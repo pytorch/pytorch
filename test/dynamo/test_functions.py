@@ -224,6 +224,24 @@ def deque_length_hints():
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
+    def _check_fallback(self, fn, inputs, error):
+        x = torch.ones(1)
+        with self.assertRaisesRegex(Unsupported, error):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, inputs[0])
+        torch._dynamo.reset()
+        fallback = torch.compile(fn, backend="eager")
+        for obj in inputs:
+            self.assertEqual(fallback(x, obj), fn(x, obj))
+
+    def _check_reuse(self, fn, inputs, *args, frames=2, **options):
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, **options)
+        x = torch.ones(1)
+        for value in inputs:
+            self.assertEqual(compiled(x, value, *args), fn(x, value, *args))
+        self.assertEqual(counter.frame_count, frames)
+        return compiled, counter
+
     def test_shared_mro_owner_base_replacement(self):
         class Base:
             scale = 1
@@ -345,10 +363,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x, obj):
             return x + obj.scale
 
-        obj, x = Input(), torch.ones(1)
-        with self.assertRaisesRegex(Unsupported, "Custom metaclass metadata access"):
-            torch.compile(fn, backend="eager", fullgraph=True)(x, obj)
-        self.assertEqual(torch.compile(fn, backend="eager")(x, obj), x + 3)
+        obj = Input()
+        self.assertEqual(obj.scale, 3)
+        self._check_fallback(fn, (obj,), "Custom metaclass metadata access")
 
     @parametrize("suppressed", ["context", "source"])
     @parametrize("change", ["bases", "shadow"])
@@ -388,16 +405,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             comptime(prime)
             return x + obj.scale
 
-        obj, x = Input(), torch.ones(1)
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        self.assertEqual(compiled(x, obj), x + 1)
-        if change == "bases":
-            Input.__bases__ = (Other,)
-        else:
-            Input.scale = 7
-        self.assertEqual(compiled(x, obj), x + 7)
-        self.assertEqual(counter.frame_count, 2)
+        def inputs():
+            obj = Input()
+            yield obj
+            if change == "bases":
+                Input.__bases__ = (Other,)
+            else:
+                Input.scale = 7
+            self.assertEqual(obj.scale, 7)
+            yield obj
+
+        self._check_reuse(fn, inputs())
 
     hw_classification = HardwareClassification.GENERIC
 
