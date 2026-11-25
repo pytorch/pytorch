@@ -882,7 +882,8 @@ class TestJunitXml(TestCase):
 class TestPeriodicDecorator(TestCase):
     @parametrize("in_ci", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_gates_on_periodic_mode(self, in_ci, periodic_enabled):
+    @parametrize("hours", [4, 24])
+    def test_periodic_gates_on_periodic_mode(self, in_ci, periodic_enabled, hours):
         calls = []
         with unittest.mock.patch.multiple(
             "torch.testing._internal.common_utils",
@@ -894,7 +895,7 @@ class TestPeriodicDecorator(TestCase):
                 def setUp(self):
                     calls.append("setUp")
 
-                @periodic
+                @periodic(hours=hours)
                 def test_p(self):
                     calls.append("test")
 
@@ -903,7 +904,7 @@ class TestPeriodicDecorator(TestCase):
 
         skipped = in_ci and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP.test_p, "pytestmark", ())}
-        self.assertIn("periodic", marks)
+        self.assertEqual(marks, {"periodic_daily" if hours == 24 else "periodic"})
         self.assertEqual(calls, [] if skipped else ["setUp", "test"])
         self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
@@ -911,7 +912,8 @@ class TestPeriodicDecorator(TestCase):
 
     @parametrize("on_sandcastle", [False, True])
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_class_gates_setup(self, on_sandcastle, periodic_enabled):
+    @parametrize("hours", [4, 24])
+    def test_periodic_class_gates_setup(self, on_sandcastle, periodic_enabled, hours):
         calls = []
         with unittest.mock.patch.multiple(
             "torch.testing._internal.common_utils",
@@ -919,7 +921,7 @@ class TestPeriodicDecorator(TestCase):
             IS_SANDCASTLE=on_sandcastle,
             TEST_WITH_PERIODIC=periodic_enabled,
         ):
-            @periodic
+            @periodic(hours=hours)
             class TestP(unittest.TestCase):
                 @classmethod
                 def setUpClass(cls):
@@ -937,7 +939,7 @@ class TestPeriodicDecorator(TestCase):
 
         skipped = on_sandcastle and not periodic_enabled
         marks = {mark.name for mark in getattr(TestP, "pytestmark", ())}
-        self.assertIn("periodic", marks)
+        self.assertEqual(marks, {"periodic_daily" if hours == 24 else "periodic"})
         self.assertEqual(calls, [] if skipped else ["setUpClass", "test", "tearDownClass"])
         self.assertEqual(len(result.skipped), 1 if skipped else 0)
         self.assertEqual(result.failures, [])
@@ -947,9 +949,14 @@ class TestPeriodicDecorator(TestCase):
         IS_FBCODE, "run_test.py periodic filtering is only exercised by OSS CI"
     )
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
-    def test_periodic_config_selects_only_periodic_tests(self):
+    @parametrize("periodic_config", ["periodic", "periodic_daily"])
+    def test_periodic_config_selects_only_periodic_tests(self, periodic_config):
         source = """\
-from torch.testing._internal.common_utils import periodic, run_tests, serialTest
+import os
+from torch.testing._internal.common_utils import TEST_WITH_PERIODIC, TestCase, periodic, run_tests, serialTest
+
+if os.environ.get("TEST_CONFIG") in ("periodic", "periodic_daily") and not TEST_WITH_PERIODIC:
+    raise AssertionError("periodic test configs must enable the shared periodic gate")
 
 def test_plain_pytest():
     print("PLAIN_PYTEST_RAN")
@@ -962,6 +969,24 @@ def test_periodic_pytest():
 @periodic
 def test_periodic_serial_pytest():
     print("PERIODIC_SERIAL_PYTEST_RAN")
+
+@periodic(hours=24)
+def test_daily_pytest():
+    print("DAILY_PYTEST_RAN")
+
+@serialTest()
+@periodic(hours=24)
+def test_daily_serial_pytest():
+    print("DAILY_SERIAL_PYTEST_RAN")
+
+@periodic
+class TestClassPeriodic(TestCase):
+    def test_class_periodic(self):
+        print("CLASS_REGULAR_RAN")
+
+    @periodic(hours=24)
+    def test_class_daily(self):
+        print("CLASS_DAILY_RAN")
 
 if __name__ == "__main__":
     run_tests()
@@ -992,12 +1017,13 @@ if __name__ == "__main__":
             def run_test(periodic_mode):
                 test_env = env.copy()
                 if periodic_mode:
-                    test_env["TEST_CONFIG"] = "periodic"
+                    test_env["TEST_CONFIG"] = periodic_config
                     test_env["PYTORCH_TEST_WITH_SLOW"] = "1"
                 else:
                     test_env.pop("TEST_CONFIG", None)
+                args = [sys.executable, "run_test.py", "--include", test_name, "-s"]
                 result = subprocess.run(
-                    [sys.executable, "run_test.py", "--include", test_name, "-s"],
+                    args,
                     cwd=test_dir,
                     env=test_env,
                     capture_output=True,
@@ -1008,22 +1034,34 @@ if __name__ == "__main__":
                 return output
 
             periodic_output = run_test(periodic_mode=True)
-            default_output = run_test(periodic_mode=False)
+            default_output = (
+                run_test(periodic_mode=False) if periodic_config == "periodic" else None
+            )
 
-        self.assertIn("PERIODIC_PYTEST_RAN", periodic_output)
-        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", periodic_output)
+        self.assertEqual("PERIODIC_PYTEST_RAN" in periodic_output, periodic_config == "periodic")
+        self.assertEqual("PERIODIC_SERIAL_PYTEST_RAN" in periodic_output, periodic_config == "periodic")
+        self.assertEqual("DAILY_PYTEST_RAN" in periodic_output, periodic_config == "periodic_daily")
+        self.assertEqual("DAILY_SERIAL_PYTEST_RAN" in periodic_output, periodic_config == "periodic_daily")
+        self.assertEqual("CLASS_REGULAR_RAN" in periodic_output, periodic_config == "periodic")
+        self.assertEqual("CLASS_DAILY_RAN" in periodic_output, periodic_config == "periodic_daily")
         self.assertNotIn("PLAIN_PYTEST_RAN", periodic_output)
-        self.assertIn("PLAIN_PYTEST_RAN", default_output)
-        self.assertIn("PERIODIC_PYTEST_RAN", default_output)
-        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+        if default_output is not None:
+            self.assertIn("PLAIN_PYTEST_RAN", default_output)
+            self.assertIn("PERIODIC_PYTEST_RAN", default_output)
+            self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+            self.assertIn("DAILY_PYTEST_RAN", default_output)
+            self.assertIn("DAILY_SERIAL_PYTEST_RAN", default_output)
+            self.assertIn("CLASS_REGULAR_RAN", default_output)
+            self.assertIn("CLASS_DAILY_RAN", default_output)
 
-    def test_periodic_does_not_leak_across_parametrized_tests(self):
+    @parametrize("hours", [4, 24])
+    def test_periodic_does_not_leak_across_parametrized_tests(self, hours):
         with unittest.mock.patch(
             "torch.testing._internal.common_utils.TEST_WITH_PERIODIC", True
         ):
             class TestP(unittest.TestCase):
                 @parametrize("x", [1, 2])
-                @decorateIf(periodic, lambda params: params["x"] == 1)
+                @decorateIf(periodic(hours=hours), lambda params: params["x"] == 1)
                 def test_p(self, x):
                     pass
 
@@ -1031,12 +1069,30 @@ if __name__ == "__main__":
 
         marked = TestP.test_p_x_1
         plain = TestP.test_p_x_2
-        self.assertIn("periodic", {mark.name for mark in marked.pytestmark})
+        marker = "periodic_daily" if hours == 24 else "periodic"
+        self.assertEqual({mark.name for mark in marked.pytestmark}, {marker})
         plain_marks = {mark.name for mark in getattr(plain, "pytestmark", ())}
-        self.assertNotIn("periodic", plain_marks)
+        self.assertNotIn(marker, plain_marks)
 
-    @periodic
-    def test_periodic_smoke(self):
+    def test_periodic_rejects_unsupported_cadences(self):
+        with self.assertRaisesRegex(ValueError, "only hours=4 or hours=24"):
+            periodic(hours=12)
+
+    def test_periodic_default_factory(self):
+        @periodic()
+        def test_p():
+            pass
+
+        self.assertEqual({mark.name for mark in test_p.pytestmark}, {"periodic"})
+
+    def test_periodic_rejects_positional_hours(self):
+        with self.assertRaisesRegex(TypeError, "test function or class, got int; pass hours by keyword"):
+            periodic(24)
+
+    @parametrize("hours", [4, 24])
+    @decorateIf(periodic, lambda params: params["hours"] == 4)
+    @decorateIf(periodic(hours=24), lambda params: params["hours"] == 24)
+    def test_periodic_smoke(self, hours):
         self.assertTrue(TEST_WITH_PERIODIC or not (IS_CI or IS_SANDCASTLE))
 
 
@@ -2328,7 +2384,7 @@ class TestMakeTensor(TestCase):
         torch.testing.assert_close(actual, expected)
 
 
-instantiate_device_type_tests(TestMakeTensor, globals())
+instantiate_device_type_tests(TestMakeTensor, globals(), allow_xpu=True)
 
 
 def _get_test_names_for_test_class(test_cls):
@@ -3978,7 +4034,9 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        # Under PYTORCH_TEST_OMIT_SKIPPED=1, cls_name=None skips in op_db omit supported_dtypes() names.
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
@@ -4001,7 +4059,9 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        # Likewise guard module_info.dtypes names against cls_name=None skips when omitting.
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
@@ -4226,6 +4286,88 @@ class TestTestParametrizationDeviceType(TestCase):
     def test_two_things_subtest_expected_failure(self, device, x, y):
         if x == 1 or y == 6:
             raise RuntimeError('Boom')
+
+    def test_skipped_device_type_tests_are_omitted(self, device):
+        device = self.device_type
+        test_op_info = OpInfo(
+            "test_op",
+            op=lambda x: -x,
+            dtypes=(torch.float32, torch.float64),
+            sample_inputs_func=lambda _: [],
+            decorators=[
+                DecorateInfo(
+                    unittest.skip("never runs here"),
+                    "TestDeviceOmitted",
+                    "test_op_skipped_dtype",
+                    dtypes=[torch.float64],
+                )
+            ],
+        )
+
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", True):
+
+            class TestDeviceOmitted(TestCase):
+                def test_runs(self, device):
+                    pass
+
+                @unittest.skip("never runs here")
+                def test_skipped(self, device):
+                    pass
+
+                @parametrize("x", [subtest(1, decorators=[unittest.skip("never runs here")]), 2])
+                def test_partly_skipped(self, device, x):
+                    pass
+
+                @decorateIf(unittest.skip("never runs here"), lambda p: p["dtype"] == torch.float64)
+                @dtypes(torch.float32, torch.float64)
+                def test_dtype_partly_skipped(self, device, dtype):
+                    pass
+
+                @ops([test_op_info])
+                def test_op_skipped_dtype(self, device, dtype, op):
+                    pass
+
+            locals_dict = dict(locals())
+            instantiate_device_type_tests(TestDeviceOmitted, locals_dict, only_for=device)
+
+        device_cls = locals_dict[f"TestDeviceOmitted{device.upper()}"]
+        self.assertEqual(
+            _get_test_names_for_test_class(device_cls),
+            [
+                f"{device_cls.__name__}.test_dtype_partly_skipped_{device}_float32",
+                f"{device_cls.__name__}.test_op_skipped_dtype_test_op_{device}_float32",
+                f"{device_cls.__name__}.test_partly_skipped_x_2_{device}",
+                f"{device_cls.__name__}.test_runs_{device}",
+            ],
+        )
+
+    def test_skipped_device_type_tests_are_kept_when_omit_disabled(self, device):
+        device = self.device_type
+
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
+
+            class TestDeviceKept(TestCase):
+                @unittest.skip("never runs here")
+                def test_skipped(self, device):
+                    pass
+
+                @decorateIf(unittest.skip("never runs here"), lambda p: p["dtype"] == torch.float64)
+                @dtypes(torch.float32, torch.float64)
+                def test_dtype_partly_skipped(self, device, dtype):
+                    pass
+
+            locals_dict = dict(locals())
+            instantiate_device_type_tests(TestDeviceKept, locals_dict, only_for=device)
+
+        device_cls = locals_dict[f"TestDeviceKept{device.upper()}"]
+        self.assertEqual(
+            _get_test_names_for_test_class(device_cls),
+            [
+                f"{device_cls.__name__}.test_dtype_partly_skipped_{device}_float32",
+                f"{device_cls.__name__}.test_dtype_partly_skipped_{device}_float64",
+                f"{device_cls.__name__}.test_skipped_{device}",
+            ],
+        )
 
 
 instantiate_parametrized_tests(TestTestParametrization)
@@ -4767,7 +4909,7 @@ class TestHardwareClassifications(TestCase):
                 self.assertEqual(ran, {"test_cuda", "test_unclassified"}, output)
 
 
-instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
+instantiate_device_type_tests(TestOpInfoSampleFunctions, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestImports)
 
 

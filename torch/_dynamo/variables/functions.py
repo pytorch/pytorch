@@ -505,26 +505,6 @@ class BaseUserFunctionVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
         return VariableTracker.build(tx, repr(self.as_python_constant()))
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in ("__setattr__", "__delattr__"):
-            # Data descriptors from tp_getset/tp_members win over the instance
-            # dict, as in PyObject_GenericSetAttr.
-            value = args[1] if name == "__setattr__" else None
-            if args[0].is_python_constant():
-                entry = self.lookup_tp_getset_member(args[0].as_python_constant())
-                if entry is not None:
-                    out = entry.setter(self, tx, value)
-                    return out if out is not None else ConstantVariable.create(None)
-            dict_method = "__setitem__" if value is not None else "__delitem__"
-            return self.get_dict_vt(tx).call_method(tx, dict_method, list(args), {})
-        return super().call_method(tx, name, list(args), kwargs)
-
     def get_filename(self) -> str:
         return self.get_code().co_filename
 
@@ -664,9 +644,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
-
-    def get_value_for_setattr(self) -> object | None:
-        return self.fn
 
     def __init__(
         self,
@@ -1604,6 +1581,20 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # exits without yielding another value
         return self.gen_send_ex(tx, args[0], False)
 
+    def gen_close_iter(
+        self, tx: "InstructionTranslatorBase", yf: VariableTracker
+    ) -> None:
+        # https://github.com/python/cpython/blob/3.13/Objects/genobject.c (gen_close_iter)
+        # Only call yf.close() if it exists; e.g. tuple_iterator has no close().
+        if isinstance(yf, LocalGeneratorObjectVariable):
+            yf.call_method(tx, "close", [], {})
+            return
+        from .object_protocol import generic_getattr
+
+        meth = generic_getattr(tx, yf, "close", default=None)
+        if meth is not None:
+            meth.call_function(tx, [], {})
+
     def gen_close(
         self,
         tx: "InstructionTranslatorBase",
@@ -1636,7 +1627,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         if yf:
             with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
                 try:
-                    yf.call_method(tx, "close", [], {})
+                    self.gen_close_iter(tx, yf)
                 except ObservedException:
                     err = True
 
@@ -1705,9 +1696,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # CPython has an extra flag for handling async generators
             if pyerr_given_exception_match(arg, GeneratorExit):
                 try:
-                    # CPython uses gen_close_iter here
                     with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
-                        yf.call_method(tx, "close", [], {})
+                        self.gen_close_iter(tx, yf)
                 except ObservedException:
                     pass
                 return throw_here()
@@ -2080,6 +2070,13 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
             return SourcelessBuilder.create_internal_torch_ctx_manager(
                 func
             ).call_function(tx, [self.im_self, *args], kwargs)
+        elif func is torch.cuda.use_mem_pool._recreate_cm:
+            # A function decorated with use_mem_pool: rebuild the context from
+            # the decorator's arguments, as for the `with` form.
+            args_var = self.im_self.tp_getattro_impl(tx, "_args")
+            use_mem_pool = torch.cuda.use_mem_pool
+            ctx = SourcelessBuilder.create_internal_torch_ctx_manager(use_mem_pool)
+            return ctx.call_function(tx, args_var.unpack_var_sequence(tx), {})
         if self.is_constant:
             fn = getattr(self.im_self.value, func.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
@@ -2846,12 +2843,6 @@ class SkipFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
-
-    def get_value_for_setattr(self) -> object | None:
-        mod = getattr(self.value, "__module__", None) or ""
-        if mod == "torch" or mod.startswith(("torch.", "torch_")):
-            return None
-        return self.value
 
     def as_python_constant(self) -> Any:
         return self.value
@@ -4145,9 +4136,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         return cls(value, source=source)
-
-    def get_value_for_setattr(self) -> object | None:
-        return self.fn
 
     def __init__(self, fn: _F, **kwargs: Any) -> None:
         super().__init__(**kwargs)
