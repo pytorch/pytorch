@@ -255,6 +255,45 @@ class TestSubgraphChoice(TestCase):
         self.assertEqual("_split_aten" in source, expect_aten)
         self.assertEqual("_split_triton_" in source, expect_triton)
 
+    @unittest.skipUnless(
+        has_datacenter_blackwell_tma_device(),
+        "the Triton partial BMM needs datacenter Blackwell",
+    )
+    @parametrize("a_row_major", (False, True))
+    def test_decompose_k_triton_tf32_transposed_a(self, a_row_major):
+        # tcgen05.mma cannot read a transposed FP32 A operand from shared
+        # memory, so with TF32 on the Triton partial BMM must be skipped for a
+        # column-major A rather than failing to compile.
+        # K is deep enough for the one-wave Triton split to keep 8 K blocks.
+        if a_row_major:
+            a = _exact_inputs(128, 65536, dtype=torch.float32)
+        else:
+            a = _exact_inputs(65536, 128, dtype=torch.float32).T
+        b = _exact_inputs(65536, 512, dtype=torch.float32)
+        old_precision = torch.backends.cuda.matmul.fp32_precision
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        try:
+            with config.patch(
+                {
+                    "max_autotune_gemm": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "compile_threads": 1,
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.num_decompose_k_splits": 4,
+                    "triton.decompose_k_bmm_backends": "ATEN,TRITON",
+                    "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+                }
+            ):
+                actual, codes = run_and_get_code(
+                    torch.compile(lambda x, y: x @ y, fullgraph=True), a, b
+                )
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = old_precision
+        # Small integers are exact in both TF32 and IEEE fp32.
+        self.assertEqual(actual, a @ b, atol=0, rtol=0)
+        self.assertEqual("_split_triton_" in "\n".join(codes), a_row_major)
+
     def test_backend_specific_split_candidates(self):
         one_cta = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[0]
         two_cta_wide = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[2]

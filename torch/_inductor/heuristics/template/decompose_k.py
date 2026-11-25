@@ -20,7 +20,12 @@ from ...utils import get_k_splits, use_triton_blackwell_tma_template
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
-from .triton import BaseConfig, CUDAConfigHeuristic
+from .triton import (
+    BaseConfig,
+    blackwell_tma_mma_layout_supported,
+    CUDAConfigHeuristic,
+    mm_allow_tf32,
+)
 
 
 if TYPE_CHECKING:
@@ -95,6 +100,18 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return
 
         mat1, mat2 = kernel_inputs.mat1mat2()
+        # Mirror the partial kernel's A_ROW_MAJOR/ALLOW_TF32 kwargs so configs
+        # tcgen05 cannot lower never reach codegen. Checked before the guarded
+        # TMA checks so a layout no config supports installs no guards.
+        a_row_major = mat1.get_stride()[1] == 1
+        allow_tf32 = mm_allow_tf32(m, n, k, mat1.get_device().type)
+        if not any(
+            blackwell_tma_mma_layout_supported(
+                mat1.get_dtype(), allow_tf32, a_row_major, partial_config.block_m
+            )
+            for partial_config in BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS
+        ):
+            return
         layout = kernel_inputs.output_layout()
         if not use_triton_blackwell_tma_template(
             mat1,
@@ -116,6 +133,12 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         # fallbacks.
         config_index = 2 if m_hint > 128 and n_hint > 128 else 0
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+        # Re-evaluated on the now-specialized sizes, which can only enable TF32.
+        allow_tf32 = mm_allow_tf32(m_hint, n_hint, k_hint, mat1.get_device().type)
+        if not blackwell_tma_mma_layout_supported(
+            mat1.get_dtype(), allow_tf32, a_row_major, partial_config.block_m
+        ):
+            return
         # Same opt-in shared-memory pruning as the mm heuristics.
         if config.max_autotune_prune_choices_based_on_shared_mem:
             exceeds_smem = CUDAConfigHeuristic()._get_exceeding_shared_memory_checker(
