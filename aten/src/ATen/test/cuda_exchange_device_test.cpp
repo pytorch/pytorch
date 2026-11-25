@@ -9,14 +9,6 @@ TEST(CudaExchangeDeviceTest, checkPrimaryContext) {
     return;
   }
 
-  // Before HIP 7.14, hipSetDevice does not create the primary context; it
-  // appears on first real use of the device instead.
-#if defined(USE_ROCM) && TORCH_HIP_VERSION < 714
-  constexpr bool kSetDeviceCreatesContext = false;
-#else
-  constexpr bool kSetDeviceCreatesContext = true;
-#endif
-
   ASSERT_FALSE(at::cuda::hasPrimaryContext(0));
   at::cuda::MaybeExchangeDevice(0);
   ASSERT_FALSE(at::cuda::hasPrimaryContext(0));
@@ -26,7 +18,7 @@ TEST(CudaExchangeDeviceTest, checkPrimaryContext) {
   if (at::cuda::device_count() > 1) {
     ASSERT_FALSE(at::cuda::hasPrimaryContext(1));
     at::cuda::ExchangeDevice(1);
-    ASSERT_EQ(at::cuda::hasPrimaryContext(1), kSetDeviceCreatesContext);
+    ASSERT_TRUE(at::cuda::hasPrimaryContext(1));
   }
 
   ASSERT_FALSE(at::cuda::hasPrimaryContext(0));
@@ -35,5 +27,5 @@ TEST(CudaExchangeDeviceTest, checkPrimaryContext) {
   at::accelerator::maybeExchangeDevice(0);
   ASSERT_FALSE(at::cuda::hasPrimaryContext(0));
   at::accelerator::exchangeDevice(0);
-  ASSERT_EQ(at::cuda::hasPrimaryContext(0), kSetDeviceCreatesContext);
+  ASSERT_TRUE(at::cuda::hasPrimaryContext(0));
 }
