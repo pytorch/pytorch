@@ -32,4 +32,16 @@ private:
   bool value_set_;
 };
 
+// A native hook on the PreDispatch key. While set on a thread (and PreDispatch
+// is in that thread's TLS include set), preDispatchFallback hands every op to
+// the hook instead of redispatching. The hook must continue the op itself with
+// op.redispatchBoxed(keys, stack); `keys` already excludes PreDispatch.
+using PreDispatchHook = void (*)(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet keys,
+    torch::jit::Stack* stack);
+
+// Sets this thread's hook (nullptr to clear) and returns the previous one.
+TORCH_API PreDispatchHook set_pre_dispatch_hook(PreDispatchHook hook);
+
 } // namespace at::impl
