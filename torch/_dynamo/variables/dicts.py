@@ -1262,13 +1262,19 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
                 and effects.is_modified(var)
                 for var in effects.id_to_variable.values()
             ):
-                unimplemented(
-                    gb_type="Unsupported OrderedDict instance state",
-                    context=f"OrderedDict.{name}",
-                    explanation=f"Dynamo cannot trace {name} on an OrderedDict with nonempty or potentially modified instance attributes.",
-                    hints=["Move the copy or attribute lookup outside compiled code."],
-                )
+                self.unsupported_instance_state(f"OrderedDict.{name}")
             install_guard(instance_dict.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+        elif tx.output.side_effects.has_pending_mutation(self):
+            self.unsupported_instance_state(f"OrderedDict.{name}")
+
+    @staticmethod
+    def unsupported_instance_state(operation: str) -> None:
+        unimplemented(
+            gb_type="Unsupported OrderedDict instance state",
+            context=operation,
+            explanation=f"Dynamo cannot preserve instance attributes while tracing {operation}.",
+            hints=["Move this OrderedDict operation outside compiled code."],
+        )
 
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
