@@ -516,9 +516,15 @@ class CaptureRoutingAllocator final : public CUDAPluggableAllocator {
   }
   void recordStream(const c10::DataPtr& ptr, c10::cuda::CUDAStream stream)
       override {
-    // Native tensors made while routing (eager code, other streams) need it.
-    // The caching allocator ignores memory it does not own, such as the
-    // memory of the allocator the capture routes to.
+    // A tensor of the allocator the capture routes to: that allocator handles
+    // the stream use (a CUDAPluggableAllocator passes it to its
+    // record_stream_fn, if set). After routing ends, the caching allocator
+    // ignores memory it does not own.
+    if (ptr.get_deleter() == &deleteOwned) {
+      static_cast<Owned*>(ptr.get_context())
+          ->allocator->recordStream(ptr, stream);
+      return;
+    }
     native()->recordStream(ptr, stream);
   }
 

@@ -1710,8 +1710,8 @@ def _route_capture_allocations(
     must not allocate CUDA memory through PyTorch, and ``free_fn(ptr, size, device, stream)`` as
     soon as the allocation dies, in order, during the capture or after it. The graph keeps using
     memory freed during the capture, so the allocator must not hand it out outside the graph
-    until the graph is destroyed. :meth:`~torch.Tensor.record_stream` on its memory is ignored
-    (the allocator is not told). Its memory is not counted in
+    until the graph is destroyed. :meth:`~torch.Tensor.record_stream` on its memory while it is
+    open goes to the allocator; afterwards it is ignored. Its memory is not counted in
     the memory statistics or snapshots. ``_lazy_clone`` of its tensors is not supported.
 
     While it is open, a routing allocator is made current with :func:`change_current_allocator` (and the
