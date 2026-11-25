@@ -1107,6 +1107,43 @@ class TestVmSwap(TestCase):
 instantiate_device_type_tests(TestVmSwap, globals())
 
 
+class TestVmWithoutRuntime(TestCase):
+    """A build of PyTorch that skipped the torch._rust crate (another Python
+    than 3.12, another system than Linux, no cargo)."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_error_names_the_reason(self):
+        # In a process where the import of torch._rust fails.
+        script = """
+import sys
+
+
+class Hidden:
+    def find_spec(self, name, path=None, target=None):
+        if name == "torch._rust":
+            raise ImportError("hidden")
+
+
+sys.meta_path.insert(0, Hidden())
+import torch
+
+assert torch._rust is None
+try:
+    torch.vm(lambda x: x + 1)
+except RuntimeError as e:
+    print(e)
+"""
+        ran = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=600
+        )
+        self.assertEqual(ran.returncode, 0, msg=ran.stderr[-2000:])
+        self.assertIn(
+            "torch.vm needs the torch._rust extension, which this build of PyTorch does not have",
+            ran.stdout,
+        )
+
+
 def call_outcome(fn, *args, **kwargs):
     """What a call returns, or the type and the message of what it raises."""
     try:
