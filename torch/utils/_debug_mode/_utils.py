@@ -213,6 +213,24 @@ def _get_op_name(op) -> str:
     return op_name
 
 
+# Functional collectives are asynchronous: their outputs, and the inputs of wait_tensor(s),
+# are in flight, and out/recv buffer inputs are uninitialized. Only wait outputs are final.
+_FUNCTIONAL_COLLECTIVE_NAMESPACES = ("_c10d_functional", "_c10d_functional_autograd")
+
+
+def _is_functional_collective(func) -> bool:
+    return (
+        isinstance(func, torch._ops.OpOverload)
+        and func.namespace in _FUNCTIONAL_COLLECTIVE_NAMESPACES
+    )
+
+
+def _is_wait_op(func) -> bool:
+    # Lazy lookup: this module is imported during `import torch`, when the op may not be registered yet.
+    funcol = torch.ops._c10d_functional
+    return func in (funcol.wait_tensor.default, funcol.wait_tensors.default)
+
+
 def _run_hook(hook, *args):
     out = hook(*args)
     if out is not None and not isinstance(out, dict):
