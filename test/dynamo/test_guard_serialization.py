@@ -21,6 +21,7 @@ import types
 import typing
 import unittest
 import weakref
+from collections import defaultdict, OrderedDict
 from collections.abc import Iterator
 from typing import Any, NamedTuple
 from unittest import mock
@@ -960,6 +961,11 @@ class _ABCHolder(metaclass=abc.ABCMeta):  # noqa: B024 - exercise a concrete ABC
         self.unused = threading.Lock()
 
 
+_pruning_graph = functools.partial(
+    types.SimpleNamespace, torch_function_mode_stack=(), fx_annotation=None
+)
+
+
 class DictionaryToken:
     def __init__(self, **attrs):
         self.__dict__.update(attrs)
@@ -983,11 +989,11 @@ class _PayloadConsumer(TokenConsumer):
             raise ValueError("Missing constructor payload")
 
 
-class _RegisteredPayloadConsumer(_PayloadConsumer):
+class _RegisteredConsumer(_PayloadConsumer):
     __reduce_ex__ = object.__reduce_ex__
 
 
-class _DynamicStateConsumer(_RegisteredPayloadConsumer):
+class _DynamicConsumer(_RegisteredConsumer):
     def __getattr__(self, name):
         if name == "__setstate__":
             return lambda state: self.__init__(state["token"])
@@ -1003,7 +1009,7 @@ _PayloadRecord = collections.namedtuple("_PayloadRecord", ["token"])
 _tuple_new = tuple.__new__
 
 
-class _PayloadNewConsumer(_PayloadRecord):
+class _NewConsumer(_PayloadRecord):
     def __new__(cls, token):
         return _tuple_new(cls, (token or None,))
 
@@ -1017,8 +1023,7 @@ class SlottedTokenConsumer(TokenConsumer):
 class DefaultSlottedTokenConsumer:
     __slots__ = ("token",)
 
-    def __init__(self, token):
-        self.token = token
+    __init__ = TokenConsumer.__init__
 
     def __setattr__(self, name, value):
         if name == "token" and not isinstance(value, DictionaryToken):
@@ -1875,13 +1880,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
     @parametrize(
         "mapping_type",
-        [
-            dict,
-            PlainNamespaceDict,
-            GenericGetattrDict,
-            collections.OrderedDict,
-            collections.defaultdict,
-        ],
+        [dict, PlainNamespaceDict, GenericGetattrDict, OrderedDict, defaultdict],
     )
     @parametrize(
         "key,consumer_type",
@@ -1934,14 +1933,26 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         cfg = {"token": token}
         backing = ClassReducedDict(token)
         backing["loss"] = _MappingCallable(cfg)
-        unused = {"lock": threading.Lock(), "proxy": types.MappingProxyType(backing)}
+        orphan = DictionaryToken()
+        unused = {"lock": threading.Lock(), "token": orphan}
+        unused["self"] = unused
         backing.private = unused
         proxy = types.MappingProxyType(backing)
+        unused["proxy"] = proxy
         scope = {"cfg": cfg, "unused": unused, "get": proxy.get, "proxy": proxy}
-        saved = self._roundtrip_pruned(scope, [cfg, unused])
+        scope["alias"] = unused
+        scope["orphan"] = types.MappingProxyType({"consumer": TokenConsumer(orphan)})
+        # Registered globals outside the saved scopes are not pickle roots.
+        holder = ReducedHolder(2, {})
+        holder.cfg = unused
+        saved = self._roundtrip_pruned(scope, [cfg, unused], {"helper": holder})
         self.assertIs(saved["get"].__self__, saved["proxy"])
         self.assertIs(saved["get"]("loss").cfg, saved["cfg"])
-        self.assertIsInstance(saved["unused"]["lock"], _Missing)
+        self.assertIs(saved["unused"], saved["alias"])
+        self.assertIs(saved["unused"]["self"], saved["unused"])
+        self.assertIsInstance(saved["orphan"]["consumer"].token, DictionaryToken)
+        for name in ("lock", "token"):
+            self.assertIsInstance(saved["unused"][name], _Missing)
 
         def copy():
             consumer = TokenConsumer(token) if token_live else _MappingCallable(cfg)
@@ -1981,23 +1992,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             pickler.prune_scopes({}, {}, [mapping, plain])
         self.assertNotIn(id(mapping), pickler._pruned_dictionary_ids)
         self.assertIn(id(plain), pickler._pruned_dictionary_ids)
-
-    def test_pruned_dictionary_preserves_recursive_and_repeated_references(self):
-        token = DictionaryToken()
-        proxy = types.MappingProxyType({"consumer": TokenConsumer(token)})
-        value = {"bystander": threading.Lock(), "token": token}
-        value["self"] = value
-        helper = ReducedHolder(2, {})
-        helper.cfg = value
-        # A registered globals dict omitted from the saved scopes is not a pickle root.
-        scope = {"left": value, "right": value, "proxy": proxy}
-        saved = self._roundtrip_pruned(scope, [value], {"helper": helper})
-        left, right = saved["left"], saved["right"]
-        self.assertIsInstance(left["token"], _Missing)
-        self.assertIsInstance(saved["proxy"]["consumer"].token, DictionaryToken)
-        self.assertIs(left, right)
-        self.assertIs(left["self"], left)
-        self.assertIsInstance(left["bystander"], _Missing)
 
     def test_required_state_traversal_does_not_read_class_property(self):
         class Key:
@@ -2517,7 +2511,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # An unguarded symbolic LOCAL is a bystander: pickle_guards_state
         # registers it and it is pruned before the refusal is reached.
         s, x = env.create_unbacked_symint(), torch.randn(2)
-        graph = types.SimpleNamespace(
+        graph = _pruning_graph(
             guards=[],
             local_scope={"s": s, "x": x},
             global_scope={},
@@ -2596,7 +2590,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         def fn(a, cfg=[1, m.cfg]):  # noqa: B006
             return a
 
-        graph = types.SimpleNamespace(
+        graph = _pruning_graph(
             guards=[],
             local_scope={"m": m, "fn": fn},
             global_scope={},
@@ -2628,7 +2622,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         def fn(a, cfg=_Cfg(m.cfg)):
             return a
 
-        graph = types.SimpleNamespace(
+        graph = _pruning_graph(
             guards=[],
             local_scope={"m": m, "fn": fn},
             global_scope={},
@@ -2714,7 +2708,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             pass
 
         t = torch.randn(2)
-        graph = types.SimpleNamespace(
+        graph = _pruning_graph(
             guards=[],
             local_scope={
                 "dt": torch.float32,
@@ -2763,7 +2757,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 buf = io.BytesIO()
                 GuardsStatePickler({}, {}, {}, {}, buf).dump({"o": obj})
                 self.assertIsInstance(load_guards_state(buf.getvalue())["o"], _Missing)
-                graph = types.SimpleNamespace(
+                graph = _pruning_graph(
                     guards=[],
                     local_scope={"o": obj},
                     global_scope={},
@@ -3630,6 +3624,29 @@ class TestGuardSerialization(TestGuardSerializationBase):
         check(inputs, True)
         return check
 
+    @parametrize("annotation", [False, True])
+    def test_list_leaf_alias_in_saved_constructor(self, annotation):
+        def fn(x, items, holder):
+            return x + items[1] + holder.weight
+
+        token, holder = DictionaryToken(), DictionaryToken(weight=3)
+        consumer = TokenConsumer(token)
+        if not annotation:
+            holder.cb = consumer.__reduce_ex__
+        metadata = {"consumer": consumer, "token": token} if annotation else {}
+        with torch.fx.traceback.annotate(metadata):
+            self._test_serialization(
+                "CONSTANT_MATCH", fn, torch.ones(1), [token, 5], holder
+            )
+        graph = load_guards_state(self._cached_guards_state).output_graph
+        items = graph.local_scope["items"]
+        if annotation:
+            self.assertIs(graph.fx_annotation["token"], items[0])
+            consumer = graph.fx_annotation["consumer"]
+        else:
+            consumer = graph.local_scope["holder"].cb.__self__
+        self.assertIs(consumer.token, items[0])
+
     @parametrize("helper_type", [DictionaryToken, ReducedHolder, TokenConsumer])
     @parametrize("mapping_type", [dict, collections.defaultdict])
     def test_dictionary_snapshot_constructor_aliases(self, helper_type, mapping_type):
@@ -3657,7 +3674,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         saved = load_guards_state(self._cached_guards_state).output_graph
         loaded, opts = saved.local_scope["holder"], saved.local_scope["nested"]["opts"]
         self.assertIs(loaded.items[2].token, opts[1])
-        self.assertIs(saved.torch_function_mode_stack[0].consumer.token, opts[2])
+        self.assertIs(saved.torch_function_mode_stack[-1].consumer.token, opts[2])
         if helper_type is ReducedHolder:
             self.assertIsInstance(loaded.cfg["token"], DictionaryToken)
             self.assertIs(loaded.items[0].cfg["token"], loaded.cfg["token"])
@@ -3765,12 +3782,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     @parametrize(
         "consumer_type",
-        [
-            _PayloadConsumer,
-            _PayloadNewConsumer,
-            _RegisteredPayloadConsumer,
-            _DynamicStateConsumer,
-        ],
+        [_PayloadConsumer, _NewConsumer, _RegisteredConsumer, _DynamicConsumer],
     )
     def test_custom_constructor_keeps_independently_guarded_arguments(
         self, consumer_type
@@ -3781,7 +3793,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         token = _PayloadToken(scale=3, payload=["required"])
         consumer = consumer_type(token)
         inputs = {"x": torch.ones(1), "consumer": consumer, "token": token}
-        reducers = {_RegisteredPayloadConsumer: lambda obj: (type(obj), (obj.token,))}
+        reducers = {_RegisteredConsumer: lambda obj: (type(obj), (obj.token,))}
         with mock.patch.dict(copyreg.dispatch_table, reducers):
             check = self._roundtrip_checks("CONSTANT_MATCH", fn, inputs)
         token.scale += 1
@@ -3804,7 +3816,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         inputs = {"x": torch.ones(1), "holder": holder}
         kinds = ("TYPE_MATCH", "CONSTANT_MATCH", "TENSOR_MATCH")
         if root_type is _StateHolder:
-            # An arbitrary setter can inspect its child, as _DynamicStateConsumer does.
+            # An arbitrary setter can inspect its child, as _DynamicConsumer does.
             with self.assertRaisesRegex(PackageError, "cannot pickle.*lock"):
                 self._test_serialization(kinds, fn, *inputs.values())
             return
@@ -5311,12 +5323,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
     @parametrize("iterate", [False, True])
     @parametrize(
         "mapping_type",
-        [
-            dict,
-            LockDict,
-            collections.OrderedDict,
-            functools.partial(collections.defaultdict, list),
-        ],
+        [dict, LockDict, OrderedDict, functools.partial(defaultdict, list)],
     )
     def test_dictionary_keys_prune_unused_values(self, iterate, mapping_type):
         def fn(x, cfg):
@@ -6559,6 +6566,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": wider}, False)
         renamed = marked(min=2, max=8, shape_id="t")
         self._test_check_fn(ref, loaded, {"x": renamed}, False)
+
+        def refined_fn(x):
+            torch._check(x.shape[0] == 1)
+            return x + 1
+
+        def refined_marked(size, static_size=2):
+            t = torch.randn(size, static_size)
+            torch._dynamo.decorators.mark_unbacked(t, 0)
+            return t
+
+        # torch._check replaces the unbacked size with 1; the serialized
+        # TENSOR_MATCH must leave that dim unchecked, like the live guard,
+        # instead of requiring size 1.
+        x = refined_marked(1)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", refined_fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        # The runtime assertion, not either input guard, enforces the refinement.
+        self._test_check_fn(ref, loaded, {"x": refined_marked(2)}, True)
+        self._test_check_fn(ref, loaded, {"x": refined_marked(2, 3)}, False)
 
     def test_weak_and_strict_markings_round_trip(self):
         def fn(x):
