@@ -42,17 +42,30 @@ class Event:
     def wait(self, stream: Stream | None = None, *, value: int | None = None) -> None:
         r"""wait(stream=None, *, value=None) -> None
 
-        Make future work submitted to the given stream wait for this event.
+        Makes all future work submitted to the given stream wait for this event.
+
+        By default the stream waits for the latest :meth:`record`. If ``value``
+        is given, it instead waits on the GPU until the host calls
+        :meth:`signal` with ``value`` or higher. The host signal counter is
+        separate from the recorded work, so :meth:`query`, :meth:`synchronize`
+        and :meth:`elapsed_time` ignore it.
+
+        .. note::
+            A stream that waits for a host signal cannot be drained:
+            :func:`torch.mps.synchronize`, :func:`torch.mps.empty_cache`,
+            ``tensor.cpu()`` and ``tensor.item()`` block until another thread
+            calls :meth:`signal`. Keep the event alive until then. If the
+            signal does not arrive before Metal's command buffer timeout, the
+            wait fails and a ``RuntimeError`` is raised at a later
+            synchronization point.
 
         Args:
-            stream (torch.mps.Stream, torch.Stream, optional): Stream on which
-                to wait. Default: ``None`` (the current MPS stream).
+            stream (torch.mps.Stream, torch.Stream, optional): Uses ``torch.mps.current_stream()`` if no stream is specified.
 
         Keyword args:
             value (int, optional): Unsigned 64-bit value that the host signal
-                from :meth:`signal` must reach. A value of ``0`` is already
-                satisfied. Default: ``None``, which waits for the latest
-                :meth:`record`.
+                counter must reach. A value of ``0`` is already satisfied.
+                Default: ``None``
 
         Examples::
 
@@ -66,8 +79,10 @@ class Event:
             raise RuntimeError(f"expected an MPS stream, but got {stream.device.type}")
         if value is None:
             torch._C._mps_waitForEvent(self.__eventId, stream.stream_id)
-        else:
+        elif 0 <= value < 2**64:
             torch._C._mps_waitForHostSignal(self.__eventId, stream.stream_id, value)
+        else:
+            raise ValueError(f"expected an unsigned 64-bit value, but got {value}")
 
     def signal(self, value: int) -> None:
         r"""signal(value) -> None
@@ -76,11 +91,11 @@ class Event:
         at zero and only increases. GPU work waiting for a value at or below
         the current counter can proceed.
 
-        A GPU wait can fail if it reaches Metal's timeout before the host signals it.
-
         Args:
             value (int): Unsigned 64-bit signal value.
         """
+        if not 0 <= value < 2**64:
+            raise ValueError(f"expected an unsigned 64-bit value, but got {value}")
         torch._C._mps_signalEvent(self.__eventId, value)
 
     def query(self) -> bool:

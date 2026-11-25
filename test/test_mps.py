@@ -9350,26 +9350,48 @@ class TestMPS(TestCaseMPS):
         event = torch.mps.Event()
         event.wait(value=2)
         event.signal(1)
-        self.assertFalse(torch.mps.current_stream().query())
-        threading.Timer(0.2, event.signal, args=(2,)).start()
+        signalled = threading.Event()
+        threading.Timer(0.2, lambda: (signalled.set(), event.signal(2))).start()
+        # Drains the stream, so the timer thread can only signal if empty_cache releases the GIL
         torch.mps.empty_cache()
+        self.assertTrue(signalled.is_set())
         self.assertTrue(torch.mps.current_stream().query())
+
+    @parametrize("method", ["record", "wait"])
+    def test_mps_event_host_signal_with_blocked_thread(self, method):
+        event = torch.mps.Event()
+        event.wait(value=1)
+        blocked = threading.Timer(0.1, getattr(torch.mps.Event(), method))
+        blocked.start()
+        threading.Timer(0.2, event.signal, args=(1,)).start()
+        torch.mps.synchronize()
+        blocked.join()
+
+    def test_mps_event_host_signal_invalid_value(self):
+        event = torch.mps.Event()
+        with self.assertRaisesRegex(ValueError, "unsigned 64-bit"):
+            event.signal(-1)
+        with self.assertRaisesRegex(ValueError, "unsigned 64-bit"):
+            event.wait(value=2**64)
 
     def test_mps_event_host_signal_after_pool_reuse(self):
         previous_event = torch.mps.Event()
         previous_event.signal(1)
         del previous_event
         event = torch.mps.Event()
+        torch.mps.synchronize()
         event.wait(value=1)
         self.assertFalse(torch.mps.current_stream().query())
         event.signal(1)
+        torch.mps.synchronize()
 
     def test_mps_event_host_signal_orders_host_writes(self):
-        steps = 8
+        steps = 100  # more than the 64 uncompleted command buffers that Metal allows on a queue
         x = torch.zeros(steps, device="mps")
         torch.mps.synchronize()
         host_x = torch.empty(0).set_(torch.mps._host_alias_storage(x.untyped_storage()))
         event = torch.mps.Event()
+        self.addCleanup(event.signal, steps)
         out = []
         for n in range(1, steps + 1):
             event.wait(value=n)

@@ -87,6 +87,10 @@ class TORCH_API MPSStream {
   void synchronize(SyncType syncType);
   // Commits once enough kernels are encoded, so that the GPU runs them while the host keeps encoding
   void commitIfNeeded();
+  // Whether another commit could stall the creation of the next command buffer, see commitIfNeeded
+  bool tooManyCommandBuffersInFlight() const {
+    return _commandBuffersInFlight >= kMaxCommandBuffersInFlight;
+  }
   void copy(MTLBuffer_t srcBuffer,
             MTLBuffer_t dstBuffer,
             size_t length,
@@ -158,6 +162,7 @@ class TORCH_API MPSStream {
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
   uint32_t _kernelsSinceCommit = 0;
+  static constexpr uint32_t kMaxCommandBuffersInFlight = 32;
   std::atomic<uint32_t> _commandBuffersInFlight{0};
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;

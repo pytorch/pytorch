@@ -232,14 +232,11 @@ void MPSEventPool::waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream
 }
 
 void MPSEventPool::waitForHostSignal(id_t event_id, MPSStream* stream, uint64_t value) {
-  if (value == 0) {
-    return;
-  }
   const auto event = getEventForHostSignal(event_id);
   const auto host_event = event->m_hostEvent;
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      encodeEventWait(host_event, value, stream, /*syncEvent=*/true);
+      encodeEventWait(host_event, value, stream, /*syncEvent=*/!stream->tooManyCommandBuffersInFlight());
     }
   });
 }

@@ -110,9 +110,7 @@ void MPSStream::commitIfNeeded() {
   // stall the caller, so skip the commit while kMaxCommandBuffersInFlight of the stream's own commits are in
   // flight (MPSGraph's are not counted).
   constexpr uint32_t kKernelsPerCommit = 16; // See https://github.com/pytorch/pytorch/pull/200181 for the sweep
-  constexpr uint32_t kMaxCommandBuffersInFlight = 32;
-  if (_enableCommitAndContinue && _kernelsSinceCommit >= kKernelsPerCommit &&
-      _commandBuffersInFlight < kMaxCommandBuffersInFlight) {
+  if (_enableCommitAndContinue && _kernelsSinceCommit >= kKernelsPerCommit && !tooManyCommandBuffersInFlight()) {
     synchronize(SyncType::COMMIT);
   }
 }

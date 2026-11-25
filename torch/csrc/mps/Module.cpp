@@ -89,6 +89,8 @@ static PyObject* MPSModule_emptyCache(
     PyObject* /*_unused*/,
     PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
+    // Release GIL as this can block until another Python thread calls
+    // torch.mps.Event.signal.
     pybind11::gil_scoped_release no_gil;
     at::detail::getMPSHooks().emptyCache();
   }
@@ -195,7 +197,11 @@ static PyObject* MPSModule_recordEvent(PyObject* /*_unused*/, PyObject* args) {
   }
   const uint32_t event_id = THPUtils_unpackUInt32(event_id_o);
   const int64_t stream_id = THPUtils_unpackLong(stream_id_o);
-  at::detail::getMPSHooks().recordEvent(event_id, stream_id);
+  {
+    // See MPSModule_emptyCache.
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().recordEvent(event_id, stream_id);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -209,7 +215,11 @@ static PyObject* MPSModule_waitForEvent(PyObject* /*_unused*/, PyObject* args) {
   }
   const uint32_t event_id = THPUtils_unpackUInt32(event_id_o);
   const int64_t stream_id = THPUtils_unpackLong(stream_id_o);
-  at::detail::getMPSHooks().waitForEvent(event_id, stream_id);
+  {
+    // See MPSModule_emptyCache.
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().waitForEvent(event_id, stream_id);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -253,6 +263,7 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   const uint32_t end_event_id = THPUtils_unpackUInt32(end_event_o);
   double elapsed = 0.0;
   {
+    // See MPSModule_emptyCache.
     pybind11::gil_scoped_release no_gil;
     elapsed = at::detail::getMPSHooks().elapsedTimeOfEvents(
         start_event_id, end_event_id);
