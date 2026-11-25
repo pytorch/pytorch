@@ -1,12 +1,3 @@
-if(INTERN_BUILD_MOBILE)
-  caffe2_binary_target("speed_benchmark_torch.cc")
-  caffe2_binary_target("load_benchmark_torch.cc")
-  if(NOT BUILD_LITE_INTERPRETER)
-    caffe2_binary_target("compare_models_torch.cc")
-  endif()
-  return()
-endif()
-
 caffe2_binary_target("parallel_info.cc")
 target_include_directories(parallel_info PUBLIC
   ${CMAKE_BINARY_DIR}/aten/src) # provides "ATen/TypeExtendedInterface.h" to ATen.h

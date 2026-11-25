@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     NestedTensorTestCase,
     parametrize,
+    periodic,
     run_tests,
     serialTest,
     skipIfCppFakeTensor,
@@ -9058,6 +9059,7 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
 # OpInfo-based NJT tests. These tests utilize an NJT-specific op_db generated from the standard
 # op_db. Note that certain tradeoffs were made wrt coverage vs. time spent running tests:
 #   * All tests run with dtype=torch.float32 only
+@periodic
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorOpInfo(NestedTensorTestCase):
     # TODO: move this
@@ -9401,9 +9403,9 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
-instantiate_device_type_tests(TestNestedTensorAutograd, globals())
+instantiate_device_type_tests(TestNestedTensorAutograd, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestNestedTensorSubclass, globals())
-instantiate_device_type_tests(TestNestedTensorOpInfo, globals())
+instantiate_device_type_tests(TestNestedTensorOpInfo, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
