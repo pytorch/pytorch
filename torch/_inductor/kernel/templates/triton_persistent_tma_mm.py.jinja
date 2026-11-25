@@ -2,6 +2,12 @@
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K = {{size("A", 1)}}
+    {%- if K_LOOP_OVER_TILES | default(0) %}
+    # XPU 2D block IO needs an even inner extent (bf16); an odd last column is handled below.
+    K_MAIN = K // 2 * 2
+    {%- else %}
+    K_MAIN = K
+    {%- endif %}
 
     if (M == 0) or (N == 0):
         # early exit due to zero-size input(s)
@@ -44,19 +50,35 @@
 
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
-        shape=[M, K] if A_ROW_MAJOR else [K, M],
+        shape=[M, K_MAIN] if A_ROW_MAJOR else [K_MAIN, M],
         strides=[stride_am, 1] if A_ROW_MAJOR else [stride_ak, 1],
         block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
     )
     b_desc = triton.language.make_tensor_descriptor(
         base=B,
-        shape=[K, N] if B_ROW_MAJOR else [N, K],
+        shape=[K_MAIN, N] if B_ROW_MAJOR else [N, K_MAIN],
         strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
         block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
     )
     {%- endif %}
 
+    {%- if SPLIT_K | default(1) > 1 %}
+
+    # ws_ptr (int32): per-tile arrival counters, then SPLIT_K fp32 partial tiles per tile.
+    # The last split to arrive reduces and runs the epilogue, and re-zeroes its counter.
+    k_tiles = tl.cdiv(K_MAIN, BLOCK_K)
+    k_per_split = tl.cdiv(k_tiles, SPLIT_K)
+    counters = ws_ptr
+    partials = (ws_ptr + tl.cdiv(num_tiles, 64) * 64).to(tl.pointer_type(tl.float32))
+    part_offs = tl.arange(0, BLOCK_M)[:, None] * BLOCK_N + tl.arange(0, BLOCK_N)[None, :]
+
+    for work_id in tl.range(start_pid, num_tiles * SPLIT_K, NUM_SMS):
+        tile_id = work_id // SPLIT_K
+        split_id = work_id % SPLIT_K
+    {%- else %}
+
     for tile_id in tl.range(start_pid, num_tiles, NUM_SMS):
+    {%- endif %}
 
         # re-order program ID for better L2 performance
         group_id = tile_id // width
@@ -70,8 +92,23 @@
         rn_desc = rn.to(tl.int32)
         acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
+        {%- if K_LOOP_OVER_TILES | default(0) %}
+
+        # XPU's alignment check rejects the nested-loop IV;
+        # k_idx * BLOCK_K proves the even-element K offset needed for A's 2D block IO.
+        {%- if SPLIT_K | default(1) > 1 %}
+        k_begin = split_id * k_per_split
+        k_end = min(k_begin + k_per_split, k_tiles)
+        for k_idx in tl.range(k_begin, k_end):
+        {%- else %}
+        for k_idx in tl.range(0, tl.cdiv(K_MAIN, BLOCK_K)):
+        {%- endif %}
+            rk_desc = (k_idx * BLOCK_K).to(tl.int32)
+        {%- else %}
+
         for rk in tl.range(0, K, BLOCK_K):
             rk_desc = rk.to(tl.int32)
+        {%- endif %}
 
             {%- if TMA_EXPERIMENTAL_API %}
             a = tl._experimental_descriptor_load(
@@ -110,9 +147,53 @@
                     allow_tf32=ALLOW_TF32,
                 )
 
+        {%- if K_LOOP_OVER_TILES | default(0) and not TMA_EXPERIMENTAL_API %}
+        {%- if SPLIT_K | default(1) > 1 %}
+
+        # The last K-slice also takes the odd column.
+        if (K_MAIN < K) & (split_id == SPLIT_K - 1):
+        {%- else %}
+
+        if K_MAIN < K:
+        {%- endif %}
+            # tl.dot needs K >= 16: a 16-wide slab in which only column K - 1 is unmasked.
+            rk_tail = K_MAIN + tl.arange(0, 16)
+            rm_tail = rm + tl.arange(0, BLOCK_M)
+            rn_tail = rn + tl.arange(0, BLOCK_N)
+            a_tail = tl.load(
+                A + rm_tail[:, None] * stride_am + rk_tail[None, :] * stride_ak,
+                mask=(rm_tail[:, None] < M) & (rk_tail[None, :] < K),
+                other=0.0,
+            )
+            b_tail = tl.load(
+                B + rk_tail[:, None] * stride_bk + rn_tail[None, :] * stride_bn,
+                mask=(rk_tail[:, None] < K) & (rn_tail[None, :] < N),
+                other=0.0,
+            )
+            acc = tl.dot(a_tail, b_tail, acc, allow_tf32=ALLOW_TF32)
+        {%- endif %}
+
         # rematerialize rm and rn to save registers
         rm = pid_m * BLOCK_M
         rn = pid_n * BLOCK_N
+
+        {%- if SPLIT_K | default(1) > 1 %}
+
+        tl.store(partials + work_id * (BLOCK_M * BLOCK_N) + part_offs, acc)
+        # Every warp's partial must be written before this slice counts as arrived.
+        tl.debug_barrier()
+        arrived = tl.atomic_add(counters + tile_id, 1, sem="acq_rel")
+        if arrived == SPLIT_K - 1:
+            # No warp may read the other slices' partials before the arrival is observed.
+            tl.debug_barrier()
+            # Fixed summation order, so the result does not depend on arrival order.
+            acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+            for s in tl.static_range(SPLIT_K):
+                acc += tl.load(partials + (tile_id * SPLIT_K + s) * (BLOCK_M * BLOCK_N) + part_offs)
+            # The workspace is zeroed once per graph call and shared, so leave it zeroed.
+            tl.store(counters + tile_id, 0)
+            {{store_output(("rm", "rn"), "acc", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
+        {%- else %}
 
         # inductor generates a suffix
         {%- if TMA_EXPERIMENTAL_API %}
@@ -124,4 +205,12 @@
         {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"))}}
         {%- else %}
         {{store_output(("rm", "rn"), "acc", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
+        {%- endif %}
+        {%- endif %}
+        {%- if TILE_BARRIER_MIN_K_STEPS | default(0) %}
+
+        # Without SLM staging nothing else keeps a work-group's warps on the same tile.
+        # Runtime sizes, so a dynamic-shape kernel still decides per call.
+        if tl.cdiv(num_tiles, NUM_SMS) * tl.cdiv(K, BLOCK_K) >= TILE_BARRIER_MIN_K_STEPS:
+            tl.debug_barrier()
         {%- endif %}
