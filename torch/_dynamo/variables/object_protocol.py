@@ -396,6 +396,34 @@ def pysequence_check(obj_type: type) -> bool:
     return type_implements_sq_item(obj_type)
 
 
+def pymapping_check(obj: VariableTracker) -> bool:
+    """Implements PyMapping_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c (PyMapping_Check)
+    return obj.tp_as_mapping.mp_subscript is not None
+
+
+def pylist_check(obj: VariableTracker) -> bool:
+    """Implements PyList_Check semantics for VariableTracker objects."""
+    return issubclass(obj.python_type(), list)
+
+
+def pytuple_check(obj: VariableTracker) -> bool:
+    """Implements PyTuple_Check semantics for VariableTracker objects."""
+    return issubclass(obj.python_type(), tuple)
+
+
+def mappingproxy_check_mapping(
+    tx: "InstructionTranslatorBase", mapping: VariableTracker
+) -> None:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c (mappingproxy_check_mapping)
+    if not pymapping_check(mapping) or pylist_check(mapping) or pytuple_check(mapping):
+        raise_type_error(
+            tx,
+            "mappingproxy() argument must be a mapping, not "
+            f"{mapping.python_type_name()}",
+        )
+
+
 def pylong_check(obj_type: type) -> bool:
     """Implements PyLong_Check semantics for VariableTracker objects."""
     # ref: https://github.com/python/cpython/blob/v3.13.0/Include/longobject.h#L12-L13

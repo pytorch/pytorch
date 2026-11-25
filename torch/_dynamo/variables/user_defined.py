@@ -145,6 +145,7 @@ from .object_protocol import (
     generic_is_true,
     guard_mro_absent,
     is_nb_not_implemented,
+    mappingproxy_check_mapping,
     mro_attr_source,
     mro_lookup,
     pynumber_as_ssize_t,
@@ -2196,12 +2197,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return SourcelessUserDefinedObjectBuilder.create(tx, random_object)
-        elif self.value is types.MappingProxyType and len(args) == 1:
-            # types.MappingProxyType is a read-only proxy of the dict. If the
-            # original dict changes, the changes are reflected in proxy as well.
-            dict_arg = args[0]
-            if isinstance(dict_arg, ConstDictVariable):
-                return variables.MappingProxyVariable(dict_arg)
+        elif self.value is types.MappingProxyType and len(args) == 1 and not kwargs:
+            # mappingproxy_new: a read-only view of any mapping, so changes to
+            # the mapping show through the proxy.
+            # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c (mappingproxy_new)
+            mappingproxy_check_mapping(tx, args[0])
+            return variables.MappingProxyVariable(args[0])
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and (
             self.source or torch._dynamo.config.enable_trace_load_build_class
         ):
