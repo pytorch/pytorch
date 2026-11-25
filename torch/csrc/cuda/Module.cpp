@@ -1411,11 +1411,6 @@ void callPythonDeallocator(
   };
   try {
     py::gil_scoped_acquire gil;
-    // A tensor's last reference may be dropped while a Python exception is
-    // propagating (e.g. a temporary of the expression that raised): set the
-    // pending error aside for the callback and restore it afterwards, or the
-    // callback fails with a SystemError and the pending error is lost.
-    py::error_scope pending_error;
     try {
       py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 1))(
           reinterpret_cast<uintptr_t>(ptr),
