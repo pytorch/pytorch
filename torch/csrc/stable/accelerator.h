@@ -87,7 +87,7 @@ class Stream {
         }) {}
 
   StreamId id() const {
-    StreamId stream_id = 0;
+    StreamId stream_id;
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_stream_id(stream_.get(), &stream_id));
     return stream_id;
@@ -123,7 +123,7 @@ inline Stream getCurrentStream(DeviceIndex device_index) {
  * Minimum compatible version: PyTorch 2.9.
  */
 inline DeviceIndex getCurrentDeviceIndex() {
-  DeviceIndex device_index = 0;
+  DeviceIndex device_index;
   STABLE_TORCH_ERROR_CODE_CHECK(
       aoti_torch_get_current_device_index(&device_index));
   return device_index;
