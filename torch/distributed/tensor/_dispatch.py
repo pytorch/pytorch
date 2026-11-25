@@ -209,6 +209,13 @@ class OpDispatcher:
     OpDispatcher and ShardingPropagator.
     """
 
+    # A custom op handler returns this to have its op dispatched as if it had no
+    # handler (checked in dispatchDTensorOp, python_variable.cpp). A declining
+    # handler must leave args and kwargs untouched, since dispatch then reads the
+    # call from both them and the dispatcher stack; it must decline the calls it
+    # re-dispatches itself, and wrappers of handlers must pass it through.
+    _custom_op_handler_fallthrough = object()
+
     def __init__(self) -> None:
         self.sharding_propagator = ShardingPropagator()
         # NOTE: must stay in sync with is_random_op in

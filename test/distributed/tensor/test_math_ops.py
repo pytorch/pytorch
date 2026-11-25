@@ -818,17 +818,10 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                     "mean": Partial("avg") if even else Replicate(),
                 }[reduction]
                 self.assertEqual(out.placements, (expected_out,), msg=msg)
-                # The *_backward kernels divide by the local numel for "mean", so
-                # they run replicated. binary_cross_entropy_with_logits has no
-                # backward kernel: autograd composes its gradient from pointwise ops.
-                replicated_grad = (
-                    reduction == "mean"
-                    and loss_name != "binary_cross_entropy_with_logits"
-                )
-                expected_grad = Replicate() if replicated_grad else Shard(0)
-                self.assertEqual(dist_x.grad.placements, (expected_grad,), msg=msg)
-                if not replicated_grad:
-                    self.assertEqual(comm_mode.get_total_counts(), 0, msg=msg)
+                # The backward stays sharded, also for "mean", which runs as
+                # "sum" with a scaled grad_output.
+                self.assertEqual(dist_x.grad.placements, (Shard(0),), msg=msg)
+                self.assertEqual(comm_mode.get_total_counts(), 0, msg=msg)
 
     @with_comms
     def test_pointwise_loss_uneven_2d_mesh(self):
@@ -867,11 +860,10 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                 return DTensor.from_local(torch.empty_like(t), device_mesh, [placement])
             return distribute_tensor(torch.empty_like(t), device_mesh, [placement])
 
-        # reduction -> sharded placements of the loss out buffer and of
-        # grad_input ("mean" backward only runs replicated).
+        # reduction -> sharded placements of the loss out buffer and of grad_input
         cases = {
             0: (Shard(0), Shard(0)),
-            1: (Partial("avg"), Replicate()),
+            1: (Partial("avg"), Shard(0)),
             2: (Partial("sum"), Shard(0)),
         }
         for reduction, sharded in cases.items():
@@ -2988,6 +2980,23 @@ class DistMathOpsTest(DTensorContinuousTestBase):
 class TestPointwiseLossRegistration(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_mean_backward_has_no_sharded_strategy(self):
+        # The custom op handler rewrites "mean" backwards, so only direct sharding
+        # propagation reaches this rule. It must keep them replicated: the kernel
+        # divides by its input's numel, and on a shard that is the local numel.
+        from torch.distributed.tensor._dtensor_spec import TensorMeta
+        from torch.distributed.tensor._ops._math_ops import (
+            pointwise_loss_single_dim_strategy as strategy,
+        )
+
+        def meta(*shape):
+            return TensorMeta(torch.Size(shape), (1,) * len(shape), torch.float32)
+
+        op = aten.mse_loss_backward.default
+        args = (meta(), meta(8, 3), meta(8, 3))
+        self.assertEqual(strategy(op, (*args, 1), {}), [])
+        self.assertNotEqual(strategy(op, (*args, 2), {}), [])
+
     def test_squeeze_check_with_symbolic_shapes(self):
         # torch.compile(dynamic=True) passes symbolic shapes, which must neither be
         # hashed nor guarded on: equal ones get the same strategies as static
@@ -3020,30 +3029,37 @@ class TestPointwiseLossRegistration(TestCase):
         # Every overload needs the explicit registration: autogen-derived .out
         # strategies would drop the uneven-shard filter.
         from torch.distributed.tensor._ops._math_ops import (
+            _pointwise_loss_backward_handler,
             _pointwise_loss_full_mesh_strategy_filter,
         )
 
         strategies = (
             DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs
         )
-        packets = [
-            aten.binary_cross_entropy,
-            aten.binary_cross_entropy_with_logits,
-            aten.huber_loss,
-            aten.mse_loss,
-            aten.smooth_l1_loss,
-            aten.soft_margin_loss,
-            aten.binary_cross_entropy_backward,
-            aten.huber_loss_backward,
-            aten.mse_loss_backward,
-            aten.smooth_l1_loss_backward,
-            aten.soft_margin_loss_backward,
-        ]
-        for packet in packets:
+        handlers = DTensor._op_dispatcher._custom_op_handlers
+        packets = {
+            aten.binary_cross_entropy: False,
+            aten.binary_cross_entropy_with_logits: False,
+            aten.huber_loss: False,
+            aten.mse_loss: False,
+            aten.smooth_l1_loss: False,
+            aten.soft_margin_loss: False,
+            aten.binary_cross_entropy_backward: True,
+            aten.huber_loss_backward: True,
+            aten.mse_loss_backward: True,
+            aten.smooth_l1_loss_backward: True,
+            aten.soft_margin_loss_backward: True,
+        }
+        for packet, is_backward in packets.items():
             for op in packet.op_overloads():
                 self.assertIs(
                     strategies[op].full_mesh_strategy_filter,
                     _pointwise_loss_full_mesh_strategy_filter,
+                    msg=str(op),
+                )
+                self.assertEqual(
+                    handlers.get(op) is _pointwise_loss_backward_handler,
+                    is_backward,
                     msg=str(op),
                 )
 

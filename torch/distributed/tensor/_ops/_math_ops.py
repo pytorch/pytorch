@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, cast
 
 import torch
+from torch._library.utils import fill_defaults
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
@@ -1429,11 +1430,57 @@ _BINARY_CROSS_ENTROPY_OPS = {
 _elementwise_single_dim_strategy = _common_pointwise_single_dim_strategy()
 
 
-def _loss_reduction(op: torch._ops.OpOverload, args: Sequence[object]) -> object:
-    """Return the value of the loss op's ``reduction`` argument."""
-    arguments = op._schema.arguments
-    idx = [a.name for a in arguments].index("reduction")
-    return args[idx] if len(args) > idx else arguments[idx].default_value
+# op -> (position, default) of its ``reduction`` argument, read once because
+# op._schema.arguments copies every Argument on each access and the custom op
+# handler below runs on every call of these ops.
+_LOSS_REDUCTION_ARG = {
+    op: next(
+        (i, a.default_value)
+        for i, a in enumerate(op._schema.arguments)
+        if a.name == "reduction"
+    )
+    for op in _POINTWISE_LOSS_OPS + _POINTWISE_LOSS_BACKWARD_OPS
+}
+
+
+def _loss_reduction(
+    op: torch._ops.OpOverload, args: Sequence[object]
+) -> tuple[int, object]:
+    """Return the position and value of the loss op's ``reduction`` argument."""
+    idx, default = _LOSS_REDUCTION_ARG[op]
+    return idx, args[idx] if len(args) > idx else default
+
+
+def _pointwise_loss_backward_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    """Run a "mean" loss backward as a "sum" one with grad_output / numel.
+
+    The backward kernels divide by their input's numel for "mean", which on a
+    shard is the local numel. Their result is linear in grad_output and the
+    "mean" result is the "sum" one divided by numel, so this rewrite lets them
+    run sharded; a DTensor's numel() is the global one. Scaling grad_output
+    first rounds like autograd's backward of ``reduction="none"`` + ``.mean()``.
+    Other reductions, and the rewritten call itself, dispatch as usual.
+    """
+    reduction_idx, reduction = _loss_reduction(op_call, args)
+    if reduction != Reduction.MEAN.value:
+        return DTensor._op_dispatcher._custom_op_handler_fallthrough
+    args, kwargs = fill_defaults(op_call._schema, args, kwargs)
+    grad_output = cast(torch.Tensor, args[0])
+    numel = cast(torch.Tensor, args[1]).numel()
+    # aten.div.Scalar keeps numel a Python scalar; `grad_output / numel` would
+    # wrap it in a tensor, which sends the division down DTensor's slower
+    # dispatch path.
+    args = (
+        aten.div.Scalar(grad_output, numel),
+        *args[1:reduction_idx],
+        Reduction.SUM.value,
+        *args[reduction_idx + 1 :],
+    )
+    return op_call(*args, **kwargs)
 
 
 def _pointwise_loss_full_mesh_strategy_filter(
@@ -1471,11 +1518,12 @@ def pointwise_loss_single_dim_strategy(
     The forward kernel reduces its local shard, so "sum" and "mean" turn a
     sharded input into Partial("sum") and Partial("avg") outputs; the full-mesh
     filter keeps Partial("avg") to even shards. The backward kernels divide by
-    the local numel for "mean", so they only run replicated. Otherwise the
-    losses are elementwise in all their tensor arguments. An ``out`` or
-    ``grad_input`` tensor takes the output's placement.
+    the local numel for "mean", so no sharded rule is valid for them; DTensor
+    runs them as "sum" instead (see _pointwise_loss_backward_handler).
+    Otherwise the losses are elementwise in all their tensor arguments. An
+    ``out`` or ``grad_input`` tensor takes the output's placement.
     """
-    reduction = _loss_reduction(op, args_schema)
+    _, reduction = _loss_reduction(op, args_schema)
     is_backward = op in _POINTWISE_LOSS_BACKWARD_OPS
     if op in _BINARY_CROSS_ENTROPY_OPS:
         # The BCE kernels squeeze (grad,) input and target instead of broadcasting
@@ -2275,3 +2323,6 @@ DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
 DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
     aten.native_group_norm_backward.default
 ] = _adjust_group_norm_scalars
+DTensor._op_dispatcher._custom_op_handlers.update(
+    dict.fromkeys(_POINTWISE_LOSS_BACKWARD_OPS, _pointwise_loss_backward_handler)
+)
