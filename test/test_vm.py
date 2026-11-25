@@ -16,8 +16,10 @@ import functools
 import gc
 import math
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -1105,6 +1107,114 @@ class TestVmSwap(TestCase):
 
 
 instantiate_device_type_tests(TestVmSwap, globals())
+
+
+def rust_adds(x, w):
+    return ((x @ w).sin() + x).cos().tanh().exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRustPasses(TestCase):
+    """Passes written in Rust on the crate torch/_rust/sdk, loaded from the
+    library cargo builds from test/vm_passes."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def library(self):
+        cargo = shutil.which("cargo")
+        if cargo is None:
+            self.skipTest("cargo is not installed")
+        here = os.path.dirname(os.path.abspath(__file__))
+        manifest = os.path.join(here, "vm_passes", "Cargo.toml")
+        # One build for the tests of a run (each runs in a process of its own).
+        target = os.path.join(tempfile.gettempdir(), f"vm_passes_{os.getuid()}")
+        command = [cargo, "build", "--release", "--offline", "--locked"]
+        command += ["--manifest-path", manifest, "--target-dir", target]
+        subprocess.run(command, check=True, capture_output=True)
+        (library,) = (
+            os.path.join(target, "release", name)
+            for name in os.listdir(os.path.join(target, "release"))
+            if name.startswith("libvm_passes.") and not name.endswith(".d")
+        )
+        return library
+
+    def run_with(self, fn, block_pass, calls=8):
+        # What each call gives, eager's, and the warnings of the run.
+        g = vm(fn, passes=(*EARLY, block_pass))
+        torch.manual_seed(0)
+        w = torch.randn(8, 8)
+        got = []
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            for _ in range(calls):
+                x = torch.randn(4, 8)
+                got.append((g(x, w), fn(x, w)))
+        return got, [str(w.message) for w in caught]
+
+    @isolated
+    def test_pass_puts_a_kernel_in(self):
+        passes = vm.load_passes(self.library())
+        self.assertEqual(sorted(passes), ["fuse_rmsnorm", "panics", "strict"])
+        calls = []
+
+        def kernel(h):
+            calls.append(tuple(h.shape))
+            return swap_rms_norm(h)
+
+        fuse = passes["fuse_rmsnorm"].bind(kernel)
+        self.assertEqual(fuse.__name__, "fuse_rmsnorm")
+        self.assertEqual(vm.kind(fuse), "block")
+        got, said = self.run_with(swap_model, fuse)
+        for ours, eagers in got:
+            self.assertEqual(ours, eagers, rtol=1e-4, atol=1e-5)
+        # The fourth call is traced; the kernel runs from the fifth on.
+        self.assertEqual(calls, [(4, 8)] * 4)
+        self.assertEqual(said, [])
+
+    @isolated
+    def test_kernel_a_pass_puts_in_is_checked(self):
+        passes = vm.load_passes(self.library())
+        wrong = passes["fuse_rmsnorm"].bind(lambda h: swap_rms_norm(h) + 1e-2)
+        with self.assertRaisesRegex(vm.Mismatch, "differs by up to 0.01"):
+            self.run_with(swap_model, wrong)
+
+    @isolated
+    def test_pass_that_fails_leaves_the_region_as_it_was(self):
+        passes = vm.load_passes(self.library())
+        # `strict` fails where a region multiplies; an unbound pass has no
+        # kernel; a panic is an error like another. Each is skipped for the
+        # region with a warning that says why, and the results are eager's.
+        for name, why in [
+            ("strict", "a block that multiplies: aten::"),
+            ("fuse_rmsnorm", "needs a kernel"),
+            ("panics", "a pass panicked"),
+        ]:
+            got, said = self.run_with(swap_model, passes[name])
+            for ours, eagers in got:
+                self.assertEqual(ours, eagers, atol=0, rtol=0)
+            self.assertTrue(
+                any(why in text and "RuntimeError" in text for text in said),
+                msg=f"{name}: {said}",
+            )
+        got, said = self.run_with(rust_adds, passes["strict"])
+        for ours, eagers in got:
+            self.assertEqual(ours, eagers, atol=0, rtol=0)
+        self.assertEqual(said, [])
+
+    def test_library_that_is_none_is_an_error(self):
+        with self.assertRaisesRegex(RuntimeError, "cannot load"):
+            vm.load_passes("/nowhere/libpasses.so")
+        with self.assertRaisesRegex(RuntimeError, "exports no passes"):
+            vm.load_passes(torch._C.__file__)
+
+    def test_library_of_another_interface_version_is_refused(self):
+        library = self.library()
+        with unittest.mock.patch.object(torch.vm._native, "ABI_VERSION", 2):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "version 1 of the pass interface; this torch.vm has version 2",
+            ):
+                vm.load_passes(library)
 
 
 class TestVmWithoutRuntime(TestCase):

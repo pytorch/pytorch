@@ -1,0 +1,14 @@
+[package]
+name = "vm_passes"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Passes for torch.vm in Rust, built and loaded by test/test_vm.py"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+torch-vm-pass = { path = "../../torch/_rust/sdk" }
+
+[workspace]
