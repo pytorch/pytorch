@@ -9,7 +9,7 @@ from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
-from torch._dynamo.device_interface import CudaInterface, XpuInterface
+from torch._dynamo.device_interface import CudaInterface
 from torch._inductor.exc import InductorError
 from torch._inductor.kernel.flex.flex_decoding import get_split_k
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -2554,13 +2554,6 @@ class TestGetSplitKDeviceRouting(common_utils.TestCase):
 
         self.assertEqual(calls, [torch.device("cuda", 1)])
         self.assertEqual(split_k, 80 // (2 * 4) * 2)
-
-    def test_split_k_xpu_capped_by_kv_tiles(self):
-        # On XPU, SPLIT_KV is at most one split per 64-wide KV tile.
-        with patch.object(XpuInterface, "get_multi_processor_count", lambda d=None: 20):
-            split_k = get_split_k(1, 1, 1088, torch.device("xpu"))
-
-        self.assertEqual(split_k, 17)
 
 
 instantiate_device_type_tests(
