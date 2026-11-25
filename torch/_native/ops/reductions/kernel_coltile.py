@@ -33,7 +33,7 @@ from .kernel_general import (
     _ORDERED_COL_DTYPES,
     ReduceBlock,
 )
-from .kernel_rowtile import trait_itree_plan
+from .kernel_rowtile import split_partials, trait_itree_plan
 from .traits import WARP
 
 
@@ -593,7 +593,7 @@ class _OrderedColReduce:
         if const_expr(plan.shape == "split"):
             if (worker == Int32(0)) & active:
                 index = output * Int32(plan.split[0]) + partition
-                for f in cutlass.range_constexpr(trait.nfields):
+                for f in cutlass.range_constexpr(self.nouts):
                     mOuts[f][index] = final[f]
         else:
             projected = trait.project(final, trait.acc(self.R))
@@ -683,28 +683,24 @@ def reduce_ordered_col(
             if split:
                 return None
             config = OrderedColConfig(0)
-    op = _OrderedColReduce(
-        trait,
-        plan,
-        R,
-        C,
-        trait.nfields if split else nouts,
-        full_tiles=config.full_tiles,
-        worker_warps=config.worker_warps,
-        tile_columns=config.tile_columns,
-    )
     outs = [
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
     ]
     kernel_x = _flat(x)
-    kernel_outs = (
-        [
-            torch.empty(B * C * plan.split[0], device=x.device, dtype=cute2torch[d])
-            for d in trait.fdtypes
-        ]
-        if split
-        else _flat_outs(outs)
+    if split:
+        plan, combine, kernel_outs = split_partials(trait, plan, B * C, x.device)
+    else:
+        combine, kernel_outs = None, _flat_outs(outs)
+    op = _OrderedColReduce(
+        trait,
+        plan,
+        R,
+        C,
+        len(kernel_outs),
+        full_tiles=config.full_tiles,
+        worker_warps=config.worker_warps,
+        tile_columns=config.tile_columns,
     )
     args = (Int64(x.storage_offset()), Int32(B * C), Int32(C), _stream(device))
     key = (
@@ -728,7 +724,7 @@ def reduce_ordered_col(
     if split:
         flat_outs = _flat_outs(outs)
         _combine_itree_partials(
-            trait, trait_key, plan, kernel_outs, flat_outs, R, nouts
+            trait, trait_key, combine, kernel_outs, flat_outs, R, nouts
         )
     return tuple(outs)
 

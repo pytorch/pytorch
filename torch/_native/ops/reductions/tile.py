@@ -3,12 +3,16 @@
 # fixed DAGs preserve order. Reuse avoids prior 3.7x unwidened and 3x alignment losses.
 
 import math
-from typing import Any
+from typing import Any, get_args, Literal, TYPE_CHECKING
 
 import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Int32, Int64, pipeline
 from cutlass.cute.nvgpu import cpasync
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 WARP = 32
@@ -292,6 +296,47 @@ def _uniform_tree_issue(
     if not threads_per_block <= count <= max_count:
         return f"{threads_per_block} to {max_count} values per output for {threads_per_block} threads, got {count}"
     return None
+
+
+UniformCombineMode = Literal["off", "counts", "weights"]
+UNIFORM_COMBINE_MODES = get_args(UniformCombineMode)
+
+
+def check_uniform_combine_mode(mode: str) -> None:
+    modes = UNIFORM_COMBINE_MODES
+    if mode not in modes:
+        raise ValueError(f"uniform_combine must be one of {modes}, got {mode!r}")
+
+
+def _uniform_combine_issue(trait, split, mode) -> str | None:
+    if mode not in UNIFORM_COMBINE_MODES[1:]:
+        return f"a mode in {UNIFORM_COMBINE_MODES[1:]}, got {mode!r}"
+    issue = _flag_issue(trait, "has_combine_uniform", "combine_uniform")
+    if issue is not None:
+        return issue
+    if mode == "weights" and not hasattr(trait, "uniform_weight"):
+        return f"a trait with uniform_weight, got {type(trait).__name__}"
+    if trait.acc is not cutlass.Float32:
+        return f"an FP32 accumulator, got {trait.acc}"
+    if len(split) != 5:
+        return f"a split plan, got {split=}"
+    nbatch, count, last = split[:3]
+    # Equal power-of-two counts keep every index * count exact in fp32.
+    if not 0 < nbatch <= 2**24:
+        return f"1 to 2**24 partials, got {nbatch}"
+    if count != last:
+        return f"partials of one count, got {count} and {last}"
+    if not 0 < count <= 2**24 or count & (count - 1):
+        return f"a power-of-two count up to 2**24, got {count}"
+    return None
+
+
+def uniform_combine_ok(trait, split, mode):
+    """Whether combine_uniform can fold a split plan's partials with derived counts.
+
+    Only "counts" and "weights" pass; "weights" also needs uniform_weight.
+    """
+    return _uniform_combine_issue(trait, split, mode) is None
 
 
 @cute.jit
@@ -1094,12 +1139,31 @@ class TileReduce:
                     f"{combine=} {flat_tail=} {ragged_chunk=} {gidx_from=} {wide=} "
                     f"stage_e={itree.stage_e}"
                 )
+            mode = itree.uniform_combine
+            check_uniform_combine_mode(mode)
+            uniform = mode != "off"
+            # _uniform_combine_issue checks the split's length before it is unpacked.
+            if uniform:
+                issue = _uniform_combine_issue(trait, itree.split, mode)
+                if issue is not None:
+                    raise ValueError(f"uniform_combine={mode!r} needs {issue}")
+            # A split plan carries its combine's mode: stage 1 skips the derived count.
+            staged = itree.shape == "combine" and itree.combine_tile
+            if uniform and not (staged or itree.shape == "split"):
+                raise ValueError(
+                    f"uniform_combine={mode!r} needs a staged combine plan or its split, got {itree.shape=} {itree.combine_tile=}"
+                )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
             if itree.stage_e:
                 threads_per_row = WARP
             threads_per_block = threads_per_row * itree.rows_per_block
-            if itree.shape == "combine" and itree.combine_tile:
+            if staged and threads_per_block > WARP:
+                # Partial and weight staging index the block's rows by lane.
+                raise ValueError(
+                    f"staged combine plans require at most {WARP} threads per block, got {threads_per_block}"
+                )
+            if staged:
                 # The async transpose needs every lane even for a short row group.
                 threads_per_block = max(WARP, threads_per_block)
         if axis == "general" and order == "linear":
@@ -1143,6 +1207,12 @@ class TileReduce:
         self.threads_per_block = threads_per_block
         self.nouts = nouts
         self.final = final
+        derived_count = (
+            order == "inner_tree"
+            and itree.shape == "split"
+            and itree.uniform_combine != "off"
+        )
+        self.partial_fields = trait.nfields - derived_count
         self.unroll = unroll
         self.ragged_vector = ragged_vector
         # The count compiles as whole loads and whether a tail remains.
@@ -1642,15 +1712,42 @@ class TileReduce:
         return self._fold_itree(sX, r_in_block, lane_w, warp_id, r_in_block, batch_idx)
 
     @cute.jit
+    def _combine_itree_partial(self, a, b, index):
+        if const_expr(self.itree.uniform_combine != "off"):
+            return self.trait.combine_uniform(
+                a,
+                b,
+                index,
+                const_expr(self.itree.split[1]),
+                b[-1] if const_expr(self.itree.uniform_combine == "weights") else None,
+            )
+        return self.trait.combine(a, b)
+
+    @cute.jit
+    def _stage_combine_weights(self, sw, base, lane):
+        """Write the weights of the tile of partials from index `base` into sw."""
+        count = const_expr(self.itree.split[1])
+        for i in cutlass.range_constexpr(self.itree.combine_tile // WARP):
+            # Consecutive lanes write consecutive words, avoiding bank conflicts.
+            k = Int32(const_expr(i * WARP)) + lane
+            sw[k] = self.trait.uniform_weight(base + k, count)
+
+    @cute.jit
     def _fold_itree_combine_async(self, mIns, row, lane, blk):
         """Coalesce split partials through shared memory without changing fold order."""
-        combine_fn, fdtypes = self.trait.combine, self.trait.fdtypes
+        combine_fn, fdtypes = self._combine_itree_partial, self.trait.fdtypes
         nf = const_expr(self.trait.nfields)
         nbatch = const_expr(self.itree.split[0])
         grp = const_expr(self.itree.combine_grp)
         rpb = const_expr(self.itree.rows_per_block)
         tile_n = const_expr(self.itree.combine_tile)  # partials per row per tile
         unroll = const_expr(self.itree.combine_unroll)
+        mode = self.itree.uniform_combine
+        count = const_expr(self.itree.split[1] if mode != "off" else 0)
+        # Derived counts are not staged; weights depend only on the partial index, so one row of
+        # them serves the whole block in the count field's slot.
+        weights = const_expr(mode == "weights")
+        ncopy = const_expr(nf - 1 if count else nf)  # fields copied from global
         mult = const_expr(tile_n // (WARP * grp))  # cp.async per lane per row
         ntiles = const_expr(nbatch // tile_n)
         # Pad each row's run by `grp` so a lane's run stays transfer-aligned while the runs start in
@@ -1663,25 +1760,41 @@ class TileReduce:
                 cute.make_layout(const_expr(rpb * pitch)),
                 byte_alignment=TRANSFER_ALIGNMENT,
             )
-            for f in range(nf)
+            for f in range(ncopy)
         ]
+        if const_expr(weights):
+            sbuf.append(
+                smem.allocate_tensor(
+                    fdtypes[ncopy],
+                    cute.make_layout(tile_n),
+                    byte_alignment=TRANSFER_ALIGNMENT,
+                )
+            )
         g2s = [
             cute.make_copy_atom(
                 cpasync.CopyG2SOp(),
                 fdtypes[f],
                 num_bits_per_copy=const_expr(grp * fdtypes[f].width),
             )
-            for f in range(nf)
+            for f in range(ncopy)
         ]
-        gv = [cute.flat_divide(mIns[f], (grp,)) for f in range(nf)]
-        sv = [cute.flat_divide(sbuf[f], (grp,)) for f in range(nf)]
+        gv = [cute.flat_divide(mIns[f], (grp,)) for f in range(ncopy)]
+        sv = [cute.flat_divide(sbuf[f], (grp,)) for f in range(ncopy)]
         nrows = mIns[0].shape[0] // Int32(const_expr(nbatch))
         row0 = Int32(blk) * Int32(const_expr(rpb))
         live_lane = lane if lane < Int32(const_expr(rpb)) else Int32(0)
         run = live_lane * Int32(const_expr(pitch))
-        take = lambda j: tuple(  # noqa: E731
-            fdtypes[f](sbuf[f][run + Int32(j)]) for f in range(nf)
-        )
+        # Per-field reads of partial j: staged fields from this lane's run, then a derived
+        # count's slot from the shared weight row, or a constant, which combine_uniform
+        # ignores.
+        reads: list[Callable[[Any], Any]] = [
+            lambda j, f=f: sbuf[f][run + Int32(j)] for f in range(ncopy)
+        ]
+        if const_expr(weights):
+            reads.append(lambda j: sbuf[ncopy][Int32(j)])
+        elif const_expr(count):
+            reads.append(lambda j: count)
+        take = lambda j: tuple(fdtypes[f](read(j)) for f, read in enumerate(reads))  # noqa: E731
 
         # A tile of every row in the block, one coalesced cp.async per (row, lane). INLINED at both
         # call sites: the DSL rejects a closure inside dynamic control flow, whatever it captures.
@@ -1696,8 +1809,10 @@ class TileReduce:
                         + Int32(const_expr(u * WARP))
                     )
                     dst = Int32(const_expr(i * pitch // grp + u * WARP)) + lane
-                    for f in cutlass.range_constexpr(nf):
+                    for f in cutlass.range_constexpr(ncopy):
                         cute.copy(g2s[f], gv[f][None, src], sv[f][None, dst])
+        if const_expr(weights):
+            self._stage_combine_weights(sbuf[ncopy], Int32(0), lane)
         cute.arch.cp_async_commit_group()
         cute.arch.cp_async_wait_group(0)
         cute.arch.barrier()
@@ -1706,10 +1821,10 @@ class TileReduce:
         acc = take(0)
         if const_expr(unroll):
             for j in cutlass.range(1, tile_n, unroll=unroll):
-                acc = combine_fn(acc, take(j))
+                acc = combine_fn(acc, take(j), j)
         else:
             for j in cutlass.range_constexpr(tile_n - 1):
-                acc = combine_fn(acc, take(const_expr(j + 1)))
+                acc = combine_fn(acc, take(const_expr(j + 1)), Int32(j + 1))
         for t in cutlass.range(1, ntiles):
             cute.arch.barrier()  # the refill overwrites what the previous fold just read
             for i in cutlass.range_constexpr(rpb):
@@ -1725,17 +1840,19 @@ class TileReduce:
                             + Int32(const_expr(u * WARP))
                         )
                         dst = Int32(const_expr(i * pitch // grp + u * WARP)) + lane
-                        for f in cutlass.range_constexpr(nf):
+                        for f in cutlass.range_constexpr(ncopy):
                             cute.copy(g2s[f], gv[f][None, src], sv[f][None, dst])
+            if const_expr(weights):
+                self._stage_combine_weights(sbuf[ncopy], t * Int32(tile_n), lane)
             cute.arch.cp_async_commit_group()
             cute.arch.cp_async_wait_group(0)
             cute.arch.barrier()
             if const_expr(unroll):
                 for j in cutlass.range(tile_n, unroll=unroll):
-                    acc = combine_fn(acc, take(j))
+                    acc = combine_fn(acc, take(j), t * Int32(tile_n) + j)
             else:
                 for j in cutlass.range_constexpr(tile_n):
-                    acc = combine_fn(acc, take(j))
+                    acc = combine_fn(acc, take(j), t * Int32(tile_n) + Int32(j))
         return acc
 
     @cute.jit
@@ -2240,7 +2357,7 @@ class TileReduce:
             # Emit raw per-field partials for stage 2.
             if lane == 0 and alive:
                 for s in cutlass.range_constexpr(self.nslots):
-                    for f in cutlass.range_constexpr(trait.nfields):
+                    for f in cutlass.range_constexpr(self.partial_fields):
                         mOuts[f][part_base + Int32(s) * part_stride] = trait.fdtypes[f](
                             accs[s][f]
                         )
