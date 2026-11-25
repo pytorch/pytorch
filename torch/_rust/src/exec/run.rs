@@ -1290,10 +1290,15 @@ impl Act<'_> {
                     || effects.get(crate::cfg::ir::Site::Instr(**v)).iter().any(|(seq, _)| !seq.is_empty())
             })
             .count();
-        if work < 2 {
+        // A write to something that outlives the block isn't replayed by a
+        // region: the version keeps running as it is, so the write is made
+        // on every call, with that call's value.
+        let body = &self.cfg[b].versions[vi].body;
+        let escapes = body.iter().any(|v| super::escaping_write(self.cfg, body, *v));
+        if work < 2 || escapes {
             self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        work >= 2
+        work >= 2 && !escapes
     }
 
     // At span si's entry: runs a region of it whose checks hold, or traces
@@ -1481,10 +1486,38 @@ impl Act<'_> {
                 let old = std::mem::replace(&mut *self.local(*s), o);
                 ffi::Py_XDECREF(old);
             }
+            // The entry's stack values too: the run that gave up dropped each
+            // at its last use, and the blocks are about to run from them.
+            for (p, o) in self.cfg.explicit_params(sp.entry).into_iter().zip(&args[sp.inputs.len()..]) {
+                self.set(p, xincref(*o));
+            }
             pyo3::ffi::PyErr_Clear();
             return None;
         };
         held.into_iter().for_each(|o| ffi::Py_XDECREF(o));
+        // What the traced run leaves to the program holds floats, not the
+        // float subclass the trace computes with (see region::plain).
+        for s in &sp.live_out {
+            let slot = self.local(*s);
+            let new = super::outside_executor(|| super::region::plain(*slot));
+            let old = std::mem::replace(&mut *slot, new);
+            ffi::Py_XDECREF(old);
+        }
+        let leave = match leave {
+            Ok(x) => {
+                for q in self.cfg.explicit_params(x) {
+                    let new = super::outside_executor(|| super::region::plain(self.val(q)));
+                    self.set(q, new);
+                }
+                Ok(x)
+            }
+            Err(Outcome::Return(v)) => {
+                let new = super::outside_executor(|| super::region::plain(v));
+                ffi::Py_XDECREF(v);
+                Err(Outcome::Return(new))
+            }
+            other => other,
+        };
         match traced {
             Ok(Some(t)) => sp.state.regions.lock().unwrap().push(Arc::new(t.spec)),
             Ok(None) => sp.state.off.store(true, std::sync::atomic::Ordering::Relaxed),
@@ -1636,6 +1669,14 @@ impl Act<'_> {
             return false;
         }
         held.into_iter().for_each(|o| ffi::Py_XDECREF(o));
+        if ran {
+            // The program gets floats, not the float subclass the trace
+            // computes with (see region::plain).
+            for o in &ver.outputs {
+                let new = super::outside_executor(|| super::region::plain(self.val(*o)));
+                self.set(*o, new);
+            }
+        }
         match traced {
             Ok(Some(t)) if ran => match super::add_region(c, self.p as *const Prepared as usize, b, t) {
                 Ok(true) => {}

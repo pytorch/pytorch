@@ -94,6 +94,33 @@ pub fn tracing() -> bool {
     TRACING.get()
 }
 
+// While a region is traced, the floats it computes with are instances of a
+// float subclass (torch._rust_inductor._Scalar), so that the arithmetic on
+// them is recorded. The traced run is also the call's own run, so what it
+// leaves behind (a block's outputs; a span's locals, stack values and return
+// value) is given to the program as floats: `o` (borrowed, NULL allowed) with
+// each such instance replaced by the float it is, in `o` itself and in the
+// exact tuples, lists and dicts it holds. A new reference, to `o` where there
+// was nothing to replace.
+pub unsafe fn plain(o: *mut PyObject) -> *mut PyObject {
+    if o.is_null() {
+        return o;
+    }
+    let py = Python::assume_attached();
+    let made = py
+        .import("torch._rust_inductor")
+        .and_then(|m| m.getattr("_plain_result"))
+        .and_then(|f| f.call1((Bound::from_borrowed_ptr(py, o),)));
+    match made {
+        Ok(x) => x.into_ptr(),
+        Err(_) => {
+            ffi::PyErr_Clear();
+            ffi::Py_INCREF(o);
+            o
+        }
+    }
+}
+
 fn null_sentinel(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
     static NULL: pyo3::sync::PyOnceLock<Py<PyAny>> = pyo3::sync::PyOnceLock::new();
     NULL.get_or_try_init(py, || Ok::<_, PyErr>(py.import("torch._rust_inductor")?.getattr("NULL")?.unbind())).map(|n| n.bind(py).clone())
