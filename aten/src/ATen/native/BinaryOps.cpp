@@ -9,6 +9,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/native/ElementBytes.h>
 #include <ATen/native/ElementwiseRefMeta.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -1473,19 +1474,68 @@ Tensor& greater_equal_out(const Tensor& self, const Scalar& other, Tensor& resul
 Tensor greater_equal(const Tensor& self, const Scalar& other) { return self.ge(other); }
 Tensor& greater_equal_(Tensor& self, const Scalar& other) { return self.ge_(other); }
 
+#define CREATE_COMPARISON_SCALAR_IMPL_FUNC(func)                    \
+  TORCH_IMPL_FUNC(func##_Scalar_out)                                \
+  (const Tensor& self, const Scalar& other, const Tensor& result) { \
+    func##_stub(device_type(), *this);                              \
+  }
+
 #define CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(func)             \
   TORCH_IMPL_FUNC(func##_Tensor_out)                                \
   (const Tensor& self, const Tensor& other, const Tensor& result) { \
     func##_stub(device_type(), *this);                              \
   }                                                                 \
                                                                     \
-  TORCH_IMPL_FUNC(func##_Scalar_out)                                \
-  (const Tensor& self, const Scalar& other, const Tensor& result) { \
-    func##_stub(device_type(), *this);                              \
-  }
+  CREATE_COMPARISON_SCALAR_IMPL_FUNC(func)
 
-CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(eq)
-CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(ne)
+// Dtypes with a non-power-of-two element size have no typed kernels; their
+// elements are equal iff all of their bytes are. The other packed float shell
+// dtypes use their typed kernels unless an operand is a CPU scalar of a
+// non-CPU op, which those kernels cannot read (no Scalar conversion). That
+// operand moves to the result device before its bytes view (which is not
+// 0-dim) is taken.
+static bool is_cpu_scalar_of(const Tensor& t, const Tensor& result) {
+  return t.dim() == 0 && t.device() != result.device();
+}
+
+static bool compare_as_element_bytes(
+    const Tensor& self,
+    const Tensor& other,
+    const Tensor& result) {
+  const auto dtype = self.scalar_type();
+  if (other.scalar_type() != dtype) {
+    return false;
+  }
+  return hasNonPowerOfTwoElementSize(dtype) ||
+      (isPackedShellFloatType(dtype) &&
+       (is_cpu_scalar_of(self, result) || is_cpu_scalar_of(other, result)));
+}
+
+#define CREATE_EQUALITY_SCALAR_TENSOR_IMPL_FUNC(func, reduce_bytes)    \
+  TORCH_IMPL_FUNC(func##_Tensor_out)                                   \
+  (const Tensor& self, const Tensor& other, const Tensor& result) {    \
+    TORCH_CHECK_NOT_IMPLEMENTED(                                       \
+        !isPackedShellFloatType(result.scalar_type()),                 \
+        #func "(): cannot write the result to a ",                     \
+        result.scalar_type(),                                          \
+        " tensor, which has no conversion from Bool");                 \
+    if (compare_as_element_bytes(self, other, result)) {               \
+      auto bytes_on_result_device = [&](const Tensor& t) {             \
+        return as_element_bytes(                                       \
+            is_cpu_scalar_of(t, result) ? t.to(result.device()) : t);  \
+      };                                                               \
+      result.copy_(bytes_on_result_device(self)                        \
+                       .func(bytes_on_result_device(other))            \
+                       .reduce_bytes(-1));                             \
+      return;                                                          \
+    }                                                                  \
+    func##_stub(device_type(), *this);                                 \
+  }                                                                    \
+                                                                       \
+  CREATE_COMPARISON_SCALAR_IMPL_FUNC(func)
+
+CREATE_EQUALITY_SCALAR_TENSOR_IMPL_FUNC(eq, all)
+CREATE_EQUALITY_SCALAR_TENSOR_IMPL_FUNC(ne, any)
 CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(gt)
 CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(ge)
 CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(lt)

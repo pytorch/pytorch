@@ -1073,6 +1073,7 @@ def meta_index_reduce(
     *,
     include_self: bool = True,
 ) -> Tensor:
+    utils.check_packed_shell_float_arithmetic("index_reduce", self.dtype)
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
@@ -1086,6 +1087,7 @@ def meta_index_reduce_(
     *,
     include_self: bool = True,
 ) -> Tensor:
+    utils.check_packed_shell_float_arithmetic("index_reduce_", self.dtype)
     return self
 
 
@@ -5115,6 +5117,10 @@ def meta_rrelu_with_noise_(
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
     _check_index_tensor_types(indices)
+    if accumulate:
+        utils.check_packed_shell_float_arithmetic(
+            "index_put with accumulate=True", self.dtype
+        )
     return torch.empty_like(self)
 
 
@@ -5162,6 +5168,10 @@ def meta_masked_scatter_backward(self, mask, sizes):
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
     _check_index_tensor_types(indices)
+    if accumulate:
+        utils.check_packed_shell_float_arithmetic(
+            "index_put_ with accumulate=True", self.dtype
+        )
     return self
 
 
@@ -6466,6 +6476,10 @@ def scatter_shape_check(self, dim, index, src_opt=None):
 # From aten/src/ATen/native/TensorAdvancedIndexing.cpp
 def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=False):
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
+    if src is None or reduce_ is not None:
+        utils.check_packed_shell_float_arithmetic(
+            "scatter with a reduction or a Scalar value", self.dtype
+        )
     scatter_gather_dtype_check("scatter", self, index, src)
     scatter_shape_check(self, wrapped_dim, index, src)
     if reduce_ is not None:
@@ -7722,7 +7736,21 @@ def meta_scaled_mm_v2(
     )
 
     _out_dtype = out_dtype if out_dtype is not None else self.dtype
+    if self.dtype == torch.float6_e2m3fn_x4:
+        torch._check_value(
+            _out_dtype in (torch.bfloat16, torch.float32),
+            lambda: f"MXFP6 scaled_mm requires out_dtype to be BFloat16 or Float, got {_out_dtype}",
+        )
+        torch._check_not_implemented(
+            bias is None, lambda: "MXFP6 scaled_mm does not support bias"
+        )
     return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)
+
+
+@register_meta([aten._scaled_mm_mxfp6.default, aten._scaled_mm_mxfp6.out])
+@out_wrapper(exact_dtype=True)
+def meta_scaled_mm_mxfp6(self, mat2, scale_a, scale_b, out_dtype):
+    return torch.empty(self.size(0), mat2.size(1), dtype=out_dtype, device=self.device)
 
 
 @register_meta([aten._scaled_addmm.default])
@@ -7754,6 +7782,10 @@ def meta_scaled_addmm(
             and contraction_dim[1] in (0, -2)
         ),
         lambda: "torch._scaled_addmm only supports contraction_dim=(1, 0)",
+    )
+    torch._check_not_implemented(
+        mat1.dtype != torch.float6_e2m3fn_x4,
+        lambda: "torch._scaled_addmm does not support MXFP6",
     )
     result = meta_scaled_mm_v2(
         mat1,

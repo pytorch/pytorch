@@ -493,6 +493,20 @@ class TestScatterGatherDevice(TestCase):
         dst.scatter_(0, index[:, None, None].expand_as(src), src)
         self.assertEqual(dst.cpu(), expected, atol=0, rtol=0)
 
+    def test_scatter_index_expanded_over_part_of_dim(self, device):
+        # An index expanded over fewer columns than self has only covers those
+        # columns, in deterministic mode too.
+        dst = torch.zeros(8, 16, device=device)
+        src = torch.arange(32.0, device=device).view(2, 16)
+        for index in (
+            torch.tensor([2, 5], device=device)[:, None].expand(2, 4),
+            torch.tensor(2, device=device).expand(1, 1),
+        ):
+            expected = dst.scatter(0, index.contiguous(), src)
+            for deterministic in (False, True):
+                with DeterministicGuard(deterministic):
+                    self.assertEqual(dst.scatter(0, index, src), expected)
+
     @parametrize("op", ["scatter", "index_copy"])
     def test_copy_misaligned_out(self, device, op):
         dst = torch.zeros((64, 128), device=device)

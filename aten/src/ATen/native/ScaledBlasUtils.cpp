@@ -362,6 +362,62 @@ bool is_two_level_nvfp4(
 
 } // namespace
 
+namespace {
+
+// MXFP6 runs only through `aten::_scaled_mm_mxfp6` (see the CUDA
+// `_scaled_mm_v2` impl): two K-major float6_e2m3fn_x4 operands, each with one
+// BlockWise1x32 SWIZZLE_32_4_4 e8m0 scale. A float6_e2m3fn_x4 element packs 4
+// values along K.
+void validate_mxfp6_scaled_mm_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    ArrayRef<Tensor> scale_a,
+    ArrayRef<ScalingType> recipe_a,
+    ArrayRef<SwizzleType> swizzle_a,
+    ArrayRef<Tensor> scale_b,
+    ArrayRef<ScalingType> recipe_b,
+    ArrayRef<SwizzleType> swizzle_b) {
+  TORCH_CHECK_VALUE(
+      mat_a.scalar_type() == mat_b.scalar_type(),
+      "MXFP6 scaled_mm requires both operands to be Float6_e2m3fn_x4, got ",
+      mat_a.scalar_type(), " and ", mat_b.scalar_type());
+  TORCH_CHECK_VALUE(
+      recipe_a.size() == 1 && recipe_b.size() == 1 &&
+          recipe_a[0] == ScalingType::BlockWise1x32 &&
+          recipe_b[0] == ScalingType::BlockWise1x32 && swizzle_a.size() == 1 &&
+          swizzle_b.size() == 1 && swizzle_a[0] == SwizzleType::SWIZZLE_32_4_4 &&
+          swizzle_b[0] == SwizzleType::SWIZZLE_32_4_4 && scale_a.size() == 1 &&
+          scale_b.size() == 1,
+      "MXFP6 scaled_mm requires one BlockWise1x32 SWIZZLE_32_4_4 scale per operand");
+  TORCH_CHECK_VALUE(
+      mat_a.sym_stride(1) == 1 && mat_b.sym_stride(0) == 1,
+      "MXFP6 scaled_mm requires both operands to be contiguous along K");
+  const auto K = mat_a.sym_size(1) * 4;
+  TORCH_CHECK_VALUE(
+      K % 128 == 0, "MXFP6 scaled_mm requires K to be a multiple of 128, got ", K);
+  const auto scale_k = (K / 32 + 3) / 4 * 4;
+  for (const auto& [scale, rows, name] :
+       {std::tuple{scale_a[0], mat_a.sym_size(0), "scale_a"},
+        std::tuple{scale_b[0], mat_b.sym_size(1), "scale_b"}}) {
+    TORCH_CHECK_VALUE(
+        scale.scalar_type() == ScalarType::Float8_e8m0fnu && scale.is_contiguous(),
+        "MXFP6 scaled_mm requires contiguous Float8_e8m0fnu scales, got ", name,
+        " with dtype ", scale.scalar_type());
+    const auto expected = (rows + 127) / 128 * 128 * scale_k;
+    TORCH_CHECK_VALUE(
+        scale.sym_numel() == expected, "MXFP6 scaled_mm expected ", name, " to have ",
+        expected, " elements, got ", scale.sym_numel());
+    TORCH_CHECK_VALUE(
+        scale.device() == mat_a.device(), "MXFP6 scaled_mm expected ", name,
+        " on ", mat_a.device(), ", got ", scale.device());
+  }
+  TORCH_CHECK_VALUE(
+      mat_b.device() == mat_a.device(), "MXFP6 scaled_mm expected mat_b on ",
+      mat_a.device(), ", got ", mat_b.device());
+}
+
+} // namespace
+
 // Eager-and-meta validation for `_scaled_mm_v2`. Mirrors a subset of the
 // kernel-side checks so torch.compile tracing fails fast with the same
 // messages users get in eager. We deliberately *don't* duplicate checks
@@ -381,6 +437,12 @@ void validate_scaled_mm_v2_inputs(
     ArrayRef<Tensor> scale_b,
     ArrayRef<ScalingType> recipe_b,
     ArrayRef<SwizzleType> swizzle_b) {
+  if (mat_a.scalar_type() == ScalarType::Float6_e2m3fn_x4 ||
+      mat_b.scalar_type() == ScalarType::Float6_e2m3fn_x4) {
+    validate_mxfp6_scaled_mm_inputs(
+        mat_a, mat_b, scale_a, recipe_a, swizzle_a, scale_b, recipe_b, swizzle_b);
+    return;
+  }
   TORCH_CHECK_VALUE(
       is_fp8_or_fp4_type(mat_a.scalar_type()) && is_fp8_or_fp4_type(mat_b.scalar_type()),
       "Expected both inputs to be fp8 or fp4 types but got mat_a.dtype=",
