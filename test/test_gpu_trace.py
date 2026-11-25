@@ -110,6 +110,7 @@ class TestGpuTraceDevice(TestCase):
         event.synchronize()
         self.mock.assert_called_once_with(event._as_parameter_.value)
 
+    # A subprocess lets us register before XPU creates its stream pool.
     def test_stream_creation_callback(self, device):
         script = """
 import importlib
