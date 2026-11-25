@@ -101,7 +101,7 @@ b2b_gemm_left_template = TritonTemplate(
             b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
             b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
             b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
-            acc_ab += tl.dot(a, b, out_dtype=tl.float32)
+            acc_ab += tl.dot(a, b, input_precision=INNER_MM_PRECISION, out_dtype=tl.float32)
             offs_n += BLOCK_SIZE_N
         # apply the subgraph
         {{ modification(
@@ -109,11 +109,8 @@ b2b_gemm_left_template = TritonTemplate(
             output_name="post_subgraph_acc_ab",
             inner_mm="acc_ab"
         ) | indent_except_first(2) }}
-        acc += tl.dot(post_subgraph_acc_ab, c, out_dtype=tl.float32)
+        acc += tl.dot(post_subgraph_acc_ab, c, input_precision=OUTER_MM_PRECISION, out_dtype=tl.float32)
         offs_o += BLOCK_SIZE_O
-
-    # type conversion
-    acc = acc.to(tl.float16)
 
     # store preparation
     idx_m = offs_m[:, None]
@@ -183,7 +180,7 @@ b2b_gemm_right_template = TritonTemplate(
             c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
             c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
             c = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_O * BLOCK_SIZE_P
-            acc_bc += tl.dot(b, c, out_dtype=tl.float32)
+            acc_bc += tl.dot(b, c, input_precision=INNER_MM_PRECISION, out_dtype=tl.float32)
             offs_o += BLOCK_SIZE_O
         # apply the subgraph
         {{ modification(
@@ -191,11 +188,8 @@ b2b_gemm_right_template = TritonTemplate(
             output_name="post_subgraph_acc_bc",
             inner_mm="acc_bc"
         ) | indent_except_first(2) }}
-        acc += tl.dot(a, post_subgraph_acc_bc, out_dtype=tl.float32)
+        acc += tl.dot(a, post_subgraph_acc_bc, input_precision=OUTER_MM_PRECISION, out_dtype=tl.float32)
         offs_n += BLOCK_SIZE_N
-
-    # type conversion
-    acc = acc.to(tl.float16)
 
     # store preparation
     idx_m = offs_m[:, None]
@@ -555,40 +549,49 @@ def tuned_b2b_gemm(
     *,
     layout=None,
 ) -> torch._inductor.ir.TensorBox:
+    from ..heuristics.template.triton import mm_allow_tf32
+
     # call .realize() to get rid of Pointwise
     A.realize()
     B.realize()
     C.realize()
+    device = A.get_device_or_error()
+    M, N = A.get_size()
+    O, P = C.get_size()
     layout = FixedLayout(
-        A.get_device_or_error(),
-        A.get_dtype(),
-        [A.shape[0], C.shape[1]],  # type: ignore[index]
+        device,
+        C.get_dtype() if is_left_assoc else A.get_dtype(),
+        [M, P],
     )
-    placeholders = [
-        create_placeholder("inner_mm", A.get_dtype(), A.get_device_or_error())
-    ]
+    placeholders = [create_placeholder("inner_mm", B.get_dtype(), device)]
     subgraph_buffer = build_subgraph_buffer(
         placeholders,  # type: ignore[arg-type, list-item]
         subgraph,
     )
+    inner_mm_shape = (M, O, N) if is_left_assoc else (N, P, O)
+    outer_mm_shape = (M, P, O) if is_left_assoc else (M, P, N)
+
+    def gemm_precision(dtype, shape):
+        m, n, k = shape
+        use_default = dtype in (torch.float16, torch.bfloat16) or (
+            dtype == torch.float32 and mm_allow_tf32(m, n, k, device.type)
+        )
+        return None if use_default else "ieee"
+
+    inner_mm_precision = gemm_precision(B.get_dtype(), inner_mm_shape)
+    outer_mm_precision = gemm_precision(layout.dtype, outer_mm_shape)
+    template = b2b_gemm_left_template if is_left_assoc else b2b_gemm_right_template
     choices: list[TritonTemplateCaller] = []
     for config in b2b_gemm_configs:
-        if is_left_assoc:
-            b2b_gemm_left_template.maybe_append_choice(
-                choices,
-                input_nodes=(A, B, C),
-                layout=layout,
-                subgraphs=[subgraph_buffer],
-                **config,
-            )
-        else:
-            b2b_gemm_right_template.maybe_append_choice(
-                choices,
-                input_nodes=(A, B, C),
-                layout=layout,
-                subgraphs=[subgraph_buffer],
-                **config,
-            )
+        template.maybe_append_choice(
+            choices,
+            input_nodes=(A, B, C),
+            layout=layout,
+            subgraphs=[subgraph_buffer],
+            INNER_MM_PRECISION=repr(inner_mm_precision),
+            OUTER_MM_PRECISION=repr(outer_mm_precision),
+            **config,
+        )
     # add the unoptimized choice to mitigate performance degradation
     choices.append(
         _make_unoptimized_b2b_gemm_choice(is_left_assoc, subgraph, [A, B, C], layout)
