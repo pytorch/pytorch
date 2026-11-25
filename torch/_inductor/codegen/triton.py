@@ -9503,9 +9503,10 @@ class TritonScheduling(SIMDScheduling):
             args = mod.get_args()
             call = mod.call
             wrapped_jit_function = mod.triton_
-            # call once to trigger the compilation
             try:
-                call(wrapped_jit_function.clone_args(*args)[0])
+                spills = _compile_or_skip_for_spills(
+                    wrapped_jit_function, call, args, n_spills_threshold
+                )
             except Exception as e:
                 if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
                     raise
@@ -9523,7 +9524,7 @@ class TritonScheduling(SIMDScheduling):
                 raise AssertionError(f"expected 1 launcher, got {len(launchers)}")
             # n_spills does not necessarily mean it's not profitable to fuse,
             # and sometimes it can be inaccurate
-            if launchers[0].n_spills > n_spills_threshold:
+            if spills or launchers[0].n_spills > n_spills_threshold:
                 # skip benchmarking the kernel if there are register spills
                 ms = float("inf")
             else:
@@ -9724,13 +9725,14 @@ class TritonScheduling(SIMDScheduling):
                 call = mod.call
                 wrapped_jit_function = mod.triton_
 
-                # call once to trigger the compilation
-                call(wrapped_jit_function.clone_args(*args)[0])
+                spills = _compile_or_skip_for_spills(
+                    wrapped_jit_function, call, args, 0
+                )
 
                 launchers = wrapped_jit_function.launchers
                 if len(launchers) != 1:
                     raise AssertionError(f"expected 1 launcher, got {len(launchers)}")
-                if launchers[0].n_spills > 0:
+                if spills or launchers[0].n_spills > 0:
                     # skip benchmarking the kernel if there are register spills
                     ms = ms_clone = float("inf")
                 else:
@@ -9762,6 +9764,26 @@ class TritonScheduling(SIMDScheduling):
             V.graph.removed_buffers = removed_buffers_orig
             V.graph.inplaced_to_remove = inplaced_to_remove_orig
         return total_ms, total_clone_ms, file_list
+
+
+def _compile_or_skip_for_spills(
+    kernel: triton_heuristics.CachingAutotuner,
+    call: Callable[..., Any],
+    args: list[Any],
+    n_spills_threshold: int,
+) -> bool:
+    """Compile ``kernel`` for a benchmark and return whether to skip it for
+    register spills. A skipped kernel is never launched: nothing waits for that
+    launch, and the next kernel load blocks until it finishes (a CUDA module load
+    waits for the context's running kernels). Otherwise ``call`` runs once, which
+    autotunes down to one launcher. Either way one launcher is left."""
+    if not kernel.launchers:
+        kernel.precompile()
+    if kernel.skip_for_spills(n_spills_threshold):
+        kernel._keep_launcher(kernel.launchers[0])
+        return True
+    call(kernel.clone_args(*args)[0])
+    return False
 
 
 def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
