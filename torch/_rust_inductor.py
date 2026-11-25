@@ -101,6 +101,26 @@ def _plain(x):
     return float.__float__(x) if type(x) is _Scalar else x
 
 
+def _plain_result(x, depth=0):
+    """x as the program is to see it once a trace is over: each _Scalar in it
+    replaced by the float it is. Exact tuples are rebuilt, exact lists and
+    dicts changed in place (the run that was traced made them). The executor
+    calls this on what a traced run leaves behind (see exec/region.rs)."""
+    t = type(x)
+    if t is _Scalar:
+        return float.__float__(x)
+    if depth < 16:
+        if t is tuple:
+            new = tuple(_plain_result(y, depth + 1) for y in x)
+            return new if any(a is not b for a, b in zip(new, x)) else x
+        if t is list or t is dict:
+            for k, y in list(x.items()) if t is dict else list(enumerate(x)):
+                z = _plain_result(y, depth + 1)
+                if z is not y:
+                    x[k] = z
+    return x
+
+
 def _live(x) -> bool:
     """Whether x is a _Scalar of the trace running (one an earlier trace left
     in a frame is a plain float)."""
@@ -1092,6 +1112,37 @@ def _memo_chains(pro: torch.fx.Graph) -> None:
     pro.lint()
 
 
+def _const_homes(args, consts):
+    """Where a region's constants (the tensors its body read that aren't
+    inputs) are kept by what it was given: (dict, key, tensor) for each one
+    that is a parameter, a buffer or an attribute of a module among ``args``
+    (or of a submodule), or an attribute of another object among them. The
+    region only runs while each of those still holds its tensor."""
+    want = {id(c): c for c in consts}
+    homes = []
+    if not want:
+        return homes
+
+    def look(d):
+        if type(d) is dict or isinstance(d, dict):
+            for key, value in d.items():
+                if id(value) in want:
+                    homes.append((d, key, value))
+
+    seen = set()
+    for a in args:
+        if isinstance(a, torch.nn.Module):
+            for m in a.modules():
+                if id(m) not in seen:
+                    seen.add(id(m))
+                    look(m._parameters)
+                    look(m._buffers)
+                    look(m.__dict__)
+        elif not isinstance(a, torch.Tensor):
+            look(getattr(a, "__dict__", None))
+    return homes
+
+
 def _input_types(args, plan, types, consts):
     """torch.vm Types of the graph's inputs: tensor args' from what the VM
     recorded (``types``, by arg), container leaves', floats' and constants'
@@ -1431,6 +1482,7 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
             print(f"region {name}: refused: {e}")
         return None
     compiled = _compile(name, gm, example, consts, args, plan, types)
+    homes = _const_homes(args, consts)
     if DEBUG:
         print(f"region {name}: {n_ops} ops, {len(example)} inputs + {len(consts)} constants")
 
@@ -1442,6 +1494,11 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
             if COUNT:
                 counts[f"{name} CHECK"] = counts.get(f"{name} CHECK", 0) + 1
             return None
+        # A constant the program has rebound since (`m.seen = m.seen + y`) is
+        # no longer what the body would read.
+        for home, key, const in homes:
+            if home.get(key) is not const:
+                return None
         why = [] if DEBUG else None
         inputs = _inputs(region_args, plan, why)
         for i in unread if inputs is not None else ():

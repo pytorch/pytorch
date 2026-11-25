@@ -228,6 +228,8 @@ pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>, qualnam
             && blk.origin.is_none()
             && matches!(blk.term, Terminator::Jump(Exit::Block(_) | Exit::Return(_)) | Terminator::Branch { .. })
             && !body(b).iter().any(frame_state)
+            // A region doesn't replay a store into an object or a namespace.
+            && !body(b).iter().any(|v| super::escaping_store(&cfg[*v].op))
             && (never(b)
                 || body(b).iter().all(|v| {
                     movable.contains(v)

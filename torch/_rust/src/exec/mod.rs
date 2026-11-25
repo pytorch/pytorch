@@ -2299,6 +2299,39 @@ fn impure_op(op: &str, args: &str) -> bool {
         || op.starts_with("aten::is_nonzero")
 }
 
+// Whether instr v of `body` writes to something that outlives the code it is
+// in: an attribute, a global, a name, a cell, or an item of a container that
+// `body` didn't build. A region replays tensor ops and what its trace's
+// outputs hold, nothing else, so a block with such a write must not become
+// one: the write would be made on the traced call alone.
+pub(crate) fn escaping_write(cfg: &crate::cfg::ir::Cfg, body: &[ValueId], v: ValueId) -> bool {
+    let ins = &cfg[v];
+    if !writes(&ins.op) {
+        return false;
+    }
+    let built = |x: Option<&ValueId>| {
+        x.is_some_and(|x| body.contains(x) && matches!(cfg[*x].op, Op::Bytecode { opcode: opcodes::BUILD_LIST | opcodes::BUILD_MAP | opcodes::BUILD_SET, .. }))
+    };
+    match ins.op {
+        Op::Bytecode { opcode: opcodes::STORE_SUBSCR | opcodes::STORE_SLICE, .. } => !built(ins.args.get(1)),
+        Op::Bytecode { opcode: opcodes::DELETE_SUBSCR, .. } => !built(ins.args.first()),
+        _ => true,
+    }
+}
+
+// As escaping_write, for a span, which may change the containers it makes
+// (see spans.rs): a write to an attribute, a global or a name.
+pub(crate) fn escaping_store(op: &Op) -> bool {
+    matches!(op, Op::StoreAttr(_))
+        || matches!(
+            op,
+            Op::Bytecode {
+                opcode: opcodes::STORE_GLOBAL | opcodes::DELETE_GLOBAL | opcodes::DELETE_ATTR | opcodes::STORE_NAME | opcodes::DELETE_NAME,
+                ..
+            }
+        )
+}
+
 fn writes(op: &Op) -> bool {
     match op {
         Op::StoreAttr(_) | Op::StoreDeref { .. } | Op::DeleteDeref { .. } => true,
