@@ -763,6 +763,15 @@ python_ref_db: list[OpInfo] = [
                 dtypes=(torch.float16,),
                 device_type="cuda",
             ),
+            # AssertionError: Reference result was farther from the precise
+            # computation than the torch result was, under the aten executor too.
+            DecorateInfo(
+                unittest.skip("https://github.com/intel/torch-xpu-ops/issues/6390"),
+                "TestCommon",
+                "test_python_ref_executor",
+                dtypes=(torch.float16,),
+                device_type="xpu",
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
@@ -841,6 +850,15 @@ python_ref_db: list[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestCommon",
                 "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="xpu",
+            ),
+            # AssertionError: Reference result was farther from the precise
+            # computation than the torch result was, under the aten executor too.
+            DecorateInfo(
+                unittest.skip("https://github.com/intel/torch-xpu-ops/issues/6390"),
+                "TestCommon",
+                "test_python_ref_executor",
                 dtypes=(torch.float16,),
                 device_type="xpu",
             ),

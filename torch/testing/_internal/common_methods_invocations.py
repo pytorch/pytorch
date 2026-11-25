@@ -14891,7 +14891,7 @@ op_db: list[OpInfo] = [
            decorators=[
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                            device_type=('cuda', 'xpu'), active_if=not SM53OrLater),
+                            device_type='cuda', active_if=not SM53OrLater),
                # ROCm intermittently fails the test with standard atol/rtol
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
                             'TestCommon', 'test_noncontiguous_samples', device_type=('cuda', 'xpu'),
@@ -20710,6 +20710,9 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo('histogram',
            dtypes=floating_types(),
            dtypesIfCUDA=_dispatch_dtypes(),  # histogram is only implemented on CPU
+           # XPU has no histogram kernel either, but the op falls back to CPU, so the
+           # float dtypes do work there.
+           dtypesIfXPU=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_histogram,
            supports_autograd=False,
            skips=(
@@ -20725,7 +20728,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                # Not Implemented on XLA.
                DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla'),
                # Align dtypes with CUDA for fallback ops
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='xpu'),
            ),
            decorators=(
                DecorateInfo(
@@ -24900,12 +24902,12 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # dropout is not comparable. On CUDA/ROCm the aten-executor result
+            # dropout is not comparable. On CUDA/ROCm/XPU the aten-executor result
             # for complex happens to match eager (unexpected success vs the xfail
             # below), unlike MPS where it stays non-comparable, so skip complex
             # there rather than xfail.
             DecorateInfo(unittest.skip("dropout is not comparable"), 'TestCommon',
-                         'test_python_ref_executor', device_type='cuda',
+                         'test_python_ref_executor', device_type=('cuda', 'xpu'),
                          dtypes=(torch.complex64, torch.complex128)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
@@ -25128,8 +25130,11 @@ python_ref_db = [
         validate_view_consistency=False,
         skips=(
             # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
+            # On XPU the same _local_scalar_dense tracing error occurs:
+            # https://github.com/intel/torch-xpu-ops/issues/5848
             DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                device_type=("cuda", "xpu")  # https://github.com/intel/torch-xpu-ops/issues/5848
             ),
         ),
     ),
@@ -25523,7 +25528,7 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32,),
+                dtypes=(torch.complex32,), device_type="cuda",
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
@@ -25564,7 +25569,7 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32,),
+                dtypes=(torch.complex32,), device_type="cuda",
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -25683,7 +25688,7 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32,),
+                dtypes=(torch.complex32,), device_type="cuda",
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
