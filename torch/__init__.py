@@ -1448,6 +1448,36 @@ except ImportError:
 from torch import _C as _C
 
 
+# `torch._rust` is optional -- absent when torch is built without a Rust
+# toolchain, and under Buck configs that don't link the crate into `_C` -- so
+# neither lookup below may break `import torch`.
+try:
+    # OSS path: `_rust` is a separate Python extension (`torch/_rust.so`).
+    from torch import _rust as _rust
+except ImportError:
+    _rust = None
+else:
+    # As in the `torch/_C` check above, a `__file__` of None means we imported
+    # the `torch/_rust` source folder as a namespace package rather than the
+    # extension, which is not a usable module.
+    if _rust.__file__ is None:
+        del sys.modules["torch._rust"]
+        _rust = None
+
+if _rust is None:
+    try:
+        # Buck path: the crate is link_whole'd into `_C.so` and attached as the
+        # `_rust` submodule by `_C`'s init code. Register it in `sys.modules` so
+        # `import torch._rust` works like the OSS path.
+        from torch._C import (
+            _rust as _rust,  # pyrefly: ignore [missing-module-attribute]
+        )
+    except ImportError:
+        _rust = None
+    else:
+        sys.modules["torch._rust"] = _rust
+
+
 __name, __obj = "", None
 for __name in dir(_C):
     if __name[0] != "_" and not __name.endswith("Base"):
@@ -3060,6 +3090,21 @@ _InputT = _ParamSpec("_InputT")
 _RetT = _TypeVar("_RetT")
 
 
+def compile3(fn: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
+    """Experimental: when ``fn`` is called, print the bytecode of ``fn`` and of
+    every Python function it calls (each once per call). Requires Python 3.12+.
+    """
+    if _rust is None:
+        raise RuntimeError("torch.compile3 requires the torch._rust extension")
+
+    @functools.wraps(fn)
+    def wrapper(*args: _InputT.args, **kwargs: _InputT.kwargs) -> _RetT:
+        # pyrefly: ignore[missing-attribute]
+        return _rust.call_with_bytecode_printing(fn, *args, **kwargs)
+
+    return wrapper
+
+
 @_overload
 def compile(
     model: _Callable[_InputT, _RetT],
@@ -3433,6 +3478,7 @@ else:
         "_dynamo",
         "_inductor",
         "_export",
+        "vm",
         # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
         "onnx",
     }
