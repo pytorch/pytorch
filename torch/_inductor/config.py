@@ -1990,10 +1990,13 @@ avoid_32bit_indexing_guards: bool = False
 # When the sizes of a kernel cannot be proven to fit in int32, compile it with both
 # 32-bit and 64-bit indexing and have the wrapper launch the 32-bit kernel whenever every
 # size fits, instead of guarding on the sizes. Costs a second compile of each covered
-# kernel (of every variant, with triton.multi_kernel). The 64-bit kernel's codegen
-# heuristics (tiling, size_hints, from which its autotuning configs are generated, ...)
-# see sizes past int32 (codegen/simd.py _int64_kernel_hint_overrides). If the example
-# inputs already exceed int32, only the 64-bit kernel is built, as without this flag.
+# kernel (of every variant, with triton.multi_kernel). The 64-bit kernel is generated
+# with hints past int32 (codegen/simd.py _int64_kernel_hint_overrides): its size_hints,
+# from which its autotuning configs are generated, and the other hint-based choices
+# made while generating it. Choices made before that keep the example's hints, e.g.
+# Reduction.num_splits at lowering and the memory-coalescing analysis that ranks
+# tilings. If the example inputs already exceed int32, only the 64-bit kernel is built,
+# as without this flag.
 # So far covers Triton reduction kernels from the main SIMD codegen path.
 # Takes precedence over avoid_32bit_indexing_guards for the kernels it covers;
 # assume_32bit_indexing takes precedence over it. Not applied with the cpp or FX
