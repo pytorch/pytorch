@@ -12,6 +12,7 @@ mod live;
 pub mod overlap;
 pub mod reads;
 pub mod region;
+pub mod scalars;
 mod run;
 mod spans;
 pub mod torch_ops;

@@ -2106,6 +2106,48 @@ PyObject* tr_proxy_dict(PyObject* o) {
   return NULL;
 }
 
+// Whether descriptor d is a slot a class declares in `__slots__`: a member
+// holding an object, which reads as an AttributeError while unset.
+static int tr_is_slot(PyObject* d) {
+  return Py_IS_TYPE(d, &PyMemberDescr_Type) &&
+      ((PyMemberDescrObject*)d)->d_member->type == Py_T_OBJECT_EX &&
+      !(((PyMemberDescrObject*)d)->d_member->flags & Py_READONLY);
+}
+
+// How `obj.name = value` or `del obj.name` (`del_`) is carried out. 1: the
+// plain store into the instance's dict by the generic rule (the class has no
+// __setattr__ of its own and no data descriptor under the name, and the
+// object has a dict); with `generic`, the call is object.__setattr__ itself,
+// whatever the class defines. 3: the generic store into a slot of the class
+// (`__slots__`). 0: Python code of the class runs (its __setattr__, a
+// property), whose own stores are what happens. 2: C code other than these
+// (and the deletion of a slot). Runs no Python code.
+int tr_store_attr_kind(PyTypeObject* tp, PyObject* name, int generic, int del_) {
+  if (!generic) {
+    PyObject* special = PyUnicode_InternFromString(del_ ? "__delattr__" : "__setattr__");
+    PyObject* f = special == NULL ? NULL : _PyType_Lookup(tp, special);
+    Py_XDECREF(special);
+    if (f == NULL) {
+      PyErr_Clear();
+      return 2;
+    }
+    if (PyFunction_Check(f)) {
+      return 0;
+    }
+    if (tp->tp_setattro != PyObject_GenericSetAttr) {
+      return 2;
+    }
+  }
+  PyObject* d = _PyType_Lookup(tp, name);
+  if (d != NULL && tr_is_slot(d)) {
+    return del_ ? 2 : 3;
+  }
+  if (d != NULL && Py_TYPE(d)->tp_descr_set != NULL) {
+    return !generic && Py_IS_TYPE(d, &PyProperty_Type) ? 0 : 2;
+  }
+  return tp->tp_dictoffset != 0 || PyType_HasFeature(tp, Py_TPFLAGS_MANAGED_DICT) ? 1 : 2;
+}
+
 // The object a builtin method is bound to (borrowed), or NULL.
 PyObject* tr_builtin_self(PyObject* callable) {
   if (Py_IS_TYPE(callable, &_PyMethodWrapper_Type)) {

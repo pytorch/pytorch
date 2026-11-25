@@ -1140,6 +1140,13 @@ impl Reads {
         unsafe { *self.overlap.get() = Some(overlap) };
     }
 
+    /// Whether what the trace read leads to ``obj`` (see leads_to): a region
+    /// that holds an object itself (a list it hands back, which was there
+    /// before it ran) has the right one for as long as its reads hold.
+    fn knows(&self, obj: &Bound<'_, PyAny>) -> bool {
+        unsafe { leads_to(&*self.entries.get(), obj.as_ptr()) }
+    }
+
     /// Drops what was read from these containers and objects: the region
     /// checks them itself (its arguments, by structure).
     fn forget(&self, holders: Vec<Bound<'_, PyAny>>) {
@@ -1185,6 +1192,38 @@ impl Reads {
         }));
         out
     }
+}
+
+// obj's __dict__ (borrowed), or NULL if it has none.
+pub(super) unsafe fn instance_dict(obj: *mut PyObject) -> *mut PyObject {
+    let d = ffi::PyObject_GenericGetDict(obj, std::ptr::null_mut());
+    if d.is_null() {
+        ffi::PyErr_Clear();
+        return d;
+    }
+    // The object holds it.
+    ffi::Py_DECREF(d);
+    d
+}
+
+// Whether what was read (`e`) leads to `p`: it is something an entry was
+// read from (or the object whose __dict__ is), or a value an entry expects
+// by identity.
+unsafe fn leads_to(e: &Entries, p: *mut PyObject) -> bool {
+    let d = if ffi::PyList_Check(p) != 0 || ffi::PyDict_Check(p) != 0 || ffi::PyAnySet_Check(p) != 0 { std::ptr::null_mut() } else { instance_dict(p) };
+    let is = |o: &Py<PyAny>| o.as_ptr() == p || (!d.is_null() && o.as_ptr() == d);
+    e.typed.iter().any(|t| is(&t.obj))
+        || e.reads.iter().any(|r| is(&r.obj) || r.value.as_ref().is_some_and(|v| r.want == Want::Is && is(v)))
+        || e.groups.iter().any(|g| is(&g.holder) || g.items.iter().any(|i| i.want == Want::Is && i.value.as_ref().is_some_and(&is)) || g.whole.as_ref().is_some_and(|w| w.items.iter().any(&is)))
+}
+
+/// Whether the trace running on this thread came by ``obj`` through
+/// something it read (a namespace, an attribute, an item, a cell), as far
+/// as it has run: then ``obj`` was there before the traced run, and is
+/// nothing the run made.
+#[pyfunction]
+pub fn _region_known(obj: &Bound<'_, PyAny>) -> bool {
+    TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| unsafe { leads_to(&t.entries, obj.as_ptr()) }))
 }
 
 static MISSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

@@ -27,6 +27,7 @@ import functools
 import importlib
 import inspect
 import logging
+import math
 import operator
 import os
 import re
@@ -106,8 +107,12 @@ class _Scalar(float):
     value is computed as on plain floats, so a graph run reproduces it
     exactly), so it may differ on the next call. Branching on it, comparing
     or hashing it specializes the region on the value of every input it came
-    from. Builtins that read the C double (``math.sqrt``) aren't seen: the
-    value they return is baked into the graph."""
+    from: the region is checked on that value, and a call with another gets
+    a region of its own. So does handing it to C code that reads the number
+    inside it without calling any of its methods (``float(t)``, ``"%f" % t``,
+    ``1j * t``, numpy): the executor reports those (exec/scalars.rs, to
+    ``_scalars_read`` and ``_c_call``). The functions of ``math`` that
+    compute a float from floats are recorded as graph nodes instead."""
 
     # expr: ("input", k) for the region's k-th float input, else (op, args)
     # with args _Scalars of the same trace or numbers. trace: the
@@ -249,6 +254,108 @@ for _name in (
     setattr(_Scalar, _name, _specializing(_name))
 
 
+# The functions of ``math`` that compute one float from numbers and do nothing
+# else: called on a stand-in, the call is a node of the graph like the
+# arithmetic on it, by id.
+_FLOAT_MATH = {
+    id(getattr(math, n))
+    for n in (
+        "sqrt exp expm1 log log2 log10 log1p sin cos tan asin acos atan atan2 sinh "
+        "cosh tanh asinh acosh atanh pow fabs hypot degrees radians erf erfc gamma "
+        "lgamma copysign fmod"
+    ).split()
+}
+# Builtins that take an object as it is, or read a number only through its
+# own methods (which record, or specialize), by id; those of them that call
+# another function on what they are given when asked to by keyword.
+_OBJECT_BUILTINS = {
+    id(f)
+    for f in (
+        *(isinstance, issubclass, type, id, callable, abs, pow, round, divmod, min, max),
+        *(sum, sorted, int, bool, str, repr, format, hash, tuple, list, dict, set),
+        *(frozenset, zip, enumerate, reversed, iter, next),
+    )
+}
+_KEYED = {id(min), id(max), id(sorted)}
+# Methods of builtin types that store or hand on what they are given.
+_OBJECT_METHODS = (
+    (list, ("append", "insert", "extend")),
+    (dict, ("__setitem__", "setdefault", "get", "update", "pop")),
+    (set, ("add",)),
+    (object, ("__setattr__",)),
+)
+
+
+def _reads_through_methods(callee, keywords: int) -> bool:
+    """Whether C code ``callee``, handed a stand-in for a scalar input, leaves
+    the number in it alone or reads it by the stand-in's methods: torch's own
+    functions (the trace's torch-function mode sees the call), the builtins
+    and methods listed above, the ``__new__`` of a builtin container, and a
+    class whose objects Python code makes."""
+    if id(callee) in _OBJECT_BUILTINS:
+        return not (keywords and id(callee) in _KEYED)
+    if isinstance(callee, type):
+        new, init = callee.__new__, callee.__init__
+        python = types.FunctionType
+        return (new is object.__new__ or isinstance(new, python)) and (
+            init is object.__init__ or isinstance(init, python)
+        )
+    module = getattr(callee, "__module__", None)
+    owner = getattr(callee, "__self__", None)
+    if owner is None:
+        owner = getattr(callee, "__objclass__", None)
+    name = getattr(callee, "__name__", None)
+    if isinstance(owner, torch.Tensor) or (
+        isinstance(module, str) and module.split(".")[0] == "torch"
+    ):
+        return True
+    if isinstance(owner, type):
+        if name == "__new__" and owner in (object, tuple, list, dict, set, frozenset):
+            return True
+        if any(issubclass(owner, c) and name in ns for c, ns in _OBJECT_METHODS[:3]):
+            return True
+        module = owner.__module__
+    else:
+        if any(isinstance(owner, c) and name in ns for c, ns in _OBJECT_METHODS):
+            return True
+        module = getattr(owner, "__name__", None)
+    return isinstance(module, str) and module.split(".")[0] == "torch"
+
+
+def _scalars_read(*objs) -> None:
+    """The stand-ins among ``objs`` (and in the tuples, lists and dicts
+    among them) were handed to code that reads the number without them
+    seeing it (exec/scalars.rs): the region is checked on the value of the
+    inputs each came from."""
+    if _scalar_state is not None:
+        _scalar_state["specialized"].update(
+            *(x.deps for x in _floats_in(list(objs), []) if _live(x))
+        )
+
+
+def _c_call(callee, args, keywords: int, result):
+    """The executor's report of a call that ran C code for ``callee`` itself
+    with a stand-in among ``args`` (the receiver of a bound method first; the
+    last ``keywords`` given by keyword): what the call's result is. A
+    function of ``math`` computing a float from numbers gives a stand-in
+    computed in the graph from its arguments; code that reads the number in
+    another way has the region checked on the value (``_scalars_read``)."""
+    live = [x for x in _floats_in(list(args), []) if _live(x)]
+    if not live or _scalar_state is None:
+        return result
+    if callee is type and len(args) == 1:
+        # What the program would be told of the float it passed.
+        return float
+    numbers = all(type(a) in (float, int, _Scalar) for a in args)
+    if id(callee) in _FLOAT_MATH and numbers and not keywords and type(result) is float:
+        deps = frozenset().union(*(x.deps for x in live))
+        expr = (callee, tuple(a if _live(a) else _plain(a) for a in args))
+        return _new_scalar(result, expr, deps)
+    if not _reads_through_methods(callee, keywords):
+        _scalars_read(*live)
+    return result
+
+
 def _has_floats(p) -> bool:
     return p is not None and (
         p[0] == "float" or (p[0] == "tree" and any(c[0] == _FLOAT for c in p[2]))
@@ -343,6 +450,12 @@ def _floats_in(x, out):
     return out
 
 
+# Methods that hand a tensor's values to Python as a list or an array
+# without running an operator: a region that held one would give back the
+# traced call's values (its trace is refused, as for a branch on a value).
+_VALUES_OUT = (torch.Tensor.tolist, torch.Tensor.numpy, torch.Tensor.__array__)
+
+
 class _ScalarArgs(TorchFunctionMode):
     """Puts the _Scalars a torch call is given back into the node the call
     traced: the dispatcher hands make_fx new Python floats. The node's float
@@ -356,6 +469,10 @@ class _ScalarArgs(TorchFunctionMode):
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
+        if func in _VALUES_OUT and _scalar_state is not None:
+            # The tensor's values, handed to Python as they are: nothing a
+            # graph gives back on a later call.
+            _scalar_state["specialized"].add(_DATA)
         if (
             func is torch.Tensor.item
             and not kwargs
@@ -415,11 +532,20 @@ class _ScalarArgs(TorchFunctionMode):
 
 def _scalars_to_nodes(
     gm: torch.fx.GraphModule, inputs: list[torch.fx.Node], state: dict[str, Any]
-) -> None:
+) -> list[tuple[Any, list[Any]]]:
     """Replaces the _Scalars of the trace (`state`) in gm's nodes by nodes
     computing them from the float `inputs`, each made before its first use.
-    Others (an earlier trace's) are their values."""
+    Others (an earlier trace's) are their values. Returns the arithmetic that
+    is done on the float inputs alone, in order, for _arithmetic: (op, args)
+    with each arg ("input", k), ("step", j) or ("value", number)."""
     made: dict[int, Any] = {}
+    steps: list[tuple[Any, list[Any]]] = []
+    refs: dict[int, tuple[str, Any]] = {}
+
+    def ref(x):
+        if type(x) is _Scalar and x.trace is state:
+            return refs.get(id(x))
+        return ("value", _plain(x))
 
     def build(a, before):
         if type(a) is not _Scalar:
@@ -429,19 +555,52 @@ def _scalars_to_nodes(
         if id(a) not in made:
             if a.expr[0] == "input":
                 made[id(a)] = inputs[a.expr[1]]
+                refs[id(a)] = ("input", a.expr[1])
             elif a.expr[0] == "node":
                 made[id(a)] = a.expr[1]
             else:
-                op, args = a.expr
-                args = tuple(build(x, before) for x in args)
+                op, given = a.expr
+                args = tuple(build(x, before) for x in given)
                 with gm.graph.inserting_before(before):
                     made[id(a)] = gm.graph.call_function(op, args)
                 made[id(a)].meta["val"] = float.__float__(a)
+                of = [ref(x) for x in given]
+                if None not in of:
+                    refs[id(a)] = ("step", len(steps))
+                    steps.append((op, of))
         return made[id(a)]
 
     for node in list(gm.graph.nodes):
         node.args = torch.fx.node.map_aggregate(node.args, lambda a: build(a, node))
         node.kwargs = torch.fx.node.map_aggregate(node.kwargs, lambda a: build(a, node))
+    return steps
+
+
+def _arithmetic(steps):
+    """A check that the arithmetic a region does on its float inputs
+    (``steps``, from _scalars_to_nodes) can be done on those of a call. In
+    eager the same arithmetic raises for a number outside what it takes (a
+    division by zero, the root of a negative number), where the code around
+    it may catch the error; in a region it would raise from the graph. Such
+    a call is not the region's: the code runs as it is."""
+
+    def holds(floats) -> bool:
+        done: list[Any] = []
+        try:
+            for op, args in steps:
+                done.append(
+                    op(
+                        *(
+                            floats[x] if kind == "input" else done[x] if kind == "step" else x
+                            for kind, x in args
+                        )
+                    )
+                )
+        except (ArithmeticError, ValueError):
+            return False
+        return True
+
+    return holds if steps else None
 
 
 def _paths(args, plan) -> dict[int, tuple[int, tuple[Any, ...]]]:
@@ -630,6 +789,10 @@ class Trace:
     constants: int = 0
     # The check of what the region's trace read (exec/reads.rs), if any.
     reads: Any = None
+    # The float arguments the region is checked on by value, as text ("arg 1
+    # (float) == 0.5"): those its code compared, hashed, converted or handed
+    # to C code that reads the number. The others are inputs of the graph.
+    values: list[str] = dataclasses.field(default_factory=list)
     # How often the region ran, and the calls its own checks turned down, by
     # what did not match.
     runs: int = 0
@@ -1928,14 +2091,59 @@ def _span_holds(checks, args) -> bool:
     return True
 
 
-def _shared_container(outs) -> bool:
-    """Whether a list, dict or set is reachable twice from outs (a region
-    makes each anew, so they'd no longer be the same)."""
+def _held(outs, old) -> list[Any]:
+    """The lists, dicts and sets among ``outs`` (and in what a region builds
+    for them) that were there before the traced run, which the run came by
+    through something it read (a global, an attribute, an item, a cell)
+    rather than through its arguments. A region hands back the very object,
+    as it does one an argument holds: only what the run itself made is built
+    anew. Each is added to ``old`` (which tells _template) and returned: a
+    later call must come by the same object (see _lost)."""
+    known = _rust()._region_known
+    held: list[Any] = []
     seen: set[int] = set()
     todo = list(outs)
     while todo:
         x = todo.pop()
         if isinstance(x, (list, dict, set)):
+            if id(x) in seen or id(x) in old:
+                continue
+            seen.add(id(x))
+            if known(x):
+                old[id(x)] = True
+                held.append(x)
+                continue
+        if isinstance(x, (list, tuple, set)):
+            todo.extend(x)
+        elif isinstance(x, dict):
+            todo.extend(x.values())
+        elif (names := _init_fields(x)) is not None:
+            todo.extend(getattr(x, n) for n in names)
+    return held
+
+
+def _lost(reads, held) -> str | None:
+    """Why a region cannot hand back one of ``held`` (see _held), or None:
+    nothing its trace read, which is what is checked before the region is
+    entered, leads to the object, so a later call might use another one in
+    its place."""
+    for x in held if reads is not None else ():
+        if not reads.knows(x):
+            return f"it hands on a {type(x).__name__} that was there before it ran and that none of its reads leads to"
+    return None
+
+
+def _shared_container(outs, old=()) -> bool:
+    """Whether a list, dict or set is reachable twice from outs (a region
+    makes each anew, so they'd no longer be the same); one of ``old`` was
+    there before the run and stays the one it is."""
+    seen: set[int] = set()
+    todo = list(outs)
+    while todo:
+        x = todo.pop()
+        if isinstance(x, (list, dict, set)):
+            if id(x) in old:
+                continue
             if id(x) in seen:
                 return True
             seen.add(id(x))
@@ -2066,9 +2274,13 @@ def trace_region(
                 if _contents([x])[id(x)][1] != items:
                     result["refused"] = f"it changes a {type(x).__name__} it was given"
                     return []
+            # A container that was there before the run is handed back as the
+            # object it is, never as a copy, whatever the run came by it
+            # through.
+            result["held"] = _held(outs, old)
             tensor_outs: list[Any] = []
             objects: list[Any] = []
-            if span and _shared_container(outs):
+            if span and _shared_container(outs, old):
                 result["refused"] = "its outputs share a container"
                 return []
             try:
@@ -2110,16 +2322,21 @@ def trace_region(
     stats["traced"] += 1
     # What the body read from outside its args (see exec/reads.rs).
     reads, unchecked = _region_reads()
+    unchecked = unchecked or _lost(reads, result.get("held", ()))
     if unchecked is not None:
         result.setdefault("refused", unchecked)
     if _DATA in state["specialized"]:
         result["refused"] = "it branches on a value it reads from a tensor"
     elif in_vm:
-        _scalars_to_nodes(
-            gm, list(gm.graph.find_nodes(op="placeholder"))[n_tensors:], state
+        result["arithmetic"] = _arithmetic(
+            _scalars_to_nodes(
+                gm, list(gm.graph.find_nodes(op="placeholder"))[n_tensors:], state
+            )
         )
         for k in state["specialized"]:
             (i, leaf), value = locs[k], example[n_tensors + k]
+            where = f"arg {i}" if leaf is None else f"arg {i}, leaf {leaf}"
+            result.setdefault("values", []).append(f"{where} (float) == {value!r}")
             if leaf is None:
                 plan[i] = ("float", value)
             else:
@@ -2200,6 +2417,7 @@ def trace_region(
         inputs=len(example),
         constants=len(consts),
         reads=reads,
+        values=result.get("values", []),
     )
     for key in [key for key, entry in _made.items() if entry[0]() is None]:
         del _made[key]
@@ -2217,6 +2435,8 @@ def trace_region(
     if COUNT:
         name = f"{name} {n_ops}ops"
 
+    arithmetic = result.get("arithmetic")
+
     def func(region_args):
         if own_checks and not _span_holds(own_checks, region_args):
             record.misses["an argument"] = record.misses.get("an argument", 0) + 1
@@ -2227,6 +2447,8 @@ def trace_region(
         inputs = _inputs(region_args, plan, why)
         if inputs is not None and overlap is not None and not overlap.holds(inputs):
             inputs, why = None, ["how its tensors share memory"]
+        if inputs is not None and arithmetic is not None and not arithmetic(inputs[n_tensors:]):
+            inputs, why = None, ["a number its arithmetic does not take"]
         for i in unread if inputs is not None else ():
             inputs[i] = inputs[i].detach()
         if COUNT:

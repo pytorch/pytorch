@@ -250,6 +250,267 @@ class TestVmTracedCall(TestCase):
 instantiate_device_type_tests(TestVmTracedCall, globals())
 
 
+def floats_work(x, k):
+    return ((x.sin() * k).cos() + 1).tanh().exp()
+
+
+def floats_root(x, t):
+    return floats_work(x, 1 / math.sqrt(t))
+
+
+def floats_exp_and_log(x, t):
+    return floats_work(x, math.exp(-t) + math.log(t + 1.0))
+
+
+def floats_two_arguments(x, t):
+    return floats_work(x, math.pow(t, 2) + math.atan2(t, 2.0) + math.hypot(t, 1.0))
+
+
+def floats_helper(t):
+    return math.sqrt(t) * 2.0
+
+
+def floats_in_a_callee(x, t):
+    return floats_work(x, floats_helper(t))
+
+
+def floats_clamped(x, t):
+    return floats_work(torch.clamp(x, min=t), t)
+
+
+def floats_converted(x, t):
+    return floats_work(x, float(t) * 2.0)
+
+
+def floats_percent(x, t):
+    return floats_work(x, float("%.3f" % t))  # noqa: UP031
+
+
+def floats_formatted(x, t):
+    return floats_work(x, float(f"{t:.3f}") + float(f"{t:.2f}"))
+
+
+def floats_times_a_complex(x, t):
+    return floats_work(x, (2j * t).imag)
+
+
+def floats_rounded(x, t):
+    return floats_work(x, round(t, 1) + int(t * 4))
+
+
+def floats_as_a_key(x, t):
+    return floats_work(x, {0.5: 1.0, 0.75: 2.0, 1.0: 3.0}[t])
+
+
+def floats_compared(x, t):
+    return floats_work(x, max(t, 0.6) + sorted([t, 0.6])[0])
+
+
+def floats_in_a_list(x, t):
+    return floats_work(x, math.fsum([t, 1.0]))
+
+
+def floats_attribute(x, t):
+    return floats_work(x, t.real + t.conjugate())
+
+
+def floats_as_text(x, t):
+    return floats_work(x, float(len(str(t))) + float(repr(t)))
+
+
+def floats_tested(x, t):
+    return floats_work(x, t if math.isfinite(t) and math.floor(t * 4) > 2 else 2.0)
+
+
+def floats_log_or_not(t):
+    try:
+        return math.log(t - 0.6)
+    except ValueError:
+        return -1.0
+
+
+def floats_outside_the_domain(x, t):
+    return floats_work(x, floats_log_or_not(t))
+
+
+def floats_in_a_tuple(x, pair):
+    return floats_work(x, math.sqrt(pair[0]) + float(pair[1]))
+
+
+def floats_type_asked(x, t):
+    return floats_work(x, t * (2.0 if type(t) is float else 3.0))
+
+
+def floats_norm_of_an_item(x, t):
+    y = floats_work(x, t)
+    return y / math.sqrt(y.pow(2).sum().item())
+
+
+def floats_item_tested(x, t):
+    y = floats_work(x, t)
+    return y * (2.0 if math.isfinite((y - t).log().sum().item()) else 3.0)
+
+
+def floats_values_as_a_list(x, t):
+    y = floats_work(x, t)
+    return y + 1, y.tolist(), y.numpy()[0].item()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmFloatArguments(TestCase):
+    """A float argument is an input of a region's graph while the function
+    only does arithmetic on it, and the region is checked on its value where
+    the function reads the number in another way. Either way every call
+    computes with that call's value."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def rows(self, fn, device, pair=False):
+        # Twelve calls with three values in turn: regions form on the fourth.
+        g = vm_early(fn)
+        x = torch.ones(3, device=device)
+        for call in range(12):
+            t = (0.5, 0.75, 1.0)[call % 3]
+            arg = (t, 2.0 + t) if pair else t
+            self.assertEqual(
+                g(x, arg), fn(x, arg), atol=0, rtol=0, msg=f"call {call}, {t}"
+            )
+        return [
+            r
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["state"] == "region"
+        ]
+
+    def in_the_graph(self, fn, device):
+        # One region for every value: the number is computed in its graph.
+        (row,) = self.rows(fn, device)
+        self.assertEqual(
+            (row["variants"], row["values"], row["runs"], row["misses"]),
+            (1, [], 8, {}),
+            msg=str(row),
+        )
+
+    def by_value(self, fn, device):
+        # A region per value, each checked on it.
+        (row,) = self.rows(fn, device)
+        values = [f"arg 1 (float) == {t!r}" for t in (0.5, 0.75, 1.0)]
+        self.assertEqual(
+            (row["variants"], sorted(row["values"]), row["runs"]),
+            (3, values, 6),
+            msg=str(row),
+        )
+
+    @isolated
+    def test_square_root(self, device):
+        self.in_the_graph(floats_root, device)
+
+    @isolated
+    def test_exponential_and_logarithm(self, device):
+        self.in_the_graph(floats_exp_and_log, device)
+
+    @isolated
+    def test_math_functions_of_two_arguments(self, device):
+        self.in_the_graph(floats_two_arguments, device)
+
+    @isolated
+    def test_math_function_in_a_function_the_region_calls(self, device):
+        self.in_the_graph(floats_in_a_callee, device)
+
+    @isolated
+    def test_argument_of_a_torch_function(self, device):
+        self.in_the_graph(floats_clamped, device)
+
+    @isolated
+    def test_conversion_to_float(self, device):
+        self.by_value(floats_converted, device)
+
+    @isolated
+    def test_percent_formatting(self, device):
+        self.by_value(floats_percent, device)
+
+    @isolated
+    def test_format_specification(self, device):
+        self.by_value(floats_formatted, device)
+
+    @isolated
+    def test_operator_of_a_complex_number(self, device):
+        self.by_value(floats_times_a_complex, device)
+
+    @isolated
+    def test_rounding_and_conversion_to_int(self, device):
+        self.by_value(floats_rounded, device)
+
+    @isolated
+    def test_key_of_a_dict(self, device):
+        self.by_value(floats_as_a_key, device)
+
+    @isolated
+    def test_comparison_by_max_and_sorted(self, device):
+        self.by_value(floats_compared, device)
+
+    @isolated
+    def test_float_inside_a_list_given_to_a_c_function(self, device):
+        self.by_value(floats_in_a_list, device)
+
+    @isolated
+    def test_attribute_and_method_of_float(self, device):
+        self.by_value(floats_attribute, device)
+
+    @isolated
+    def test_conversion_to_text(self, device):
+        self.by_value(floats_as_text, device)
+
+    @isolated
+    def test_predicates_of_math(self, device):
+        self.rows(floats_tested, device)
+
+    @isolated
+    def test_value_outside_the_domain_of_the_arithmetic(self, device):
+        # The logarithm raises for the first value and the function catches
+        # it: that value has a region of its own (the path through the
+        # handler), the other two share the one that computes it.
+        (row,) = self.rows(floats_outside_the_domain, device)
+        self.assertEqual(
+            (row["variants"], row["values"]),
+            (2, ["arg 1 (float) == 0.5"]),
+            msg=str(row),
+        )
+
+    @isolated
+    def test_floats_inside_a_tuple_argument(self, device):
+        # The first is computed in the graph, the second converted.
+        (row,) = self.rows(floats_in_a_tuple, device, pair=True)
+        values = [f"arg 1, leaf 1 (float) == {2.0 + t!r}" for t in (0.5, 0.75, 1.0)]
+        self.assertEqual(
+            (row["variants"], sorted(row["values"])), (3, values), msg=str(row)
+        )
+
+    @isolated
+    def test_type_of_the_argument(self, device):
+        # The function is told `float`, as it is in eager.
+        self.in_the_graph(floats_type_asked, device)
+
+    @isolated
+    def test_math_function_of_a_value_read_from_a_tensor(self, device):
+        # Where a region holds the read, the root is computed in its graph
+        # from that call's value.
+        self.rows(floats_norm_of_an_item, device)
+
+    @isolated
+    def test_predicate_on_a_value_read_from_a_tensor(self, device):
+        # The third value makes the logarithm NaN: the branch on what C
+        # code says of the value is decided on every call, by no region.
+        self.assertEqual(self.rows(floats_item_tested, device), [])
+
+    @isolated
+    def test_values_of_a_tensor_as_a_list_and_as_an_array(self, device):
+        # Each call hands back that call's values.
+        self.assertEqual(self.rows(floats_values_as_a_list, device), [])
+
+
+instantiate_device_type_tests(TestVmFloatArguments, globals())
+
+
 class WritesBox:
     pass
 
@@ -361,6 +622,36 @@ def writes_then_fails_in_a_kernel(x, rate, box):
     box.acc.add_(y)
     factor = torch.linalg.cholesky(torch.outer(y, y) + box.shift)
     return writes_tail(factor.diagonal(), rate) + box.acc.sum()
+
+
+# By side ("mine", "theirs"): containers a function reaches through this
+# global, not through its arguments.
+WRITES_KEPT = {"mine": [], "theirs": [], "mine stats": {}, "theirs stats": {}}
+
+
+def writes_appends_behind_the_work(x, rate, side):
+    y = writes_work(x, rate)
+    WRITES_KEPT[side].append(rate)
+    return writes_tail(y, rate)
+
+
+def writes_appends_a_tensor_behind_the_work(x, rate, side):
+    y = writes_work(x, rate)
+    kept = WRITES_KEPT[side]
+    kept.append(y)
+    return writes_tail(y, rate)
+
+
+def writes_stores_an_item_behind_the_work(x, rate, side):
+    y = writes_work(x, rate)
+    stats = WRITES_KEPT[side + " stats"]
+    stats["rate"] = rate * 4.0
+    return writes_tail(y, rate)
+
+
+def writes_returns_what_it_keeps(x, rate, side):
+    y = writes_work(x, rate)
+    return writes_tail(y, rate), WRITES_KEPT[side]
 
 
 def writes_list_in_place(x, rate, box):
@@ -572,6 +863,47 @@ class TestVmWrites(TestCase):
             lambda box: box.acc,
             before=before,
         )
+
+    def kept(self, fn, device, read):
+        for held in WRITES_KEPT.values():
+            held.clear()
+        self.compare(fn, device, "mine", "theirs", read)
+
+    @isolated
+    def test_list_reached_through_a_global_appended_to_behind_a_region(self, device):
+        # The list is read in the region in front of the append and is live
+        # at its end: the region hands back that list, not a copy of it.
+        self.kept(
+            writes_appends_behind_the_work, device, lambda side: list(WRITES_KEPT[side])
+        )
+
+    @isolated
+    def test_tensor_appended_behind_a_region_to_a_list_a_global_holds(self, device):
+        self.kept(
+            writes_appends_a_tensor_behind_the_work,
+            device,
+            lambda side: list(WRITES_KEPT[side]),
+        )
+
+    @isolated
+    def test_item_stored_behind_a_region_in_a_dict_a_global_holds(self, device):
+        self.kept(
+            writes_stores_an_item_behind_the_work,
+            device,
+            lambda side: dict(WRITES_KEPT[side + " stats"]),
+        )
+
+    @isolated
+    def test_container_a_region_returns_is_the_one_that_was_there(self, device):
+        g = vm(writes_returns_what_it_keeps, passes=EARLY)
+        x = torch.randn(4, device=device)
+        for call in range(9):
+            got = g(x, 0.5, "mine")
+            want = writes_returns_what_it_keeps(x, 0.5, "theirs")
+            self.assertEqual(got[0], want[0], atol=0, rtol=0, msg=f"call {call}")
+            self.assertIs(got[1], WRITES_KEPT["mine"], msg=f"call {call}")
+        (row,) = (r for r in vm.regions(g) if r["state"] == "region")
+        self.assertEqual(row["runs"], 9 - 3 - 1, msg=str(row))
 
     def in_place(self, fn, device, name, read):
         mine, theirs = WritesBox(), WritesBox()

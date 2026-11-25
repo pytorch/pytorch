@@ -11,6 +11,7 @@ use crate::cfg::ir::*;
 
 use super::effects::{self, Recorder};
 use super::reads;
+use super::scalars;
 use super::ffi::*;
 use super::{Compiled, Prepared};
 
@@ -1903,6 +1904,13 @@ impl Act<'_> {
         if !self.reading {
             return self.exec_instr(v, ins);
         }
+        // A stand-in for a scalar input among the operands: is its value
+        // about to be read without it seeing that (see scalars.rs)?
+        if ins.args.iter().any(|x| scalars::stand_in(self.val(*x))) {
+            let operands: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+            let name = if let Op::StoreAttr(n) = ins.op { self.name(n) } else { std::ptr::null_mut() };
+            scalars::before(ins, &operands, name);
+        }
         let outer = reads::set_in_instr(true);
         let r = self.exec_instr(v, ins);
         reads::set_in_instr(outer);
@@ -2015,10 +2023,21 @@ impl Act<'_> {
                     let before = reads::frames();
                     let r = tr_call(args, *argc as c_int, kw);
                     let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                    let given = &all[if all[0].is_null() { 2 } else { 1 }..];
                     // A call that raised read what it was handed too (a
                     // lookup that found nothing).
-                    reads::call(callee, &all[if all[0].is_null() { 2 } else { 1 }..], r, reads::frames() != before);
+                    reads::call(callee, given, r, reads::frames() != before);
+                    // C code that was handed a stand-in for a scalar input
+                    // (see scalars.rs).
+                    let r = if scalars::handed(callee, given) { scalars::called(callee, given, kw, r) } else { r };
                     check(r)?
+                } else if self.reading && scalars::handed(callee, &ins.args.iter().map(|x| self.val(*x)).collect::<Vec<_>>()[1..]) {
+                    // As above, for C code that is no builtin function (an
+                    // instance of a C class that is called).
+                    reads::called(callee);
+                    let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                    let r = tr_call(args, *argc as c_int, kw);
+                    check(scalars::called(callee, &all[if all[0].is_null() { 2 } else { 1 }..], kw, r))?
                 } else {
                     if self.reading {
                         reads::called(callee);

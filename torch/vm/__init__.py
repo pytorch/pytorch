@@ -517,6 +517,11 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
     - ``ops``, ``inputs``, ``constants`` of the graph, ``variants`` (how many
       regions the place has: one per state it was traced in), ``reads`` (how
       many reads of state outside its arguments they are checked against);
+    - ``values``: the float arguments its regions are checked on by value
+      (``"arg 1 (float) == 0.5"``, one entry per value a region was traced
+      for): those the code compared, hashed, converted or handed to C code
+      that reads the number (``float(t)``, numpy). A float argument that is
+      not listed is an input of the graph, whatever its value;
     - ``runs`` (calls that ran a region) and ``misses`` (calls a region's own
       checks turned down, by what did not match: an argument's leaf, or
       ``"read: ..."`` for what a callee read);
@@ -562,6 +567,7 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
                 "constants": 0,
                 "variants": 0,
                 "reads": 0,
+                "values": [],
                 "runs": 0,
                 "misses": {},
                 "traces": [],
@@ -578,6 +584,7 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
                 constants=t.constants,
             )
             row["variants"] += 1
+            row["values"].extend(v for v in t.values if v not in row["values"])
             row["runs"] += t.runs
             for what, n in t.misses.items():
                 row["misses"][what] = row["misses"].get(what, 0) + n
@@ -611,6 +618,7 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
             "constants": 0,
             "variants": 0,
             "reads": 0,
+            "values": [],
             "runs": 0,
             "misses": {},
             "traces": [],
