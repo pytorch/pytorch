@@ -1,0 +1,15 @@
+from collections.abc import Hashable
+from typing import Literal
+
+import torch
+
+
+Shape = tuple[int, ...]
+DTypes = tuple[torch.dtype, ...]
+RowGap = tuple[int, int, int]
+PromotionOperands = tuple[tuple[torch.dtype, bool], ...]
+CacheKey = tuple[Hashable, ...]
+Number = bool | int | float | complex
+Mode = str | None
+Path = Literal["vec", "strided"]
+OperatorResult = torch.Tensor | tuple[torch.Tensor, ...]

@@ -4314,6 +4314,7 @@ class TestImports(TestCase):
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._native.flydsl.intrinsics",  # depends on flydsl
                            "torch._native.cutedsl",  # depends on cutlass
+                           'torch._native.ops.pointwise.kernel',
                            'torch._native.ops.pointwise.ops',
                            "torch._native.ops.reductions.traits",  # depends on cutlass
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
