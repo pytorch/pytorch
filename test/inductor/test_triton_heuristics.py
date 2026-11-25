@@ -2562,6 +2562,57 @@ class TestGuardSizeDivisibleBy16(TestCase):
             self.check(compiled, n)
         self.assertEqual(self.num_graphs(), 2)
 
+    def test_benchmark_subgraph_adds_no_guards(self):
+        # A custom op's decompositions are benchmarked in their own graphs, which
+        # share the ShapeEnv but whose wrappers are thrown away. A guard added
+        # there would make the real graph's kernels divisible by 16 without the
+        # real wrapper checking the size.
+        from torch._inductor.kernel.custom_op import (
+            CustomOpConfig,
+            register_custom_op_autotuning,
+        )
+        from torch._inductor.lowering import user_lowerings
+
+        self.addCleanup(user_lowerings.clear)
+
+        @torch.library.custom_op(f"test_lib::div16_{id(self)}", mutates_args=())
+        def op(x: torch.Tensor) -> torch.Tensor:
+            return x.float() * 2
+
+        @op.register_fake
+        def _(x):
+            return torch.empty_like(x, dtype=torch.float32)
+
+        register_custom_op_autotuning(
+            op,
+            configs=[
+                CustomOpConfig(lambda x: x.float() * 2),
+                CustomOpConfig(lambda x: x.float() + x.float()),
+            ],
+            name=f"div16_{id(self)}",
+        )
+
+        guarded_in = []
+        guard = triton_utils._guard_multiple_of
+
+        def record(expr, alignment):
+            result = guard(expr, alignment)
+            if result:
+                guarded_in.append(V.graph.name)
+            return result
+
+        with (
+            patch.object(triton_utils, "_guard_multiple_of", record),
+            config.patch(max_autotune=True, force_disable_caches=True),
+        ):
+            compiled = torch.compile(lambda x: op(x) + 1, dynamic=True)
+            x = self.inputs(4096, count=1)[0]
+            self.assertEqual(compiled(x), x.float() * 2 + 1)
+        self.assertTrue(guarded_in)
+        self.assertFalse(
+            [name for name in guarded_in if (name or "").startswith("benchmark_")]
+        )
+
     def test_at_most_one_recompile_per_frame(self):
         # two sizes guarded independently: breaking one recompiles, and the new graph
         # doesn't guard the other, which would cost another recompile when it breaks

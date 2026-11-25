@@ -203,6 +203,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         # Donation indices use the parent graph's placeholder ordering, not ours
         # (same as SubgraphLowering).
         bm_graph_lowering.bw_donated_idxs = None
+        # This graph's wrapper is thrown away after benchmarking, so it can't run
+        # the size divisibility check for a guard it would add to the shared
+        # ShapeEnv, and the real wrapper wouldn't know about that guard.
+        bm_graph_lowering.may_add_size_divisibility_guards = False
 
         for sym_inp in self.sym_inputs:
             bm_graph_lowering.graph_inputs[sym_inp.name] = sym_inp
