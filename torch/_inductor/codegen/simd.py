@@ -3008,7 +3008,11 @@ def _int64_kernel_hint_overrides(
     """Hints for the int64 kernel of a dual int32/int64 pair: every symbol in
     int32_conditions (SIMDKernelFeatures.int32_index_conditions) scaled by the
     smallest power of two at which a condition fails, i.e. the smallest input with
-    the example's proportions that launches that kernel. None if there is none."""
+    the example's proportions that launches that kernel. None if there is none.
+
+    The symbols are scaled together because which dimension grows past int32 is
+    unknown; dimensions that are static in the graph are not symbols, so when only
+    the batch is dynamic, only the batch is scaled."""
     sizevars = V.graph.sizevars
     symbols = sorted(
         OrderedSet(s for cond in int32_conditions for s in cond.free_symbols), key=str
@@ -5061,6 +5065,26 @@ class SIMDScheduling(BaseScheduling):
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
 
+    @staticmethod
+    def _record_other_choices_provenance(kernel, node_schedule) -> None:
+        """codegen_comment records the kernel's provenance under its kernel_name,
+        which for a ConditionalMultiKernel names its first choice. Record the other
+        choices too: they compute the same nodes."""
+        if not isinstance(kernel, ConditionalMultiKernel):
+            return
+        from ..debug import set_kernel_post_grad_provenance_tracing
+
+        wrapper = V.graph.wrapper_code
+        for choice in kernel.kernels[1:]:
+            handle = set_kernel_post_grad_provenance_tracing(
+                node_schedule, choice.kernel_name
+            )
+            if handle is not None:
+                wrapper.make_comment(
+                    f"{wrapper.comment} [Provenance debug handles] "
+                    f"{choice.kernel_name}:{handle}"
+                )
+
     def _launch_kernel_and_cleanup(
         self,
         kernel,
@@ -5069,6 +5093,7 @@ class SIMDScheduling(BaseScheduling):
         free_buffers: bool = True,
     ) -> None:
         self.codegen_comment(base_scheduler_nodes, kernel.kernel_name)
+        self._record_other_choices_provenance(kernel, base_scheduler_nodes)
         with V.graph.wrapper_code.kernel_profile_scope(
             kernel.kernel_name, base_scheduler_nodes
         ):
@@ -6180,6 +6205,7 @@ class SIMDScheduling(BaseScheduling):
                 )
             kernel_name = kernel.kernel_name
             self.codegen_comment(combo_kernel_node.snodes, kernel_name)
+            self._record_other_choices_provenance(kernel, combo_kernel_node.snodes)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             with V.graph.wrapper_code.kernel_profile_scope(
                 kernel_name, combo_kernel_node.snodes
@@ -6964,15 +6990,15 @@ class SIMDScheduling(BaseScheduling):
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
 
+        hint_overrides_key = V.graph.sizevars.optimization_hint_overrides_key
         if (not is_pointwise and not config.triton.tile_reductions) or get_max_tiles(
             default=2
         ) <= 1:
             # Emit a perf hint in case we miss an opportunity to tile a reduction.
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
-                    if (
-                        not config.triton.tile_reductions
-                        and len(cls.candidate_tilings(node, numel, reduction_numel)) > 0
+                    if not config.triton.tile_reductions and cls.candidate_tilings(
+                        node, numel, reduction_numel, hint_overrides_key
                     ):
                         perf_hint_log.info(
                             textwrap.dedent(
@@ -6986,7 +7012,6 @@ class SIMDScheduling(BaseScheduling):
 
             return _TilingSelection(default_tiling, None, None)
 
-        hint_overrides_key = V.graph.sizevars.optimization_hint_overrides_key
         seen_names: OrderedSet[str] = OrderedSet()
         candidate_tiles: Counter[CandidateTiling] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
