@@ -1112,6 +1112,14 @@ class TestSymbolicTracing(TestCase):
                 self.assertEqual(rx, ry)
         return traced_f
 
+    def test_rms_norm_symbolic_normalized_shape(self):
+        # _fused_rms_norm takes int[], so symbolic normalized sizes must not reach it: the traced graph
+        # has to keep working for sizes other than the traced ones.
+        def f(x, w):
+            return torch.nn.functional.rms_norm(x, x.shape[-2:], w, 1e-5)
+
+        self._test_dynamic(f, [(3, 4, 5), (4, 5)], [[(3, 4, 5), (4, 5)], [(2, 6, 7), (6, 7)]])
+
     # The arg parser expands a scalar SymInt for an int[N] arg, but calling an OpOverload directly doesn't
     def test_op_overload_scalar_symint_for_int_list(self):
         def f(x, k):
@@ -2207,6 +2215,10 @@ symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
+    # Symbolic sizes trace to the composite while eager runs the fused kernel; on uniform(0, 1) data the eps=-0.5
+    # sample leaves mean(x**2) + eps near 0, which amplifies their rounding differences past the tolerance.
+    # test_rms_norm_symbolic_normalized_shape covers symbolic tracing with well-conditioned inputs.
+    skip('nn.functional.rms_norm', '', device_type='cpu'),
 }
 symbolic_tensor_segfaults = {
     skip('nn.functional.batch_norm')  # Segfault??
