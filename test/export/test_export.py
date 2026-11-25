@@ -8415,7 +8415,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
             self.assertTrue(torch.allclose(er, r))
 
-    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureCppRuntimeNonStrict
     def test_more_multidimensional_slicing(self):
         # Inputs: a 3d tensor t and a 1d tensor x of indices into t
