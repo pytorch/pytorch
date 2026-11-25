@@ -86,8 +86,8 @@ struct OffsetCalculator {
   }
 
   int dims;
-  at::cuda::detail::IntDivider<index_t> sizes_[MAX_DIMS];
-  stride_t strides_[MAX_DIMS][std::max<int>(NARGS, 1)];
+  at::cuda::detail::IntDivider<index_t> sizes_[MAX_DIMS]{};
+  stride_t strides_[MAX_DIMS][std::max<int>(NARGS, 1)]{};
 };
 
 template <int NARGS, typename index_t = uint32_t>

@@ -484,12 +484,13 @@ struct ReduceOp {
       // so that thread_reduce will have an aligned memory to work on.
       return {input_vectorized_thread_reduce_impl(data)};
     } else {
-      index_t element_stride = input_calc.strides_[0][0] / sizeof(scalar_t);
-      bool is_contiguous = (input_calc.dims == 1 && element_stride == 1);
-      if (is_contiguous) {
-        return thread_reduce_impl<output_vec_size>(data, [](index_t idx) { return idx; });
-      } else if (input_calc.dims == 1) {
-        return thread_reduce_impl<output_vec_size>(data, [&](index_t idx) { return idx * element_stride; });
+      if (input_calc.dims == 1) {
+        index_t element_stride = input_calc.strides_[0][0] / sizeof(scalar_t);
+        if (element_stride == 1) {
+          return thread_reduce_impl<output_vec_size>(data, [](index_t idx) { return idx; });
+        } else {
+          return thread_reduce_impl<output_vec_size>(data, [&](index_t idx) { return idx * element_stride; });
+        }
       } else {
         return thread_reduce_impl<output_vec_size>(data, [&](index_t idx) { return input_calc.get(idx)[0] / sizeof(scalar_t); });
       }
