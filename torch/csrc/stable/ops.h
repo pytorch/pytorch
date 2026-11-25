@@ -2136,12 +2136,13 @@ inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> median(
 ///       host-side call overhead by using a typed C shim. Targets from 2.10
 ///       through 2.15 use boxed dispatch.
 ///
+/// @note Following torch::stable::fill_, this wrapper returns the tensor
+///       handle by value. The ATen C++ API returns a mutable tensor reference.
+///
 /// @param self The tensor to modify.
 /// @param dim The dimension to index.
 /// @param index The indices to fill.
 /// @param value The zero-dimensional tensor containing the fill value.
-/// @note Following torch::stable::fill_, this wrapper returns the tensor
-///       handle by value. The ATen C++ API returns a mutable tensor reference.
 /// @return The modified input tensor.
 inline torch::stable::Tensor index_fill_(
     const torch::stable::Tensor& self,
@@ -2181,12 +2182,13 @@ inline torch::stable::Tensor index_fill_(
 /// @note The value parameter is typed as double
 ///       API uses double for the Scalar parameter.
 ///
+/// @note Following torch::stable::fill_, this wrapper returns the tensor
+///       handle by value. The ATen C++ API returns a mutable tensor reference.
+///
 /// @param self The tensor to modify.
 /// @param dim The dimension to index.
 /// @param index The indices to fill.
 /// @param value The real fill value.
-/// @note Following torch::stable::fill_, this wrapper returns the tensor
-///       handle by value. The ATen C++ API returns a mutable tensor reference.
 /// @return The modified input tensor.
 inline torch::stable::Tensor index_fill_(
     const torch::stable::Tensor& self,
