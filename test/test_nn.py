@@ -1033,6 +1033,46 @@ class TestNN(NNTestCase):
         self.assertRaises(NotImplementedError, module_list)
         self.assertRaises(NotImplementedError, module_list, torch.rand(1, 3))
 
+    def test_ModuleList_extend_self(self):
+        # Extending a ModuleList with itself (or a live view of itself) must
+        # double its contents, like list.extend(self), instead of raising
+        # RuntimeError and leaving the list partially extended.
+        def check_doubled(module_list, modules):
+            self.assertEqual(len(module_list), 2 * len(modules))
+            for i, module in enumerate(modules + modules):
+                self.assertIs(module_list[i], module)
+
+        modules = [nn.ReLU(), nn.Linear(5, 5)]
+
+        module_list = nn.ModuleList(modules)
+        module_list.extend(module_list)
+        check_doubled(module_list, modules)
+
+        module_list = nn.ModuleList(modules)
+        module_list += module_list
+        check_doubled(module_list, modules)
+
+        module_list = nn.ModuleList(modules)
+        module_list.extend(module_list.children())
+        check_doubled(module_list, modules)
+
+    def test_Sequential_extend_self(self):
+        # Same as test_ModuleList_extend_self, for nn.Sequential.
+        def check_doubled(sequential, modules):
+            self.assertEqual(len(sequential), 2 * len(modules))
+            for i, module in enumerate(modules + modules):
+                self.assertIs(sequential[i], module)
+
+        modules = [nn.ReLU(), nn.Linear(5, 5)]
+
+        sequential = nn.Sequential(*modules)
+        sequential.extend(sequential)
+        check_doubled(sequential, modules)
+
+        sequential = nn.Sequential(*modules)
+        sequential += sequential
+        check_doubled(sequential, modules)
+
     def test_ModuleDict(self):
         modules = OrderedDict([
             ('act', nn.ReLU()),
