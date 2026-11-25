@@ -11,6 +11,7 @@ import torch.distributed as dist
 try:
     from .utils import (
         COMPLEX_DTYPES,
+        decomposed_op_db,
         Descriptor,
         force_test_op_db,
         implemented_op_db,
@@ -20,6 +21,7 @@ try:
 except ImportError:
     from utils import (
         COMPLEX_DTYPES,
+        decomposed_op_db,
         Descriptor,
         force_test_op_db,
         implemented_op_db,
@@ -34,6 +36,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     unMarkDynamoStrictTest,
 )
@@ -47,6 +51,8 @@ aten = torch.ops.aten
 SKIPS = {
     Descriptor(op=aten.empty_like, variant=None): "Non-deterministic output",
     Descriptor(op=aten.randn_like, variant=None): "Non-deterministic output",
+    Descriptor(op=aten.empty_strided, variant=None): "Non-deterministic output",
+    Descriptor(op=aten.new_empty, variant=None): "Non-deterministic output",
     Descriptor(
         op=aten.any, variant=Variant.Distributed
     ): "does not have a sharding strategy registered",
@@ -143,6 +149,14 @@ class TestComplexTensor(TestCase):
     def test_consistency(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
 
+    @ops(
+        decomposed_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=list(COMPLEX_DTYPES),
+    )
+    def test_decompositions(self, device, dtype, op: OpInfo):
+        self.check_consistency(device, dtype, op, Variant.Op)
+
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_maybe_error(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
@@ -189,6 +203,35 @@ class TestComplexTensorGeneric(TestCase):
 
         self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
 
+    @parametrize("op_name", ["linspace", "logspace"])
+    @parametrize(
+        "start_is_tensor, end_is_tensor", [(True, True), (True, False), (False, True)]
+    )
+    @unMarkDynamoStrictTest  # `.item()` isn't supported for complex yet.
+    def test_space_complex_endpoints(self, op_name, start_is_tensor, end_is_tensor):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        op = getattr(torch, op_name)
+        start = torch.tensor(1 - 2j, dtype=torch.complex64)
+        end = torch.tensor(-3 + 0.5j, dtype=torch.complex64)
+        if not start_is_tensor:
+            start = start.item()
+        if not end_is_tensor:
+            end = end.item()
+
+        def as_complex_tensor(x):
+            if isinstance(x, torch.Tensor):
+                return ComplexTensor.from_interleaved(x)
+            return x
+
+        xstart, xend = as_complex_tensor(start), as_complex_tensor(end)
+        expected = op(start, end, 5)
+        self.assertEqual(op(xstart, xend, 5), expected)
+
+        out = ComplexTensor.from_interleaved(torch.empty(5, dtype=torch.complex64))
+        self.assertIs(op(xstart, xend, 5, out=out), out)
+        self.assertEqual(out, expected)
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):
@@ -204,6 +247,7 @@ class TestComplexBwdGradients(TestCase):
         self.check_grad(device, dtype, op)
 
 
+instantiate_parametrized_tests(TestComplexTensorGeneric)
 instantiate_device_type_tests(TestComplexTensor, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestComplexBwdGradients, globals(), allow_xpu=True)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import cmath
 import warnings
 from typing import Any, TYPE_CHECKING
 
@@ -89,7 +90,6 @@ def is_pinned_impl(self: ComplexTensor, device: torch.device | None = None) -> b
 SIMPLE_OPS_LIST = [
     aten.slice,
     aten.flatten,
-    aten.view,
     aten.diagonal,
     aten.expand,
     aten.unsqueeze,
@@ -608,6 +608,77 @@ def full_like_impl(
     return ComplexTensor(ret_r, ret_i)
 
 
+@register_complex(aten.new_full)
+def new_full_impl(
+    input: ComplexTensor,
+    size: tuple[int, ...],
+    fill_value: complex,
+    *args: Any,
+    dtype: torch.dtype | None = None,
+    **kwargs: Any,
+) -> torch.Tensor | ComplexTensor:
+    # Note: Cannot be merged with the case above due to the `size` argument
+    if dtype is None:
+        dtype = input.dtype
+    input_r, input_i = split_complex_tensor(input)
+
+    if dtype is not None and not dtype.is_complex:
+        return input_r.new_full(size, fill_value, *args, dtype=dtype, **kwargs)
+
+    real_dtype = COMPLEX_TO_REAL[dtype]
+
+    fv_r, fv_i = split_complex_arg(fill_value)
+    ret_r = input_r.new_full(size, fv_r, *args, dtype=real_dtype, **kwargs)
+    ret_i = input_i.new_full(size, fv_i, *args, dtype=real_dtype, **kwargs)
+
+    return ComplexTensor(ret_r, ret_i)
+
+
+@register_complex(aten.ones_like)
+def ones_like_impl(
+    input: ComplexTensor,
+    *args: Any,
+    dtype: torch.dtype | None = None,
+    **kwargs: Any,
+) -> torch.Tensor | ComplexTensor:
+    # Note: Cannot be merged with the cases below due to 1, 0 decomp
+    if dtype is None:
+        dtype = input.dtype
+    input_r, input_i = split_complex_tensor(input)
+    if dtype is not None and not dtype.is_complex:
+        return torch.ones_like(input_r, *args, dtype=dtype, **kwargs)
+
+    real_dtype = COMPLEX_TO_REAL[dtype]
+    ret_r = torch.ones_like(input_r, *args, dtype=real_dtype, **kwargs)
+    ret_i = torch.zeros_like(input_i, *args, dtype=real_dtype, **kwargs)
+
+    return ComplexTensor(ret_r, ret_i)
+
+
+@register_complex(aten.new_ones)
+def new_ones_impl(
+    input: ComplexTensor,
+    size: tuple[int, ...],
+    *args: Any,
+    dtype: torch.dtype | None = None,
+    **kwargs: Any,
+) -> torch.Tensor | ComplexTensor:
+    # Note: Cannot be merged with the case above due to the `size` argument
+    if dtype is None:
+        dtype = input.dtype
+    input_r, input_i = split_complex_tensor(input)
+
+    if dtype is not None and not dtype.is_complex:
+        return input_r.new_ones(size, *args, dtype=dtype, **kwargs)
+
+    real_dtype = COMPLEX_TO_REAL[dtype]
+
+    ret_r = input_r.new_ones(size, *args, dtype=real_dtype, **kwargs)
+    ret_i = input_i.new_zeros(size, *args, dtype=real_dtype, **kwargs)
+
+    return ComplexTensor(ret_r, ret_i)
+
+
 def register_like(op: OpType) -> Callable[..., Any]:
     def impl(
         self: ComplexTensor, *args: Any, dtype: torch.dtype | None = None, **kwargs: Any
@@ -637,6 +708,7 @@ LIKE_OPS_LIST = [
     aten.zeros_like,
     aten.randn_like,
     aten.new_zeros,
+    aten.new_empty,
 ]
 
 for like_op in LIKE_OPS_LIST:
@@ -1033,6 +1105,10 @@ def to_dtype_layout(
         return self
     re, im = split_complex_arg(self)
     if dtype is not None and dtype not in COMPLEX_TO_REAL:
+        warnings.warn(
+            "Casting complex values to real discards the imaginary part",
+            category=UserWarning,
+        )
         return _op(re, device=device, dtype=dtype, **kwargs)
 
     dtype = COMPLEX_TO_REAL.get(dtype)  # type: ignore[no-matching-overload]
@@ -1137,3 +1213,120 @@ def _to_copy_out(
     )
     out.copy_(temp)
     return out
+
+
+@register_complex(aten.view.dtype)
+def view_dtype_impl(
+    self: ComplexTensor,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    if dtype != self.dtype:
+        raise RuntimeError(
+            "Cannot view a non-interleaved complex tensor as a different dtype; use view_copy instead."
+        )
+
+    re, im = split_complex_arg(self)
+    return ComplexTensor(re.view(dtype=re.dtype), im.view(dtype=im.dtype))
+
+
+@register_complex(aten.view.default)
+def view_default_impl(
+    self: ComplexTensor,
+    shape: tuple[int, ...],
+) -> torch.Tensor:
+    re, im = split_complex_arg(self)
+    return ComplexTensor(
+        re.view(shape),
+        im.view(shape),
+    )
+
+
+@register_complex(aten.view_copy.default)
+def view_copy_default_impl(self: ComplexTensor, size: tuple[int, ...]) -> ComplexTensor:
+    re, im = split_complex_arg(self)
+    return ComplexTensor(aten.view_copy(re, size), aten.view_copy(im, size))
+
+
+@register_complex(aten.view_copy.dtype)
+def view_copy_dtype_impl(self: ComplexTensor, dtype: torch.dtype) -> torch.Tensor:
+    # Reinterpret the interleaved layout, which can mix real and imaginary parts.
+    interleaved = view_as_real_impl(self).flatten(-2)
+    if not dtype.is_complex:
+        return interleaved.view(dtype)
+
+    real_view = interleaved.view(COMPLEX_TO_REAL[dtype])
+    return view_as_complex_impl(real_view.unflatten(-1, (-1, 2)))
+
+
+def register_space(
+    op: torch._ops.OpOverloadPacket,
+    complex_parts: Callable[..., tuple[torch.Tensor, torch.Tensor]],
+) -> Callable[..., Any]:
+    """Register all overloads of `linspace`-like ops, including Tensor endpoints and `out=`."""
+
+    def impl(
+        start: Any,
+        end: Any,
+        steps: int,
+        *args: Any,
+        dtype: torch.dtype | None = None,
+        layout: torch.layout | None = None,
+        device: torch.device | None = None,
+        pin_memory: bool | None = None,
+        out: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        # Like eager, Tensor endpoints are reduced to Scalars.
+        start = start.item() if isinstance(start, torch.Tensor) else start
+        end = end.item() if isinstance(end, torch.Tensor) else end
+        if out is not None:
+            dtype, device = out.dtype, out.device
+        if dtype is None:
+            dtype = torch.get_default_dtype()
+            if is_complex(start) or is_complex(end):
+                dtype = REAL_TO_COMPLEX[dtype]
+
+        kwargs = {"layout": layout, "device": device, "pin_memory": pin_memory}
+        if dtype.is_complex:
+            re, im = complex_parts(
+                complex(start),
+                complex(end),
+                steps,
+                *args,
+                dtype=COMPLEX_TO_REAL[dtype],
+                **kwargs,
+            )
+            result = ComplexTensor(re, im)
+        else:
+            result = op.default(start, end, steps, *args, dtype=dtype, **kwargs)
+
+        return result if out is None else out.copy_(result)
+
+    func_name = _get_func_name(op)
+    impl.__name__ = func_name
+    impl.__qualname__ = func_name
+
+    return register_complex(op, impl)
+
+
+def _linspace_parts(
+    start: complex, end: complex, steps: int, **kwargs: Any
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # `linspace` is linear, so each component is the `linspace` of its endpoints.
+    re = aten.linspace.default(start.real, end.real, steps, **kwargs)
+    im = aten.linspace.default(start.imag, end.imag, steps, **kwargs)
+    return re, im
+
+
+def _logspace_parts(
+    start: complex, end: complex, steps: int, base: float = 10.0, **kwargs: Any
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # base ** z == exp(z * log(base))
+    x, y = _linspace_parts(start, end, steps, **kwargs)
+    log_base = cmath.log(base)
+    magnitude = torch.exp(x * log_base.real - y * log_base.imag)
+    angle = x * log_base.imag + y * log_base.real
+    return magnitude * torch.cos(angle), magnitude * torch.sin(angle)
+
+
+linspace_impl = register_space(aten.linspace, _linspace_parts)
+logspace_impl = register_space(aten.logspace, _logspace_parts)
