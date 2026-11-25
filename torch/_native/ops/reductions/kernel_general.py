@@ -7,7 +7,8 @@
 # to 127 kernels per configuration. Inputs must be on the current device.
 
 import math
-from collections.abc import Sequence
+import os
+from collections.abc import Callable, Sequence
 from typing import Any, cast, Literal, NamedTuple
 
 import cutlass.cute as cute
@@ -18,10 +19,14 @@ from torch._tensor_iterator import reduce_op
 
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
-from ...cutedsl.plan_cache import cached_plan
+from ...cutedsl.plan_cache import cached_plan, LRUCache
 from ...utils.device import check_current
 from . import tile
-from .inner_tree_plan import _K_INNER_TREE_THRESHOLD, _K_TWO_KERNEL_THRESHOLD
+from .inner_tree_plan import (
+    _INNER_TREE_ENV,
+    _K_INNER_TREE_THRESHOLD,
+    _K_TWO_KERNEL_THRESHOLD,
+)
 from .traits import (
     AbsMaxOps,
     AbsMinOps,
@@ -135,8 +140,6 @@ class ReduceBlock:
             self.num_o if self.wide_output else None,
             self.red_pairs,
             self.kept_pairs,
-            self.in_base,
-            self.limit,
             self.project_n,
         )
 
@@ -146,8 +149,14 @@ _stream = _L.stream
 # _L.compile_kernel uses fake operands and tvm-ffi, avoiding per-call tensor wrapping.
 _compile = _L.compile_kernel
 
+# The compiled-kernel caches (_COMPILE_CACHE, kernel_rowtile._CACHE,
+# kernel_coltile._CACHE and kernel_xcta._PLAN) stay unbounded: evicting a kernel drops
+# its last reference and CuTeDSL unloads its CUDA module, which a captured CUDA graph
+# may still launch. kernel_general._PLAN, kernel_xcta._GEOM and _REPLAYS can be LRUs
+# since these caches keep the kernels alive.
 _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
-_PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
+# (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
+_PLAN = LRUCache(1024)
 
 
 def _fakes(
@@ -167,11 +176,6 @@ def _fakes(
     ]
 
 
-def _operands(ts: Sequence[torch.Tensor], read_only: bool = False) -> list[Any]:
-    # Pass real tensors; read_only() prevents COW input materialization during export.
-    return [_L.read_only(t) for t in ts] if read_only else list(ts)
-
-
 def _exts(pairs: Pairs, wide: bool = False) -> list[Any] | None:
     # FastDivmod takes Int32 extents, and its dividends (r < count, o < num_o) stay
     # below 2^31; wider decodes use native Int64 division.
@@ -184,7 +188,7 @@ def _strides(pairs: Pairs) -> list[Any] | None:
 
 
 def _geom_args(op: ReduceBlock) -> tuple[Any, ...]:
-    # Runtime geometry: both decodes' extents/strides and scalar bounds.
+    # Runtime geometry: both decodes' extents/strides; bounds are boxed per call.
     # Wide outputs take the fewest grid rows and split them evenly, so fewer than
     # grid_y dead blocks fold without storing.
     grid_y = -(-op.num_o // _GRID_X_MAX) if op.wide_output else None
@@ -199,8 +203,6 @@ def _geom_args(op: ReduceBlock) -> tuple[Any, ...]:
         _strides(op.red_pairs),
         _exts(op.kept_pairs, op.wide_output),
         _strides(op.kept_pairs),
-        Int64(op.in_base),
-        Int64(op.limit),
     )
 
 
@@ -233,6 +235,8 @@ def _launch(
     # Entry points check that this device is current.
     device = ins[0].get_device()
     key = (device,) + key
+    # The input offset is boxed per call so offset views share a plan.
+    bounds = (Int64(op.in_base), Int64(op.limit))
     plan = _PLAN.get((key, op.geom_sig))
     if plan is None:
         fn = cached_plan(
@@ -245,6 +249,7 @@ def _launch(
                 _fakes(ins, int64_extent=True, alignments=alignments),
                 _fakes(outs, int64_extent=op.wide_output),
                 *_geom_args(op),
+                *bounds,
                 _stream(device),
             ),
             op=f"aten::{op_name}",
@@ -252,7 +257,7 @@ def _launch(
         plan = (fn, _geom_args(op))
         _PLAN[(key, op.geom_sig)] = plan
     fn, geom = plan
-    fn(_operands(ins, read_only=True), _operands(outs), *geom, _stream(device))
+    _L.launch(fn, device, list(ins), list(outs), *geom, *bounds)
 
 
 def _ti_pairs(x: torch.Tensor, out: torch.Tensor) -> tuple[Pairs, Pairs]:
@@ -1247,6 +1252,65 @@ def reduce_all2(
     order: Literal["unordered", "inner_tree"] | None = None,
 ) -> tuple[torch.Tensor, ...]:
     return _reduce_all(trait, trait_key, x, list(out_dtypes), 2, order=order)
+
+
+# An eager call with an earlier call's metadata replays that call's launches, skipping the
+# routing and planning that cost 40-85 us of host time per call on B200. Recordings hold
+# absolute storage offsets, so each offset view takes its own entry: a loop over more
+# distinct offsets than _REPLAYS holds records on every call.
+_REPLAYS = LRUCache(1024)
+_UNRECORDED = object()
+
+
+def replay_reduce(
+    make_trait: Callable[[], Any],
+    trait_key: str,
+    x: torch.Tensor,
+    dims: int | Sequence[int] | None,
+    out_dtype: torch.dtype,
+) -> torch.Tensor:
+    """reduce_dim over `dims`, or reduce_all when None, replaying the launches of an
+    earlier call with the same metadata. x's device must be current. The trait is not
+    keyed: trait_key, with x.dtype and out_dtype, must determine every parameter of the
+    trait make_trait builds. Routing state read at call time is not keyed either
+    (_hw.caps, _BATCHED_COL_CCS, _ORDERED_COL_CCS, _INT32_LIMIT, the select_* policies
+    and _itree_arch, for example), so it must not change while replays are live.
+    Every route must also follow _L.LaunchRecord's replay contract. Inside an active
+    _L.recording it skips _REPLAYS and runs the full path, so the outer recording
+    captures the launches."""
+    if not x.is_cuda:
+        raise AssertionError(f"need a CUDA input, got {x.device}")
+    # Warm replays skip _reduce's and _reduce_all's checks; without this one they would
+    # launch on x's device's stream while another device is current.
+    check_current(x.get_device())
+    dims = [dims] if isinstance(dims, int) else (None if dims is None else list(dims))
+
+    def run() -> torch.Tensor:
+        trait = make_trait()
+        if dims is None:
+            return reduce_all(trait, trait_key, x, out_dtype)
+        return reduce_dim(trait, trait_key, x, dims, out_dtype)
+
+    if _L.recording_active():
+        return run()
+    dims_key = None if dims is None else tuple(sorted({d % x.dim() for d in dims}))
+    # Normalizes kernel_rowtile._inner_tree_env's values, which run() validates: unset,
+    # "" and "0" all leave the inner-tree order off; strict mode keys apart.
+    order = os.environ.get(_INNER_TREE_ENV, "")
+    key = (
+        (trait_key, out_dtype, dims_key)
+        + _L.LaunchRecord.input_key(x, tile.TRANSFER_ALIGNMENT)
+        + ("" if order == "0" else order,)
+    )
+    replay = _REPLAYS.get(key, _UNRECORDED)
+    if replay is None:
+        return run()
+    if replay is not _UNRECORDED:
+        return replay(x)[0]
+    with _L.recording(x) as record:
+        out = run()
+    _REPLAYS[key] = record.finish([out])
+    return out
 
 
 def _reduce_all(
