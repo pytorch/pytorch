@@ -24,12 +24,10 @@ free frontier is an ancestor of (or equal to) a node of ``j``'s allocation
 frontier, so that all work issued after ``j``'s allocation depends on the work
 that used ``i``. The frontiers are read from the capture
 (``cudaStreamGetCaptureInfo``): at each allocation, the allocating stream's; at
-each free, the allocation's stream's and that of every stream recorded for it
-with :meth:`torch.Tensor.record_stream` (a stream that is not being captured
-has none: its work is not in the graph). This allows sharing across streams
-along synchronization edges. As in eager mode, a tensor used on another stream
-must either be recorded with ``record_stream`` or not be freed before that
-stream's work has been joined.
+each free, the allocation's stream's. This allows sharing across streams
+along synchronization edges. :meth:`torch.Tensor.record_stream` inside the
+captured function is not supported (it is ignored): a tensor used on another
+stream must not be freed before that stream's work has been joined.
 """
 
 from __future__ import annotations
@@ -56,10 +54,9 @@ _ALIGNMENT = 256
 def _python_allocator(
     alloc_fn: Callable[[int, int, int], int],
     free_fn: Callable[[int, int, int, int], None],
-    record_stream_fn: Callable[[int, int], None] | None = None,
 ) -> torch.cuda.memory._CUDAAllocator:
     return torch.cuda.memory._CUDAAllocator(
-        torch._C._cuda_createPythonAllocator(alloc_fn, free_fn, record_stream_fn)
+        torch._C._cuda_createPythonAllocator(alloc_fn, free_fn)
     )
 
 
@@ -72,7 +69,6 @@ class _Allocation:
     stream_id: int
     alloc_time: int
     free_time: int | None = None  # None: live at the end of the capture
-    used_streams: set[int] = dataclasses.field(default_factory=set)
     # capture frontiers, as graph node handles while recording, then as node
     # indices once the graph is known
     alloc_nodes: list[int] = dataclasses.field(default_factory=list)
@@ -168,21 +164,12 @@ class _Recorder:
             if index is not None and self._recording:
                 a = self.allocations[index]
                 # (if a query raises, the free stays unrecorded: live to the end)
-                frontier = [
-                    h
-                    for s in {a.stream} | a.used_streams
-                    for h in torch._C._cuda_streamCaptureInfo(s)[1]
-                ]
+                frontier = torch._C._cuda_streamCaptureInfo(a.stream)[1]
                 a.free_time, self._time = self._time, self._time + 1
                 a.free_nodes, a.free_width = frontier, len(frontier)
         finally:
             self._live.pop(ptr, None)
             self._maybe_release()
-
-    def record_stream(self, ptr: int, stream: int) -> None:
-        index = self._live.get(ptr)
-        if index is not None:
-            self.allocations[index].used_streams.add(stream)
 
     def end(self, nodes: list[int], edges: list[tuple[int, int]]) -> None:
         """Ends the recording and turns the frontiers into node indices of the
@@ -236,9 +223,9 @@ class _Placer:
         self.count = 0
         self._released = False
         # the capture's streams by order of first use, and each placed
-        # allocation's stream and record_stream streams
+        # allocation's stream
         self._stream_ids: dict[int, int] = {}
-        self._streams: dict[int, set[int]] = {}
+        self._streams: dict[int, int] = {}
         # recorded frees, by the number of allocations made before them
         alloc_times = [a.alloc_time for a in allocations]
         self._frees = sorted(
@@ -303,7 +290,7 @@ class _Placer:
         self._check_frees(k)
         ptr = self.base + self.offsets[k]
         self._live[ptr] = k
-        self._streams[k] = {stream}
+        self._streams[k] = stream
         self.count = k + 1
         return ptr
 
@@ -313,11 +300,9 @@ class _Placer:
             if k is not None:
                 self._freed[k] = True
                 a = self.allocations[k]
-                streams = self._streams.pop(k)
+                alloc_stream = self._streams.pop(k)
                 if a.free_time is not None and self._mismatch is None:
-                    width = sum(
-                        len(torch._C._cuda_streamCaptureInfo(s)[1]) for s in streams
-                    )
+                    width = len(torch._C._cuda_streamCaptureInfo(alloc_stream)[1])
                     if width != a.free_width:
                         # (an exception would be lost in the free callback)
                         self._mismatch = (
@@ -335,16 +320,9 @@ class _Placer:
                 "deterministic, including its stream synchronization"
             )
 
-    def record_stream(self, ptr: int, stream: int) -> None:
-        # (reached during the capture only: a stream used by a placed
-        # allocation joins its free's frontier check)
-        k = self._live.get(ptr)
-        if k is not None:
-            self._streams[k].add(stream)
-
     def allocator(self) -> torch.cuda.memory._CUDAAllocator:
         """The allocator of the second capture."""
-        return _python_allocator(self.alloc, self.free, self.record_stream)
+        return _python_allocator(self.alloc, self.free)
 
     def finish(self) -> None:
         """Checks, after the second capture, that it made every allocation and
@@ -443,8 +421,10 @@ class MemoryPlannedGraph:
       captures on other threads).
     * Memory allocated under :func:`~torch.cuda.use_mem_pool` inside ``fn`` stays
       in that pool and is not planned.
-    * :meth:`~torch.Tensor.record_stream` on the outputs after the first call is
-      ignored: use them on other streams only before :meth:`release`.
+    * :meth:`~torch.Tensor.record_stream` is not supported: inside ``fn`` it is
+      ignored (do not free a tensor before the work of the other streams that
+      use it has been joined), and on the outputs after the first call too (use
+      them on other streams only before :meth:`release`).
 
     Example::
 
@@ -504,9 +484,7 @@ class MemoryPlannedGraph:
         """The first capture: records ``fn`` with ``recorder`` and returns the
         recording's outputs, which refer to scratch memory."""
         graph = torch.cuda.CUDAGraph(keep_graph=True)
-        allocator = _python_allocator(
-            recorder.alloc, recorder.free, recorder.record_stream
-        )
+        allocator = _python_allocator(recorder.alloc, recorder.free)
         with torch.cuda.graph(graph, capture_error_mode=self.capture_error_mode):
             with torch.cuda.memory._route_capture_allocations(allocator):
                 outputs = self.fn()
