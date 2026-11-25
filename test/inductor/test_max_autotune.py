@@ -2099,6 +2099,30 @@ class TestMaxAutotune(TestCase):
             if not same(expect, actual, tol=1e-2):
                 raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
+    @config.patch(
+        force_shape_pad=True,
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON,ATEN",
+    )
+    def test_addmm_layout_conflict_extern_fallback(self):
+        """
+        Padding K freezes A at its original row stride, which conflicts with the
+        layout the template expects, so the scheduler falls back to the fastest
+        extern choice. addmm has two extern choices, and only the fastest one
+        has a timing.
+        """
+        M, K, N = 256, 1778, 640
+        a = torch.randn(M * 1792, device=GPU_TYPE, dtype=torch.float16).as_strided(
+            (M, K), (1792, 1)
+        )
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+        bias = torch.randn(N, device=GPU_TYPE, dtype=torch.float16).as_strided(
+            (M, N), (0, 1)
+        )
+
+        out = torch.compile(torch.addmm)(bias, a, b)
+        torch.testing.assert_close(out, torch.addmm(bias, a, b), atol=5e-2, rtol=1e-2)
+
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -2221,6 +2245,33 @@ class TestMaxAutotune(TestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
             bf16_red_setting
         )
+
+    def test_template_module_key_matches_precompile_worker(self):
+        from torch._inductor.codecache import PyCodeCache
+
+        a = torch.randn(256, 128, device=GPU_TYPE)
+        b = torch.randn(128, 64, device=GPU_TYPE)
+        templates: list[TritonTemplateCaller] = []
+
+        def record(choices):
+            templates.extend(c for c in choices if isinstance(c, TritonTemplateCaller))
+            return choices
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record)
+        try:
+            with config.patch(
+                {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+            ):
+                torch.compile(lambda x, y: x @ y)(a, b)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertTrue(templates)
+        for choice in templates:
+            with open(choice.bmreq.module_path) as f:
+                worker_key, _ = PyCodeCache.write(f.read())
+            self.assertEqual(choice.bmreq.module_cache_key, worker_key, choice.name)
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -3438,6 +3489,77 @@ class TestMaxAutotune(TestCase):
         self.assertTrue(any(name.startswith("triton_mm") for name in names), names)
         self.assertFalse(
             any(name.startswith("decompose_k_mm") for name in names), names
+        )
+
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    @fresh_cache()
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="ATEN,TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_decompose_k_max_k_per_split_numerics(self):
+        # With K = 2**18, split 2 (chunks of 131072) misses this tolerance on B200;
+        # whether it does depends on the BLAS kernel, so only the bounded path is
+        # checked numerically.
+        M, N, K = 64, 64, 2**18
+        torch.manual_seed(0)
+        a = torch.randn(M, K, device=GPU_TYPE).to(torch.bfloat16)
+        b = torch.randn(K, N, device=GPU_TYPE).to(torch.bfloat16)
+        ref = a.float() @ b.float()
+
+        def compile_decompose_k_only(max_k_per_split):
+            names: list[str] = []
+
+            def keep_decompose_k(choices):
+                # Also runs for the partial bmm inside the decompose_k subgraph,
+                # which has no decompose_k choices; leave that one alone.
+                kept = [c for c in choices if c.name.startswith("decompose_k_mm")]
+                names.extend(c.name for c in kept)
+                return kept or choices
+
+            torch._dynamo.reset()
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+            add_preprocessing_fn(keep_decompose_k)
+            try:
+                with config.patch(
+                    {
+                        "triton.num_decompose_k_splits": 1,
+                        "triton.decompose_k_max_k_per_split": max_k_per_split,
+                    }
+                ):
+                    out = torch.compile(lambda x, y: x @ y)(a, b)
+            finally:
+                clear_preprocessing_fns(clear_defaults=False)
+                get_k_splits.cache_clear()
+                use_decompose_k_choice.cache_clear()
+            return out, names
+
+        def within_tolerance(out):
+            # bf16 tolerances used by TritonBench accuracy checks
+            err = (out.float() - ref).abs()
+            return bool((err <= 1e-2 + 1e-1 * ref.abs()).all())
+
+        # Default bound: chunks of at most 16384, so the single split is 16.
+        out, names = compile_decompose_k_only(16384)
+        self.assertTrue(names, names)
+        self.assertTrue(
+            all(n.startswith("decompose_k_mm_16_split") for n in names), names
+        )
+        self.assertTrue(within_tolerance(out))
+
+        # Unbounded: the single split is 2.
+        _, names = compile_decompose_k_only(0)
+        self.assertTrue(names, names)
+        self.assertTrue(
+            all(n.startswith("decompose_k_mm_2_split") for n in names), names
         )
 
     @config.patch(

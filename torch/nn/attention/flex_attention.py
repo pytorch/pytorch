@@ -305,6 +305,14 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
+    NUM_XCCS: NotRequired[int]
+    """Number of XCCs to remap the Triton forward and backward kernels' programs
+    across, so the blocks of one (batch, head) share an XCC's L2. Defaults to
+    the device's XCC count on gfx942 and gfx950 with ROCm 7.0+ and off
+    elsewhere; 0 or 1 disables it. Not used by the decode, FLASH or FLYDSL
+    kernels, and skipped when the flattened grid would not fit; may add a size
+    guard with dynamic shapes."""
+
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
 
@@ -2181,6 +2189,12 @@ def _apply_kernel_options(
                 f"Invalid BACKEND value '{kernel_options['BACKEND']}'. "
                 f"Must be one of {valid_backends}"
             )
+
+    for name, num_xccs in kernel_options.items():
+        if name in ("NUM_XCCS", "fwd_NUM_XCCS", "bwd_NUM_XCCS") and (
+            type(num_xccs) is not int or num_xccs < 0
+        ):
+            raise ValueError(f"{name} must be a non-negative int, got {num_xccs!r}")
 
     kernel_options.setdefault("BACKEND", "AUTO")
     kernel_options.setdefault("PRESCALE_QK", False)

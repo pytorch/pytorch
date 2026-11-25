@@ -33,6 +33,7 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
     preserves_device_selection,
     skipCUDAIf,
+    skipMPS,
 )
 from torch.testing._internal.common_quantized import (
     ceil_div,
@@ -87,6 +88,12 @@ def _is_cuda_device(device) -> bool:
     if isinstance(device, str):
         return "cuda" in device
     return False
+
+
+def _skip_if_unsupported_on_mps(dtypes: tuple[torch.dtype, ...], device) -> None:
+    # MPS only implements float8_e4m3fn and float8_e8m0fnu
+    if torch.device(device).type == "mps" and torch.float8_e5m2 in dtypes:
+        raise unittest.SkipTest("float8_e5m2 is not supported on MPS")
 
 
 def _fix_fp8_dtype_for_rocm(
@@ -242,6 +249,7 @@ class TestFP8Types(TestCase):
 
         We should not pick a XBLOCK larger than xnumel
         """
+        _skip_if_unsupported_on_mps((float8_dtype,), device)
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
 
         def f(x):
@@ -254,6 +262,7 @@ class TestFP8Types(TestCase):
 
     @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @skipMPS
     def test_eager_fallback(self, dtype: torch.dtype, device: torch.device):
         weight_shape = (32, 16)
 
@@ -300,6 +309,7 @@ class TestFP8Types(TestCase):
     def test_valid_cast(
         self, dtype: torch.dtype, shape: str, dst_types: tuple, device: torch.device
     ):
+        _skip_if_unsupported_on_mps(dst_types, device)
         dst_types = _fix_fp8_dtype_for_rocm(dst_types, device=device)
         e4m3, e5m2 = dst_types
 
@@ -353,6 +363,7 @@ class TestFP8Types(TestCase):
     def test_int_to_float8_cast(
         self, src_dtype: torch.dtype, dst_dtype: torch.dtype, device: torch.device
     ):
+        _skip_if_unsupported_on_mps((dst_dtype,), device)
         dst_dtype = _fix_fp8_dtype_for_rocm(dst_dtype, device=device)
 
         def fp8_cast(x):
@@ -399,6 +410,7 @@ class TestFP8Types(TestCase):
         torch.testing.assert_close(actual.float(), expected.float(), rtol=0, atol=0)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipMPS
     def test_bad_cast(self, device):
         def fp8_cast(x, dtype):
             return x.to(dtype=dtype)
@@ -441,6 +453,7 @@ class TestFP8Types(TestCase):
         shape: str,
         device: torch.device,
     ):
+        _skip_if_unsupported_on_mps((dst_dtype,), device)
         dst_dtype = _fix_fp8_dtype_for_rocm(dst_dtype, device=device)
 
         def fp8_saturated(x, dtype):
@@ -462,6 +475,7 @@ class TestFP8Types(TestCase):
     def test_amax_fp8_quant(
         self, float8_dtype: torch.dtype, shape: str, device: torch.device
     ):
+        _skip_if_unsupported_on_mps((float8_dtype,), device)
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
@@ -489,6 +503,7 @@ class TestFP8Types(TestCase):
     def test_amax_along_with_fp8_quant(
         self, float8_dtype: torch.dtype, shape: str, device: torch.device
     ):
+        _skip_if_unsupported_on_mps((float8_dtype,), device)
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
@@ -526,6 +541,7 @@ class TestFP8Types(TestCase):
         shape: str,
         device: torch.device,
     ):
+        _skip_if_unsupported_on_mps((float8_dtype,), device)
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
@@ -2699,8 +2715,10 @@ class TestE8M0ToFloat(TestCase):
         (torch.float64, torch.float32, torch.float16, torch.bfloat16),
     )
     @parametrize("direct_input", (False, True))
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(["cpu", "cuda", "mps"])
     def test_conversion(self, device, dtype, direct_input):
+        if torch.device(device).type == "mps" and dtype is torch.float64:
+            raise unittest.SkipTest("MPS does not support float64")
         raw = torch.tensor(
             [0, 1, 126, 127, 128, 129, 254, 255],
             device=device,
@@ -2725,7 +2743,7 @@ class TestE8M0ToFloat(TestCase):
             self.assertEqual(actual.view(torch.int32), expected.view(torch.int32))
 
     @parametrize("direct_input", (False, True))
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(["cpu", "cuda", "mps"])
     def test_codegen(self, device, direct_input):
         raw = torch.tensor(
             [0, 1, 126, 127, 128, 129, 254, 255],
@@ -2754,6 +2772,8 @@ class TestE8M0ToFloat(TestCase):
         if torch.device(device).type == "cuda":
             self.assertIn("bitcast=True", code_str)
             self.assertNotIn("libdevice.ldexp", code_str)
+        elif torch.device(device).type == "mps":
+            self.assertIn("async_compile.metal", code_str)
         else:
             self.assertIn("async_compile.cpp_pybinding", code_str)
             if direct_input:
@@ -2978,9 +2998,9 @@ class TestE8M0Log2PatternBitManip(TestCase):
         )
 
 
-instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestFP8Lowering, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(TestE8M0ToFloat, globals(), allow_mps=True)
 
 
 if __name__ == "__main__":
