@@ -443,11 +443,11 @@ _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS = 16384
 # views route from R = 32768; C = 192 and 256 won 1.19-3.3x at every R from 24577.
 # General-p norms (an exp/log leaf; p = 3 and 0.5 measured) run 0.34-0.36x at C = 128
 # and R = 32768 but 1.0-2.1x from C = 1024. Routed views compile one stage-one kernel
-# per mapping and whole or ragged last partition, not per R: on first call (B200),
-# single-field split views took 1.5-2.4 s with whole partitions and 3.2-3.8 s with a
-# ragged last one (C = 128), and a new R on a compiled kernel 0.13-0.34 s for the
-# stage-two combine of its partition count, against 0.55 s for the indexed tree, which
-# compiles per R.
+# per mapping, stride width and whole or ragged last partition, not per R: on first
+# call (B200), single-field split views took 1.5-2.4 s with whole partitions and
+# 3.2-3.8 s with a ragged last one (C = 128), and a new partition count on a compiled
+# stage one 0.13-0.34 s for its stage-two combine, against 0.55 s per R for the indexed
+# tree.
 _ORDERED_SPLIT_MIN_R = _K_TWO_KERNEL_THRESHOLD * _K_INNER_TREE_THRESHOLD + 1
 _ORDERED_SPLIT_MIN_OUTPUTS = 128
 _ORDERED_SPLIT_GENERAL_NORM_MIN_OUTPUTS = 1024
@@ -914,14 +914,7 @@ def _try_indexed_itree(
         _launch(op, key, [_flat(x)], outs)
         return tuple(outs)
 
-    parts = [
-        torch.empty(
-            num_o * nbatch,
-            device=x.device,
-            dtype=cute2torch[trait.fdtypes[f]],
-        )
-        for f in range(trait.nfields)
-    ]
+    plan, combine, parts = rt.split_partials(trait, plan, num_o, x.device)
     part_dtypes = tuple(p.dtype for p in parts)
     s1 = ReduceBlock(
         trait,
@@ -930,7 +923,7 @@ def _try_indexed_itree(
         red_pairs=red_pairs,
         kept_pairs=kept_pairs,
         in_base=int(x.storage_offset()),
-        nouts=trait.nfields,
+        nouts=len(parts),
         final=False,
         order="inner_tree",
         itree=plan,
@@ -939,14 +932,14 @@ def _try_indexed_itree(
     _launch(s1, key1, [_flat(x)], parts)
 
     outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
-    _combine_itree_partials(trait, trait_key, plan, parts, outs, count, nouts)
+    _combine_itree_partials(trait, trait_key, combine, parts, outs, count, nouts)
     return tuple(outs)
 
 
 def _combine_itree_partials(
     trait: Any,
     trait_key: str,
-    plan: Any,
+    combine: Any,
     parts: list[torch.Tensor],
     outs: list[torch.Tensor],
     project_n: int,
@@ -955,23 +948,13 @@ def _combine_itree_partials(
     """Fold a split plan's per-partition partials in the row planner's fixed combine
     order.
 
-    parts holds one tensor per trait field (dtypes trait.fdtypes), laid out
-    output * partitions + partition. outs are flat, so num_o is outs[0].numel(), and
-    project_n is the true reduced length.
+    combine and parts come from kernel_rowtile.split_partials. outs are flat, so num_o
+    is outs[0].numel(), and project_n is the true reduced length.
     """
-    from . import kernel_rowtile as rt
-
     num_o = outs[0].numel()
-    combine = rt.itree_combine_plan(
-        plan,
-        max(p.element_size() for p in parts),
-        parts[0].device,
-        nrows=num_o,
-        trait=trait,
-    )
     s2 = ReduceBlock(
         trait,
-        count=plan.split[0],
+        count=combine.split[0],
         num_o=num_o,
         red_pairs=[],
         kept_pairs=[],
