@@ -57,7 +57,7 @@ def _storage_bytes(value: torch.Tensor) -> torch.Tensor:
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoCuteDSL
-class TestCuTeDSLPointwise(TestCase):
+class TestCuTeDSLTranspose(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @parametrize("normalize", (False, True))
@@ -133,7 +133,7 @@ class TestCuTeDSLPointwise(TestCase):
             self.assertEqual(len(transpose_copy._PLANS), cached)
 
 
-instantiate_device_type_tests(TestCuTeDSLPointwise, globals(), only_for="cuda")
+instantiate_device_type_tests(TestCuTeDSLTranspose, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
