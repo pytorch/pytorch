@@ -1194,11 +1194,11 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   auto act_contig = act.contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
   auto src_dims = act_contig.sizes().vec();
   auto src_data_type = dnnl::memory::data_type::u8;
-  auto src_desc = at::native::mkldnn::MkldnnMemory::desc(src_dims, src_data_type,
+  auto src_desc = ideep::tensor::desc(src_dims, src_data_type,
       kSpatialDim == 2 ? dnnl::memory::format_tag::nhwc : dnnl::memory::format_tag::ndhwc);
-  at::native::mkldnn::MkldnnMemory src(src_desc, act_contig.data_ptr());
+  ideep::tensor src(src_desc, act_contig.data_ptr());
   // weights & bias
-  at::native::mkldnn::MkldnnMemory& weights = *(weight_);
+  ideep::tensor& weights = *(weight_);
   bool with_bias = bias_.has_value();
   const auto& kernel_size = weights.get_dims();
   // dst
@@ -1245,17 +1245,17 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   if (output.numel() == 0) {
     return output;
   }
-  at::native::mkldnn::MkldnnMemory dst;
+  ideep::tensor dst;
   at::Tensor accum_contig;
   if (has_accum) {
-    auto dst_desc = at::native::mkldnn::MkldnnMemory::desc(dst_dims, src_data_type,
+    auto dst_desc = ideep::tensor::desc(dst_dims, src_data_type,
         kSpatialDim == 2 ? dnnl::memory::format_tag::nhwc : dnnl::memory::format_tag::ndhwc);
     accum_contig = accum.value().contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
     TORCH_CHECK(accum_contig.dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
     // When fused with sum, the dst tensor will share the data ptr as the accum tensor.
     dst.init(dst_desc, accum_contig.data_ptr());
   } else {
-    dst = at::native::mkldnn::MkldnnMemory({dst_dims, dnnl::memory::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
+    dst = ideep::tensor({dst_dims, dnnl::memory::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
                       output.data_ptr());
   }
 
@@ -1294,7 +1294,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   if (with_bias && bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
     bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
   }
-  const auto& b = with_bias ? bias_.value() : at::native::mkldnn::MkldnnMemory();
+  const auto& b = with_bias ? bias_.value() : ideep::tensor();
   int num_threads = at::get_num_threads();
   if (transpose()) {
     // Primitive cache is initialized when called for the first time
@@ -1310,9 +1310,9 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
             src_zero_points, dst_zero_points, op_attr,
             dnnl::algorithm::deconvolution_direct,
             dnnl::prop_kind::forward_inference,
-            at::native::mkldnn::u8s8);
+            ideep::u8s8);
         get_deconv_cache() = DeconvPrimitiveCache(cache_key, params);
-        auto expected_weight_desc = at::native::mkldnn::MkldnnMemory::desc(params.pd.weights_desc(), groups());
+        auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     if (get_deconv_cache().hit(cache_key)) {
@@ -1328,7 +1328,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
           src_zero_points, dst_zero_points, op_attr,
           dnnl::algorithm::deconvolution_direct,
           dnnl::prop_kind::forward_inference,
-          at::native::mkldnn::u8s8);
+          ideep::u8s8);
     }
   } else {  // not transposed
     PrimitiveCacheKey cache_key = std::make_tuple(
@@ -1342,9 +1342,9 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
             src_zero_points, dst_zero_points,
             op_attr, dnnl::algorithm::convolution_direct,
             dnnl::prop_kind::forward_inference,
-            at::native::mkldnn::u8s8);
+            ideep::u8s8);
         get_conv_cache() = ConvPrimitiveCache(cache_key, params);
-        auto expected_weight_desc = at::native::mkldnn::MkldnnMemory::desc(params.pd.weights_desc(), groups());
+        auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     // If hit, use cached data. If miss, fall back to normal path.
@@ -1359,7 +1359,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
           src_zero_points, dst_zero_points, op_attr,
           dnnl::algorithm::convolution_direct,
           dnnl::prop_kind::forward_inference,
-          at::native::mkldnn::u8s8);
+          ideep::u8s8);
     }
   }
   if (has_accum) {
@@ -1534,7 +1534,7 @@ static at::Tensor _quantized_convolution_onednn(
     std::optional<std::string_view> unary_attr,
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm) {
-  using tensor = at::native::mkldnn::MkldnnMemory;
+  using ideep::tensor;
   /*********************************/
   /*          Checks               */
   /*********************************/
@@ -1548,8 +1548,8 @@ static at::Tensor _quantized_convolution_onednn(
   if (fp32_output || bfloat16_output) {
     // When fp32 or bf16 output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
     // So, we will use default output_scale as 1.0 and output_zero_point as 0, since
-    // when output_scale is 1.0, we will skip invoking of op_attr.set_scales;
-    // when output_zero_point is 0, we will skip invoking of op_attr.set_zero_points.
+    // when output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
+    // when output_zero_point is 0, we will skip invoking of op_attr.set_zero_points in ideep.
     TORCH_CHECK(output_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, output_scale must be 1.0.");
     TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 or bf16 output, output_zero_point must be 0");
   }
@@ -1656,7 +1656,7 @@ static at::Tensor _quantized_convolution_onednn(
   );
 
   // Parameters
-#if DNNL_PREREQ(3, 1, 0)
+#if IDEEP_PREREQ(3, 1, 0, 1)
   // 1. If the weight scale generated by observer should with dtype float32
   // https://github.com/pytorch/pytorch/blob/d2c24eca8a60c56b31ca967a44d5cc4522802aa6/torch/ao/quantization/observer.py#L323
   // 2. If the weight scale got from the quantized tensor, like did in the UT. It's with dtype of double.
@@ -1674,18 +1674,37 @@ static at::Tensor _quantized_convolution_onednn(
     "weight_scales should be scalar tensor or contiguous 1D tensor.");
   const float* weight_scales_ptr = weight_scales.const_data_ptr<float>();
   std::vector<float> weights_scales(weight_scales_ptr, weight_scales_ptr + weight_scales.numel());
+#elif IDEEP_PREREQ(3, 1, 0, 0)
+  // TODO (leslie): optimize the performance here:
+  // 1. Remove the reciprocal of weight scale, we have done the reciprocal of weight scale back in Ideep:
+  // https://github.com/intel/ideep/blob/3c90e365526e19c110371d23831678a7e9d4353d/include/ideep/operators/conv.hpp#L163-L168
+  // 2. Remove 2 memory copies of weight_scales:
+  //   2.1 Input of weights_scales is PyTorch Dense tensor, we convert it to vector<float>
+  //   2.2 OneDNN stream submit convert weights_scales from vector to ideep::tensor
+  //   https://github.com/intel/ideep/blob/3c90e365526e19c110371d23831678a7e9d4353d/include/ideep/operators/conv.hpp#L1855-L1860
+  // We should be able to directly convert weights_scales from PyTorch Dense Tensor to IDeep Tensor which can share same data ptr.
+  std::vector<float> weights_scales(weight_scales.numel());
+  if (weight_scales.ndimension() == 0) {
+    // Weight is quant per tensor, then weight_scales will be a scalar Tensor
+    weights_scales[0] = 1.0 / weight_scales.item().toDouble(); // Scales of ONEDNN and PyTorch are reciprocal
+  } else {
+    // Weight is quant per channel
+    for (int i = 0; i < weight_scales.numel(); ++i) {
+      weights_scales[i] = 1.0 / weight_scales[i].item().toDouble();
+    }
+  }
 #else
-  TORCH_CHECK(false, "Unexpected oneDNN version to do qconv calculation.");
+  TORCH_CHECK(false, "Unexpected IDeep version to do qconv calculation.");
 #endif
 
   const std::vector<int32_t> src_zero_points = std::vector<int32_t>(1, act_zero_point);
   const std::vector<int32_t> dst_zero_points = std::vector<int32_t>(1, output_zero_point);
 
   // Weight
-  auto packed_weight = at::native::memory_from_mkldnn(weight);
+  auto packed_weight = at::native::itensor_from_mkldnn(weight);
 
   // Bias
-  at::native::mkldnn::MkldnnMemory onednn_bias;
+  ideep::tensor onednn_bias;
   const int output_channels = weight.size(0);
   bool with_bias = bias.has_value();
 
@@ -1697,11 +1716,11 @@ static at::Tensor _quantized_convolution_onednn(
     TORCH_CHECK(
         bias_val_float.size(0) == output_channels,
         "bias should have K elements: " + std::to_string(output_channels));
-    auto bias_desc = at::native::mkldnn::MkldnnMemory::desc(bias_val_float.sizes().vec(), dnnl::memory::data_type::f32);
+    auto bias_desc = ideep::tensor::desc(bias_val_float.sizes().vec(), dnnl::memory::data_type::f32);
     onednn_bias.init(bias_desc, bias_val_float.data_ptr());
   }
 
-  const auto& expected_bias = with_bias ? onednn_bias : at::native::mkldnn::MkldnnMemory();
+  const auto& expected_bias = with_bias ? onednn_bias : ideep::tensor();
 
   /*********************************/
   /*        Computation            */
@@ -1712,9 +1731,9 @@ static at::Tensor _quantized_convolution_onednn(
                                    c10::MemoryFormat::ChannelsLast3d);
   auto src_dims = act_contig.sizes().vec();
   auto src_data_type = at::native::get_mkldnn_dtype(act.scalar_type());
-  auto src_desc = at::native::mkldnn::MkldnnMemory::desc(src_dims, src_data_type,
+  auto src_desc = ideep::tensor::desc(src_dims, src_data_type,
       kSpatialDim == 2 ? dnnl::memory::format_tag::nhwc : dnnl::memory::format_tag::ndhwc);
-  at::native::mkldnn::MkldnnMemory src;
+  ideep::tensor src;
   src.init(src_desc, act_contig.data_ptr());
   // dst
   const std::vector<int64_t>& input_size = src.get_dims();
@@ -1739,8 +1758,8 @@ static at::Tensor _quantized_convolution_onednn(
     // must not return tensors that alias inputs, so return a copy.
     return has_accum_postop_sum ? output.clone() : output;
   }
-  at::native::mkldnn::MkldnnMemory dst = at::native::memory_view_from_dense(output);
-  static at::native::mkldnn::MkldnnMemory::desc dummy_accum_desc;
+  ideep::tensor dst = at::native::itensor_view_from_dense(output);
+  static ideep::tensor::desc dummy_accum_desc;
   at::native::mkldnn::Attr op_attr = onednn_utils::create_attr_by_post_op(
     binary_attr.has_value() ? binary_attr.value() : "none",
     binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
@@ -1762,9 +1781,9 @@ static at::Tensor _quantized_convolution_onednn(
     output_scale = 1.0f;
   }
 
-#if DNNL_PREREQ(3, 1, 0)
-  // Use oneDNN's APIs instead of the prepare/compute ported from ideep to reduce integration overhead.
-  // The ported functions are heavy because they have complex data structures for unified API
+#if IDEEP_PREREQ(3, 1, 0, 0)
+  // Use oneDNN's APIs instead of prepare/compute from ideep to reduce integration overhead.
+  // The functions from ideep are heavy because they have complex data structures for unified API
   // oneDNN version >= 3.1.0 is required.
   auto weight_grouped = packed_weight.make_grouped_weights(groups, /* is_deconv */false);
   auto weights_desc = tensor::desc(weight_grouped.get_dims(), packed_weight.get_data_type(), dnnl::memory::format_tag::any);
@@ -1782,7 +1801,7 @@ static at::Tensor _quantized_convolution_onednn(
     op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
   }
   int oc_per_group = weight_grouped.get_dim(0) / groups;
-  int wei_scale_mask = at::native::mkldnn::utils::conv_weight_scale_mask(weight_scales.numel(), oc_per_group, groups, false);
+  int wei_scale_mask = ideep::utils::conv_weight_scale_mask(weight_scales.numel(), oc_per_group, groups, false);
   op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, wei_scale_mask);
   if (output_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_DST, 0);
@@ -1791,8 +1810,8 @@ static at::Tensor _quantized_convolution_onednn(
     op_attr.set_zero_points_mask(DNNL_ARG_DST, 0);
   }
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-  auto engine = at::native::mkldnn::Engine::cpu_engine();
-  auto dilates_dnnl = at::native::mkldnn::utils::get_compatible_dilates(dilation.vec());
+  auto engine = ideep::engine::cpu_engine();
+  auto dilates_dnnl = ideep::utils::get_compatible_dilates(dilation.vec());
   auto primitive_desc = with_bias ?
       dnnl::convolution_forward::primitive_desc(
         engine, dnnl::prop_kind::forward_inference, dnnl::algorithm::convolution_direct,
@@ -1837,7 +1856,7 @@ static at::Tensor _quantized_convolution_onednn(
   if (output_zero_point != 0) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_t});
   }
-  primitive.execute(at::native::mkldnn::IStream::default_stream(), args);
+  primitive.execute(ideep::stream::default_stream(), args);
 #else
   // Scales of ONEDNN and PyTorch are reciprocal
   const std::vector<float>& src_scales = std::vector<float>(1, 1.0 / act_scale);
@@ -1861,9 +1880,9 @@ static at::Tensor _quantized_convolution_onednn(
       src_zero_points, dst_zero_points,
       op_attr, dnnl::algorithm::convolution_direct,
       dnnl::prop_kind::forward_inference,
-      at::native::mkldnn::u8s8);
-  auto expected_weight_desc = at::native::mkldnn::MkldnnMemory::desc(params.pd.weights_desc(), groups);
-  at::native::mkldnn::MkldnnMemory expected_weight = packed_weight.reorder_if_differ_in(expected_weight_desc);
+      ideep::u8s8);
+  auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups);
+  ideep::tensor expected_weight = packed_weight.reorder_if_differ_in(expected_weight_desc);
 
   // Computation
   at::native::mkldnn::convolution_forward_compute<false, false>(params, src, expected_weight, expected_bias, dst);

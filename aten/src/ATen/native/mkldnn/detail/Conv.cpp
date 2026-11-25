@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/Conv.h>
-#include <ATen/native/mkldnn/detail/IdeepUtils.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/detail/PrimitiveCache.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -16,11 +16,11 @@ namespace at::native::mkldnn {
 // quantization version. Also used for fp32 when scales and zero points are
 // empty.
 void prepare_parameters(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    const MkldnnMemory& dst,
+    const ideep::tensor& dst,
     const dnnl::memory::dims& dilates,
     int groups,
     const std::vector<float>& src_scales,
@@ -29,33 +29,33 @@ void prepare_parameters(
     const std::vector<int32_t>& src_zero_points,
     const std::vector<int32_t>& dst_zero_points,
     const Attr& attr,
-    const lowp_kind alowp_kind,
+    const ideep::lowp_kind alowp_kind,
     bool with_bias,
     bool is_deconv,
-    MkldnnMemory& weight_grouped, /* Output */
+    ideep::tensor& weight_grouped, /* Output */
     dnnl::memory::dims& dil_compatible, /* Output */
     Attr& op_attr, /* Output */
     Attr& src_attr, /* Output */
     Attr& weights_attr, /* Output */
     Attr& bias_attr, /* Output */
-    MkldnnMemory::desc& src_desc, /* Output */
-    MkldnnMemory::desc& weights_desc, /* Output */
-    MkldnnMemory::desc& bias_desc, /* Output */
-    MkldnnMemory::desc& dst_desc /* Output */) {
+    ideep::tensor::desc& src_desc, /* Output */
+    ideep::tensor::desc& weights_desc, /* Output */
+    ideep::tensor::desc& bias_desc, /* Output */
+    ideep::tensor::desc& dst_desc /* Output */) {
   std::vector<float> dst_scales_in;
   dnnl::memory::data_type dst_data_type;
   op_attr.set_post_ops(attr.get_post_ops());
 
   // make weights and dilates compatible with DNNL
   weight_grouped = weights.make_grouped_weights(groups, is_deconv);
-  dil_compatible = utils::get_compatible_dilates(dilates);
+  dil_compatible = ideep::utils::get_compatible_dilates(dilates);
 
   auto& weights_scales_in =
       weight_grouped.has_scale() ? weight_grouped.get_scale() : weights_scales;
   if (!weights_scales_in.empty()) {
 #ifndef NDEBUG
     dnnl::error::wrap_c_api(
-        alowp_kind == u8s8 || alowp_kind == s8s8
+        alowp_kind == ideep::u8s8 || alowp_kind == ideep::s8s8
             ? dnnl_success
             : dnnl_invalid_arguments,
         "Unsupported lowp kind");
@@ -63,12 +63,12 @@ void prepare_parameters(
     int scale_size = (weights_scales_in.size() > 1) ? dst_dims[1] : 1;
     auto& src_scales_in = src.has_scale()
         ? src.get_scale()
-        : (src_scales.empty() ? DEF_SCALE : src_scales);
+        : (src_scales.empty() ? ideep::IDEEP_DEF_SCALE : src_scales);
 
     // determine dst data type
     if (dst.get_data_type() != dnnl::memory::data_type::undef) {
       dst_data_type = dst.get_data_type();
-    } else if (dst_scales.empty() || dst_scales == DEF_SCALE) {
+    } else if (dst_scales.empty() || dst_scales == ideep::IDEEP_DEF_SCALE) {
       dst_data_type = dnnl::memory::data_type::f32;
     } else if (attr.non_negative_output()) {
       dst_data_type = dnnl::memory::data_type::u8;
@@ -79,7 +79,7 @@ void prepare_parameters(
     // fill primitive attr
     dst_scales_in =
         dst_scales.empty() || dst_data_type == dnnl::memory::data_type::f32
-        ? DEF_SCALE
+        ? ideep::IDEEP_DEF_SCALE
         : dst_scales;
     const auto default_zero_point = std::vector<int32_t>(1);
     const auto& src_zero_point = src.has_zero_point() ? src.get_zero_point()
@@ -148,7 +148,7 @@ void prepare_parameters(
     // `weight.get_dim(0)` returns g * i or i and `get_dim(1)` always returns o.
     int oc_per_group = is_deconv ? weight_grouped.get_dim(1)
                                  : weight_grouped.get_dim(0) / groups;
-    auto wei_scale_mask = utils::conv_weight_scale_mask(
+    auto wei_scale_mask = ideep::utils::conv_weight_scale_mask(
         weights_scales_in.size(), oc_per_group, groups, is_deconv);
     auto wei_scales = weights_scales_in;
     if (!std::all_of(wei_scales.begin(), wei_scales.end(), [](float i) {
@@ -164,24 +164,24 @@ void prepare_parameters(
     // Set zero points to op_attr (weight zero point is always 0. Do not set.)
     // Only set non-zero zero points otherwise there is extra oneDNN overhead
     if (src_zero_point[0] != 0) {
-      auto src_zp_mask = utils::tensor_zp_mask(src_zero_point_size);
+      auto src_zp_mask = ideep::utils::tensor_zp_mask(src_zero_point_size);
       op_attr.set_zero_points(DNNL_ARG_SRC, src_zp_mask, src_zero_point);
     }
     if (dst_zero_point[0] != 0) {
-      auto dst_zp_mask = utils::tensor_zp_mask(dst_zero_point_size);
+      auto dst_zp_mask = ideep::utils::tensor_zp_mask(dst_zero_point_size);
       op_attr.set_zero_points(DNNL_ARG_DST, dst_zp_mask, dst_zero_point);
     }
 
     src_desc = {
         src.get_dims(),
-        alowp_kind == u8s8 ? dnnl::memory::data_type::u8
+        alowp_kind == ideep::u8s8 ? dnnl::memory::data_type::u8
                                   : dnnl::memory::data_type::s8,
         dnnl::memory::format_tag::any};
     if (src.get_data_type() == dnnl::memory::data_type::f32) {
       src_attr = {0, src_scales_in};
     }
 
-    weights_desc = MkldnnMemory::desc(
+    weights_desc = ideep::tensor::desc(
         weight_grouped.get_dims(),
         dnnl::memory::data_type::s8,
         dnnl::memory::format_tag::any);
@@ -190,7 +190,7 @@ void prepare_parameters(
     }
     if (weight_grouped.get_data_type() == dnnl::memory::data_type::f32) {
       weights_attr = {
-          utils::tensor_scale_mask(scale_size, groups > 1),
+          ideep::utils::tensor_scale_mask(scale_size, groups > 1),
           weights_scales_in};
     }
 
@@ -223,7 +223,7 @@ void prepare_parameters(
         ? dnnl::memory::data_type::bf16
         : dnnl::memory::data_type::f32;
     src_desc = src.get_desc().to_type(dst_data_type);
-    weights_desc = MkldnnMemory::desc(
+    weights_desc = ideep::tensor::desc(
         weight_grouped.get_dims(), dst_data_type, dnnl::memory::format_tag::any);
     if (groups > 1) {
       weights_desc = weights_desc.to_grouped(groups);
@@ -248,39 +248,39 @@ void prepare_parameters(
 
   dst_desc = attr.has_op_kind(dnnl::primitive::kind::sum)
       ? dst.get_desc()
-      : MkldnnMemory::desc(dst_dims, dst_data_type);
+      : ideep::tensor::desc(dst_dims, dst_data_type);
 }
 
 // Ported from ideep::conv_deconv_utils::prepare_parameters.
 // Common logic to prepare parameters for conv/deconv.
 // non-quantization version
 void prepare_parameters(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    const MkldnnMemory& dst,
+    const ideep::tensor& dst,
     const dnnl::memory::dims& dilates,
     int groups,
     const Attr& attr,
     bool with_bias,
     bool is_deconv,
-    MkldnnMemory& weight_grouped, /* Output */
+    ideep::tensor& weight_grouped, /* Output */
     dnnl::memory::dims& dil_compatible, /* Output */
     Attr& op_attr, /* Output */
     Attr& src_attr, /* Output */
     Attr& weights_attr, /* Output */
     Attr& bias_attr, /* Output */
-    MkldnnMemory::desc& src_desc, /* Output */
-    MkldnnMemory::desc& weights_desc, /* Output */
-    MkldnnMemory::desc& bias_desc, /* Output */
-    MkldnnMemory::desc& dst_desc /* Output */) {
+    ideep::tensor::desc& src_desc, /* Output */
+    ideep::tensor::desc& weights_desc, /* Output */
+    ideep::tensor::desc& bias_desc, /* Output */
+    ideep::tensor::desc& dst_desc /* Output */) {
   dnnl::memory::data_type dst_data_type;
   op_attr = attr;
 
   // make weights and dilates compatible with DNNL
   weight_grouped = weights.make_grouped_weights(groups, is_deconv);
-  dil_compatible = utils::get_compatible_dilates(dilates);
+  dil_compatible = ideep::utils::get_compatible_dilates(dilates);
 
 #ifndef NDEBUG
   dnnl::error::wrap_c_api(
@@ -301,7 +301,7 @@ void prepare_parameters(
              ? dnnl::memory::data_type::f16
              : dnnl::memory::data_type::f32);
   src_desc = src.get_desc().to_type(dst_data_type);
-  weights_desc = MkldnnMemory::desc(
+  weights_desc = ideep::tensor::desc(
       weight_grouped.get_dims(), dst_data_type, dnnl::memory::format_tag::any);
   if (groups > 1) {
     weights_desc = weights_desc.to_grouped(groups);
@@ -326,7 +326,7 @@ void prepare_parameters(
 
   dst_desc = attr.has_op_kind(dnnl::primitive::kind::sum)
       ? dst.get_desc()
-      : MkldnnMemory::desc(dst_dims, dst_data_type);
+      : ideep::tensor::desc(dst_dims, dst_data_type);
 }
 
 namespace {
@@ -339,10 +339,10 @@ std::pair<
     dnnl::convolution_forward::primitive_desc,
     dnnl::convolution_forward>
 get_primitive_desc(
-    const MkldnnMemory::desc& src_desc,
-    const MkldnnMemory::desc& weights_desc,
-    const MkldnnMemory::desc& bias_desc,
-    const MkldnnMemory::desc& dst_desc,
+    const ideep::tensor::desc& src_desc,
+    const ideep::tensor::desc& weights_desc,
+    const ideep::tensor::desc& bias_desc,
+    const ideep::tensor::desc& dst_desc,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -351,16 +351,16 @@ get_primitive_desc(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward) {
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   auto src_desc_query = src_desc;
   auto weights_desc_query = weights_desc;
-  auto bias_desc_query = with_bias ? bias_desc : MkldnnMemory::desc();
+  auto bias_desc_query = with_bias ? bias_desc : ideep::tensor::desc();
   auto dst_desc_query = dst_desc;
 
   src_desc_query = src_desc.to_format_any();
   weights_desc_query = weights_desc.to_format_any();
   bias_desc_query =
-      with_bias ? bias_desc.to_format_any() : MkldnnMemory::desc();
+      with_bias ? bias_desc.to_format_any() : ideep::tensor::desc();
   dst_desc_query = dst_desc.to_format_any();
 
   // For nhwc path, weight uses format_tag::any,
@@ -411,10 +411,10 @@ get_primitive_desc(
 #else
 template <bool with_bias>
 dnnl::convolution_forward::primitive_desc get_primitive_desc(
-    const MkldnnMemory::desc& src_desc,
-    const MkldnnMemory::desc& weights_desc,
-    const MkldnnMemory::desc& bias_desc,
-    const MkldnnMemory::desc& dst_desc,
+    const ideep::tensor::desc& src_desc,
+    const ideep::tensor::desc& weights_desc,
+    const ideep::tensor::desc& bias_desc,
+    const ideep::tensor::desc& dst_desc,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -423,16 +423,16 @@ dnnl::convolution_forward::primitive_desc get_primitive_desc(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward) {
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   auto src_desc_query = src_desc;
   auto weights_desc_query = weights_desc;
-  auto bias_desc_query = with_bias ? bias_desc : MkldnnMemory::desc();
+  auto bias_desc_query = with_bias ? bias_desc : ideep::tensor::desc();
   auto dst_desc_query = dst_desc;
 
   src_desc_query = src_desc.to_format_any();
   weights_desc_query = weights_desc.to_format_any();
   bias_desc_query =
-      with_bias ? bias_desc.to_format_any() : MkldnnMemory::desc();
+      with_bias ? bias_desc.to_format_any() : ideep::tensor::desc();
   dst_desc_query = dst_desc.to_format_any();
 
   // For nhwc path, weight uses format_tag::any,
@@ -501,7 +501,7 @@ dnnl::convolution_forward::primitive_desc get_primitive_desc(
 // Ported from ideep::convolution_forward::expected_weights_desc (the
 // template on is_channels_last).
 template <bool is_channels_last = false>
-MkldnnMemory::desc expected_weights_desc(
+ideep::tensor::desc expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     dnnl::memory::data_type dtype = dnnl::memory::data_type::f32,
     const dnnl::memory::dims& strides = {1, 1},
@@ -518,13 +518,13 @@ MkldnnMemory::desc expected_weights_desc(
   auto src_size = weights_dims.size();
   auto grouped = groups > 1;
   auto weights_dims_g = grouped
-      ? utils::group_dims(weights_dims, groups)
+      ? ideep::utils::group_dims(weights_dims, groups)
       : weights_dims;
-  auto weights_desc = MkldnnMemory::desc(weights_dims_g, dtype);
+  auto weights_desc = ideep::tensor::desc(weights_dims_g, dtype);
 
   auto dims_in = weights_desc.get_dims();
   auto ndims = dims_in.size();
-  auto dilates_ = utils::get_compatible_dilates(dilates, src_size);
+  auto dilates_ = ideep::utils::get_compatible_dilates(dilates, src_size);
 
 #ifndef NDEBUG
   dnnl::error::wrap_c_api(
@@ -586,8 +586,8 @@ MkldnnMemory::desc expected_weights_desc(
   auto y_dtype = dtype != dnnl::memory::data_type::s8
       ? dtype
       : dnnl::memory::data_type::s32;
-  MkldnnMemory::desc src_desc(x_dims, x_dtype);
-  MkldnnMemory::desc dst_desc(y_dims, y_dtype);
+  ideep::tensor::desc src_desc(x_dims, x_dtype);
+  ideep::tensor::desc dst_desc(y_dims, y_dtype);
 
   auto src_query = src_desc;
   auto dst_query = dst_desc;
@@ -622,7 +622,7 @@ MkldnnMemory::desc expected_weights_desc(
   auto pd = get_primitive_desc</*with_bias=*/false>(
       src_query,
       weights_desc,
-      MkldnnMemory::desc(),
+      ideep::tensor::desc(),
       dst_query,
       strides,
       dilates_,
@@ -635,9 +635,9 @@ MkldnnMemory::desc expected_weights_desc(
 
   // embed group info into weights_desc
 #ifdef __aarch64__
-  return MkldnnMemory::desc(pd.first.weights_desc(), groups);
+  return ideep::tensor::desc(pd.first.weights_desc(), groups);
 #else
-  return MkldnnMemory::desc(pd.weights_desc(), groups);
+  return ideep::tensor::desc(pd.weights_desc(), groups);
 #endif
 }
 
@@ -648,11 +648,11 @@ MkldnnMemory::desc expected_weights_desc(
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void do_compute(
     const convolution_forward_params& param,
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
-    MkldnnMemory& dst) {
-  auto scratchpad = MkldnnMemory(param.pd.scratchpad_desc());
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    ideep::tensor& dst) {
+  auto scratchpad = ideep::tensor(param.pd.scratchpad_desc());
 
   auto& expected_src =
       reorder_src ? src.reorder_if_differ_in(param.pd.src_desc()) : src;
@@ -672,14 +672,14 @@ void do_compute(
   if (param.all_scales && !param.all_scales->empty()) {
     for (auto& arg_scale_pair : *param.all_scales) {
       int dnnl_arg = arg_scale_pair.first;
-      MkldnnMemory& scales_m = std::get<1>(arg_scale_pair);
+      ideep::tensor& scales_m = std::get<1>(arg_scale_pair);
       args.insert({DNNL_ARG_ATTR_SCALES | dnnl_arg, scales_m});
     }
   }
   if (param.all_zero_points && !param.all_zero_points->empty()) {
     for (auto& arg_zp_pair : *param.all_zero_points) {
       int dnnl_arg = arg_zp_pair.first;
-      MkldnnMemory& zp_m = std::get<1>(arg_zp_pair);
+      ideep::tensor& zp_m = std::get<1>(arg_zp_pair);
       args.insert({DNNL_ARG_ATTR_ZERO_POINTS | dnnl_arg, zp_m});
     }
   }
@@ -687,7 +687,7 @@ void do_compute(
   // Deal with dst tensor
   if (reorder_src) {
     auto expected_dst_desc = param.pd.dst_desc();
-    MkldnnMemory expected_dst;
+    ideep::tensor expected_dst;
     if (dst.is_empty() || dst.get_desc() != expected_dst_desc) {
       // If dst buffer is not given by user or the given buffer is not in expected format,
       // We need to init a new one
@@ -702,7 +702,7 @@ void do_compute(
       expected_dst = dst;
     }
     args.insert({DNNL_ARG_DST, expected_dst});
-    primitive.execute(IStream::default_stream(), args);
+    primitive.execute(ideep::stream::default_stream(), args);
     // reorder back to dst's buffer if needed
     if (dst.is_empty() || dst.get_desc() == expected_dst.get_desc() ||
         !dst.get_desc().has_same_shape_as(expected_dst.get_desc())) {
@@ -712,7 +712,7 @@ void do_compute(
     }
   } else {
     args.insert({DNNL_ARG_DST, dst});
-    primitive.execute(IStream::default_stream(), args);
+    primitive.execute(ideep::stream::default_stream(), args);
   }
 }
 
@@ -721,14 +721,14 @@ void do_compute(
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void do_compute_binary(
     const convolution_forward_params& param,
-    const MkldnnMemory& src,
-    const MkldnnMemory& other,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
-    MkldnnMemory& dst) {
+    const ideep::tensor& src,
+    const ideep::tensor& other,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    ideep::tensor& dst) {
   auto& pd = param.pd;
   auto& primitive = param.primitive;
-  auto scratchpad = MkldnnMemory(pd.scratchpad_desc());
+  auto scratchpad = ideep::tensor(pd.scratchpad_desc());
   auto& expected_src =
       reorder_src ? src.reorder_if_differ_in(pd.src_desc()) : src;
   if (reorder_src) {
@@ -761,32 +761,32 @@ void do_compute_binary(
   if (param.all_scales && !param.all_scales->empty()) {
     for (auto& arg_scale_pair : *param.all_scales) {
       int dnnl_arg = arg_scale_pair.first;
-      MkldnnMemory& scales_m = arg_scale_pair.second;
+      ideep::tensor& scales_m = arg_scale_pair.second;
       args.insert({DNNL_ARG_ATTR_SCALES | dnnl_arg, scales_m});
     }
   }
   if (param.all_zero_points && !param.all_zero_points->empty()) {
     for (auto& arg_zp_pair : *param.all_zero_points) {
       int dnnl_arg = arg_zp_pair.first;
-      MkldnnMemory& zp_m = arg_zp_pair.second;
+      ideep::tensor& zp_m = arg_zp_pair.second;
       args.insert({DNNL_ARG_ATTR_ZERO_POINTS | dnnl_arg, zp_m});
     }
   }
   if (with_bias) {
     args.insert({DNNL_ARG_BIAS, bias});
   }
-  primitive.execute(IStream::default_stream(), args);
+  primitive.execute(ideep::stream::default_stream(), args);
 }
 
 // Ported from ideep::convolution_forward::compute_dispatch.
 // For fp32
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_dispatch(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -796,9 +796,9 @@ void compute_dispatch(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward) {
-  MkldnnMemory::desc src_desc, weights_desc, bias_desc, dst_desc;
+  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
   Attr op_attr, src_attr, weights_attr, bias_attr;
-  MkldnnMemory weights_grouped;
+  ideep::tensor weights_grouped;
   dnnl::memory::dims dil_compatible;
 
   prepare_parameters(
@@ -854,11 +854,11 @@ void compute_dispatch(
 // For int8. Also used for fp32 when scales and zero points are empty.
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_dispatch(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -873,10 +873,10 @@ void compute_dispatch(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
-    const lowp_kind alowp_kind = u8s8) {
-  MkldnnMemory::desc src_desc, weights_desc, bias_desc, dst_desc;
+    const ideep::lowp_kind alowp_kind = ideep::u8s8) {
+  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
   Attr op_attr, src_attr, weights_attr, bias_attr;
-  MkldnnMemory weights_grouped;
+  ideep::tensor weights_grouped;
   dnnl::memory::dims dil_compatible;
 
   prepare_parameters(
@@ -942,23 +942,23 @@ void compute_dispatch(
   // Prepare tensors for scales and zero points
   if (param.op_attr.has_scales()) {
     if (!param.all_scales) {
-      param.all_scales.reset(new std::unordered_map<int, MkldnnMemory>);
+      param.all_scales.reset(new std::unordered_map<int, ideep::tensor>);
     }
     for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
       int dnnl_arg = arg_scale_pair.first;
       const std::vector<float>& scale = arg_scale_pair.second.first;
-      MkldnnMemory scales_m = MkldnnMemory(scale);
+      ideep::tensor scales_m = ideep::tensor(scale);
       param.all_scales->insert({dnnl_arg, scales_m});
     }
   }
   if (param.op_attr.has_zero_points()) {
     if (!param.all_zero_points) {
-      param.all_zero_points.reset(new std::unordered_map<int, MkldnnMemory>);
+      param.all_zero_points.reset(new std::unordered_map<int, ideep::tensor>);
     }
     for (auto& arg_zp_pair : param.op_attr.get_all_zero_points()) {
       int dnnl_arg = arg_zp_pair.first;
       const std::vector<int32_t>& zp = arg_zp_pair.second.first;
-      MkldnnMemory zp_m = MkldnnMemory(zp);
+      ideep::tensor zp_m = ideep::tensor(zp);
       param.all_zero_points->insert({dnnl_arg, zp_m});
     }
   }
@@ -971,11 +971,11 @@ void compute_dispatch(
 template <bool with_bias>
 void do_prepare(
     convolution_forward_params& param,
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -985,9 +985,9 @@ void do_prepare(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind) {
-  MkldnnMemory::desc src_desc, weights_desc, bias_desc, dst_desc;
+  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
   Attr op_attr, src_attr, weights_attr, bias_attr;
-  MkldnnMemory weights_grouped;
+  ideep::tensor weights_grouped;
   dnnl::memory::dims dil_compatible;
 
   prepare_parameters(
@@ -1041,11 +1041,11 @@ void do_prepare(
 template <bool with_bias>
 void do_prepare(
     convolution_forward_params& param,
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1060,10 +1060,10 @@ void do_prepare(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind,
-    const lowp_kind alowp_kind) {
-  MkldnnMemory::desc src_desc, weights_desc, bias_desc, dst_desc;
+    const ideep::lowp_kind alowp_kind) {
+  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
   Attr op_attr, src_attr, weights_attr, bias_attr;
-  MkldnnMemory weights_grouped;
+  ideep::tensor weights_grouped;
   dnnl::memory::dims dil_compatible;
 
   prepare_parameters(
@@ -1129,25 +1129,25 @@ void do_prepare(
   // Prepare tensors for scales and zero points
   if (param.op_attr.has_scales()) {
     if (!param.all_scales) {
-      param.all_scales.reset(new std::unordered_map<int, MkldnnMemory>);
+      param.all_scales.reset(new std::unordered_map<int, ideep::tensor>);
     }
     // get_all_scales() returns unordered_map<int, pair of scale and mask>
     for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
       int dnnl_arg = arg_scale_pair.first;
       const std::vector<float>& scale = std::get<0>(std::get<1>(arg_scale_pair));
-      MkldnnMemory scales_m(scale);
+      ideep::tensor scales_m(scale);
       param.all_scales->insert({dnnl_arg, scales_m});
     }
   }
   if (param.op_attr.has_zero_points()) {
     if (!param.all_zero_points) {
-      param.all_zero_points.reset(new std::unordered_map<int, MkldnnMemory>);
+      param.all_zero_points.reset(new std::unordered_map<int, ideep::tensor>);
     }
     // get_all_zero_points() returns unordered_map<int, pair of zp and mask>
     for (auto& arg_zp_pair : param.op_attr.get_all_zero_points()) {
       int dnnl_arg = arg_zp_pair.first;
       const std::vector<int32_t>& zp = std::get<0>(std::get<1>(arg_zp_pair));
-      MkldnnMemory zp_m(zp);
+      ideep::tensor zp_m(zp);
       param.all_zero_points->insert({dnnl_arg, zp_m});
     }
   }
@@ -1157,12 +1157,12 @@ void do_prepare(
 // For fp32 with binary post-op
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_binary_dispatch(
-    const MkldnnMemory& src,
-    const MkldnnMemory& other,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& other,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1196,11 +1196,11 @@ void compute_binary_dispatch(
 // Ported from ideep::convolution_backward_weights::compute_impl.
 template <bool with_diff_bias>
 void backward_weights_compute_impl(
-    const MkldnnMemory& src,
-    const MkldnnMemory& diff_dst,
+    const ideep::tensor& src,
+    const ideep::tensor& diff_dst,
     const dnnl::memory::dims& diff_weights_dims,
-    MkldnnMemory& diff_weights,
-    MkldnnMemory& diff_bias,
+    ideep::tensor& diff_weights,
+    ideep::tensor& diff_bias,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1208,7 +1208,7 @@ void backward_weights_compute_impl(
     const int groups,
     bool is_channels_last,
     const Attr& attr) {
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   const auto aalgorithm = dnnl::algorithm::convolution_direct;
   dnnl::memory::data_type diff_dst_type = diff_dst.get_data_type();
   if (is_avx2_vnni_2() &&
@@ -1221,8 +1221,8 @@ void backward_weights_compute_impl(
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
   // make diff_weights and dilates compatible with DNNL
-  auto dilates_ = utils::get_compatible_dilates(dilates);
-  auto diff_weights_desc = MkldnnMemory::desc(
+  auto dilates_ = ideep::utils::get_compatible_dilates(dilates);
+  auto diff_weights_desc = ideep::tensor::desc(
       diff_weights_dims, diff_dst_type, dnnl::memory::format_tag::any);
   if (groups > 1) {
     diff_weights_desc = diff_weights_desc.to_grouped(groups).to_format_any();
@@ -1242,7 +1242,7 @@ void backward_weights_compute_impl(
   auto diff_dst_desc = diff_dst.get_desc().to_format(format_tag);
   auto src_desc = src.get_desc().to_format(format_tag);
 
-  auto diff_bias_desc = MkldnnMemory::desc(
+  auto diff_bias_desc = ideep::tensor::desc(
       {diff_dst.get_dim(1)}, diff_dst_type, dnnl::memory::format_tag::any);
 
   // for forward hint, weights_desc should have same data_type
@@ -1325,8 +1325,8 @@ void backward_weights_compute_impl(
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
   // embed group info into diff_weights_desc
   auto expected_diff_weights_desc =
-      MkldnnMemory::desc(pd.diff_weights_desc(), groups);
-  MkldnnMemory expected_diff_weights;
+      ideep::tensor::desc(pd.diff_weights_desc(), groups);
+  ideep::tensor expected_diff_weights;
   // diff_weights not init in FW or has same desc with expected desc.
   if (diff_weights.is_empty() ||
       diff_weights.get_desc() == expected_diff_weights_desc) {
@@ -1338,14 +1338,14 @@ void backward_weights_compute_impl(
     expected_diff_weights.init(expected_diff_weights_desc);
   }
 
-  MkldnnMemory scratchpad(pd.scratchpad_desc());
+  ideep::tensor scratchpad(pd.scratchpad_desc());
 
   if (with_diff_bias) {
     // May replace diff_bias's buffer and layout when they differ from
     // pd.diff_bias_desc().
     diff_bias.reinit_if_possible(pd.diff_bias_desc());
     dnnl::convolution_backward_weights(pd).execute(
-        IStream::default_stream(),
+        ideep::stream::default_stream(),
         {{DNNL_ARG_DIFF_DST, expected_diff_dst},
          {DNNL_ARG_SRC, expected_src},
          {DNNL_ARG_DIFF_WEIGHTS, expected_diff_weights},
@@ -1353,7 +1353,7 @@ void backward_weights_compute_impl(
          {DNNL_ARG_SCRATCHPAD, scratchpad}});
   } else {
     dnnl::convolution_backward_weights(pd).execute(
-        IStream::default_stream(),
+        ideep::stream::default_stream(),
         {{DNNL_ARG_DIFF_DST, expected_diff_dst},
          {DNNL_ARG_SRC, expected_src},
          {DNNL_ARG_DIFF_WEIGHTS, expected_diff_weights},
@@ -1375,11 +1375,11 @@ void backward_weights_compute_impl(
 } // namespace
 
 void convolution_forward_compute_v2(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1435,10 +1435,10 @@ void convolution_forward_compute_v2(
 }
 
 void convolution_forward_compute_v2(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1452,7 +1452,7 @@ void convolution_forward_compute_v2(
     const Attr& attr) {
   bool is_channels_last = src.get_desc().is_channels_last() ||
       weights.get_desc().is_channels_last();
-  static MkldnnMemory dummy_bias;
+  static ideep::tensor dummy_bias;
   compute_dispatch</*with_bias=*/false, true, true>(
       src,
       weights,
@@ -1474,11 +1474,11 @@ void convolution_forward_compute_v2(
 }
 
 void convolution_forward_compute_v3(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1524,10 +1524,10 @@ void convolution_forward_compute_v3(
 }
 
 void convolution_forward_compute_v3(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1537,7 +1537,7 @@ void convolution_forward_compute_v3(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind) {
-  static MkldnnMemory dummy_bias;
+  static ideep::tensor dummy_bias;
   compute_dispatch<false, true, true>(
       src,
       weights,
@@ -1557,12 +1557,12 @@ void convolution_forward_compute_v3(
 
 template <bool reorder_src, bool reorder_weight>
 void convolution_forward_compute_binary(
-    const MkldnnMemory& src,
-    const MkldnnMemory& other,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& other,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1611,11 +1611,11 @@ void convolution_forward_compute_binary(
 
 template <bool reorder_src, bool reorder_weight>
 void convolution_forward_compute_binary(
-    const MkldnnMemory& src,
-    const MkldnnMemory& other,
-    const MkldnnMemory& weights,
+    const ideep::tensor& src,
+    const ideep::tensor& other,
+    const ideep::tensor& weights,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1625,7 +1625,7 @@ void convolution_forward_compute_binary(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind) {
-  static MkldnnMemory dummy_bias;
+  static ideep::tensor dummy_bias;
   compute_binary_dispatch</*with_bias=*/false, reorder_src, reorder_weight>(
       src,
       other,
@@ -1644,7 +1644,7 @@ void convolution_forward_compute_binary(
       aprop_kind);
 }
 
-MkldnnMemory::desc convolution_forward_expected_weights_desc(
+ideep::tensor::desc convolution_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     dnnl::memory::data_type dtype,
     const dnnl::memory::dims& strides,
@@ -1690,10 +1690,10 @@ MkldnnMemory::desc convolution_forward_expected_weights_desc(
 }
 
 void convolution_backward_data_compute_v2(
-    const MkldnnMemory& diff_dst,
-    const MkldnnMemory& weights,
+    const ideep::tensor& diff_dst,
+    const ideep::tensor& weights,
     const dnnl::memory::dims& diff_src_dims,
-    MkldnnMemory& diff_src,
+    ideep::tensor& diff_src,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1701,7 +1701,7 @@ void convolution_backward_data_compute_v2(
     const int groups,
     bool is_channels_last,
     Attr op_attr) {
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   const auto aalgorithm = dnnl::algorithm::convolution_direct;
   if (is_avx2_vnni_2() &&
       one_of(
@@ -1714,7 +1714,7 @@ void convolution_backward_data_compute_v2(
   }
   // make weights and dilates compatible with DNNL
   auto weights_ = weights.make_grouped_weights(groups);
-  auto dilates_ = utils::get_compatible_dilates(dilates);
+  auto dilates_ = ideep::utils::get_compatible_dilates(dilates);
   auto format_tag = dnnl::memory::format_tag::any;
   auto ndims = diff_dst.get_desc().get_dims().size();
   if (ndims == 4) {
@@ -1728,7 +1728,7 @@ void convolution_backward_data_compute_v2(
   }
   auto diff_dst_desc = diff_dst.get_desc().to_format(format_tag);
   // align weight data type with diff_dst for bf16 and f16
-  auto weights_desc = MkldnnMemory::desc(
+  auto weights_desc = ideep::tensor::desc(
       weights_.get_dims(),
       diff_dst.get_data_type(),
       dnnl::memory::format_tag::any);
@@ -1736,13 +1736,13 @@ void convolution_backward_data_compute_v2(
     weights_desc = weights_desc.to_grouped(groups);
   }
 
-  auto diff_src_desc = MkldnnMemory::desc(
+  auto diff_src_desc = ideep::tensor::desc(
       diff_src_dims, diff_dst_desc.get_data_type(), format_tag);
 
   auto forward_hints = get_primitive_desc</*with_bias=*/false>(
       diff_src_desc,
       weights_desc,
-      MkldnnMemory::desc(),
+      ideep::tensor::desc(),
       diff_dst_desc,
       strides,
       dilates_,
@@ -1786,10 +1786,10 @@ void convolution_backward_data_compute_v2(
   // pd.diff_src_desc().
   diff_src.reinit_if_possible(pd.diff_src_desc());
 
-  MkldnnMemory scratchpad(pd.scratchpad_desc());
+  ideep::tensor scratchpad(pd.scratchpad_desc());
 
   dnnl::convolution_backward_data(pd).execute(
-      IStream::default_stream(),
+      ideep::stream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_WEIGHTS, expected_weights},
        {DNNL_ARG_DIFF_SRC, diff_src},
@@ -1797,11 +1797,11 @@ void convolution_backward_data_compute_v2(
 }
 
 void convolution_backward_weights_compute_v2(
-    const MkldnnMemory& src,
-    const MkldnnMemory& diff_dst,
+    const ideep::tensor& src,
+    const ideep::tensor& diff_dst,
     const dnnl::memory::dims& diff_weights_dims,
-    MkldnnMemory& diff_weights,
-    MkldnnMemory& diff_bias,
+    ideep::tensor& diff_weights,
+    ideep::tensor& diff_bias,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1825,10 +1825,10 @@ void convolution_backward_weights_compute_v2(
 }
 
 void convolution_backward_weights_compute_v2(
-    const MkldnnMemory& src,
-    const MkldnnMemory& diff_dst,
+    const ideep::tensor& src,
+    const ideep::tensor& diff_dst,
     const dnnl::memory::dims& diff_weights_dims,
-    MkldnnMemory& diff_weights,
+    ideep::tensor& diff_weights,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1836,7 +1836,7 @@ void convolution_backward_weights_compute_v2(
     int groups,
     bool is_channels_last,
     const Attr& attr) {
-  static MkldnnMemory dummy_diff_bias;
+  static ideep::tensor dummy_diff_bias;
   backward_weights_compute_impl</*with_diff_bias=*/false>(
       src,
       diff_dst,
@@ -1854,11 +1854,11 @@ void convolution_backward_weights_compute_v2(
 
 void convolution_forward_prepare(
     convolution_forward_params& param,
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1872,7 +1872,7 @@ void convolution_forward_prepare(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind,
-    const lowp_kind alowp_kind) {
+    const ideep::lowp_kind alowp_kind) {
   bool is_channels_last = src.get_desc().is_channels_last() ||
       weights.get_desc().is_channels_last();
   if (bias.is_empty()) {
@@ -1927,10 +1927,10 @@ void convolution_forward_prepare(
 template <bool reorder_src, bool reorder_weight>
 void convolution_forward_compute(
     const convolution_forward_params& param,
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
-    MkldnnMemory& dst) {
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    ideep::tensor& dst) {
   if (bias.is_empty()) {
     do_compute</*with_bias=*/false, reorder_src, reorder_weight>(
         param, src, weights, bias, dst);
@@ -1942,11 +1942,11 @@ void convolution_forward_compute(
 
 template <bool reorder_src, bool reorder_weight>
 void convolution_forward_compute(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weights,
-    const MkldnnMemory& bias,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
     const dnnl::memory::dims& dst_dims,
-    MkldnnMemory& dst,
+    ideep::tensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1960,7 +1960,7 @@ void convolution_forward_compute(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind,
-    const lowp_kind alowp_kind) {
+    const ideep::lowp_kind alowp_kind) {
   if (bias.is_empty()) {
     compute_dispatch</*with_bias=*/false, reorder_src, reorder_weight>(
         src,
@@ -2011,17 +2011,17 @@ void convolution_forward_compute(
 // The template arguments used by ATen callers.
 template void convolution_forward_compute<false, false>(
     const convolution_forward_params&,
-    const MkldnnMemory&,
-    const MkldnnMemory&,
-    const MkldnnMemory&,
-    MkldnnMemory&);
+    const ideep::tensor&,
+    const ideep::tensor&,
+    const ideep::tensor&,
+    ideep::tensor&);
 
 template void convolution_forward_compute<true, true>(
-    const MkldnnMemory&,
-    const MkldnnMemory&,
-    const MkldnnMemory&,
+    const ideep::tensor&,
+    const ideep::tensor&,
+    const ideep::tensor&,
     const dnnl::memory::dims&,
-    MkldnnMemory&,
+    ideep::tensor&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,
@@ -2035,15 +2035,15 @@ template void convolution_forward_compute<true, true>(
     const Attr&,
     dnnl::algorithm,
     dnnl::prop_kind,
-    const lowp_kind);
+    const ideep::lowp_kind);
 
 template void convolution_forward_compute_binary<true, true>(
-    const MkldnnMemory&,
-    const MkldnnMemory&,
-    const MkldnnMemory&,
-    const MkldnnMemory&,
+    const ideep::tensor&,
+    const ideep::tensor&,
+    const ideep::tensor&,
+    const ideep::tensor&,
     const dnnl::memory::dims&,
-    MkldnnMemory&,
+    ideep::tensor&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,
@@ -2054,11 +2054,11 @@ template void convolution_forward_compute_binary<true, true>(
     dnnl::algorithm,
     dnnl::prop_kind);
 template void convolution_forward_compute_binary<true, true>(
-    const MkldnnMemory&,
-    const MkldnnMemory&,
-    const MkldnnMemory&,
+    const ideep::tensor&,
+    const ideep::tensor&,
+    const ideep::tensor&,
     const dnnl::memory::dims&,
-    MkldnnMemory&,
+    ideep::tensor&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,

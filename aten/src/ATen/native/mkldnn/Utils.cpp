@@ -135,7 +135,7 @@ static AttrFunction attr_func_hardsigmoid =
     [](torch::List<std::optional<at::Scalar>> scalars,
        std::optional<std::string_view> algorithm) {
       mkldnn::Attr attr;
-      dnnl::post_ops po;
+      ideep::post_ops po;
       po.append_eltwise(
           dnnl::algorithm::eltwise_hardsigmoid, 1.0f / 6.0f, 0.5f);
       attr.set_post_ops(po);

@@ -52,9 +52,6 @@ def sample_inputs_softmax_variant(
         ((S, M, S), (2,)),
         *([((S, 0, 0), (-1,))] if use_zero_dimensions else []),
     ]
-    # MPS reduces 8192 or more short rows that are not innermost with one thread per row
-    if not requires_grad and torch.device(device).type == "mps":
-        cases.append(((2, 21, 4097), (1,)))
     kwargs = (
         dict(
             dtype=(

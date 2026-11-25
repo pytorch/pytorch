@@ -125,7 +125,7 @@ static void check_shape_forward(const Tensor& input,
 }
 
 #define MKLDNNTensor(itensor, options)                                  \
-  new_with_mkldnn_memory(                                              \
+  new_with_itensor_mkldnn(                                              \
       std::move(itensor),                                               \
       optTypeMetaToScalarType(options.dtype_opt()),                     \
       options.device_opt())
@@ -188,7 +188,7 @@ static void _mkldnn_convolution_out(
     const Tensor& weight_t,
     const Tensor& bias,
     std::vector<int64_t>& output_sizes,
-    mkldnn::MkldnnMemory& y,
+    ideep::tensor& y,
     IntArrayRef stride,
     IntArrayRef dilation,
     IntArrayRef padding,
@@ -199,11 +199,11 @@ static void _mkldnn_convolution_out(
   auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
-  const mkldnn::MkldnnMemory x = memory_from_const_tensor(input);
-  const mkldnn::MkldnnMemory w = memory_from_const_tensor(weight);
+  const ideep::tensor x = itensor_from_const_tensor(input);
+  const ideep::tensor w = itensor_from_const_tensor(weight);
   auto algo = dnnl::algorithm::convolution_direct;
   if (bias.defined()) {
-    const mkldnn::MkldnnMemory b = memory_from_const_tensor(bias);
+    const ideep::tensor b = itensor_from_const_tensor(bias);
     mkldnn::convolution_forward_compute_v3(
         x,
         w,
@@ -276,10 +276,10 @@ static Tensor _mkldnn_convolution(
 
   auto output_sizes = conv_output_size(input_t.sizes(), weight_t.sizes(), padding_expanded, stride_expanded, dilation_expanded);
   auto output = at::empty({0}, input_t.options());
-  mkldnn::MkldnnMemory y;
+  ideep::tensor y;
   if (use_channels_last) {
     output.resize_(output_sizes, memory_format);
-    y = memory_from_tensor(output);
+    y = itensor_from_tensor(output);
   }
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       input_t.scalar_type() == at::kFloat) {
@@ -455,19 +455,19 @@ Tensor mkldnn_convolution_pointwise_binary(
     auto output = at::empty(
         output_sizes,
         input_t.options().memory_format(memory_format));
-    const mkldnn::MkldnnMemory x = memory_from_const_tensor(input);
-    const mkldnn::MkldnnMemory w = memory_from_const_tensor(weight);
-    const mkldnn::MkldnnMemory z = memory_from_const_tensor(other);
-    mkldnn::MkldnnMemory y = memory_from_tensor(output);
+    const ideep::tensor x = itensor_from_const_tensor(input);
+    const ideep::tensor w = itensor_from_const_tensor(weight);
+    const ideep::tensor z = itensor_from_const_tensor(other);
+    ideep::tensor y = itensor_from_tensor(output);
     dnnl::memory::format_tag format_tag = dnnl::memory::format_tag::nhwc;
     if (input_t.ndimension() == 5) {
       format_tag = dnnl::memory::format_tag::ndhwc;
     }
-    auto other_desc = mkldnn::MkldnnMemory::desc(
+    auto other_desc = ideep::tensor::desc(
         other.sizes().vec(), get_mkldnn_dtype(other.scalar_type()), format_tag);
 
     mkldnn::Attr op_attr;
-    dnnl::post_ops po;
+    ideep::post_ops po;
     po.append_binary(it_binary->second, other_desc);
     if (unary_attr_value != "none") {
       po.append_eltwise(unary_alg, 0.f, 0.f);
@@ -483,7 +483,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     }
 
     if (bias.defined()) {
-      const mkldnn::MkldnnMemory b = memory_from_const_tensor(bias);
+      const ideep::tensor b = itensor_from_const_tensor(bias);
       mkldnn::convolution_forward_compute_binary(
           x,
           z,
@@ -611,7 +611,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
        other_t.is_contiguous(at::MemoryFormat::ChannelsLast3d));
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   if (can_be_fused) {
-    mkldnn::MkldnnMemory y = memory_from_tensor(other_t);
+    ideep::tensor y = itensor_from_tensor(other_t);
     mkldnn::Attr op_attr;
     if (unary_attr.has_value()) {
       op_attr = mkldnn::Attr::residual();
@@ -744,19 +744,19 @@ Tensor _mkldnn_convolution_transpose(
   auto output_sizes = conv_input_size(input.sizes(), weight_IOHW_sizes, padding_expanded, output_padding_expanded, stride_expanded, dilation_expanded, groups);
   auto output = at::empty({0}, input.options());
 
-  const mkldnn::MkldnnMemory x = memory_from_const_tensor(input);
+  const ideep::tensor x = itensor_from_const_tensor(input);
 
-  mkldnn::MkldnnMemory w = memory_from_const_tensor(weight);
+  ideep::tensor w = itensor_from_const_tensor(weight);
   if (!weight.is_mkldnn()) {
     // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
     // while PyTorch has IOHW or IODHW, `._transpose()` switches strides (no memory copy).
     w.transpose_(0, 1);
   }
 
-  mkldnn::MkldnnMemory y;
+  ideep::tensor y;
   if (use_channels_last) {
     output.resize_(output_sizes, memory_format);
-    y = memory_from_tensor(output);
+    y = itensor_from_tensor(output);
   }
 
   if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
@@ -767,7 +767,7 @@ Tensor _mkldnn_convolution_transpose(
   }
 
   if (bias.defined()) {
-    const mkldnn::MkldnnMemory b = memory_from_const_tensor(bias);
+    const ideep::tensor b = itensor_from_const_tensor(bias);
     mkldnn::convolution_transpose_forward_compute_v3(
         x,
         w,
@@ -846,14 +846,14 @@ Tensor mkldnn_convolution_backward_input(
     bool is_channels_last) {
   auto grad_input = at::empty({0}, grad_output.options());
 
-  auto grad_y = memory_from_const_tensor(grad_output);
-  auto w = memory_view_from_const_dense(weight);
+  auto grad_y = itensor_from_const_tensor(grad_output);
+  auto w = itensor_view_from_const_dense(weight);
 
-  mkldnn::MkldnnMemory grad_x;
+  ideep::tensor grad_x;
   if (is_channels_last) {
     auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     grad_input.resize_(input_size, memory_format);
-    grad_x = memory_from_tensor(grad_input);
+    grad_x = itensor_from_tensor(grad_input);
   }
   mkldnn::Attr op_attr = mkldnn::Attr();
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
@@ -910,10 +910,10 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
     int64_t groups,
     bool bias_defined,
     bool is_channels_last) {
-  const mkldnn::MkldnnMemory grad_y = memory_from_const_tensor(grad_output);
-  const mkldnn::MkldnnMemory x = memory_from_const_tensor(input);
+  const ideep::tensor grad_y = itensor_from_const_tensor(grad_output);
+  const ideep::tensor x = itensor_from_const_tensor(input);
 
-  mkldnn::MkldnnMemory grad_w, grad_b;
+  ideep::tensor grad_w, grad_b;
   mkldnn::Attr op_attr = mkldnn::Attr();
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       input.scalar_type() == at::kFloat) {
@@ -1063,14 +1063,14 @@ Tensor mkldnn_convolution_transpose_backward_input(
     bool is_channels_last) {
   auto grad_input = at::empty({0}, grad_output.options());
 
-  auto grad_y = memory_from_const_tensor(grad_output);
-  auto w = memory_view_from_const_dense(weight).transpose_(0, 1);
+  auto grad_y = itensor_from_const_tensor(grad_output);
+  auto w = itensor_view_from_const_dense(weight).transpose_(0, 1);
 
-  mkldnn::MkldnnMemory grad_x;
+  ideep::tensor grad_x;
   if (is_channels_last) {
     auto memory_format = mkldnn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     grad_input.resize_(input_size, memory_format);
-    grad_x = memory_from_tensor(grad_input);
+    grad_x = itensor_from_tensor(grad_input);
   }
   mkldnn::Attr op_attr = mkldnn::Attr();
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
@@ -1114,10 +1114,10 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
     int64_t groups,
     bool bias_defined,
     bool is_channels_last) {
-  auto grad_y = memory_from_const_tensor(grad_output);
-  auto x = memory_from_const_tensor(input);
+  auto grad_y = itensor_from_const_tensor(grad_output);
+  auto x = itensor_from_const_tensor(input);
 
-  mkldnn::MkldnnMemory grad_w, grad_b;
+  ideep::tensor grad_w, grad_b;
   mkldnn::Attr op_attr = mkldnn::Attr();
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       input.scalar_type() == at::kFloat) {

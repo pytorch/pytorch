@@ -30,7 +30,7 @@ Tensor& mkldnn_zero_(Tensor& self) {
 namespace at::native {
 
 Tensor& mkldnn_zero_(Tensor& self) {
-  mkldnn::MkldnnMemory& x = memory_from_mkldnn(self);
+  ideep::tensor& x = itensor_from_mkldnn(self);
   const int64_t nbytes = nbytes_from_mkldnn(self);
   if (nbytes == 0) {
     return self;

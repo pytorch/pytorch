@@ -1,18 +1,18 @@
 #include <ATen/native/mkldnn/detail/Eltwise.h>
-#include <ATen/native/mkldnn/detail/IdeepUtils.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 
 namespace at::native::mkldnn {
 
 void eltwise_forward(
-    const MkldnnMemory& src,
-    MkldnnMemory& dst,
+    const ideep::tensor& src,
+    ideep::tensor& dst,
     dnnl::algorithm algorithm,
     dnnl::prop_kind prop_kind,
     float alpha,
     float beta) {
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   auto src_in = src;
   // Quantized inputs are dequantized here for every algorithm except relu.
   if (algorithm != dnnl::algorithm::eltwise_relu &&
@@ -35,10 +35,10 @@ void eltwise_forward(
   if (src_in.has_scale()) {
     dst.set_scale(src_in.get_scale());
   }
-  MkldnnMemory scratchpad(pd.scratchpad_desc());
+  ideep::tensor scratchpad(pd.scratchpad_desc());
 
   dnnl::eltwise_forward(pd).execute(
-      IStream::default_stream(),
+      ideep::stream::default_stream(),
       {{DNNL_ARG_SRC, src_in},
        {DNNL_ARG_DST, dst},
        {DNNL_ARG_SCRATCHPAD, scratchpad}});
@@ -50,9 +50,9 @@ void eltwise_forward(
 }
 
 void eltwise_backward(
-    const MkldnnMemory& src,
-    const MkldnnMemory& diff_dst,
-    MkldnnMemory& diff_src,
+    const ideep::tensor& src,
+    const ideep::tensor& diff_dst,
+    ideep::tensor& diff_src,
     dnnl::algorithm algorithm,
     float alpha,
     float beta) {
@@ -65,7 +65,7 @@ void eltwise_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   auto src_desc = src.get_desc();
 
   auto forward_hints = dnnl::eltwise_forward::primitive_desc(
@@ -92,7 +92,7 @@ void eltwise_backward(
       op_attr);
 
   auto expected_diff_dst = diff_dst.reorder_if_differ_in(pd.diff_dst_desc());
-  MkldnnMemory expected_diff_src;
+  ideep::tensor expected_diff_src;
   if (diff_src.is_empty() || diff_src.get_desc() != pd.diff_src_desc()) {
     expected_diff_src.init(pd.diff_src_desc());
   } else {
@@ -110,9 +110,9 @@ void eltwise_backward(
   auto src_dst_arg = use_dst ? DNNL_ARG_DST : DNNL_ARG_SRC;
   auto expected_src_dst_desc = use_dst ? pd.dst_desc() : pd.src_desc();
   auto expected_src_dst = src.reorder_if_differ_in(expected_src_dst_desc);
-  MkldnnMemory scratchpad(pd.scratchpad_desc());
+  ideep::tensor scratchpad(pd.scratchpad_desc());
   dnnl::eltwise_backward(pd).execute(
-      IStream::default_stream(),
+      ideep::stream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {src_dst_arg, expected_src_dst},
        {DNNL_ARG_DIFF_SRC, expected_diff_src},

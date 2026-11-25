@@ -124,18 +124,18 @@ static bool use_mkldnn_tf32_matmul() {
 #endif
 }
 
-// returns an MkldnnMemory
+// returns an ideep::tensor
 // - dims: shape e.g: {M,N}
-// - idtype: oneDNN data type e.g: (f32, bf16, f16)
+// - idtype: ideep data type e.g: (f32, bf16, f16)
 // - strides: Memory layout
 // - data: data pointer
 template <typename scalar_t>
-inline mkldnn::MkldnnMemory make_ideep_tensor(
+inline ideep::tensor make_ideep_tensor(
     std::vector<int64_t> dims,
     dnnl::memory::data_type idtype,
     dnnl::memory::dims& strides,
     scalar_t *data){
-    mkldnn::MkldnnMemory res({
+    ideep::tensor res({
       dims,
       idtype,
       strides
@@ -193,10 +193,10 @@ mkldnn_gemm(
     idtype = dnnl::memory::data_type::f32;
   }
 
-  mkldnn::MkldnnMemory a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
-  mkldnn::MkldnnMemory b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
-  mkldnn::MkldnnMemory c = make_ideep_tensor<scalar_t>({n, m}, idtype, c_strides, c_data);
-  mkldnn::MkldnnMemory src = b;
+  ideep::tensor a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
+  ideep::tensor b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
+  ideep::tensor c = make_ideep_tensor<scalar_t>({n, m}, idtype, c_strides, c_data);
+  ideep::tensor src = b;
 
 #if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
   if constexpr (std::is_same_v<scalar_t, c10::Half>) {
@@ -215,10 +215,10 @@ mkldnn_gemm(
   mkldnn::matmul_forward(src, a, c, alpha, beta, op_attr);
 
   if (c.get_data_handle() != c_data){
-    // matmul_forward will query oneDNN expect format of output
-    // if given output format is not expected, matmul_forward will re-init an output buffer
+    // ideep will query oneDNN expect format of output
+    // if given output format is not expected, ideep will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
-    mkldnn::MkldnnMemory real_output = make_ideep_tensor<scalar_t>({n,m}, idtype, c_strides, c_data);
+    ideep::tensor real_output = make_ideep_tensor<scalar_t>({n,m}, idtype, c_strides, c_data);
     c.reorder_to(real_output);
   }
   return true;
@@ -261,17 +261,17 @@ mkldnn_gemm(
 
   auto idtype = dnnl::memory::data_type::bf16;
 
-  mkldnn::MkldnnMemory a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
-  mkldnn::MkldnnMemory b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
-  mkldnn::MkldnnMemory c = make_ideep_tensor<float>({n, m}, dnnl::memory::data_type::f32, c_strides, c_data);
+  ideep::tensor a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
+  ideep::tensor b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
+  ideep::tensor c = make_ideep_tensor<float>({n, m}, dnnl::memory::data_type::f32, c_strides, c_data);
 
   mkldnn::matmul_forward(b, a, c, alpha, beta, op_attr);
 
   if(c.get_data_handle() != c_data){
-    // matmul_forward will query onednn expect format of output
-    // if given output format is not expected, matmul_forward will re-init an output buffer
+    // ideep will query onednn expect format of output
+    // if given output format is not expected, ideep will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
-    mkldnn::MkldnnMemory real_output = make_ideep_tensor<float>({n,m}, idtype, c_strides, c_data);
+    ideep::tensor real_output = make_ideep_tensor<float>({n,m}, idtype, c_strides, c_data);
     c.reorder_to(real_output);
   }
 
@@ -420,15 +420,15 @@ void mkldnn_matmul(
   mat2_ = may_convert_to_default_contiguous_strides(mat2_);
 
   // mkldnn_matmul only proceed CPU tensor
-  const mkldnn::MkldnnMemory x = memory_view_from_const_dense(mat1_);
-  const mkldnn::MkldnnMemory w = memory_view_from_const_dense(mat2_);
-  mkldnn::MkldnnMemory y = memory_view_from_dense(result_unsqueezed);
+  const ideep::tensor x = itensor_view_from_const_dense(mat1_);
+  const ideep::tensor w = itensor_view_from_const_dense(mat2_);
+  ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
   mkldnn::matmul_forward(x, w, y, alpha, beta, op_attr);
   if (y.get_data_handle() != result.const_data_ptr()){
-    // matmul_forward will query onednn expect format of output
-    // if given output format is not expected, matmul_forward will re-init an output buffer
+    // ideep will query onednn expect format of output
+    // if given output format is not expected, ideep will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
-    mkldnn::MkldnnMemory public_y = memory_view_from_dense(result);
+    ideep::tensor public_y = itensor_view_from_dense(result);
     y.reorder_to(public_y);
   }
 
@@ -534,30 +534,30 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
-  // Create ITensors for oneDNN computation
+  // Create ideep tensors for oneDNN computation
   dnnl::memory::data_type src_dtype;
   if (mat1.scalar_type() == at::kByte) {
     src_dtype = dnnl::memory::data_type::u8;
   } else {
     src_dtype = dnnl::memory::data_type::s8;
   }
-  auto src = mkldnn::MkldnnMemory(
+  auto src = ideep::tensor(
       {mat1.sizes().vec(),
        src_dtype,
        mat1.strides().vec()},
       const_cast<void*>(mat1.const_data_ptr()));
-  auto wei = mkldnn::MkldnnMemory(
+  auto wei = ideep::tensor(
       {mat2.sizes().vec(),
        dnnl::memory::data_type::s8,
        mat2.strides().vec()},
       const_cast<void*>(mat2.const_data_ptr()));
-  auto dst = mkldnn::MkldnnMemory(
+  auto dst = ideep::tensor(
       {result.sizes().vec(),
        dnnl::memory::data_type::s32,
        result.strides().vec()},
       result.mutable_data_ptr());
   // Create primitive desc
-  auto engine = mkldnn::Engine::cpu_engine();
+  auto engine = ideep::engine::cpu_engine();
   mkldnn::Attr op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto src_desc = src.get_desc();
@@ -573,7 +573,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   // Reorder mat2 if needed
   auto expected_weight = wei.reorder_if_differ_in(prim_desc.weights_desc());
   // Prepare args for primitive
-  mkldnn::MkldnnMemory scratchpad(prim_desc.scratchpad_desc());
+  ideep::tensor scratchpad(prim_desc.scratchpad_desc());
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src});
   args.insert({DNNL_ARG_WEIGHTS, expected_weight});
@@ -581,7 +581,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
   // Create primitive and execute
   auto primitive = dnnl::matmul(prim_desc);
-  primitive.execute(mkldnn::IStream::default_stream(), args);
+  primitive.execute(ideep::stream::default_stream(), args);
 }
 
 template <typename a_type>

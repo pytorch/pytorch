@@ -12,8 +12,8 @@ namespace at::native::mkldnn {
 // Ported from ideep::sum::compute.
 void sum(
     const std::vector<float>& scales,
-    const std::vector<MkldnnMemory>& srcs,
-    MkldnnMemory& dst);
+    const std::vector<ideep::tensor>& srcs,
+    ideep::tensor& dst);
 
 } // namespace at::native::mkldnn
 

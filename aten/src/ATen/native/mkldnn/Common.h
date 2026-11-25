@@ -5,14 +5,14 @@
 
 #if AT_MKLDNN_ENABLED()
 
+#include <ideep/tensor.hpp>
 #include <ATen/native/mkldnn/detail/Attr.h>
-#include <ATen/native/mkldnn/detail/Memory.h>
 #include <utility>
 
 namespace at::native::mkldnn {
 
 struct ContextConv final {
-  MkldnnMemory weight_packed_;
+  ideep::tensor weight_packed_;
   std::optional<at::Tensor> at_bias_;
   std::vector<int64_t> padding_;
   std::vector<int64_t> stride_;
@@ -23,7 +23,7 @@ struct ContextConv final {
   ContextConv() = delete;
 
   ContextConv(
-      MkldnnMemory&& weight_packed,
+      ideep::tensor&& weight_packed,
       std::optional<at::Tensor> at_bias,
       std::vector<int64_t> padding,
       std::vector<int64_t> stride,

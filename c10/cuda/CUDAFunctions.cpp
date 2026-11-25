@@ -226,32 +226,29 @@ cudaError_t GetDeviceCount(int* dev_count) {
   return cudaGetDeviceCount(dev_count);
 }
 
-// CUDA 12+ eagerly creates a primary context when cudaSetDevice is called.
-// To avoid unnecessary context creation when restoring a device, device guard
-// destructors use MaybeSetDevice, and torch.cuda.device context managers use
-// MaybeExchangeDevice on exit. Deferred device switching is not enabled on
-// ROCm.
-//
-// If the requested device has a primary context, MaybeSetDevice calls
-// SetDevice, which clears the deferred index and calls cudaSetDevice if the
-// requested device is not current. If the requested device has no primary
-// context, MaybeSetDevice only records it as the deferred index.
-// GetDevice reports the deferred index when one is set, without querying the
-// CUDA runtime. If the deferred index is not set, it calls cudaGetDevice to
-// get the CUDA runtime's current device.
-// This preserves lazy context creation for applications like this:
+// This is a codepath for CUDA 12 that comes with a critical change in behavior
+// of `cudaSetDevice`. Unlike to previous CUDA versions that allocate context
+// lazily CUDA 12.x eagerly allocates primary context the moment `cudaSetDevice`
+// is called. This can lead to dramatic consequences and pollute the device
+// memory in distributed runs. To avoid unnecessary context creation a new
+// function called `MaybeSetDevice` was introduced. This function is to be
+// called in device guard destructor and at the exit of torch.cuda.device
+// context manager. The behavior of `MaybeSetDevice` is quite simple, it calls
+// to `cudaSetDevice` if context already exist or if context was not allocated
+// on targeted device it simply saves the device index. This way we can keep
+// PyTorch backward compatible for applications like this:
 //
 // ```
 // import torch
-// x = torch.empty(1, device="cuda:1")  # no context on cuda:0 after this call
-// y = torch.empty(1, device="cuda")    # creates a context on cuda:0
+// x = torch.empty(1, device=“cuda:1”) # no CUDA context on cuda:0 after this
+// call y = torch.empty(1, device=“cuda”) # CUDA context is created on cuda:0
 // ```
 #if CUDA_VERSION >= 12000
-thread_local static DeviceIndex deferredDeviceIndex = -1;
+thread_local static DeviceIndex targetDeviceIndex = -1;
 
 cudaError_t GetDevice(DeviceIndex* device) {
-  if (deferredDeviceIndex >= 0) {
-    *device = deferredDeviceIndex;
+  if (targetDeviceIndex >= 0) {
+    *device = targetDeviceIndex;
     return cudaSuccess;
   }
   int tmp_device = -1;
@@ -267,12 +264,10 @@ cudaError_t GetDevice(DeviceIndex* device) {
   return err;
 }
 
-// Clear the deferred device index and call cudaSetDevice if force is true or
-// the requested device differs from the runtime's current device.
 cudaError_t SetDevice(DeviceIndex device, const bool force) {
   TORCH_CHECK(
       device >= 0, "device id must be non-negative!", static_cast<int>(device));
-  deferredDeviceIndex = -1;
+  targetDeviceIndex = -1;
   if (force) {
     return cudaSetDevice(device);
   }
@@ -288,20 +283,15 @@ cudaError_t MaybeSetDevice(DeviceIndex device) {
   if (hasPrimaryContext(device)) {
     return c10::cuda::SetDevice(device);
   }
-  deferredDeviceIndex = device;
+  targetDeviceIndex = device;
   return cudaSuccess;
 }
 
-// Switch to to_device and return the previous device index, which is either
-// the deferred index if it was previously set, or the runtime's current device.
-// If there was no device deferred and to_device is already current, no switch
-// is needed, in this case no CUDA context if forced to be initialized. In all
-// other cases, ExchangeDevice calls cudaSetDevice(to_device), initializing its
-// primary context if it was uninitialized. ExchangeDevice clears the deferred
-// index in any scenario.
+// This function always initializes the CUDA context
+// on to_device
 DeviceIndex ExchangeDevice(DeviceIndex to_device) {
-  auto cur_device = deferredDeviceIndex;
-  deferredDeviceIndex = -1;
+  auto cur_device = targetDeviceIndex;
+  targetDeviceIndex = -1;
   if (cur_device < 0) {
     int tmp_device = -1;
     C10_CUDA_CHECK(cudaGetDevice(&tmp_device));
@@ -314,10 +304,8 @@ DeviceIndex ExchangeDevice(DeviceIndex to_device) {
   return cur_device;
 }
 
-// Return the runtime's current device. If to_device is already current, return
-// without changing the deferred index. Otherwise, call cudaSetDevice if
-// to_device has a primary context, or save to_device as the deferred index if
-// it does not. Calling cudaSetDevice here leaves any deferred index unchanged.
+// This function does not initialize the CUDA context
+// on to_device if it does not already exist
 DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
   int tmp_cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&tmp_cur_device));
@@ -333,15 +321,14 @@ DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
   if (hasPrimaryContext(to_device)) {
     C10_CUDA_CHECK(cudaSetDevice(to_device));
   } else {
-    deferredDeviceIndex = to_device;
+    targetDeviceIndex = to_device;
   }
   return cur_device;
 }
 
-// Apply the deferred device index, if any, via SetDevice.
 void SetTargetDevice() {
-  if (deferredDeviceIndex >= 0) {
-    C10_CUDA_CHECK(c10::cuda::SetDevice(deferredDeviceIndex));
+  if (targetDeviceIndex >= 0) {
+    C10_CUDA_CHECK(c10::cuda::SetDevice(targetDeviceIndex));
   }
 }
 #else
@@ -392,7 +379,7 @@ DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
 }
 
 void SetTargetDevice() {
-  // No deferred device switching on CUDA < 12 or ROCm.
+  // no-op on CUDA version < 12.x
 }
 #endif
 

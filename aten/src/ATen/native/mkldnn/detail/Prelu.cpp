@@ -1,16 +1,16 @@
 #include <ATen/native/mkldnn/detail/Prelu.h>
-#include <ATen/native/mkldnn/detail/IdeepUtils.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 
 namespace at::native::mkldnn {
 
 void prelu_forward(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weight,
-    MkldnnMemory& dst,
+    const ideep::tensor& src,
+    const ideep::tensor& weight,
+    ideep::tensor& dst,
     dnnl::prop_kind prop_kind) {
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   auto weight_in = weight;
   if (src.ndims() != weight.ndims()) {
     dnnl::memory::dims dim_w(src.ndims(), 1);
@@ -30,10 +30,10 @@ void prelu_forward(
   // May replace dst's buffer and layout when they differ from pd.dst_desc().
   dst.reinit_if_possible(pd.dst_desc());
 
-  MkldnnMemory scratchpad(pd.scratchpad_desc());
+  ideep::tensor scratchpad(pd.scratchpad_desc());
 
   dnnl::prelu_forward(pd).execute(
-      IStream::default_stream(),
+      ideep::stream::default_stream(),
       {{DNNL_ARG_SRC, src},
        {DNNL_ARG_WEIGHTS, expected_weights},
        {DNNL_ARG_DST, dst},
@@ -41,11 +41,11 @@ void prelu_forward(
 }
 
 void prelu_backward(
-    const MkldnnMemory& src,
-    const MkldnnMemory& weight,
-    const MkldnnMemory& diff_dst,
-    MkldnnMemory& diff_src,
-    MkldnnMemory& diff_weight) {
+    const ideep::tensor& src,
+    const ideep::tensor& weight,
+    const ideep::tensor& diff_dst,
+    ideep::tensor& diff_src,
+    ideep::tensor& diff_weight) {
   if (is_avx2_vnni_2() &&
       one_of(
           diff_dst.get_data_type(),
@@ -55,7 +55,7 @@ void prelu_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   auto weight_dims = weight.get_dims();
   auto weight_in = weight;
   if (src.ndims() != weight.ndims()) {
@@ -68,7 +68,7 @@ void prelu_backward(
   auto weight_desc = weight_in.get_desc().to_format_any();
   auto diff_dst_desc = diff_dst.get_desc();
   auto diff_weights_desc =
-      MkldnnMemory::desc(
+      ideep::tensor::desc(
           weight_in.get_dims(),
           diff_dst.get_data_type(),
           dnnl::memory::format_tag::any)
@@ -97,10 +97,10 @@ void prelu_backward(
   diff_src.reinit_if_possible(pd.diff_src_desc());
   diff_weight.reinit_if_possible(pd.diff_weights_desc());
 
-  MkldnnMemory scratchpad(pd.scratchpad_desc());
+  ideep::tensor scratchpad(pd.scratchpad_desc());
 
   dnnl::prelu_backward(pd).execute(
-      IStream::default_stream(),
+      ideep::stream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_WEIGHTS, expected_weights},

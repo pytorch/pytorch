@@ -1,19 +1,19 @@
 #include <ATen/native/mkldnn/detail/BatchNorm.h>
-#include <ATen/native/mkldnn/detail/IdeepUtils.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 
 namespace at::native::mkldnn {
 
 void batch_normalization_forward_inference(
-    const MkldnnMemory& src,
-    const MkldnnMemory& mean,
-    const MkldnnMemory& variance,
-    const MkldnnMemory& scale,
-    const MkldnnMemory& shift,
-    MkldnnMemory& dst,
+    const ideep::tensor& src,
+    const ideep::tensor& mean,
+    const ideep::tensor& variance,
+    const ideep::tensor& scale,
+    const ideep::tensor& shift,
+    ideep::tensor& dst,
     float epsilon) {
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   const auto pd_flags = dnnl::normalization_flags::use_scale |
       dnnl::normalization_flags::use_shift |
       dnnl::normalization_flags::use_global_stats;
@@ -35,12 +35,12 @@ void batch_normalization_forward_inference(
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
   // May replace dst's buffer and layout when they differ from pd.dst_desc().
   dst.reinit_if_possible(pd.dst_desc());
-  MkldnnMemory scratchpad(pd.scratchpad_desc());
+  ideep::tensor scratchpad(pd.scratchpad_desc());
 
   auto expected_mean = mean.reorder_if_differ_in(pd.mean_desc());
   auto expected_var = variance.reorder_if_differ_in(pd.variance_desc());
   dnnl::batch_normalization_forward(pd).execute(
-      IStream::default_stream(),
+      ideep::stream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_SCALE, scale},
        {DNNL_ARG_SHIFT, shift},
@@ -51,14 +51,14 @@ void batch_normalization_forward_inference(
 }
 
 void batch_normalization_forward_training(
-    const MkldnnMemory& src,
-    const MkldnnMemory& scale,
-    const MkldnnMemory& shift,
-    MkldnnMemory& dst,
-    MkldnnMemory& mean,
-    MkldnnMemory& variance,
+    const ideep::tensor& src,
+    const ideep::tensor& scale,
+    const ideep::tensor& shift,
+    ideep::tensor& dst,
+    ideep::tensor& mean,
+    ideep::tensor& variance,
     float epsilon) {
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   const auto pd_flags = dnnl::normalization_flags::use_scale |
       dnnl::normalization_flags::use_shift;
 
@@ -83,10 +83,10 @@ void batch_normalization_forward_training(
   mean.reinit_if_possible(pd.mean_desc());
   variance.reinit_if_possible(pd.variance_desc());
   dst.reinit_if_possible(pd.dst_desc());
-  MkldnnMemory scratchpad(pd.scratchpad_desc());
+  ideep::tensor scratchpad(pd.scratchpad_desc());
 
   dnnl::batch_normalization_forward(pd).execute(
-      IStream::default_stream(),
+      ideep::stream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_SCALE, scale},
        {DNNL_ARG_SHIFT, shift},
@@ -97,14 +97,14 @@ void batch_normalization_forward_training(
 }
 
 void batch_normalization_backward(
-    const MkldnnMemory& src,
-    const MkldnnMemory& mean,
-    const MkldnnMemory& variance,
-    const MkldnnMemory& diff_dst,
-    const MkldnnMemory& scale,
-    MkldnnMemory& diff_src,
-    MkldnnMemory& diff_scale,
-    MkldnnMemory& diff_shift,
+    const ideep::tensor& src,
+    const ideep::tensor& mean,
+    const ideep::tensor& variance,
+    const ideep::tensor& diff_dst,
+    const ideep::tensor& scale,
+    ideep::tensor& diff_src,
+    ideep::tensor& diff_scale,
+    ideep::tensor& diff_shift,
     float epsilon) {
   if (is_avx2_vnni_2() &&
       one_of(
@@ -115,7 +115,7 @@ void batch_normalization_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = Engine::cpu_engine();
+  const auto& engine = ideep::engine::cpu_engine();
   const auto pd_flags = dnnl::normalization_flags::use_scale |
       dnnl::normalization_flags::use_shift;
   // Workaround for oneDNN issue intel/mkl-dnn#588 (kept from ideep).
@@ -152,10 +152,10 @@ void batch_normalization_backward(
   diff_scale.reinit_if_possible(scale.get_desc());
   diff_shift.reinit_if_possible(scale.get_desc());
 
-  MkldnnMemory scratchpad(pd.scratchpad_desc());
+  ideep::tensor scratchpad(pd.scratchpad_desc());
 
   dnnl::batch_normalization_backward(pd).execute(
-      IStream::default_stream(),
+      ideep::stream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_SCALE, scale},

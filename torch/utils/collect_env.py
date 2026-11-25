@@ -118,15 +118,6 @@ PIP_PATTERNS = [
 ]
 
 
-def _decode_output(data, enc):
-    for candidate in (enc, "utf-8"):
-        try:
-            return data.decode(candidate)
-        except UnicodeDecodeError:
-            pass
-    return data.decode(enc, errors="replace")
-
-
 def run(command):
     """Return (return-code, stdout, stderr)."""
     shell = type(command) is str
@@ -139,8 +130,8 @@ def run(command):
         enc = "oem"
     else:
         enc = locale.getpreferredencoding()
-    output = _decode_output(raw_output, enc)
-    err = _decode_output(raw_err, enc)
+    output = raw_output.decode(enc)
+    err = raw_err.decode(enc)
     return rc, output.strip(), err.strip()
 
 

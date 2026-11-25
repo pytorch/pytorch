@@ -31,38 +31,38 @@ Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
         "mkldnn_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
-  const mkldnn::MkldnnMemory& x = memory_from_mkldnn(input);
-  const mkldnn::MkldnnMemory& w = memory_from_const_tensor(weight);
+  const ideep::tensor& x = itensor_from_mkldnn(input);
+  const ideep::tensor& w = itensor_from_const_tensor(weight);
 
-  mkldnn::MkldnnMemory y;
+  ideep::tensor y;
   mkldnn::prelu_forward(
       x, w, y, dnnl::prop_kind::forward_training);
-  return new_with_mkldnn_memory(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
                                  input.options().device_opt());
 }
 
 std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, const Tensor& input, const Tensor& weight) {
-  const mkldnn::MkldnnMemory& x = memory_from_mkldnn(input);
-  const mkldnn::MkldnnMemory& w = memory_from_const_tensor(weight);
-  const mkldnn::MkldnnMemory grady = memory_from_mkldnn(grad_output);
-  mkldnn::MkldnnMemory gradx;
-  mkldnn::MkldnnMemory gradw;
+  const ideep::tensor& x = itensor_from_mkldnn(input);
+  const ideep::tensor& w = itensor_from_const_tensor(weight);
+  const ideep::tensor grady = itensor_from_mkldnn(grad_output);
+  ideep::tensor gradx;
+  ideep::tensor gradw;
 
   mkldnn::prelu_backward(x, w, grady, gradx, gradw);
   if (weight.is_mkldnn()) {
     return std::make_tuple(
-        new_with_mkldnn_memory(std::move(gradx),
+        new_with_itensor_mkldnn(std::move(gradx),
                                 optTypeMetaToScalarType(grad_output.options().dtype_opt()),
                                 grad_output.options().device_opt()),
-        new_with_mkldnn_memory(std::move(gradw),
+        new_with_itensor_mkldnn(std::move(gradw),
                                 optTypeMetaToScalarType(weight.options().dtype_opt()),
                                 weight.options().device_opt()));
   } else {
     return std::make_tuple(
-        new_with_mkldnn_memory(std::move(gradx),
+        new_with_itensor_mkldnn(std::move(gradx),
                                 optTypeMetaToScalarType(grad_output.options().dtype_opt()),
                                 grad_output.options().device_opt()),
-        mkldnn_to_dense(new_with_mkldnn_memory(std::move(gradw),
+        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw),
                                                 optTypeMetaToScalarType(weight.options().dtype_opt()),
                                                 weight.options().device_opt())));
   }

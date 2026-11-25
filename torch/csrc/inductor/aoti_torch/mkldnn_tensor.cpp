@@ -3,6 +3,7 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ideep.hpp>
 #endif
 
 namespace torch::aot_inductor {
