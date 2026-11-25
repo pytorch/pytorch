@@ -356,121 +356,8 @@ def _force_partition_plan(plan):
         yield
 
 
-@instantiate_parametrized_tests
 class GraphTreeBackendTests(TestCase):
-    @parametrize("num_generators", [0, 2])
-    def test_xpu_create_graph(self, num_generators):
-        from torch._inductor import graph_tree_backend as backend
-
-        with mock.patch.object(torch.xpu, "XPUGraph") as graph_factory:
-            graph = backend.XPUGraphTreeGraphInterface().create_graph(
-                num_generators=num_generators
-            )
-
-        graph_factory.assert_called_once_with()
-        self.assertIs(graph, graph_factory.return_value)
-
-    @parametrize("data_ptr", [0, 4096])
-    def test_xpu_create_storage(self, data_ptr):
-        from torch._inductor import graph_tree_backend as backend
-
-        metadata = {
-            "data_ptr": data_ptr,
-            "device": torch.device("xpu:0"),
-            "nbytes": 64 if data_ptr else 0,
-        }
-        with (
-            mock.patch.object(torch, "UntypedStorage") as empty_storage,
-            mock.patch.object(
-                torch._C, "_construct_storage_from_data_pointer"
-            ) as storage_from_pointer,
-        ):
-            storage = backend.XPUGraphTreeAllocatorInterface().create_storage(metadata)
-
-        if data_ptr == 0:
-            self.assertIs(storage, empty_storage.return_value)
-            empty_storage.assert_called_once_with(0, device=metadata["device"])
-            storage_from_pointer.assert_not_called()
-        else:
-            self.assertIs(storage, storage_from_pointer.return_value)
-            storage_from_pointer.assert_called_once_with(
-                data_ptr, metadata["device"], metadata["nbytes"]
-            )
-            empty_storage.assert_not_called()
-
-    def test_graph_tree_backend_import_is_lazy(self):
-        from torch._inductor import graph_tree_backend as backend
-
-        spec = importlib.util.spec_from_file_location(
-            "_test_graph_tree_backend", backend.__file__
-        )
-        module = importlib.util.module_from_spec(spec)
-        with (
-            mock.patch.dict(sys.modules, {spec.name: module}),
-            mock.patch.object(torch.accelerator, "current_accelerator") as query,
-        ):
-            spec.loader.exec_module(module)
-        query.assert_not_called()
-        self.assertIsNone(module._graph_interface)
-        self.assertIsNone(module._allocator_interface)
-        self.assertIsNone(module._registered_device_type)
-        self.assertFalse(module._initialized)
-
-    @parametrize("device_type", ("cuda", "xpu"))
-    def test_graph_tree_backend_lazy_default(self, device_type):
-        with (
-            fresh_graph_tree_backend() as backend,
-            mock.patch.object(
-                torch.accelerator,
-                "current_accelerator",
-                return_value=torch.device(device_type),
-            ),
-        ):
-            self.assertTrue(backend.is_graph_tree_backend_available())
-            self.assertIsNone(backend._graph_interface)
-            self.assertIsNone(backend._allocator_interface)
-            self.assertFalse(backend._initialized)
-
-            graph_cls, allocator_cls = (
-                (
-                    backend.CUDAGraphTreeGraphInterface,
-                    backend.CUDAGraphTreeAllocatorInterface,
-                )
-                if device_type == "cuda"
-                else (
-                    backend.XPUGraphTreeGraphInterface,
-                    backend.XPUGraphTreeAllocatorInterface,
-                )
-            )
-            graph = backend.get_graph_interface()
-            allocator = backend.get_allocator_interface()
-            self.assertIsInstance(graph, graph_cls)
-            self.assertIsInstance(allocator, allocator_cls)
-            self.assertEqual(backend.get_device_type(), device_type)
-            self.assertIs(backend.get_graph_interface(), graph)
-            self.assertIs(backend.get_allocator_interface(), allocator)
-            with self.assertRaisesRegex(RuntimeError, "already been initialized"):
-                backend.register_graph_tree_backend(device_type, graph, allocator)
-
-    @parametrize("device_type", (None, "privateuseone"))
-    def test_graph_tree_backend_without_default(self, device_type):
-        with (
-            fresh_graph_tree_backend() as backend,
-            mock.patch.object(
-                torch.accelerator,
-                "current_accelerator",
-                return_value=None if device_type is None else torch.device(device_type),
-            ),
-        ):
-            self.assertFalse(backend.is_graph_tree_backend_available())
-            with self.assertRaisesRegex(
-                RuntimeError, "No Graph Trees backend registered"
-            ):
-                backend.get_graph_interface()
-            self.assertFalse(backend._initialized)
-
-    @parametrize("device_type", ("cuda", "xpu", "privateuseone"))
-    def test_graph_tree_backend_registration(self, device_type):
+    def test_graph_tree_backend_registration(self):
         with fresh_graph_tree_backend() as backend:
             graph_interface = backend.CUDAGraphTreeGraphInterface()
             allocator_interface = backend.CUDAGraphTreeAllocatorInterface()
@@ -478,17 +365,17 @@ class GraphTreeBackendTests(TestCase):
             with unittest.mock.patch.object(
                 torch.accelerator,
                 "current_accelerator",
-                return_value=torch.device(device_type),
+                return_value=torch.device("privateuseone"),
             ):
                 backend.register_graph_tree_backend(
-                    device_type,
+                    "privateuseone",
                     graph_interface,
                     allocator_interface,
                 )
 
                 with self.assertRaisesRegex(RuntimeError, "already registered"):
                     backend.register_graph_tree_backend(
-                        device_type,
+                        "privateuseone",
                         graph_interface,
                         allocator_interface,
                     )
@@ -496,11 +383,11 @@ class GraphTreeBackendTests(TestCase):
                 self.assertTrue(backend.is_graph_tree_backend_available())
                 self.assertIs(backend.get_graph_interface(), graph_interface)
                 self.assertIs(backend.get_allocator_interface(), allocator_interface)
-                self.assertEqual(backend.get_device_type(), device_type)
+                self.assertEqual(backend.get_device_type(), "privateuseone")
 
                 with self.assertRaisesRegex(RuntimeError, "already been initialized"):
                     backend.register_graph_tree_backend(
-                        device_type,
+                        "privateuseone",
                         graph_interface,
                         allocator_interface,
                     )

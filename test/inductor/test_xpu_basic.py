@@ -80,6 +80,7 @@ class XpuBasicTests(TestCase):
 
         x = torch.randn(16, device="xpu")
         expected = fn(x)
+        # clear the registered backends to simulate unregistered state
         with (
             mock.patch.multiple(
                 graph_tree_backend,
