@@ -9,7 +9,7 @@ void binary(
     const MkldnnMemory& src1,
     MkldnnMemory& dst,
     dnnl::algorithm algorithm) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto src0_desc = src0.get_desc();
   auto src1_desc = src1.get_desc();
   auto dst_desc = src0_desc.to_format_any();
@@ -28,7 +28,7 @@ void binary(
   dst.reinit_if_possible(pd.dst_desc());
 
   dnnl::binary(pd).execute(
-      ideep::stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_0, expected_src0},
        {DNNL_ARG_SRC_1, expected_src1},
        {DNNL_ARG_DST, dst},

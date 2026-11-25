@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/Lstm.h>
-#include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/IdeepUtils.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -17,7 +17,7 @@ void lstm_forward_inference(
     MkldnnMemory& dst_iter_c,
     bool reverse,
     dnnl::prop_kind prop_kind) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
 
@@ -72,7 +72,7 @@ void lstm_forward_inference(
   MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_forward(pd).execute(
-      ideep::stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},
@@ -95,7 +95,7 @@ lstm_forward_inference_expected_weights_desc(
     const MkldnnMemory& weights_iter,
     const MkldnnMemory& bias,
     bool reverse) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
 
@@ -156,7 +156,7 @@ dnnl::lstm_forward::primitive_desc lstm_forward_training_prepare(
     const MkldnnMemory& dst_iter,
     const MkldnnMemory& dst_iter_c,
     bool reverse) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
 
@@ -207,7 +207,7 @@ void lstm_forward_training(
   MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_forward(pd).execute(
-      ideep::stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},
@@ -252,7 +252,7 @@ void lstm_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   constexpr auto f32 = dnnl::memory::data_type::f32;
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
@@ -331,7 +331,7 @@ void lstm_backward(
   MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_backward(pd).execute(
-      ideep::stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},

@@ -467,7 +467,7 @@ Tensor mkldnn_convolution_pointwise_binary(
         other.sizes().vec(), get_mkldnn_dtype(other.scalar_type()), format_tag);
 
     mkldnn::Attr op_attr;
-    ideep::post_ops po;
+    dnnl::post_ops po;
     po.append_binary(it_binary->second, other_desc);
     if (unary_attr_value != "none") {
       po.append_eltwise(unary_alg, 0.f, 0.f);

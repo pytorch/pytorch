@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/Matmul.h>
-#include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/IdeepUtils.h>
 #include <ATen/native/mkldnn/detail/PrimitiveCache.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -127,7 +127,7 @@ void do_prepare(
     int scale_size = 1;
     op_attr.set_scales(
         DNNL_ARG_SRC,
-        ideep::utils::op_scale_mask(scale_size),
+        utils::op_scale_mask(scale_size),
         std::vector<float>(1, dst_coeff));
   }
 
@@ -143,7 +143,7 @@ void do_prepare(
     dst_desc = dst.get_desc().to_type(dst_data_type);
   }
 
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
 #ifdef __aarch64__
   if (with_bias) {
     param.pd = dnnl::matmul::primitive_desc(
@@ -206,7 +206,7 @@ void do_prepare_static_quant(
     const float sum_coeff = 1.0f, // for post-op sum
     const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::u8,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8) {
+    const lowp_kind alowp_kind = u8s8) {
 #ifndef NDEBUG
   dnnl::error::wrap_c_api(
       src.ndims() == weights.ndims() ? dnnl_success : dnnl_invalid_arguments,
@@ -229,19 +229,19 @@ void do_prepare_static_quant(
   }
 
   auto& weights_scales_in =
-      weights_scales.empty() ? ideep::IDEEP_DEF_SCALE : weights_scales;
+      weights_scales.empty() ? DEF_SCALE : weights_scales;
 
 #ifndef NDEBUG
   dnnl::error::wrap_c_api(
-      alowp_kind == ideep::u8s8 || alowp_kind == ideep::s8s8
+      alowp_kind == u8s8 || alowp_kind == s8s8
           ? dnnl_success
           : dnnl_invalid_arguments,
       "Unsupported lowp kind");
 #endif
 
   auto src_scales_in =
-      src_scales.empty() ? ideep::IDEEP_DEF_SCALE : src_scales;
-  auto src_data_type = (alowp_kind == ideep::u8s8)
+      src_scales.empty() ? DEF_SCALE : src_scales;
+  auto src_data_type = (alowp_kind == u8s8)
       ? dnnl::memory::data_type::u8
       : dnnl::memory::data_type::s8;
   src_desc = MkldnnMemory::desc(
@@ -257,13 +257,13 @@ void do_prepare_static_quant(
   weights_desc = weights.get_desc();
   if (weights.get_data_type() == dnnl::memory::data_type::f32) {
     weights_attr = {
-        ideep::utils::tensor_scale_mask(scale_size, false), weights_scales_in};
+        utils::tensor_scale_mask(scale_size, false), weights_scales_in};
   }
 
   // determine dst data type
   if (dst.get_data_type() != dnnl::memory::data_type::undef) {
     dst_data_type = dst.get_data_type();
-  } else if (dst_scales.empty() || dst_scales == ideep::IDEEP_DEF_SCALE) {
+  } else if (dst_scales.empty() || dst_scales == DEF_SCALE) {
     dst_data_type = dnnl::memory::data_type::f32;
   } else {
     dst_data_type = dnnl::memory::data_type::u8;
@@ -272,13 +272,13 @@ void do_prepare_static_quant(
   // fill primitive attr
   dst_scales_in =
       (dst_scales.empty() || dst_data_type == dnnl::memory::data_type::f32)
-      ? ideep::IDEEP_DEF_SCALE
+      ? DEF_SCALE
       : dst_scales;
   const auto& src_zero_point = src.has_zero_point() ? src.get_zero_point()
-      : src_zero_points.empty()                     ? ideep::IDEEP_DEF_ZP
+      : src_zero_points.empty()                     ? DEF_ZP
                                                     : src_zero_points;
   const auto& dst_zero_point = dst.has_zero_point() ? dst.get_zero_point()
-      : dst_zero_points.empty()                     ? ideep::IDEEP_DEF_ZP
+      : dst_zero_points.empty()                     ? DEF_ZP
                                                     : dst_zero_points;
 #ifndef NDEBUG
   const auto src_zero_point_size =
@@ -301,7 +301,7 @@ void do_prepare_static_quant(
   if (src_scales_in[0] != 1.0f) {
     op_attr.set_scales(
         DNNL_ARG_SRC,
-        ideep::utils::op_scale_mask(src_scales_in.size()),
+        utils::op_scale_mask(src_scales_in.size()),
         src_scales_in);
   }
   auto wei_scales = weights_scales_in;
@@ -313,7 +313,7 @@ void do_prepare_static_quant(
     }
     op_attr.set_scales(
         DNNL_ARG_WEIGHTS,
-        ideep::utils::op_scale_mask(wei_scales.size()),
+        utils::op_scale_mask(wei_scales.size()),
         wei_scales);
   }
   for (auto& s : dst_scales_in) {
@@ -322,13 +322,13 @@ void do_prepare_static_quant(
   if (dst_scales_in[0] != 1.0f) {
     op_attr.set_scales(
         DNNL_ARG_DST,
-        ideep::utils::op_scale_mask(dst_scales_in.size()),
+        utils::op_scale_mask(dst_scales_in.size()),
         dst_scales_in);
   }
   if (src_zero_point[0] != 0) {
     op_attr.set_zero_points(
         DNNL_ARG_SRC,
-        ideep::utils::tensor_zp_mask(src_zero_point.size()),
+        utils::tensor_zp_mask(src_zero_point.size()),
         src_zero_point);
   }
   if (src.get_data_type() == dnnl::memory::data_type::f32) {
@@ -336,14 +336,14 @@ void do_prepare_static_quant(
     // First arg should be DNNL_ARG_DST rather than DNNL_ARG_SRC
     src_attr.set_zero_points(
         DNNL_ARG_DST,
-        ideep::utils::tensor_zp_mask(src_zero_point.size()),
+        utils::tensor_zp_mask(src_zero_point.size()),
         src_zero_point);
   }
   if (dst_data_type != dnnl::memory::data_type::f32 &&
       dst_zero_point[0] != 0) {
     op_attr.set_zero_points(
         DNNL_ARG_DST,
-        ideep::utils::tensor_zp_mask(dst_zero_point.size()),
+        utils::tensor_zp_mask(dst_zero_point.size()),
         dst_zero_point);
   }
 
@@ -366,7 +366,7 @@ void do_prepare_static_quant(
   if (!dst.is_empty()) {
     dst_desc = dst.get_desc().to_type(dst_data_type);
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
 #ifdef __aarch64__
   if (with_bias) {
     param.pd = dnnl::matmul::primitive_desc(
@@ -435,7 +435,7 @@ void do_prepare_dynamic_quant(
     const float sum_coeff = 1.0f, // for post-op sum
     const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::f32,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8) {
+    const lowp_kind alowp_kind = u8s8) {
   /* This function does the following things:
    * - Determine expected descs of src/weight/dst
    * - Use runtime values for op attributes
@@ -470,7 +470,7 @@ void do_prepare_dynamic_quant(
   auto& weights_scales_in =
       weights.has_scale() ? weights.get_scale() : weights_scales;
 
-  auto src_data_type = alowp_kind == ideep::s8s8 ? dnnl::memory::data_type::s8
+  auto src_data_type = alowp_kind == s8s8 ? dnnl::memory::data_type::s8
                                                  : dnnl::memory::data_type::u8;
   std::vector<int64_t> src_strides = (ndims == 3)
       ? std::vector<int64_t>({src_dims[1] * src_dims[2], src_dims[1], 1})
@@ -501,21 +501,21 @@ void do_prepare_dynamic_quant(
   // Weight zero point is always 0. Do not set.
   // Dst is in fp32, no scales or zero points.
   op_attr.set_scales_mask(
-      DNNL_ARG_SRC, ideep::utils::op_scale_mask(1 /* scale_size */));
-  op_attr.set_zero_points_mask(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1));
+      DNNL_ARG_SRC, utils::op_scale_mask(1 /* scale_size */));
+  op_attr.set_zero_points_mask(DNNL_ARG_SRC, utils::tensor_zp_mask(1));
   auto wei_scales = weights_scales_in;
   for (auto& s : wei_scales) {
     s = 1.0 / s;
   }
   op_attr.set_scales(
       DNNL_ARG_WEIGHTS,
-      ideep::utils::op_scale_mask(wei_scales.size()),
+      utils::op_scale_mask(wei_scales.size()),
       wei_scales);
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   // Src attr for reorder
-  src_attr.set_scales_mask(DNNL_ARG_DST, ideep::utils::op_scale_mask(1));
-  src_attr.set_zero_points_mask(DNNL_ARG_DST, ideep::utils::tensor_zp_mask(1));
+  src_attr.set_scales_mask(DNNL_ARG_DST, utils::op_scale_mask(1));
+  src_attr.set_zero_points_mask(DNNL_ARG_DST, utils::tensor_zp_mask(1));
 
   // Dst desc
   std::vector<int64_t> dst_strides = (ndims == 3)
@@ -535,7 +535,7 @@ void do_prepare_dynamic_quant(
   }
 
   // Create pd and primitive
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
 #ifdef __aarch64__
   if (with_bias) {
     param.pd = dnnl::matmul::primitive_desc(
@@ -658,7 +658,7 @@ void do_compute(
       expected_dst = dst;
     }
     args.insert({DNNL_ARG_DST, expected_dst});
-    primitive.execute(ideep::stream::default_stream(), args);
+    primitive.execute(IStream::default_stream(), args);
     // reorder back to dst's buffer if needed
     if (dst.is_empty() || dst.get_desc() == expected_dst.get_desc() ||
         !dst.get_desc().has_same_shape_as(expected_dst.get_desc())) {
@@ -668,7 +668,7 @@ void do_compute(
     }
   } else {
     args.insert({DNNL_ARG_DST, dst});
-    primitive.execute(ideep::stream::default_stream(), args);
+    primitive.execute(IStream::default_stream(), args);
   }
 }
 
@@ -709,7 +709,7 @@ void do_compute_dynamic_quant(
   // Prepare tensor of output scales
   auto src_scales_in = src.has_scale()
       ? src.get_scale()
-      : (src_scales.empty() ? ideep::IDEEP_DEF_SCALE : src_scales);
+      : (src_scales.empty() ? DEF_SCALE : src_scales);
 
   const dnnl::memory::dim scale_zp_stride = 1;
 
@@ -720,7 +720,7 @@ void do_compute_dynamic_quant(
   int src_scale_size = src_scales_in.size();
   MkldnnMemory::desc src_scales_desc = {
       {src_scale_size}, dnnl::memory::data_type::f32, {scale_zp_stride}};
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   MkldnnMemory src_scales_m(
       src_scales_desc,
       reinterpret_cast<float*>(src_scales_in.data()),
@@ -728,7 +728,7 @@ void do_compute_dynamic_quant(
 
   // Prepare tensor of src zero point
   auto src_zero_point = src.has_zero_point() ? src.get_zero_point()
-      : src_zero_points.empty()              ? ideep::IDEEP_DEF_ZP
+      : src_zero_points.empty()              ? DEF_ZP
                                              : src_zero_points;
   const auto src_zero_point_size =
       static_cast<dnnl::memory::dim>(src_zero_point.size());
@@ -747,7 +747,7 @@ void do_compute_dynamic_quant(
   // Reroder src (f32 -> u8)
   MkldnnMemory expected_src(expected_src_desc);
   src_reorder.execute(
-      ideep::stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_FROM, src},
        {DNNL_ARG_TO, expected_src},
        {DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, src_scales_m},
@@ -787,7 +787,7 @@ void do_compute_dynamic_quant(
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_m});
   args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zero_point_m});
 
-  primitive.execute(ideep::stream::default_stream(), args);
+  primitive.execute(IStream::default_stream(), args);
 }
 
 // Ported from ideep::matmul_forward::compute_impl.
@@ -808,7 +808,7 @@ void compute_impl(
     const float sum_coeff = 1.0f,
     const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::undef,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8) {
+    const lowp_kind alowp_kind = u8s8) {
   matmul_forward_params param;
   auto& weights_scales_in =
       weights.has_scale() ? weights.get_scale() : weights_scales;
@@ -879,7 +879,7 @@ void matmul_forward_compute(
     const float sum_coeff,
     const Attr& attr,
     const dnnl::memory::data_type dst_type,
-    const ideep::lowp_kind alowp_kind) {
+    const lowp_kind alowp_kind) {
   if (bias.is_empty()) {
     compute_impl</*with_bias=*/false, reorder_src, reorder_weight>(
         src,
@@ -931,7 +931,7 @@ void matmul_forward_prepare(
     const float sum_coeff,
     const Attr& attr,
     const dnnl::memory::data_type dst_type,
-    const ideep::lowp_kind alowp_kind) {
+    const lowp_kind alowp_kind) {
   if (is_dynamic) {
     if (bias.is_empty()) {
       do_prepare_dynamic_quant</*with_bias=*/false>(
@@ -1041,17 +1041,17 @@ void matmul_forward(
     const Attr& attr) {
   // Consider fp32 only for IPEX
   static MkldnnMemory dummy_bias;
-  static ideep::lowp_kind dummy_lowp_kind = ideep::u8s8;
+  static lowp_kind dummy_lowp_kind = u8s8;
   compute_impl</*with_bias=*/false, /*reorder_src*/ true, /*reorder_weight*/ true>(
       src,
       weights,
       dummy_bias,
       dst,
-      ideep::IDEEP_EMPTY_SCALE,
-      ideep::IDEEP_EMPTY_SCALE,
-      ideep::IDEEP_EMPTY_SCALE,
-      ideep::IDEEP_EMPTY_ZP,
-      ideep::IDEEP_EMPTY_ZP,
+      EMPTY_SCALE,
+      EMPTY_SCALE,
+      EMPTY_SCALE,
+      EMPTY_ZP,
+      EMPTY_ZP,
       dst_coeff,
       sum_coeff,
       attr,
@@ -1095,7 +1095,7 @@ MkldnnMemory::desc matmul_forward_expected_weights_desc(
   MkldnnMemory::desc weights_desc(
       weights_dims, dtype, dnnl::memory::format_tag::any);
   auto pd = dnnl::matmul::primitive_desc(
-      ideep::engine::cpu_engine(), x_desc, weights_desc, y_desc, attr);
+      Engine::cpu_engine(), x_desc, weights_desc, y_desc, attr);
   return pd.weights_desc();
 }
 
@@ -1127,7 +1127,7 @@ template void matmul_forward_compute<true, true>(
     const float,
     const Attr&,
     const dnnl::memory::data_type,
-    const ideep::lowp_kind);
+    const lowp_kind);
 
 template void matmul_forward_prepare<false>(
     matmul_forward_params&,
@@ -1144,7 +1144,7 @@ template void matmul_forward_prepare<false>(
     const float,
     const Attr&,
     const dnnl::memory::data_type,
-    const ideep::lowp_kind);
+    const lowp_kind);
 
 template void matmul_forward_prepare<true>(
     matmul_forward_params&,
@@ -1161,7 +1161,7 @@ template void matmul_forward_prepare<true>(
     const float,
     const Attr&,
     const dnnl::memory::data_type,
-    const ideep::lowp_kind);
+    const lowp_kind);
 
 template void matmul_forward_compute<false, false>(
     const matmul_forward_params&,

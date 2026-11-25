@@ -7,6 +7,7 @@
 #include <ideep.hpp>
 #include <dnnl.hpp>
 #include <ATen/native/mkldnn/detail/Attr.h>
+#include <ATen/native/mkldnn/detail/IdeepUtils.h>
 #include <ATen/native/mkldnn/detail/Memory.h>
 
 #ifndef DNNL_PREREQ

@@ -10,7 +10,7 @@ void sum(
     const std::vector<float>& scales,
     const std::vector<MkldnnMemory>& srcs,
     MkldnnMemory& dst) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   std::vector<dnnl::memory::desc> src_descs;
   src_descs.reserve(srcs.size());
   for (const auto& src : srcs) {
@@ -31,7 +31,7 @@ void sum(
     args.insert({DNNL_ARG_MULTIPLE_SRC + static_cast<int>(i), srcs[i]});
   }
 
-  dnnl::sum(pd).execute(ideep::stream::default_stream(), args);
+  dnnl::sum(pd).execute(IStream::default_stream(), args);
 }
 
 } // namespace at::native::mkldnn
