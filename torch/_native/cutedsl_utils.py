@@ -1,6 +1,8 @@
 import functools
 import logging
 import sys
+import warnings
+from collections.abc import Callable
 from typing import cast
 
 from torch._vendor.packaging.version import Version
@@ -22,6 +24,61 @@ from .registry import (
 
 
 log = logging.getLogger(__name__)
+
+_pending_cuda_registrations: list[Callable[[], None]] = []
+
+
+def register_cuda_overrides(
+    register: Callable[[], None], arch_majors: tuple[int, ...]
+) -> None:
+    r"""Install a CuTeDSL registration group after supported CUDA devices initialize."""
+    if not runtime_available() or check_native_jit_disabled() or not _version_is_ok():
+        return
+
+    import torch
+
+    from . import registry
+
+    def install() -> None:
+        native = sys.modules["torch._native"]
+        if not native._registration_complete:
+            _pending_cuda_registrations.append(install)
+            return
+        if not any(
+            torch.cuda.get_device_capability(i)[0] in arch_majors
+            for i in range(torch.cuda.device_count())
+        ):
+            return
+        before = {key: len(graph) for key, graph in registry._graphs.items()}
+        register()
+        keys = {
+            key
+            for key, graph in registry._graphs.items()
+            if len(graph) != before.get(key, 0)
+        }
+        if native.user_order_fn is not None:
+            registry._apply_graph_transformation(
+                native.user_order_fn, keys_to_process=keys
+            )
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Warning only once for all operators.*",
+                category=UserWarning,
+            )
+            for key in keys:
+                registry._register_overrides_from_graph(
+                    *key, registry._graphs[key], filter_state=registry._filter_state
+                )
+
+    torch.cuda._lazy_call(install)
+
+
+def _flush_cuda_registrations() -> None:
+    pending = list(_pending_cuda_registrations)
+    _pending_cuda_registrations.clear()
+    for install in pending:
+        install()
 
 
 _CUTEDSL_DSL_NAME = "cutedsl"

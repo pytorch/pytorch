@@ -216,6 +216,20 @@ their functional counterparts (`aten::add_` → `aten::add`) before running
 decompositions. If you want overrides to fire in compiled graphs as well
 as eager, register overrides for the **functional** variant too.
 
+### Scalar arguments and type promotion
+
+Functor annotations select operand and result precision; TensorIterator supplies
+promotion. JIT and AOT use the same functor contract.
+
+`_scalar_arg_coercer` wraps boxed numbers for `_WEAK_SCALAR_OPS` as CPU tensors.
+Unknown policies, promotion-changing division, and calls whose positional tensors
+are all 0D fall back before predicates. Native fallback keeps the original arguments;
+`call_boxed` restores wrapped-number tensors.
+
+Functional overrides restore the weak dtype within the same numeric kind. Mutable
+overrides preserve output aliases. Device wrapped numbers remain tensors to avoid
+host reads.
+
 ## Registering a New Operator
 
 We currently don't have a use for this functionality, please come talk to us if you want it!
