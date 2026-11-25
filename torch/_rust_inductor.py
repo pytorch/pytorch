@@ -1347,7 +1347,9 @@ def _template(o, args, tensor_outs, objects, old):
     if isinstance(o, torch.Tensor):
         tensor_outs.append(o)
         return ("out", len(tensor_outs) - 1)
-    if type(o) in _IMMUTABLE:
+    if type(o) in _IMMUTABLE or type(o) is torch.Size:
+        # A torch.Size too: ints that nothing can change, handed back as the
+        # object it is (pytree would make a plain tuple of it).
         objects.append(o)
         return ("obj", len(objects) - 1)
     if type(o) in (tuple, list):
@@ -1402,6 +1404,11 @@ def _template(o, args, tensor_outs, objects, old):
         )
     if _is_tree(o):
         leaves, spec = _flatten(o)
+        # What a region hands back is made by pytree from the leaves: only
+        # where that is an object of the output's own class (a subclass of a
+        # container that pytree does not know is its own single leaf).
+        if (len(leaves) == 1 and leaves[0] is o) or type(_unflatten(spec, leaves)) is not type(o):
+            raise _Refused(f"an output is a {type(o).__name__}, which a region cannot make again")
         objects.append(functools.partial(_unflatten, spec))
         return (
             "call",

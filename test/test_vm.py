@@ -1007,6 +1007,88 @@ class TestVmDataSizes(TestCase):
 instantiate_device_type_tests(TestVmDataSizes, globals())
 
 
+class OutputsPair(tuple):  # noqa: SLOT001
+    """A tuple of a class of the program's, which pytree does not know."""
+
+
+OutputsNamed = collections.namedtuple("OutputsNamed", "values size")
+
+
+def outputs_work(x):
+    return ((x.sin() * 2).cos() + 1).tanh().exp()
+
+
+def outputs_size(x):
+    y = outputs_work(x)
+    return y, y.shape, y.size(), [y.shape, {"size": y.shape}]
+
+
+def outputs_size_used(x):
+    y = outputs_work(x)
+    return y, y.shape.numel(), torch.Size([y.shape[0], 2])
+
+
+def outputs_named_tuple(x):
+    y = outputs_work(x)
+    return OutputsNamed(y, y.shape)
+
+
+def outputs_tuple_subclass(x):
+    y = outputs_work(x)
+    return OutputsPair((y, y.shape[0]))
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmOutputTypes(TestCase):
+    """What a region hands back is an object of the class eager's result
+    has: a torch.Size stays one, and a container a region cannot make again
+    as what it is leaves its block as it is."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def classes(self, out):
+        if type(out) in (tuple, list) or isinstance(out, (OutputsPair, OutputsNamed)):
+            return (type(out), [self.classes(o) for o in out])
+        if type(out) is dict:
+            return (dict, [(k, self.classes(v)) for k, v in out.items()])
+        return type(out)
+
+    def rows(self, fn, device):
+        g = vm_early(fn)
+        for call in range(8):
+            x = torch.randn(
+                4 + call % 2, 8, generator=torch.Generator().manual_seed(call)
+            ).to(device)
+            got, want = g(x), fn(x)
+            self.assertEqual(self.classes(got), self.classes(want), msg=f"call {call}")
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        return [
+            r["state"]
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["kind"] == "block"
+        ]
+
+    @isolated
+    def test_size_of_a_tensor(self, device):
+        self.assertEqual(self.rows(outputs_size, device), ["region"])
+
+    @isolated
+    def test_size_that_is_used_and_one_that_is_made(self, device):
+        self.assertEqual(self.rows(outputs_size_used, device), ["region"])
+
+    @isolated
+    def test_named_tuple(self, device):
+        self.assertEqual(self.rows(outputs_named_tuple, device), ["region"])
+
+    @isolated
+    def test_tuple_of_a_class_of_the_program(self, device):
+        # Made by its class, on every call, whatever holds the block.
+        self.rows(outputs_tuple_subclass, device)
+
+
+instantiate_device_type_tests(TestVmOutputTypes, globals())
+
+
 class WritesBox:
     pass
 
