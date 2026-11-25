@@ -105,12 +105,15 @@ def _fa4_register_kernels() -> Library:
         _fa4_flash_attention_forward_no_dropout_inplace_quantized_impl,
         "CUDA",
     )
-    # TODO: also register `_scaled_dot_product_flash_attention.quantized`, so the experimental fp8 SDPA runs
-    # on FA4 (pytorch/pytorch#175472 did it and went stale).
     lib.impl("_flash_attention_backward", _fa4_flash_attention_backward_impl, "CUDA")
     lib.impl(
         "_scaled_dot_product_flash_attention",
         _fa4_scaled_dot_product_flash_attention_forward_impl,
+        "CUDA",
+    )
+    lib.impl(
+        "_scaled_dot_product_flash_attention.quantized",
+        _fa4_scaled_dot_product_flash_attention_forward_quantized_impl,
         "CUDA",
     )
     lib.impl(
@@ -628,6 +631,10 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
     return_debug_mask: bool = False,
     *,
     scale: float | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
+    quantized: bool = False,
 ):
     error = _fa4_forward_support_error(
         query,
@@ -638,12 +645,17 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         None,
         None,
         None,
+        quantized=quantized,
     )
     if error is not None:
         raise RuntimeError(f"FA4 SDPA forward unsupported: {error}")
     q, k, v = _transpose_dense(query, key, value)
 
-    out_bhsd = _empty_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
+    out_bhsd = _empty_with_matching_layout(
+        query,
+        (*query.shape[:-1], value.size(-1)),
+        dtype=torch.bfloat16 if quantized else None,
+    )
     out_bshd = out_bhsd.transpose(1, 2)
 
     max_q_flash = q.size(1)
@@ -661,6 +673,10 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         return_debug_mask,
         scale=scale,
         out=out_bshd,
+        q_descale=q_descale,
+        k_descale=k_descale,
+        v_descale=v_descale,
+        quantized=quantized,
     )
     max_q = query.size(2)
     max_k = key.size(2)
@@ -674,6 +690,38 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         rng_state,
         philox_offset,
         debug_mask,
+    )
+
+
+def _fa4_scaled_dot_product_flash_attention_forward_quantized_impl(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    q_descale: torch.Tensor | None,
+    k_descale: torch.Tensor | None,
+    v_descale: torch.Tensor | None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: float | None = None,
+):
+    """``.quantized`` SDPA overload: fp8 query, key and value; writes a bf16 output.
+
+    Its schema puts the descales before ``dropout_p``, so it can't be a ``functools.partial`` of the default impl.
+    """
+    return _fa4_scaled_dot_product_flash_attention_forward_impl(
+        query,
+        key,
+        value,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale=scale,
+        q_descale=q_descale,
+        k_descale=k_descale,
+        v_descale=v_descale,
+        quantized=True,
     )
 
 

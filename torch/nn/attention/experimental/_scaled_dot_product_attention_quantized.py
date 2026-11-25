@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 """
-This operator implements FP8 scaled dot product attention using Flash Attention 3.
+This operator implements FP8 scaled dot product attention using Flash Attention 3 or 4.
 This operator is experimental and subject to change.
 """
 
@@ -27,16 +27,17 @@ def _scaled_dot_product_attention_quantized(
     r"""Scaled dot product attention for FP8 inputs.
 
     This is a specialized version of scaled_dot_product_attention that supports
-    FP8 quantized inputs (float8_e4m3fn) with per-head descaling. Requires the
-    Flash Attention 3 backend to be activated.
+    FP8 quantized inputs with per-head descaling. Requires the Flash Attention 3
+    (SM90, float8_e4m3fn) or Flash Attention 4 (SM100, float8_e4m3fn or float8_e5m2)
+    implementation to be activated.
 
     .. warning::
         This function is experimental and only supports forward pass.
 
     Args:
-        query (Tensor): Query tensor; shape :math:`(N, H_q, L, E)` dtype float8_e4m3fn
-        key (Tensor): Key tensor; shape :math:`(N, H, S, E)` dtype float8_e4m3fn
-        value (Tensor): Value tensor; shape :math:`(N, H, S, E_v)` dtype float8_e4m3fn
+        query (Tensor): Query tensor; shape :math:`(N, H_q, L, E)` dtype float8_e4m3fn or float8_e5m2
+        key (Tensor): Key tensor; shape :math:`(N, H, S, E)`, same dtype as ``query``
+        value (Tensor): Value tensor; shape :math:`(N, H, S, E_v)`, same dtype as ``query``
         is_causal (bool): Apply causal attention mask
         scale (float, optional): Scaling factor for attention weights
         q_descale (Tensor, optional): Query descale tensor; shape :math:`(N, H)` for PER_HEAD

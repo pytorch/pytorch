@@ -6614,7 +6614,8 @@ def meta__scaled_dot_product_flash_attention_quantized(
     return_debug_mask: bool = False,
     scale: float | None = None,
 ):
-    if query.dtype == torch.float8_e4m3fn:
+    # fp8 flash attention writes a bf16 output.
+    if query.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
         query = query.to(torch.bfloat16)
 
     return meta__scaled_dot_product_flash_attention(

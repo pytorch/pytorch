@@ -971,8 +971,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   bool return_debug_mask,
   std::optional<double> scale) {
   TORCH_CHECK(false,
-    "Low-precision flash attention SDPA requires FA3. "
-    "Call torch.nn.attention.activate_flash_attention_impl('FA3') first.");
+    "Low-precision flash attention SDPA requires FA3 (SM90) or FA4 (SM100). "
+    "Call torch.nn.attention.activate_flash_attention_impl('FA3') or ('FA4') first.");
   return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), c10::SymInt(0), c10::SymInt(0), Tensor(), Tensor(), Tensor());
 }
 
