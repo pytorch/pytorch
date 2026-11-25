@@ -453,6 +453,13 @@ class GraphLowering(torch.fx.Interpreter):
             shape_env.deferred_runtime_asserts.copy()
         )
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
+        # (size, alignment) pairs kernels assume divisible because of a guard
+        # added while lowering; the wrapper re-checks them on every call. See
+        # triton_utils._guard_multiple_of.
+        self.size_divisibility_guards = OrderedSet[tuple[sympy.Expr, int]]()
+        # caches for triton_utils._guard_multiple_of
+        self.may_add_size_divisibility_guards: bool | None = None
+        self.wrapper_bound_symbols: OrderedSet[sympy.Symbol] | None = None
 
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []

@@ -8,6 +8,8 @@ compiled backends to get the best of both worlds: usability and performance. Thi
 seamlessly optimize PyTorch programs, including those using modern Python features.
 """
 
+import sys
+
 import torch
 
 from . import (
@@ -164,6 +166,11 @@ def reset() -> None:
         torch._dynamo.compiled_autograd.reset()
         convert_frame.FRAME_COUNTER = 0
         convert_frame.FRAME_COMPILE_COUNTER.clear()
+        if (
+            triton_utils := sys.modules.get("torch._inductor.codegen.triton_utils")
+        ) is not None:
+            # keyed by the frame ids just reset
+            triton_utils._divisibility_guarded_compile.clear()
         callback_handler.clear()
         GenerationTracker.clear()
         TensorifyState.clear()
