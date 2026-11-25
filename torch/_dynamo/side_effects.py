@@ -318,9 +318,8 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
-        # Used by MappingProxyVariable to graph break in case of any mutated
-        # dict
-        self._has_existing_dict_mutation = False
+        # An escaping namespace iterator must see any aliased dictionary writes.
+        self.mutated_dict_sources: OrderedSet[Source] = OrderedSet()
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var: ListVariable | None = None
@@ -474,7 +473,7 @@ class SideEffects:
         ref = self.output_graph_weakref()
         if ref is None:
             raise AssertionError("output_graph weakref is dead during clone")
-        return self.__class__(
+        clone = self.__class__(
             output_graph=ref,
             id_to_variable=dict(self.id_to_variable),
             store_attr_mutations={
@@ -488,6 +487,8 @@ class SideEffects:
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
         )
+        clone.mutated_dict_sources = self.mutated_dict_sources.copy()
+        return clone
 
     def __contains__(self, item: object) -> bool:
         return id(item) in self.id_to_variable
@@ -1202,10 +1203,7 @@ class SideEffects:
         if var.source is not None:
             self.mutated_sources.add(var.source)
         if var.source and isinstance(var, variables.ConstDictVariable):
-            self._has_existing_dict_mutation = True
-
-    def has_existing_dict_mutation(self) -> bool:
-        return self._has_existing_dict_mutation
+            self.mutated_dict_sources.add(var.source)
 
     def _get_modified_vars(self) -> list[VariableTracker]:
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
