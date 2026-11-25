@@ -42,7 +42,11 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
-from torch._dispatch.python import enable_python_dispatcher
+from torch._dispatch.python import enable_python_dispatcher, no_python_dispatcher
+from torch._functorch.predispatch import (
+    _functorch_predispatch_functions,
+    _jvp_predispatch_functions,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_reconstruct_fn,
@@ -55,12 +59,16 @@ from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
+    in_kernel_invocation_manager,
     is_fake,
     is_fake_tensor,
+    maybe_get_fake_dispatch_keys,
     maybe_get_fake_mode,
+    maybe_get_real_tensor,
     track_fake_tensor_for_export,
     unset_fake_temporarily,
 )
@@ -693,14 +701,59 @@ def _build_proxy_for_sym_expr(
     return out
 
 
+def _unwrap_functorch(t: Tensor) -> Tensor:
+    functorch = torch._C._functorch
+    while functorch.is_batchedtensor(t) or functorch.is_gradtrackingtensor(t):
+        t = functorch.get_unwrapped(t)
+    return t
+
+
 def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # val.detach() will also eventually call fast_detach(),
     # but this saves us a full trip into __torch_dispatch__
     # (snapshot_fake is called a lot)
     if is_fake_tensor(val):
         return fast_detach(maybe_get_fake_mode(val), val, include_real)
-    else:
-        return val.detach()
+    # Pre-dispatch tracing inside vmap or jvp sees functorch wrappers, which
+    # have no storage and outlive their level. Record a view of the fake tensor
+    # they wrap, with the sizes, strides and storage offset the wrapper reports,
+    # so passes still see which storage it aliases. Functorch is disabled so
+    # that an outer jvp does not wrap the view again. Sparse tensors and
+    # wrapped subclasses such as DTensor keep their wrapper.
+    inner = _unwrap_functorch(val)
+    fake_mode = maybe_get_fake_mode(inner) if is_fake_tensor(inner) else None
+    # A value whose real tensor is kept, such as a placeholder of a cond branch
+    # inside vmap under real tensor propagation, keeps its wrapper as before,
+    # which carries the real tensor. Its real view would need the real layout
+    # at each functorch level, while the view below uses the fake one.
+    if (
+        fake_mode is not None
+        and not is_sparse_any(inner)
+        and not (include_real and maybe_get_real_tensor(inner) is not None)
+    ):
+        # The view is made on the meta tensor inside the fake tensor, as
+        # fast_detach does, so real tensor propagation does not also run it on
+        # the real tensor, which has no storage for it when the batch is empty.
+        with torch._C._DisableFuncTorch():
+            with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
+                view = torch.ops.aten.as_strided.default(
+                    torch.ops.aten.detach.default(inner),
+                    val.shape,
+                    val.stride(),
+                    val.storage_offset(),
+                )
+            dispatch_keys = maybe_get_fake_dispatch_keys(inner)
+            if isinstance(fake_mode, CppFakeTensorMode):
+                return fake_mode.fake_tensor_converter.from_meta_and_device(
+                    fake_mode, view, inner.device, dispatch_keys=dispatch_keys
+                )
+            return FakeTensor(
+                fake_mode,
+                view,
+                inner.device,
+                dispatch_keys=dispatch_keys,
+            )
+    return val.detach()
 
 
 _ExtractValType: TypeAlias = (
@@ -1276,9 +1329,9 @@ def _coor_current_device_index_impl() -> int:
 def _coor_current_device_index_fake() -> torch.SymInt:
     from torch.fx.experimental.symbolic_shapes import constrain_range
 
-    # Unbacked, but not a size, so not ctx.new_dynamic_size(): that files the
-    # symbol under ShapeEnv.size_like, whose size-oblivious reasoning assumes a
-    # value is never 0 or 1 -- here, that this rank is never cuda:0 or cuda:1.
+    # Allocate directly so device-index reads work even when
+    # allow_dynamic_output_shape_ops is disabled; ctx.new_dynamic_size()
+    # requires that permission.
     ctx = torch.library.get_ctx()
     index = ctx._shape_env.create_unbacked_symint()
     constrain_range(index, min=0)  # an accelerator index is non-negative
@@ -2435,20 +2488,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         # We need more complicated handling here because the inputs
         # to these functions are sometimes tensors or symints where
         # we need to fetch the proxies properly.
-        if func in [
-            torch._functorch.predispatch._add_batch_dim,
-            torch._functorch.predispatch._remove_batch_dim,
-            torch._functorch.predispatch._vmap_increment_nesting,
-            torch._functorch.predispatch._vmap_decrement_nesting,
-            torch._functorch.vmap.lazy_load_decompositions,
-            torch._functorch.predispatch._make_dual,
-            torch._functorch.predispatch._unpack_dual,
-            torch._functorch.predispatch._jvp_increment_nesting,
-            torch._functorch.predispatch._jvp_decrement_nesting,
-            torch._functorch.predispatch._unwrap_for_grad,
-            torch._functorch.predispatch._enter_dual_level,
-            torch._functorch.predispatch._exit_dual_level,
-        ]:
+        if func in _functorch_predispatch_functions:
             _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
             out_proxy = self.tracer.create_proxy(
                 "call_function",
@@ -2457,11 +2497,12 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 kwargs,
             )
             res = func(*args, **kwargs)
-            # When JVP transforms are active, snapshot_fake calls detach
-            # which goes through C++ functorch dispatch keys, potentially
-            # re-wrapping the result as a grad tracking tensor.
-            # Temporarily disable functorch transforms during tracking to
-            # prevent this corruption of meta["val"].
+            # Inside jvp, the detach that snapshot_fake calls on a wrapped
+            # tensor subclass goes through C++ functorch dispatch keys, which
+            # could wrap the result as a grad tracking tensor again, so the jvp
+            # calls track their results with functorch disabled. The vmap calls
+            # do not need that, and nested vmap over a wrapped subclass fails
+            # with it.
             if func in _jvp_predispatch_functions:
                 with torch._C._DisableFuncTorch():
                     track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
@@ -2473,37 +2514,6 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
 
 _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_manager(
     PreDispatchTorchFunctionMode
-)
-
-
-# JVP predispatch functions need special handling during tracing:
-# _DisableFuncTorch prevents grad tracking tensor corruption in snapshot_fake.
-_jvp_predispatch_functions = frozenset(
-    {
-        torch._functorch.predispatch._make_dual,
-        torch._functorch.predispatch._unpack_dual,
-        torch._functorch.predispatch._jvp_increment_nesting,
-        torch._functorch.predispatch._jvp_decrement_nesting,
-        torch._functorch.predispatch._unwrap_for_grad,
-        torch._functorch.predispatch._enter_dual_level,
-        torch._functorch.predispatch._exit_dual_level,
-    }
-)
-
-# These JVP predispatch wrappers manage transform nesting/level state
-# and must survive FX dead code elimination even with zero output users.
-# Registered here rather than in predispatch.py to avoid circular imports
-# (predispatch.py loads before torch.fx during torch.autograd init).
-from torch.fx.node import _side_effectful_functions
-
-
-_side_effectful_functions.update(
-    {
-        torch._functorch.predispatch._jvp_increment_nesting,
-        torch._functorch.predispatch._jvp_decrement_nesting,
-        torch._functorch.predispatch._enter_dual_level,
-        torch._functorch.predispatch._exit_dual_level,
-    }
 )
 
 
@@ -3333,7 +3343,7 @@ class _MakefxTracer:
         # and configurations. After tracing, their states should be cleaned except for shape_env.
         # Remember to specify how to initialize it from user inputs and from parent tracer whenever
         # adding new modes in _MakefxTracer.
-        self.fake_tensor_mode: FakeTensorMode | None = None
+        self.fake_tensor_mode: FakeTensorMode | CppFakeTensorMode | None = None
         self.proxy_mode: nullcontext[None] | ProxyTorchDispatchMode = nullcontext()
         self.proxy_function_mode: nullcontext[None] | PreDispatchTorchFunctionMode = (
             nullcontext()
@@ -3383,7 +3393,7 @@ class _MakefxTracer:
 
     def _restore_modes(
         self,
-        prev_fake_tensor_mode: FakeTensorMode | None,
+        prev_fake_tensor_mode: FakeTensorMode | CppFakeTensorMode | None,
         prev_proxy_mode: nullcontext[None] | ProxyTorchDispatchMode,
         prev_proxy_function_mode: nullcontext[None] | PreDispatchTorchFunctionMode,
         prev_fx_tracer: PythonKeyTracer | None,
@@ -3988,7 +3998,7 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
     fake_mode = typing.cast(
-        "FakeTensorMode | None",
+        "FakeTensorMode | CppFakeTensorMode | None",
         torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
     )
     if fake_mode and fake_mode.shape_env:
