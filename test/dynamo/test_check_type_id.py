@@ -14,10 +14,15 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
-from torch.testing._internal.common_utils import munge_exc
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    munge_exc,
+)
 
 
 class TestCheckTypeId(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _find_guard_lines(guard_manager_str: str, keyword: str) -> list[str]:
         # Normalize and anonymize type IDs, then return lines containing the keyword
