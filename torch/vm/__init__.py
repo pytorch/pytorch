@@ -397,7 +397,7 @@ class _Program:
             if self.calls == observe_at:
                 rust._set_cfg_region_observe(True)
             if self.calls == regions.at:
-                rust._set_cfg_regions(True, 1, regions.variants)
+                rust._set_cfg_regions(True, 1, regions.variants, regions.keys)
         if "bypass_cold" in builtin and self.calls == builtin["bypass_cold"].at:
             rust._cfg_bypass_cold()
         self.calls += 1

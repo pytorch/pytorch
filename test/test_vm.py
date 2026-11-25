@@ -1698,6 +1698,33 @@ def many_loop(scales, x):
     return x
 
 
+class ManyLayer(torch.nn.Module):
+    def __init__(self, k):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.full((8,), 1.0 + k / 16))
+
+
+def many_apply(layer, x):
+    return (x * layer.weight).tanh().cos().sin() + x
+
+
+def many_noted(scales, x, seen):
+    for i, scale in enumerate(scales):
+        x = (x * scale + i).tanh().cos().sin()
+        # A write to a list the caller holds: the loop is no region as a
+        # whole, its body's computation is one per `i`.
+        seen.append(i)
+    return x
+
+
+def many_shapes(x):
+    return (x.sin() + 1).tanh().cos().exp()
+
+
+def many_shift(x, n):
+    return (x + n).tanh().cos().sin().exp()
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmManyRegions(TestCase):
     """A place with one region per state finds the one for a call without
@@ -1725,6 +1752,147 @@ class TestVmManyRegions(TestCase):
         # the call down.
         self.assertEqual(row["variants"], 4)
         self.assertEqual(row["runs"], 4 * 5)
+        self.assertEqual(row["misses"], {})
+        # Each was found by what `i` is: none was asked and turned the call
+        # down.
+        self.assertEqual(torch._rust._cfg_region_passed_over(), 0)
+
+    @isolated
+    def test_eighty_layer_and_shape_combinations_at_one_place(self, device):
+        layers = [ManyLayer(k).to(device) for k in range(20)]
+        g = vm_early(many_apply)
+        calls = 0
+        with torch.no_grad():
+            for step in range(4 * 3):
+                x = torch.randn(2 + step % 4, 8, device=device)
+                for k, layer in enumerate(layers):
+                    self.assertEqual(
+                        g(layer, x),
+                        many_apply(layer, x),
+                        atol=0,
+                        rtol=0,
+                        msg=f"step {step}, layer {k}",
+                    )
+                    calls += 1
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "many_apply" and r["state"] == "region"
+        )
+        # One place, a region for every layer and input size; every call
+        # after the three before regions start either traces one or runs
+        # one.
+        self.assertEqual(row["variants"], 20 * 4)
+        self.assertEqual(row["runs"], calls - 3 - 20 * 4)
+        self.assertEqual(row["misses"], {})
+
+    @isolated
+    def test_region_is_found_by_which_object_an_argument_is(self, device):
+        layers = [ManyLayer(k).to(device) for k in range(12)]
+        g = vm_early(many_apply)
+        with torch.no_grad():
+            for step in range(5):
+                x = torch.randn(4, 8, device=device)
+                for k, layer in enumerate(layers):
+                    self.assertEqual(
+                        g(layer, x),
+                        many_apply(layer, x),
+                        atol=0,
+                        rtol=0,
+                        msg=f"step {step}, layer {k}",
+                    )
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "many_apply" and r["state"] == "region"
+        )
+        self.assertEqual(row["variants"], 12)
+        self.assertEqual(row["runs"], 5 * 12 - 3 - 12)
+        self.assertEqual(row["misses"], {})
+        # Twelve regions at one place, found by the layer: only the first,
+        # while it was the only one, was asked for another layer's call.
+        self.assertLessEqual(torch._rust._cfg_region_passed_over(), 1)
+
+    @isolated
+    def test_place_without_a_key_asks_its_variants_in_order(self, device):
+        g = vm_early(many_shapes)
+        for call in range(3 + 3 * 3):
+            x = torch.randn(2 + call % 3, 8, device=device)
+            self.assertEqual(g(x), many_shapes(x), atol=0, rtol=0, msg=f"call {call}")
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "many_shapes" and r["state"] == "region"
+        )
+        self.assertEqual(row["variants"], 3)
+        self.assertEqual(row["runs"], 3 * 2)
+        # The regions differ by the input's size alone: those in front of the
+        # one for a call are asked and pass it on, which is no miss.
+        self.assertEqual(row["misses"], {})
+        self.assertGreater(torch._rust._cfg_region_passed_over(), 0)
+
+    @isolated
+    def test_place_whose_inputs_keep_changing_is_bounded(self, device):
+        import torch._rust_inductor as ri
+
+        ri.COUNT = True
+        g = vm(
+            many_shift, passes=vm.configure(EARLY, regions={"variants": 2, "keys": 3})
+        )
+
+        def variants():
+            return sum(
+                r["variants"]
+                for r in vm.regions(g)
+                if r["function"] == "many_shift" and r["state"] == "region"
+            )
+
+        # Another int on every call: a key each, up to `keys`.
+        for call in range(12):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(
+                g(x, call), many_shift(x, call), atol=0, rtol=0, msg=f"call {call}"
+            )
+        self.assertEqual(variants(), 3)
+        # Another input size on every call, with an int that has a region:
+        # up to `variants` under that key.
+        for call in range(6):
+            x = torch.randn(5 + call, 8, device=device)
+            self.assertEqual(
+                g(x, 5), many_shift(x, 5), atol=0, rtol=0, msg=f"size {call}"
+            )
+        self.assertEqual(variants(), 3 + 1)
+        # The regions it has still run.
+        before = region_runs()
+        x = torch.randn(4, 8, device=device)
+        self.assertEqual(g(x, 4), many_shift(x, 4), atol=0, rtol=0)
+        self.assertGreater(region_runs(), before)
+
+    @isolated
+    def test_loop_with_more_iterations_than_keys_is_bounded_within_one_call(
+        self, device
+    ):
+        scales = [1.0 + k / 8 for k in range(40)]
+        g = vm(many_noted, passes=vm.configure(EARLY, regions={"keys": 5}))
+        for call in range(6):
+            x = torch.randn(4, 8, device=device)
+            seen, expected = [], []
+            self.assertEqual(
+                g(scales, x, seen),
+                many_noted(scales, x, expected),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+            self.assertEqual(seen, expected, msg=f"call {call}")
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "many_noted" and r["state"] == "region"
+        )
+        # Forty values of `i` in every call, from the first that is traced
+        # on: the place stops at its five keys.
+        self.assertEqual(row["variants"], 5)
         self.assertEqual(row["misses"], {})
 
 

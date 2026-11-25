@@ -1067,7 +1067,7 @@ pub fn _cfg_bypass_cold() -> usize {
         memo.insert(key, false);
         let prep = &c.plan().prep;
         let cfg = &prep.cfg;
-        let spans = cfg.spans.iter().any(|s| !s.state.off.load(Ordering::Relaxed) && !s.state.regions.lock().unwrap().is_empty());
+        let spans = cfg.spans.iter().any(|s| !s.state.off.load(Ordering::Relaxed) && !s.state.regions.is_empty());
         let h = !cfg.regions.is_empty() || !cfg.trainings.is_empty() || spans || prep.clones.values().any(|cl| hot(&cl.compiled, memo));
         memo.insert(key, h);
         h
@@ -1640,10 +1640,32 @@ pub(crate) fn no_training(c: &Compiled, prep: usize, b: BlockId, why: String) {
     }
 }
 
-// Gives block b of code's Cfg a region version (see region.rs) in front of
-// its others, made from a trace of its last version, if the Cfg is the one
-// whose Prepared is at `prep` or derives from it by adding regions (which
-// leaves that version as it was). Ok(false): it isn't (trace it again).
+// The Cfg whose regions a frame running `prep`'s sees or adds to: c's
+// current one, if it is `prep`'s or derives from it by adding regions (which
+// leaves the blocks and their other versions as they were).
+pub(crate) fn region_cfg(c: &Compiled, prep: usize) -> Option<&Cfg> {
+    let plan = c.plan();
+    let here = &plan.prep as *const Prepared as usize;
+    let lineage = unsafe { &*plan.prep.region_lineage.get() };
+    (here == prep || lineage.contains(&prep)).then(|| &*plan.prep.cfg)
+}
+
+// The regions of block b of `cfg`, if it has any: what its region version
+// (the first) runs.
+pub(crate) fn place_of(cfg: &Cfg, b: BlockId) -> Option<&Arc<crate::cfg::ir::Place>> {
+    let head = cfg[b].versions.first()?.body.first()?;
+    match cfg[*head].op {
+        Op::Region(r) => cfg.regions.get(r as usize),
+        _ => None,
+    }
+}
+
+// Gives block b of code's Cfg a region (see region.rs) made from a trace of
+// its last version, if the Cfg is the one whose Prepared is at `prep` or
+// derives from it by adding regions. The block's first region comes with a
+// region version in front of its others, with the guard of the version the
+// trace was made from; later ones are added to that version's place, which
+// changes no Cfg. Ok(false): the Cfg is another (trace it again).
 pub(crate) fn add_region(c: &Compiled, prep: usize, b: BlockId, traced: region::Traced) -> PyResult<bool> {
     let plan = c.plan();
     let here = &plan.prep as *const Prepared as usize;
@@ -1651,25 +1673,26 @@ pub(crate) fn add_region(c: &Compiled, prep: usize, b: BlockId, traced: region::
     if here != prep && !lineage.contains(&prep) {
         return Ok(false);
     }
+    let n = traced.variant.spec.outputs.len();
+    if let Some(place) = place_of(&plan.prep.cfg, b) {
+        if place.outputs != n {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("a region of {} has {n} outputs, not {}", place.name, place.outputs)));
+        }
+        place.variants.push(traced.variant);
+        return Ok(true);
+    }
     let mut cfg = (*plan.prep.cfg).clone();
     let vi = cfg[b].versions.len() - 1;
-    let mut pins: Vec<Py<PyAny>> = vec![];
     let handler = region_handler(&cfg, b, vi).map_err(pyo3::exceptions::PyNotImplementedError::new_err)?;
     let blk = &cfg[b];
     let from = &blk.versions[vi];
-    let mut guard = from.guard.clone();
+    let guard = from.guard.clone();
     let inputs = from.inputs.clone();
     let args: Vec<ValueId> = blk.params.iter().chain(&inputs).copied().collect();
     let origin = from.body.first().map_or(0, |v| cfg[*v].origin);
-    Python::attach(|py| -> PyResult<()> {
-        for t in &traced.checks {
-            let check = parse_check(t.bind(py), &args, &mut cfg, &mut pins)?;
-            guard.checks.push(check);
-        }
-        Ok(())
-    })?;
-    let n = traced.spec.outputs.len();
-    cfg.regions.push(Arc::new(traced.spec));
+    let place = crate::cfg::ir::Place { name: traced.variant.spec.name.clone(), outputs: n, variants: Default::default() };
+    place.variants.push(traced.variant);
+    cfg.regions.push(Arc::new(place));
     let v = cfg.add(Op::Region(cfg.regions.len() as u32 - 1), args, origin);
     let outputs: Vec<ValueId> = (0..n).map(|k| cfg.add(Op::Project(k as u32), vec![v], origin)).collect();
     let mut body = vec![v];
@@ -1680,7 +1703,7 @@ pub(crate) fn add_region(c: &Compiled, prep: usize, b: BlockId, traced: region::
     };
     cfg[b].versions.insert(0, crate::cfg::ir::Version { guard, body, outputs, unwind, inputs });
     crate::cfg::verify::verify(&cfg).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("CFG verification failed: {e}")))?;
-    swap_plan(c, plan, plan, cfg, plan.prep.record, pins, HashMap::new(), |_| {})?;
+    swap_plan(c, plan, plan, cfg, plan.prep.record, vec![], HashMap::new(), |_| {})?;
     let new = &c.plan().prep;
     for (i, flag) in plan.prep.region_off.iter().enumerate() {
         new.region_off[i].store(flag.load(Ordering::Relaxed), Ordering::Relaxed);
@@ -1721,16 +1744,20 @@ fn region_handler(cfg: &Cfg, b: BlockId, vi: usize) -> Result<crate::cfg::ir::Ha
     Ok(out.unwrap_or(Handler::Propagate))
 }
 
-// A guard check given from Python as a tuple: (kind, position among `args`
-// (or a value for global checks), ...). See _add_block_checks.
-fn parse_check(t: &Bound<'_, PyTuple>, args: &[ValueId], cfg: &mut Cfg, pins: &mut Vec<Py<PyAny>>) -> PyResult<(Option<ValueId>, Check)> {
+// A check a region's trace asks for (torch._rust_inductor._plan), given as a
+// tuple (kind, position among the place's args (or a value for global
+// checks), ...): the position with the check, or with the object the arg is
+// to be.
+pub(crate) enum Parsed {
+    Check(Option<usize>, Check),
+    Is(usize, Py<PyAny>),
+}
+
+pub(crate) fn parse_check_tuple(t: &Bound<'_, PyTuple>) -> PyResult<Parsed> {
     let bad = || pyo3::exceptions::PyValueError::new_err(format!("bad check {t}"));
     let kind: String = t.get_item(0)?.extract()?;
-    let arg = || -> PyResult<Option<ValueId>> {
-        let i: usize = t.get_item(1)?.extract()?;
-        args.get(i).copied().map(Some).ok_or_else(bad)
-    };
-    Ok(match kind.as_str() {
+    let arg = || -> PyResult<Option<usize>> { Ok(Some(t.get_item(1)?.extract()?)) };
+    let (at, check) = match kind.as_str() {
         "grad_enabled" => (None, Check::GradEnabled(t.get_item(1)?.extract()?)),
         "no_torch_function_mode" => (None, Check::NoTorchFunctionMode),
         "no_forward_ad" => (None, Check::NoForwardAD),
@@ -1748,21 +1775,10 @@ fn parse_check(t: &Bound<'_, PyTuple>, args: &[ValueId], cfg: &mut Cfg, pins: &m
         }
         "value" => (arg()?, Check::Value(lit(&t.get_item(2)?).ok_or_else(bad)?)),
         "ints" => (arg()?, Check::Ints(t.get_item(2)?.extract()?, t.get_item(3)?.extract()?)),
-        "is" => {
-            let obj = t.get_item(2)?;
-            let k = match pins.iter().position(|p| p.is(&obj)) {
-                Some(k) => (cfg.pins.len() - pins.len() + k) as u32,
-                None => {
-                    let name = obj.get_type().name().map_or("?".into(), |n| n.to_string());
-                    cfg.pins.push(crate::cfg::ir::Pin { name, path: None });
-                    pins.push(obj.unbind());
-                    cfg.pins.len() as u32 - 1
-                }
-            };
-            (arg()?, Check::Is(k))
-        }
+        "is" => return Ok(Parsed::Is(t.get_item(1)?.extract()?, t.get_item(2)?.unbind())),
         _ => return Err(bad()),
-    })
+    };
+    Ok(Parsed::Check(at, check))
 }
 
 /// For coverage reports: what became of each pure block of the CFG the
