@@ -5734,8 +5734,10 @@ std::shared_ptr<RelationalGuard> STORAGE_OVERLAPPING::clone(
     RootGuardManager* root) {
   auto checker = root->clone_relational_state(
       _checker.get(), [&] { return _checker->clone(); });
-  return std::make_shared<STORAGE_OVERLAPPING>(
-      root, _overlapping, checker, verbose_code_parts(), get_user_stack());
+  return root->clone_relational_state(this, [&] {
+    return std::make_shared<STORAGE_OVERLAPPING>(
+        root, _overlapping, checker, verbose_code_parts(), get_user_stack());
+  });
 }
 
 std::shared_ptr<RelationalGuard> SYMBOLIC_SHAPE_GUARD::clone(
