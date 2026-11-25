@@ -1982,6 +1982,18 @@ assume_32bit_indexing: bool = False
 # no guard: one variant that serves every size, at the cost of 64-bit index math.
 avoid_32bit_indexing_guards: bool = False
 
+# When the sizes of a kernel cannot be proven to fit in int32, compile it with both
+# 32-bit and 64-bit indexing and have the wrapper launch the 32-bit kernel whenever every
+# size fits, instead of guarding on the sizes. Costs a second compile of each covered
+# kernel (of every variant, with triton.multi_kernel). The 64-bit kernel's codegen
+# heuristics (tiling, size_hints, from which its autotuning configs are generated, ...)
+# see sizes past int32 (codegen/simd.py _int64_kernel_hint_overrides). If the example
+# inputs already exceed int32, only the 64-bit kernel is built, as without this flag.
+# So far covers Triton pointwise and reduction kernels from the main SIMD codegen
+# path; other kernels keep the default behavior (see avoid_32bit_indexing_guards).
+# Skips are logged at debug level (TORCH_LOGS="+inductor").
+dual_index_dtype_kernels: bool = False
+
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
 # ignoring the unsupported args may lead to unexpected autotuning behavior: don't
