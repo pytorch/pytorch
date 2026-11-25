@@ -557,17 +557,17 @@ ownership:
       - /aten/src/ATen/native/ao_sparse/: [salilsdesai, digantdesai, jianyuh]
   - name: profiler
     labels: ["oncall: profiler"]
-    owners: [ryanzhang22, scotts]
+    owners: [ryanzhang22, scotts, thomasywang]
     section: profiler
     paths:
       - /test/cpp/profiler/test_profiler_collection.cpp
       - /test/profiler/
       - /test/test_throughput_benchmark.py
-      - /torch/autograd/profiler*: [scotts, ryanzhang22]
+      - /torch/autograd/profiler*: [scotts, ryanzhang22, thomasywang]
       - /torch/autograd/profiler.py
       - /torch/autograd/profiler_legacy.py
       - /torch/autograd/profiler_util.py
-      - /torch/csrc/autograd/profiler*: [scotts, ryanzhang22]
+      - /torch/csrc/autograd/profiler*: [scotts, ryanzhang22, thomasywang]
       - /torch/csrc/autograd/profiler.h
       - /torch/csrc/autograd/profiler_kineto.cpp
       - /torch/csrc/autograd/profiler_kineto.h
@@ -575,8 +575,8 @@ ownership:
       - /torch/csrc/autograd/profiler_legacy.h
       - /torch/csrc/autograd/profiler_python.cpp
       - /torch/csrc/autograd/profiler_python.h
-      - /torch/csrc/profiler/: [scotts, ryanzhang22]
-      - /torch/profiler/: [scotts, ryanzhang22]
+      - /torch/csrc/profiler/: [scotts, ryanzhang22, thomasywang]
+      - /torch/profiler/: [scotts, ryanzhang22, thomasywang]
   - name: mobile
     labels: ["oncall: mobile"]
     owners: []
@@ -835,10 +835,10 @@ ownership:
       - /third_party/xnnpack_wrapper_defs.bzl
   - name: third_party_profiler
     labels: ["oncall: profiler", "module: third_party"]
-    owners: [ryanzhang22, scotts]
+    owners: [ryanzhang22, scotts, thomasywang]
     section: third_party_backend_deps
     paths:
-      - /third_party/dynolog_headers/: [scotts, ryanzhang22]
+      - /third_party/dynolog_headers/: [scotts, ryanzhang22, thomasywang]
   - name: xpu_third_party
     labels: ["module: third_party", "module: xpu"]
     owners: [EikanWang, gujinghui]
