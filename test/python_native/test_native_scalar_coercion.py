@@ -34,9 +34,8 @@ class TestNativeScalarCoercion(TestCase):
         args, result_dtype = _scalar_arg_coercer(op)(
             (torch.ones(3, dtype=dtype), value)
         )
-        self.assertEqual(args[1].dtype, expected_dtype)
         self.assertEqual(
-            args[1].item(), torch.tensor(value, dtype=expected_dtype).item()
+            args[1], torch.tensor(value, dtype=expected_dtype), atol=0, rtol=0
         )
         self.assertEqual(result_dtype, dtype)
 
@@ -69,7 +68,7 @@ class TestNativeScalarCoercion(TestCase):
 
         check_scalar(255.5, torch.uint8)
         self.assertEqual(torch.empty((), dtype=torch.uint8).fill_(255.5).item(), 255)
-        with self.assertRaises(OverflowError):
+        with self.assertRaisesRegex(OverflowError, "overflows.*uint8"):
             check_scalar(256.0, torch.uint8)
 
 
