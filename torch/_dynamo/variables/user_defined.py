@@ -4000,18 +4000,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             install_not_in_instance_dict_guard(self.source, name)
 
     def generic_getattr(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        *,
+        use_getattr_hook: bool = False,
     ) -> VariableTracker:
-        """Dynamo implementation of CPython's PyObject_GenericGetAttr.
+        """Look up an attribute in descriptors and instance storage.
 
-        This mirrors object.__getattribute__ and is called from:
-        - tp_getattro_impl (for objects without a custom __getattribute__)
-        - SuperVariable.call_method (when super().__getattribute__() resolves
-          to object.__getattribute__)
-
-        The algorithm: MRO walk → data descriptor → instance __dict__ →
-        non-data descriptor / plain class attr → dynamic fallback →
-        __getattr__ → AttributeError.
+        Only ordinary attribute access dispatches to __getattr__ on a miss.
+        Explicit object.__getattribute__ and super().__getattribute__ raise directly.
         """
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
@@ -4093,7 +4091,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 pass
 
         # Step 6: __getattr__ fallback.
-        result = self.call_getattr_fallback(tx, name)
+        result = self.call_getattr_fallback(tx, name) if use_getattr_hook else None
         if result is not None:
             if (
                 self.source
@@ -4150,7 +4148,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Pass through to __getattr__ if __getattribute__ fails
                 handle_observed_exception(tx)
 
-        return self.generic_getattr(tx, name)
+        return self.generic_getattr(tx, name, use_getattr_hook=True)
 
     def resolve_data_descriptor(
         self,
