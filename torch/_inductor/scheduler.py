@@ -109,6 +109,22 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
+def grid_split_factors(nodes: Iterable[BaseSchedulerNode]) -> OrderedSet[int | None]:
+    """Split-as-grid factors of the reductions in `nodes`; None marks a reduction
+    without one. See ir.Reduction.create_multilayer_split_as_grid."""
+    return OrderedSet(
+        n.node._grid_split_factor if isinstance(n.node, ir.ComputedBuffer) else None
+        for n in nodes
+        if n.is_reduction()
+    )
+
+
+def _has_grid_split(node: BaseSchedulerNode) -> bool:
+    return config.triton.split_reductions_as_grid and any(
+        split is not None for split in grid_split_factors(node.get_nodes())
+    )
+
+
 def _real_dep_names(deps: OrderedSet[Dep]) -> OrderedSet[str]:
     """Names of real reads/writes, excluding WeakDep (ordering-only deps that
     do not actually read or write the buffer)."""
@@ -471,6 +487,8 @@ class MixOrderReduction:
         Check whether we can fuse two reductions with mix loop orders.
         """
         if not config.triton.mix_order_reduction:
+            return False
+        if _has_grid_split(node1) or _has_grid_split(node2):
             return False
 
         # TODO: Mix order reduction is not supported with cpp_wrapper yet
@@ -2491,6 +2509,8 @@ class NestedReduction:
 
     @classmethod
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        if _has_grid_split(node1) or _has_grid_split(node2):
+            return False
         return cls.plan(node1, node2) is not None
 
     @classmethod
@@ -3366,6 +3386,7 @@ class BaseSchedulerNode:
                                 ir.NoneLayout,
                                 ir.MultiOutputLayout,
                                 ir.MutationLayoutSHOULDREMOVE,
+                                ir.NonOwningLayout,
                                 ir.CommBufferLayout,
                             ),
                         )
@@ -4004,6 +4025,8 @@ class SchedulerNode(BaseSchedulerNode):
 
     _sizes: tuple[Sequence[sympy.Expr], ...]
     _body: LoopBody
+    # ((_loop_state_gen, _body), copy) from the last unsplit_reduction call.
+    _unsplit_reduction_cache: tuple[tuple[int, LoopBody], SchedulerNode] | None = None
 
     def __init__(
         self,
@@ -4261,10 +4284,20 @@ class SchedulerNode(BaseSchedulerNode):
         whole reduction; this node is left unchanged."""
         if not MixOrderReduction.is_split_reduction(self):
             return self
+        # The fusion search asks for the same node many times. Loop
+        # transformations replace _body or bump _loop_state_gen.
+        key = (self._loop_state_gen, self._body)
+        if self._unsplit_reduction_cache is not None:
+            cached_key, cached = self._unsplit_reduction_cache
+            if cached_key[0] == key[0] and cached_key[1] is key[1]:
+                return cached
         node = copy.copy(self)
         node.cancel_reduction_split()
+        if not isinstance(self.node, ir.ComputedBuffer):
+            raise AssertionError("expected self.node to be an ir.ComputedBuffer")
         # cancel_reduction_split caches the unsplit body.
         self.node.get_default_sizes_body.clear_cache(self.node)
+        self._unsplit_reduction_cache = (key, node)
         return node
 
     def expand_dimension_for_pointwise_node(
@@ -6276,8 +6309,8 @@ class Scheduler:
         self._fusion_memory_guard_disabled = False
         # Whether fusion rounds hold back template reduction epilogues, and
         # whether the latest round held any back. See fuse_nodes.
-        self._defer_template_reduction_epilogues = False
-        self._deferred_template_reduction_epilogues = False
+        self._template_reduction_deferral_on = False
+        self._template_reductions_deferred_this_round = False
         super().__init__()
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
@@ -7447,7 +7480,7 @@ class Scheduler:
             # plus the reduction's own kernel, so hold it back until no other
             # fusion is left. Otherwise the reduction is timed before it fuses
             # with its consumers, which are then timed as separate kernels.
-            self._defer_template_reduction_epilogues = True
+            self._template_reduction_deferral_on = True
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(
@@ -7463,15 +7496,23 @@ class Scheduler:
                     old_len,
                     new_len,
                 )
-                if new_len == old_len and self._deferred_template_reduction_epilogues:
-                    self._defer_template_reduction_epilogues = False
+                if new_len == old_len and self._template_reductions_deferred_this_round:
+                    self._template_reduction_deferral_on = False
                     continue
                 if new_len == old_len or new_len == 1:
                     fusion_log.debug(
                         "===== fusion complete (%d iterations) =====", i + 1
                     )
                     break
-            self._defer_template_reduction_epilogues = False
+            if (
+                self._template_reduction_deferral_on
+                and self._template_reductions_deferred_this_round
+            ):
+                # The rounds ran out while template reductions were held back,
+                # so try them once.
+                self._template_reduction_deferral_on = False
+                nodes = self.fuse_nodes_once(nodes, is_reorder_round=False)
+            self._template_reduction_deferral_on = False
 
             if (
                 config.loop_ordering_after_fusion
@@ -8322,8 +8363,8 @@ class Scheduler:
                 choice: torch._inductor.select_algorithm.TritonTemplateCaller,
             ) -> tuple[ir.ChoiceCaller, float]:
                 """The fastest of choice's variants with all or none of its
-                reduction epilogue's extra outputs on TMA, and its fused time;
-                choice and inf if both fail too."""
+                reduction epilogue's extra outputs and inputs on TMA, and its fused
+                time; choice and inf if both fail too."""
                 best: tuple[ir.ChoiceCaller, float] = (choice, float("inf"))
                 for plan in ("plain", "all"):
                     variant = choice.with_epilogue_tma_plan(plan)
@@ -9648,10 +9689,13 @@ class Scheduler:
             for node_grouping in group_grouping.values():
                 check_all_pairs(node_grouping)
 
+        # Defer before filtering by priority: a backend may rank the deferred
+        # template reductions highest (NVGEMM does), which would filter out
+        # every other fusion and leave nothing to fuse this round.
+        possible_fusions = self._defer_benchmarked_template_reductions(possible_fusions)
         possible_fusions = self.get_possible_fusions_with_highest_priority(
             possible_fusions
         )
-        possible_fusions = self._defer_benchmarked_template_reductions(possible_fusions)
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
@@ -9664,12 +9708,12 @@ class Scheduler:
         deferred = OrderedSet(
             (node1, node2)
             for node1, node2 in possible_fusions
-            if self._defer_template_reduction_epilogues
+            if self._template_reduction_deferral_on
             and config.benchmark_template_fusion
             and isinstance(node1.get_template_node(), ir.MultiTemplateBuffer)
             and self._is_template_reduction_epilogue(node1, node2)
         )
-        self._deferred_template_reduction_epilogues = bool(deferred)
+        self._template_reductions_deferred_this_round = bool(deferred)
         for node1, node2 in deferred:
             WhyNoFuse(node1, node2)("template reduction epilogue deferred")
         return [pair for pair in possible_fusions if pair not in deferred]
@@ -11814,7 +11858,13 @@ class Scheduler:
         # Non-injective scatter: range vars absent from write index mean
         # multiple iterations hit the same location. Can't fuse the reader
         # in or it will see partially-written state between iterations.
-        if not OrderedSet(write.var_names) <= write.index.free_symbols:
+        # Compare against the writer's ranges, since trailing unused vars are
+        # dropped from write.var_names
+        writer = self.name_to_buf[weak_dep.mutating_buf].defining_op
+        if not isinstance(writer, SchedulerNode):
+            return False
+        iter_numel = sympy_product(writer.get_ranges()[0])
+        if not V.graph.sizevars.statically_known_equals(write.get_numel(), iter_numel):
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
