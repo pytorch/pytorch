@@ -1008,9 +1008,8 @@ def nested_compile_region(
             provided, Dynamo traces this function to obtain a constant integer
             and uses it as the cache key for subgraph reuse, bypassing the
             automatic fingerprint/guard machinery. Two calls that produce the
-            same code object and hash key reuse the same cached subgraph. Pass relevant
-            closure state, defaults, globals, and aliases to the hash function or
-            capture them in the hash function itself. The hash function
+            same code object and hash key reuse a subgraph. Include relevant closures, defaults,
+            globals, and aliases via arguments or captures. The hash function
             must be fully traceable (no graph breaks) and must return a
             constant integer.
     """
