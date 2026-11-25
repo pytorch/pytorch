@@ -4473,20 +4473,7 @@ class InstructionTranslatorBase(
         return value
 
     def _format_value(self, fmt_spec: VariableTracker, flags: int) -> None:
-        value = self.pop()
-        if isinstance(value, SymNodeVariable):
-            from torch._dynamo.variables.lazy import (
-                LazySymNodeFormatString,
-                LazyVariableTracker,
-            )
-
-            value = LazyVariableTracker.create(
-                LazySymNodeFormatString(value, fmt_spec), source=None
-            )
-            self.push(value)
-            return
-
-        value = self._convert_value(value, flags & 0x03)
+        value = self._convert_value(self.pop(), flags & 0x03)
 
         # For plain f"{obj}" (no conversion, empty format spec, default
         # __format__), eagerly evaluate str() via generic_str to capture
@@ -4500,28 +4487,23 @@ class InstructionTranslatorBase(
             and fmt_spec.is_python_constant()
             and fmt_spec.as_python_constant() == ""
         ):
-            realized = value.realize()
             try:
-                py_type = realized.python_type()
+                py_type = value.python_type()
             except NotImplementedError:
                 py_type = None
             if py_type is not None and py_type.__format__ is object.__format__:
                 try:
                     from .variables.object_protocol import generic_str
 
-                    str_result = generic_str(self, realized)
+                    str_result = generic_str(self, value.realize())
                     self.push(str_result)
                     return
                 except Unsupported:
                     if self.output.should_exit:
                         raise
 
-        fmt_var = VariableTracker.build(
-            self, "{:" + fmt_spec.as_python_constant() + "}"
-        )
-
-        format_fn = VariableTracker.build(self, str.format)
-        self.call_function(format_fn, [fmt_var, value], {})
+        format_fn = SourcelessBuilder.create_internal_builtin(format)
+        self.call_function(format_fn, [value, fmt_spec], {})
 
     @break_graph_if_unsupported(
         push=True,
@@ -4543,7 +4525,17 @@ class InstructionTranslatorBase(
         kwargs: dict[str, VariableTracker] = {}
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")
-        for part in self.popn(inst.arg):
+        parts = self.popn(inst.arg)
+        # isinstance doesn't realize lazy constants, so concatenating keeps them lazy
+        if parts and all(isinstance(part, ConstantVariable) for part in parts):
+            add = SourcelessBuilder.create_internal_builtin(operator.add)
+            self.push(
+                functools.reduce(
+                    lambda a, b: add.call_function(self, [a, b], {}), parts
+                )
+            )
+            return
+        for part in parts:
             if part.is_python_constant():
                 format_string_parts.append("{}")
                 args.append(part)
