@@ -88,8 +88,7 @@ def _validate_sdpa_input(
 class DescaleType(IntEnum):
     """Describes the scaling granularity for FP8 descale tensors.
 
-    Used by the fp8 attention APIs (_scaled_dot_product_attention_quantized, varlen_attn)
-    to specify how the descale factors are applied to the quantized inputs.
+    _scaled_dot_product_attention_quantized takes one per descale; varlen_attn always uses PER_HEAD.
 
     .. warning::
         This enum is experimental and subject to change.

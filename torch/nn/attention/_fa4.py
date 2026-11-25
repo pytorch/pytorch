@@ -288,7 +288,7 @@ def _fa4_run_forward(
         if tensorwise_scales_cls is not None:
             kwargs["scales"] = tensorwise_scales_cls(q_descale, k_descale, v_descale)
         else:
-            # flash-attn-4 releases before 4.0.0b39 (CI pins 4.0.0b31) take the descales as separate arguments.
+            # flash-attn-4 releases before 4.0.0b39 take the descales as separate arguments.
             kwargs.update(q_descale=q_descale, k_descale=k_descale, v_descale=v_descale)
     out, lse, *_ = module._flash_attn_fwd(query, key, value, **kwargs)
     return out, lse.contiguous()
