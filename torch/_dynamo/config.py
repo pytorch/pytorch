@@ -455,8 +455,8 @@ skip_fsdp_guards = True
 
 # When calling forward directly on a module without hooks, skip guards on empty
 # builtin local hook registries. Later global hooks can be missed with either setting.
-# During hook dispatch, skip type checks on builtin global registries and on
-# hook IDs used for flag membership.
+# During hook dispatch, skip type checks on builtin registries read from their global
+# names and on hook IDs used for flag membership.
 skip_nnmodule_hook_guards = True
 
 # Make dynamo skip no tensor aliasing guard on parameters
