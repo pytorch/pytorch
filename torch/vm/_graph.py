@@ -568,7 +568,64 @@ def _differs(want: Any, have: Any, rtol: float, atol: float) -> str | None:
     return f"is {have!r}, not {want!r}"
 
 
-def swap(ops: Iterable[str], kernel: Callable, *, check: bool | int = True, rtol: float = 1e-4, atol: float = 1e-6) -> Callable:
+# The tolerances of a checked kernel unless others are given.
+SWAP_RTOL, SWAP_ATOL = 1e-4, 1e-6
+
+
+def _as_target(fn: Callable, name: str) -> Callable:
+    """``fn`` as a graph node's target: a graph's code calls a function of a
+    torch module by its qualified name, so it gets a name of its own here."""
+    name = "".join(c for c in name if c.isalnum() or c == "_")
+    fn.__name__ = fn.__qualname__ = f"{name}_{len(_stand_ins)}"
+    _stand_ins.append(fn)
+    globals()[fn.__name__] = fn
+    return fn
+
+
+def _segment_of(gm: torch.fx.GraphModule, nodes: list[torch.fx.Node]) -> Segment | None:
+    """The calls ``nodes`` (consecutive) as a segment: what they take from
+    outside, in the order they first use it, and what they give to what
+    follows. None if nothing follows."""
+    inside = set(nodes)
+    inputs: dict[torch.fx.Node, None] = {}
+    for n in nodes:
+        for a in n.all_input_nodes:
+            if a not in inside:
+                inputs.setdefault(a)
+    outputs = [n for n in nodes if any(u not in inside for u in n.users)]
+    return Segment(gm, nodes, list(inputs), outputs) if outputs else None
+
+
+def _checked(kernel: Callable, checks: int, rtol: float, atol: float, reference: torch.fx.GraphModule, n_outputs: int) -> Callable:
+    """``kernel`` in place of the ops of ``reference`` (which give
+    ``n_outputs`` values): for its first ``checks`` calls the ops run on the
+    same inputs, and a kernel that gives something else raises Mismatch."""
+    name = getattr(kernel, "__name__", type(kernel).__name__)
+    state = {"left": checks, "calls": 0}
+
+    def swapped(*values):
+        state["calls"] += 1
+        expected = None
+        if state["left"] > 0:
+            state["left"] -= 1
+            # The replaced ops first: they get the inputs as the function had them.
+            with torch.no_grad():
+                expected = reference(*values)
+        out = kernel(*values)
+        found = (out,) if n_outputs == 1 else tuple(out)
+        if len(found) != n_outputs:
+            raise Mismatch(f"{name} gave {len(found)} values where the ops it replaced give {n_outputs}")
+        if expected is not None:
+            for i, (want, have) in enumerate(zip(expected, found)):
+                how = _differs(want, have, rtol, atol)
+                if how is not None:
+                    raise Mismatch(f"{name}: result {i} {how} on call {state['calls']} (the ops it replaced were run on the same inputs)")
+        return found
+
+    return _as_target(swapped, f"swap_{name}")
+
+
+def swap(ops: Iterable[str], kernel: Callable, *, check: bool | int = True, rtol: float = SWAP_RTOL, atol: float = SWAP_ATOL) -> Callable:
     """A block pass that replaces a run of ops by one call of ``kernel`` and
     checks the kernel against the ops it replaced.
 
@@ -599,35 +656,6 @@ def swap(ops: Iterable[str], kernel: Callable, *, check: bool | int = True, rtol
     checks = 8 if check is True else int(check)
     name = getattr(kernel, "__name__", type(kernel).__name__)
 
-    def stand_in(reference: torch.fx.GraphModule, n_outputs: int) -> Callable:
-        state = {"left": checks, "calls": 0}
-
-        def swapped(*values):
-            state["calls"] += 1
-            expected = None
-            if state["left"] > 0:
-                state["left"] -= 1
-                # The replaced ops first: they get the inputs as the function had them.
-                with torch.no_grad():
-                    expected = reference(*values)
-            out = kernel(*values)
-            found = (out,) if n_outputs == 1 else tuple(out)
-            if len(found) != n_outputs:
-                raise Mismatch(f"{name} gave {len(found)} values where the ops it replaced give {n_outputs}")
-            if expected is not None:
-                for i, (want, have) in enumerate(zip(expected, found)):
-                    how = _differs(want, have, rtol, atol)
-                    if how is not None:
-                        raise Mismatch(f"{name}: result {i} {how} on call {state['calls']} (the ops it replaced were run on the same inputs)")
-            return found
-
-        # A graph's code calls a function of a torch module by its qualified
-        # name: the stand-in is one, under a name of its own.
-        swapped.__name__ = swapped.__qualname__ = f"swap_{name.strip('<>')}_{len(_stand_ins)}"
-        _stand_ins.append(swapped)
-        globals()[swapped.__name__] = swapped
-        return swapped
-
     def swap_pass(gm: torch.fx.GraphModule, input_types: list[Any]) -> torch.fx.GraphModule:
         while True:
             order = list(gm.graph.nodes)
@@ -637,18 +665,10 @@ def swap(ops: Iterable[str], kernel: Callable, *, check: bool | int = True, rtol
                 if not all(_same_operator(w, _operator(n)) for w, n in zip(wanted, run)) or any(map(_writes_or_draws, run)):
                     continue
                 # What stands between the ops (an item taken out of a result) comes along.
-                nodes = [n for n in order[order.index(run[0]) : order.index(run[-1]) + 1] if n.op == "call_function"]
-                inside = set(nodes)
-                inputs: dict[torch.fx.Node, None] = {}
-                for n in nodes:
-                    for a in n.all_input_nodes:
-                        if a not in inside:
-                            inputs.setdefault(a)
-                outputs = [n for n in nodes if any(u not in inside for u in n.users)]
-                if not outputs:
+                seg = _segment_of(gm, [n for n in order[order.index(run[0]) : order.index(run[-1]) + 1] if n.op == "call_function"])
+                if seg is None:
                     continue
-                seg = Segment(gm, nodes, list(inputs), outputs)
-                replace_segment(gm, seg, stand_in(seg.as_callable(), len(outputs)))
+                replace_segment(gm, seg, _checked(kernel, checks, rtol, atol, seg.as_callable(), len(seg.outputs)))
                 _replacements(gm).append((kernel, atol, rtol, "same"))
                 break
             else:

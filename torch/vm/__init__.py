@@ -90,6 +90,7 @@ from torch.vm._guards import (
     TensorMeta,
     Value,
 )
+from torch.vm._native import load_passes
 from torch.vm._pipeline import VersionInfo
 from torch.vm._types import AnyType, ConstType, DimSet, FloatType, IntType, Interval, materialize, nbytes, ObjectType, SeqType, TensorType, Type, type_of, UnionType, Varies
 
@@ -158,6 +159,7 @@ __all__ = [
     "guard",
     "kind",
     "last_forward_user",
+    "load_passes",
     "lower_to",
     "mark_recompute",
     "match",
