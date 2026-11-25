@@ -6,6 +6,7 @@ import inspect
 import os
 import sys
 import sysconfig
+import types
 import unittest
 import weakref
 from collections import OrderedDict
@@ -1829,6 +1830,62 @@ class TagSafetyChecks(RecursiveDictTagTests):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
+
+    def test_object_aliasing_closed_within_module_is_tag_safe(self):
+        def hook(mod, args, out, scale):
+            return out * scale
+
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_forward_hook(functools.partial(hook, scale=2))
+
+            def forward(self, x):
+                return x + 1
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = Child()
+                self.b = Child()
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        mod = Parent()
+        x = torch.randn(4)
+
+        def fn(x):
+            return mod(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook_test(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_source = LocalSource("mod")
+            mod_mgr = builder.get_guard_manager_from_source(mod_source)
+            # Both hooks share one function, which may relate the two children
+            # by an aliasing guard. The children can't be roots on their own
+            # then, but the parent holds both sides of the guard.
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+            for _ in range(3):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+
+            # Same code, different function object: the hooks no longer alias.
+            other = types.FunctionType(hook.__code__, hook.__globals__)
+            child = mod.b
+            child._forward_hooks.clear()
+            child.register_forward_hook(functools.partial(other, scale=2))
+            self.assertFalse(guard_wrapper.check({"mod": mod, "x": x}))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook_test):
+            opt_fn(x)
 
     def test_unoptimized_relational_guard_not_tag_safe(self):
         from torch._dynamo.guards import GuardManagerWrapper
