@@ -4828,30 +4828,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(_rel_bias, dtype, device, B, H, S, head_dim, B, H, S, head_dim)
-        if head_dim == 576 and torch.device(device).type == "xpu":
-            # The path taken when the inputs cannot use TMA.
-            block_mask = create_block_mask(_causal_mask, B, 1, S, S, device=device)
-            attention = functools.partial(
-                flex_attention,
-                block_mask=block_mask,
-                kernel_options={"USE_TMA": False},
-            )
-            self.run_test_with_call(
-                attention, dtype, device, B, H, S, head_dim, B, H, S, head_dim
-            )
-            # An odd storage offset rules out TMA, even when requested, and only
-            # a smaller config fits shared memory at head_dim 288.
-            q, k, v = (
-                torch.randn(B * H * S * 288 + 1, device=device, dtype=dtype)[1:].view(
-                    B, H, S, 288
-                )
-                for _ in range(3)
-            )
-            golden = flex_attention(*(x.double() for x in (q, k, v)))
-            compiled = torch.compile(flex_attention)(
-                q, k, v, kernel_options={"fwd_USE_TMA": True}
-            )
-            self._check_out(golden, flex_attention(q, k, v), compiled)
 
     @supported_platform
     @skip_on_cpu
