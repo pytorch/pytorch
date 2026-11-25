@@ -82,7 +82,7 @@ jobs:
       runs_on: ${{ needs.select-runner.outputs.x86 }}
       docker_image: "pytorch/manylinux2_28-builder:cpu"
 
-  build-wheel-win:
+  build-wheel-win-xpu:
     # The selector also applies the [no-ci] gate to this fixed runner.
     if: github.repository_owner == 'pytorch'
     needs: select-runner
@@ -114,7 +114,7 @@ jobs:
       artifact_pattern: triton-wheel-*-rocm-manylinux_2_28_x86_64
 
   upload-wheel-xpu:
-    needs: [build-wheel-xpu, build-wheel-win]
+    needs: [build-wheel-xpu, build-wheel-win-xpu]
     permissions:
       id-token: write
       contents: read
