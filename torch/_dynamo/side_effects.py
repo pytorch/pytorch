@@ -318,8 +318,6 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
-        # An escaping namespace iterator must see any aliased dictionary writes.
-        self.mutated_dict_sources: OrderedSet[Source] = OrderedSet()
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var: ListVariable | None = None
@@ -335,6 +333,8 @@ class SideEffects:
         # Sources mutated during tracing: AttrSource for attribute
         # mutations, var.source for value mutations (list/dict/etc).
         self.mutated_sources: OrderedSet[Source] = OrderedSet()
+        # An escaping namespace iterator must see any aliased dictionary writes.
+        self.mutated_dict_sources: OrderedSet[Source] = OrderedSet()
 
         # Deferred side-effect checking for nullified attribute mutations.
         # Maps (vt_id, attr_name) → (original_value, current_value).
@@ -633,6 +633,10 @@ class SideEffects:
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
     ) -> None:
+        if type(item) is variables.OrderedDictVariable and isinstance(
+            item.mutation_type, ValueMutationNew
+        ):
+            self.track_attribute_mutation_new(item)
         # `obj.__dict__` ordering is observable (e.g. list(obj.__dict__)). When a
         # key is re-added after being deleted, CPython appends it at the end
         # rather than reusing its old slot. store_attr_mutations is an
@@ -1200,8 +1204,8 @@ class SideEffects:
             var.mutation_type.is_modified = True
         if var.source is not None:
             self.mutated_sources.add(var.source)
-        if var.source and isinstance(var, variables.ConstDictVariable):
-            self.mutated_dict_sources.add(var.source)
+            if isinstance(var, variables.ConstDictVariable):
+                self.mutated_dict_sources.add(var.source)
 
     def _get_modified_vars(self) -> list[VariableTracker]:
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
