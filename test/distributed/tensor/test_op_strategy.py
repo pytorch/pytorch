@@ -939,6 +939,64 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertEqual(strategies[1][0], Partial("max"))
         self.assertEqual(strategies[1][1].dim, 1)
 
+    def test_empty_dim_single_dim_strategy(self):
+        from torch.distributed.tensor._ops._math_ops import (
+            bool_reduction_single_dim_strategy,
+            linear_reduction_single_dim_strategy,
+            std_var_single_dim_strategy,
+        )
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _ShardingPlaceholder,
+        )
+
+        def normalize(strategies):
+            return [
+                [p.dim if isinstance(p, _ShardingPlaceholder) else p for p in s]
+                for s in strategies
+            ]
+
+        meta = TensorMeta(shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32)
+        bool_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.bool
+        )
+        # aten reductions read dim=[] as every dim; any/all and prims as no dim.
+        cases = [
+            (
+                linear_reduction_single_dim_strategy,
+                torch.ops.aten.sum.dim_IntList,
+                (meta, []),
+                [[Partial("sum"), 0], [Partial("sum"), 1], [Partial("sum")] * 2],
+            ),
+            (
+                linear_reduction_single_dim_strategy,
+                torch.ops.prims.sum.default,
+                (meta, []),
+                [[0, 0], [1, 1], [Partial("sum")] * 2],
+            ),
+            (
+                std_var_single_dim_strategy,
+                torch.ops.aten.var.correction,
+                (meta, []),
+                [],
+            ),
+            (
+                std_var_single_dim_strategy,
+                torch.ops.prims.var.default,
+                (meta, [], 1.0),
+                [[0, 0], [1, 1]],
+            ),
+            (
+                bool_reduction_single_dim_strategy,
+                torch.ops.aten.any.dims,
+                (bool_meta, []),
+                [[0, 0], [1, 1]],
+            ),
+        ]
+        for strategy_fn, op, args, expected in cases:
+            self.assertEqual(
+                normalize(strategy_fn(op, args, {})), expected, msg=str(op)
+            )
+
     def test_var_mean_single_dim_strategy(self):
         from torch.distributed.tensor._ops._math_ops import std_var_single_dim_strategy
 
