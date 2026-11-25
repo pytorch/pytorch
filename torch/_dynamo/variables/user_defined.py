@@ -5099,64 +5099,67 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return super().tp_getattro_impl(tx, name)
 
 
-_CONSTANT_BASE_TYPES = (int, float, str)
-
-
-class ProtobufEnumWrapperVariable(UserDefinedObjectVariable):
-    """Resolve protobuf enum members backed by UPB's unmodeled C mapping slot."""
+class ProtobufDescriptorMapVariable(UserDefinedObjectVariable):
+    """Model subscription on UPB's read-only descriptor name maps."""
 
     @staticmethod
     def is_matching_object(obj: object) -> bool:
-        mod = sys.modules.get("google.protobuf.internal.enum_type_wrapper")
-        return mod is not None and type(obj) is mod.EnumTypeWrapper
-
-    def call_getattr_fallback(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker | None:
         upb = sys.modules.get("google._upb._message")
-        getattr_fn = self._check_for_getattr()
-        side_effects = tx.output.side_effects
+        return upb is not None and type(obj) is getattr(upb, "_ByNameMap", None)
+
+    def mp_subscript_impl(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        mapping_type = type(self.value)
+        slot = self.lookup_class_mro_attr("__getitem__")
         if (
             self.source is None
-            or upb is None
-            or self._object_has_getattribute
-            or not isinstance(getattr_fn, types.FunctionType)
-            or getattr_fn.__module__ != "google.protobuf.internal.enum_type_wrapper"
-            or getattr_fn.__qualname__ != "EnumTypeWrapper.__getattr__"
-            or type(vars(self.value).get("_enum_type")) is not upb.EnumDescriptor
-            or side_effects.has_pending_mutation_of_attr(self, "_enum_type")
-            or side_effects.has_pending_mutation_of_attr(self, name)
-            or side_effects.has_pending_mutation_of_attr(self, "__dict__")
+            or is_constant_source(self.source)
+            or self.source.is_ephemeral()
+            or not isinstance(slot, types.WrapperDescriptorType)
+            or slot.__objclass__ is not mapping_type
+            or slot.__name__ != "__getitem__"
+            or not key.is_python_constant()
         ):
-            return super().call_getattr_fallback(tx, name)
+            return super().mp_subscript_impl(tx, key)
 
-        cls_source = TypeSource(self.source)
-        # Use ordinary lookup to guard the result, including changes to the
-        # wrapper's descriptor or attributes that shadow enum members.
-        install_guard(
-            AttrSource(cls_source, "__getattribute__").make_guard(
-                GuardBuilder.FUNCTION_MATCH
-            ),
-            AttrSource(cls_source, "__getattr__").make_guard(
-                GuardBuilder.FUNCTION_MATCH
-            ),
-            AttrSource(self.source, "_enum_type").make_guard(GuardBuilder.TYPE_MATCH),
-        )
+        name = key.as_python_constant()
+        # The native slot can call Python's hash protocol for other key types.
+        if type(name) not in (str, bytes):
+            return super().mp_subscript_impl(tx, key)
+
+        side_effects = tx.output.side_effects
+        if mapping_type in side_effects and side_effects.has_pending_mutation_of_attr(
+            side_effects[mapping_type], "__getitem__"
+        ):
+            unimplemented(
+                gb_type="Native mapping subscription after slot mutation",
+                context=f"type={mapping_type.__qualname__}",
+                explanation="The native mapping's __getitem__ changed earlier in the trace.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         try:
-            result = getattr_fn(self.value, name)
-        except AttributeError as exc:
+            entry = slot(self.value, name)
+        except KeyError as exc:
             install_guard(
                 self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                    functools.partial(
+                        GuardBuilder.NATIVE_SUBSCRIPT_MATCH, slot=slot, absent_key=name
+                    )
                 )
             )
-            raise_observed_exception(
-                AttributeError,
-                tx,
-                args=exc.args,
-                kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
+            raise_observed_exception(KeyError, tx, args=exc.args)
+        install_guard(
+            self.source.make_guard(
+                functools.partial(
+                    GuardBuilder.NATIVE_SUBSCRIPT_MATCH, slot=slot, absent_key=None
+                )
             )
-        return VariableTracker.build(tx, result, AttrSource(self.source, name))
+        )
+        return VariableTracker.build(tx, entry, GetItemSource(self.source, name))
+
+
+_CONSTANT_BASE_TYPES = (int, float, str)
 
 
 class UserDefinedConstantVariable(UserDefinedObjectVariable):

@@ -1524,6 +1524,25 @@ def _guard_create_fn_keyword(guard: Guard, name: str) -> Any:
     return create_fn.keywords[name]
 
 
+def _native_subscript_matches(
+    value: object, metadata: tuple[types.WrapperDescriptorType, str | bytes | None]
+) -> bool:
+    slot, absent_key = metadata
+    cls = slot.__objclass__
+    if (
+        type(value) is not cls
+        or get_type_dict_no_user_code(cls).get("__getitem__") is not slot
+    ):
+        return False
+    if absent_key is None:
+        return True
+    try:
+        slot(value, absent_key)
+    except KeyError:
+        return True
+    return False
+
+
 def register_guard_check_spec(
     get_metadata_fn: GuardCheckGetMetadataFn,
     eval_fn: GuardCheckEvalFn,
@@ -2797,6 +2816,29 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            _guard_create_fn_keyword(guard, "slot"),
+            _guard_create_fn_keyword(guard, "absent_key"),
+        ),
+        eval_fn=_native_subscript_matches,
+    )
+    def NATIVE_SUBSCRIPT_MATCH(
+        self,
+        guard: Guard,
+        slot: types.WrapperDescriptorType,
+        absent_key: str | bytes | None,
+    ) -> None:
+        """Guard a modeled native slot before accessing its sourced results."""
+        ref = self.arg_ref(guard)
+        code = f"native_subscript_matches({ref}, {absent_key!r})"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            functools.partial(_native_subscript_matches, metadata=(slot, absent_key)),
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(guard, "key"),

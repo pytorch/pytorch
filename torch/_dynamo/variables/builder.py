@@ -369,7 +369,7 @@ from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
-    ProtobufEnumWrapperVariable,
+    ProtobufDescriptorMapVariable,
     SimpleNamespaceVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
@@ -1722,10 +1722,6 @@ class VariableBuilder:
             items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.EQUALS_MATCH)
             return FrozensetVariable(items, source=self.source)
-        elif ProtobufEnumWrapperVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = ProtobufEnumWrapperVariable(value, source=self.source)
-            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(
             value,
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
@@ -2034,6 +2030,8 @@ class VariableBuilder:
             result = KeyedJaggedTensorVariable(value, source=self.source)
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif ProtobufDescriptorMapVariable.is_matching_object(value):
+            return ProtobufDescriptorMapVariable(value, source=self.source)
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.ID_MATCH)
             self.source = OptimizerSource(self.source)
