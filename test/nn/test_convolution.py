@@ -3906,10 +3906,11 @@ class TestConvolutionNNDevice(NNTestCase):
         x = x.contiguous(memory_format=torch.contiguous_format)
         out_c = conv(x, weight)
         self.assertTrue(out_c.is_contiguous(memory_format=torch.contiguous_format))
-        # The two layouts can run different conv algorithms (e.g. MIOpen picks
+        # On ROCm the two layouts can run different MIOpen algorithms (e.g.
         # Winograd for one and implicit GEMM for the other), so their fp32
         # results differ by more than the default tolerance.
-        self.assertEqual(out_c, out_nhwc, atol=5e-5, rtol=1e-5)
+        atol, rtol = (5e-5, 1e-5) if TEST_WITH_ROCM else (None, None)
+        self.assertEqual(out_c, out_nhwc, atol=atol, rtol=rtol)
         self.assertEqual(weight.stride(), weight_stride)
 
     @skipCUDAIfNoCudnn
