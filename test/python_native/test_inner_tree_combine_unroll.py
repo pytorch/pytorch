@@ -204,7 +204,7 @@ class TestInnerTreeCombineUnroll(TestCase):
         "updates,msg",
         [
             ({"uniform_combine": "weight"}, r"must be one of \('off', 'counts'"),
-            ({"shape": "split"}, "staged combine plan"),
+            ({"shape": "looped"}, "staged combine plan"),
             ({"combine_tile": 0}, "staged combine plan"),
             ({"trait": "sum"}, "combine_uniform, got SumOps"),
             ({"trait": "fp64"}, "an FP32 accumulator"),
@@ -396,6 +396,11 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         general = {k[-2] for k in kg._COMPILE_CACHE if k[1:3] == ("genitree2", key)}
         self.assertEqual(row_sigs, {combine.sig})
         self.assertEqual(general, {combine.sig})
+        # Uniform combines derive counts, so stage one writes no count partial.
+        nparts = trait.nfields - (uniform != "off")
+        row_parts = {k[3] for k in rt._CACHE if k[:2] == ("rowitree1", key)}
+        gen = {k[4] for k in kg._COMPILE_CACHE if k[1:3] == ("genitree1", key)}
+        self.assertEqual({len(p) for p in row_parts | gen}, {nparts})
         if col_combine is not None:
             # Split columns fold their partials through the general genitree2 combine.
             self.assertEqual(col_combine.combine_tile, 128)
@@ -405,6 +410,9 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             col_key = ("genitree2", f"{key}_col")
             col_sigs = {k[-2] for k in kg._COMPILE_CACHE if k[1:3] == col_key}
             self.assertEqual(col_sigs, {col_combine.sig})
+            col_one = ("ordered_col1", f"{key}_col")
+            col_parts = {len(k[3]) for k in ct._CACHE if k[:2] == col_one}
+            self.assertEqual(col_parts, {nparts})
         for g, w in zip(got, want):
             self.assertEqual(g.view(torch.int32), w.view(torch.int32))
 
@@ -457,12 +465,15 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
                 trait, key + "_pitched", pitched, [torch.float32], order="inner_tree"
             )
         self.assertEqual(got_p.view(torch.int32), got.view(torch.int32))
+        # Split stages carry their combine's mode, so Welford's write no count partial.
+        mode = c.uniform_combine
         unstaged = rt.trait_itree_plan(trait, n, 1, 4, stage=False, arch=profile)
         sigs = {e[-1] for e in rt._CACHE if e[:2] == ("rowitree1", key + "_pitched")}
-        self.assertEqual(sigs, {unstaged.sig})
+        self.assertEqual(sigs, {unstaged._replace(uniform_combine=mode).sig})
         # Each stage's cache key ends with its plan's sig.
+        stage_one = split._replace(uniform_combine=mode)
         for k in (key, key + "_ordered"):
-            for tag, plan in (("rowitree1", split), ("rowitree2", c)):
+            for tag, plan in (("rowitree1", stage_one), ("rowitree2", c)):
                 sigs = {e[-1] for e in rt._CACHE if e[:2] == (tag, k)}
                 self.assertEqual(sigs, {plan.sig})
         # Every _ItreeArch knob is bit-neutral, so the default profile gives the same bits.
