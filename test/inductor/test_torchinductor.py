@@ -19426,13 +19426,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # Checks that no triton code run in the generated code
             self.assertFalse(".run(" in code[0])
 
-    # skip cpu test since rms norm is always decomposed on cpu
-    @skip_if_device(
-        lambda device: device != GPU_TYPE or device == "mps", "requires GPU"
-    )
+    @skip_if_device(lambda device: device == "mps", "not supported on MPS")
     def test_lite_mode_not_decompose(self):
-        if self.device != GPU_TYPE or self.device == "mps":
-            raise unittest.SkipTest("requires GPU")
+        if self.device == "mps":
+            raise unittest.SkipTest("not supported on MPS")
+        shim_device = "cpu" if self.device == "cpu" else "cuda"
+        shim = f"aoti_torch_{shim_device}__fused_rms_norm("
 
         def f(x, shape):
             y = x + 1
@@ -19444,9 +19443,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(2, 3, device=self.device)
         _, code = run_and_get_code(f, x, [2, 3])
         if config.cpp_wrapper:
-            FileCheck().check(
-                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda__fused_rms_norm("
-            ).run(code[0])
+            FileCheck().check(f"AOTI_TORCH_ERROR_CODE_CHECK({shim}").run(code[0])
         else:
             FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
 
@@ -19454,9 +19451,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, codes = run_fw_bw_and_get_code(lambda: f(x, [2, 3]))
         self.assertEqual(len(codes), 2)
         if config.cpp_wrapper:
-            FileCheck().check(
-                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda__fused_rms_norm("
-            ).run(codes[0])
+            FileCheck().check(f"AOTI_TORCH_ERROR_CODE_CHECK({shim}").run(codes[0])
         else:
             FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(codes[0])
 
