@@ -84,9 +84,11 @@ def tma_ok(
 
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
-# making it hash-pinnable, and covers every N to prevent silent fallback. It costs
-# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var avoids
-# affecting upstream kernels, which register first.
+# making it hash-pinnable, and covers every N whose geometry fits Int32. It costs
+# 0.92-1.41x the rolled fold and requires per-N compilation. Column layouts take the
+# general axis's decoded-gather tree ahead of coltile: for x.sum(0) of fp32 (65536, 256)
+# the tree took 68.4us and coltile 17.2us (B200 CUDA graphs, L2-cold). Its independent
+# env var avoids affecting upstream kernels, which register first.
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
 _MULTIROW_ROWS_PER_BLOCK = 128
@@ -175,7 +177,7 @@ def itree_plan(
     vec_linear: bool = False,
     stage: bool | None = None,
 ) -> _ItreePlan | None:
-    """Return the upstream-matching plan, or None to use default order without declining."""
+    """Return the upstream-matching plan, or None when N < 1."""
     from .inner_tree_plan import (
         _K_MULTIROW_MAX_LOADS,
         _K_TWO_KERNEL_THRESHOLD,
