@@ -702,6 +702,12 @@ class TritonTemplateKernel(TritonKernel):
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
     ) -> None:
+        if tma_load_for_template_epilogue and self._single_k_tile_two_ctas(
+            input_nodes, prefix_args, meta
+        ):
+            # autoWS can hang on 2-CTA templates with a single K tile and a
+            # TMA-loaded epilogue input.
+            tma_load_for_template_epilogue = False
         tma_tiled = tma_store or tma_load_for_template_epilogue
         numel = sympy_product(output_node.get_size())
         if tma_tiled:
@@ -2607,6 +2613,21 @@ class TritonTemplateKernel(TritonKernel):
             return None
         return super().store(name, index, value, mode)
 
+    @staticmethod
+    def _single_k_tile_two_ctas(
+        input_nodes: Sequence[ir.IRNode], prefix_args: int, meta: dict[str, Any]
+    ) -> bool:
+        """Whether a 2-CTA template's K may fit in one BLOCK_K tile."""
+        block_k = meta.get("BLOCK_K")
+        if (
+            not meta.get("TWO_CTAS")
+            or block_k is None
+            or len(input_nodes) <= prefix_args
+        ):
+            return False
+        k = input_nodes[prefix_args].get_size()[-1]
+        return not V.graph.sizevars.statically_known_gt(k, block_k)
+
     def _tile_tma_store(self, name: str, index: sympy.Expr, value: CSEVariable) -> bool:
         """TMA-store a full-tile output of a row reduction pass, e.g. a
         normalized output, whose index is row-major in the tile's symbols. The
@@ -2754,6 +2775,21 @@ class TritonTemplateKernel(TritonKernel):
             template_out = 0
         return limit - ring - template_out - margin
 
+    def _operand_ring_slack(self) -> int:
+        """Shared memory autoWS can free for epilogue staging by giving the
+        operand ring fewer copies: its memory planner grows the ring only into
+        what's left, down to 2 copies when loads and MMAs are in different
+        stages. 0 for templates autoWS doesn't plan (USE_META_WS off)."""
+        tile = [self.meta.get(k) for k in ("BLOCK_M", "BLOCK_N", "BLOCK_K")]
+        if not self.meta.get("USE_META_WS") or None in tile:
+            return 0
+        bm, bn, bk = tile
+        operands = self.input_nodes[
+            self.prefix_args : len(self.input_nodes) - self.suffix_args
+        ]
+        elem = max(node.get_dtype().itemsize for node in operands)
+        return max(self.num_stages - 2, 0) * (bm * bk + bk * bn) * elem
+
     def _plain_store_scratch(self, itemsizes: Sequence[int]) -> int:
         """Shared memory the full-tile tensors an epilogue reads or plain-stores
         take to convert the subtile's layout, shared by all of them: measured at
@@ -2865,8 +2901,6 @@ class TritonTemplateKernel(TritonKernel):
                     )
                 ):
                     reads[dep.name] = buf.get_dtype().itemsize
-        if self.tma_load_for_template_epilogue:
-            budget -= (self._staged_tile_elems() or 0) * sum(reads.values())
         if self.epilogue_tma_plan == "all":
             return OrderedSet(name for name, _ in outputs), OrderedSet(
                 name
@@ -2882,13 +2916,23 @@ class TritonTemplateKernel(TritonKernel):
             )
             kept = tma_store_outputs_within_budget(outputs, budget - scratch)
         inputs: OrderedSet[str] = OrderedSet()
-        # The budget already charges every full-tile read's staging.
-        left = budget - scratch - sum(n for name, n in outputs if name in kept)
-        if self.tma_load_for_template_epilogue and left >= 0:
-            inputs = OrderedSet(
-                name
-                for name, _ in self._full_tile_epilogue_inputs(template_node, nodes)
+        if self.tma_load_for_template_epilogue:
+            # Stage full-tile inputs in what the kept TMA stores leave, plus
+            # what autoWS frees by shortening the operand ring, largest first;
+            # the rest keep tl.load.
+            left = (
+                budget
+                - scratch
+                - sum(n for name, n in outputs if name in kept)
+                + self._operand_ring_slack()
             )
+            for name, nbytes in sorted(
+                self._full_tile_epilogue_inputs(template_node, nodes),
+                key=lambda x: -x[1],
+            ):
+                if nbytes <= left:
+                    inputs.add(name)
+                    left -= nbytes
         return kept, inputs
 
     def _full_tile_epilogue_inputs(
