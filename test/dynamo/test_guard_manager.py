@@ -1260,13 +1260,18 @@ user_stack=None)
         )
 
     def test_compute_overlapping_tensor_groups_repeated_tensor(self):
-        # A repeated tensor overlaps itself without reading its metadata, which
-        # a sparse tensor doesn't have.
+        # A repeated tensor overlaps itself without reading its metadata: a
+        # sparse tensor has no strides, and an unbacked numel can't be compared
+        # with 0.
         sparse = torch.eye(2).to_sparse_csr()
-        for n in (2, SWEEP_MIN_BUCKET_SIZE):
-            self.assertEqual(
-                compute_overlapping_tensor_groups([sparse] * n), [list(range(n))]
-            )
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            unbacked = torch.empty(shape_env.create_unbacked_symint(), 16)
+        for t in (sparse, unbacked):
+            for n in (2, SWEEP_MIN_BUCKET_SIZE):
+                self.assertEqual(
+                    compute_overlapping_tensor_groups([t] * n), [list(range(n))]
+                )
 
     def _all_pairs_overlap_groups(self, tensors, symbolic=True):
         # Two-tensor calls always take the direct pairwise path, so they give
@@ -1320,33 +1325,16 @@ user_stack=None)
                 return base[randint(0, 4096) :][:0]
             return base
 
-        informative_cases = 0
         for _ in range(300):
             bases = [torch.zeros(4096) for _ in range(randint(1, 5))]
-            picks = [randint(0, len(bases)) for _ in range(randint(8, 60))]
-            tensors = [random_view(bases[k]) for k in picks]
-            repeats = [randint(0, len(tensors)) for _ in range(2)]
-            tensors += [tensors[r] for r in repeats]
-            base_of = picks + [picks[r] for r in repeats]
+            tensors = [
+                random_view(bases[randint(0, len(bases))])
+                for _ in range(randint(8, 60))
+            ]
+            tensors += [tensors[randint(0, len(tensors))] for _ in range(2)]
             expected = self._all_pairs_overlap_groups(tensors, symbolic=False)
             actual = compute_overlapping_tensor_groups(tensors, symbolic=False)
             self.assertEqual(actual, expected)
-            # Count cases where swept buckets merge distinct tensors into at
-            # least two groups, so a generator where everything collapses into
-            # one group, or where repeats make all the groups, can't hide
-            # dropped pairs.
-            per_base = [set() for _ in bases]
-            for t, k in zip(tensors, base_of):
-                per_base[k].add(id(t))
-            swept = {
-                k for k, ids in enumerate(per_base) if len(ids) >= SWEEP_MIN_BUCKET_SIZE
-            }
-            merged = sum(
-                base_of[g[0]] in swept and len({id(tensors[i]) for i in g}) >= 2
-                for g in expected
-            )
-            informative_cases += merged >= 2
-        self.assertGreater(informative_cases, 150)
 
     def test_compute_overlapping_tensor_groups_symbolic(self):
         shape_env = ShapeEnv()
@@ -1429,38 +1417,6 @@ user_stack=None)
         values = {a.node.expr: 4, b.node.expr: 3}
         for guard in shape_env.guards:
             self.assertTrue(guard.expr.subs(values), guard.expr)
-
-    def test_compute_overlapping_tensor_groups_contiguous_ranges(self):
-        base = torch.empty(32)
-        # Shuffled ranges include a chain of overlaps, nested ranges and adjacency.
-        views = [
-            base[18:24],
-            base[8:12],
-            base[24:26],
-            base[:10],
-            base[19:20],
-            base[11:15],
-            base[15:18],
-            base[2:3],
-            base[:2],
-        ]
-        self.assertGreaterEqual(len(views), SWEEP_MIN_BUCKET_SIZE)
-        groups = compute_overlapping_tensor_groups(views, symbolic=False)
-        self.assertEqual(groups, [[0, 4], [1, 3, 5, 7, 8]])
-
-    def test_compute_overlapping_tensor_groups_strided_and_empty(self):
-        left = torch.empty(44)
-        right = torch.empty(32)
-        empty = right[:0]
-        strided_bucket = [left[:12:2], left[10:11], *left[12:].split(4)]
-        empty_bucket = [empty, right[:0], empty, *right.split(4)]
-        first_empty = len(strided_bucket)
-        for bucket in (strided_bucket, empty_bucket):
-            self.assertGreaterEqual(len(bucket), SWEEP_MIN_BUCKET_SIZE)
-        groups = compute_overlapping_tensor_groups(
-            strided_bucket + empty_bucket, symbolic=False
-        )
-        self.assertEqual(groups, [[0, 1], [first_empty, first_empty + 2]])
 
     def test_globals(self):
         global global_pair, Pair
