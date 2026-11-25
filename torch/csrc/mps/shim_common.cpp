@@ -1,3 +1,4 @@
+#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -18,4 +19,9 @@ AOTITorchError torch_mps_set_arg_bytes(
     auto func = reinterpret_cast<at::native::mps::MetalKernelFunction*>(handle);
     func->setArg(idx, ptr, size);
   });
+}
+
+AOTITorchError torch_get_mps_stream_from_pool(void** ret_stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_stream = at::mps::getStreamFromPool()->commandQueue(); });
 }

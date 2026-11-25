@@ -59,11 +59,14 @@ def get_extension():
 
     mps_available = torch.backends.mps.is_available()
 
+    xpu_available = torch.xpu.is_available()
+
     sources = [
         s
         for d in [CSRC_DIR, *PREV_CSRC_DIRS]
         for s in d.glob("**/*.cpp")
         if s.name != "pyobject_interop_module.cpp"
+        and (s.parent.name != "xpu" or xpu_available)
         and (s.parent.name != "mps" or mps_available)
     ]
 
@@ -85,12 +88,16 @@ def get_extension():
     if mps_available:
         extra_compile_args["cxx"].append("-DUSE_MPS")
 
+    if xpu_available:
+        extra_compile_args["cxx"].append("-DUSE_XPU")
+
     return [
         extension(
             "libtorch_agn_2_16._C",
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,
             extra_compile_args=extra_compile_args,
+            libraries=["torch_xpu"] if xpu_available else [],
             extra_link_args=[],
         )
     ]

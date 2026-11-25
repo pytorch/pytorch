@@ -3,6 +3,7 @@
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/version.h>
+#include <torch/headeronly/core/DeviceType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
 
@@ -112,6 +113,51 @@ inline Stream getCurrentStream(DeviceIndex device_index) {
       aoti_torch_get_current_stream(device_index, &stream));
   return Stream(stream);
 }
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+// Returns a borrowed native stream handle for the selected device type.
+template <torch::headeronly::DeviceType device_type>
+void* getStreamFromPool(bool is_high_priority, DeviceIndex device_index) =
+    delete;
+
+#ifdef USE_CUDA
+template <>
+inline void* getStreamFromPool<torch::headeronly::DeviceType::CUDA>(
+    bool is_high_priority,
+    DeviceIndex device_index) {
+  void* stream = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_get_cuda_stream_from_pool(is_high_priority, device_index, &stream));
+  return stream;
+}
+#endif // USE_CUDA
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#ifdef USE_XPU
+template <>
+inline void* getStreamFromPool<torch::headeronly::DeviceType::XPU>(
+    bool is_high_priority,
+    DeviceIndex device_index) {
+  void* stream = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_get_xpu_stream_from_pool(is_high_priority, device_index, &stream));
+  return stream;
+}
+#endif
+
+#ifdef USE_MPS
+template <torch::headeronly::DeviceType device_type>
+void* getStreamFromPool() = delete;
+
+template <>
+inline void* getStreamFromPool<torch::headeronly::DeviceType::MPS>() {
+  void* stream = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_get_mps_stream_from_pool(&stream));
+  return stream;
+}
+#endif // USE_MPS
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 /**
  * @brief Gets the current device index.
