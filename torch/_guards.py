@@ -15,7 +15,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, overload, Self, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
@@ -244,10 +244,20 @@ class SLoc:
             return f"({floc})"
 
 
-class ShapeGuard(NamedTuple):
+class _ShapeGuardFields(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
-    size_oblivious: bool
+
+
+class ShapeGuard(_ShapeGuardFields):
+    __slots__ = ()
+
+    # Pickles from older versions carry extra trailing fields (e.g. the removed
+    # size_oblivious); accept and drop them so saved ShapeEnvs still load.
+    def __new__(
+        cls, expr: sympy.logic.boolalg.Boolean, sloc: SLoc, *_legacy: object
+    ) -> Self:
+        return super().__new__(cls, expr, sloc)
 
 
 @dataclasses.dataclass(slots=True)
@@ -285,6 +295,7 @@ class Guard:
     # serialize_guards refuses it.
     _unserializable: type | None = None
     _force_dict_keys_match: bool = False
+    recompile_hint: str | None = dataclasses.field(default=None, compare=False)
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -490,18 +501,6 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 class StorageOverlap(GuardEnvExpr):
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
-
-
-@dataclasses.dataclass(frozen=True)
-class StorageOverlapPartition(GuardEnvExpr):
-    input_sources: list[Source]
-    overlapping_indices: tuple[tuple[int, ...], ...]
-
-    def __post_init__(self) -> None:
-        if len(set(self.input_sources)) != len(self.input_sources):
-            raise AssertionError(
-                f"input_sources must be unique, got {self.input_sources}"
-            )
 
 
 """
@@ -1149,7 +1148,7 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode: FakeTensorMode | None) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode | None) -> None:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
@@ -1157,7 +1156,7 @@ class TracingContext:
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
         # Combined cache for inlined code data (instructions, indexof, code_options)
         self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
-        self.fake_mode: FakeTensorMode | None = fake_mode
+        self.fake_mode: FakeTensorMode | CppFakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
@@ -1644,31 +1643,3 @@ def active_fake_mode() -> FakeTensorMode | CppFakeTensorMode | None:
     # _get_dispatch_mode(FAKE) falls back to an installed C++ mode's
     # CppFakeTensorMode when that slot is empty.
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-
-
-def require_python_fake_mode(
-    mode: FakeTensorMode | CppFakeTensorMode | None,
-    /,
-) -> FakeTensorMode | None:
-    """
-    Returns mode unchanged if it is a FakeTensorMode or None.
-
-    Use it on a fake mode that must be a Python FakeTensorMode, for example to
-    get Python FakeTensors from it or to pass it on to code typed for
-    FakeTensorMode: a result of detect_fake_mode, active_fake_mode or
-    maybe_get_fake_mode, or a mode the caller was given. Callers narrow the
-    lookups with it so that they keep getting a Python FakeTensorMode when a
-    lookup finds a C++ mode.
-
-    Raises:
-        RuntimeError: if mode is a CppFakeTensorMode, which does not have all of
-            FakeTensorMode's interface.
-    """
-    from torch._subclasses.fake_tensor import CppFakeTensorMode
-
-    if isinstance(mode, CppFakeTensorMode):
-        raise RuntimeError(
-            "This needs a Python torch._subclasses.fake_tensor.FakeTensorMode; "
-            "a CppFakeTensorMode is not supported here yet"
-        )
-    return mode

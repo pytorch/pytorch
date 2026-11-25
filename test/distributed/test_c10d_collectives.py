@@ -886,6 +886,40 @@ class AbstractIsolatedCollectivesTest(CollectivesTestMixin, C10dBackendTest):
             return
         self._test_transport_matrix(self._test_gather_single)
 
+        root = self.world_size - 1
+        tensor = torch.arange(6, device=self.device).view(2, 3) + 6 * self.rank
+        output = None
+        if self.rank == root:
+            storage = tensor.new_full((self.world_size * 6 + 2,), -1)
+            output = storage[1:-1].view(self.world_size, 2, 3)
+        dist.gather_single(tensor, output, dst=root)
+        if self.rank == root:
+            self.assertEqual(
+                output.flatten(), torch.arange(self.world_size * 6, device=self.device)
+            )
+            self.assertEqual(storage[0].item(), -1)
+            self.assertEqual(storage[-1].item(), -1)
+
+        if self.backend_name in ("nccl2", "nccl-lazy"):
+            # The nccl2 self-copy must preserve the peers' storage order.
+            values = torch.arange(12, device=self.device).view(1, 3, 2, 2)
+            tensor = (values + 12 * self.rank).contiguous(
+                memory_format=torch.channels_last
+            )
+            output = None
+            if self.rank == root:
+                storage = tensor.new_full((self.world_size * 12 + 2,), -1)
+                output = storage[1:-1]
+            dist.gather_single(tensor, output, dst=root)
+            if self.rank == root:
+                values = values.permute(0, 2, 3, 1).flatten()
+                self.assertEqual(
+                    output,
+                    torch.cat([values + 12 * rank for rank in range(self.world_size)]),
+                )
+                self.assertEqual(storage[0].item(), -1)
+                self.assertEqual(storage[-1].item(), -1)
+
         # Only the destination rank validates the output size, so only it calls
         # into the (failing) collective; the size check happens before any
         # communication is issued.
