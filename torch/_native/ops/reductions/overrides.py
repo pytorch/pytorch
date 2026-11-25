@@ -38,6 +38,9 @@ the condition declines go to ATen, which does not follow the order.
 
 from __future__ import annotations
 
+import functools
+import importlib
+import logging
 from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING, TypeAlias
 
@@ -58,6 +61,8 @@ else:
     T = LazyModule("torch._native.ops.reductions.traits")
     kg = LazyModule("torch._native.ops.reductions.kernel_general")
 
+
+log = logging.getLogger(__name__)
 
 _Dim: TypeAlias = int | Sequence[int] | None
 _Red: TypeAlias = set[int] | None
@@ -185,6 +190,20 @@ _amax_impl = _make_impl(lambda: T.AMaxOps, "amax")
 _amin_impl = _make_impl(lambda: T.AMinOps, "amin")
 
 
+@functools.cache
+def _runtime_ok() -> bool:
+    """Whether CuTeDSL and the reduction kernel modules import. Registration checks only
+    the package, so without this a CuTeDSL that fails to import would make served eager
+    calls raise; compile and launch failures still do."""
+    try:
+        for name in ("kernel_general", "kernel_coltile", "kernel_xcta"):
+            importlib.import_module(f"torch._native.ops.reductions.{name}")
+    except Exception:
+        log.info("CuTeDSL failed to import; reduction overrides decline", exc_info=True)
+        return False
+    return True
+
+
 def register_reduction_overrides() -> None:
     # cu.register_op_override is a no-op when the CuteDSL runtime is unavailable.
     overrides = (
@@ -196,4 +215,6 @@ def register_reduction_overrides() -> None:
     )
     for op, cond, impl in overrides:
         impl = cuda_device_guard(impl)
-        cu.register_op_override("aten", op, "CUDA", cond=cond, impl=impl)
+        cu.register_op_override(
+            "aten", op, "CUDA", cond=cond, impl=impl, try_initialize_runtime=_runtime_ok
+        )

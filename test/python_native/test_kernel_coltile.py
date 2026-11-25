@@ -1007,21 +1007,25 @@ class TestOrderedColDevice(TestCase):
         self.assertEqual(_tags(key), {"ordered_col1"})
 
     def test_split_rows_share_a_kernel(self, device):
-        """Split views of any row count share one stage-one kernel per mapping and whole
-        or ragged last partition, bitwise equal to the indexed tree."""
+        """Split views of any row count share one stage-one kernel per mapping, stride
+        width and whole or ragged last partition, and one stage-two kernel per partition
+        count, bitwise equal to the indexed tree."""
         trait, f32, key = T.SumOps(acc=cutlass.Float32), [torch.float32], "split_rows"
-        # 4 and 5 whole partitions, then 5 and 7 with a ragged last one.
-        for rows in (32768, 40960, 40000, 50003):
+        # 4 and 5 whole partitions, then 5, 5 and 7 with a ragged last one.
+        for rows in (32768, 40960, 40000, 40001, 50003):
             x = torch.randn(rows, 128, device=device)
             got = ct.reduce_ordered_col(trait, key, x, f32, 1, config=_FIXED)
             shapes, strides = [(rows, 128)], [(128, 1)]
             want = kg._try_indexed_itree(
                 trait, f"{key}_ref", x, shapes, strides, 128, rows, f32, 1
             )
+            self.assertIsNotNone(got)
             self.assertIsNotNone(want)
             self.assertEqual(got[0].view(torch.uint8), want[0].view(torch.uint8))
         stage_one = [k for k in ct._CACHE if k[1] == key and k[0] == "ordered_col1"]
         self.assertEqual(len(stage_one), 2)
+        stage_two = [k for k in kg._COMPILE_CACHE if k[1:3] == ("genitree2", key)]
+        self.assertEqual(len(stage_two), 3)
 
     def test_split_plans_decline_integer_inputs(self, device):
         """Split plans are verified bitwise for floating inputs only."""

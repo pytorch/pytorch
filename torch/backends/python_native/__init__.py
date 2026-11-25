@@ -183,7 +183,8 @@ class DSLController:
 
         Also masks the native-AOT kernel stubs of every DSL (AOT-compiled kernels
         embedded in the aten kernels themselves), process-wide, so code inside the
-        block sees stock aten behavior, e.g. for reference computations in tests.
+        block sees no native-AOT kernels and none of this DSL's conditional overrides,
+        e.g. for reference computations in tests.
 
         Two things stay active by design, because for them the override IS
         the implementation and masking would change results rather than
