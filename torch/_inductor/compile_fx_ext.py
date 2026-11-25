@@ -16,6 +16,7 @@ from typing import final, Self, TYPE_CHECKING, TypeGuard
 from typing_extensions import override
 
 import torch._inductor.async_compile
+import torch._logging._internal
 import torch.fx
 from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
 from torch._inductor.metrics import CachedMetricsDeltas, CachedMetricsHelper
@@ -317,12 +318,18 @@ class _LoggerState:
     # loggers: enabling a torch._logging artifact only changes the level and
     # propagate flag of its logger, and the (reused) child has to mirror that.
     loggers: dict[str, tuple[int, bool]]
+    # The parent's torch._logging state (enabled artifacts and log levels).
+    # Artifact loggers that only exist in the child, such as ones defined in
+    # modules the child first imports while compiling, are missing from
+    # `loggers`, so the child configures them from this state instead.
+    log_state: torch._logging._internal.LogState
     # The actual log capturing mechanism - this should be None when we're not
     # actively capturing logs.
     captured_logs: _CapturedLogs | None = None
 
     def __init__(self) -> None:
         self.loggers = {}
+        self.log_state = torch._logging._internal._get_log_state()
 
         def filter(
             logger: logging.Logger | logging.PlaceHolder,
@@ -368,6 +375,22 @@ class _LoggerState:
         self.captured_logs.remove()
 
 
+def _inductor_artifact_log_qnames() -> list[str]:
+    return [
+        name
+        for name in torch._logging._internal.log_registry.get_artifact_log_qnames()
+        if name.startswith("torch._inductor")
+    ]
+
+
+def _reconfigure_artifact_log(logger: logging.Logger) -> None:
+    # Reset to the defaults _init_logs starts from, then apply the current
+    # torch._logging state.
+    logger.setLevel(logging.NOTSET)
+    logger.propagate = True
+    torch._logging._internal.configure_artifact_log(logger)
+
+
 class _CapturedLogs:
     """
     Helper for _LoggerState - this class actually attaches to the logger in
@@ -378,6 +401,7 @@ class _CapturedLogs:
     queue: queue.Queue[logging.LogRecord]
     handlers: dict[str, logging.Handler] | None
     saved: dict[str, tuple[int, bool]]
+    saved_log_state: torch._logging._internal.LogState | None
 
     def __init__(self, state: _LoggerState) -> None:
         self.state = state
@@ -389,6 +413,8 @@ class _CapturedLogs:
         # Mapping from name to the child's own (level, propagate), restored on
         # remove since the child process is reused for later compiles.
         self.saved = {}
+        # The child's own torch._logging state, restored on remove.
+        self.saved_log_state = None
 
     def finish(self) -> list[logging.LogRecord]:
         if self.handlers is not None:
@@ -408,11 +434,18 @@ class _CapturedLogs:
         for name, handler in handlers.items():
             logger = logging.getLogger(name)
             logger.removeHandler(handler)
+        torch._logging._internal._set_log_state(self.saved_log_state)
+        self.saved_log_state = None
         saved, self.saved = self.saved, {}
         for name, (level, propagate) in saved.items():
             logger = logging.getLogger(name)
             logger.setLevel(level)
             logger.propagate = propagate
+        # Artifact loggers first created during this compile were configured
+        # from the parent's state, so reconfigure them from the child's own.
+        for name in _inductor_artifact_log_qnames():
+            if name not in saved:
+                _reconfigure_artifact_log(logging.getLogger(name))
 
     def apply(self) -> None:
         from logging.handlers import QueueHandler
@@ -420,6 +453,15 @@ class _CapturedLogs:
         if self.handlers is not None:
             raise AssertionError("expected handlers to be None in apply")
         self.handlers = {}
+        # Artifact loggers created while this is applied (getArtifactLogger)
+        # are configured from the parent's state too.
+        self.saved_log_state = torch._logging._internal._get_log_state()
+        torch._logging._internal._set_log_state(self.state.log_state)
+        for name in _inductor_artifact_log_qnames():
+            if name not in self.state.loggers:
+                logger = logging.getLogger(name)
+                self.saved[name] = (logger.level, logger.propagate)
+                _reconfigure_artifact_log(logger)
         for name, (level, propagate) in self.state.loggers.items():
             logger = logging.getLogger(name)
             self.saved[name] = (logger.level, logger.propagate)

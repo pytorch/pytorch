@@ -6,6 +6,7 @@
 
 import contextlib
 import importlib
+import logging
 import os
 import sys
 import time
@@ -287,6 +288,37 @@ class TestSubprocess(TestCase):
         with ctx():
             torch.compile(lambda x: x * 3)(torch.randn(4))
         self.assertEqual(stream.getvalue().count("AFTER FUSION"), 1)
+
+    def test_logger_state_configures_child_only_artifact_loggers(self):
+        from torch._inductor.compile_fx_ext import _LoggerState
+        from torch._logging import _internal
+
+        parent_log_state = _internal.LogState()
+        parent_log_state.enable_artifact("fusion")
+        logger_state = _LoggerState()
+        logger_state.log_state = parent_log_state
+
+        # Created after the snapshot, like an artifact logger in a module that
+        # only the compile worker has imported.
+        module = "torch._inductor.test_compile_subprocess_child_only"
+        child_only = _internal.getArtifactLogger(module, "fusion")
+        self.assertFalse(child_only.propagate)
+
+        child_log_state = _internal._get_log_state()
+        with logger_state as captured_logs:
+            child_only.debug("child-only record")
+            # Created during the compile, like a module first imported then.
+            late = _internal.getArtifactLogger(module + "_late", "fusion")
+            late.debug("late record")
+        records = captured_logs.finish()
+
+        self.assertEqual(
+            [r.getMessage() for r in records], ["child-only record", "late record"]
+        )
+        self.assertIs(_internal._get_log_state(), child_log_state)
+        self.assertFalse(child_only.propagate)
+        self.assertFalse(late.propagate)
+        self.assertEqual(late.level, logging.NOTSET)
 
 
 if RUN_CPU:
