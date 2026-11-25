@@ -411,6 +411,13 @@ class Method:
 
     handler: Callable[..., VariableTracker | None]
 
+    @classmethod
+    def from_slot(cls, slot_impl: Callable[..., VariableTracker | None]) -> Method:
+        """Expose a `(self, tx, *args)` slot impl as a METH_COEXIST method.
+        The impl is bound when the table is built, so a subclass override of
+        the slot is not used, like CPython calling e.g. dict_subscript directly."""
+        return cls(lambda self, tx, args, kwargs: slot_impl(self, tx, *args))
+
     def __call__(
         self,
         vt: VariableTracker,
@@ -998,11 +1005,11 @@ def _wrap_descr_get(
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
     check_positional(tx, "", len(args), 1, 2)
-    obj = args[0]
+    # wrap_descr_get maps a None obj to NULL and rejects the call when both
+    # arguments are None.
+    obj = None if args[0].is_constant_none() else args[0]
     owner = args[1] if len(args) > 1 else ConstantVariable.create(None)
-    # wrap_descr_get treats None as absent for both arguments and rejects the
-    # call when both are absent.
-    if obj.is_constant_none() and owner.is_constant_none():
+    if obj is None and owner.is_constant_none():
         raise_type_error(tx, "__get__(None, None) is invalid")
     return func(self, tx, obj, owner)
 
@@ -2238,10 +2245,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def tp_descr_get_impl(
         self,
         tx: InstructionTranslatorBase,
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
-        """Mirrors CPython's tp_descr_get slot.
+        """Mirrors CPython's tp_descr_get slot. obj is None for C NULL
+        (access through the owner), not for the None instance.
 
         Called when type_implements_tp_descr_get returns True for this type.
         Subclasses override to provide the actual descriptor read.
