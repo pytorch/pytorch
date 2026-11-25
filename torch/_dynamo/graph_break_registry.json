@@ -3322,7 +3322,7 @@
       "Context": "context",
       "Explanation": "Dynamo cannot establish the stable receiver identity required by this operation.",
       "Hints": [
-        "Use a stable receiver or pass the result into the saved graph or reuse hash function."
+        "Compute the result outside compilation and pass it as an input."
       ]
     }
   ],
@@ -5481,10 +5481,10 @@
   "GB1943": [
     {
       "Gb_type": "Unsupported OrderedDict instance state",
-      "Context": "OrderedDict.{name}",
-      "Explanation": "Dynamo cannot trace {name} on an OrderedDict with nonempty or potentially modified instance attributes.",
+      "Context": "operation",
+      "Explanation": "Dynamo cannot preserve instance attributes while tracing {operation}.",
       "Hints": [
-        "Move the copy or attribute lookup outside compiled code."
+        "Move this OrderedDict operation outside compiled code."
       ]
     },
     {

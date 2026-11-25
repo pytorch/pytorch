@@ -107,10 +107,10 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
-    def compile_counted(fn, export=None):
+    def compile_counted(fn, record=None):
         counter = torch._dynamo.testing.CompileCounter()
-        if export is not None:
-            opt = torch._dynamo.optimize(counter, nopython=True, guard_export_fn=export)
+        if record is not None:
+            opt = torch._dynamo.optimize(counter, nopython=True, guard_export_fn=record)
             return opt(fn), counter
         return torch.compile(fn, backend=counter, fullgraph=True), counter
 
