@@ -9163,6 +9163,49 @@ class TestMPS(TestCaseMPS):
         print(f"Recommended Max Memory : {max_memory / 1024 ** 3} GB")
         self.assertGreater(max_memory, 0)
 
+    def test_large_alloc_threshold(self):
+        def heap_growth(threshold_mb):
+            torch._C._accelerator_setAllocatorSettings(f"mps_large_alloc_threshold_mb:{threshold_mb}")
+            torch.mps.empty_cache()
+            baseline = torch.mps.driver_allocated_memory()
+            x = torch.ones(50 * 1024 * 1024 // 4, device="mps")
+            growth = torch.mps.driver_allocated_memory() - baseline
+            self.assertEqual(x.sum().item(), x.numel())
+            del x
+            return growth
+
+        self.addCleanup(torch.mps.empty_cache)
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        # By default a 50 MB tensor is placed in a shared 1 GiB XLARGE heap
+        self.assertGreater(heap_growth(0), 900 * 1024 * 1024)
+        self.assertLess(heap_growth(10), 100 * 1024 * 1024)
+
+    def test_large_alloc_threshold_keeps_heaps_separate(self):
+        self.addCleanup(torch.mps.empty_cache)
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:64")
+        torch.mps.empty_cache()
+        baseline = torch.mps.driver_allocated_memory()
+        # Below the threshold: a shared 1 GiB heap. At or above it: a heap of its own,
+        # even though the shared heap has room, so freeing the small one releases 1 GiB.
+        small = torch.empty(50 * 1024 * 1024, dtype=torch.uint8, device="mps")
+        large = torch.empty(100 * 1024 * 1024, dtype=torch.uint8, device="mps")
+        del small
+        torch.mps.empty_cache()
+        self.assertLess(torch.mps.driver_allocated_memory() - baseline, 200 * 1024 * 1024)
+        del large
+
+    def test_large_alloc_threshold_config_keys(self):
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        with self.assertRaisesRegex(ValueError, "Unrecognized key 'mps_larg_alloc_threshold_mb'"):
+            torch._C._accelerator_setAllocatorSettings("mps_larg_alloc_threshold_mb:64")
+        with self.assertRaisesRegex(ValueError, "at most 512"):
+            torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:1024")
+        # Keys of other backends in the shared env var must not break MPS
+        env = {**os.environ, "PYTORCH_ALLOC_CONF": "backend:native,mps_large_alloc_threshold_mb:64"}
+        cmd = [sys.executable, "-c", "import torch; print(torch.ones(1, device='mps').item())"]
+        self.assertEqual(subprocess.check_output(cmd, env=env, text=True).strip(), "1.0")
+
     def test_host_alias_storage(self):
         n = 1024
         dtype = torch.float32
