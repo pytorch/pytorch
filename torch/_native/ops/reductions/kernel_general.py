@@ -3,7 +3,7 @@
 # O(op * dtype * pair-count), except that the gated general-axis inner-tree path
 # compiles per reduction length, and per output count below the plan's rows_per_block;
 # cache_sig compiles decode depths, outputs, index mode, projection/partial mode, and
-# fold clamps.
+# fold clamps. Inputs must be on the current device.
 
 import math
 from collections.abc import Sequence
@@ -18,6 +18,7 @@ from torch._tensor_iterator import reduce_op
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
+from ...utils.device import check_current
 from . import tile
 from .inner_tree_plan import _K_INNER_TREE_THRESHOLD
 from .traits import WARP, WelfordOps
@@ -189,7 +190,9 @@ def _launch(
 ) -> None:
     # _PLAN caches boxed geometry (~6us); _COMPILE_CACHE deduplicates structural kernels.
     op_name = key[1]
-    key = (str(ins[0].device),) + key
+    # Entry points check that this device is current.
+    device = ins[0].get_device()
+    key = (device,) + key
     plan = _PLAN.get((key, op.geom_sig))
     if plan is None:
         fn = cached_plan(
@@ -200,14 +203,14 @@ def _launch(
                 _fakes(ins, int64_extent=True),
                 _fakes(outs, int64_extent=op.wide_output),
                 *_geom_args(op),
-                _stream(),
+                _stream(device),
             ),
             op=f"aten::{op_name}",
         )
         plan = (fn, _geom_args(op))
         _PLAN[(key, op.geom_sig)] = plan
     fn, geom = plan
-    fn(_operands(ins, read_only=True), _operands(outs), *geom, _stream())
+    fn(_operands(ins, read_only=True), _operands(outs), *geom, _stream(device))
 
 
 def _ti_pairs(x: torch.Tensor, out: torch.Tensor) -> tuple[Pairs, Pairs]:
@@ -594,6 +597,7 @@ def _reduce(
     # TI drives all dimensions and layouts through this path; return nouts tensors.
     if not x.is_cuda:
         raise AssertionError(f"need a CUDA input, got {x.device}")
+    check_current(x.get_device())
     red_axes = (
         range(x.dim()) if dims is None else ([dims] if isinstance(dims, int) else dims)
     )
@@ -774,6 +778,7 @@ def _reduce_all(
     # All preserve view-relative indices because reduce-all is a single row.
     if not x.is_cuda:
         raise AssertionError(f"reduce-all needs a CUDA input, got {x.device}")
+    check_current(x.get_device())
     if not x.is_contiguous():
         if getattr(trait, "has_index", False):
             x = x.contiguous()
