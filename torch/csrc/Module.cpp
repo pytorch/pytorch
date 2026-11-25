@@ -1995,24 +1995,6 @@ static PyObject* THPModule_override_stale_capture_stream(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPModule_ensureCUDADeviceGuardSet(
-    PyObject* self,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::impl::ensureCUDADeviceGuardSet();
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPModule_ensureXPUDeviceGuardSet(
-    PyObject* self,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::impl::ensureXPUDeviceGuardSet();
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 struct TorchModuleState {
   PyObject* log_api_usage_seen; // dict used by _log_api_usage_once
 };
@@ -2413,14 +2395,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      reinterpret_cast<PyCFunction>(
          reinterpret_cast<void (*)()>(THPModule_has_torch_function_variadic)),
      METH_FASTCALL,
-     nullptr},
-    {"_ensureCUDADeviceGuardSet",
-     THCPModule_ensureCUDADeviceGuardSet,
-     METH_NOARGS,
-     nullptr},
-    {"_ensureXPUDeviceGuardSet",
-     THPModule_ensureXPUDeviceGuardSet,
-     METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}
 
@@ -2845,6 +2819,10 @@ PyObject* initModule() {
               c10::OperatorName(name, overload));
         });
   }
+  py_module.def("_ensureDeviceGuardSet", [](std::string& device_type) {
+    c10::impl::ensureDeviceGuardSet(c10::Device(device_type).type());
+  });
+
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
   py_module.def(

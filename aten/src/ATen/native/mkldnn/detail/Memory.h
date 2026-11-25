@@ -56,7 +56,7 @@ class allocator {
 // Ported from ideep::engine.
 /// cpu execution engine only.
 struct Engine : public dnnl::engine {
-  friend class ITensor;
+  friend class MkldnnMemory;
 
   /// Singleton CPU engine for all primitives
   static TORCH_API Engine& cpu_engine();
@@ -88,14 +88,14 @@ struct IStream : public dnnl::stream {
 };
 
 // Ported from ideep::tensor.
-class ITensor : public dnnl::memory {
+class MkldnnMemory : public dnnl::memory {
  public:
   using dim_t = dnnl_dim_t;
   using dims_t = dnnl_dims_t;
   using format_kind_t = memory::format_kind;
 
   struct desc : public memory::desc {
-    friend class ITensor;
+    friend class MkldnnMemory;
 
     // avoid conflicts with function desc::dims() and desc::data_type()
     using dims = typename memory::dims;
@@ -497,7 +497,7 @@ class ITensor : public dnnl::memory {
   }
 
   // Constructs an tensor with no buffer and zero memory description
-  ITensor() {
+  MkldnnMemory() {
     init({}, nullptr);
   }
 
@@ -506,7 +506,7 @@ class ITensor : public dnnl::memory {
   /// @param desc tensor descriptor.
   /// @param aengine Engine.
   /// @param ahandle handle.
-  ITensor(
+  MkldnnMemory(
       const desc& adesc,
       void* ahandle,
       const Engine& aengine = Engine::cpu_engine()) {
@@ -517,12 +517,12 @@ class ITensor : public dnnl::memory {
   ///
   /// @param desc tensor descriptor.
   /// @param aengine Engine.
-  ITensor(const desc& adesc, const Engine& aengine = Engine::cpu_engine()) {
+  MkldnnMemory(const desc& adesc, const Engine& aengine = Engine::cpu_engine()) {
     init(adesc, aengine);
   }
 
   // format_tag, buffer
-  ITensor(
+  MkldnnMemory(
       const dims& adims,
       data_type adata_type,
       format_tag aformat_tag,
@@ -532,7 +532,7 @@ class ITensor : public dnnl::memory {
   }
 
   // format_tag, no buffer
-  ITensor(
+  MkldnnMemory(
       const dims& adims,
       data_type adata_type,
       format_tag aformat_tag,
@@ -541,7 +541,7 @@ class ITensor : public dnnl::memory {
   }
 
   // no format_tag, buffer
-  ITensor(
+  MkldnnMemory(
       const dims& adims,
       data_type adata_type,
       void* ahandle,
@@ -550,14 +550,14 @@ class ITensor : public dnnl::memory {
   }
 
   // no format_tag, no buffer
-  ITensor(
+  MkldnnMemory(
       const dims& adims,
       data_type adata_type,
       const Engine& aengine = Engine::cpu_engine()) {
     init(adims, adata_type, aengine);
   }
 
-  ITensor(
+  MkldnnMemory(
       const std::vector<float>& scales,
       const Engine& aengine = Engine::cpu_engine()) {
     init({(int)scales.size()}, data_type::f32, aengine);
@@ -566,7 +566,7 @@ class ITensor : public dnnl::memory {
       data_ptr[i] = scales[i];
   }
 
-  ITensor(
+  MkldnnMemory(
       const std::vector<int32_t>& zero_points,
       const Engine& aengine = Engine::cpu_engine()) {
     init({(int)zero_points.size()}, data_type::s32, aengine);
@@ -659,7 +659,7 @@ class ITensor : public dnnl::memory {
   }
 
   /// Copy constructor
-  ITensor(const ITensor& t)
+  MkldnnMemory(const MkldnnMemory& t)
       : memory(t),
         workspace_(t.workspace_),
         scale_(t.scale_),
@@ -669,7 +669,7 @@ class ITensor : public dnnl::memory {
         groups_(t.groups_) {}
 
   /// Move constructor
-  ITensor(ITensor&& t)
+  MkldnnMemory(MkldnnMemory&& t)
       : memory(std::move(t)),
         workspace_(std::move(t.workspace_)),
         scale_(std::move(t.scale_)),
@@ -679,7 +679,7 @@ class ITensor : public dnnl::memory {
         groups_(t.groups_) {}
 
   /// Assignment operator
-  ITensor& operator=(const ITensor& t) {
+  MkldnnMemory& operator=(const MkldnnMemory& t) {
     memory::operator=(t);
     buffer_ = t.buffer_;
     scale_ = t.scale_;
@@ -691,7 +691,7 @@ class ITensor : public dnnl::memory {
   }
 
   /// Move assignment operator
-  ITensor& operator=(ITensor&& t) {
+  MkldnnMemory& operator=(MkldnnMemory&& t) {
     memory::operator=(std::move(t));
     buffer_ = std::move(t.buffer_);
     scale_ = std::move(t.scale_);
@@ -771,7 +771,7 @@ class ITensor : public dnnl::memory {
     }
   }
 
-  ITensor reorder_if_differ_in(
+  MkldnnMemory reorder_if_differ_in(
       const desc& expected_desc,
       const Attr& aattr = Attr()) const {
     // Check desc, scales and zero points
@@ -795,7 +795,7 @@ class ITensor : public dnnl::memory {
     if (reorder_not_needed) {
       return *this;
     } else {
-      ITensor dst{expected_desc};
+      MkldnnMemory dst{expected_desc};
       // Keep scale and zero point
       if (has_scale()) {
         dst.set_scale(get_scale());
@@ -811,7 +811,7 @@ class ITensor : public dnnl::memory {
       } catch (...) {
         // A common error is 'could not create a reorder primitive descriptor'
         // We won't distinguish between specific errors
-        ITensor&& plain_weight = to_public(nullptr, get_data_type());
+        MkldnnMemory&& plain_weight = to_public(nullptr, get_data_type());
         plain_weight.reorder_to(dst, aattr);
       }
       return dst;
@@ -825,7 +825,7 @@ class ITensor : public dnnl::memory {
   }
 
   // no data copy
-  ITensor make_grouped_weights(int groups, bool is_deconv = false) const {
+  MkldnnMemory make_grouped_weights(int groups, bool is_deconv = false) const {
     if (groups <= 1)
       return *this;
 
@@ -900,7 +900,7 @@ class ITensor : public dnnl::memory {
   }
 
   /// Return an new tensor with new shape
-  ITensor& reshape(const dims& adims) {
+  MkldnnMemory& reshape(const dims& adims) {
 #ifndef NDEBUG
     dnnl::error::wrap_c_api(
         (has_same_volume(adims)) ? dnnl_success : dnnl_invalid_arguments,
@@ -966,31 +966,31 @@ class ITensor : public dnnl::memory {
     set_desc(get_desc().to_type(adata_type));
   }
 
-  inline void reorder_to(ITensor& dst, const Attr& aattr = Attr()) const {
+  inline void reorder_to(MkldnnMemory& dst, const Attr& aattr = Attr()) const {
     Attr op_attr = aattr;
     op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
     auto pd = dnnl::reorder::primitive_desc(*this, dst, op_attr);
 
-    ITensor scratchpad(pd.scratchpad_desc());
+    MkldnnMemory scratchpad(pd.scratchpad_desc());
     std::unordered_map<int, dnnl::memory> args;
-    args.insert({DNNL_ARG_FROM, const_cast<ITensor&>(*this)});
+    args.insert({DNNL_ARG_FROM, const_cast<MkldnnMemory&>(*this)});
     args.insert({DNNL_ARG_TO, dst});
     args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
     // Insert scales and zero points
     const static std::vector<int> args_for_scales_zp = {DNNL_ARG_SRC, DNNL_ARG_DST};
-    std::vector<ITensor> scale_tensors(args_for_scales_zp.size());
+    std::vector<MkldnnMemory> scale_tensors(args_for_scales_zp.size());
     for (size_t i = 0; i < args_for_scales_zp.size(); ++i) {
       int arg = args_for_scales_zp[i];
       if (op_attr.has_scales_for(arg)) {
-        scale_tensors[i] = ITensor(op_attr.get_scales(arg).first);
+        scale_tensors[i] = MkldnnMemory(op_attr.get_scales(arg).first);
         args.insert({DNNL_ARG_ATTR_SCALES | arg, scale_tensors[i]});
       }
     }
-    std::vector<ITensor> zp_tensors(args_for_scales_zp.size());
+    std::vector<MkldnnMemory> zp_tensors(args_for_scales_zp.size());
     for (size_t i = 0; i < args_for_scales_zp.size(); ++i) {
       int arg = args_for_scales_zp[i];
       if (op_attr.has_zero_points_for(arg)) {
-        zp_tensors[i] = ITensor(op_attr.get_zero_points(arg).first);
+        zp_tensors[i] = MkldnnMemory(op_attr.get_zero_points(arg).first);
         args.insert({DNNL_ARG_ATTR_ZERO_POINTS | arg, zp_tensors[i]});
       }
     }
@@ -1000,7 +1000,7 @@ class ITensor : public dnnl::memory {
   }
 
   /// Convert the tensor to public format, and f32 data type by default
-  ITensor to_public(void* buffer = nullptr, data_type dst_type = data_type::f32)
+  MkldnnMemory to_public(void* buffer = nullptr, data_type dst_type = data_type::f32)
       const {
     auto dst_desc = get_desc();
 
@@ -1015,7 +1015,7 @@ class ITensor : public dnnl::memory {
       dst_desc = dst_desc.to_type(dst_type);
     }
 
-    auto dst = buffer ? ITensor(dst_desc, buffer) : ITensor(dst_desc);
+    auto dst = buffer ? MkldnnMemory(dst_desc, buffer) : MkldnnMemory(dst_desc);
 
     if (one_of(
             get_data_type(), data_type::s8, data_type::u8, data_type::s32) &&
@@ -1036,7 +1036,7 @@ class ITensor : public dnnl::memory {
 
   /// Fill the tensor with a src tensor
   /// TODO(xpz): may replace is_deconv_weights with a enum for other purposes
-  void feed_from(const ITensor& src, bool is_deconv_weights = false) {
+  void feed_from(const MkldnnMemory& src, bool is_deconv_weights = false) {
     std::vector<float> dst_scale, src_scale;
     if (has_scale() && src.has_scale()) {
       dst_scale = get_scale();
@@ -1083,8 +1083,8 @@ class ITensor : public dnnl::memory {
     feed_from({adims, adata_type, const_cast<void*>(array)});
   }
 
-  ITensor dequantize() const {
-    ITensor dst(get_desc().to_type(data_type::f32));
+  MkldnnMemory dequantize() const {
+    MkldnnMemory dst(get_desc().to_type(data_type::f32));
 #ifndef NDEBUG
     dnnl::error::wrap_c_api(
         (has_scale()) ? dnnl_success : dnnl_invalid_arguments,
@@ -1101,12 +1101,12 @@ class ITensor : public dnnl::memory {
   }
 
   void init_workspace(const desc& desc) {
-    auto workspace = new ITensor(desc, get_engine());
+    auto workspace = new MkldnnMemory(desc, get_engine());
     workspace_.reset(workspace);
   }
 
   /// Return extra packed tensor
-  ITensor& get_workspace() const {
+  MkldnnMemory& get_workspace() const {
     return *workspace_;
   }
 
@@ -1145,32 +1145,32 @@ class ITensor : public dnnl::memory {
     zero_point_.reset(new std::vector<int32_t>(zp));
   }
 
-  ITensor& permute_(const std::vector<int>& permute_axes = {}) {
+  MkldnnMemory& permute_(const std::vector<int>& permute_axes = {}) {
     return set_desc(get_desc().permute(permute_axes));
   }
 
-  ITensor permute(const std::vector<int>& permute_axes = {}) const {
+  MkldnnMemory permute(const std::vector<int>& permute_axes = {}) const {
     auto src_mask = *this;
     src_mask.permute_(permute_axes);
-    auto dst = ITensor(src_mask.get_desc().to_default_format());
+    auto dst = MkldnnMemory(src_mask.get_desc().to_default_format());
     src_mask.reorder_to(dst);
     return dst;
   }
 
-  ITensor& transpose_(dim dim0, dim dim1) {
+  MkldnnMemory& transpose_(dim dim0, dim dim1) {
     return set_desc(get_desc().transpose(dim0, dim1));
   }
 
-  ITensor transpose(dim dim0, dim dim1) const {
+  MkldnnMemory transpose(dim dim0, dim dim1) const {
     auto src_mask = *this;
     src_mask.transpose_(dim0, dim1);
-    auto dst = ITensor(src_mask.get_desc().to_default_format());
+    auto dst = MkldnnMemory(src_mask.get_desc().to_default_format());
     src_mask.reorder_to(dst);
     return dst;
   }
 
   // For backward compatibility. Will be deprecated
-  void transpose_from(const ITensor& src, const std::vector<int>& perms = {}) {
+  void transpose_from(const MkldnnMemory& src, const std::vector<int>& perms = {}) {
     *this = std::move(src.permute(perms));
   }
 
@@ -1186,7 +1186,7 @@ class ITensor : public dnnl::memory {
 
   inline void to_format(const desc& adesc) {
     if (get_desc() != adesc) {
-      auto dst = ITensor(adesc);
+      auto dst = MkldnnMemory(adesc);
       this->reorder_to(dst);
       *this = std::move(dst);
     }
@@ -1204,7 +1204,7 @@ class ITensor : public dnnl::memory {
   /// Set a descriptor into tensor to replace the older one, keep buffer
   /// It is caller's responsibility to make sure the original buffer is large
   /// enough for specified descriptor
-  ITensor& set_desc(const desc& new_desc) {
+  MkldnnMemory& set_desc(const desc& new_desc) {
     // Keep the original management
     auto buf = std::move(buffer_);
     auto ws = std::move(workspace_);
@@ -1218,7 +1218,7 @@ class ITensor : public dnnl::memory {
     return *this;
   }
 
-  std::shared_ptr<ITensor> workspace_;
+  std::shared_ptr<MkldnnMemory> workspace_;
   std::shared_ptr<std::vector<float>> scale_;
   std::shared_ptr<std::vector<int32_t>> zero_point_;
   std::shared_ptr<void> buffer_;

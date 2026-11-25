@@ -31,10 +31,10 @@ Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
         "mkldnn_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
-  const mkldnn::ITensor& x = itensor_from_mkldnn(input);
-  const mkldnn::ITensor& w = itensor_from_const_tensor(weight);
+  const mkldnn::MkldnnMemory& x = itensor_from_mkldnn(input);
+  const mkldnn::MkldnnMemory& w = itensor_from_const_tensor(weight);
 
-  mkldnn::ITensor y;
+  mkldnn::MkldnnMemory y;
   mkldnn::prelu_forward(
       x, w, y, dnnl::prop_kind::forward_training);
   return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
@@ -42,11 +42,11 @@ Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
 }
 
 std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, const Tensor& input, const Tensor& weight) {
-  const mkldnn::ITensor& x = itensor_from_mkldnn(input);
-  const mkldnn::ITensor& w = itensor_from_const_tensor(weight);
-  const mkldnn::ITensor grady = itensor_from_mkldnn(grad_output);
-  mkldnn::ITensor gradx;
-  mkldnn::ITensor gradw;
+  const mkldnn::MkldnnMemory& x = itensor_from_mkldnn(input);
+  const mkldnn::MkldnnMemory& w = itensor_from_const_tensor(weight);
+  const mkldnn::MkldnnMemory grady = itensor_from_mkldnn(grad_output);
+  mkldnn::MkldnnMemory gradx;
+  mkldnn::MkldnnMemory gradw;
 
   mkldnn::prelu_backward(x, w, grady, gradx, gradw);
   if (weight.is_mkldnn()) {
