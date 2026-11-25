@@ -3402,13 +3402,15 @@ class TestTorchDeviceType(TestCase):
     @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
     @dtypes(torch.int32, torch.int64, torch.float, torch.double, torch.cfloat)
     def test_cumsum_many_short_rows(self, device, dtype):
-        # Enough rows that ROCm gives each row to a group of lanes, with row ends at each position
-        # within a lane's elements, also in the first lane of a row's second tile (129 and 257
-        # elements). (655360, 4) int32 is 10 MiB, so it ends where its allocation does and a read
-        # past the end of the last row faults. The results are exact in `dtype`.
-        shapes = [(655360, 4), (40000, 9), (40000, 31), (40000, 47), (40000, 63), (40000, 129), (40000, 135),
-                  (40000, 257), (40000, 300)]
+        # Enough rows that ROCm gives each row to a group of lanes, with row ends at every position
+        # within a lane's elements (8 for 4-byte types, 4 for 8-byte types; lengths 9 to 16), also
+        # in the first lane of a later tile (257 for 4-byte types, 129 and 257 for 8-byte types).
+        # (655360, 4) is 10 MiB or more: with the cache emptied it most likely gets an allocation of
+        # its own, so a read past the end of the last row faults. The results are exact in `dtype`.
+        shapes = [(655360, 4)] + [(40000, n) for n in (9, 10, 11, 12, 13, 14, 15, 16, 31, 63, 129, 131, 257, 262, 300)]
         for shape in shapes:
+            if shape[0] == 655360:
+                torch.cuda.empty_cache()
             x = torch.randint(-3, 4, shape).to(dtype)
             expected = torch.cumsum(x, 1, dtype=dtype)
             out = torch.empty(shape, dtype=dtype, device=device)

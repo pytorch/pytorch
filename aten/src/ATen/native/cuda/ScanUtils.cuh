@@ -1170,9 +1170,10 @@ inline Plan make_plan(int64_t num_rows, int64_t row_size, int64_t num_sms, int64
 template <int kItems, int kVec, int kRun, typename T, class BinaryFunction>
 void launch_with(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T init, BinaryFunction binary_op) {
   constexpr uintptr_t kAlign = kGlobalAlign<T>;
-  // Vector accesses start at a row start plus a multiple of kItems, so only row starts need
-  // kAlign; partial vectors at the end of a row use scalar accesses (1- and 2-byte elements use
-  // dword accesses instead; see kDwordAccess).
+  // Vector accesses start at a row start plus a multiple of kItems, or end at the row end
+  // (load_items_row_end and store_items_row_end, for 4- and 8-byte elements, whose kAlign is their
+  // own alignment), so only row starts need kAlign. Other partial vectors at the end of a row use
+  // scalar accesses (1- and 2-byte elements use dword accesses instead; see kDwordAccess).
   const bool vec_ok = static_cast<uintptr_t>(row_size) * sizeof(T) % kAlign == 0 &&
       reinterpret_cast<uintptr_t>(src) % kAlign == 0 &&
       reinterpret_cast<uintptr_t>(tgt) % kAlign == 0;
