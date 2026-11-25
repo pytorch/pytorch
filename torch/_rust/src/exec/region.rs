@@ -228,13 +228,25 @@ pub struct Variant {
     _held: Vec<Py<PyAny>>,
 }
 
+impl Variant {
+    // Whether a call with these args has the variant's facts: asked before
+    // anything else of it, so that a variant for another object or value is
+    // passed over whichever of its checks the fact comes from (func's, for a
+    // str or a bound method).
+    pub unsafe fn facts_hold(&self, args: &[*mut PyObject]) -> bool {
+        self.facts.iter().all(|(p, a)| atom_at(args, *p) == *a)
+    }
+}
+
 #[inline]
 fn mix(h: u64, x: u64) -> u64 {
     (h.rotate_left(5) ^ x).wrapping_mul(0x517c_c1b7_2722_0a95)
 }
 
 // What a key is made of at one position: the value of an exact int or str
-// (their hashes run no Python code), else which object it is.
+// (their hashes run no Python code); for a bound method what it is bound to
+// (`layer.forward` is another method object on every read); else which
+// object it is.
 unsafe fn atom(x: *mut PyObject) -> u64 {
     if x.is_null() {
         1
@@ -243,7 +255,8 @@ unsafe fn atom(x: *mut PyObject) -> u64 {
     } else if ffi::PyUnicode_CheckExact(x) != 0 {
         mix(3, ffi::PyObject_Hash(x) as u64)
     } else {
-        mix(4, x as usize as u64)
+        let bound_to = super::ffi::tr_bound_self(x);
+        if bound_to.is_null() { mix(4, x as usize as u64) } else { mix(5, bound_to as usize as u64) }
     }
 }
 
@@ -480,6 +493,8 @@ pub enum Quick {
     Item(u32, u32, bool, Py<PyAny>),
     // These args, as a tuple, pass the TreeChecks.
     Tensors(Vec<u32>, Py<super::TreeChecks>),
+    // Arg i (a container of tensors and plain values) passes the TreeChecks.
+    Tree(u32, Py<super::TreeChecks>),
 }
 
 fn parse_quick(q: &Bound<'_, PyTuple>) -> PyResult<Quick> {
@@ -488,13 +503,15 @@ fn parse_quick(q: &Bound<'_, PyTuple>) -> PyResult<Quick> {
         "arg" => Quick::Arg(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?, q.get_item(3)?.unbind()),
         "item" => Quick::Item(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?, q.get_item(3)?.extract()?, q.get_item(4)?.unbind()),
         "tensors" => Quick::Tensors(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?),
+        "tree" => Quick::Tree(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?),
         _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("bad quick check {q}"))),
     })
 }
 
 impl Quick {
     // No Python code runs: the values compared by == are exact ints, bools,
-    // strs or None.
+    // strs, bytes, torch.Sizes or None (a Tree's TreeChecks is one that is
+    // `quick`).
     unsafe fn holds(&self, py: Python<'_>, args: &[*mut PyObject]) -> bool {
         let is = |x: *mut PyObject, same: bool, want: &Py<PyAny>| {
             if same || x.is_null() {
@@ -530,6 +547,10 @@ impl Quick {
                     return false;
                 };
                 checks.get().passes(t.as_any())
+            }
+            Quick::Tree(i, checks) => {
+                let a = arg(*i);
+                !a.is_null() && checks.get().passes(&Bound::from_borrowed_ptr(py, a))
             }
         }
     }

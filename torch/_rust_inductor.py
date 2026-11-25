@@ -1722,9 +1722,11 @@ def _quick(args, plan, own_checks):
     over the others for nanoseconds each: ("arg", i, by identity, what) and
     ("tensors", args, TreeChecks) from a span's own checks, and ("item", i,
     j, by identity, what) for the items of an exact tuple or list arg that
-    are leaves checked by value or by identity. Each is one of the checks
-    func makes anyway, so a region passed over here is one func would turn
-    down."""
+    are leaves checked by value or by identity, or ("tree", i, TreeChecks)
+    for a container arg of tensors and plain values, whole (its tensors'
+    metadata too: a region for another input size held in a tuple is passed
+    over, not entered and turned down). Each is one of the checks func makes
+    anyway, so a region passed over here is one func would turn down."""
     simple = (int, bool, str, type(None))
     out: list[tuple[Any, ...]] = []
     for kind, i, want in own_checks:
@@ -1735,7 +1737,12 @@ def _quick(args, plan, own_checks):
         elif kind == "tensors":
             out.append(("tensors", list(i), want))
     for i, (a, p) in enumerate(zip(args, plan)):
-        if p is None or p[0] != "tree" or type(a) not in (tuple, list):
+        if p is None or p[0] != "tree":
+            continue
+        if p[3] is not None and p[3].quick:
+            out.append(("tree", i, p[3]))
+            continue
+        if type(a) not in (tuple, list):
             continue
         for j, x in enumerate(a):
             if type(x) in simple:
@@ -1753,13 +1760,32 @@ def _quick(args, plan, own_checks):
 def _keys(args, plan, checks):
     """What the checks of a region's args pin to one object or to one small
     value, as (arg, item or None, what): an arg checked by identity, an int,
-    bool, None or str arg checked by value, and the items of an exact tuple
-    or list arg that are leaves checked that way. A place with many regions
+    bool, None or str arg checked by value, a bound method whose ``__self__``
+    is checked by identity, and the items of an exact tuple or list arg that
+    are any of these. A place with many regions
     (one per layer of a loop) finds the one for a call by these (see
     exec/region.rs's Variants) instead of asking each. Every entry is implied
     by a check the region makes anyway (the guard's, a quick one, func's), so
     a call that differs in one is a call the region would turn down."""
     simple = (int, bool, str, type(None))
+
+    def by_identity(x) -> bool:
+        return (
+            type(x) not in (list, tuple, dict)
+            and _made_of(x) is None
+            and not _is_tree(x)
+            and _leaf_check(x, "")[0] is _IS
+        )
+
+    def pinned(x) -> bool:
+        # A bound method made anew on every read counts by what it is bound
+        # to (the key takes a method object that way).
+        return (
+            type(x) in simple
+            or by_identity(x)
+            or (type(x) is types.MethodType and by_identity(x.__self__))
+        )
+
     out: list[tuple[int, int | None, Any]] = []
     for c in checks:
         if c[0] == "is" or (c[0] == "value" and type(c[2]) in simple):
@@ -1769,15 +1795,11 @@ def _keys(args, plan, checks):
             continue
         if p[0] == "equal" and p[1] is str:
             out.append((i, None, a))
+        elif p[0] == "tree" and type(a) is types.MethodType:
+            if by_identity(a.__self__):
+                out.append((i, None, a))
         elif p[0] == "tree" and type(a) in (tuple, list):
-            for j, x in enumerate(a):
-                if type(x) in simple or (
-                    type(x) not in (list, tuple, dict)
-                    and _made_of(x) is None
-                    and not _is_tree(x)
-                    and _leaf_check(x, "")[0] is _IS
-                ):
-                    out.append((i, j, x))
+            out.extend((i, j, x) for j, x in enumerate(a) if pinned(x))
     return out
 
 
