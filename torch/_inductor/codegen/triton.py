@@ -28,6 +28,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype, type_to_dtype
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
@@ -8580,6 +8581,31 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 pointer_range_override=self.pointer_range_override(),
             )
         ]
+        if (
+            config.triton.dynamic_divisibility_variants
+            and config.triton.divisible_by_16
+            and not self.fixed_config
+            and not V.graph.cpp_wrapper
+            and isinstance(triton_meta["configs"][0], dict)
+        ):
+            divisible = OrderedSet(
+                key[0]
+                for key, attrs in triton_meta["configs"][0].items()
+                if any(attr[0] == "tt.divisibility" for attr in attrs)
+            )
+            variant_args = [
+                i
+                for i, arg in enumerate(signature)
+                if isinstance(arg, SizeArg)
+                and i not in divisible
+                and isinstance(arg.expr, sympy.Expr)
+                and arg.expr.free_symbols
+                and not free_unbacked_symbols(arg.expr)
+                # The RNG seed offset is a value, not a size (config_of skips it too).
+                and not arg.name.startswith("load_seed_offset")
+            ]
+            if variant_args:
+                inductor_meta["dynamic_divisibility_variant_args"] = variant_args
 
         for helper in self.helper_functions:
             code.writeline("")

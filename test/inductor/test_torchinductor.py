@@ -21161,6 +21161,72 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertFalse("ReductionHint.INNER" in code)
 
     @skip_if_device(lambda device: device == "cpu", "Skip for CPU device")
+    @skipIfXpu
+    @xfail_if_mps
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.dynamic_divisibility_variants": True,
+        }
+    )
+    def test_dynamic_divisibility_variants(self):
+        if config.cpp_wrapper:
+            raise unittest.SkipTest(
+                "the C++ wrapper launches kernels directly, without variants"
+            )
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        def f(x, y):
+            # The store is contiguous along the dynamic dim, so its vectorization
+            # depends on that size being divisible by 16.
+            cat = torch.cat([x, y], dim=1).float() * 2
+            return cat.to(torch.bfloat16).transpose(0, 1).contiguous()
+
+        def inputs(n):
+            return (
+                torch.randn(n, 48, 256, device=self.device, dtype=torch.bfloat16),
+                torch.randn(n, 24, 256, device=self.device, dtype=torch.bfloat16),
+            )
+
+        compiled = torch.compile(f, dynamic=True)
+        # 6034 and 6161 are not divisible by 16, 6176 is (and equals no product
+        # of the static dims, so it identifies the batch-size argument).
+        sizes = (6034, 6176, 6161, 6176)
+        cases = [inputs(n) for n in sizes]
+        with unittest.mock.patch.object(
+            CachingAutotuner,
+            "_build_divisibility_variant",
+            autospec=True,
+            side_effect=CachingAutotuner._build_divisibility_variant,
+        ) as build:
+            actual, (code,) = run_and_get_code(compiled, *cases[0])
+            outputs = [actual] + [compiled(*args) for args in cases[1:]]
+        self.assertIn("dynamic_divisibility_variant_args", code)
+
+        # Variants were compiled, and each size launched the one matching which
+        # of its size arguments are divisible: the batch-size argument (6176 vs
+        # 6161) is specialized only for 6176.
+        tuner = build.call_args.args[0]
+        variants = tuner._divisibility_variants
+        self.assertGreaterEqual(sum(v is not None for v in variants.values()), 2)
+        dispatch = tuner._divisibility_dispatch
+        for n, expect_specialized in ((6176, True), (6161, False)):
+            (values,) = [v for v in dispatch if n in v]
+            batch_arg = tuner._divisibility_variant_args[values.index(n)]
+            variant = dispatch[values]
+            self.assertIsNotNone(variant)
+            (key,) = [k for k, v in variants.items() if v is variant]
+            self.assertEqual(batch_arg in key, expect_specialized)
+
+        # Every size, divisible or not, matches a compile without variants bitwise.
+        with config.patch("triton.dynamic_divisibility_variants", False):
+            torch._dynamo.reset()
+            baseline = torch.compile(f, dynamic=True)
+            for args, out in zip(cases, outputs):
+                self.assertTrue(torch.equal(baseline(*args), out))
+                self.assertTrue(torch.equal(f(*args), out))
+
+    @skip_if_device(lambda device: device == "cpu", "Skip for CPU device")
     @config.patch(force_disable_caches=True)
     @xfail_if_mps  # MPS codegen does not emit ReductionHint.OUTER
     def test_broadcasted_inner_reduction_detection(self):
