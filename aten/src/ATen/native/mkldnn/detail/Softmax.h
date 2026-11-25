@@ -9,8 +9,8 @@ namespace at::native::mkldnn {
 
 // Ported from ideep::softmax_forward::compute.
 void softmax_forward(
-    const ITensor& src,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    MkldnnMemory& dst,
     int softmax_axis,
     dnnl::prop_kind prop_kind = dnnl::prop_kind::forward);
 

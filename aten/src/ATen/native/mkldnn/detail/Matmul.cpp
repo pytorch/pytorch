@@ -18,10 +18,10 @@ namespace {
 template <bool with_bias>
 void do_prepare(
     matmul_forward_params& param,
-    const ITensor& src,
-    const ITensor& weights,
-    const ITensor& bias,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const float dst_coeff = 1.0f,
     const float sum_coeff = 1.0f, // for post-op sum
     const Attr& attr = Attr(),
@@ -32,7 +32,7 @@ void do_prepare(
       "Invalid dims in src or weights");
 #endif
 
-  ITensor::desc src_desc, weights_desc, bias_desc;
+  MkldnnMemory::desc src_desc, weights_desc, bias_desc;
   Attr& op_attr = param.op_attr;
   op_attr = attr;
   auto dst_data_type = dnnl::memory::data_type::f32;
@@ -84,7 +84,7 @@ void do_prepare(
   // for aarch64 ACL backend with fixed format kernels, the weights are
   // always in blocked layout, so, set the descriptor to tag::any for the backend
   // to decide the format
-  weights_desc = ITensor::desc(
+  weights_desc = MkldnnMemory::desc(
       weights.get_dims(), wei_data_type, dnnl::memory::format_tag::any);
 #else
   // For fp32 matmul, weight (2nd input) is usually not in blocked layout
@@ -92,7 +92,7 @@ void do_prepare(
   // Should use tag::any to query blocked layout if there is perf gain later
   weights_desc = weights.get_desc().is_plain()
       ? weights.get_desc().to_type(wei_data_type)
-      : ITensor::desc(
+      : MkldnnMemory::desc(
             weights.get_dims(), wei_data_type, dnnl::memory::format_tag::any);
 #endif
 
@@ -138,7 +138,7 @@ void do_prepare(
   /* rely on tensor descriptor class to se the format appropriately
    * based on the tensor dimensions.
    */
-  ITensor::desc dst_desc = ITensor::desc(dst_dims, dst_data_type);
+  MkldnnMemory::desc dst_desc = MkldnnMemory::desc(dst_dims, dst_data_type);
   if (!dst.is_empty()) {
     dst_desc = dst.get_desc().to_type(dst_data_type);
   }
@@ -177,12 +177,12 @@ void do_prepare(
 #endif
   if (param.op_attr.has_scales()) {
     if (!param.all_scales) {
-      param.all_scales.reset(new std::unordered_map<int, ITensor>);
+      param.all_scales.reset(new std::unordered_map<int, MkldnnMemory>);
     }
     for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
       int dnnl_arg = arg_scale_pair.first;
       const std::vector<float>& scale = arg_scale_pair.second.first;
-      ITensor scales_m(scale);
+      MkldnnMemory scales_m(scale);
       param.all_scales->insert({dnnl_arg, scales_m});
     }
   }
@@ -193,10 +193,10 @@ void do_prepare(
 template <bool with_bias>
 void do_prepare_static_quant(
     matmul_forward_params& param,
-    const ITensor& src,
-    const ITensor& weights,
-    const ITensor& bias,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const std::vector<float>& src_scales,
     const std::vector<float>& weights_scales,
     const std::vector<float>& dst_scales,
@@ -213,7 +213,7 @@ void do_prepare_static_quant(
       "Invalid dims in src or weights");
 #endif
 
-  ITensor::desc src_desc, weights_desc, bias_desc;
+  MkldnnMemory::desc src_desc, weights_desc, bias_desc;
   Attr& op_attr = param.op_attr;
   Attr& src_attr = param.src_attr;
   Attr& weights_attr = param.weights_attr;
@@ -244,7 +244,7 @@ void do_prepare_static_quant(
   auto src_data_type = (alowp_kind == ideep::u8s8)
       ? dnnl::memory::data_type::u8
       : dnnl::memory::data_type::s8;
-  src_desc = ITensor::desc(
+  src_desc = MkldnnMemory::desc(
       src_dims, src_data_type, dnnl::memory::format_tag::any);
   for (auto& s : src_scales_in) {
     s = 1.0 / s;
@@ -361,7 +361,7 @@ void do_prepare_static_quant(
 
   dst_data_type =
       dst_type == dnnl::memory::data_type::undef ? dst_data_type : dst_type;
-  ITensor::desc dst_desc = ITensor::desc(
+  MkldnnMemory::desc dst_desc = MkldnnMemory::desc(
       dst_dims, dst_data_type, dnnl::memory::format_tag::any);
   if (!dst.is_empty()) {
     dst_desc = dst.get_desc().to_type(dst_data_type);
@@ -400,23 +400,23 @@ void do_prepare_static_quant(
 #endif
   if (param.op_attr.has_scales()) {
     if (!param.all_scales) {
-      param.all_scales.reset(new std::unordered_map<int, ITensor>);
+      param.all_scales.reset(new std::unordered_map<int, MkldnnMemory>);
     }
     for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
       int dnnl_arg = arg_scale_pair.first;
       const std::vector<float>& scale = arg_scale_pair.second.first;
-      ITensor scales_m(scale);
+      MkldnnMemory scales_m(scale);
       param.all_scales->insert({dnnl_arg, scales_m});
     }
   }
   if (param.op_attr.has_zero_points()) {
     if (!param.all_zero_points) {
-      param.all_zero_points.reset(new std::unordered_map<int, ITensor>);
+      param.all_zero_points.reset(new std::unordered_map<int, MkldnnMemory>);
     }
     for (auto& arg_zp_pair : param.op_attr.get_all_zero_points()) {
       int dnnl_arg = arg_zp_pair.first;
       const std::vector<int32_t>& zp = arg_zp_pair.second.first;
-      ITensor zp_m(zp);
+      MkldnnMemory zp_m(zp);
       param.all_zero_points->insert({dnnl_arg, zp_m});
     }
   }
@@ -427,10 +427,10 @@ void do_prepare_static_quant(
 template <bool with_bias>
 void do_prepare_dynamic_quant(
     matmul_forward_params& param,
-    const ITensor& src,
-    const ITensor& weights,
-    const ITensor& bias,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const std::vector<float>& weights_scales,
     const float sum_coeff = 1.0f, // for post-op sum
     const Attr& attr = Attr(),
@@ -457,7 +457,7 @@ void do_prepare_dynamic_quant(
       "Failed to allocate memory for parameters");
 #endif
 
-  ITensor::desc& src_desc = param.dq_param_ptr->src_desc;
+  MkldnnMemory::desc& src_desc = param.dq_param_ptr->src_desc;
   Attr& op_attr = param.op_attr;
   Attr src_attr;
 
@@ -475,7 +475,7 @@ void do_prepare_dynamic_quant(
   std::vector<int64_t> src_strides = (ndims == 3)
       ? std::vector<int64_t>({src_dims[1] * src_dims[2], src_dims[1], 1})
       : std::vector<int64_t>({src_dims[1], 1});
-  src_desc = ITensor::desc(src_dims, src_data_type, src_strides);
+  src_desc = MkldnnMemory::desc(src_dims, src_data_type, src_strides);
 
   // Post-ops
   auto pops = attr.get_post_ops();
@@ -521,12 +521,12 @@ void do_prepare_dynamic_quant(
   std::vector<int64_t> dst_strides = (ndims == 3)
       ? std::vector<int64_t>({dst_dims[2] * dst_dims[1], dst_dims[1], 1})
       : std::vector<int64_t>({dst_dims[1], 1});
-  ITensor::desc dst_desc =
-      ITensor::desc(dst_dims, dst_type, dst_strides);
+  MkldnnMemory::desc dst_desc =
+      MkldnnMemory::desc(dst_dims, dst_type, dst_strides);
   if (!dst.is_empty()) {
     dst_desc = dst.get_desc().to_type(dst_type);
   }
-  ITensor::desc bias_desc;
+  MkldnnMemory::desc bias_desc;
   if (with_bias) {
     dnnl::memory::format_tag bia_tag = bias.get_dims().size() == 2
         ? dnnl::memory::format_tag::ab
@@ -580,12 +580,12 @@ void do_prepare_dynamic_quant(
 
   if (param.op_attr.has_scales()) {
     if (!param.all_scales) {
-      param.all_scales.reset(new std::unordered_map<int, ITensor>);
+      param.all_scales.reset(new std::unordered_map<int, MkldnnMemory>);
     }
     for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
       int dnnl_arg = arg_scale_pair.first;
       const std::vector<float>& scale = arg_scale_pair.second.first;
-      ITensor scales_m(scale);
+      MkldnnMemory scales_m(scale);
       param.all_scales->insert({dnnl_arg, scales_m});
     }
   }
@@ -599,10 +599,10 @@ void do_prepare_dynamic_quant(
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void do_compute(
     const matmul_forward_params& param,
-    const ITensor& src,
-    const ITensor& weights,
-    const ITensor& bias,
-    ITensor& dst) {
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst) {
   auto& pd = param.pd;
   auto& primitive = param.primitive;
   auto& op_attr = param.op_attr;
@@ -619,7 +619,7 @@ void do_compute(
   auto& expected_weights = reorder_weight
       ? weights.reorder_if_differ_in(expected_wei_desc, weights_attr)
       : weights;
-  ITensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, expected_src});
@@ -631,19 +631,19 @@ void do_compute(
   if (param.all_scales && !param.all_scales->empty()) {
     for (auto& arg_scale_pair : *param.all_scales) {
       int dnnl_arg = arg_scale_pair.first;
-      ITensor& scales_m = arg_scale_pair.second;
+      MkldnnMemory& scales_m = arg_scale_pair.second;
       args.insert({DNNL_ARG_ATTR_SCALES | dnnl_arg, scales_m});
     }
   }
   if (param.all_zero_points && !param.all_zero_points->empty()) {
     for (auto& arg_zp_pair : *param.all_zero_points) {
       int dnnl_arg = arg_zp_pair.first;
-      ITensor& zp_m = arg_zp_pair.second;
+      MkldnnMemory& zp_m = arg_zp_pair.second;
       args.insert({DNNL_ARG_ATTR_ZERO_POINTS | dnnl_arg, zp_m});
     }
   }
   if (reorder_src) {
-    ITensor expected_dst;
+    MkldnnMemory expected_dst;
     if (dst.is_empty() || dst.get_desc() != expected_dst_desc) {
       // If dst buffer are not given by user or user given dst buffer are not
       // under expected format
@@ -680,10 +680,10 @@ void do_compute(
 template <bool with_bias, bool reorder_weight = true>
 void do_compute_dynamic_quant(
     const matmul_forward_params& param,
-    const ITensor& src,
-    const ITensor& weights,
-    const ITensor& bias,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const std::vector<float>& src_scales,
     const std::vector<int32_t>& src_zero_points,
     const float dst_coeff = 1.0f) {
@@ -718,10 +718,10 @@ void do_compute_dynamic_quant(
     s = 1.0 / s;
   }
   int src_scale_size = src_scales_in.size();
-  ITensor::desc src_scales_desc = {
+  MkldnnMemory::desc src_scales_desc = {
       {src_scale_size}, dnnl::memory::data_type::f32, {scale_zp_stride}};
   const auto& engine = ideep::engine::cpu_engine();
-  ITensor src_scales_m(
+  MkldnnMemory src_scales_m(
       src_scales_desc,
       reinterpret_cast<float*>(src_scales_in.data()),
       engine);
@@ -737,15 +737,15 @@ void do_compute_dynamic_quant(
       src_zero_point_size == 1 ? dnnl_success : dnnl_invalid_arguments,
       "DNNL only support 1-dim zero_point");
 #endif
-  ITensor::desc src_zero_point_desc = {
+  MkldnnMemory::desc src_zero_point_desc = {
       {src_zero_point_size}, dnnl::memory::data_type::s32, {scale_zp_stride}};
-  ITensor src_zero_point_m(
+  MkldnnMemory src_zero_point_m(
       src_zero_point_desc,
       reinterpret_cast<int32_t*>(src_zero_point.data()),
       engine);
 
   // Reroder src (f32 -> u8)
-  ITensor expected_src(expected_src_desc);
+  MkldnnMemory expected_src(expected_src_desc);
   src_reorder.execute(
       ideep::stream::default_stream(),
       {{DNNL_ARG_FROM, src},
@@ -757,9 +757,9 @@ void do_compute_dynamic_quant(
   auto& expected_weights = reorder_weight
       ? weights.reorder_if_differ_in(pd.weights_desc(), weights_attr)
       : weights;
-  ITensor& expected_dst = dst;
+  MkldnnMemory& expected_dst = dst;
 
-  ITensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, expected_src});
@@ -772,14 +772,14 @@ void do_compute_dynamic_quant(
   if (param.all_scales && !param.all_scales->empty()) {
     for (auto& arg_scale_pair : *param.all_scales) {
       int dnnl_arg = arg_scale_pair.first;
-      ITensor& scales_m = arg_scale_pair.second;
+      MkldnnMemory& scales_m = arg_scale_pair.second;
       args.insert({DNNL_ARG_ATTR_SCALES | dnnl_arg, scales_m});
     }
   }
   if (param.all_zero_points && !param.all_zero_points->empty()) {
     for (auto& arg_zp_pair : *param.all_zero_points) {
       int dnnl_arg = arg_zp_pair.first;
-      ITensor& zp_m = arg_zp_pair.second;
+      MkldnnMemory& zp_m = arg_zp_pair.second;
       args.insert({DNNL_ARG_ATTR_ZERO_POINTS | dnnl_arg, zp_m});
     }
   }
@@ -795,10 +795,10 @@ void do_compute_dynamic_quant(
 // Supports fp32, static int8 and dynamic int8
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_impl(
-    const ITensor& src,
-    const ITensor& weights,
-    const ITensor& bias,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const std::vector<float>& src_scales = std::vector<float>(),
     const std::vector<float>& weights_scales = std::vector<float>(),
     const std::vector<float>& dst_scales = std::vector<float>(),
@@ -866,10 +866,10 @@ void compute_impl(
 
 template <bool reorder_src, bool reorder_weight>
 void matmul_forward_compute(
-    const ITensor& src,
-    const ITensor& weights,
-    const ITensor& bias,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const std::vector<float>& src_scales,
     const std::vector<float>& weights_scales,
     const std::vector<float>& dst_scales,
@@ -918,10 +918,10 @@ void matmul_forward_compute(
 template <bool is_dynamic>
 void matmul_forward_prepare(
     matmul_forward_params& param,
-    const ITensor& src,
-    const ITensor& weights,
-    const ITensor& bias,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const std::vector<float>& src_scales,
     const std::vector<float>& weights_scales,
     const std::vector<float>& dst_scales,
@@ -1000,10 +1000,10 @@ void matmul_forward_prepare(
 template <bool reorder_src, bool reorder_weight>
 void matmul_forward_compute(
     const matmul_forward_params& param,
-    const ITensor& src,
-    const ITensor& weights,
-    const ITensor& bias,
-    ITensor& dst) {
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst) {
   if (bias.is_empty()) {
     do_compute</*with_bias=*/false, reorder_src, reorder_weight>(
         param, src, weights, bias, dst);
@@ -1016,10 +1016,10 @@ void matmul_forward_compute(
 template <bool reorder_weight>
 void matmul_forward_compute(
     const matmul_forward_params& param,
-    const ITensor& src,
-    const ITensor& weights,
-    const ITensor& bias,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const std::vector<float>& src_scales,
     const std::vector<int32_t>& src_zero_points,
     const float dst_coeff) {
@@ -1033,14 +1033,14 @@ void matmul_forward_compute(
 }
 
 void matmul_forward(
-    const ITensor& src,
-    const ITensor& weights,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    MkldnnMemory& dst,
     const float dst_coeff,
     const float sum_coeff,
     const Attr& attr) {
   // Consider fp32 only for IPEX
-  static ITensor dummy_bias;
+  static MkldnnMemory dummy_bias;
   static ideep::lowp_kind dummy_lowp_kind = ideep::u8s8;
   compute_impl</*with_bias=*/false, /*reorder_src*/ true, /*reorder_weight*/ true>(
       src,
@@ -1059,7 +1059,7 @@ void matmul_forward(
       dummy_lowp_kind);
 }
 
-ITensor::desc matmul_forward_expected_weights_desc(
+MkldnnMemory::desc matmul_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     const dnnl::memory::dims& src_dims,
     dnnl::memory::data_type dtype,
@@ -1082,24 +1082,24 @@ ITensor::desc matmul_forward_expected_weights_desc(
                                            : dnnl_invalid_arguments,
       "Invalid dims for data and weights");
 #endif
-  ITensor::desc x_desc(
+  MkldnnMemory::desc x_desc(
       x_dims,
       x_dtype,
       ndims == 2 ? dnnl::memory::format_tag::ab
                  : dnnl::memory::format_tag::abc);
-  ITensor::desc y_desc(
+  MkldnnMemory::desc y_desc(
       y_dims,
       y_dtype,
       ndims == 2 ? dnnl::memory::format_tag::ab
                  : dnnl::memory::format_tag::abc);
-  ITensor::desc weights_desc(
+  MkldnnMemory::desc weights_desc(
       weights_dims, dtype, dnnl::memory::format_tag::any);
   auto pd = dnnl::matmul::primitive_desc(
       ideep::engine::cpu_engine(), x_desc, weights_desc, y_desc, attr);
   return pd.weights_desc();
 }
 
-ITensor::desc matmul_forward_expected_weights_desc(
+MkldnnMemory::desc matmul_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     const dnnl::memory::dims& src_dims,
     dnnl::memory::data_type dtype,
@@ -1114,10 +1114,10 @@ ITensor::desc matmul_forward_expected_weights_desc(
 }
 
 template void matmul_forward_compute<true, true>(
-    const ITensor&,
-    const ITensor&,
-    const ITensor&,
-    ITensor&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&,
     const std::vector<float>&,
     const std::vector<float>&,
     const std::vector<float>&,
@@ -1131,10 +1131,10 @@ template void matmul_forward_compute<true, true>(
 
 template void matmul_forward_prepare<false>(
     matmul_forward_params&,
-    const ITensor&,
-    const ITensor&,
-    const ITensor&,
-    ITensor&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&,
     const std::vector<float>&,
     const std::vector<float>&,
     const std::vector<float>&,
@@ -1148,10 +1148,10 @@ template void matmul_forward_prepare<false>(
 
 template void matmul_forward_prepare<true>(
     matmul_forward_params&,
-    const ITensor&,
-    const ITensor&,
-    const ITensor&,
-    ITensor&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&,
     const std::vector<float>&,
     const std::vector<float>&,
     const std::vector<float>&,
@@ -1165,17 +1165,17 @@ template void matmul_forward_prepare<true>(
 
 template void matmul_forward_compute<false, false>(
     const matmul_forward_params&,
-    const ITensor&,
-    const ITensor&,
-    const ITensor&,
-    ITensor&);
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&);
 
 template void matmul_forward_compute<true>(
     const matmul_forward_params&,
-    const ITensor&,
-    const ITensor&,
-    const ITensor&,
-    ITensor&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&,
     const std::vector<float>&,
     const std::vector<int32_t>&,
     const float);
