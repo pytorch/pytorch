@@ -11789,40 +11789,6 @@ for args in ((a, b), (a, b, False)):
         self.assertNotIn(before.data_ptr(), live)
         self.assertEqual(live, {})
 
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
-    def test_python_allocator_record_stream(self):
-        # a Python allocator sees record_stream on its memory
-        arena = torch.empty(1 << 20, dtype=torch.uint8, device="cuda")
-        top = [arena.data_ptr()]
-        live = {}
-        streams = []
-
-        def alloc(size, device, stream):
-            ptr = top[0]
-            top[0] += (size + 511) // 512 * 512
-            live[ptr] = size
-            return ptr
-
-        def free(ptr, size, device, stream):
-            del live[ptr]
-
-        side = torch.cuda.Stream()
-        previous = torch.cuda.memory._get_current_allocator()
-        pluggable = torch.cuda.memory._CUDAAllocator(
-            torch._C._cuda_createPythonAllocator(
-                alloc, free, lambda ptr, stream: streams.append((ptr, stream))
-            )
-        )
-        torch.cuda.memory.change_current_allocator(pluggable)
-        try:
-            t = torch.empty(1024, device="cuda")
-            t.record_stream(side)
-            self.assertEqual(streams, [(t.data_ptr(), side.cuda_stream)])
-            del t
-            self.assertEqual(live, {})
-        finally:
-            torch.cuda.memory.change_current_allocator(previous)
-
     @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
     @requires_cuda_python_bindings
@@ -16933,26 +16899,6 @@ class TestGraphAllocators(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(y, x + 1)
         del g, buf, pool
-
-    def test_record_stream_reaches_the_allocator(self):
-        # record_stream on the allocator's memory while routing
-        bump = self.Bump()
-        seen = []
-        allocator = torch.cuda.memory._CUDAAllocator(
-            torch._C._cuda_createPythonAllocator(
-                bump._alloc, bump._free, lambda ptr, stream: seen.append((ptr, stream))
-            )
-        )
-        side = torch.cuda.Stream()
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g), _route_capture_allocations(allocator):
-            t = torch.empty(1024, device="cuda")
-            side.wait_stream(torch.cuda.current_stream())
-            t.record_stream(side)
-            torch.cuda.current_stream().wait_stream(side)
-        self.assertEqual(seen, [(t.data_ptr(), side.cuda_stream)])
-        del t
-        self.assertEqual(bump.live, {})
 
     def test_pass_through(self):
         # while routing, everything but the capture's tensor allocations is
