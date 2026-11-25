@@ -479,6 +479,27 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             )
         self.assertTrue(selected)
 
+    def test_constant_result_class_attribute_drop_advice(self):
+        class Local:
+            pass
+
+        @torch.compiler.assume_constant_result
+        def config():
+            return types.SimpleNamespace(model_cls=Local)
+
+        def step(x):
+            return x + len(config().model_cls.__mro__)
+
+        x = torch.ones(1)
+        session = precompile_package.precompile_capture(step, backend="eager")
+        with session as call:
+            self.assertEqual(call(x), step(x))
+        ((kind, name),) = session.summary().risky_dropped_guards
+        self.assertEqual(kind, "CLASS_MATCH")
+        self.assertTrue(name.endswith(".model_cls"), name)
+        with self.assertRaisesRegex(PackageError, "module-level metaclasses"):
+            session.snapshot_artifact()
+
     def test_default_precompile_refuses_nonreferenceable_base(self):
         # The default filter must not silently discard a mutable base's identity.
         x, obj = torch.ones(1), _DynamicMROInput()
@@ -2921,24 +2942,25 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         custom.snapshot_artifact(require_no_risky_drops=False)
 
     def test_non_mro_guard_name_does_not_get_mro_advice(self):
-        # An ordinary local name containing `__mro__` is not a `TypeMROSource` access.
-        def step(x__mro__tag, cls):
-            return x__mro__tag + (1 if cls is _MROBase else 2)
+        # The dictionary key looks like an MRO access in the rendered guard name.
+        def step(x, classes):
+            return x + (1 if classes["key.__mro__[0]"] is _MROBase else 2)
 
+        name = "classes['key.__mro__[0]']"
         default = precompile_package.default_guard_filter_fn
         session = precompile_package.precompile_capture(
             step,
             backend="eager",
             guard_filter_fn=lambda entries: [
-                keep and entry.name not in ("x__mro__tag", "cls")
+                keep and entry.name != name
                 for keep, entry in zip(default(entries), entries)
             ],
         )
+        x = torch.ones(1)
         with session as call:
-            self.assertEqual(call(torch.ones(1), _MROBase), torch.full((1,), 2.0))
+            self.assertEqual(call(x, {"key.__mro__[0]": _MROBase}), x + 1)
         self.assertEqual(
-            session.summary().risky_dropped_guards,
-            (("CLASS_MATCH", "cls"), ("TENSOR_MATCH", "x__mro__tag")),
+            session.summary().risky_dropped_guards, (("CLASS_MATCH", name),)
         )
         with self.assertRaisesRegex(PackageError, "can affect dispatch") as error:
             session.snapshot_artifact()
