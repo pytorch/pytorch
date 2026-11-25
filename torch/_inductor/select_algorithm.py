@@ -2505,10 +2505,12 @@ class TritonTemplateKernel(TritonKernel):
                 with self.set_subgraph_body(subgraph_name):
                     nodes = self._epilogue_nodes_by_subgraph[i]
                     if any(node.is_reduction() for node in nodes):
-                        _, self._unfused_epilogues = finished_after_kernel(
+                        _, after = finished_after_kernel(
                             self.output_tiles[i][1], template_node.node, nodes
                         )
-                        nodes = [n for n in nodes if n not in self._unfused_epilogues]
+                        # Keep the nodes deferred from earlier subgraphs.
+                        self._unfused_epilogues.extend(after)
+                        nodes = [n for n in nodes if n not in after]
                     produced = template_node.get_buffer_names().union(
                         *(node.get_buffer_names() for node in nodes)
                     )
@@ -2523,6 +2525,16 @@ class TritonTemplateKernel(TritonKernel):
                     first_red = next(
                         (j for j, n in enumerate(nodes) if n.is_reduction()), len(nodes)
                     )
+                    if first_red < len(nodes) and self.output_tiles[i][1][2] == 1:
+                        # Nodes over rows only can't be generated in the
+                        # output's (M * N) space, but the tile pass handles them
+                        # when it isn't looped over subtiles.
+                        rows = (self.output_node.get_size()[0], sympy.S.One)
+                        first_red = next(
+                            j
+                            for j, n in enumerate(nodes)
+                            if n.is_reduction() or n.group[1] == rows
+                        )
                     for node in nodes[:first_red]:
                         node.codegen(self.split_and_set_ranges(node.get_ranges()))
                     row_loads = {}
