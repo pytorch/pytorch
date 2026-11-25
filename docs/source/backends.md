@@ -571,7 +571,7 @@ Each DSL controller (e.g., `torch.backends.python_native.triton`) provides the f
 |----------|------|-------------|
 | `name` | `str` | The name of the DSL |
 | `available` | `bool` | Whether the DSL's runtime dependencies are available |
-| `enabled` | `bool` | Controls whether the conditional operations from this DSL are enabled. Setting to `False` disables the DSL's conditional overrides, while `True` re-enables them |
+| `enabled` | `bool` | Controls whether the conditional operations from this DSL are enabled. Setting to `False` disables the DSL's conditional overrides, while `True` re-enables them. Native AOT kernels stay on either way |
 | `version` | `Version` or `None` | The version of the DSL runtime, if available. Returns `None` if the DSL is not available |
 
 #### DSL Methods
@@ -579,7 +579,8 @@ Each DSL controller (e.g., `torch.backends.python_native.triton`) provides the f
 Each DSL controller provides the following methods:
 
 **disable()**
-    Disable the conditional operations from this DSL.
+    Disable the conditional operations from this DSL. Native AOT kernels stay on;
+    `disabled()` masks those too.
 
 **enable()**
     Re-enable the conditional operations from this DSL.
