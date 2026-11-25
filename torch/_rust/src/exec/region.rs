@@ -1,0 +1,734 @@
+// Regions: a pure block's version compiled as one graph.
+//
+// Once a pure block's (unguarded beyond the optimizer's own checks) version
+// has run often enough, its next run is traced: torch._rust_inductor's
+// trace_region runs the body (through _region_body) under make_fx on the
+// real inputs, and hands the aten graph to a backend (Inductor). The block
+// then gets a version in front of the others whose guard adds what the trace
+// depended on (each tensor's dtype, device, sizes, strides and requires_grad,
+// each scalar's value, each object's identity, grad mode) and whose body is
+// one Op::Region: the compiled graph, called (from Python, which checks the
+// containers among them) on the block's params and inputs, once what the
+// trace read from elsewhere (see reads.rs) is seen to be as it was. A run whose guard fails falls through to the version
+// the trace came from, which traces again (another variant) when it has run
+// often enough again.
+//
+// A place (a block, or a span) has one region per state it was traced in: its
+// variants (see Variants). The block has one region version, whose guard is
+// that of the version the traces are made from; each variant has the checks
+// its own trace added. Where the variants differ by something small that a
+// call's args show at once (which object an arg or an item of a tuple arg
+// is, the value of an int), they are found by that key instead of being
+// asked in turn. A place holds up to max_regions() variants per key and up
+// to max_keys() keys.
+
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+
+use pyo3::ffi;
+use pyo3::ffi::PyObject;
+use pyo3::prelude::*;
+use pyo3::types::PyTuple;
+
+use crate::cfg::ir::{Check, RegionOut, RegionSpec};
+use crate::exec::ffi::GilCell;
+use crate::exec::types::Slot;
+
+static ENABLED: AtomicBool = AtomicBool::new(false);
+static OBSERVE: AtomicBool = AtomicBool::new(false);
+static AFTER: AtomicU32 = AtomicU32::new(2);
+static MAX_REGIONS: AtomicUsize = AtomicUsize::new(4);
+static MAX_KEYS: AtomicUsize = AtomicUsize::new(64);
+// Variants asked at a place's entry that their own checks of the args turned
+// down (see _cfg_region_passed_over).
+static PASSED_OVER: AtomicU64 = AtomicU64::new(0);
+static CHECK_READS: AtomicBool = AtomicBool::new(true);
+
+/// Whether a region is entered only while what its trace read is as it was
+/// (see exec/reads.rs). On, except to measure what the check costs: a region
+/// that isn't checked computes with what its trace read.
+#[pyfunction]
+pub fn _set_cfg_region_reads(on: bool) {
+    CHECK_READS.store(on, Ordering::Relaxed);
+}
+
+/// Compile pure blocks into regions (see exec/region.rs) once a version has
+/// run `after` times: up to `variants` for each key of a place (one per
+/// input specialization) and up to `keys` keys (a loop body over different
+/// modules has one per module); a place whose variants differ by nothing a
+/// key is made of has one key.
+#[pyfunction]
+#[pyo3(signature = (on, after=2, variants=4, keys=64))]
+pub fn _set_cfg_regions(on: bool, after: u32, variants: usize, keys: usize) {
+    ENABLED.store(on, Ordering::Relaxed);
+    AFTER.store(after.max(1), Ordering::Relaxed);
+    MAX_REGIONS.store(variants.max(1), Ordering::Relaxed);
+    MAX_KEYS.store(keys.max(1), Ordering::Relaxed);
+}
+
+/// How many times a variant of a place was asked at the place's entry and
+/// turned down by its own checks of the args (before its reads were checked
+/// or anything of it ran), over all places. A place whose variants are found
+/// by their key adds nothing here; one whose variants differ only by tensor
+/// metadata adds one for each variant in front of the one that runs.
+#[pyfunction]
+pub fn _cfg_region_passed_over() -> u64 {
+    PASSED_OVER.load(Ordering::Relaxed)
+}
+
+/// Record the types of the args of the blocks and spans that would be
+/// traced, for their traces (torch.vm's input_types), whether or not regions
+/// are on.
+#[pyfunction]
+pub fn _set_cfg_region_observe(on: bool) {
+    OBSERVE.store(on, Ordering::Relaxed);
+}
+
+#[inline]
+pub fn observing() -> bool {
+    OBSERVE.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn max_regions() -> usize {
+    MAX_REGIONS.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn max_keys() -> usize {
+    MAX_KEYS.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
+
+// Whether block b's version (the last, the one traces are made from) should
+// be traced on this run.
+pub fn due(runs: &AtomicU32, off: &AtomicBool) -> bool {
+    !off.load(Ordering::Relaxed) && runs.fetch_add(1, Ordering::Relaxed) + 1 == AFTER.load(Ordering::Relaxed)
+}
+
+// Joins a run's args (borrowed, NULL allowed) into their types.
+pub unsafe fn observe(types: &mut Vec<Slot>, args: &[*mut PyObject]) {
+    types.resize_with(args.len(), Slot::default);
+    for (slot, a) in types.iter_mut().zip(args) {
+        if !slot.skips(*a) {
+            slot.observe(*a, false);
+        }
+    }
+}
+
+// Runs the body being traced on the given args (borrowed); Ok(its outputs,
+// owned) or Err with the body's exception set.
+pub type Body<'a> = dyn FnMut(&[*mut PyObject]) -> Result<Vec<*mut PyObject>, ()> + 'a;
+
+thread_local! {
+    static BODY: Cell<Option<*mut Body<'static>>> = const { Cell::new(None) };
+    static TRACING: Cell<bool> = const { Cell::new(false) };
+}
+
+// Whether a trace is running on this thread. Regions don't run then (the
+// trace wouldn't see their ops), nor are others traced.
+#[inline]
+pub fn tracing() -> bool {
+    TRACING.get()
+}
+
+// While a region is traced, the floats it computes with are instances of a
+// float subclass (torch._rust_inductor._Scalar), so that the arithmetic on
+// them is recorded. The traced run is also the call's own run, so what it
+// leaves behind (a block's outputs; a span's locals, stack values and return
+// value) is given to the program as floats: `o` (borrowed, NULL allowed) with
+// each such instance replaced by the float it is, in `o` itself and in the
+// exact tuples, lists and dicts it holds. A new reference, to `o` where there
+// was nothing to replace.
+pub unsafe fn plain(o: *mut PyObject) -> *mut PyObject {
+    if o.is_null() {
+        return o;
+    }
+    let py = Python::assume_attached();
+    let made = py
+        .import("torch._rust_inductor")
+        .and_then(|m| m.getattr("_plain_result"))
+        .and_then(|f| f.call1((Bound::from_borrowed_ptr(py, o),)));
+    match made {
+        Ok(x) => x.into_ptr(),
+        Err(_) => {
+            ffi::PyErr_Clear();
+            ffi::Py_INCREF(o);
+            o
+        }
+    }
+}
+
+fn null_sentinel(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+    static NULL: pyo3::sync::PyOnceLock<Py<PyAny>> = pyo3::sync::PyOnceLock::new();
+    NULL.get_or_try_init(py, || Ok::<_, PyErr>(py.import("torch._rust_inductor")?.getattr("NULL")?.unbind())).map(|n| n.bind(py).clone())
+}
+
+/// Runs the body of the block being traced (see torch._rust_inductor), once.
+#[pyfunction]
+#[pyo3(signature = (*args))]
+pub fn _region_body<'py>(py: Python<'py>, args: &Bound<'py, PyTuple>) -> PyResult<Bound<'py, PyTuple>> {
+    let Some(body) = BODY.take() else {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err("no region body is being traced"));
+    };
+    let null = null_sentinel(py)?;
+    let objs: Vec<*mut PyObject> = args.iter().map(|a| if a.is(&null) { std::ptr::null_mut() } else { a.as_ptr() }).collect();
+    // The trace runs outside the executor; the body runs in it again, so
+    // that the frames it enters are the executor's and what they read is
+    // recorded (see reads.rs).
+    let outs = {
+        let _exec = super::ExecGuard::new();
+        let _recording = super::reads::Recording::start();
+        unsafe { (*body)(&objs) }
+    };
+    match outs {
+        Ok(outs) => {
+            let items: Vec<Bound<'py, PyAny>> = outs
+                .into_iter()
+                .map(|o| unsafe { Bound::from_owned_ptr_or_opt(py, o) }.unwrap_or_else(|| null.clone()))
+                .collect();
+            PyTuple::new(py, items)
+        }
+        Err(()) => Err(PyErr::fetch(py)),
+    }
+}
+
+// A check a variant makes of its place's args (by position), beyond those of
+// the guard its block's region version has.
+pub enum Own {
+    // The arg is this object.
+    Is(u32, Py<PyAny>),
+    // On the arg, or on global state (None).
+    Check(Option<u32>, Check),
+}
+
+// Where a fact is about: an arg, or (with an index other than WHOLE) an item
+// of an arg that is an exact tuple or list.
+pub type Pos = (u32, u32);
+const WHOLE: u32 = u32::MAX;
+
+// One region of a place: the state it was traced in (what its trace
+// depended on among the place's args), and what runs then.
+pub struct Variant {
+    // A block's: what the trace added to the guard. A span's region makes
+    // every check itself (see RegionSpec::quick and its func).
+    pub checks: Vec<Own>,
+    pub spec: RegionSpec,
+    // What its checks (these, the quick ones, func's) pin to one object or
+    // to one small value, by position (sorted): the atom the arg or item has
+    // whenever they hold. A call whose atom there is another is not for this
+    // variant.
+    facts: Vec<(Pos, u64)>,
+    // The objects of the facts: an atom that is an address stays theirs.
+    _held: Vec<Py<PyAny>>,
+}
+
+impl Variant {
+    // Whether a call with these args has the variant's facts: asked before
+    // anything else of it, so that a variant for another object or value is
+    // passed over whichever of its checks the fact comes from (func's, for a
+    // str or a bound method).
+    pub unsafe fn facts_hold(&self, args: &[*mut PyObject]) -> bool {
+        self.facts.iter().all(|(p, a)| atom_at(args, *p) == *a)
+    }
+}
+
+#[inline]
+fn mix(h: u64, x: u64) -> u64 {
+    (h.rotate_left(5) ^ x).wrapping_mul(0x517c_c1b7_2722_0a95)
+}
+
+// What a key is made of at one position: the value of an exact int or str
+// (their hashes run no Python code); for a bound method what it is bound to
+// (`layer.forward` is another method object on every read); else which
+// object it is.
+unsafe fn atom(x: *mut PyObject) -> u64 {
+    if x.is_null() {
+        1
+    } else if ffi::PyLong_CheckExact(x) != 0 {
+        mix(2, ffi::PyObject_Hash(x) as u64)
+    } else if ffi::PyUnicode_CheckExact(x) != 0 {
+        mix(3, ffi::PyObject_Hash(x) as u64)
+    } else {
+        let bound_to = super::ffi::tr_bound_self(x);
+        if bound_to.is_null() { mix(4, x as usize as u64) } else { mix(5, bound_to as usize as u64) }
+    }
+}
+
+unsafe fn atom_at(args: &[*mut PyObject], (i, j): Pos) -> u64 {
+    let a = args.get(i as usize).copied().unwrap_or(std::ptr::null_mut());
+    if j == WHOLE {
+        return atom(a);
+    }
+    let j = j as ffi::Py_ssize_t;
+    if a.is_null() {
+        0
+    } else if ffi::PyTuple_CheckExact(a) != 0 && j < ffi::PyTuple_GET_SIZE(a) {
+        atom(ffi::PyTuple_GET_ITEM(a, j))
+    } else if ffi::PyList_CheckExact(a) != 0 && j < ffi::PyList_GET_SIZE(a) {
+        atom(ffi::PyList_GET_ITEM(a, j))
+    } else {
+        0
+    }
+}
+
+#[derive(Default)]
+struct Table {
+    // In the order they were traced. Never removed: a variant lives as long
+    // as its place.
+    all: Vec<Box<Variant>>,
+    // The key's positions: those every variant has a fact for.
+    at: Vec<Pos>,
+    // By key (the facts at `at`, hashed): indices into `all`, in order.
+    // Empty while `at` is.
+    by_key: HashMap<u64, Vec<u32>>,
+}
+
+impl Table {
+    unsafe fn key_of(&self, args: &[*mut PyObject]) -> u64 {
+        self.at.iter().fold(0, |h, p| mix(h, atom_at(args, *p)))
+    }
+
+    fn key(&self, v: &Variant) -> u64 {
+        // Every position of `at` is one of v's facts.
+        self.at.iter().fold(0, |h, p| mix(h, v.facts.iter().find(|f| f.0 == *p).map_or(0, |f| f.1)))
+    }
+}
+
+// The variants of a place. Shared by every Cfg made from the one the place
+// got its first region in; read and changed with the GIL held.
+pub struct Variants(GilCell<Table>);
+
+impl Default for Variants {
+    fn default() -> Self {
+        Variants(GilCell::new(Table::default()))
+    }
+}
+
+impl Variants {
+    pub fn len(&self) -> usize {
+        unsafe { (*self.0.get()).all.len() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn keys(&self) -> usize {
+        unsafe { (*self.0.get()).by_key.len().max(1) }
+    }
+
+    // The i-th variant to ask for a call with these args (the newest first):
+    // with a key, only those under the call's (computed once, into `key`).
+    // One variant alone is asked without a key.
+    pub unsafe fn candidate(&self, args: &[*mut PyObject], key: &mut Option<u64>, i: usize) -> Option<&Variant> {
+        let t = &*self.0.get();
+        let n = t.all.len();
+        let j = if n <= 1 || t.at.is_empty() {
+            n.checked_sub(i + 1)?
+        } else {
+            let k = *key.get_or_insert_with(|| t.key_of(args));
+            let under = t.by_key.get(&k)?;
+            under[under.len().checked_sub(i + 1)?] as usize
+        };
+        // Boxed and never removed: it outlives the borrow of the table (which
+        // a trace made under the call may add to).
+        Some(&*(&*t.all[j] as *const Variant))
+    }
+
+    // Whether the place may get another variant for a call with these args:
+    // its key has fewer than max_regions(), and is one of at most max_keys().
+    pub unsafe fn room(&self, args: &[*mut PyObject]) -> bool {
+        let t = &*self.0.get();
+        if t.at.is_empty() {
+            return t.all.len() < max_regions();
+        }
+        match t.by_key.get(&t.key_of(args)) {
+            Some(under) => under.len() < max_regions(),
+            None => t.by_key.len() < max_keys(),
+        }
+    }
+
+    pub fn push(&self, v: Variant) {
+        let t = unsafe { &mut *self.0.get() };
+        let at: Vec<Pos> = if t.all.is_empty() { v.facts.iter().map(|f| f.0).collect() } else { t.at.iter().copied().filter(|p| v.facts.iter().any(|f| f.0 == *p)).collect() };
+        t.all.push(Box::new(v));
+        if at != t.at {
+            // A variant without one of the positions: the keys are of those
+            // left.
+            t.at = at;
+            t.by_key.clear();
+        }
+        if t.at.is_empty() {
+            return;
+        }
+        let from = if t.by_key.is_empty() { 0 } else { t.all.len() - 1 };
+        for j in from..t.all.len() {
+            let k = t.key(&t.all[j]);
+            t.by_key.entry(k).or_default().push(j as u32);
+        }
+    }
+}
+
+impl std::fmt::Debug for Variants {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} variants, {} keys", self.len(), self.keys())
+    }
+}
+
+// Counts a variant asked at entry whose own checks turned the call down.
+#[inline]
+pub fn passed_over() {
+    PASSED_OVER.fetch_add(1, Ordering::Relaxed);
+}
+
+// What a trace produced.
+pub struct Traced {
+    pub variant: Variant,
+}
+
+fn parse_own(t: &Bound<'_, PyTuple>, n_args: usize) -> PyResult<Own> {
+    let bad = || pyo3::exceptions::PyValueError::new_err(format!("bad check {t}"));
+    Ok(match super::parse_check_tuple(t)? {
+        super::Parsed::Is(i, o) if i < n_args => Own::Is(i as u32, o),
+        super::Parsed::Check(None, c) => Own::Check(None, c),
+        super::Parsed::Check(Some(i), c) if i < n_args => Own::Check(Some(i as u32), c),
+        _ => return Err(bad()),
+    })
+}
+
+// (arg, item or None, the object or value the checks pin it to): see
+// torch._rust_inductor._keys.
+unsafe fn parse_facts(keys: &[Bound<'_, PyTuple>]) -> PyResult<(Vec<(Pos, u64)>, Vec<Py<PyAny>>)> {
+    let mut facts: Vec<(Pos, u64)> = vec![];
+    let mut held = vec![];
+    for k in keys {
+        let i: u32 = k.get_item(0)?.extract()?;
+        let j: Option<u32> = k.get_item(1)?.extract()?;
+        let want = k.get_item(2)?;
+        let pos = (i, j.unwrap_or(WHOLE));
+        if facts.iter().all(|f| f.0 != pos) {
+            facts.push((pos, atom(want.as_ptr())));
+            held.push(want.unbind());
+        }
+    }
+    facts.sort_by_key(|f| f.0);
+    Ok((facts, held))
+}
+
+// Traces a run of a block's version. `args`: its params then inputs
+// (borrowed, NULL allowed), of which those at `unread` aren't read by the
+// version's instrs (NULL if not used at all), and `types` their types over
+// the runs observed (see observing); `body` runs it. Ok(None): not worth a
+// region. With `span` (a span's run, which no guard checks first), the region
+// makes all its checks itself.
+pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: &[u32], span: bool, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
+    let py = Python::assume_attached();
+    let null = null_sentinel(py)?;
+    let items: Vec<Bound<'_, PyAny>> =
+        args.iter().map(|a| Bound::from_borrowed_ptr_or_opt(py, *a).unwrap_or_else(|| null.clone())).collect();
+    let n_args = args.len();
+    let args = PyTuple::new(py, items)?;
+    let types = (0..args.len())
+        .map(|i| match types.get(i).and_then(|s| s.ty.as_ref()) {
+            Some(t) => t.to_py(py),
+            None => Ok(py.None().into_bound(py)),
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    let body: *mut Body<'_> = body;
+    BODY.set(Some(std::mem::transmute::<*mut Body<'_>, *mut Body<'static>>(body)));
+    TRACING.set(true);
+    super::reads::begin();
+    let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span, types)));
+    super::reads::end();
+    TRACING.set(false);
+    BODY.set(None);
+    let r = r?;
+    if r.is_none() {
+        return Ok(None);
+    }
+    #[allow(clippy::type_complexity)]
+    let (func, outputs, objects, checks, reads, quick, keys): (
+        Bound<'_, PyAny>,
+        Vec<Bound<'_, PyAny>>,
+        Vec<Bound<'_, PyAny>>,
+        Vec<Bound<'_, PyTuple>>,
+        Option<Py<super::reads::Reads>>,
+        Vec<Bound<'_, PyTuple>>,
+        Vec<Bound<'_, PyTuple>>,
+    ) = r.extract()?;
+    let quick = quick.iter().map(parse_quick).collect::<PyResult<Vec<_>>>()?;
+    let outputs = outputs.iter().map(parse_out).collect::<PyResult<Vec<_>>>()?;
+    // A span's region makes the checks itself (func, and the quick ones).
+    let checks = if span { vec![] } else { checks.iter().map(|c| parse_own(c, n_args)).collect::<PyResult<Vec<_>>>()? };
+    let (facts, held) = parse_facts(&keys)?;
+    Ok(Some(Traced {
+        variant: Variant {
+            checks,
+            spec: RegionSpec {
+                func: func.unbind(),
+                outputs,
+                objects: objects.into_iter().map(Bound::unbind).collect(),
+                name: name.to_string(),
+                reads,
+                quick,
+            },
+            facts,
+            _held: held,
+        },
+    }))
+}
+
+// A check of a region's args that its func makes too, asked first (see
+// torch._rust_inductor._quick).
+pub enum Quick {
+    // Arg i is (or equals, with the same exact type) this.
+    Arg(u32, bool, Py<PyAny>),
+    // Arg i is an exact tuple or list whose item j is (or equals) this.
+    Item(u32, u32, bool, Py<PyAny>),
+    // These args, as a tuple, pass the TreeChecks.
+    Tensors(Vec<u32>, Py<super::TreeChecks>),
+    // Arg i (a container of tensors and plain values) passes the TreeChecks.
+    Tree(u32, Py<super::TreeChecks>),
+}
+
+fn parse_quick(q: &Bound<'_, PyTuple>) -> PyResult<Quick> {
+    let kind: String = q.get_item(0)?.extract()?;
+    Ok(match kind.as_str() {
+        "arg" => Quick::Arg(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?, q.get_item(3)?.unbind()),
+        "item" => Quick::Item(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?, q.get_item(3)?.extract()?, q.get_item(4)?.unbind()),
+        "tensors" => Quick::Tensors(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?),
+        "tree" => Quick::Tree(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?),
+        _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("bad quick check {q}"))),
+    })
+}
+
+impl Quick {
+    // No Python code runs: the values compared by == are exact ints, bools,
+    // strs, bytes, torch.Sizes or None (a Tree's TreeChecks is one that is
+    // `quick`).
+    unsafe fn holds(&self, py: Python<'_>, args: &[*mut PyObject]) -> bool {
+        let is = |x: *mut PyObject, same: bool, want: &Py<PyAny>| {
+            if same || x.is_null() {
+                return x == want.as_ptr();
+            }
+            let eq = ffi::Py_TYPE(x) == ffi::Py_TYPE(want.as_ptr()) && ffi::PyObject_RichCompareBool(x, want.as_ptr(), ffi::Py_EQ) == 1;
+            if !ffi::PyErr_Occurred().is_null() {
+                ffi::PyErr_Clear();
+            }
+            eq
+        };
+        let arg = |i: u32| args.get(i as usize).copied().unwrap_or(std::ptr::null_mut());
+        match self {
+            Quick::Arg(i, same, want) => is(arg(*i), *same, want),
+            Quick::Item(i, j, same, want) => {
+                let (a, j) = (arg(*i), *j as ffi::Py_ssize_t);
+                if a.is_null() {
+                    false
+                } else if ffi::PyTuple_CheckExact(a) != 0 && j < ffi::PyTuple_GET_SIZE(a) {
+                    is(ffi::PyTuple_GET_ITEM(a, j), *same, want)
+                } else if ffi::PyList_CheckExact(a) != 0 && j < ffi::PyList_GET_SIZE(a) {
+                    is(ffi::PyList_GET_ITEM(a, j), *same, want)
+                } else {
+                    false
+                }
+            }
+            Quick::Tensors(idx, checks) => {
+                if idx.iter().any(|i| arg(*i).is_null()) {
+                    return false;
+                }
+                let Ok(t) = PyTuple::new(py, idx.iter().map(|i| Bound::from_borrowed_ptr(py, arg(*i)))) else {
+                    ffi::PyErr_Clear();
+                    return false;
+                };
+                checks.get().passes(t.as_any())
+            }
+            Quick::Tree(i, checks) => {
+                let a = arg(*i);
+                !a.is_null() && checks.get().passes(&Bound::from_borrowed_ptr(py, a))
+            }
+        }
+    }
+}
+
+fn parse_out(o: &Bound<'_, PyAny>) -> PyResult<RegionOut> {
+    let t = o.cast::<PyTuple>()?;
+    let kind: String = t.get_item(0)?.extract()?;
+    Ok(match kind.as_str() {
+        "arg" => RegionOut::Arg(t.get_item(1)?.extract()?),
+        "out" => RegionOut::Out(t.get_item(1)?.extract()?),
+        "obj" => RegionOut::Obj(t.get_item(1)?.extract()?),
+        "null" => RegionOut::Null,
+        "tuple" | "list" => {
+            let items = t.get_item(1)?.try_iter()?.map(|x| parse_out(&x?)).collect::<PyResult<Vec<_>>>()?;
+            if kind == "tuple" { RegionOut::Tuple(items) } else { RegionOut::List(items) }
+        }
+        "dict" => {
+            let keys: Vec<u32> = t.get_item(1)?.extract()?;
+            let items = t.get_item(2)?.try_iter()?.map(|x| parse_out(&x?)).collect::<PyResult<Vec<_>>>()?;
+            RegionOut::Dict(keys, items)
+        }
+        "iter" => RegionOut::Iter(Box::new(parse_out(&t.get_item(1)?)?)),
+        "call" => {
+            let items = t.get_item(2)?.try_iter()?.map(|x| parse_out(&x?)).collect::<PyResult<Vec<_>>>()?;
+            RegionOut::Call(t.get_item(1)?.extract()?, items)
+        }
+        _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("bad region output {o}"))),
+    })
+}
+
+// Runs an Op::Region on `args` (borrowed: the block's params, then the
+// version's inputs): Some(the block's outputs, owned), None if the region's
+// own checks failed (run the version it was traced from), or Err with an
+// exception set.
+pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
+    let py = Python::assume_attached();
+    // The region of another state of its place (another input size) is
+    // passed over here, for next to nothing.
+    if !spec.quick.iter().all(|q| q.holds(py, args)) {
+        passed_over();
+        return Ok(None);
+    }
+    // Before anything of the region runs.
+    if let Some(reads) = &spec.reads
+        && CHECK_READS.load(Ordering::Relaxed)
+        && !reads.get().check()
+    {
+        if std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some() {
+            eprintln!("region {}: miss on {}", spec.name, reads.get().last());
+        }
+        return Ok(None);
+    }
+    let Ok(null) = null_sentinel(py) else { return Err(()) };
+    let list = ffi::PyList_New(args.len() as ffi::Py_ssize_t);
+    if list.is_null() {
+        return Err(());
+    }
+    for (i, a) in args.iter().enumerate() {
+        let a = if a.is_null() { null.as_ptr() } else { *a };
+        ffi::Py_INCREF(a);
+        ffi::PyList_SET_ITEM(list, i as ffi::Py_ssize_t, a);
+    }
+    // The compiled graph's Python wrappers run on CPython.
+    let r = super::outside_executor(|| ffi::PyObject_CallOneArg(spec.func.as_ptr(), list));
+    ffi::Py_DECREF(list);
+    if r.is_null() {
+        return Err(());
+    }
+    if r == ffi::Py_None() {
+        ffi::Py_DECREF(r);
+        return Ok(None);
+    }
+    let outs = if ffi::PyList_CheckExact(r) != 0 || ffi::PyTuple_CheckExact(r) != 0 { r } else { ffi::PySequence_Fast(r, c"region outputs".as_ptr()) };
+    if outs.is_null() {
+        ffi::Py_DECREF(r);
+        return Err(());
+    }
+    let item = |k: u32| -> *mut PyObject {
+        if ffi::PyList_CheckExact(outs) != 0 { ffi::PyList_GET_ITEM(outs, k as ffi::Py_ssize_t) } else { ffi::PyTuple_GET_ITEM(outs, k as ffi::Py_ssize_t) }
+    };
+    let n = ffi::PySequence_Size(outs);
+    unsafe fn make(spec: &RegionSpec, o: &RegionOut, args: &[*mut PyObject], item: &dyn Fn(u32) -> *mut PyObject, n: isize) -> *mut PyObject {
+        match o {
+            RegionOut::Arg(i) => {
+                let a = args[*i as usize];
+                if !a.is_null() {
+                    ffi::Py_INCREF(a);
+                }
+                a
+            }
+            RegionOut::Out(k) => {
+                if *k as isize >= n {
+                    ffi::PyErr_SetString(ffi::PyExc_RuntimeError, c"CFG executor: a region returned too few outputs".as_ptr());
+                    return std::ptr::null_mut();
+                }
+                let x = item(*k);
+                ffi::Py_INCREF(x);
+                x
+            }
+            RegionOut::Obj(i) => {
+                let x = spec.objects[*i as usize].as_ptr();
+                ffi::Py_INCREF(x);
+                x
+            }
+            RegionOut::Null => std::ptr::null_mut(),
+            RegionOut::Call(f, items) => {
+                let list = ffi::PyList_New(items.len() as isize);
+                for (i, it) in items.iter().enumerate() {
+                    let x = make(spec, it, args, item, n);
+                    if x.is_null() {
+                        ffi::Py_DECREF(list);
+                        return std::ptr::null_mut();
+                    }
+                    ffi::PyList_SET_ITEM(list, i as isize, x);
+                }
+                let r = ffi::PyObject_CallOneArg(spec.objects[*f as usize].as_ptr(), list);
+                ffi::Py_DECREF(list);
+                r
+            }
+            RegionOut::Tuple(items) | RegionOut::List(items) => {
+                let tuple = matches!(o, RegionOut::Tuple(_));
+                let c = if tuple { ffi::PyTuple_New(items.len() as isize) } else { ffi::PyList_New(items.len() as isize) };
+                for (i, it) in items.iter().enumerate() {
+                    let x = make(spec, it, args, item, n);
+                    if x.is_null() {
+                        ffi::Py_DECREF(c);
+                        return std::ptr::null_mut();
+                    }
+                    if tuple {
+                        ffi::PyTuple_SET_ITEM(c, i as isize, x);
+                    } else {
+                        ffi::PyList_SET_ITEM(c, i as isize, x);
+                    }
+                }
+                c
+            }
+            RegionOut::Dict(keys, items) => {
+                let d = ffi::PyDict_New();
+                for (k, it) in keys.iter().zip(items) {
+                    let x = make(spec, it, args, item, n);
+                    if x.is_null() || ffi::PyDict_SetItem(d, spec.objects[*k as usize].as_ptr(), x) < 0 {
+                        ffi::Py_XDECREF(x);
+                        ffi::Py_DECREF(d);
+                        return std::ptr::null_mut();
+                    }
+                    ffi::Py_DECREF(x);
+                }
+                d
+            }
+            RegionOut::Iter(items) => {
+                let c = make(spec, items, args, item, n);
+                if c.is_null() {
+                    return c;
+                }
+                let it = ffi::PyObject_GetIter(c);
+                ffi::Py_DECREF(c);
+                it
+            }
+        }
+    }
+    let mut result = Vec::with_capacity(spec.outputs.len());
+    let mut ok = true;
+    for o in &spec.outputs {
+        let x = make(spec, o, args, &item, n);
+        if x.is_null() && !matches!(o, RegionOut::Null | RegionOut::Arg(_)) {
+            ok = false;
+            break;
+        }
+        result.push(x);
+    }
+    if outs != r {
+        ffi::Py_DECREF(outs);
+    }
+    ffi::Py_DECREF(r);
+    if !ok {
+        result.into_iter().for_each(|x| ffi::Py_XDECREF(x));
+        return Err(());
+    }
+    Ok(Some(result))
+}
