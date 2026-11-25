@@ -194,6 +194,8 @@ op_assert_ref_tol_table = {
     (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
     (torch.float16, torch.ops.aten.native_layer_norm_backward.default): 1e-3,
     (torch.bfloat16, torch.ops.aten.native_layer_norm_backward.default): 2e-2,
+    (torch.float16, torch.ops.aten._fused_rms_norm_backward.default): 1e-6,
+    (torch.bfloat16, torch.ops.aten._fused_rms_norm_backward.default): 1e-6,
     (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
     (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
     (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
