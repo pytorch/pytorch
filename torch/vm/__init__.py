@@ -56,6 +56,7 @@ from torch.vm._graph import (
     mark_recompute,
     match,
     Match,
+    Mismatch,
     placeholder,
     replace_backward_uses,
     replace_segment,
@@ -63,6 +64,7 @@ from torch.vm._graph import (
     Segment,
     segments,
     specialize_floats,
+    swap,
 )
 from torch.vm._guards import (
     Aligned,
@@ -123,6 +125,7 @@ __all__ = [
     "Loop",
     "Match",
     "Merge",
+    "Mismatch",
     "NoForwardAD",
     "NoSavedTensorHooks",
     "NoTorchFunctionMode",
@@ -166,6 +169,7 @@ __all__ = [
     "replace_segment",
     "run_until",
     "segments",
+    "swap",
     "type_of",
     "versions",
     "vm",

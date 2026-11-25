@@ -521,3 +521,138 @@ class async_ops:
     @staticmethod
     def register(start: Any, *, completes_with: Any) -> None:
         async_ops.registered[start] = completes_with
+
+
+# Kernel swaps that are checked against the ops they replace.
+
+
+# The stand-ins swap put into graphs (each is a global of this module).
+_stand_ins: list[Callable] = []
+
+
+class Mismatch(RuntimeError):
+    """A kernel gave something else than the ops it replaced."""
+
+
+def _operator(node: torch.fx.Node) -> str:
+    """``aten::mul.Tensor`` for a node calling ``torch.ops.aten.mul.Tensor``."""
+    schema = node.target._schema
+    return f"{schema.name}.{schema.overload_name}" if schema.overload_name else schema.name
+
+
+def _same_operator(wanted: str, found: str) -> bool:
+    """Whether ``wanted`` (``aten::mul.Tensor``, ``mul.Tensor`` or ``mul``)
+    names the operator ``found``."""
+    full = found.split("::", 1)[-1]
+    return wanted.split("::", 1)[-1] in (full, full.split(".", 1)[0])
+
+
+def _writes_or_draws(node: torch.fx.Node) -> bool:
+    return node.target._schema.is_mutable or torch.Tag.nondeterministic_seeded in node.target.tags
+
+
+def _differs(want: Any, have: Any, rtol: float, atol: float) -> str | None:
+    """How ``have`` differs from ``want``, or None."""
+    if isinstance(want, torch.Tensor):
+        if not isinstance(have, torch.Tensor):
+            return f"is a {type(have).__name__}, not a tensor"
+        if have.shape != want.shape:
+            return f"has shape {tuple(have.shape)}, not {tuple(want.shape)}"
+        if have.dtype != want.dtype or have.device != want.device:
+            return f"is {have.dtype} on {have.device}, not {want.dtype} on {want.device}"
+        if not torch.allclose(have.detach(), want.detach(), rtol=rtol, atol=atol, equal_nan=True):
+            return f"differs by up to {(have.detach() - want.detach()).abs().max().item():.3g}"
+        return None
+    if type(want) is type(have) and want == have:
+        return None
+    return f"is {have!r}, not {want!r}"
+
+
+def swap(ops: Iterable[str], kernel: Callable, *, check: bool | int = True, rtol: float = 1e-4, atol: float = 1e-6) -> Callable:
+    """A block pass that replaces a run of ops by one call of ``kernel`` and
+    checks the kernel against the ops it replaced.
+
+    The pass looks in a region's graph for aten ops that are exactly ``ops``,
+    in this order and with no other aten op between them, wherever the run
+    comes from (one line or several functions). An op is named as the
+    dispatcher names it (``"aten::mul.Tensor"``), or without its overload or
+    namespace (``"mul"``), which matches every overload. A run with an op that
+    writes to its inputs or draws random numbers is left as it is: it cannot
+    be run a second time for the check.
+
+    ``kernel`` is called with the values the run takes from outside it, in the
+    order the run first uses them, and returns what the run gives to what
+    follows: one value, or a tuple in the order the ops compute them.
+
+    ``check``: for the first calls of the region (8 with ``True``, or as many
+    as given) the replaced ops run on the same inputs, and a kernel that gives
+    another shape, dtype or device, or values that are not close (``rtol``,
+    ``atol``), raises :class:`Mismatch` out of the call. ``False`` trusts the
+    kernel. ::
+
+        fuse = vm.swap(["pow", "mean", "add", "rsqrt", "mul"], rms_norm)
+        step = torch.vm(step, passes=(*vm.DEFAULT_PASSES, fuse))
+    """
+    wanted = list(ops)
+    if not wanted:
+        raise ValueError("swap needs at least one op")
+    checks = 8 if check is True else int(check)
+    name = getattr(kernel, "__name__", type(kernel).__name__)
+
+    def stand_in(reference: torch.fx.GraphModule, n_outputs: int) -> Callable:
+        state = {"left": checks, "calls": 0}
+
+        def swapped(*values):
+            state["calls"] += 1
+            expected = None
+            if state["left"] > 0:
+                state["left"] -= 1
+                # The replaced ops first: they get the inputs as the function had them.
+                with torch.no_grad():
+                    expected = reference(*values)
+            out = kernel(*values)
+            found = (out,) if n_outputs == 1 else tuple(out)
+            if len(found) != n_outputs:
+                raise Mismatch(f"{name} gave {len(found)} values where the ops it replaced give {n_outputs}")
+            if expected is not None:
+                for i, (want, have) in enumerate(zip(expected, found)):
+                    how = _differs(want, have, rtol, atol)
+                    if how is not None:
+                        raise Mismatch(f"{name}: result {i} {how} on call {state['calls']} (the ops it replaced were run on the same inputs)")
+            return found
+
+        # A graph's code calls a function of a torch module by its qualified
+        # name: the stand-in is one, under a name of its own.
+        swapped.__name__ = swapped.__qualname__ = f"swap_{name.strip('<>')}_{len(_stand_ins)}"
+        _stand_ins.append(swapped)
+        globals()[swapped.__name__] = swapped
+        return swapped
+
+    def swap_pass(gm: torch.fx.GraphModule, input_types: list[Any]) -> torch.fx.GraphModule:
+        while True:
+            order = list(gm.graph.nodes)
+            calls = [n for n in order if n.op == "call_function" and isinstance(n.target, torch._ops.OpOverload)]
+            for at in range(len(calls) - len(wanted) + 1):
+                run = calls[at : at + len(wanted)]
+                if not all(_same_operator(w, _operator(n)) for w, n in zip(wanted, run)) or any(map(_writes_or_draws, run)):
+                    continue
+                # What stands between the ops (an item taken out of a result) comes along.
+                nodes = [n for n in order[order.index(run[0]) : order.index(run[-1]) + 1] if n.op == "call_function"]
+                inside = set(nodes)
+                inputs: dict[torch.fx.Node, None] = {}
+                for n in nodes:
+                    for a in n.all_input_nodes:
+                        if a not in inside:
+                            inputs.setdefault(a)
+                outputs = [n for n in nodes if any(u not in inside for u in n.users)]
+                if not outputs:
+                    continue
+                seg = Segment(gm, nodes, list(inputs), outputs)
+                replace_segment(gm, seg, stand_in(seg.as_callable(), len(outputs)))
+                _replacements(gm).append((kernel, atol, rtol, "same"))
+                break
+            else:
+                return gm
+
+    swap_pass.__name__ = f"swap_{name}"
+    return swap_pass
