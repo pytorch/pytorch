@@ -7215,6 +7215,7 @@ def meta__flash_attention_backward(
     scale: float | None = None,
     window_size_left: int | None = None,
     window_size_right: int | None = None,
+    grad_logsumexp: Tensor | None = None,
 ):
     grad_query = torch.empty_like(query)
     grad_key = torch.empty_like(key)
@@ -8563,10 +8564,14 @@ def meta_histc(input, bins=100, min=0, max=0):
 @register_meta(
     [
         aten._upsample_bilinear2d_aa.default,
+        aten._upsample_bilinear2d_aa.out,
         aten._upsample_bicubic2d_aa.default,
+        aten._upsample_bicubic2d_aa.out,
         aten._upsample_lanczos2d_aa.default,
+        aten._upsample_lanczos2d_aa.out,
     ]
 )
+@out_wrapper(exact_dtype=True, preserve_memory_format=True)
 def meta_upsample_bimode2d_aa(
     input,
     output_size,
@@ -8582,7 +8587,7 @@ def meta_upsample_bimode2d_aa(
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     return input.new_empty(full_output_size).to(
-        memory_format=utils.suggest_memory_format(input)
+        memory_format=utils.upsample_output_memory_format(input)
     )
 
 
@@ -8616,6 +8621,43 @@ but got grad_output_size({i}) = {grad_output.size(i)}""",
         )
     return grad_output.new_empty(input_size).to(
         memory_format=utils.suggest_memory_format(grad_output)
+    )
+
+
+@register_meta([aten._upsample_inter_area2d.default, aten._upsample_inter_area2d.out])
+@out_wrapper(exact_dtype=True, preserve_memory_format=True)
+def meta_upsample_inter_area2d(input, output_size, scales_h=None, scales_w=None):
+    full_output_size = upsample_common_check(
+        input.size(), output_size, num_spatial_dims=2
+    )
+    for axis, in_size, out_size, scale in zip(
+        ("height", "width"), input.shape[2:], output_size, (scales_h, scales_w)
+    ):
+        if scale is None or scale <= 0:
+            continue
+        scaled_size = in_size * scale
+        expected_size = None
+        if math.isfinite(scale) and (
+            not isinstance(scaled_size, utils.FloatWithoutSymFloat)
+            or math.isfinite(scaled_size)
+        ):
+            # Use the same symbolic expression as upsample_compute_output_size.
+            expected_size = (
+                in_size * int(scale)
+                if int(scale) == scale
+                else torch.sym_int(scaled_size)
+            )
+        torch._check(
+            expected_size == out_size,
+            lambda: f"_upsample_inter_area2d: the output size must be floor(input size * scale) for {axis}, "
+            f"but got input size {in_size}, output size {out_size} and scale {scale}",
+        )
+    torch._check(
+        input.numel() != 0 or all(size > 0 for size in input.shape[1:]),
+        lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.shape}",
+    )
+    return input.new_empty(full_output_size).to(
+        memory_format=utils.suggest_memory_format(input)
     )
 
 
