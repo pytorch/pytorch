@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/ElementBytes.h>
 #include <ATen/native/IndexKernel.h> // for flip_stub
 #include <ATen/native/TensorTransformations.h>
 
@@ -40,6 +41,18 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   const int64_t total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
+
+  if (isPackedShellFloatType(self.scalar_type())) {
+    // Flip whole elements: the trailing byte dim is never flipped.
+    DimVector byte_flip_dims;
+    for (const auto i : c10::irange(total_dims)) {
+      if (flip_dims_b[i]) {
+        byte_flip_dims.push_back(i);
+      }
+    }
+    return from_element_bytes(
+        as_element_bytes(self).flip(byte_flip_dims), self.scalar_type());
+  }
 
   Tensor out_tensor = at::empty_like(self, MemoryFormat::Preserve);
 
