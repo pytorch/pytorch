@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 
+import collections
 import enum
 import inspect
 import itertools
@@ -2405,6 +2406,24 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertTrue(type(res) is types.MappingProxyType)
+
+    def test_mapping_proxy_of_non_dict_mapping(self):
+        def fn(x, m):
+            mp = types.MappingProxyType(m)
+            m["c"] = 4
+            try:
+                types.MappingProxyType([1])
+            except TypeError:
+                x = x + 1
+            return x * mp["a"] + len(mp) + ("c" in mp), mp
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        for make in (UserDict, lambda **kw: collections.ChainMap(kw)):
+            ref, res = fn(x, make(a=2, b=3)), opt_fn(x, make(a=2, b=3))
+            self.assertEqual(ref[0], res[0])
+            self.assertTrue(type(res[1]) is types.MappingProxyType)
+            self.assertEqual(dict(ref[1]), dict(res[1]))
 
     def test_mapping_proxy_for_nonlocal(self):
         d = {"a": 2, "b": 3, "c": 5}

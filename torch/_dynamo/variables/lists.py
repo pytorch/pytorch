@@ -80,10 +80,12 @@ from .object_protocol import (
     maybe_get_python_type,
     pyindex_check,
     pyiter_next,
+    pylist_check,
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
     python_constant_repr_impl,
+    pytuple_check,
     repr_guard,
     type_implements_nb_index,
     vt_is_iterable,
@@ -99,14 +101,6 @@ if TYPE_CHECKING:
 
 def pytuple_checkexact(obj: VariableTracker) -> bool:
     return obj.python_type() is tuple
-
-
-def pytuple_check(obj: VariableTracker) -> bool:
-    return issubclass(obj.python_type(), tuple)
-
-
-def pylist_check(obj: VariableTracker) -> bool:
-    return issubclass(obj.python_type(), list)
 
 
 def pylist_checkexact(obj: VariableTracker) -> bool:
