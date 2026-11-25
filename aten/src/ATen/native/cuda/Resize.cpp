@@ -15,12 +15,10 @@
 namespace at::native {
 
 namespace {
-// A storage whose CUDA allocator is no longer the current one re-allocates from
-// the current one. The current CUDA allocator changes around CUDA graph
-// allocator windows (torch/csrc/cuda/CUDAPluggableAllocator.cpp): a storage
-// created before a window (e.g. FSDP2's unsharded parameters, resized inside a
-// captured step) resizes through the window's allocator, and one created during
-// a window resizes through the caching allocator after it.
+// A storage whose CUDA allocator is no longer the current one (the current
+// allocator was changed after it was made, change_current_allocator)
+// re-allocates from the current one. E.g. FSDP2's unsharded parameters, made
+// once and resized every step, follow the current allocator.
 c10::Allocator* current_cuda_allocator_for(StorageImpl* storage) {
   auto* allocator = storage->allocator();
   auto* current = c10::cuda::CUDACachingAllocator::get();
