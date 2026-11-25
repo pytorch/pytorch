@@ -39,28 +39,31 @@ class MultiKernelState:
 
     def define_dispatcher(self, multi_kernel: "DispatchedMultiKernel") -> str:
         """Register a multi-kernel whose sub-kernel is picked at run time by a
-        dispatcher object in the generated module (MultiKernel, SizeHintMultiKernel;
-        see DispatchedMultiKernel), and return its name.
+        dispatcher object in the generated module (MultiKernel,
+        SizeHintMultiKernel; see DispatchedMultiKernel), and return its name.
 
-        Multi-kernels with the same sub-kernels share one name; otherwise a new
-        `multi_kernel_N` is assigned (numbered from the root state, since subgraph
-        definitions land in the parent module) and kernel_defs gets the shared
-        `arg_index` table (which call args each sub-kernel takes), then the line
-        that creates the dispatcher, from multi_kernel.write_dispatcher. Nothing is
-        written in the second pass of cpp-wrapper codegen.
+        Multi-kernels of the same type with the same sub-kernels share one name.
+        Otherwise a new `multi_kernel_N` is assigned (numbered from the root state,
+        since subgraph definitions land in the parent module) and two definitions
+        are written to kernel_defs: the `arg_index` table (which call args each
+        sub-kernel takes) and the dispatcher itself, e.g.
+        `multi_kernel_0 = async_compile.multi_kernel(...)`, whose line the subclass
+        writes in write_dispatcher. Nothing is written in the second pass of
+        cpp-wrapper codegen.
         """
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
 
         kernels = multi_kernel.kernels
         kernel_names = tuple(k.kernel_name for k in kernels)
-        if kernel_names in self.subkernel_to_kernel_name:
-            return self.subkernel_to_kernel_name[kernel_names]
+        key = (type(multi_kernel), kernel_names)
+        if key in self.subkernel_to_kernel_name:
+            return self.subkernel_to_kernel_name[key]
 
         # name the multi kernel based on the first kernel
         multi_kernel_name = f"multi_kernel_{self._root._num_names}"
         self._root._num_names += 1
-        self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
+        self.subkernel_to_kernel_name[key] = multi_kernel_name
 
         if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
             # we should not generate any python code for multi-kernel during
