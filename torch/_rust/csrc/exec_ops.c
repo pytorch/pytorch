@@ -193,6 +193,12 @@ typedef struct {
   PyObject* self;
 } tr_wrapperobject;
 
+// What a bound method is bound to (its `__self__`), if `callable` is exactly
+// one; else NULL. Borrowed: the method holds it. Runs no Python.
+PyObject* tr_bound_self(PyObject* callable) {
+  return Py_IS_TYPE(callable, &PyMethod_Type) ? PyMethod_GET_SELF(callable) : NULL;
+}
+
 // The callable a functools.partial calls (its `func`), if `callable` is
 // exactly one; else NULL. Borrowed: the partial holds it. Runs no Python.
 PyObject* tr_partial_func(PyObject* callable) {

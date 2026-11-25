@@ -2491,6 +2491,23 @@ impl TreeChecks {
         Ok(c)
     }
 
+    /// Whether matching runs no Python code: no registered pytree node (its
+    /// flatten function is Python), and no dict key that isn't a plain
+    /// value. Such a check can be asked before a region is entered (see
+    /// region.rs's Quick).
+    #[getter]
+    fn quick(&self, py: Python<'_>) -> bool {
+        fn plain(py: Python<'_>, node: &TreeNode) -> bool {
+            match node {
+                TreeNode::List(kids) | TreeNode::Tuple(kids) => kids.iter().all(|k| plain(py, k)),
+                TreeNode::Dict(kids) => kids.iter().all(|(key, k)| (key.bind(py).is_none() || is_value_type(key.bind(py))) && plain(py, k)),
+                TreeNode::Tensor(_) | TreeNode::Value(_) => true,
+                TreeNode::Pytree { .. } => false,
+            }
+        }
+        plain(py, &self.root)
+    }
+
     /// The tensors in `x`, in order, if it matches; else None.
     fn leaves<'py>(&self, py: Python<'py>, x: &Bound<'py, PyAny>) -> PyResult<Option<Bound<'py, pyo3::types::PyList>>> {
         let mut out = Vec::with_capacity(self.specs.len());

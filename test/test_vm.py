@@ -1761,6 +1761,18 @@ class ManyLayer(torch.nn.Module):
         super().__init__()
         self.weight = torch.nn.Parameter(torch.full((8,), 1.0 + k / 16))
 
+    def scaled(self, y):
+        return y * self.weight + 1
+
+
+def many_method(fn, x):
+    return fn(x.sin()).tanh().cos()
+
+
+def many_packed(pair):
+    x, y = pair
+    return (x * y + 1).tanh().cos().sin()
+
 
 def many_apply(layer, x):
     return (x * layer.weight).tanh().cos().sin() + x
@@ -1870,6 +1882,58 @@ class TestVmManyRegions(TestCase):
         # Twelve regions at one place, found by the layer: only the first,
         # while it was the only one, was asked for another layer's call.
         self.assertLessEqual(torch._rust._cfg_region_passed_over(), 1)
+
+    @isolated
+    def test_region_is_found_by_what_a_bound_method_is_bound_to(self, device):
+        layers = [ManyLayer(k).to(device) for k in range(12)]
+        g = vm(many_method, passes=vm.configure(EARLY, pure_calls=4))
+        with torch.no_grad():
+            for step in range(6):
+                x = torch.randn(4, 8, device=device)
+                for k, layer in enumerate(layers):
+                    # `layer.scaled` is another method object on every read.
+                    self.assertEqual(
+                        g(layer.scaled, x),
+                        many_method(layer.scaled, x),
+                        atol=0,
+                        rtol=0,
+                        msg=f"step {step}, layer {k}",
+                    )
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "many_method" and r["state"] == "region"
+        )
+        self.assertEqual(row["variants"], 12)
+        self.assertGreaterEqual(row["runs"], 4 * 12)
+        # A region per layer, found by the layer the method is bound to:
+        # none is entered for another layer's call and turns it down, and
+        # only the first, while it was the only one, was asked for one.
+        self.assertEqual(row["misses"], {})
+        self.assertLessEqual(torch._rust._cfg_region_passed_over(), 1)
+
+    @isolated
+    def test_region_for_another_size_of_a_tensor_in_a_tuple_is_passed_over(
+        self, device
+    ):
+        g = vm_early(many_packed)
+        for call in range(3 + 3 * 3):
+            n = 2 + call % 3
+            pair = (torch.randn(n, 8, device=device), torch.randn(n, 8, device=device))
+            self.assertEqual(
+                g(pair), many_packed(pair), atol=0, rtol=0, msg=f"call {call}"
+            )
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "many_packed" and r["state"] == "region"
+        )
+        self.assertEqual(row["variants"], 3)
+        self.assertEqual(row["runs"], 3 * 2)
+        # The tuple's tensors are checked before a region is entered, as a
+        # tensor argument's are: the regions for the other sizes pass the
+        # call on.
+        self.assertEqual(row["misses"], {})
 
     @isolated
     def test_place_without_a_key_asks_its_variants_in_order(self, device):

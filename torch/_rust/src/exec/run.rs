@@ -1279,10 +1279,11 @@ impl Act<'_> {
         let mut i = 0;
         while let Some(v) = variants.candidate(args, &mut key, i) {
             i += 1;
-            let own = v.checks.iter().all(|c| match c {
-                super::region::Own::Is(k, o) => args[*k as usize] == o.as_ptr(),
-                super::region::Own::Check(k, c) => self.check(c, k.map_or(std::ptr::null_mut(), |k| args[k as usize])),
-            });
+            let own = v.facts_hold(args)
+                && v.checks.iter().all(|c| match c {
+                    super::region::Own::Is(k, o) => args[*k as usize] == o.as_ptr(),
+                    super::region::Own::Check(k, c) => self.check(c, k.map_or(std::ptr::null_mut(), |k| args[k as usize])),
+                });
             if !own {
                 super::region::passed_over();
                 continue;
