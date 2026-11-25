@@ -119,9 +119,6 @@ class _Missing:
     def __repr__(self) -> str:
         return f"_Missing({self._reason})"
 
-    def __str__(self) -> str:
-        return f"_Missing({self._reason})"
-
     # Sometimes _Missing object is used as the callable with functools.partial,
     # so we add a dummy __call__ here to bypass TypeError from partial().
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -944,23 +941,25 @@ class SystemInfo:
         gpu_name, toolkit_version = None, None
         gpu_arch, gpu_sm_count = None, None
         for device_type in cls.CHECK_GPUS:
-            if getattr(torch, device_type).is_available():
-                try:
-                    gpu_name = getattr(torch, device_type).get_device_name()
-                    toolkit_version = getattr(torch.version, device_type)
-                    if device_type == "cuda":
-                        interface = get_interface_for_device(device_type)
-                        gpu_arch, gpu_sm_count = (
-                            interface.get_compute_capability(),
-                            interface.get_multi_processor_count(),
-                        )
-                    break
-                except Exception:
-                    logger.debug(
-                        "Could not read the %s device's info for SystemInfo",
-                        device_type,
-                        exc_info=True,
+            device_module = getattr(torch, device_type)
+            if not device_module.is_available():
+                continue
+            try:
+                gpu_name = device_module.get_device_name()
+                toolkit_version = getattr(torch.version, device_type)
+                if device_type == "cuda":
+                    interface = get_interface_for_device(device_type)
+                    gpu_arch, gpu_sm_count = (
+                        interface.get_compute_capability(),
+                        interface.get_multi_processor_count(),
                     )
+                break
+            except Exception:
+                logger.debug(
+                    "Could not read the %s device's info for SystemInfo",
+                    device_type,
+                    exc_info=True,
+                )
 
         return cls(
             python_version=platform.python_version(),
@@ -1065,8 +1064,7 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        current_system_info = SystemInfo.current()
-        self.system_info.check_compatibility(current_system_info, self.device_type)
+        self.system_info.check_compatibility(SystemInfo.current(), self.device_type)
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -1117,35 +1115,30 @@ class PrecompileCacheEntry:
 
         for code in cache_entry.codes:
             for backend_id in code.backend_ids:
-                if backend_id not in backends:
-                    logger.warning("Backend not found")
-                    debug_str = json.dumps(
-                        {
-                            "entry": cache_entry.debug_info(),
-                            "missing_backend": backend_id,
-                        }
-                    )
-                    torch._logging.trace_structured(
-                        "artifact",
-                        metadata_fn=lambda: {
-                            "name": "dynamo_cache_bypass",
-                            "encoding": "json",
-                        },
-                        payload_fn=lambda: debug_str,
-                        expect_trace_id=False,
-                    )
-                    code.bypassed = True
-                    break
-                else:
+                if backend_id in backends:
                     backend_content[backend_id] = backends[backend_id]
+                    continue
+                logger.warning("Backend not found")
+                debug_str = json.dumps(
+                    {"entry": cache_entry.debug_info(), "missing_backend": backend_id}
+                )
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "dynamo_cache_bypass",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: debug_str,
+                    expect_trace_id=False,
+                )
+                code.bypassed = True
+                break
 
         return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
 
 
 def _hash_source(source: str) -> str:
-    sha256_hash = hashlib.sha256()
-    sha256_hash.update(source.encode())
-    return sha256_hash.hexdigest()
+    return hashlib.sha256(source.encode()).hexdigest()
 
 
 def _get_sourcelines(
@@ -1158,9 +1151,9 @@ def _hash_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int) ->
     return _hash_source("".join(_get_sourcelines(m, firstlineno, lastlineno)))
 
 
-def _compile_frame_context(
-    code: types.CodeType,
-) -> contextlib.AbstractContextManager[None]:
+# pyrefly: ignore [deprecated]
+@contextlib.contextmanager
+def _compile_frame_context(code: types.CodeType) -> Iterator[None]:
     from torch._dynamo.convert_frame import get_compile_id, log_dynamo_start
     from torch._guards import compile_context, CompileContext
 
@@ -1169,30 +1162,25 @@ def _compile_frame_context(
     # under the same cache entry, so we don't have recompile ids
     # i.e. If cold start had 0/0, 0/1, 1/0, 1/1, these would be
     # collapsed into 0/0, 1/0 on warm.
-    # pyrefly: ignore [deprecated]
-    @contextlib.contextmanager
-    def _ctx() -> Iterator[None]:
-        increment_frame()
-        compile_id = get_compile_id(frame_state={})
-        with (
-            compile_context(CompileContext(compile_id)),
-            dynamo_timed(
-                "_compile.compile_inner",
-                phase_name="entire_frame_compile",
-                dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
-                # TODO: save all relevant compilation metrics
-                metadata={
-                    "frame_key": str(torch._dynamo.utils.curr_frame),
-                    "co_name": code.co_name,
-                    "co_filename": code.co_filename,
-                    "co_firstlineno": code.co_firstlineno,
-                },
-            ),
-        ):
-            log_dynamo_start(code)
-            yield
-
-    return _ctx()
+    increment_frame()
+    compile_id = get_compile_id(frame_state={})
+    with (
+        compile_context(CompileContext(compile_id)),
+        dynamo_timed(
+            "_compile.compile_inner",
+            phase_name="entire_frame_compile",
+            dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
+            # TODO: save all relevant compilation metrics
+            metadata={
+                "frame_key": str(torch._dynamo.utils.curr_frame),
+                "co_name": code.co_name,
+                "co_filename": code.co_filename,
+                "co_firstlineno": code.co_firstlineno,
+            },
+        ),
+    ):
+        log_dynamo_start(code)
+        yield
 
 
 # The skips installed packages hold on each code object, one per package, True
@@ -1756,15 +1744,11 @@ class CompilePackage:
             with context:
                 module = sys.modules[entry.python_module]
                 self._install_import_sources(module, entry.import_sources)
-                target_code = code
                 if entry.install_to_global:
                     self._install_resume_functions(module, code, entry.function_names)
-                if entry.code_source:
-                    target_code = _lookup_code(entry)
+                target_code = _lookup_code(entry) if entry.code_source else code
 
                 if entry.bypassed:
-                    # If the entry is bypassed, do not install backends
-                    # or guarded codes.
                     continue
 
                 input_codes.add(target_code)
@@ -1772,7 +1756,7 @@ class CompilePackage:
 
                 # Dynamo generates empty graph for trivial functions, should just skip them
                 # in these cases.
-                if entry.skip_recursive or len(entry.guarded_codes) == 0:
+                if entry.skip_recursive or not entry.guarded_codes:
                     _update_skip_hold(target_code, entry.skip_recursive, hold=True)
                     self._skipped_codes.append((target_code, entry.skip_recursive))
 
@@ -1797,12 +1781,8 @@ class CompilePackage:
     def source_id_from_fn(fn: Callable[..., Any]) -> str:
         from .eval_frame import innermost_fn
 
-        innermost_fn_ = innermost_fn(fn)
-
-        sha256_hash = hashlib.sha256()
-        sha256_hash.update(innermost_fn_.__qualname__.encode())
-        sha256_hash.update(str(innermost_fn_.__code__.co_firstlineno).encode())
-        return sha256_hash.hexdigest()
+        inner = innermost_fn(fn)
+        return _hash_source(f"{inner.__qualname__}{inner.__code__.co_firstlineno}")
 
 
 _Backends = dict[_BackendId, Any]
@@ -1956,10 +1936,10 @@ class InMemoryDynamoStore(DynamoStore):
         """
         Read dynamo cache entry and backends from memory.
         """
-        if path not in self.packages:
+        entry = self.packages.get(path)
+        if entry is None:
             raise RuntimeError(f"No package found with key {path}")
-
-        return self.packages[path]
+        return entry
 
 
 class DiskDynamoStore(DynamoStore):
@@ -1987,8 +1967,9 @@ class DiskDynamoStore(DynamoStore):
         """
         Clear all CompilePackages from disk.
         """
-        if self.path_prefix():
-            shutil.rmtree(self.path_prefix(), ignore_errors=True)
+        prefix = self.path_prefix()
+        if prefix:
+            shutil.rmtree(prefix, ignore_errors=True)
 
     def write(
         self,
