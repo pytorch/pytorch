@@ -31,6 +31,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, TypeMROSource, TypeSource
 from ..utils import is_tensor_base_attr_getter, is_torch_class
 from .base import (
+    _compute_slotdefs,
     AsPythonConstantNotImplementedError,
     GetSet,
     getset_build,
@@ -40,14 +41,15 @@ from .base import (
     Member,
     NO_SUCH_SUBOBJ,
     readonly_setter,
+    store_attr_mutation,
     type_qualified_name,
     unmodeled_setter,
     VariableTracker,
 )
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
-from .object_protocol import python_constant_repr_impl
-from .user_defined import UserDefinedObjectVariable
+from .object_protocol import mro_lookup, python_constant_repr_impl
+from .user_defined import setattr_hackcheck, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -69,6 +71,14 @@ DescriptorTypes: TypeAlias = (
     | types.MemberDescriptorType
     | types.GetSetDescriptorType
 )
+
+
+def _is_c_struct_member(descriptor: types.MemberDescriptorType) -> bool:
+    """A member of a C type: may be T_OBJECT (del, then reads give None) or a
+    numeric field (del raises). __slots__ members live on heap types and are
+    always T_OBJECT_EX."""
+    Py_TPFLAGS_HEAPTYPE = 1 << 9
+    return not descriptor.__objclass__.__flags__ & Py_TPFLAGS_HEAPTYPE
 
 
 def _check_descriptor_obj_type(
@@ -104,6 +114,27 @@ def descr_repr(
     return VariableTracker.build(
         tx, f"<{kind} '{name}' of '{get_type_tp_name(objclass)}' objects>"
     )
+
+
+def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
+    if py_type is object:
+        return variables.VariableTracker
+    if py_type is type:
+        return variables.TypeVariable
+
+    from .base import VariableTrackerMeta
+
+    for subclass in VariableTrackerMeta.all_subclasses:
+        cpython_type = getattr(subclass, "_cpython_type", None)
+        if cpython_type is None:
+            continue
+        types = cpython_type if isinstance(cpython_type, tuple) else (cpython_type,)
+        # Only a class vt is an instance of: another class's slot impls assume
+        # their own representation, e.g. IntConstantVariable's fold a constant
+        # and cannot run on a SymNodeVariable that also models int.
+        if py_type in types and isinstance(vt, subclass):
+            return subclass
+    return None
 
 
 class DescriptorVariable(VariableTracker):
@@ -205,11 +236,27 @@ class WrapperDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        name, objclass = self.descriptor.__name__, self.descriptor.__objclass__
+        if not issubclass(obj.python_type(), objclass):
+            raise_type_error(
+                tx,
+                f"descriptor '{name}' requires a '{objclass.__name__}' object "
+                f"but received a '{obj.python_type_name()}'",
+            )
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
+        obj = obj.realize()
+        if name in ("__setattr__", "__delattr__"):
+            setattr_hackcheck(tx, obj, self.descriptor)
+        # The VT class modeling objclass, e.g. ConstDictVariable for
+        # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
+        vt_cls = _vt_cls_modeling(obj, objclass)
+        sd = _compute_slotdefs(objclass).get(name)
+        if vt_cls is not None and sd is not None:
+            impl = getattr(vt_cls, sd.impl)
+            return sd.wrapper(obj, tx, impl, rest, kwargs)
         return self.owner.call_method(
             tx, self.descriptor.__name__, [obj, *rest], kwargs
         )
@@ -219,11 +266,13 @@ class WrapperDescriptorVariable(DescriptorVariable):
         tx: "InstructionTranslatorBase",
         obj: VariableTracker,
         owner: VariableTracker,
-    ) -> "MethodWrapperVariable":
+    ) -> "WrapperDescriptorVariable | MethodWrapperVariable":
         # Mirrors wrapperdescr_get which calls PyWrapper_New to produce
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
@@ -279,8 +328,13 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         "__self__": Member(lambda s, tx: s.obj, readonly_setter),
     }
 
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.as_python_constant()
+    def get_real_python_backed_value(self) -> object:
+        # The owner may be backed by a real object without being a constant
+        # (e.g. an lru_cache wrapper).
+        obj_value = self.obj.get_real_python_backed_value()
+        if obj_value is NO_SUCH_SUBOBJ:
+            return NO_SUCH_SUBOBJ
+        return self.descriptor.__get__(obj_value, type(obj_value))
 
     def is_python_constant(self) -> bool:
         return self.obj.is_python_constant()
@@ -328,13 +382,13 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         try:
             # CPython wrapper_hash:
             # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
             return hash(self.as_python_constant()), False
         except NotImplementedError:
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -405,19 +459,25 @@ class MethodDescriptorVariable(DescriptorVariable):
                 tx, f"unbound method {self.descriptor.__qualname__}() needs an argument"
             )
         obj, *rest = args
-        name = self.descriptor.__name__
+        name, objclass = self.descriptor.__name__, self.descriptor.__objclass__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj = obj.realize()
-        if isinstance(obj, UserDefinedObjectVariable):
-            base_methods = obj._base_methods
-            if base_methods is not None and self.descriptor in base_methods:
-                return obj.call_base_method(tx, name, rest, kwargs)
-        method = obj.lookup_tp_method(name)
-        if method is not None:
-            result = method(obj, tx, name, rest, kwargs)
-            if result is not None:
-                return result
-        return self.owner.call_method(tx, name, [obj, *rest], kwargs)
+
+        if vt_cls := _vt_cls_modeling(obj, objclass):
+            if meth := vt_cls._lookup_tp_table(name, "tp_methods"):
+                result = meth(obj, tx, name, rest, kwargs)
+                if result is not None:
+                    return result
+        if mro_lookup(obj.python_type(), name) is self.descriptor:
+            # Nothing overrides it, so name lookup reaches the same C method.
+            return obj.call_method(tx, name, rest, kwargs)
+        unimplemented(
+            gb_type="Unbound method descriptor call with unmodeled owner",
+            context=f"{self.descriptor.__qualname__}({obj}, ...)",
+            explanation=f"Dynamo has no model of {objclass.__qualname__}.{name} for a "
+            f"{obj.python_type().__qualname__} receiver.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def tp_descr_get_impl(
         self,
@@ -434,18 +494,6 @@ class MethodDescriptorVariable(DescriptorVariable):
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
         return BoundBuiltinMethodVariable(self.descriptor, obj)
-
-    def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        # PyMethodDescr_Type leaves tp_richcompare NULL and inherits
-        # object_richcompare from object.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
 
 @functools.cache
@@ -573,7 +621,19 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        # builtin_function_or_method has no __getattr__ and no instance __dict__.
+        msg = f"'builtin_function_or_method' object has no attribute '{name}'"
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[msg],
+            kwargs={"name": ConstantVariable.create(name), "obj": self},
+        )
+
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         # It hashes m_self by identity, so only a guarded runtime method has a
         # real hash; a method bound during tracing gets a compile-time-only one.
@@ -748,6 +808,8 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         # producing a builtin_function_or_method via PyCMethod_New.
         # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
+        if owner.is_constant_none():
+            owner = obj.tp_getattro_impl(tx, "__class__")
         owner_type = owner.python_type()
         if not issubclass(owner_type, type):
             raise_type_error(
@@ -1091,6 +1153,8 @@ class MemberDescriptorVariable(DescriptorVariable):
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         from .object_protocol import _UnhandledDescriptorError
 
@@ -1138,11 +1202,18 @@ class MemberDescriptorVariable(DescriptorVariable):
             # what PyMember_SetOne raises.
             entry.setter(obj, tx, value)
             return ConstantVariable.create(None)
+        if value is None and _is_c_struct_member(self.descriptor):
+            unimplemented(
+                gb_type="Delete of an unmodeled C member",
+                context=f"del {obj}.{name}",
+                explanation=f"Dynamo does not model deleting the C struct member '{name}'.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         # No model for this member. STORE_ATTR itself applies the descriptor, so
         # replay via store_attr on the target (mirrors the __slots__ path in
         # UserDefinedObjectVariable).
         stored = variables.DeletedVariable() if value is None else value
-        tx.output.side_effects.store_attr(obj, name, stored)
+        store_attr_mutation(tx, obj, name, stored)
         return ConstantVariable.create(None)
 
 
@@ -1260,6 +1331,8 @@ class GetSetDescriptorVariable(DescriptorVariable):
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to tp_getattro_impl for
         # proxy-based VTs like TensorVariable.
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Prefer the VT's declarative table when it models this attribute
         entry = obj.lookup_tp_getset_member(attr_name)
@@ -1416,7 +1489,10 @@ class PropertyVariable(VariableTracker):
         fn = getattr(self.descriptor, attr)
 
         if fn is None:
-            display_name = getattr(self.descriptor, "__name__", None)
+            if sys.version_info >= (3, 13):
+                display_name = getattr(self.descriptor, "__name__", None)
+            else:
+                display_name = getattr(self.descriptor.fget, "__name__", None)
             kind = "setter" if value is not None else "deleter"
             # property_descr_set formats %R of the owner's *type*, whose
             # repr is its bare __qualname__ (no module prefix) -- unlike

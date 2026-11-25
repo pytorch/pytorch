@@ -229,16 +229,18 @@ def is_available() -> bool:
     """
     if not _is_compiled():
         return False
-    if _nvml_based_avail():
-        # The user has set an env variable to request this availability check that attempts to avoid fork poisoning by
-        # using NVML at the cost of a weaker CUDA availability assessment. Note that if NVML discovery/initialization
-        # fails, this assessment falls back to the default CUDA Runtime API assessment (`cudaGetDeviceCount`)
-        return device_count() > 0
-    else:
-        # The default availability inspection never throws and returns 0 if the driver is missing or can't
-        # be initialized. This uses the CUDA Runtime API `cudaGetDeviceCount` which in turn initializes the CUDA Driver
-        # API via `cuInit`
-        return torch._C._cuda_getDeviceCount() > 0
+    counter = torch._C._monitor._WaitCounter("pytorch.wait_counter.cuda.is_available")
+    with counter.guard():
+        if _nvml_based_avail():
+            # The user has set an env variable to request this availability check that attempts to avoid fork poisoning by
+            # using NVML at the cost of a weaker CUDA availability assessment. Note that if NVML discovery/initialization
+            # fails, this assessment falls back to the default CUDA Runtime API assessment (`cudaGetDeviceCount`)
+            return device_count() > 0
+        else:
+            # The default availability inspection never throws and returns 0 if the driver is missing or can't
+            # be initialized. This uses the CUDA Runtime API `cudaGetDeviceCount` which in turn initializes the CUDA Driver
+            # API via `cuInit`
+            return torch._C._cuda_getDeviceCount() > 0
 
 
 def is_bf16_supported(including_emulation: bool = True):
@@ -400,6 +402,10 @@ PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
         "aarch64": {80, 90, 100, 110, 120},
     },
     "13.4": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.5": {
         "x86_64": {75, 80, 86, 90, 100, 120},
         "aarch64": {80, 90, 100, 110, 120},
     },
@@ -1462,18 +1468,15 @@ def current_blas_handle():
     On CUDA, the handle uses the BLAS library's default workspace unless ATen
     workspace caching is explicitly enabled. When caching is disabled, internal
     ATen operations may temporarily bind their own workspace to this handle, but
-    restore the default workspace before releasing it. On ROCm they use
-    separate handles, and this function returns a different handle for each
-    stream, because a rocBLAS workspace must not be shared by two streams at
-    once. Each is bound when it is created to a buffer from a caching-allocator
-    pool reserved for these buffers, at least as large as the workspace rocBLAS would allocate, which
-    rocBLAS never grows. A workspace bound with
-    ``rocblas_set_workspace`` stays bound, even after the thread exits and the
-    handle passes to another thread, so unbind it before freeing the buffer.
-    While the current stream is capturing, ROCm returns a capture handle
-    instead, bound to a workspace from the capture's memory pool: call this
-    function inside the capture rather than reusing a handle obtained before
-    it, and do not use the capture handle after the capture ends.
+    restore the default workspace before releasing it.
+
+    On ROCm, this function returns a different handle for each thread and
+    stream, and another one while the current stream is capturing. Run work on
+    a handle only on the stream it was returned for, and inside a capture call
+    this function again rather than use a handle obtained before it. See
+    :ref:`hipblas-workspaces` for the workspace each handle has, how handles
+    pass between threads, how to move one to another stream, and what to call
+    before graph capture begins.
     """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
@@ -2281,6 +2284,7 @@ __all__ = [
     "MemPool",
     "LocalizedAllocator",
     "use_mem_pool",
+    "HostMemPool",
     "temperature",
     "power_draw",
     "clock_rate",
