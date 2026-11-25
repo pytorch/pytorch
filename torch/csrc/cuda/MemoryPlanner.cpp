@@ -12,12 +12,14 @@
 // free frontier is an ancestor of (or equal to) a node of j's allocation
 // frontier.
 //
-// The conflicts are computed once, in parallel. Two strategies then run in
-// parallel: first fit, largest allocation first ("size"), and best fit,
-// largest breadth (the most bytes live during the allocation's lifetime) first
-// ("breadth/best"). The smaller plan is used, ties going to "size"; it is
-// validated against the rule above, re-evaluated from the inputs (not from the
-// conflict matrix).
+// The conflicts are computed once, in parallel. A portfolio of strategies
+// (first and best fit over a few orders) then runs in parallel; the smallest
+// plan is used, ties going to the earlier strategy, and it is validated
+// against the rule above, re-evaluated from the inputs (not from the conflict
+// matrix).
+//
+// The strategy interface below is internal; a public API for custom planning
+// strategies (e.g. from C++ extensions) could build on it.
 
 #include <ATen/Parallel.h>
 #include <c10/util/CallOnce.h>
@@ -35,6 +37,7 @@
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -63,8 +66,58 @@ struct ProblemInput {
   std::vector<int64_t> edges;
 };
 
-// The strategies, in tie-breaking order.
-constexpr const char* kStrategies[] = {"size", "breadth/best"};
+class PlanningProblem;
+
+// The orders in which the built-in strategies place allocations.
+enum class Order : int8_t {
+  Size, // largest first
+  // largest first, then the largest total size of conflicting allocations
+  SizeWDegree,
+  Breadth, // largest total size live during its lifetime first
+};
+Order parseOrder(const std::string& name);
+const char* orderName(Order order);
+
+// A planning algorithm. plan() returns one offset per allocation, each a
+// multiple of the alignment; it runs without the GIL, possibly concurrently
+// with other strategies on the same problem, and the plan used is validated.
+class GraphMemoryStrategy {
+ public:
+  virtual ~GraphMemoryStrategy() = default;
+  virtual std::string name() const = 0;
+  virtual std::vector<int64_t> plan(const PlanningProblem& problem) const = 0;
+};
+
+// Places the allocations one at a time in `order`, each at the lowest offset
+// that does not overlap a placed allocation it conflicts with.
+class FirstFit : public GraphMemoryStrategy {
+ public:
+  explicit FirstFit(const std::string& order = "size")
+      : order_(parseOrder(order)) {}
+  std::string name() const override {
+    return orderName(order_);
+  }
+  std::vector<int64_t> plan(const PlanningProblem& problem) const override;
+
+ private:
+  Order order_;
+};
+
+// Like FirstFit, but each allocation takes the smallest gap that holds it.
+class BestFit : public GraphMemoryStrategy {
+ public:
+  explicit BestFit(const std::string& order = "size")
+      : order_(parseOrder(order)) {}
+  std::string name() const override {
+    return std::string(orderName(order_)) + "/best";
+  }
+  std::vector<int64_t> plan(const PlanningProblem& problem) const override;
+
+ private:
+  Order order_;
+};
+
+using Strategies = std::vector<std::shared_ptr<GraphMemoryStrategy>>;
 
 struct Plan {
   std::string strategy;
@@ -88,7 +141,9 @@ class PlanningProblem {
   // Runs the strategies in parallel and keeps the plan with the smallest
   // arena, ties going to the earlier strategy. Validates the plan returned
   // (throws if it is invalid).
-  Plan plan() const;
+  Plan plan(const Strategies& strategies) const;
+  // One greedy pass in `order` (FirstFit and BestFit).
+  std::vector<int64_t> greedy(Order order, bool best_fit) const;
   // Checks offsets (one per allocation, aligned, and no two conflicting
   // allocations overlap); throws with the first violation found. Returns the
   // arena size.
@@ -113,8 +168,8 @@ class PlanningProblem {
   std::vector<uint64_t> bits;
   // the host time after the last event
   int64_t end_time = 0;
-  mutable c10::once_flag breadth_once;
-  mutable std::vector<int64_t> breadth;
+  mutable c10::once_flag wdegree_once, breadth_once;
+  mutable std::vector<int64_t> wdegree, breadth;
 
   const uint64_t* row(int64_t i) const {
     return bits.data() + i * words;
@@ -127,8 +182,9 @@ class PlanningProblem {
   void computeClosures();
   void computeConflicts();
   bool conflictDirect(int64_t i, int64_t j) const;
+  void ensureWDegree() const;
   void ensureBreadth() const;
-  Plan run(int64_t strategy) const;
+  std::vector<int64_t> visitOrder(Order order) const;
   int64_t place(
       const std::vector<int64_t>& order,
       bool best_fit,
@@ -451,6 +507,25 @@ void PlanningProblem::computeConflicts() {
   });
 }
 
+// For each allocation, the total size of the allocations it conflicts with.
+void PlanningProblem::ensureWDegree() const {
+  c10::call_once(wdegree_once, [&] {
+    wdegree.assign(n, 0);
+    parallelTasks((n + 63) / 64, threads, [&](int64_t block) {
+      for (int64_t i = block * 64; i < std::min(n, (block + 1) * 64); i++) {
+        const uint64_t* r = row(i);
+        int64_t w = 0;
+        for (int64_t k = 0; k < words; k++) {
+          for (uint64_t x = r[k]; x; x &= x - 1) {
+            w += in.size[k * 64 + std::countr_zero(x)];
+          }
+        }
+        wdegree[i] = w;
+      }
+    });
+  });
+}
+
 // For each allocation, the largest total size live (in host order) at any time
 // during its lifetime (TFLite's "greedy by breadth").
 void PlanningProblem::ensureBreadth() const {
@@ -496,28 +571,38 @@ void PlanningProblem::ensureBreadth() const {
   });
 }
 
-// Strategy `s` of kStrategies: "size" places the largest allocations first,
-// at the lowest offset that fits; "breadth/best" places those with the most
-// bytes live during their lifetime first, in the smallest gap that fits.
-Plan PlanningProblem::run(int64_t s) const {
-  std::vector<int64_t> order(n);
-  std::iota(order.begin(), order.end(), 0);
+std::vector<int64_t> PlanningProblem::visitOrder(Order order) const {
+  std::vector<int64_t> o(n);
+  std::iota(o.begin(), o.end(), 0);
   const auto& S = in.size;
   const auto& A = in.alloc_time;
-  const bool by_breadth = s == 1;
-  if (by_breadth) {
-    ensureBreadth();
+  auto sort_by = [&](auto key) {
+    std::stable_sort(o.begin(), o.end(), [&](int64_t a, int64_t b) {
+      return key(a) < key(b);
+    });
+  };
+  switch (order) {
+    case Order::Size:
+      sort_by([&](int64_t i) { return std::make_tuple(-S[i], A[i]); });
+      break;
+    case Order::SizeWDegree:
+      ensureWDegree();
+      sort_by(
+          [&](int64_t i) { return std::make_tuple(-S[i], -wdegree[i], A[i]); });
+      break;
+    case Order::Breadth:
+      ensureBreadth();
+      sort_by(
+          [&](int64_t i) { return std::make_tuple(-breadth[i], -S[i], A[i]); });
+      break;
   }
-  std::stable_sort(order.begin(), order.end(), [&](int64_t a, int64_t b) {
-    return by_breadth
-        ? std::make_tuple(-breadth[a], -S[a], A[a]) <
-            std::make_tuple(-breadth[b], -S[b], A[b])
-        : std::make_tuple(-S[a], A[a]) < std::make_tuple(-S[b], A[b]);
-  });
-  Plan r;
-  r.strategy = kStrategies[s];
-  r.arena = place(order, /*best_fit=*/by_breadth, r.offsets);
-  return r;
+  return o;
+}
+
+std::vector<int64_t> PlanningProblem::greedy(Order order, bool best_fit) const {
+  std::vector<int64_t> offsets;
+  place(visitOrder(order), best_fit, offsets);
+  return offsets;
 }
 
 // One greedy pass over `order`. First fit: the lowest offset that does not
@@ -729,10 +814,27 @@ bool PlanningProblem::conflict(int64_t i, int64_t j) const {
   return testBit(row(i), j);
 }
 
-Plan PlanningProblem::plan() const {
-  constexpr auto num = static_cast<int64_t>(std::size(kStrategies));
-  std::vector<Plan> results(num);
-  parallelTasks(num, threads, [&](int64_t s) { results[s] = run(s); });
+Plan PlanningProblem::plan(const Strategies& strategies) const {
+  TORCH_CHECK(!strategies.empty(), "no memory planning strategy");
+  std::vector<Plan> results(strategies.size());
+  const auto num = static_cast<int64_t>(strategies.size());
+  parallelTasks(num, threads, [&](int64_t s) {
+    auto& r = results[s];
+    r.strategy = strategies[s]->name();
+    r.offsets = strategies[s]->plan(*this);
+    TORCH_CHECK(
+        static_cast<int64_t>(r.offsets.size()) == n,
+        "invalid memory plan from strategy '",
+        r.strategy,
+        "': ",
+        r.offsets.size(),
+        " offsets for ",
+        n,
+        " allocations");
+    for (int64_t i = 0; i < n; i++) {
+      r.arena = std::max(r.arena, r.offsets[i] + in.size[i]);
+    }
+  });
   // the first of the smallest
   auto best = std::min_element(
       results.begin(), results.end(), [](const auto& a, const auto& b) {
@@ -744,6 +846,80 @@ Plan PlanningProblem::plan() const {
       threads,
       "invalid memory plan from strategy '" + best->strategy + "'");
   return std::move(*best);
+}
+
+std::vector<int64_t> FirstFit::plan(const PlanningProblem& problem) const {
+  return problem.greedy(order_, /*best_fit=*/false);
+}
+
+std::vector<int64_t> BestFit::plan(const PlanningProblem& problem) const {
+  return problem.greedy(order_, /*best_fit=*/true);
+}
+
+namespace {
+
+constexpr std::pair<const char*, Order> kOrders[] = {
+    {"size", Order::Size},
+    {"size_wdegree", Order::SizeWDegree},
+    {"breadth", Order::Breadth},
+};
+
+// "<order>" is FirstFit(order) and "<order>/best" is BestFit(order).
+std::shared_ptr<GraphMemoryStrategy> makeStrategy(const std::string& name) {
+  const auto slash = name.find('/');
+  const std::string order = name.substr(0, slash);
+  if (slash == std::string::npos) {
+    return std::make_shared<FirstFit>(order);
+  }
+  TORCH_CHECK_VALUE(
+      name.substr(slash) == "/best",
+      "unknown memory planning strategy '",
+      name,
+      "'; expected '<order>' or '<order>/best'");
+  return std::make_shared<BestFit>(order);
+}
+
+// The strategies MemoryPlannedGraph runs. On the plans recorded from training
+// steps of Llama 3 (70B, 405B), Qwen 3.5 (27B, 397B) and DeepSeek V3/V4
+// models, these give the best arena of 22 strategies (first and best fit over
+// eleven orders) on every plan; "size" alone is at most 0.48% larger, and
+// "size" with "breadth/best" at most 0.02%.
+Strategies defaultStrategies() {
+  Strategies strategies;
+  for (const char* name :
+       {"size", "size/best", "size_wdegree", "breadth", "breadth/best"}) {
+    strategies.push_back(makeStrategy(name));
+  }
+  return strategies;
+}
+
+} // namespace
+
+Order parseOrder(const std::string& name) {
+  for (const auto& [n, o] : kOrders) {
+    if (name == n) {
+      return o;
+    }
+  }
+  std::string valid;
+  for (const auto& [n, o] : kOrders) {
+    valid += std::string(" ") + n;
+  }
+  TORCH_CHECK_VALUE(
+      false,
+      "unknown memory planning order '",
+      name,
+      "'; valid orders:",
+      valid);
+}
+
+const char* orderName(Order order) {
+  for (const auto& [n, o] : kOrders) {
+    if (o == order) {
+      return n;
+    }
+  }
+  return "";
 }
 
 // Python binding (private): torch._C._cuda_PlanningProblem
@@ -785,15 +961,28 @@ void initMemoryPlannerBindings(PyObject* module) {
           py::arg("edges"))
       .def(
           "plan",
-          // the smaller plan of the strategies; returns (strategy, arena,
-          // offsets)
-          [](const PlanningProblem& p) {
+          // the default strategies, or one ("<order>" or "<order>/best");
+          // returns (strategy, arena, offsets)
+          [](const PlanningProblem& p, std::optional<std::string> strategy) {
+            const Strategies strategies = strategy
+                ? Strategies{makeStrategy(*strategy)}
+                : defaultStrategies();
             Plan r;
             {
               py::gil_scoped_release no_gil;
-              r = p.plan();
+              r = p.plan(strategies);
             }
             return py::make_tuple(r.strategy, r.arena, py::cast(r.offsets));
+          },
+          py::arg("strategy") = py::none())
+      .def_static(
+          "strategies",
+          [] {
+            std::vector<std::string> names;
+            for (const auto& s : defaultStrategies()) {
+              names.push_back(s->name());
+            }
+            return names;
           })
       .def(
           "validate",
