@@ -520,10 +520,12 @@ def _register_namedtuple(
     serialized.
 
     Args:
-        cls: the dataclass type to register
-        serialized_type_name: The serialized name for the dataclass. This is
+        cls: the namedtuple class to register. A tuple subclass that is built
+        as ``cls(*fields)`` also works, and its specs save and load. The key
+        path APIs, such as ``tree_flatten_with_path``, also need ``cls._fields``.
+        serialized_type_name: The serialized name for the class. This is
         required if you want to serialize the pytree TreeSpec containing this
-        namedtuple.
+        class.
     """
     _private_register_pytree_node(
         cls,
@@ -924,7 +926,36 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
-    return typ
+    # Best effort: the name can point to any registered type when the spec was
+    # edited, or when the class under the name changed since it was saved.
+    # A class registered with _register_namedtuple loads too. The
+    # collections.namedtuple factory shares its flatten function but is not a class.
+    node = SUPPORTED_NODES.get(typ)
+    if isinstance(typ, type) and (
+        is_namedtuple_class(typ)
+        or (node is not None and node.flatten_fn is _namedtuple_flatten)
+    ):
+        return typ
+    if (
+        not isinstance(typ, type)
+        or typ in BUILTIN_TYPES
+        or typ.__module__.split(".")[0] == "torch"
+    ):
+        hint = "The spec was edited or is corrupt."
+    else:
+        hint = (
+            "Another class in this process may also be registered under this "
+            "name; if so, give each class its own serialized_type_name. "
+            "Otherwise, regenerate the serialized artifact with the current "
+            "class. To load it as is, register the original namedtuple class "
+            "with `torch.utils._pytree._register_namedtuple(cls, "
+            f"serialized_type_name={dumpable_context!r})`, which replaces {typ} "
+            "under this name in this process."
+        )
+    raise TypeError(
+        f"Can't deserialize TreeSpec of namedtuple class {dumpable_context}: "
+        f"the name points to {typ}, which is not a namedtuple class. {hint}"
+    )
 
 
 def _ordereddict_flatten(d: OrderedDict[Any, T]) -> tuple[list[T], Context]:
