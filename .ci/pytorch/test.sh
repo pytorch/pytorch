@@ -1249,17 +1249,12 @@ test_perf_for_dashboard() {
     esac
   done
   local inductor_model_args=()
-  local run_inductor=1
   if [[ "$suite" == "torchbench" && "$effective_backend" == "inductor" &&
         " ${DYNAMO_BENCHMARK_FLAGS[*]} " != *" --export-aot-inductor "* ]]; then
     local model
     for model in "${INDUCTOR_TORCHBENCH_MIGRATION_MODELS[@]}"; do
       inductor_model_args+=(--exclude-exact "$model")
     done
-    if [[ "${TEST_CONFIG}" == *b200* && "$TORCHBENCH_ONLY_MODELS" == "BERT_pytorch" ]]; then
-      # Re-enable B200's BERT-only Inductor subcase after https://github.com/pytorch/pytorch/issues/203757.
-      run_inductor=0
-    fi
   fi
   local modes=()
   if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
@@ -1315,7 +1310,7 @@ test_perf_for_dashboard() {
         target_flag+=( --freezing)
       fi
 
-      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *default-true* ]]; then
+      if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}")
@@ -1325,7 +1320,7 @@ test_perf_for_dashboard() {
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
+      if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}")
@@ -1335,7 +1330,7 @@ test_perf_for_dashboard() {
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *dynamic-true* ]]; then
+      if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}")
@@ -1346,7 +1341,7 @@ test_perf_for_dashboard() {
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
+      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}")
@@ -1356,7 +1351,7 @@ test_perf_for_dashboard() {
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+      if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}")
@@ -1366,7 +1361,7 @@ test_perf_for_dashboard() {
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *freeze_autotune_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+      if [[ "$DASHBOARD_TAG" == *freeze_autotune_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}")
@@ -1392,7 +1387,7 @@ test_perf_for_dashboard() {
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
+      if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}")
@@ -1402,12 +1397,12 @@ test_perf_for_dashboard() {
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *deterministic_perf-true* ]]; then
+      if [[ "$DASHBOARD_TAG" == *deterministic_perf-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" --disable-cudagraphs --deterministic "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_deterministic_perf_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *batch_invariant_accuracy-true* ]] && [[ "$target" == "accuracy" ]]; then
+      if [[ "$DASHBOARD_TAG" == *batch_invariant_accuracy-true* ]] && [[ "$target" == "accuracy" ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" --disable-cudagraphs --batch-invariant "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_batch_invariant_accuracy_${suite}_${dtype}_${mode}_${device}_${target}.csv"
@@ -1945,18 +1940,6 @@ test_without_numpy() {
   # Regression test for https://github.com/pytorch/pytorch/pull/157734 (torch.onnx should be importable without numpy)
   python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch; import torch.onnx"
   popd
-}
-
-test_rocm_packed_atomic() {
-  # test_aoti_abi_check otherwise runs only in inductor_cpp_wrapper, which
-  # ROCm jobs do not select. This filter is the ROCm packed-atomic case.
-  local bin="${TORCH_BIN_DIR}/test_aoti_abi_check"
-  if [[ ! -x "$bin" ]]; then
-    bin="${BUILD_BIN_DIR}/test_aoti_abi_check"
-  fi
-  mkdir -p test/test-reports/cpp
-  "$bin" --gtest_filter='TestRocmPackedAtomic.*' \
-    --gtest_output=xml:test/test-reports/cpp/test_rocm_packed_atomic.xml
 }
 
 test_libtorch() {
@@ -2540,18 +2523,48 @@ test_cpp_extensions() {
   assert_git_not_dirty
 }
 
-test_vec256() {
-  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
+test_vec_all_types() {
+  # Runs vec_test_all_types, built once per CPU capability, for each capability
+  # that dispatch can pick on this CPU.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Testing vec256 instructions"
-    mkdir -p test/test-reports/vec256
+    echo "Testing vectorized types (vec_test_all_types) for the CPU capabilities that dispatch can pick"
     pushd build/bin
-    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
-    for vec256_exec in $vec256_tests
+    vec_all_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
+    # The CPU's capability, not an ATEN_CPU_CAPABILITY override.
+    cpu_capability=$(env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability().replace(' ', ''))")
+    # Unlike most tests, deliberately run every binary and report their failures
+    # at the end, so that one CI run shows the failures of all capabilities (few
+    # contributors can run them all locally), and fail if none ran, so that these
+    # tests can't silently stop running.
+    ran=0
+    failed=""
+    for vec_all_exec in $vec_all_tests
     do
-      $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
+      # Only run the capabilities that dispatch can pick on this CPU: the others
+      # would hit illegal instructions, or for SVE, assume another vector length.
+      capability=${vec_all_exec#./vec_test_all_types_}
+      if [[ "$capability" != DEFAULT && "$capability" != "$cpu_capability" &&
+            ! ( "$capability" == AVX2 && "$cpu_capability" == AVX512 ) ]]; then
+        echo "Skipping $vec_all_exec: PyTorch uses $cpu_capability"
+        continue
+      fi
+      # Find libc10 in the installed torch, as the build tree's RPATH doesn't
+      # point to it where jobs run from a copy of the workspace (XPU). Each
+      # capability reports to its own directory, which test stats key on.
+      if ! LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}" $vec_all_exec --gtest_output=xml:../../test/test-reports/vec_test_all_types_"$capability"/"$vec_all_exec".xml; then
+        failed="$failed $vec_all_exec"
+      fi
+      ran=$((ran + 1))
     done
     popd
+    if [[ "$ran" == 0 ]]; then
+      echo "No vec_test_all_types binary ran"
+      return 1
+    fi
+    if [[ -n "$failed" ]]; then
+      echo "Failed vec_test_all_types binaries:$failed"
+      return 1
+    fi
     assert_git_not_dirty
   fi
 }
@@ -2966,10 +2979,8 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
+  test_vec_all_types
   test_libtorch 1
-  if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
-    test_rocm_packed_atomic
-  fi
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
   fi
@@ -3027,7 +3038,7 @@ else
   test_cpuset_num_threads
   test_python
   test_aten
-  test_vec256
+  test_vec_all_types
   test_libtorch
   test_aot_compilation
   test_custom_script_ops

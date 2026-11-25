@@ -406,6 +406,9 @@ def evaluate_platform_supports_mx_gemm():
             return SM100OrLater
     if torch.xpu.is_available():
         return True
+    # MXFP8 and NVFP4 on MPS; MXFP4 is not implemented there
+    if torch.backends.mps.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_mxfp8_cast():
