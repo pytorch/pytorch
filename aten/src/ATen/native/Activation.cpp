@@ -401,14 +401,14 @@ TORCH_IMPL_FUNC(gelu_out_cpu) (
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const mkldnn::ITensor& x = itensor_from_const_tensor(self);
-    mkldnn::ITensor y = itensor_from_tensor(result);
+    const mkldnn::MkldnnMemory& x = itensor_from_const_tensor(self);
+    mkldnn::MkldnnMemory y = itensor_from_tensor(result);
     mkldnn::eltwise_forward(
       x, y, dnnl::algorithm::eltwise_gelu_erf, dnnl::prop_kind::forward_training, /*alpha*/ 0.0);
 #ifdef __aarch64__
   } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
-    const mkldnn::ITensor& x = itensor_from_const_tensor(self);
-    mkldnn::ITensor y = itensor_from_tensor(result);
+    const mkldnn::MkldnnMemory& x = itensor_from_const_tensor(self);
+    mkldnn::MkldnnMemory y = itensor_from_tensor(result);
     mkldnn::eltwise_forward(
       x, y, dnnl::algorithm::eltwise_gelu_tanh, dnnl::prop_kind::forward_training, /*alpha*/ 0.0);
 #endif  // ifdef __aarch64__
@@ -426,9 +426,9 @@ TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const mkldnn::ITensor& x = itensor_from_const_tensor(self);
-    mkldnn::ITensor grady = itensor_from_const_tensor(grad);
-    mkldnn::ITensor gradx = itensor_from_tensor(grad_input);
+    const mkldnn::MkldnnMemory& x = itensor_from_const_tensor(self);
+    mkldnn::MkldnnMemory grady = itensor_from_const_tensor(grad);
+    mkldnn::MkldnnMemory gradx = itensor_from_tensor(grad_input);
     mkldnn::eltwise_backward(x, grady, gradx,
       dnnl::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
   } else {

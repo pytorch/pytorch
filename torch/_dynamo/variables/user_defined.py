@@ -630,7 +630,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             list.__new__,
             int.__new__,
             float.__new__,
+            complex.__new__,
             str.__new__,
+            bytes.__new__,
             collections.deque.__new__,
             types.SimpleNamespace.__new__,
         }

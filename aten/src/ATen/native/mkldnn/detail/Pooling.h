@@ -10,9 +10,9 @@ namespace at::native::mkldnn {
 // Ported from ideep::pooling_forward::compute.
 // Training max pooling stores the indices in dst's workspace.
 void pooling_forward(
-    const ITensor& src,
+    const MkldnnMemory& src,
     const dnnl::memory::dims& output_sizes,
-    ITensor& dst,
+    MkldnnMemory& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& kernel,
     const dnnl::memory::dims& padding_l,
@@ -23,10 +23,10 @@ void pooling_forward(
 // Ported from ideep::pooling_backward::compute.
 // Max pooling reads the indices from the forward dst's workspace.
 void pooling_backward(
-    const ITensor& diff_dst,
-    const ITensor& dst,
-    const ITensor& src,
-    ITensor& diff_src,
+    const MkldnnMemory& diff_dst,
+    const MkldnnMemory& dst,
+    const MkldnnMemory& src,
+    MkldnnMemory& diff_src,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& kernel,
     const dnnl::memory::dims& padding_l,
