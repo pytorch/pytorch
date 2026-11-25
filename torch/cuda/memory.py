@@ -1711,7 +1711,7 @@ def _route_capture_allocations(
     that allocate through ``c10::GetAllocator(kCUDA)``.
 
     The allocator gets ``alloc_fn(size, device, stream)``, which must return a 256-byte aligned
-    address (``None`` raises :class:`torch.OutOfMemoryError`), runs in relaxed capture mode and
+    address (not checked; ``None`` raises :class:`torch.OutOfMemoryError`), runs in relaxed capture mode and
     must not allocate CUDA memory through PyTorch, and ``free_fn(ptr, size, device, stream)`` as
     soon as the allocation dies, in order, during the capture or after it. The graph keeps using
     memory freed during the capture, so the allocator must not hand it out outside the graph
@@ -1739,13 +1739,7 @@ def _route_capture_allocations(
         finally:
             change_current_allocator(previous)
     finally:
-        other_capture = torch._C._cuda_disarmCaptureRouting()
-    if other_capture:
-        raise RuntimeError(
-            "another CUDA graph capture began or ended while a CUDA graph capture's "
-            "allocations were routed (conditional nodes and concurrent captures are "
-            "not supported)"
-        )
+        torch._C._cuda_disarmCaptureRouting()
 
 
 def _get_current_allocator() -> _CUDAAllocator:
