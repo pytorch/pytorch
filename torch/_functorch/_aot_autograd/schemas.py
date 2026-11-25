@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
-    from torch._subclasses import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
     from torch.types import IntLikeType
 
     from .descriptors import AOTInput, AOTOutput
@@ -1324,7 +1324,7 @@ class AOTState:
     # The fake tensor mode used during tracing.  This is useful for later
     # operations that need to create new fake tensors consistent with the
     # original trace.
-    fake_mode: FakeTensorMode
+    fake_mode: FakeTensorMode | CppFakeTensorMode
 
 
 FxValue = Tensor | int | SymInt | BackwardState | CustomClassBase
@@ -1584,7 +1584,7 @@ class JointWithDescriptors:
         self._aot_graph_capture.graph_module = value
 
     @property
-    def fake_mode(self) -> FakeTensorMode:
+    def fake_mode(self) -> FakeTensorMode | CppFakeTensorMode:
         return self._aot_state.fake_mode
 
     def cache_hash(self) -> str:

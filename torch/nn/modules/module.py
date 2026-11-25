@@ -7,7 +7,8 @@ import warnings
 import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, Optional, overload, Self, TypeVar, Union
+from typing import Any, Optional, overload, TypeVar, Union
+from typing_extensions import Self  # noqa: UP035
 
 import torch
 from torch import device, dtype, memory_format, Tensor
@@ -931,8 +932,9 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
-        # _apply is traced by dynamo at the bytecode level, and torch._subclasses
-        # is in dynamo's MOD_SKIPLIST, revisit later for c++
+        # Python FakeTensor needs its wrapper state preserved across conversion.
+        # Native fakes carry that state in TensorImpl and support the usual
+        # set_data path.
         from torch._subclasses.fake_tensor import FakeTensor
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
