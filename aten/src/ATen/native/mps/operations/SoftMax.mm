@@ -3,8 +3,8 @@
 #include <ATen/ceil_div.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/SoftMax.h>
-#include <c10/util/TypeCast.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/safe_conv.h>
 #include <bit>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -29,16 +29,16 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #endif
 
 static SoftmaxParams<uint32_t> narrow_params(const SoftmaxParams<uint64_t>& params) {
-  SoftmaxParams<uint32_t> result{.dim_size = c10::checked_convert<uint32_t>(params.dim_size, "uint32_t"),
-                                 .num_rows = c10::checked_convert<uint32_t>(params.num_rows, "uint32_t"),
-                                 .inner_size = c10::checked_convert<uint32_t>(params.inner_size, "uint32_t"),
-                                 .chunk_size = c10::checked_convert<uint32_t>(params.chunk_size, "uint32_t"),
-                                 .n_chunks = c10::checked_convert<uint32_t>(params.n_chunks, "uint32_t"),
+  SoftmaxParams<uint32_t> result{.dim_size = c10::safe_conv<uint32_t>(params.dim_size, "softmax dimension size"),
+                                 .num_rows = c10::safe_conv<uint32_t>(params.num_rows, "number of softmax rows"),
+                                 .inner_size = c10::safe_conv<uint32_t>(params.inner_size, "softmax inner size"),
+                                 .chunk_size = c10::safe_conv<uint32_t>(params.chunk_size, "softmax chunk size"),
+                                 .n_chunks = c10::safe_conv<uint32_t>(params.n_chunks, "number of softmax chunks"),
                                  .ndim = params.ndim,
                                  .dim = params.dim};
   for (const auto d : c10::irange(params.ndim)) {
-    result.sizes[d] = c10::checked_convert<uint32_t>(params.sizes[d], "uint32_t");
-    result.strides[d] = c10::checked_convert<uint32_t>(params.strides[d], "uint32_t");
+    result.sizes[d] = c10::safe_conv<uint32_t>(params.sizes[d], "softmax source size");
+    result.strides[d] = c10::safe_conv<uint32_t>(params.strides[d], "softmax source stride");
   }
   return result;
 }
@@ -113,6 +113,9 @@ static void softmax_mps_impl(const std::string& kernel,
       uint64_t(1), std::min(strided_target_groups / col_groups, dim_size / (strided_min_elems_per_thread * tg_y)));
   const auto strided_chunk_size = ceil_div(dim_size, strided_chunks);
   const bool use_strided_split = !use_row_kernel && !use_split && strided_chunks > 1;
+  // the serial kernel only implements the forward ops, which have no aux input
+  const bool use_serial =
+      !contiguous_rows && !aux && dim_size <= kSoftmaxSerialMaxDim && num_rows >= kSoftmaxSerialMinRows;
   SoftmaxParams<uint64_t> params{.dim_size = dim_size,
                                  .num_rows = num_rows,
                                  .inner_size = inner_size,
@@ -147,6 +150,10 @@ static void softmax_mps_impl(const std::string& kernel,
         const auto group = MTLSizeMake(tg_x, tg_y, 1);
         run_softmax(stream, kernel + "_strided_partial", use_u32, grid, group, params, self_, aux, partials);
         run_softmax(stream, kernel + "_strided_finalize", use_u32, grid, group, params, self_, aux, output, partials);
+      } else if (use_serial) {
+        const auto grid = MTLSizeMake(ceil_div(num_rows, uint64_t(kSoftmaxThreads)), 1, 1);
+        const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
+        run_softmax(stream, kernel + "_serial", use_u32, grid, group, params, self_, aux, output);
       } else {
         const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, 1);
         const auto group = MTLSizeMake(tg_x, tg_y, 1);

@@ -6,7 +6,8 @@ assignment, or matching receives.
 
 An endpoint may connect to multiple peers; remote descriptors identify their
 peer. Exchange `bind()` bytes and remote memory descriptors through a trusted
-application control plane. Exchange descriptors only with authorized peers. A write copies from a local view to the remote base; a read
+application control plane, or connect peers by rank through a trusted Store with
+`Transport.connect_rank`. Exchange descriptors only with authorized peers. A write copies from a local view to the remote base; a read
 copies from the remote base to a writable local view. Offsets and lengths are bytes;
 shape and dtype agreement is the application's responsibility.
 
@@ -30,7 +31,6 @@ types are rejected. Tensor contents and native handles are never serialized.
 
 ```{eval-rst}
 .. autofunction:: torch.distributed._transport.new_transport
-.. autofunction:: torch.distributed._transport.new_transport_rank
 .. autoclass:: torch.distributed._transport.Transport
    :members:
 .. autoclass:: torch.distributed._transport.Memory

@@ -1126,6 +1126,7 @@ class _DeserializeGraphMixin:
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestDeserialize(_DeserializeGraphMixin, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1165,6 +1166,79 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
         self.assertTrue(is_fake_tensor(loaded_constant))
         self.assertFalse(is_concrete_int(loaded_constant.shape[0]))
         self.assertEqual(loaded_constant.shape[1], 3)
+
+    def test_custom_op_tensor_and_bool_outputs(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::with_flag",
+                "(Tensor x) -> (Tensor, bool)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::with_flag", "cpu", lib=lib)
+            @torch.library.register_fake("mylib::with_flag", lib=lib)
+            def with_flag_impl(x):
+                return x * 2, True
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.with_flag(x)[0] + 1
+
+            self.check_graph(M(), (torch.randn(3),))
+            # check_graph checks only the tensor items of a tuple val, so check
+            # the bool here.
+            loaded = deserialize(serialize(export(M(), (torch.randn(3),))))
+            (node,) = loaded.graph.find_nodes(
+                op="call_function", target=torch.ops.mylib.with_flag.default
+            )
+            self.assertIs(node.meta["val"][1], True)
+
+    @parametrize("out_type", ["SymInt", "SymBool", "Scalar"])
+    def test_custom_op_tensor_and_symbolic_outputs(self, out_type):
+        result_cls = {
+            "SymInt": torch.SymInt,
+            "SymBool": torch.SymBool,
+            "Scalar": torch.SymFloat,
+        }[out_type]
+
+        def with_size_impl(x):
+            # A new expression, so the op result is not replaced by x.size(0).
+            n = x.shape[0] + 1
+            return x * 2, {"SymInt": n, "SymBool": n > 3, "Scalar": n / 2}[out_type]
+
+        name = f"with_{out_type.lower()}"
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                f"mylib::{name}",
+                f"(Tensor x) -> (Tensor, {out_type})",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+            torch.library.impl(f"mylib::{name}", "cpu", with_size_impl, lib=lib)
+            torch.library.register_fake(f"mylib::{name}", with_size_impl, lib=lib)
+            op = getattr(torch.ops.mylib, name)
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    y, s = op(x)
+                    return y + 1, s
+
+            dynamic_shapes = ({0: Dim("n")},)
+            self.check_graph(M(), (torch.randn(4),), dynamic_shapes=dynamic_shapes)
+            # check_graph runs only the example size, so also check that the
+            # loaded op keeps a symbolic result and compare at other sizes.
+            ep = export(M(), (torch.randn(4),), dynamic_shapes=dynamic_shapes)
+            buffer = io.BytesIO()
+            save(ep, buffer)
+            buffer.seek(0)
+            loaded_ep = load(buffer)
+            (node,) = loaded_ep.graph.find_nodes(op="call_function", target=op.default)
+            self.assertIsInstance(node.meta["val"][1], result_cls)
+            loaded = loaded_ep.module()
+            for n in (2, 3):
+                x = torch.randn(n)
+                self.assertEqual(loaded(x), M()(x))
 
     def test_optional_tuple(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -1472,6 +1546,21 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
 
         f = Module()
         self.check_graph(f, (torch.ones(1), torch.ones(3)))
+
+    def test_sym_bool_output_spec(self):
+        # A SymBool returned as a graph output is recorded as a SymBoolArgument in
+        # the output spec, which exercises (de)serialize_argument_spec. Before the
+        # SymBoolArgument branch was added there, this raised AssertionError("TODO").
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x + 1, x.shape[0] > 4
+
+        dim0 = torch.export.Dim("dim0")
+        self.check_graph(
+            Module(),
+            (torch.ones(6),),
+            dynamic_shapes={"x": {0: dim0}},
+        )
 
     def test_sym_bool_torch_check_equal(self):
         class Module(torch.nn.Module):
@@ -2021,6 +2110,32 @@ class TestSchemaVersioning(TestCase):
 unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kwargs)
 
 
+class _EmptyAutocastInNoGrad(torch.nn.Module):
+    def forward(self, x):
+        with torch.no_grad():
+            y = x * 2
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                pass
+        return y
+
+
+class _StepCounter(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("steps", torch.zeros(()))
+
+    def forward(self, x):
+        with torch.no_grad():
+            self.steps.add_(1)
+        return x * 2
+
+
+class _EmptyCond(torch.nn.Module):
+    def forward(self, x):
+        torch.cond(x.sum() > 0, lambda x: (), lambda x: (), (x,))
+        return x * 2
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -2048,6 +2163,97 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
+
+    def test_load_namedtuple_output_whose_class_changed(self):
+        class Out(NamedTuple):
+            loss: torch.Tensor
+            logits: torch.Tensor
+
+        @dataclass
+        class DataOut:
+            loss: torch.Tensor
+            logits: torch.Tensor
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return Out(x.sum(), x * 2)
+
+        name = "test.export.test_serialize.test_load_namedtuple_output.Out"
+        pytree._register_namedtuple(Out, serialized_type_name=name)
+        artifact = serialize(export(M(), (torch.ones(2),)))
+        pytree._deregister_pytree_node(Out)
+        self.addCleanup(pytree.treespec_loads.cache_clear)
+
+        torch.export.register_dataclass(DataOut, serialized_type_name=name)
+        self.addCleanup(pytree._deregister_pytree_node, DataOut)
+        with self.assertRaisesRegex(TypeError, "not a namedtuple class"):
+            deserialize(artifact)
+
+        # The recovery the message names.
+        pytree._register_namedtuple(Out, serialized_type_name=name)
+        self.addCleanup(pytree._deregister_pytree_node, Out)
+        self.assertIsInstance(deserialize(artifact).module()(torch.ones(2)), Out)
+
+    @parametrize(
+        "module_cls",
+        [_EmptyAutocastInNoGrad, _StepCounter, _EmptyCond],
+        name_fn=lambda cls: cls.__name__.lstrip("_"),
+    )
+    def test_save_load_region_without_outputs(self, module_cls):
+        def has_region_without_outputs(ep):
+            return any(
+                isinstance(node.target, torch._ops.HigherOrderOperator)
+                and node.meta.get("val") == ()
+                for gm in ep.graph_module.modules()
+                if isinstance(gm, torch.fx.GraphModule)
+                for node in gm.graph.nodes
+            )
+
+        m = module_cls()
+        x = torch.randn(4, 4)
+        ep = export(m, (x,))
+        self.assertTrue(has_region_without_outputs(ep))
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertTrue(has_region_without_outputs(loaded_ep))
+        loaded = loaded_ep.module()
+        self.assertEqual(loaded(x), m(x))
+        self.assertEqual(loaded.state_dict(), m.state_dict())
+        save(loaded_ep, io.BytesIO())
+
+    def test_save_load_symbolic_bool_results_of_regions(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    alone = x.shape[0] > 2
+                with torch.no_grad():
+                    y, with_tensor = x + 1, x.shape[0] > 3
+                return y, alone, with_tensor
+
+        def regions(ep):
+            return [
+                [isinstance(v, torch.SymBool) for v in node.meta["val"]]
+                for node in ep.graph.nodes
+                if isinstance(node.target, torch._ops.HigherOrderOperator)
+            ]
+
+        ep = export(M(), (torch.randn(4),), dynamic_shapes=({0: Dim("n")},))
+        # Load reads a bool alone and a bool next to a tensor differently, so
+        # export must keep the 2 regions apart.
+        self.assertEqual(regions(ep), [[True], [False, True]])
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(regions(loaded_ep), [[True], [False, True]])
+        loaded = loaded_ep.module()
+        # At size 3 the 2 bools differ, so a swap is caught.
+        for n in (2, 3, 4):
+            x = torch.randn(n)
+            self.assertEqual(loaded(x), M()(x))
+        save(loaded_ep, io.BytesIO())
 
     def test_deserialize_torch_artifact_dict(self):
         data = {"key": torch.tensor([1, 2, 3])}
@@ -2345,7 +2551,11 @@ class TestSaveLoad(TestCase):
                         )
 
 
+instantiate_parametrized_tests(TestSaveLoad)
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestSerializeCustomClass(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -2955,6 +3165,7 @@ class TestSerializeAccelerator(TestCase):
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestDeserializeAccelerator(_DeserializeGraphMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 

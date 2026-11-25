@@ -119,6 +119,35 @@ function pip_uninstall() {
   pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
 }
 
+# Create a venv at $1 layered on top of the CI image's Python environment, so
+# anything the image already has satisfies requirements instead of being
+# re-resolved from the index at test time, while packages installed into the
+# venv shadow the image's. `venv --system-site-packages` doesn't do this: the
+# image Python is itself a venv, and that flag exposes the base interpreter.
+# The venv gets no pip or setuptools of its own, so the image's are used. Its
+# `pip`, `pip3` and `pip3.<minor>` run `python -m pip` with the venv's
+# interpreter, so they install into the venv; without them, `pip` would be the
+# image's script and install into the image.
+function create_venv_over_image() {
+  local venv_dir=$1
+  local add_image_sites
+  add_image_sites=$(python -c 'import sysconfig; print("; ".join(f"site.addsitedir({p!r})" for p in dict.fromkeys(sysconfig.get_path(k) for k in ("purelib", "platlib"))))')
+  python -m venv --without-pip "${venv_dir}"
+  local venv_python
+  venv_python="$(cd "${venv_dir}" && pwd)/bin/python"
+  echo "import site; ${add_image_sites}" > "$("${venv_python}" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/_ci_image.pth"
+  for name in pip pip3 "pip3.$("${venv_python}" -c 'import sys; print(sys.version_info.minor)')"; do
+    printf '#!/bin/sh\nexec "%s" -m pip "$@"\n' "${venv_python}" > "${venv_dir}/bin/${name}"
+    chmod +x "${venv_dir}/bin/${name}"
+  done
+}
+
+# Fail unless `import torch` in the active venv finds the venv's own torch rather
+# than the image's, which create_venv_over_image leaves visible behind it.
+function assert_venv_torch() {
+  (cd / && python -c 'import os, sys, torch; real = os.path.realpath; sys.exit(0 if real(torch.__file__).startswith(real(os.environ["VIRTUAL_ENV"]) + os.sep) else f"torch {torch.__version__} imported from {torch.__file__}, not from the venv")')
+}
+
 function get_pkg_versions() {
   python3 -c "
 import importlib.metadata as metadata
@@ -348,7 +377,7 @@ function install_cutlass_dsl() {
   # Pin to a version accepted by torch._native's cutedsl version gate
   # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.12
+  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.12 'cuda-bindings>=13.2,<14'
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
