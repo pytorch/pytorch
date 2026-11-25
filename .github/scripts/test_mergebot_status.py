@@ -177,9 +177,16 @@ def workflow_steps(workflow: str) -> list[dict[str, Any]]:
 
 
 COMMENT_ID = "${{ github.event.client_payload.comment_id }}"
-CANCELED = "${{ cancelled() && steps.checkout.outcome == 'success' }}"
+CANCELED = "${{ cancelled() && steps.stage.outcome == 'success' }}"
 SETUP_STEPS = [
     {"id": "checkout", "uses": "actions/checkout"},
+    {
+        "id": "stage",
+        "run": [
+            'mkdir -p "${RUNNER_TEMP}/mergebot/.github"',
+            'cp -a .github/scripts "${RUNNER_TEMP}/mergebot/.github/scripts"',
+        ],
+    },
     {"uses": "actions/setup-python"},
     {"run": ["pip install pyyaml==6.0.2"]},
     {
@@ -223,8 +230,8 @@ class TestMergeWorkflowSteps(TestCase):
                 "run": [
                     "set -x",
                     'if [ -n "${REBASE}" ]; then',
-                    'if ! python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"; then',
-                    'python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"',
+                    'if ! python3 "${RUNNER_TEMP}/mergebot/.github/scripts/tryrebase.py" "${PR_NUM}" --branch "${REBASE}"; then',
+                    'python3 "${RUNNER_TEMP}/mergebot/.github/scripts/comment_on_pr.py" "${PR_NUM}" "merge"',
                     "exit 0",
                     "fi",
                     "git checkout main",
@@ -236,11 +243,11 @@ class TestMergeWorkflowSteps(TestCase):
                     "exit 1",
                     "fi",
                     'if [ -n "${FORCE}" ]; then',
-                    'python3 .github/scripts/trymerge.py --force --comment-id "${COMMENT_ID}" "${PR_NUM}"',
+                    'python3 "${RUNNER_TEMP}/mergebot/.github/scripts/trymerge.py" --force --comment-id "${COMMENT_ID}" "${PR_NUM}"',
                     'elif [ -n "${IGNORE_CURRENT}" ]; then',
-                    'python3 .github/scripts/trymerge.py --ignore-current --comment-id "${COMMENT_ID}" "${PR_NUM}"',
+                    'python3 "${RUNNER_TEMP}/mergebot/.github/scripts/trymerge.py" --ignore-current --comment-id "${COMMENT_ID}" "${PR_NUM}"',
                     "else",
-                    'python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"',
+                    'python3 "${RUNNER_TEMP}/mergebot/.github/scripts/trymerge.py" --comment-id "${COMMENT_ID}" "${PR_NUM}"',
                     "fi",
                 ],
             },
@@ -250,7 +257,7 @@ class TestMergeWorkflowSteps(TestCase):
                 "COMMENT_ID": COMMENT_ID,
                 "run": [
                     "set -x",
-                    'python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"',
+                    'python3 "${RUNNER_TEMP}/mergebot/.github/scripts/comment_on_pr.py" "${PR_NUM}" "merge"',
                 ],
             },
             {
@@ -271,15 +278,15 @@ class TestMergeWorkflowSteps(TestCase):
                     "set -ex",
                     'if [ -n "${COMMENT_ID}" ]; then',
                     'if [ -n "${REASON}" ]; then',
-                    'python3 .github/scripts/trymerge.py --revert --comment-id "${COMMENT_ID}" --reason "${REASON}" "${PR_NUM}"',
+                    'python3 "${RUNNER_TEMP}/mergebot/.github/scripts/trymerge.py" --revert --comment-id "${COMMENT_ID}" --reason "${REASON}" "${PR_NUM}"',
                     "else",
-                    'python3 .github/scripts/trymerge.py --revert --comment-id "${COMMENT_ID}" "${PR_NUM}"',
+                    'python3 "${RUNNER_TEMP}/mergebot/.github/scripts/trymerge.py" --revert --comment-id "${COMMENT_ID}" "${PR_NUM}"',
                     "fi",
                     "else",
                     'if [ -n "${REASON}" ]; then',
-                    'python3 .github/scripts/trymerge.py --revert --reason "${REASON}" "${PR_NUM}"',
+                    'python3 "${RUNNER_TEMP}/mergebot/.github/scripts/trymerge.py" --revert --reason "${REASON}" "${PR_NUM}"',
                     "else",
-                    'python3 .github/scripts/trymerge.py --revert "${PR_NUM}"',
+                    'python3 "${RUNNER_TEMP}/mergebot/.github/scripts/trymerge.py" --revert "${PR_NUM}"',
                     "fi",
                     "fi",
                 ],
@@ -290,7 +297,7 @@ class TestMergeWorkflowSteps(TestCase):
                 "COMMENT_ID": COMMENT_ID,
                 "run": [
                     "set -ex",
-                    'python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "revert"',
+                    'python3 "${RUNNER_TEMP}/mergebot/.github/scripts/comment_on_pr.py" "${PR_NUM}" "revert"',
                 ],
             },
         ],
@@ -310,9 +317,10 @@ class TestMergeWorkflowSteps(TestCase):
                 ],
             },
             {
+                "if": "startsWith(github.base_ref, 'gh/') && endsWith(github.base_ref, '/base')",
                 "shell": "bash",
                 "run": [
-                    'BRANCH="${{ github.base_ref }}"',
+                    'BRANCH="${BASE_REF}"',
                     'echo "$BRANCH"',
                     'BRANCH="${BRANCH%/base}/orig"',
                     'echo "$BRANCH"',
@@ -655,7 +663,6 @@ class TestEveryCommentDeclaresItsStatus(TestCase):
         # Refusals, untagged only in a --check-mergeability run
         ("trymerge", "main", 'f"Can\'t merge closed PR #{args.pr_num}"'),
         ("trymerge", "main", "'Cross-repo ghstack merges are not supported'"),
-        ("trymerge", "main", "refusal"),
     ]
 
     def test_untagged_comments_are_the_reviewed_notices(self) -> None:
