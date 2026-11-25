@@ -864,32 +864,13 @@ unsafe impl Sync for Reads {}
 unsafe fn sweep(e: &mut Entries) {
     for _ in 0..8 {
         let mut mine: HashMap<usize, isize> = HashMap::new();
-        let mut hold = |o: &Py<PyAny>| *mine.entry(o.as_ptr() as usize).or_insert(0) += 1;
-        for t in &e.typed {
-            hold(&t.obj);
-            hold(&t.class);
-        }
-        for c in &e.classes {
-            hold(&c.class);
-            c.names.iter().for_each(|(n, had)| {
-                hold(n);
-                had.iter().for_each(&mut hold);
-            });
-        }
-        for r in &e.reads {
-            hold(&r.obj);
-            r.name.iter().for_each(&mut hold);
-            r.value.iter().for_each(&mut hold);
-        }
-        for g in &e.groups {
-            hold(&g.holder);
-            for i in &g.items {
-                hold(&i.key);
-                i.value.iter().for_each(&mut hold);
-            }
-            g.whole.iter().flat_map(|w| &w.items).for_each(&mut hold);
-        }
-        let gone = |o: &Py<PyAny>| ffi::Py_REFCNT(o.as_ptr()) == mine[&(o.as_ptr() as usize)];
+        held(e, &mut |o: &Py<PyAny>| *mine.entry(o.as_ptr() as usize).or_insert(0) += 1);
+        // Judged before any entry is dropped: dropping one lets go of what
+        // it holds, and the counts above would no longer be the entries'
+        // (an object with as many other owners as entries dropped before it
+        // would pass for gone, and the checks on it would be lost).
+        let gone: HashSet<usize> = mine.iter().filter(|(o, n)| ffi::Py_REFCNT(**o as *mut PyObject) == **n).map(|(o, _)| *o).collect();
+        let gone = |o: &Py<PyAny>| gone.contains(&(o.as_ptr() as usize));
         let before = (e.typed.len(), e.reads.len(), e.groups.len());
         e.typed.retain(|t| !gone(&t.obj));
         e.reads.retain(|r| !gone(&r.obj));
@@ -897,6 +878,34 @@ unsafe fn sweep(e: &mut Entries) {
         if before == (e.typed.len(), e.reads.len(), e.groups.len()) {
             break;
         }
+    }
+}
+
+// Every reference the entries hold, reported to `hold`.
+fn held(e: &Entries, hold: &mut impl FnMut(&Py<PyAny>)) {
+    for t in &e.typed {
+        hold(&t.obj);
+        hold(&t.class);
+    }
+    for c in &e.classes {
+        hold(&c.class);
+        c.names.iter().for_each(|(n, had)| {
+            hold(n);
+            had.iter().for_each(&mut *hold);
+        });
+    }
+    for r in &e.reads {
+        hold(&r.obj);
+        r.name.iter().for_each(&mut *hold);
+        r.value.iter().for_each(&mut *hold);
+    }
+    for g in &e.groups {
+        hold(&g.holder);
+        for i in &g.items {
+            hold(&i.key);
+            i.value.iter().for_each(&mut *hold);
+        }
+        g.whole.iter().flat_map(|w| &w.items).for_each(&mut *hold);
     }
 }
 

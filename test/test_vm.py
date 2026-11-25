@@ -697,8 +697,25 @@ class ReadsNet(torch.nn.Module):
         return y
 
 
+class ReadsScaled(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.scale = 2.0
+
+    def forward(self, y):
+        return torch.relu(self.lin(y)) * self.scale
+
+
 READS_CONFIG = ReadsConfig()
 READS_SLOTTED = ReadsSlotted()
+READS_SCALED = ReadsScaled()
+
+
+def reads_calls_scaled(x):
+    """One region that holds the call of a module a global names."""
+    y = READS_SCALED(x)
+    return (y * 2).sin() + y.cos() - y.tanh()
 
 
 def reads_through(inner):
@@ -889,6 +906,20 @@ class TestVmReads(TestCase):
             device,
             lambda x: net(x.sin() + 1).cos().exp(),
             lambda second: setattr(net, "act", other if second else first),
+        )
+
+    @isolated
+    def test_plain_attribute_of_a_module_the_region_calls(self, device):
+        # The module's call is inside the region, so the trace also read the
+        # module's __dict__ through objects that are gone when it ends: the
+        # checks on the __dict__ itself are not dropped along with those.
+        global READS_SCALED
+        torch.manual_seed(0)
+        READS_SCALED = ReadsScaled().to(device)
+        self.alternating(
+            device,
+            reads_calls_scaled,
+            lambda second: setattr(READS_SCALED, "scale", 5.0 if second else 2.0),
         )
 
     @isolated
