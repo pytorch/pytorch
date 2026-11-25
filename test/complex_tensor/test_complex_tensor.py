@@ -297,6 +297,75 @@ class TestComplexTensorGeneric(TestCase):
         self.assertEqual(xc.re.shape, (2,))
         self.assertEqual(xc.im.shape, (2,))
 
+    @parametrize(
+        "divisor",
+        [
+            "complex_tensor",
+            "complex_tensor_broadcast",
+            "real_tensor",
+            "real_tensor_broadcast",
+            "real_scalar",
+            "complex_scalar",
+        ],
+    )
+    def test_div_inplace(self, divisor: str):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        divisors = {
+            "complex_tensor": torch.randn(2, 3, dtype=torch.complex128),
+            "complex_tensor_broadcast": torch.randn(1, dtype=torch.complex128),
+            "real_tensor": torch.randn(2, 3, dtype=torch.float64),
+            "real_tensor_broadcast": torch.randn(1, dtype=torch.float64),
+            "real_scalar": 2.0,
+            "complex_scalar": 2.0 - 1.0j,
+        }
+        rhs = divisors[divisor]
+        xrhs = (
+            ComplexTensor.from_interleaved(rhs)
+            if isinstance(rhs, torch.Tensor) and rhs.dtype.is_complex
+            else rhs
+        )
+        a = torch.randn(2, 3, dtype=torch.complex128)
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.div_(xrhs)
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), a / rhs)
+
+    @parametrize("op", ["add_", "sub_", "mul_", "div_"])
+    def test_binary_inplace_real_self_raises(self, op: str):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(3, dtype=torch.float64)
+        b = torch.randn(3, dtype=torch.complex128)
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            getattr(a.clone(), op)(b)
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            getattr(a.clone(), op)(ComplexTensor.from_interleaved(b))
+
+    def test_fill_inplace_real_self(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.zeros(3, dtype=torch.float64)
+        value = ComplexTensor.from_interleaved(torch.tensor(1 + 2j))
+        with self.assertWarnsRegex(UserWarning, "discards the imaginary part"):
+            result = a.fill_(value)
+
+        self.assertIs(result, a)
+        self.assertEqual(a, torch.ones(3, dtype=torch.float64))
+
+    @parametrize("shape", [(3, 3), (3, 5), (2, 4, 3)])
+    @parametrize("diagonal", [-1, 0, 1])
+    def test_tril_inplace(self, shape: tuple[int, ...], diagonal: int):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(shape, dtype=torch.complex128)
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.tril_(diagonal)
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), a.tril(diagonal))
+
     def test_out_overload_writes_destination(self):
         from torch._subclasses.complex_tensor import ComplexTensor
 
@@ -467,76 +536,19 @@ class TestComplexTensorGeneric(TestCase):
                 self.assertEqual(l_out.as_interleaved(), expected.L)
                 self.assertEqual(u_out.as_interleaved(), expected.U)
 
-        # Like native, a real `P` is rejected.
+        # Like native, a real `P` is rejected. The plain-tensor call is the native
+        # reference for the `ComplexTensor` one.
         p_real = torch.zeros(3, 3, dtype=torch.float64)
         with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.lu_unpack(lu_data, pivots, out=(p_real, *expected[1:]))
         with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.lu_unpack(x, pivots, out=(p_real, complex_dest(), complex_dest()))
 
-    @parametrize(
-        "divisor",
-        [
-            "complex_tensor",
-            "complex_tensor_broadcast",
-            "real_tensor",
-            "real_tensor_broadcast",
-            "real_scalar",
-            "complex_scalar",
-        ],
-    )
-    def test_div_inplace(self, divisor: str):
-        from torch._subclasses.complex_tensor import ComplexTensor
-
-        divisors = {
-            "complex_tensor": torch.randn(2, 3, dtype=torch.complex128),
-            "complex_tensor_broadcast": torch.randn(1, dtype=torch.complex128),
-            "real_tensor": torch.randn(2, 3, dtype=torch.float64),
-            "real_tensor_broadcast": torch.randn(1, dtype=torch.float64),
-            "real_scalar": 2.0,
-            "complex_scalar": 2.0 - 1.0j,
-        }
-        rhs = divisors[divisor]
-        xrhs = (
-            ComplexTensor.from_interleaved(rhs)
-            if isinstance(rhs, torch.Tensor) and rhs.dtype.is_complex
-            else rhs
-        )
-        a = torch.randn(2, 3, dtype=torch.complex128)
-        xa = ComplexTensor.from_interleaved(a)
-        result = xa.div_(xrhs)
-
-        self.assertIs(result, xa)
-        self.assertEqual(xa.as_interleaved(), a / rhs)
-
-    @parametrize("shape", [(3, 3), (3, 5), (2, 4, 3)])
-    @parametrize("diagonal", [-1, 0, 1])
-    def test_tril_inplace(self, shape: tuple[int, ...], diagonal: int):
-        from torch._subclasses.complex_tensor import ComplexTensor
-
-        a = torch.randn(shape, dtype=torch.complex128)
-        xa = ComplexTensor.from_interleaved(a)
-        result = xa.tril_(diagonal)
-
-        self.assertIs(result, xa)
-        self.assertEqual(xa.as_interleaved(), a.tril(diagonal))
-
-    # These ops are force-tested, so `TestComplexBwdGradients` doesn't cover them. Their
-    # backward formulas need `div_` (`eig`), `tril_` (`householder_product`) and
-    # `lu_unpack` (`lu_factor_ex`, `lu_solve`).
-    @parametrize("op", ["eig", "householder_product", "lu_factor_ex", "lu_solve"])
+    # These ops are force-tested, so `TestComplexBwdGradients` doesn't cover them.
+    # Their backward formulas need `lu_unpack`.
+    @parametrize("op", ["lu_factor_ex", "lu_solve"])
     def test_linalg_backward_matches_native(self, op: str):
         from torch._subclasses.complex_tensor import ComplexTensor
-
-        def eig(a: torch.Tensor) -> tuple[torch.Tensor, ...]:
-            # Eigenvectors are only defined up to a phase, so use their magnitudes.
-            eigenvalues, eigenvectors = torch.linalg.eig(a)
-            return eigenvalues, eigenvectors.abs()
-
-        def householder_product(
-            a: torch.Tensor, tau: torch.Tensor
-        ) -> tuple[torch.Tensor, ...]:
-            return (torch.linalg.householder_product(a, tau),)
 
         def lu_factor_ex(a: torch.Tensor) -> tuple[torch.Tensor, ...]:
             return (torch.linalg.lu_factor_ex(a).LU,)
@@ -546,8 +558,6 @@ class TestComplexTensorGeneric(TestCase):
             return (torch.linalg.lu_solve(lu, pivots, b),)
 
         fn, shapes = {
-            "eig": (eig, [(3, 3)]),
-            "householder_product": (householder_product, [(2, 4, 3), (2, 2)]),
             "lu_factor_ex": (lu_factor_ex, [(3, 3)]),
             "lu_solve": (lu_solve, [(3, 3), (3, 2)]),
         }[op]
@@ -563,6 +573,33 @@ class TestComplexTensorGeneric(TestCase):
         )
         for a, e in zip(actual, expected, strict=True):
             self.assertEqual(a, e)
+
+    # Their backward formulas write in-place through views, which don't alias for
+    # `ComplexTensor`, so only the forward is supported.
+    @parametrize("op", ["eig", "eigh", "householder_product"])
+    def test_linalg_backward_raises(self, op: str):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        fn, shapes = {
+            "eig": (torch.linalg.eig, [(3, 3)]),
+            "eigh": (torch.linalg.eigh, [(3, 3)]),
+            "householder_product": (torch.linalg.householder_product, [(4, 3), (2,)]),
+        }[op]
+        inputs = [torch.randn(s, dtype=torch.complex128) for s in shapes]
+        if op == "eigh":
+            inputs[0] = inputs[0] + inputs[0].mH
+
+        expected = fn(*inputs)
+        actual = fn(*(ComplexTensor.from_interleaved(t) for t in inputs))
+        if op == "householder_product":
+            self.assertEqual(actual.as_interleaved(), expected)
+        else:
+            # Eigenvectors are only defined up to a phase.
+            self.assertEqual(actual[0], expected[0])
+            self.assertEqual(actual[1].abs(), expected[1].abs())
+
+        with self.assertRaisesRegex(NotImplementedError, "don't alias"):
+            fn(*(ComplexTensor.from_interleaved(t).requires_grad_() for t in inputs))
 
     @parametrize("a_interleaved", [False, True])
     def test_interleaved_householder_product_backward(self, a_interleaved: bool):
@@ -585,12 +622,39 @@ class TestComplexTensorGeneric(TestCase):
             else ComplexTensor.from_interleaved(a)
         ).requires_grad_()
         xtau = InterleavedComplexTensor(tau).requires_grad_()
+        if not a_interleaved:
+            with self.assertRaisesRegex(NotImplementedError, "don't alias"):
+                torch.linalg.householder_product(xa, xtau)
+            return
+
         out = torch.linalg.householder_product(xa, xtau)
         actual = torch.autograd.grad(out, (xa, xtau), InterleavedComplexTensor(grad))
 
         self.assertIsInstance(actual[1], InterleavedComplexTensor)
         for x, e in zip(actual, expected, strict=True):
             self.assertEqual(x.as_interleaved(), e)
+
+    @parametrize("op", ["eig", "eigh"])
+    @parametrize("eigenvalues_in_loss", [False, True])
+    def test_interleaved_eig_backward(self, op: str, eigenvalues_in_loss: bool):
+        from torch._subclasses.complex_tensor import InterleavedComplexTensor
+
+        fn = {"eig": torch.linalg.eig, "eigh": torch.linalg.eigh}[op]
+        a = torch.randn(3, 3, dtype=torch.complex128)
+        if op == "eigh":
+            a = a + a.mH
+
+        def grad(x: torch.Tensor) -> torch.Tensor:
+            eigenvalues, eigenvectors = fn(x)
+            # Eigenvectors are only defined up to a phase.
+            loss = eigenvectors.abs().sum(-2).sum()
+            if eigenvalues_in_loss:
+                loss = loss + eigenvalues.abs().sum()
+            return torch.autograd.grad(loss, x)[0]
+
+        expected = grad(a.clone().requires_grad_())
+        actual = grad(InterleavedComplexTensor(a).requires_grad_())
+        self.assertEqual(actual.as_interleaved(), expected)
 
     def test_interleaved_views_input(self):
         from torch._subclasses.complex_tensor import InterleavedComplexTensor
