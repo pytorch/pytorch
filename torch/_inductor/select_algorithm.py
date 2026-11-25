@@ -44,7 +44,7 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils._sympy.functions import CeilDiv, FloorDiv, Max, Min
+from ..utils._sympy.functions import CeilDiv, FloorDiv, Max, Min, ModularIndexing
 from ..utils._sympy.symbol import symbol_is_type, SymT
 from . import config, ir
 from .autotune_process import (
@@ -868,6 +868,21 @@ class TritonTemplateKernel(TritonKernel):
         # their TMA store. See _tile_tma_store.
         self._tile_tma_store_ctx: (
             tuple[list[sympy.Symbol], list[sympy.Expr], tuple[int, int]] | None
+        ) = None
+        # In a row reduction pass with tma_load_epilogue_inputs: the tile's
+        # index symbols, origin in the [B * M, N] view of the output, origin
+        # within a batch (None unless batched), rows per batch and tile shape.
+        # Unlike stores, loads also cover batched and partial tiles, as rows a
+        # tile doesn't own are masked out. See _tile_tma_load.
+        self._tile_tma_load_ctx: (
+            tuple[
+                list[sympy.Symbol],
+                tuple[sympy.Expr, sympy.Expr],
+                tuple[sympy.Expr, sympy.Expr] | None,
+                int | None,
+                tuple[int, int],
+            ]
+            | None
         ) = None
         # Epilogue nodes codegen'd after the kernel call instead of fused into it.
         self._unfused_epilogues: list[Any] = []
@@ -2658,8 +2673,8 @@ class TritonTemplateKernel(TritonKernel):
         full-tile outputs. Returns None to fall back to tl.load."""
         if name not in self.tma_load_epilogue_inputs:
             return None
-        access = self._tile_tma_descriptor(name, index, self.args.input(name))
-        ctx = self._tile_tma_store_ctx
+        access = self._tile_tma_load_descriptor(name, index, self.args.input(name))
+        ctx = self._tile_tma_load_ctx
         if access is None or ctx is None:
             return None
         desc, offsets = access
@@ -2669,7 +2684,69 @@ class TritonTemplateKernel(TritonKernel):
             and config.triton.codegen_upcast_to_fp32
         ):
             line, dtype = f"{line}.to(tl.float32)", torch.float32
-        return self.cse.generate(self.loads, line, dtype=dtype, shape=ctx[2])
+        return self.cse.generate(self.loads, line, dtype=dtype, shape=ctx[4])
+
+    def _tile_tma_load_descriptor(
+        self, name: str, index: sympy.Expr, var: str
+    ) -> tuple[str, str] | None:
+        """The rank-2 tensor descriptor of input name (kernel arg var) over the
+        row pass's tile, and its offsets. An input the size of the output is
+        read as its [B * M, N] view at the tile's flat origin: rows past a
+        batch's M read the next batch's, or TMA's zeros past the end, which the
+        row pass masks out. A row-major [M, N] input broadcast over the batches
+        is read at the tile's origin within its batch. None if index is
+        neither."""
+        ctx = self._tile_tma_load_ctx
+        if ctx is None:
+            return None
+        (x, r), flat, within, rows_per_batch, (rows, cols) = ctx
+        layout = V.graph.get_buffer(name).get_layout()
+        tile_index = index.xreplace(
+            {s: e.expr for s, e in self.range_tree_nodes.items()}
+        )
+        shape = [sympy_product(layout.size[:-1]), layout.size[-1]]
+        strides = [layout.stride[-2], layout.stride[-1]]
+        # A [B, M, N] input indexed by batch and row within it, e.g.
+        # 12288 * (x // 96) + 128 * ModularIndexing(x, 1, 96), is row-major in x.
+        flat_index = sympy.expand(
+            tile_index.replace(
+                lambda e: isinstance(e, ModularIndexing) and e.args[1] == 1,
+                lambda e: e.args[0] - e.args[2] * FloorDiv(e.args[0], e.args[2]),
+            )
+        )
+        if flat_index == sympy.expand(strides[0] * x + r):
+            origin = flat
+        elif (
+            within is not None
+            and len(layout.size) == 2
+            and V.graph.sizevars.statically_known_equals(layout.size[0], rows_per_batch)
+            and tile_index == strides[0] * ModularIndexing(x, 1, rows_per_batch) + r
+        ):
+            origin = within
+        else:
+            return None
+        if not all(self._tma_dim_fits_int32(name, size) for size in shape):
+            return None
+        offsets = ", ".join(
+            texpr(o) if self.index_dtype == "tl.int32" else f"({texpr(o)}).to(tl.int32)"
+            for o in origin
+        )
+        # Keyed apart from a template descriptor of the same arg, e.g. rank 3.
+        key = f"{var}:tile"
+        desc = self.prologue_cache.get(key)
+        if desc is None:
+            desc = f"tma_descriptor{next(self.block_ptr_id)}"
+            self.prologue.writeline(
+                DeferredLine(
+                    name,
+                    f"{desc} = tl.make_tensor_descriptor({var}, "
+                    f"shape={self.index_to_str(shape)}, strides={strides}, "
+                    f"block_shape=[{rows}, {cols}])",
+                )
+            )
+            self.prologue_cache[key] = desc
+        self._device_tma_buffers.add(name)
+        return desc, offsets
 
     def _tile_tma_descriptor(
         self, name: str, index: sympy.Expr, var: str
@@ -2942,7 +3019,7 @@ class TritonTemplateKernel(TritonKernel):
         epilogue's own, that a TMA load can read whole, with the bytes of their
         staged tile. Smaller inputs, e.g. a norm weight, keep tl.load."""
         staged = self._staged_tile_elems()
-        if staged is None or self.meta.get("EPILOGUE_SUBTILE", 1) != 1:
+        if staged is None:
             return []
         produced = OrderedSet(
             [self.output_node.get_name(), *template_node.get_buffer_names()]
@@ -2953,11 +3030,30 @@ class TritonTemplateKernel(TritonKernel):
                 if dep.name in produced or dep.name in inputs:
                     continue
                 buf = V.graph.try_get_buffer(dep.name)
-                if buf is not None and self._is_full_tile_tma_layout(
-                    dep.name, layout := buf.get_layout()
+                if buf is not None and (
+                    self._is_full_tile_tma_layout(dep.name, layout := buf.get_layout())
+                    or self._is_batch_broadcast_tma_layout(layout)
                 ):
                     inputs[dep.name] = staged * layout.dtype.itemsize
         return list(inputs.items())
+
+    def _is_batch_broadcast_tma_layout(self, layout: ir.Layout) -> bool:
+        """Whether layout is a static row-major [M, N] input broadcast over the
+        batches of a [B, M, N] output, which a rank-2 descriptor reads."""
+        size = self.output_node.get_size()
+        return (
+            len(size) == 3
+            and len(layout.size) == 2
+            and all(
+                isinstance(x, (int, sympy.Integer))
+                for x in (*size[1:], *layout.size, *layout.stride, layout.offset)
+            )
+            and list(layout.size) == list(size[1:])
+            and layout.offset == 0
+            and layout.stride[-1] == 1
+            and layout.stride[0] == layout.size[1]
+            and can_use_tma(output_layout=layout)
+        )
 
     def _is_full_tile_tma_layout(self, name: str, layout: ir.Layout) -> bool:
         """Whether a TMA descriptor can cover the buffer with this layout in
@@ -3689,11 +3785,20 @@ class TritonTemplateKernel(TritonKernel):
         header, init, tail = self.body, IndentedBuffer(), IndentedBuffer()
         tile_tma_store_ctx = (
             (tile_syms, origin, (rows, cols))
-            if (self.tma_store or self.tma_load_epilogue_inputs)
-            and not partial
-            and subtiles == 1
+            if self.tma_store and not partial and subtiles == 1
             else None
         )
+        tile_tma_load_ctx = None
+        if self.tma_load_epilogue_inputs and not (columns or per_batch):
+            within = origin[1:] if len(origin) == 3 else None
+            tile_tma_load_ctx = (
+                tile_syms,
+                offsets,
+                within,
+                # pyrefly: ignore [unbound-name]
+                rows_per_batch if len(origin) == 3 else None,
+                (rows, cols),
+            )
         with (
             self.use_range_trees(range_trees),
             patch.object(self.cse, "store_cache", store_cache),
@@ -3710,6 +3815,7 @@ class TritonTemplateKernel(TritonKernel):
                 tma_store=False,
                 tma_load_for_template_epilogue=False,
                 _tile_tma_store_ctx=tile_tma_store_ctx,
+                _tile_tma_load_ctx=tile_tma_load_ctx,
             ),
         ):
             for tree in range_trees:
