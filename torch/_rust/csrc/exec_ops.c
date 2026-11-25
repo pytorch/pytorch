@@ -1931,3 +1931,165 @@ int tr_generic(_PyInterpreterFrame* f, int opcode, int oparg, PyObject* const* i
       PyExc_NotImplementedError, "CFG executor: opcode %d is not supported", opcode);
   return -1;
 }
+
+// What a traced region read (torch/_rust/src/exec/reads.rs). None of these
+// runs Python code.
+
+// How a load of `name` from obj is guarded:
+//   -1 it can't be: obj's class resolves attributes its own way
+//    0 nothing to guard: obj's type can't change and obj has no __dict__
+//    1 by obj's class alone (a method, a class attribute, the __getattr__ it
+//      falls back to), and by `name` not being in *dict (if obj has one)
+//    2 by *dict, obj's __dict__, which has it
+//    3 by a data descriptor of obj's class (a slot, a getset, a property)
+//    4 by *dict, the module obj's namespace
+//    5 obj is a class: by that class
+// *dict is a new reference.
+int tr_attr_home(PyObject* obj, PyObject* name, PyObject** dict) {
+  static PyObject *getattribute_name, *generic;
+  *dict = NULL;
+  if (generic == NULL) {
+    getattribute_name = PyUnicode_InternFromString("__getattribute__");
+    if (getattribute_name == NULL) {
+      PyErr_Clear();
+      return -1;
+    }
+    generic = _PyType_Lookup(&PyBaseObject_Type, getattribute_name);
+  }
+  if (PyType_Check(obj)) {
+    return 5;
+  }
+  if (PyModule_Check(obj)) {
+    PyObject* d = PyModule_GetDict(obj);
+    if (d == NULL) {
+      PyErr_Clear();
+      return -1;
+    }
+    *dict = Py_NewRef(d);
+    return 4;
+  }
+  PyTypeObject* tp = Py_TYPE(obj);
+  if (tp->tp_getattro != PyObject_GenericGetAttr) {
+    // A class with a __getattr__ has a slot of its own that still starts
+    // with the generic lookup unless __getattribute__ is overridden too.
+    PyObject* g = _PyType_Lookup(tp, getattribute_name);
+    if (g != generic &&
+        !(g != NULL && Py_IS_TYPE(g, &PyWrapperDescr_Type) &&
+          ((PyWrapperDescrObject*)g)->d_wrapped == (void*)PyObject_GenericGetAttr)) {
+      return -1;
+    }
+  }
+  PyObject* descr = _PyType_Lookup(tp, name);
+  if (descr != NULL && Py_TYPE(descr)->tp_descr_set != NULL) {
+    return 3;
+  }
+  if (tp->tp_dictoffset == 0) {
+    return PyType_HasFeature(tp, Py_TPFLAGS_IMMUTABLETYPE) ? 0 : 1;
+  }
+  PyObject* d = PyObject_GenericGetDict(obj, NULL);
+  if (d == NULL || !PyDict_Check(d)) {
+    PyErr_Clear();
+    Py_XDECREF(d);
+    return -1;
+  }
+  int has = PyDict_Contains(d, name);
+  if (has < 0) {
+    PyErr_Clear();
+    Py_DECREF(d);
+    return -1;
+  }
+  *dict = d;
+  return has ? 2 : 1;
+}
+
+// tp's version tag, which CPython changes when tp or one of its bases is
+// modified; 0 if tp can't have one. An immutable type's never changes.
+unsigned int tr_type_version(PyTypeObject* tp) {
+  return PyUnstable_Type_AssignVersionTag(tp) ? tp->tp_version_tag : 0;
+}
+
+int tr_type_version_is(PyTypeObject* tp, unsigned int tag) {
+  return PyType_HasFeature(tp, Py_TPFLAGS_VALID_VERSION_TAG) && tp->tp_version_tag == tag;
+}
+
+// What class tp (with its bases) has under `name` (borrowed), or NULL.
+PyObject* tr_type_lookup(PyTypeObject* tp, PyObject* name) {
+  return _PyType_Lookup(tp, name);
+}
+
+int tr_type_heap(PyTypeObject* tp) {
+  return PyType_HasFeature(tp, Py_TPFLAGS_HEAPTYPE);
+}
+
+// The class after `cls` in the order obj's class resolves methods in (what
+// super() in a method of `cls` starts from), borrowed; NULL if there is none.
+PyObject* tr_super_next(PyObject* cls, PyObject* obj) {
+  PyObject* mro = Py_TYPE(obj)->tp_mro;
+  if (mro == NULL || !PyTuple_Check(mro)) {
+    return NULL;
+  }
+  Py_ssize_t n = PyTuple_GET_SIZE(mro);
+  for (Py_ssize_t i = 0; i + 1 < n; i++) {
+    if (PyTuple_GET_ITEM(mro, i) == cls) {
+      return PyTuple_GET_ITEM(mro, i + 1);
+    }
+  }
+  return NULL;
+}
+
+int tr_type_immutable(PyTypeObject* tp) {
+  return PyType_HasFeature(tp, Py_TPFLAGS_IMMUTABLETYPE);
+}
+
+// A dict's version tag: another one after every change to the dict.
+uint64_t tr_dict_version(PyObject* d) {
+  return ((PyDictObject*)d)->ma_version_tag;
+}
+
+// The dict a view (keys, values, items) is of (borrowed), or NULL.
+PyObject* tr_view_dict(PyObject* o) {
+  if (PyDictViewSet_Check(o) || PyDictValues_Check(o)) {
+    return (PyObject*)((_PyDictViewObject*)o)->dv_dict;
+  }
+  return NULL;
+}
+
+// descrobject.c's mappingproxyobject.
+typedef struct {
+  PyObject_HEAD
+  PyObject* mapping;
+} tr_mappingproxyobject;
+
+// The dict a mappingproxy (a class's __dict__) shows (borrowed), or NULL.
+PyObject* tr_proxy_dict(PyObject* o) {
+  if (Py_IS_TYPE(o, &PyDictProxy_Type)) {
+    PyObject* m = ((tr_mappingproxyobject*)o)->mapping;
+    return PyDict_Check(m) ? m : NULL;
+  }
+  return NULL;
+}
+
+// The object a builtin method is bound to (borrowed), or NULL.
+PyObject* tr_builtin_self(PyObject* callable) {
+  if (Py_IS_TYPE(callable, &_PyMethodWrapper_Type)) {
+    return ((tr_wrapperobject*)callable)->self;
+  }
+  if (PyCFunction_Check(callable)) {
+    PyObject* self = PyCFunction_GET_SELF(callable);
+    return self != NULL && !PyModule_Check(self) ? self : NULL;
+  }
+  return NULL;
+}
+
+// Whether `callable` is C code that may read what it is handed: a builtin
+// function or method, a slot wrapper, or a type that isn't a Python class. A
+// Python function, a method of one, a Python class and an instance called
+// through its class's __call__ hand their arguments to a frame instead.
+int tr_calls_builtin(PyObject* callable) {
+  if (PyType_Check(callable)) {
+    return !PyType_HasFeature((PyTypeObject*)callable, Py_TPFLAGS_HEAPTYPE);
+  }
+  return PyCFunction_Check(callable) || Py_IS_TYPE(callable, &PyMethodDescr_Type) ||
+      Py_IS_TYPE(callable, &PyClassMethodDescr_Type) || Py_IS_TYPE(callable, &PyWrapperDescr_Type) ||
+      Py_IS_TYPE(callable, &_PyMethodWrapper_Type);
+}

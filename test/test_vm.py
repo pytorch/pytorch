@@ -8,6 +8,7 @@ random draws, whatever the function does between its tensor operations.
 import abc
 import collections
 import collections.abc
+import contextlib
 import copy
 import dis
 import enum
@@ -437,15 +438,99 @@ def changes_calls(x):
     return changes_pick(x.sin() + 1).tanh().cos().exp()
 
 
+def changes_graded(y):
+    if torch.is_grad_enabled():
+        return y * 2
+    return y * 3
+
+
+def changes_calls_graded(x):
+    return changes_graded(x.sin() + 1).tanh().cos().exp()
+
+
+def changes_casts(x, w):
+    return (torch.mm(torch.mm(x, w), w).relu() * 2 + 1).tanh()
+
+
+def changes_closure():
+    factor = 2.0
+
+    def inner(y):
+        return y * factor
+
+    def outer(x):
+        return inner(x.sin() + 1).tanh().cos().exp()
+
+    def set_factor(value):
+        nonlocal factor
+        factor = value
+
+    return outer, set_factor
+
+
+class ChangesNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.norm = torch.nn.BatchNorm1d(8)
+        self.drop = torch.nn.Dropout(0.5)
+        self.scale = 2.0
+
+    def forward(self, x):
+        return self.drop(self.norm(torch.tanh(self.lin(x)))) * self.scale
+
+
+def changes_forward(module, x):
+    return module(x)
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmCalleeState(TestCase):
-    """What a callee reads when it is called between tensor operations."""
+    """State that a callee reads between tensor operations, changed between
+    calls after regions have formed: a region is entered only while what its
+    trace read is as it was."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    # A call traced into a region is not guarded on what its callee reads: the
-    # region keeps taking the branch that the traced call took.
-    @unittest.expectedFailure
+    def module_calls(self, device, change):
+        # Eleven calls of a module with dropout and batch norm, the same
+        # random draws on both sides; `change(call, module)` before each.
+        torch.manual_seed(0)
+        mine = ChangesNet().to(device)
+        theirs = copy.deepcopy(mine)
+        g = vm(changes_forward, passes=EARLY)
+        for call in range(11):
+            change(call, mine)
+            change(call, theirs)
+            x = torch.randn(4, 8, device=device)
+            torch.manual_seed(call)
+            got = g(mine, x)
+            torch.manual_seed(call)
+            want = changes_forward(theirs, x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(
+                mine.norm.running_mean,
+                theirs.norm.running_mean,
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+
+    # The region traced in training mode has the dropout and the batch
+    # statistics: evaluation mode gets a region of its own.
+    @isolated
+    def test_module_switched_between_train_and_eval(self, device):
+        self.module_calls(
+            device, lambda call, module: module.train(call < 5 or call >= 8)
+        )
+
+    @isolated
+    def test_hyperparameter_set_from_outside(self, device):
+        self.module_calls(
+            device,
+            lambda call, module: setattr(module, "scale", 5.0 if call >= 6 else 2.0),
+        )
+
     @isolated
     def test_callee_that_branches_on_a_global(self, device):
         global CHANGES_FLAG
@@ -455,8 +540,448 @@ class TestVmCalleeState(TestCase):
             CHANGES_FLAG = call < 6
             self.assertEqual(g(x), changes_calls(x), atol=0, rtol=0, msg=f"call {call}")
 
+    @isolated
+    def test_callee_that_branches_on_grad_mode(self, device):
+        g = vm(changes_calls_graded, passes=EARLY)
+        x = torch.randn(4, device=device)
+        for call in range(9):
+            with torch.set_grad_enabled(call < 6):
+                self.assertEqual(
+                    g(x), changes_calls_graded(x), atol=0, rtol=0, msg=f"call {call}"
+                )
+
+    # The dtype autocast casts to is thread state no instruction reads: a
+    # region traced under bfloat16 is not the one for float16.
+    @isolated
+    def test_autocast_dtype_changed(self, device):
+        g = vm(changes_casts, passes=EARLY)
+        x, w = torch.randn(4, 8, device=device), torch.randn(8, 8, device=device)
+        for call in range(9):
+            with torch.autocast(
+                torch.device(device).type,
+                dtype=torch.bfloat16 if call < 6 else torch.float16,
+            ):
+                got, want = g(x, w), changes_casts(x, w)
+            self.assertEqual(got.dtype, want.dtype, msg=f"call {call}")
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+
+    @isolated
+    def test_closure_variable_bound_anew(self, device):
+        (mine, set_mine), (theirs, set_theirs) = changes_closure(), changes_closure()
+        g = vm(mine, passes=EARLY)
+        x = torch.randn(4, device=device)
+        for call in range(9):
+            if call == 6:
+                set_mine(3.0)
+                set_theirs(3.0)
+            self.assertEqual(g(x), theirs(x), atol=0, rtol=0, msg=f"call {call}")
+
 
 instantiate_device_type_tests(TestVmCalleeState, globals())
+
+
+READS_FACTOR = 2
+READS_HELPER = torch.sin
+READS_TABLE = {"factor": 2.0}
+READS_LIST = [2.0, 3.0]
+READS_STAGES = [torch.sin]
+READS_HOOKS = []
+READS_MODULE = types_module.ModuleType("reads_module")
+READS_MODULE.factor = 2.0
+
+
+class ReadsConfig:
+    bias = 1.0
+
+    def __init__(self):
+        self.factor = 2.0
+        self.flip = False
+
+    @property
+    def doubled(self):
+        return self.factor * 2
+
+    def apply(self, y):
+        return y * 2
+
+
+class ReadsSlotted:
+    __slots__ = ("factor",)
+
+    def __init__(self):
+        self.factor = 2.0
+
+
+class ReadsNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.act = torch.nn.Tanh()
+        self.stages = [torch.nn.Sigmoid()]
+
+    def forward(self, y):
+        y = self.act(self.lin(y))
+        for stage in self.stages:
+            y = stage(y)
+        return y
+
+
+READS_CONFIG = ReadsConfig()
+READS_SLOTTED = ReadsSlotted()
+
+
+def reads_through(inner):
+    """A function with one region that is traced through a call of `inner`."""
+
+    def outer(x):
+        return inner(x.sin() + 1).tanh().cos().exp()
+
+    return outer
+
+
+def reads_apply_other(self, y):
+    return y * 3
+
+
+def region_runs():
+    """How many times a region has run (counted by torch._rust_inductor once
+    its COUNT is set)."""
+    import torch._rust_inductor as ri
+
+    return sum(
+        n for name, n in ri.counts.items() if not name.endswith((" MISS", " CHECK"))
+    )
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmReads(TestCase):
+    """One test per kind of read a traced call makes of something that
+    outlives it. The state is changed and changed back between calls; every
+    call gives what eager gives, and each state has a region of its own (the
+    regions are neither run with the other state nor given up)."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def alternating(self, device, fn, switch, eager=None):
+        # Thirteen calls: five in the first state (the fourth is traced, the
+        # fifth runs the region), three in the second, three in the first
+        # again, two in the second again. `switch(second)` sets the state.
+        import torch._rust_inductor as ri
+
+        ri.COUNT = True
+        eager = eager or fn
+        g = vm(fn, passes=EARLY)
+        runs, traced, call = [], [], 0
+        for second, calls in [(False, 5), (True, 3), (False, 3), (True, 2)]:
+            switch(second)
+            for _ in range(calls):
+                x = torch.randn(4, 8, device=device, dtype=torch.float32)
+                before = region_runs()
+                got, want = g(x), eager(x)
+                self.assertEqual(got.dtype, want.dtype, msg=f"call {call}")
+                self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+                runs.append(region_runs() - before)
+                call += 1
+            traced.append(ri.stats["traced"])
+        # Each state has its region, the same one when the state comes back.
+        self.assertGreater(runs[4], 0)
+        self.assertGreater(runs[7], 0)
+        self.assertEqual((runs[10], runs[12]), (runs[4], runs[7]))
+        self.assertEqual(traced[3], traced[1])
+
+    @isolated
+    def test_global_scalar(self, device):
+        def switch(second):
+            global READS_FACTOR
+            READS_FACTOR = 5 if second else 2
+
+        self.alternating(device, reads_through(lambda y: y * READS_FACTOR), switch)
+
+    @isolated
+    def test_global_function(self, device):
+        def switch(second):
+            global READS_HELPER
+            READS_HELPER = torch.cos if second else torch.sin
+
+        self.alternating(device, reads_through(lambda y: READS_HELPER(y)), switch)
+
+    @isolated
+    def test_attribute_of_an_object(self, device):
+        self.alternating(
+            device,
+            reads_through(lambda y: y * READS_CONFIG.factor),
+            lambda second: setattr(READS_CONFIG, "factor", 5.0 if second else 2.0),
+        )
+
+    @isolated
+    def test_attribute_a_branch_is_taken_on(self, device):
+        self.alternating(
+            device,
+            reads_through(lambda y: y * 3 if READS_CONFIG.flip else y - 1),
+            lambda second: setattr(READS_CONFIG, "flip", second),
+        )
+
+    @isolated
+    def test_attribute_of_a_class(self, device):
+        self.alternating(
+            device,
+            reads_through(lambda y: y + READS_CONFIG.bias),
+            lambda second: setattr(ReadsConfig, "bias", 3.0 if second else 1.0),
+        )
+
+    @isolated
+    def test_attribute_of_a_class_hidden_by_the_instance(self, device):
+        def switch(second):
+            if second:
+                READS_CONFIG.bias = 7.0
+            else:
+                vars(READS_CONFIG).pop("bias", None)
+
+        self.alternating(device, reads_through(lambda y: y + READS_CONFIG.bias), switch)
+
+    @isolated
+    def test_attribute_behind_a_property(self, device):
+        self.alternating(
+            device,
+            reads_through(lambda y: y * READS_CONFIG.doubled),
+            lambda second: setattr(READS_CONFIG, "factor", 5.0 if second else 2.0),
+        )
+
+    @isolated
+    def test_attribute_in_a_slot(self, device):
+        self.alternating(
+            device,
+            reads_through(lambda y: y * READS_SLOTTED.factor),
+            lambda second: setattr(READS_SLOTTED, "factor", 5.0 if second else 2.0),
+        )
+
+    @isolated
+    def test_attribute_of_a_python_module(self, device):
+        self.alternating(
+            device,
+            reads_through(lambda y: y * READS_MODULE.factor),
+            lambda second: setattr(READS_MODULE, "factor", 5.0 if second else 2.0),
+        )
+
+    @isolated
+    def test_attribute_asked_with_getattr(self, device):
+        def switch(second):
+            if second:
+                READS_CONFIG.extra = 4.0
+            else:
+                vars(READS_CONFIG).pop("extra", None)
+
+        self.alternating(
+            device,
+            reads_through(lambda y: y * getattr(READS_CONFIG, "extra", 1.5)),
+            switch,
+        )
+        self.alternating(
+            device,
+            reads_through(lambda y: y * 3 if hasattr(READS_CONFIG, "extra") else y - 1),
+            switch,
+        )
+
+    @isolated
+    def test_method_replaced_on_the_class(self, device):
+        first = ReadsConfig.apply
+        self.alternating(
+            device,
+            reads_through(lambda y: READS_CONFIG.apply(y)),
+            lambda second: setattr(
+                ReadsConfig, "apply", reads_apply_other if second else first
+            ),
+        )
+
+    @isolated
+    def test_forward_replaced_on_the_instance(self, device):
+        torch.manual_seed(0)
+        net = ReadsNet().to(device)
+
+        def other(y):
+            return y * 3
+
+        def switch(second):
+            if second:
+                net.forward = other
+            else:
+                vars(net).pop("forward", None)
+
+        self.alternating(device, lambda x: net(x.sin() + 1).tanh().cos().exp(), switch)
+
+    @isolated
+    def test_submodule_replaced(self, device):
+        torch.manual_seed(0)
+        net = ReadsNet().to(device)
+        first, other = net.act, torch.nn.Softsign()
+        self.alternating(
+            device,
+            lambda x: net(x.sin() + 1).cos().exp(),
+            lambda second: setattr(net, "act", other if second else first),
+        )
+
+    @isolated
+    def test_list_of_layers_that_grows(self, device):
+        torch.manual_seed(0)
+        net = ReadsNet().to(device)
+        more = torch.nn.Softsign()
+
+        def switch(second):
+            if second:
+                net.stages.append(more)
+            elif len(net.stages) > 1:
+                net.stages.pop()
+
+        self.alternating(device, lambda x: net(x.sin() + 1).cos().exp(), switch)
+
+    @isolated
+    def test_item_of_a_dict(self, device):
+        self.alternating(
+            device,
+            reads_through(lambda y: y * READS_TABLE["factor"]),
+            lambda second: READS_TABLE.update(factor=5.0 if second else 2.0),
+        )
+
+    @isolated
+    def test_item_of_a_dict_that_comes_and_goes(self, device):
+        def switch(second):
+            if second:
+                READS_TABLE["extra"] = 4.0
+            else:
+                READS_TABLE.pop("extra", None)
+
+        self.alternating(
+            device, reads_through(lambda y: y * READS_TABLE.get("extra", 1.5)), switch
+        )
+        self.alternating(
+            device,
+            reads_through(lambda y: y * 3 if "extra" in READS_TABLE else y - 1),
+            switch,
+        )
+
+    @isolated
+    def test_item_of_a_list(self, device):
+        self.alternating(
+            device,
+            reads_through(lambda y: y * READS_LIST[0] + READS_LIST[-1]),
+            lambda second: READS_LIST.__setitem__(0, 5.0 if second else 2.0),
+        )
+
+    @isolated
+    def test_list_that_is_iterated(self, device):
+        def inner(y):
+            for stage in READS_STAGES:
+                y = stage(y)
+            return y
+
+        def switch(second):
+            if second:
+                READS_STAGES.append(torch.cos)
+            elif len(READS_STAGES) > 1:
+                READS_STAGES.pop()
+
+        self.alternating(device, reads_through(inner), switch)
+
+    @isolated
+    def test_length_and_truth_of_a_list(self, device):
+        def switch(second):
+            if second:
+                READS_HOOKS.append(None)
+            else:
+                READS_HOOKS.clear()
+
+        self.alternating(
+            device, reads_through(lambda y: y * (len(READS_HOOKS) + 2)), switch
+        )
+        self.alternating(
+            device, reads_through(lambda y: y * 3 if READS_HOOKS else y - 1), switch
+        )
+
+    @isolated
+    def test_closure_variable(self, device):
+        (mine, set_mine), (theirs, set_theirs) = changes_closure(), changes_closure()
+
+        def switch(second):
+            set_mine(3.0 if second else 2.0)
+            set_theirs(3.0 if second else 2.0)
+
+        self.alternating(device, mine, switch, eager=theirs)
+
+    @isolated
+    def test_default_dtype(self, device):
+        def switch(second):
+            torch.set_default_dtype(torch.float64 if second else torch.float32)
+
+        try:
+            self.alternating(
+                device,
+                reads_through(lambda y: y + torch.ones(8, device=y.device)),
+                switch,
+            )
+        finally:
+            torch.set_default_dtype(torch.float32)
+
+    @isolated
+    def test_autocast_switched_on_and_off(self, device):
+        kind = torch.device(device).type
+        w = torch.randn(8, 8, device=device)
+        state = contextlib.ExitStack()
+
+        def switch(second):
+            state.close()
+            if second:
+                state.enter_context(torch.autocast(kind, dtype=torch.bfloat16))
+
+        with state:
+            self.alternating(
+                device,
+                lambda x: (torch.mm(torch.mm(x, w), w).relu() * 2 + 1).tanh(),
+                switch,
+            )
+
+    @isolated
+    def test_gradient_of_a_tensor(self, device):
+        # What autograd keeps on a tensor is not what a region is traced for:
+        # the block that reads it stays instructions.
+        weight = torch.randn(8, device=device, requires_grad=True)
+        fn = reads_through(lambda y: y * weight.grad)
+        g = vm(fn, passes=EARLY)
+        for call in range(9):
+            weight.grad = torch.randn(8, device=device)
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+
+    @isolated
+    def test_function_the_vm_was_told_to_skip(self, device):
+        # CPython runs it, so nothing sees what it reads: it is in no region.
+        def skipped(y):
+            return y * READS_FACTOR
+
+        def switch(second):
+            global READS_FACTOR
+            READS_FACTOR = 5 if second else 2
+
+        fn = reads_through(skipped)
+        g = vm(fn, passes=(*EARLY, vm.passes.Skip(skipped)))
+        for call in range(9):
+            switch(3 <= call < 6)
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+
+    @isolated
+    def test_value_that_changes_on_every_call(self, device):
+        # A float a callee reads is part of what a region was traced for: one
+        # that never comes back never finds its region again, and the
+        # instructions run. Every call still gives what eager gives.
+        g = vm(reads_through(lambda y: y * READS_CONFIG.factor), passes=EARLY)
+        eager = reads_through(lambda y: y * READS_CONFIG.factor)
+        x = torch.randn(4, 8, device=device)
+        for call in range(12):
+            READS_CONFIG.factor = 0.25 * (call + 1)
+            self.assertEqual(g(x), eager(x), atol=0, rtol=0, msg=f"call {call}")
+
+
+instantiate_device_type_tests(TestVmReads, globals())
 
 
 SWAP_OPS = ["pow", "mean", "add", "rsqrt", "mul"]
@@ -3678,8 +4203,6 @@ class TestVmGraphResults(TestCase):
         for _ in range(4):
             self.assertEqual(compiled(*args), expected, rtol=1e-05, atol=1e-06)
 
-    # A region traced under one autocast dtype runs under another: bfloat16 where eager gives float16.
-    @unittest.expectedFailure
     @isolated
     def test_a_graph_is_for_the_dtype_autocast_casts_to(self, device):
         kind = torch.device(device).type
@@ -4101,8 +4624,6 @@ class TestVmGraphResults(TestCase):
         finally:
             put(whole)
 
-    # The result has the shape [3, 4] where eager's is a scalar.
-    @unittest.expectedFailure
     @isolated
     def test_a_lookup_that_finds_nothing_under_getattr_with_a_default(self, device):
         def keep(gm, input_types):

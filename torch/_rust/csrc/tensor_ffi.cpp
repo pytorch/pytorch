@@ -1,9 +1,12 @@
 #include <torch/_rust/csrc/tensor_ffi.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/Context.h>
 #include <ATen/SavedTensorHooks.h>
+#include <ATen/autocast_mode.h>
 #include <ATen/core/grad_mode.h>
 #include <c10/core/AutogradState.h>
+#include <c10/core/DefaultDtype.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include "torch_rust/src/bindings/ffi.rs.h"
@@ -161,6 +164,21 @@ bool torch_function_mode_active() {
 
 bool grad_mode_enabled() {
   return at::GradMode::is_enabled();
+}
+
+std::uint64_t region_thread_state() {
+  std::uint64_t s = 0;
+  for (auto d : {at::kCPU, at::kCUDA, at::kXPU, at::kMPS}) {
+    s = (s << 7) | (at::autocast::is_autocast_enabled(d) ? 0x40u : 0u) |
+        (static_cast<std::uint64_t>(at::autocast::get_autocast_dtype(d)) & 0x3fu);
+  }
+  s = (s << 6) |
+      (static_cast<std::uint64_t>(c10::get_default_dtype_as_scalartype()) & 0x3fu);
+  const auto& ctx = at::globalContext();
+  s = (s << 3) | (ctx.deterministicAlgorithms() ? 4u : 0u) |
+      (ctx.deterministicAlgorithmsWarnOnly() ? 2u : 0u) |
+      (ctx.deterministicFillUninitializedMemory() ? 1u : 0u);
+  return s;
 }
 
 bool set_grad_mode(bool on) {

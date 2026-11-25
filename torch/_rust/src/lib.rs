@@ -83,6 +83,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::_cfg_region_stats, m)?)?;
     m.add_function(wrap_pyfunction!(exec::region::_set_cfg_regions, m)?)?;
     m.add_function(wrap_pyfunction!(exec::region::_set_cfg_region_observe, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_set_cfg_region_reads, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_set_cfg_spans, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_set_cfg_pure_calls, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_set_cfg_reoptimize_after, m)?)?;
@@ -95,6 +96,9 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::_set_cfg_scalar_reads, m)?)?;
     m.add_class::<exec::TreeChecks>()?;
     m.add_function(wrap_pyfunction!(exec::region::_region_body, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_reads, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_read_misses, m)?)?;
+    m.add_class::<exec::reads::Reads>()?;
     m.add_function(wrap_pyfunction!(exec::graph::_run_aten_graph, m)?)?;
     m.add_class::<exec::graph::Ref>()?;
     m.add_function(wrap_pyfunction!(exec::joint::_trace_joint, m)?)?;

@@ -13,6 +13,12 @@ params and inputs, guarded on what the trace specialized on: the guard checks
 top-level tensors, scalars and objects; ``func`` checks the containers (lists,
 tuples, dicts) and returns None when one doesn't match, which runs the
 version the trace came from instead.
+
+What the body read from anything else (a global, an attribute of a module, a
+closure variable, at any call depth) and the thread state the graph is
+specialized on are recorded while it is traced and checked by the executor
+before ``func`` is called (torch/_rust/src/exec/reads.rs): a region traced in
+training mode isn't entered in evaluation mode, which gets one of its own.
 """
 
 import contextlib
@@ -175,8 +181,38 @@ def _has_floats(p) -> bool:
     return p is not None and (p[0] == "float" or (p[0] == "tree" and any(c[0] == _FLOAT for c in p[2])))
 
 
-# The _Scalar methods run on CPython (see trace_region).
-_scalar_methods_skipped = False
+# Whether _skip_tracer_frames has run.
+_tracer_frames_skipped = False
+
+
+def _skip_tracer_frames() -> None:
+    """While a region's body is traced the executor runs the frames under it,
+    so that what they read is recorded (torch/_rust/src/exec/reads.rs). The
+    trace's own Python is not the body's. The executor leaves the frames of
+    this file, of torch.fx and of torch.overrides to CPython and takes the
+    frames they enter back (a function mode's handler calls the body's
+    function). Those listed here run on CPython with everything they call:
+    the float subclass, the handlers of the dispatch modes, and the stand-in
+    for ``autograd.Function.apply``, whose forward the graph calls anew on
+    every run."""
+    global _tracer_frames_skipped
+    if _tracer_frames_skipped:
+        return
+    from torch._rust import _cfg_skip
+    from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+
+    own = [
+        *vars(_Scalar).values(),
+        _RefuseImpure.__torch_dispatch__,
+        ProxyTorchDispatchMode.__torch_dispatch__,
+        _tracing_apply,
+        _refusing_init,
+        _opaque_call,
+    ]
+    for f in own:
+        if hasattr(f, "__code__"):
+            _cfg_skip(f, True)
+    _tracer_frames_skipped = True
 
 
 def _plain_tree(x) -> bool:
@@ -408,7 +444,8 @@ _PINNABLE = (
     torch.Size,
 )
 
-stats = {"traced": 0, "compiled": 0, "reused": 0, "small": 0, "refused": 0, "misses": 0}
+# "reads": the entries of the regions' checks of what their traces read.
+stats = {"traced": 0, "compiled": 0, "reused": 0, "small": 0, "refused": 0, "misses": 0, "reads": 0}
 
 # Compiled graphs by (code, input metadata, grad mode): clones of a code (one
 # per call site) trace the same graphs.
@@ -1117,7 +1154,8 @@ def _const_homes(args, consts):
     inputs) are kept by what it was given: (dict, key, tensor) for each one
     that is a parameter, a buffer or an attribute of a module among ``args``
     (or of a submodule), or an attribute of another object among them. The
-    region only runs while each of those still holds its tensor."""
+    region only runs while each of those still holds its tensor: they are
+    added to its reads (see trace_region)."""
     want = {id(c): c for c in consts}
     homes = []
     if not want:
@@ -1141,6 +1179,32 @@ def _const_homes(args, consts):
         elif not isinstance(a, torch.Tensor):
             look(getattr(a, "__dict__", None))
     return homes
+
+
+def _tree_holders(args, plan):
+    """The containers and pytree nodes inside the args a region reads as
+    trees (with the nodes' own ``__dict__``): what `func` checks by structure
+    and leaf on every call."""
+    out = []
+    todo = [a for a, p in zip(args, plan) if p is not None and p[0] == "tree"]
+    while todo:
+        x = todo.pop()
+        t = type(x)
+        if t is list or t is tuple:
+            todo.extend(x)
+        elif t is dict:
+            todo.extend(x.values())
+        elif _is_tree(x):
+            node = pytree.SUPPORTED_NODES.get(t)
+            attrs = getattr(x, "__dict__", None)
+            if attrs is not None:
+                out.append(attrs)
+            todo.extend(node.flatten_fn(x)[0] if node is not None else _flatten(x)[0])
+        else:
+            continue
+        if t is not tuple:
+            out.append(x)
+    return out
 
 
 def _input_types(args, plan, types, consts):
@@ -1324,7 +1388,7 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
     the body ran leaves running it to the executor. A span's region (`span`)
     makes the checks itself. ``types``: what the VM recorded at each arg over
     the runs before (see torch.vm.Type)."""
-    from torch._rust import _region_body
+    from torch._rust import _region_body, _region_reads
 
     allow = os.environ.get("TORCH_RUST_REGION_ALLOW")
     if allow is not None and not re.search(allow, name):
@@ -1363,15 +1427,8 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
     locs: list[Any] = []
     state = {"specialized": set()}
 
-    global _scalar_methods_skipped
     in_vm = block_pipeline is not None
-    if in_vm and not _scalar_methods_skipped:
-        from torch._rust import _cfg_skip
-
-        for f in [*vars(_Scalar).values(), _ScalarArgs.__torch_function__]:
-            if hasattr(f, "__code__"):
-                _cfg_skip(f)
-        _scalar_methods_skipped = True
+    _skip_tracer_frames()
 
     def body(*xs):
         global _scalar_state, _trace_backups
@@ -1435,6 +1492,10 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
         del Backward.__init__
         torch.autograd.Function.apply = _function_apply
     stats["traced"] += 1
+    # What the body read from outside its args (see exec/reads.rs).
+    reads, unchecked = _region_reads()
+    if unchecked is not None:
+        result.setdefault("refused", unchecked)
     if _DATA in state["specialized"]:
         result["refused"] = "it branches on a value it reads from a tensor"
     elif in_vm:
@@ -1482,9 +1543,21 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
             print(f"region {name}: refused: {e}")
         return None
     compiled = _compile(name, gm, example, consts, args, plan, types)
-    homes = _const_homes(args, consts)
+    if reads is not None:
+        # A constant the program binds anew (`m.seen = m.seen + y`) is no
+        # longer what the body would read: its home is one of the reads,
+        # whichever way the body came by it.
+        for home, key, const in _const_homes(args, consts):
+            reads.pin(home, key, const)
+        # The containers among the args are the region's own to check, by
+        # structure, on every call.
+        reads.forget(_tree_holders(args, plan))
+        stats["reads"] += len(reads)
     if DEBUG:
         print(f"region {name}: {n_ops} ops, {len(example)} inputs + {len(consts)} constants")
+        if reads is not None and os.environ.get("TORCH_RUST_REGION_DEBUG") == "2":
+            print(f"region {name}: checks {len(reads)} reads")
+            print("\n".join(f"  read: {line}" for line in reads.describe()))
 
     if COUNT:
         name = f"{name} {n_ops}ops"
@@ -1494,11 +1567,6 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
             if COUNT:
                 counts[f"{name} CHECK"] = counts.get(f"{name} CHECK", 0) + 1
             return None
-        # A constant the program has rebound since (`m.seen = m.seen + y`) is
-        # no longer what the body would read.
-        for home, key, const in homes:
-            if home.get(key) is not const:
-                return None
         why = [] if DEBUG else None
         inputs = _inputs(region_args, plan, why)
         for i in unread if inputs is not None else ():
@@ -1513,4 +1581,4 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
             return None
         return compiled(*inputs, *consts)
 
-    return func, result["outputs"], result["objects"], checks
+    return func, result["outputs"], result["objects"], checks, reads

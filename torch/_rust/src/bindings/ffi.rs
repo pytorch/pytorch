@@ -29,6 +29,7 @@ pub mod ffi {
 
         fn torch_function_mode_active() -> bool;
         fn grad_mode_enabled() -> bool;
+        fn region_thread_state() -> u64;
         fn set_grad_mode(on: bool) -> bool;
         fn tensor_version(t: &Tensor) -> i64;
         fn forward_ad_active() -> bool;
