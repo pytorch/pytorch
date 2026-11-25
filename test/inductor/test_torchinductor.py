@@ -19430,6 +19430,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_lite_mode_not_decompose(self):
         if self.device == "mps":
             raise unittest.SkipTest("not supported on MPS")
+        # CPU is the newly covered device; GPUs keep the CUDA shim name this test already checked.
         shim_device = "cpu" if self.device == "cpu" else "cuda"
         shim = f"aoti_torch_{shim_device}__fused_rms_norm("
 
