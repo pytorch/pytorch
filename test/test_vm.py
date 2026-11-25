@@ -1440,6 +1440,193 @@ class TestVmRegionReasons(TestCase):
         )
 
 
+def functions_and_masks(padding):
+    """A mask function made anew on every call over that call's padding
+    mask, as a library builds one from its arguments."""
+
+    def and_mask(rows, cols):
+        return (rows[:, None] >= cols[None, :]) & padding
+
+    return and_mask
+
+
+def functions_build(mask_function, n, where):
+    rows = torch.arange(n, device=where)
+    cols = torch.arange(n, device=where)
+    return mask_function(rows, cols).to(torch.float32).mul(2).add(1).tanh()
+
+
+def functions_scale(factor, y):
+    return y * factor
+
+
+def functions_apply(fn, x):
+    return fn(x.sin() + 1).tanh().cos().exp()
+
+
+class FunctionsScaler:
+    def __init__(self, factor):
+        self.factor = factor
+
+    def scale(self, y):
+        return y * self.factor
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmFunctionArguments(TestCase):
+    """A function handed to a region is guarded by what it is made of, not by
+    which object it is: its code, and what its cells, defaults, bound self or
+    partial arguments hold, each by the rule of its type. A tensor in a cell
+    is an input of the region."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def runs_and_traces(self):
+        import torch._rust_inductor as ri
+
+        return region_runs(), ri.stats["traced"]
+
+    @isolated
+    def test_closure_made_on_every_call_over_that_calls_tensor(self, device):
+        import torch._rust_inductor as ri
+
+        ri.COUNT = True
+        g = vm(functions_build, passes=EARLY)
+        torch.manual_seed(0)
+        runs = []
+        # Other data on every call; then another shape, another dtype, and
+        # the first metadata again.
+        kinds = (
+            [((8,), torch.bool)] * 6
+            + [((8, 8), torch.bool)] * 3
+            + [((8,), torch.int64)] * 3
+            + [((8,), torch.bool)] * 2
+        )
+        for call, (shape, dtype) in enumerate(kinds):
+            padding = (torch.rand(shape, device=device) > 0.3).to(dtype)
+            before = region_runs()
+            got = g(functions_and_masks(padding), 8, torch.device(device))
+            want = functions_build(
+                functions_and_masks(padding), 8, torch.device(device)
+            )
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            runs.append(region_runs() - before)
+        # The fourth call is traced; from the fifth on the region runs with
+        # that call's mask. Other metadata gets a region of its own (traced on
+        # its first call), and the first one is found again at the end.
+        self.assertEqual(runs[4:6], [runs[4]] * 2)
+        self.assertGreater(runs[4], 0)
+        self.assertEqual((runs[7], runs[8], runs[10], runs[11]), (runs[4],) * 4)
+        self.assertEqual(runs[12:], [runs[4]] * 2)
+
+    @isolated
+    def test_closure_over_a_scalar_that_changes_and_changes_back(self, device):
+        import torch._rust_inductor as ri
+
+        ri.COUNT = True
+
+        def scaled_by(factor):
+            return lambda y: y * factor
+
+        g = vm(functions_apply, passes=EARLY)
+        runs, traced = [], []
+        for factor, calls in [(2.0, 5), (3.0, 3), (2.0, 3), (3.0, 2)]:
+            for _ in range(calls):
+                x = torch.randn(4, 8, device=device)
+                before = region_runs()
+                self.assertEqual(
+                    g(scaled_by(factor), x),
+                    functions_apply(scaled_by(factor), x),
+                    atol=0,
+                    rtol=0,
+                )
+                runs.append(region_runs() - before)
+            traced.append(ri.stats["traced"])
+        self.assertGreater(runs[4], 0)
+        self.assertGreater(runs[7], 0)
+        self.assertEqual((runs[10], runs[12]), (runs[4], runs[7]))
+        self.assertEqual(traced[3], traced[1])
+
+    @isolated
+    def test_partial_over_a_tensor(self, device):
+        import torch._rust_inductor as ri
+
+        g = vm(functions_apply, passes=EARLY)
+        for call in range(8):
+            x, factor = torch.randn(4, 8, device=device), torch.randn(8, device=device)
+            got = g(functools.partial(functions_scale, factor), x)
+            self.assertEqual(
+                got,
+                functions_apply(functools.partial(functions_scale, factor), x),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+        # A call through a partial made anew on every call is not one the
+        # executor takes into a region yet (it sees another callee each
+        # time), so the calls above ran as instructions. The guard itself
+        # reads a partial by its parts: the tensor it holds is an input.
+        first, other = torch.randn(8, device=device), torch.randn(8, device=device)
+        _, plan = ri._plan((functools.partial(functions_scale, first), x), set())
+        self.assertEqual(plan[0][0], "tree")
+        self.assertIs(
+            ri._inputs((functools.partial(functions_scale, other), x), plan)[0], other
+        )
+        self.assertIsNone(
+            ri._inputs((functools.partial(functions_apply, other), x), plan)
+        )
+        self.assertIsNone(
+            ri._inputs((functools.partial(functions_scale, other.double()), x), plan)
+        )
+
+    @isolated
+    def test_bound_method_of_an_object_whose_state_changes(self, device):
+        import torch._rust_inductor as ri
+
+        ri.COUNT = True
+        scaler = FunctionsScaler(2.0)
+        g = vm(functions_apply, passes=EARLY)
+        runs = []
+        for call in range(11):
+            scaler.factor = 3.0 if 5 <= call < 8 else 2.0
+            x = torch.randn(4, 8, device=device)
+            before = region_runs()
+            # `scaler.scale` is another method object on every read.
+            self.assertEqual(
+                g(scaler.scale, x),
+                functions_apply(scaler.scale, x),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+            runs.append(region_runs() - before)
+        self.assertGreater(runs[4], 0)
+        self.assertGreater(runs[7], 0)
+        self.assertEqual(runs[10], runs[4])
+
+    @isolated
+    def test_function_that_holds_itself(self, device):
+        def make(depth_limit):
+            def again(y, depth=0):
+                return y if depth >= depth_limit else again(y * 2, depth + 1)
+
+            return again
+
+        g = vm(functions_apply, passes=EARLY)
+        for call in range(8):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(
+                g(make(2), x),
+                functions_apply(make(2), x),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+
+
+instantiate_device_type_tests(TestVmFunctionArguments, globals())
+
+
 class TestVmWithoutRuntime(TestCase):
     """A build of PyTorch that skipped the torch._rust crate (another Python
     than 3.12, another system than Linux, no cargo)."""
