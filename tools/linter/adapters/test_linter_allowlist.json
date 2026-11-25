@@ -218,7 +218,6 @@
   "test/distributed/test_multiproc_continuous_harness.py",
   "test/distributed/test_nan_check.py",
   "test/distributed/test_nccl.py",
-  "test/distributed/test_nvshmem.py",
   "test/distributed/test_pg_wrapper.py",
   "test/distributed/test_rocshmem_flydsl.py",
   "test/distributed/test_shmem_triton.py",
