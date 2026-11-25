@@ -6019,11 +6019,6 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
 
-    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        if self._maybe_get_baseclass_method("__len__") in dict_methods:
-            return VariableTracker.build(tx, len(self.value))  # type: ignore[bad-argument-type]
-        return super().mp_length_impl(tx)
-
 
 class SimpleNamespaceVariable(UserDefinedObjectVariable):
     """types.SimpleNamespace and its subclasses.
