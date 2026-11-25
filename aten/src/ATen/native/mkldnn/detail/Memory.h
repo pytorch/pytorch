@@ -13,6 +13,10 @@ namespace at::native::mkldnn {
 // Alias for ideep::tensor until the tensor class is ported.
 using MkldnnMemory = ideep::tensor;
 
+// CPU engine (with ATen's allocator registered) and its default stream.
+using Engine = ideep::engine;
+using IStream = ideep::stream;
+
 } // namespace at::native::mkldnn
 
 #endif // AT_MKLDNN_ENABLED()

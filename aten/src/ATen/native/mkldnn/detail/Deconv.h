@@ -51,7 +51,7 @@ void convolution_transpose_forward_compute(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8);
+    const lowp_kind alowp_kind = u8s8);
 
 // Ported from ideep::convolution_transpose_forward::prepare (int8).
 // Prepare for int8
@@ -77,7 +77,7 @@ void convolution_transpose_forward_prepare(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8);
+    const lowp_kind alowp_kind = u8s8);
 
 // Ported from ideep::convolution_transpose_forward::compute (prepared params).
 // Compute with params from convolution_transpose_forward_prepare.
