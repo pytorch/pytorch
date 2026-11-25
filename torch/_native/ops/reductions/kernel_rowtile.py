@@ -2,6 +2,7 @@
 # each kernel across a vector class; narrow rows may use one thread and TMA staging.
 import math
 import os
+import warnings
 from collections.abc import Sequence
 from typing import Any, cast, Literal, NamedTuple
 
@@ -104,8 +105,14 @@ def one_thread_row_ok(
 # 0.92-1.41x the rolled fold and requires per-N compilation. Column layouts take the
 # general axis's decoded-gather tree ahead of coltile: for x.sum(0) of fp32 (65536, 256)
 # the tree took 68.4us and coltile 17.2us (B200 CUDA graphs, L2-cold). Its independent
-# env var avoids affecting upstream kernels, which register first.
+# env var avoids affecting upstream kernels, which register first. `1` prefers the order
+# and warns once when a call cannot use it; `strict` raises instead, as an explicit
+# order= argument does.
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
+_INNER_TREE_STRICT = "strict"
+# Reasons a dispatcher cannot serve an inner-tree request.
+_INNER_TREE_WIDE = "inner-tree reduction requires extents a batch clear of Int32"
+_INNER_TREE_GEOMETRY = "inner-tree reduction cannot serve this geometry"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
 _MULTIROW_ROWS_PER_BLOCK = 128
 _MULTIROW_MAX_DEPTH = 6
@@ -196,9 +203,69 @@ _ITREE_BLOCK_THREADS = 256
 _ITREE_STAGE_E = 32
 
 
+def _inner_tree_env() -> str:
+    """The validated gate value; "" when unset."""
+    value = os.environ.get(_INNER_TREE_ENV, "")
+    if value not in ("", "0", "1", _INNER_TREE_STRICT):
+        raise ValueError(
+            f"{_INNER_TREE_ENV} must be unset, '0', '1' or '{_INNER_TREE_STRICT}', "
+            f"got {value!r}"
+        )
+    return value
+
+
 def inner_tree_order_enabled() -> bool:
     """Is the reproducible-DAG order requested? Read live, so tests can toggle it."""
-    return os.environ.get(_INNER_TREE_ENV, "") not in ("", "0")
+    return _inner_tree_env() not in ("", "0")
+
+
+def reduction_order(
+    order: Literal["unordered", "inner_tree"] | None = None,
+) -> Literal["unordered", "inner_tree"]:
+    if order is None:
+        return "inner_tree" if inner_tree_order_enabled() else "unordered"
+    if order not in ("unordered", "inner_tree"):
+        raise ValueError(
+            f"unknown reduction order {order!r}: expected None, 'unordered' or "
+            "'inner_tree' (the kernel launchers spell unordered 'linear')"
+        )
+    return order
+
+
+_warned_inner_tree_reasons: set[str] = set()
+
+
+def inner_tree_fallback(reason: str, *, explicit: bool = False) -> None:
+    """Fall back from an unservable inner-tree request: raise for an explicit order= or
+    the strict env gate, else warn once per reason."""
+    if explicit:
+        raise ValueError(f"order='inner_tree' cannot be honoured: {reason}")
+    if _inner_tree_env() == _INNER_TREE_STRICT:
+        raise ValueError(f"{_INNER_TREE_ENV}=strict cannot be honoured: {reason}")
+    if reason not in _warned_inner_tree_reasons:
+        _warned_inner_tree_reasons.add(reason)
+        strict = f"{_INNER_TREE_ENV}={_INNER_TREE_STRICT}"
+        warnings.warn(
+            f"{_INNER_TREE_ENV} could not be honoured ({reason}); such reductions use "
+            f"unordered kernels. Set {strict} to raise instead.",
+            stacklevel=3,
+        )
+
+
+def select_row_order(
+    cc: tuple[int, int],
+    dtype: torch.dtype,
+    trait_key: str,
+    N: int,
+    M: int,
+    *,
+    nfields: int,
+    nouts: int,
+    acc_bits: int = 32,
+    alignment: int = 16,
+) -> Literal["linear", "inner_tree"]:
+    """Pick the kernel order for an unordered row reduction."""
+    return "linear"
 
 
 class _ItreePlan(NamedTuple):
@@ -832,17 +899,14 @@ def reduce_row_tile(
         raise AssertionError(f"row reduction needs M and N < 2^31, got M={M}, N={N}")
     device = x.get_device()
     check_current(device)
-    # leaf/combine serves every trait and N. The opt-in gate leaves partial stages and
-    # explicit launch shapes on the default order; explicit requests raise below.
+    # Dispatchers resolve PYTORCH_NATIVE_INNER_TREE (reduction_order), so only an explicit
+    # order="inner_tree" selects the tree here, and it raises rather than use another DAG.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
     itree = None
-    if (order == "inner_tree" or (order is None and inner_tree_order_enabled())) and (
-        final and threads_per_row is None
-    ):
+    if order == "inner_tree" and final and threads_per_row is None:
         itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
     if order == "inner_tree" and itree is None:
-        # Explicit inner_tree cannot silently use another DAG; only the env gate may fall back.
         raise ValueError(
             f"order='inner_tree' cannot be honoured here: {final=} {threads_per_row=} "
             f"plan={trait_itree_plan(trait, N, M, x.element_size(), device=x.device) is not None}"
