@@ -1537,6 +1537,23 @@ torch.ones(10) * 2
 
         self.assertTrue(found, "Expected to find aten::as_strided but did not")
 
+    def test_concrete_inputs_scalar_lists(self):
+        x = torch.rand(2, 6, requires_grad=True)
+        with profile(record_shapes=True) as p:
+            torch.nn.functional.interpolate(x.view(1, 2, 6), scale_factor=[2.0])
+            x.sum(dim=[])
+            torch.nn.functional.layer_norm(x, [6]).sum().backward()
+
+        concrete = collections.defaultdict(list)
+        for e in p.events():
+            concrete[e.name].append(e.concrete_inputs)
+        self.assertIn([None, None, [2.0]], concrete["aten::upsample_nearest1d"])
+        self.assertIn([None, [], False, None], concrete["aten::sum"])
+        self.assertIn(
+            [None, None, [6], None, None, None, None, [True, False, False]],
+            concrete["aten::native_layer_norm_backward"],
+        )
+
     def test_concrete_inputs_profiling_toggling(self):
         try:
             for before, after in [(True, False), (False, True)]:
@@ -2311,7 +2328,6 @@ torch.ones(10) * 2
             enable_cuda_sync_events=True,
             enable_environment_counters=True,
             enable_graph_dependencies=False,
-            enable_event_node_ids=False,
         )
         p = profile(
             activities=[
@@ -2328,7 +2344,6 @@ torch.ones(10) * 2
                         "enable_cuda_sync_events": False,
                         "enable_environment_counters": True,
                         "enable_graph_dependencies": True,
-                        "enable_event_node_ids": True,
                     }
                 )
             ),
@@ -2354,7 +2369,6 @@ torch.ones(10) * 2
         self.assertTrue(observer.call_args.kwargs["enable_cuda_sync"])
         self.assertTrue(observer.call_args.kwargs["enable_environment_counters"])
         self.assertFalse(observer.call_args.kwargs["enable_graph_dependencies"])
-        self.assertFalse(observer.call_args.kwargs["enable_event_node_ids"])
         self.assertEqual(observer.call_args.kwargs["pm_sampling_interval_ms"], 0.5)
         self.assertEqual(observer.call_args.kwargs["pm_lookback_window_ms"], 2000)
 
