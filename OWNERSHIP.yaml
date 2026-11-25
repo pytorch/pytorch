@@ -1439,6 +1439,8 @@ ownership:
       - /torch/_prims_common/
       - /torch/_python_dispatcher.py
       - /torch/_refs/
+      - /torch/_rust/
+      - /torch/_rust_inductor.py
       - /torch/_size_docs.py
       - /torch/_sources.py
       - /torch/_storage_docs.py
@@ -1485,6 +1487,7 @@ ownership:
       - /torch/torch_version.py
       - /torch/types.py
       - /torch/utils/
+      - /torch/vm/
       - /torch/_vendor/quack/: [slayton58, drisspg]
   - name: python_api_tests
     owners: []
@@ -1496,11 +1499,14 @@ ownership:
       - /test/test_modules.py
       - /test/test_nn.py
       - /test/test_numpy_interop.py
+      - /test/test_rust.py
       - /test/test_transformers.py
       - /test/test_type_hints.py
       - /test/test_typing.py
+      - /test/test_vm.py
       - /test/torch_np/
       - /test/typing/
+      - /test/vm_passes/
       - /test/xpu/test_transformers.py
   - name: cpp_runtime_tests
     owners: []
@@ -1617,9 +1623,13 @@ ownership:
       - /GLOSSARY.md
       - /LICENSE
       - /NOTICE
+      - /OUTLINE.md
+      - /QUESTIONS.md
       - /README.md
       - /RELEASE.md
       - /SECURITY.md
+      - /TODO.md
+      - /hello1.py
   - name: protected_codeownership
     owners: []
     section: protected_codeownership
