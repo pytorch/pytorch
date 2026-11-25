@@ -108,6 +108,22 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
+def grid_split_factors(nodes: Iterable[BaseSchedulerNode]) -> OrderedSet[int | None]:
+    """Split-as-grid factors of the reductions in `nodes`; None marks a reduction
+    without one. See ir.Reduction.create_multilayer_split_as_grid."""
+    return OrderedSet(
+        n.node._grid_split_factor if isinstance(n.node, ir.ComputedBuffer) else None
+        for n in nodes
+        if n.is_reduction()
+    )
+
+
+def _has_grid_split(node: BaseSchedulerNode) -> bool:
+    return config.triton.split_reductions_as_grid and any(
+        split is not None for split in grid_split_factors(node.get_nodes())
+    )
+
+
 def _real_dep_names(deps: OrderedSet[Dep]) -> OrderedSet[str]:
     """Names of real reads/writes, excluding WeakDep (ordering-only deps that
     do not actually read or write the buffer)."""
@@ -470,6 +486,8 @@ class MixOrderReduction:
         Check whether we can fuse two reductions with mix loop orders.
         """
         if not config.triton.mix_order_reduction:
+            return False
+        if _has_grid_split(node1) or _has_grid_split(node2):
             return False
 
         # TODO: Mix order reduction is not supported with cpp_wrapper yet
@@ -2487,6 +2505,8 @@ class NestedReduction:
 
     @classmethod
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        if _has_grid_split(node1) or _has_grid_split(node2):
+            return False
         return cls.plan(node1, node2) is not None
 
     @classmethod
@@ -3281,6 +3301,33 @@ class BaseSchedulerNode:
 
             return True
 
+        def feeds_indirect_index_in_fused_node(
+            input_name: str, output_name: str
+        ) -> bool:
+            # A GPU kernel can run more threads than it has elements, e.g. a
+            # Triton layout with num_warps * warp_size > XBLOCK replicates each
+            # element across warps. Only one replica stores, so the others may
+            # load an in-place buffer after it was overwritten. That is benign
+            # unless the loaded value becomes an address: the late replica then
+            # dereferences the new value. So never inplace a buffer whose values,
+            # or values computed from it in the same kernel, feed indirect indexing.
+            fused_node = self.scheduler.get_fused_node(self)
+            nodes = [n for n in fused_node.get_nodes() if isinstance(n, SchedulerNode)]
+            tainted = OrderedSet([input_name, output_name])
+            changed = True
+            while changed:
+                changed = False
+                for node in nodes:
+                    if not any(dep.name in tainted for dep in node.read_writes.reads):
+                        continue
+                    if node._get_indirect_index_source_buffers() & tainted:
+                        return True
+                    for out_name in node.get_buffer_names():
+                        if out_name not in tainted:
+                            tainted.add(out_name)
+                            changed = True
+            return False
+
         for buf in self.get_outputs():
             buf_node = buf.node
             if buf_node is None:
@@ -3335,6 +3382,7 @@ class BaseSchedulerNode:
                                 ir.NoneLayout,
                                 ir.MultiOutputLayout,
                                 ir.MutationLayoutSHOULDREMOVE,
+                                ir.NonOwningLayout,
                                 ir.CommBufferLayout,
                             ),
                         )
@@ -3348,6 +3396,9 @@ class BaseSchedulerNode:
                         )
                         and can_match_buffer_size(input_buf.node, buf.node)
                         and single_index_in_fused_node(input_buf)
+                        and not feeds_indirect_index_in_fused_node(
+                            input_buf.get_name(), buf.get_name()
+                        )
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
@@ -4433,6 +4484,34 @@ class SchedulerNode(BaseSchedulerNode):
                         else (node.args[1] if len(node.args) >= 2 else "")
                     )
         return buffers_store_as_atomic_add
+
+    @cache_on_self
+    def _get_indirect_index_source_buffers(self) -> OrderedSet[str]:
+        """Buffers whose loaded values flow into an indirect index."""
+        sources: OrderedSet[str] = OrderedSet()
+        if not isinstance(self._body, LoopBody):
+            return sources
+        body = self._body
+        for node in body.get_nodes():
+            if node.op != "call_module" or not str(node.target).startswith(
+                "set_indirect"
+            ):
+                continue
+            pending = list(node.all_input_nodes)
+            seen: OrderedSet[torch.fx.Node] = OrderedSet()
+            while pending:
+                n = pending.pop()
+                if n in seen:
+                    continue
+                seen.add(n)
+                if n.op == "call_method" and n.target == "load":
+                    name = n.kwargs.get("name", n.args[1] if len(n.args) >= 2 else None)
+                    if isinstance(name, str):
+                        sources.add(name)
+                elif n.op == "call_module" and n.target in body.subblocks:
+                    pending.extend(body.subblocks[str(n.target)].graph.nodes)
+                pending.extend(n.all_input_nodes)
+        return sources
 
     @cache_on_self
     def has_side_effects(self) -> bool:
@@ -7528,7 +7607,10 @@ class Scheduler:
                         raise AssertionError("No extern kernel detected for fallback")
                     if len(extern_choices) > 1:
                         timings = multi_node.choice_timings()
-                        min_node_unfused = min(extern_choices, key=lambda c: timings[c])
+                        # choice_timings() keeps only the fastest extern choice, so the others have no timing.
+                        min_node_unfused = min(
+                            extern_choices, key=lambda c: timings.get(c, float("inf"))
+                        )
                     else:
                         min_node_unfused = extern_choices[0]
 
@@ -11476,7 +11558,13 @@ class Scheduler:
         # Non-injective scatter: range vars absent from write index mean
         # multiple iterations hit the same location. Can't fuse the reader
         # in or it will see partially-written state between iterations.
-        if not OrderedSet(write.var_names) <= write.index.free_symbols:
+        # Compare against the writer's ranges, since trailing unused vars are
+        # dropped from write.var_names
+        writer = self.name_to_buf[weak_dep.mutating_buf].defining_op
+        if not isinstance(writer, SchedulerNode):
+            return False
+        iter_numel = sympy_product(writer.get_ranges()[0])
+        if not V.graph.sizevars.statically_known_equals(write.get_numel(), iter_numel):
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]

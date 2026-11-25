@@ -3,6 +3,10 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Conv.h>
+#include <ATen/native/mkldnn/detail/Deconv.h>
+#include <ATen/native/mkldnn/detail/InnerProduct.h>
+#include <ATen/native/mkldnn/detail/Lstm.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <torch/library.h>
@@ -182,7 +186,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
   }
 
-  auto desc = ideep::convolution_forward::expected_weights_desc(
+  auto desc = mkldnn::convolution_forward_expected_weights_desc(
       w.get_dims(),
       w.get_data_type(),
       stride_expanded,
@@ -194,7 +198,7 @@ Tensor mkldnn_reorder_conv2d_weight(
       dnnl::prop_kind::forward_inference,
       w.get_data_type(),
       src_dims,
-      ideep::attr_t(),
+      mkldnn::Attr(),
       is_channels_last);
   ideep::tensor result;
   result.init(desc);
@@ -229,7 +233,7 @@ Tensor mkldnn_reorder_conv3d_weight(
   auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
   auto w = itensor_from_const_tensor(self_);
 
-  auto desc = ideep::convolution_forward::expected_weights_desc(
+  auto desc = mkldnn::convolution_forward_expected_weights_desc(
       w.get_dims(),
       w.get_data_type(),
       stride_expanded,
@@ -241,7 +245,7 @@ Tensor mkldnn_reorder_conv3d_weight(
       dnnl::prop_kind::forward_inference,
       w.get_data_type(),
       src_dims,
-      ideep::attr_t(),
+      mkldnn::Attr(),
       is_channels_last);
   ideep::tensor result;
   result.init(desc);
@@ -278,7 +282,7 @@ static Tensor mkldnn_reorder_linear_weight(
   if (batch_size_opt.has_value()) {
     input_size = {batch_size_opt.value(), in_features};
   }
-  auto packed_desc = ideep::inner_product_forward::expected_weights_desc(
+  auto packed_desc = mkldnn::inner_product_forward_expected_weights_desc(
       {out_features, in_features},
       input_size,
       /* weight dtype */ dtype,
@@ -303,7 +307,7 @@ static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
     dnnl::memory::data_type x_dtype,
     const dnnl::memory::dims& src_dims) {
   if (channels_last) {
-    return ideep::convolution_transpose_forward::expected_weights_desc<true>(
+    return mkldnn::convolution_transpose_forward_expected_weights_desc<true>(
         weights_dims,
         w_dtype,
         strides,
@@ -315,7 +319,7 @@ static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
         dnnl::prop_kind::forward,
         src_dims);
   } else {
-    return ideep::convolution_transpose_forward::expected_weights_desc<false>(
+    return mkldnn::convolution_transpose_forward_expected_weights_desc<false>(
         weights_dims,
         w_dtype,
         strides,
@@ -442,7 +446,7 @@ static std::tuple<ideep::tensor, ideep::tensor> get_lstm_packed_weights(
         dnnl::memory::format_tag::ldgoi});
 
   auto [packed_desc_ih, packed_desc_hh] =
-      ideep::lstm_forward_inference::expected_weights_desc(
+      mkldnn::lstm_forward_inference_expected_weights_desc(
           output_sizes,
           src_layer,
           src_iter,
