@@ -4665,6 +4665,25 @@ class TestOpInfos(TestCase):
 # Tests that validate the various sample generating functions on each OpInfo.
 class TestOpInfoSampleFunctions(TestCase):
 
+    @parametrize("op_name", ["addcmul", "addcdiv", "clamp"])
+    @parametrize("requires_grad", [False, True])
+    @dtypes(torch.float32, torch.float64)
+    def test_ternary_reference_input_gradients(self, device, dtype, op_name, requires_grad):
+        from torch.utils._pytree import tree_leaves
+
+        op = next(op for op in op_db if op.name == op_name and not op.variant_test_name)
+        samples = list(op.reference_inputs(device, dtype, requires_grad=requires_grad))
+        tensors = [t for sample in samples for t in tree_leaves((sample.input, sample.args, sample.kwargs))
+                   if isinstance(t, torch.Tensor)]
+        self.assertTrue(tensors)
+        self.assertEqual(any(t.requires_grad for t in tensors), requires_grad)
+        for t in tensors:
+            if not t.is_floating_point() and not t.is_complex():
+                self.assertFalse(t.requires_grad)
+        if op_name != "addcdiv":
+            self.assertTrue(any(not t.is_floating_point() and not t.is_complex() for t in tensors))
+
+
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_opinfo_sample_generators(self, device, dtype, op):
         # Test op.sample_inputs doesn't generate multiple samples when called
