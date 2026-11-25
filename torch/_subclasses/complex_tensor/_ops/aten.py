@@ -65,16 +65,8 @@ def register_binary_linear_inplace(
     op: OpType, out_of_place_impl: Callable[..., Any]
 ) -> Callable[..., Any]:
     def impl(
-        lhs: ComplexTensor | torch.Tensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
-    ) -> ComplexTensor | torch.Tensor:
-        # Like native, the complex result can't be written into a real `lhs`.
-        torch._check(
-            lhs.dtype.is_complex,
-            lambda: (
-                f"result type {torch.promote_types(lhs.dtype, rhs.dtype)} "
-                f"can't be cast to the desired output type {lhs.dtype}"
-            ),
-        )
+        lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
+    ) -> ComplexTensor:
         result = out_of_place_impl(lhs, rhs, *args, **kwargs)
         lhs.copy_(result)
         return lhs
@@ -318,16 +310,7 @@ sub_impl = register_binary_linear(aten.sub)
 sub__impl = register_binary_linear_inplace(aten.sub_, sub_impl)
 diagonal_scatter_impl = register_binary_linear(aten.diagonal_scatter)
 fill_impl = register_binary_linear(aten.fill)
-
-
-# Not `register_binary_linear_inplace`: like native, filling a real `self` with a complex
-# value discards the imaginary part (with a warning, via `copy_`) instead of raising.
-@register_complex(aten.fill_)
-def fill__impl(
-    self: ComplexTensor | torch.Tensor, value: ComplexTensor
-) -> ComplexTensor | torch.Tensor:
-    self.copy_(fill_impl(self, value))
-    return self
+fill__impl = register_binary_linear_inplace(aten.fill_, fill_impl)
 
 
 @register_complex(aten.copy)
@@ -377,16 +360,6 @@ def div_impl(
         (num_r / den).to(out_dt),
         (num_i / den).to(out_dt),
     )
-
-
-div__impl = register_binary_linear_inplace(aten.div_, div_impl)
-
-
-@register_complex(aten.tril_)
-def tril__impl(self: ComplexTensor, diagonal: int = 0) -> ComplexTensor:
-    self.re.tril_(diagonal)
-    self.im.tril_(diagonal)
-    return self
 
 
 @register_complex(aten.reciprocal)
