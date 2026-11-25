@@ -28,7 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, IO, Never, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, Never, NewType, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.exc import PackageError
@@ -711,30 +711,23 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
             f"Expected exactly one function name, got {len(entry.function_names)}"
         )
     fn: Any = sys.modules[entry.python_module]
-    parts = entry.function_names[0].split(".")
-    for part in parts:
+    for part in entry.function_names[0].split("."):
         fn = getattr(fn, part)
-    if entry.code_source:
-        parts = entry.code_source.split(".")
-        for part in parts:
-            if part.endswith("]"):
-                index_begin = part.rfind("[")
-                if not isinstance(index_begin, int):
-                    raise AssertionError(
-                        f"Expected int for index_begin, got {type(index_begin)}"
-                    )
-                if index_begin < 0:
-                    raise AssertionError(
-                        f"Expected non-negative index_begin, got {index_begin}"
-                    )
-                attr = getattr(fn, part[:index_begin], None)
-                if attr is None:
-                    raise PackageError(f"Cannot find source for code entry {entry}")
-                fn = attr[ast.literal_eval(part[index_begin + 1 : -1])]
-            else:
-                fn = getattr(fn, part)
-    else:
+    if not entry.code_source:
         raise PackageError(f"Cannot find source for code entry {entry}")
+    for part in entry.code_source.split("."):
+        if not part.endswith("]"):
+            fn = getattr(fn, part)
+            continue
+        index_begin = part.rfind("[")
+        if index_begin < 0:
+            raise AssertionError(
+                f"Expected non-negative index_begin, got {index_begin}"
+            )
+        attr = getattr(fn, part[:index_begin], None)
+        if attr is None:
+            raise PackageError(f"Cannot find source for code entry {entry}")
+        fn = attr[ast.literal_eval(part[index_begin + 1 : -1])]
     if not isinstance(fn, types.CodeType):
         raise AssertionError(
             f"Expected CodeType, got {type(fn)} for code entry {entry}"
@@ -941,23 +934,25 @@ class SystemInfo:
         gpu_name, toolkit_version = None, None
         gpu_arch, gpu_sm_count = None, None
         for device_type in cls.CHECK_GPUS:
-            if getattr(torch, device_type).is_available():
-                try:
-                    gpu_name = getattr(torch, device_type).get_device_name()
-                    toolkit_version = getattr(torch.version, device_type)
-                    if device_type == "cuda":
-                        interface = get_interface_for_device(device_type)
-                        gpu_arch, gpu_sm_count = (
-                            interface.get_compute_capability(),
-                            interface.get_multi_processor_count(),
-                        )
-                    break
-                except Exception:
-                    logger.debug(
-                        "Could not read the %s device's info for SystemInfo",
-                        device_type,
-                        exc_info=True,
+            device_module = getattr(torch, device_type)
+            if not device_module.is_available():
+                continue
+            try:
+                gpu_name = device_module.get_device_name()
+                toolkit_version = getattr(torch.version, device_type)
+                if device_type == "cuda":
+                    interface = get_interface_for_device(device_type)
+                    gpu_arch, gpu_sm_count = (
+                        interface.get_compute_capability(),
+                        interface.get_multi_processor_count(),
                     )
+                break
+            except Exception:
+                logger.debug(
+                    "Could not read the %s device's info for SystemInfo",
+                    device_type,
+                    exc_info=True,
+                )
 
         return cls(
             python_version=platform.python_version(),
@@ -1062,8 +1057,7 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        current_system_info = SystemInfo.current()
-        self.system_info.check_compatibility(current_system_info, self.device_type)
+        self.system_info.check_compatibility(SystemInfo.current(), self.device_type)
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -1109,32 +1103,29 @@ class PrecompileCacheEntry:
     @staticmethod
     def from_cache_entry(
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
-    ) -> Optional["PrecompileCacheEntry"]:
+    ) -> "PrecompileCacheEntry":
         backend_content: dict[_BackendId, Any] = {}
 
         for code in cache_entry.codes:
             for backend_id in code.backend_ids:
-                if backend_id not in backends:
-                    logger.warning("Backend not found")
-                    debug_str = json.dumps(
-                        {
-                            "entry": cache_entry.debug_info(),
-                            "missing_backend": backend_id,
-                        }
-                    )
-                    torch._logging.trace_structured(
-                        "artifact",
-                        metadata_fn=lambda: {
-                            "name": "dynamo_cache_bypass",
-                            "encoding": "json",
-                        },
-                        payload_fn=lambda: debug_str,
-                        expect_trace_id=False,
-                    )
-                    code.bypassed = True
-                    break
-                else:
+                if backend_id in backends:
                     backend_content[backend_id] = backends[backend_id]
+                    continue
+                logger.warning("Backend not found")
+                debug_str = json.dumps(
+                    {"entry": cache_entry.debug_info(), "missing_backend": backend_id}
+                )
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "dynamo_cache_bypass",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: debug_str,
+                    expect_trace_id=False,
+                )
+                code.bypassed = True
+                break
 
         return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
 
@@ -1155,9 +1146,9 @@ def _hash_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int) ->
     return _hash_source("".join(_get_sourcelines(m, firstlineno, lastlineno)))
 
 
-def _compile_frame_context(
-    code: types.CodeType,
-) -> contextlib.AbstractContextManager[None]:
+# pyrefly: ignore [deprecated]
+@contextlib.contextmanager
+def _compile_frame_context(code: types.CodeType) -> Iterator[None]:
     from torch._dynamo.convert_frame import get_compile_id, log_dynamo_start
     from torch._guards import compile_context, CompileContext
 
@@ -1166,30 +1157,25 @@ def _compile_frame_context(
     # under the same cache entry, so we don't have recompile ids
     # i.e. If cold start had 0/0, 0/1, 1/0, 1/1, these would be
     # collapsed into 0/0, 1/0 on warm.
-    # pyrefly: ignore [deprecated]
-    @contextlib.contextmanager
-    def _ctx() -> Iterator[None]:
-        increment_frame()
-        compile_id = get_compile_id(frame_state={})
-        with (
-            compile_context(CompileContext(compile_id)),
-            dynamo_timed(
-                "_compile.compile_inner",
-                phase_name="entire_frame_compile",
-                dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
-                # TODO: save all relevant compilation metrics
-                metadata={
-                    "frame_key": str(torch._dynamo.utils.curr_frame),
-                    "co_name": code.co_name,
-                    "co_filename": code.co_filename,
-                    "co_firstlineno": code.co_firstlineno,
-                },
-            ),
-        ):
-            log_dynamo_start(code)
-            yield
-
-    return _ctx()
+    increment_frame()
+    compile_id = get_compile_id(frame_state={})
+    with (
+        compile_context(CompileContext(compile_id)),
+        dynamo_timed(
+            "_compile.compile_inner",
+            phase_name="entire_frame_compile",
+            dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
+            # TODO: save all relevant compilation metrics
+            metadata={
+                "frame_key": str(torch._dynamo.utils.curr_frame),
+                "co_name": code.co_name,
+                "co_filename": code.co_filename,
+                "co_firstlineno": code.co_firstlineno,
+            },
+        ),
+    ):
+        log_dynamo_start(code)
+        yield
 
 
 # The skips installed packages hold on each code object, one per package, True
@@ -1589,6 +1575,20 @@ class CompilePackage:
         if record:
             self._installed_globals.setdefault(module, []).append(name)
 
+    def _install_import_sources(
+        self, module: types.ModuleType, import_sources: dict[str, str]
+    ) -> None:
+        # An __import_* alias someone else bound first may be held BY REFERENCE
+        # by a loaded artifact's guards -- AOTCompiledFunction._seed_guard_scope
+        # seeds those aliases into a live module scope and nothing re-seeds them
+        # -- so uninstall() must leave a binding this package did not create
+        # alone. The aliases and the ___unnamed_scope keys _bind_unnamed_scopes
+        # binds are the only names install() records that are ever seeded that
+        # way.
+        for alias, module_name in import_sources.items():
+            module_obj = importlib.import_module(module_name)
+            self._install_global(module, alias, module_obj, record_only_if_new=True)
+
     def _install_resume_functions(
         self,
         module: types.ModuleType,
@@ -1736,20 +1736,7 @@ class CompilePackage:
             )
             with context:
                 module = sys.modules[entry.python_module]
-                # An __import_* alias someone else bound first may be held BY
-                # REFERENCE by a loaded artifact's guards --
-                # AOTCompiledFunction._seed_guard_scope seeds those aliases into
-                # a live module scope and nothing re-seeds them -- so uninstall()
-                # must leave a binding this package did not create alone. The
-                # aliases and the ___unnamed_scope keys below are the only names
-                # install() records that are ever seeded that way.
-                for alias, module_name in entry.import_sources.items():
-                    self._install_global(
-                        module,
-                        alias,
-                        importlib.import_module(module_name),
-                        record_only_if_new=True,
-                    )
+                self._install_import_sources(module, entry.import_sources)
                 target_code = code
                 if entry.install_to_global:
                     self._install_resume_functions(module, code, entry.function_names)
@@ -1809,9 +1796,10 @@ class DynamoStore(abc.ABC):
     This is an abstract base class for different storage implementations.
     """
 
-    def record_package(self, package: CompilePackage) -> None:
+    def record_package(self, package: CompilePackage) -> _DynamoCacheEntry:
         """
         Records a package to PrecompileContext, so that it can be serialized later.
+        Returns the recorded cache entry.
         """
         from torch._dynamo.precompile_context import PrecompileContext
 
@@ -1819,6 +1807,7 @@ class DynamoStore(abc.ABC):
         PrecompileContext.record_dynamo_cache_entry(
             cache_entry=cache_entry, key=package.source_id
         )
+        return cache_entry
 
     def record_eager_backend(self, backend_id: _BackendId, backend: Any) -> None:
         """
@@ -1881,9 +1870,7 @@ class DynamoStore(abc.ABC):
         """
         Saves a package to a given path. Grabs backends from PrecompileContext.
         """
-        self.record_package(package)
-        cache_entry = package.cache_entry()
-        self.save_cache_entry(cache_entry, key)
+        self.save_cache_entry(self.record_package(package), key)
 
     @abc.abstractmethod
     def read(self, path: str) -> PrecompileCacheEntry:
@@ -1981,8 +1968,9 @@ class DiskDynamoStore(DynamoStore):
         """
         Clear all CompilePackages from disk.
         """
-        if self.path_prefix():
-            shutil.rmtree(self.path_prefix(), ignore_errors=True)
+        prefix = self.path_prefix()
+        if prefix:
+            shutil.rmtree(prefix, ignore_errors=True)
 
     def write(
         self,
@@ -2018,9 +2006,7 @@ class DiskDynamoStore(DynamoStore):
         path = self._entry_dir(path)
         try:
             with open(os.path.join(path, "entry"), "rb") as f:
-                pickled_content = f.read()
-                entry = pickle.loads(pickled_content)
-                return entry
+                return pickle.loads(f.read())
         except Exception as e:
             raise RuntimeError(f"Failed to load package from path {path}: {e}") from e
 
@@ -2036,8 +2022,8 @@ class DiskDynamoCache(DiskDynamoStore):
         Saves a package to a given path. Grabs backends from PrecompileContext.
         """
         key = package.source_id
-        logger.info("Saving CompilePackage for %s", package.source_id)
-        super().save_package(package, key)
+        logger.info("Saving CompilePackage for %s", key)
+        self.save_package(package, key)
 
     def load(self, fn: Callable[..., Any]) -> PrecompileCacheEntry | None:
         """
@@ -2051,7 +2037,7 @@ class DiskDynamoCache(DiskDynamoStore):
             counters["dynamo_cache"]["dynamo_cache_miss"] += 1
             return None
         try:
-            result = super().load_cache_entry(key)
+            result = self.load_cache_entry(key)
         except Exception:
             counters["dynamo_cache"]["dynamo_cache_error"] += 1
             logger.warning("Failed to load package from path %s", path, exc_info=True)
