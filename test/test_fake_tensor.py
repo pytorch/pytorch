@@ -2839,6 +2839,27 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.assertIs(maybe_get_fake_mode(z), mode)
             self.assertEqual(z.shape, x.shape)
 
+    @parametrize("op_name", ["upsample_bilinear2d", "upsample_trilinear3d"])
+    @parametrize("channels", [3, 15, 16])
+    @parametrize("align_corners", [False, True])
+    def test_upsample_channels_last_small_channels(
+        self, device, op_name, channels, align_corners
+    ):
+        spatial = (4, 5) if op_name == "upsample_bilinear2d" else (4, 5, 6)
+        memory_format = (
+            torch.channels_last if len(spatial) == 2 else torch.channels_last_3d
+        )
+        x = torch.randn(2, channels, *spatial, device=device).contiguous(
+            memory_format=memory_format
+        )
+        op = getattr(torch.ops.aten, op_name).default
+        args = ([3] * len(spatial), align_corners)
+        expected = op(x, *args)
+        with FakeTensorMode() as mode:
+            actual = op(mode.from_tensor(x), *args)
+        self.assertTrue(expected.is_contiguous(memory_format=memory_format))
+        self.checkMetaProps(expected, actual)
+
     def test_upsample_bilinear_small_channels(self, device):
         out = []
         mode = FakeTensorMode()
