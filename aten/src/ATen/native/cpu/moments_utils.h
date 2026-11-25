@@ -239,5 +239,103 @@ std::pair<opmath_t<T>, opmath_t<T>> RowwiseMoments(const T* X, int64_t N, int64_
   }
 }
 
+// Sum of squares over m0 parity steps. Four independent accumulators hide the
+// fmadd latency. A reduced-precision step loads as two float vectors, so it
+// fills two accumulators and consecutive steps alternate between the pairs.
+template <typename T>
+inline MomentsVec<T> SumSquaresChunk(int64_t m0, const T* X_ptr) {
+  using Vec = MomentsVec<T>;
+  constexpr int64_t kVecSize{kParityVecSize<T>};
+
+  std::array<Vec, 4> acc;
+  acc.fill(Vec{opmath_t<T>{0}});
+
+  if constexpr (std::is_same_v<T, opmath_t<T>>) {
+    for (const auto j : c10::irange(m0)) {
+      const Vec x{Vec::loadu(X_ptr + j * kVecSize)};
+      acc[j % 4] = fmadd(x, x, acc[j % 4]);
+    }
+  } else {
+    for (const auto j : c10::irange(m0)) {
+      const auto [x0, x1]{LoadMomentsVec(X_ptr + j * kVecSize)};
+      acc[2 * (j % 2)] = fmadd(x0, x0, acc[2 * (j % 2)]);
+      acc[2 * (j % 2) + 1] = fmadd(x1, x1, acc[2 * (j % 2) + 1]);
+    }
+  }
+
+  return (acc[0] + acc[1]) + (acc[2] + acc[3]);
+}
+
+// Mean of the squares of a row, using the summation scheme of
+// RowwiseMomentsImpl: chunks of kChunkSize parity steps are summed pairwise, so
+// the rounding error grows with log2(N) rather than N, and stepping by
+// kParityVecSize keeps NEON results equal to AVX2.
+template <typename T, int64_t kMaxDepth>
+opmath_t<T> RowwiseMeanSquareImpl(const T* X, int64_t N) {
+  using math_t = opmath_t<T>;
+  using Vec = MomentsVec<T>;
+  constexpr int64_t kVecSize{kParityVecSize<T>};
+  const int64_t n{N / kVecSize};
+  const int64_t m{divup(n, kChunkSize)};
+  const int64_t depth{utils::CeilLog2(m)};
+
+  // stk[j] is zero or the sum of 2^j chunks. Adding chunk i carries like a
+  // binary counter: each trailing zero bit of i + 1 merges a level upward.
+  const Vec kZeroVec{math_t{0}};
+  std::array<Vec, kMaxDepth> stk;
+  stk.fill(kZeroVec);
+
+  for (const auto i : c10::irange(m)) {
+    const int64_t m0{std::min(kChunkSize, n - i * kChunkSize)};
+    stk[0] = stk[0] + SumSquaresChunk(m0, X + i * kChunkSize * kVecSize);
+
+    int64_t mask{i + 1};
+    for (int64_t j{1}; j < depth && (mask & 1) == 0; ++j) {
+      stk[j] = stk[j] + stk[j - 1];
+      stk[j - 1] = kZeroVec;
+      mask >>= 1;
+    }
+  }
+
+  for (const auto i : c10::irange(1, depth)) {
+    stk[0] = stk[0] + stk[i];
+  }
+
+  // Fold the lanes in a fixed order, then add the scalar tail.
+  std::array<math_t, Vec::size()> lanes{};
+  stk[0].store(lanes.data());
+  math_t sum{0};
+  for (const auto lane : lanes) {
+    sum += lane;
+  }
+
+  for (int64_t i{n * kVecSize}; i < N; ++i) {
+    const math_t x{static_cast<math_t>(X[i])};
+    sum += x * x;
+  }
+
+  // N == 0 gives NaN, the mean of an empty row, as in rms_norm_composite.
+  return sum / static_cast<math_t>(N);
+}
+
+// kMaxDepth sizes the cascade stack, as in RowwiseMoments.
+template <typename T>
+opmath_t<T> RowwiseMeanSquare(const T* X, int64_t N) {
+  const int64_t m{divup(N / kParityVecSize<T>, kChunkSize)};
+  const int64_t depth{utils::CeilLog2(m)};
+
+  if (depth <= 4) {
+    return RowwiseMeanSquareImpl<T, 4>(X, N);
+  } else if (depth <= 8) {
+    return RowwiseMeanSquareImpl<T, 8>(X, N);
+  } else if (depth <= 16) {
+    return RowwiseMeanSquareImpl<T, 16>(X, N);
+  } else if (depth <= 32) {
+    return RowwiseMeanSquareImpl<T, 32>(X, N);
+  } else {
+    return RowwiseMeanSquareImpl<T, 64>(X, N);
+  }
+}
+
 } // namespace CPU_CAPABILITY
 } // namespace at::native
