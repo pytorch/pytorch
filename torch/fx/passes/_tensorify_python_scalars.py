@@ -116,7 +116,9 @@ SUPPORTED_METHOD_OPS = {
 
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)
 def tensorify_python_scalars(
-    gm: GraphModule, shape_env: ShapeEnv, fake_mode: fake_tensor.FakeTensorMode
+    gm: GraphModule,
+    shape_env: ShapeEnv,
+    fake_mode: fake_tensor.FakeTensorMode | fake_tensor.CppFakeTensorMode,
 ) -> None:
     """
     Converts Python scalar operations into Tensor operations within the graph. This pass looks for
@@ -145,7 +147,7 @@ def tensorify_python_scalars(
 def _tensorify_impl(
     gm: GraphModule,
     shape_env: ShapeEnv,
-    fake_mode: fake_tensor.FakeTensorMode,
+    fake_mode: fake_tensor.FakeTensorMode | fake_tensor.CppFakeTensorMode,
 ) -> None:
     """Helper fn in tensorify_python_scalars so the caller can wrap
     with _EnableTorchFunction (#180906).

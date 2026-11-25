@@ -1,0 +1,61 @@
+{% if FINAL %}
+{{def_kernel("X", "VECTOR", "PARTIAL")}}
+{% else %}
+{{def_kernel("X", "VECTOR")}}
+{% endif %}
+    row = tl.program_id(0) * 16 + tl.arange(0, 16)
+    cta = tl.program_id(1)
+    matrix_pointer = X.to(tl.uint64)
+    vector_pointer = VECTOR.to(tl.uint64)
+    {% for plan in PLANS %}
+    {% set plan_index = loop.index0 %}
+    matches_{{plan_index}} = False
+    {% for matrix_mask, matrix_value, vector_mask, vector_value in plan[0] %}
+    matches_{{plan_index}} = matches_{{plan_index}} | (((matrix_pointer & {{matrix_mask}}) == {{matrix_value}}) & ((vector_pointer & {{vector_mask}}) == {{vector_value}}))
+    {% endfor %}
+    {% endfor %}
+    {% if COMPLEX %}
+    real = tl.full((16,), 0, ACC_TYPE)
+    imag = tl.full((16,), 0, ACC_TYPE)
+    {% else %}
+    value = tl.full((16,), 0, ACC_TYPE)
+    {% endif %}
+    {% for plan in PLANS %}
+    if matches_{{loop.index0}} & (cta < {{plan[2]}}):
+        {% if not FINAL and plan[1] in (4, 5) %}
+        value = triton_helpers.cuda_native_mv_mma_value(X, VECTOR, cta, M, K, S0, S1, VS, {{plan[10]}})
+        {% elif FINAL and plan[1] == 4 %}
+        value = tl.load(PARTIAL + row.to(tl.int64) * MAX_CTAS, row < M, 0)
+        {% else %}
+        for offset in range(16):
+            scalar_row = tl.program_id(0).to(tl.int64) * 16 + offset
+            if scalar_row < M:
+                {% if COMPLEX %}
+                scalar_real, scalar_imag = triton_helpers.cuda_native_complex_mv_value(
+                    X, VECTOR, {% if FINAL %}PARTIAL{% else %}X{% endif %}, scalar_row, cta,
+                    K, S0, S1, VS, {{plan[2]}}, {{plan[3]}}, {{plan[4]}}, {{plan[5]}}, {{plan[6]}},
+                    {{3 if FINAL and plan[1] == 5 else plan[1]}}, ACC_TYPE, FINAL, MAX_CTAS, {{plan[7]}}, {{plan[8]}}, {{plan[9]}})
+                real = tl.where(tl.arange(0, 16) == offset, scalar_real, real)
+                imag = tl.where(tl.arange(0, 16) == offset, scalar_imag, imag)
+                {% else %}
+                scalar_value = triton_helpers.cuda_native_mv_value(
+                    X, VECTOR, {% if FINAL %}PARTIAL{% else %}X{% endif %}, scalar_row, cta,
+                    K, S0, S1, VS, {{plan[2]}}, {{plan[3]}}, {{plan[4]}}, {{plan[5]}}, {{plan[6]}},
+                    {{3 if FINAL and plan[1] == 5 else plan[1]}}, ACC_TYPE, FINAL, MAX_CTAS)
+                value = tl.where(tl.arange(0, 16) == offset, scalar_value, value)
+                {% endif %}
+        {% endif %}
+    {% endfor %}
+    {% if COMPLEX %}
+    component = tl.arange(0, 2)
+    value = tl.where(component[None, :] == 0, real[:, None], imag[:, None])
+    {% if FINAL %}
+    {{store_output(("row[:, None]", "component[None, :]"), "value", "row[:, None] < M", val_shape=("16", "2"))}}
+    {% else %}
+    {{store_output(("row[:, None]", "cta", "component[None, :]"), "value", "row[:, None] < M", val_shape=("16", "2"))}}
+    {% endif %}
+    {% elif FINAL %}
+    {{store_output(("row",), "value", "row < M", val_shape=("16",))}}
+    {% else %}
+    {{store_output(("row", "cta"), "value", "row < M", val_shape=("16",))}}
+    {% endif %}

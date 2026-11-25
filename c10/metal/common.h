@@ -46,7 +46,8 @@
   _(Float8_e4m3fn, 24, float8_e4m3fn)  \
   _(UInt16, 27, uint16_t)              \
   _(UInt32, 28, uint32_t)              \
-  _(UInt64, 29, uint64_t)
+  _(UInt64, 29, uint64_t)              \
+  _(Float8_e8m0fnu, 44, float8_e8m0fnu)
 
 #define C10_METAL_SERIAL_SUFFIX_false ""
 #define C10_METAL_SERIAL_SUFFIX_true "_serial"

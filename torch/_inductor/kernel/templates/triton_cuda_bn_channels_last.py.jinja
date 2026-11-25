@@ -1,0 +1,19 @@
+{% if FINAL and CTAS > 1 %}
+{{def_kernel("X", "PARTIAL")}}
+{% else %}
+{{def_kernel("X")}}
+    PARTIAL = X
+{% endif %}
+    channel = tl.program_id(0).to(tl.int64)
+    cta = tl.program_id(1)
+    mean, m2, count = triton_helpers.cuda_bn_channels_last_statistics(X, PARTIAL, channel, cta, N, C, BH, CTAS, {{FINAL and CTAS > 1}})
+{% if not FINAL %}
+    component = tl.arange(0, 4)
+    value = tl.where(component == 0, mean, tl.where(component == 1, m2, count))
+    {{store_output(("component", "channel", "cta"), "value", "component < 3", val_shape=("4",))}}
+{% else %}
+    component = tl.arange(0, 2)
+    variance = triton_helpers.cuda_bn_divide(m2, count.to(ACC_TYPE))
+    value = tl.where(component == 0, mean, variance)
+    {{store_output(("component", "channel"), "value", "True", val_shape=("2",))}}
+{% endif %}

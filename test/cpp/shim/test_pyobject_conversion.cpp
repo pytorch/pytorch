@@ -67,6 +67,15 @@ TEST(TorchPyObjectConversion, DeviceNoopErrorsWithoutLibtorchPython) {
           aoti_torch_device_type_cpu(), /*device_index=*/-1, &py_out),
       AOTI_TORCH_FAILURE);
   EXPECT_EQ(py_out, nullptr);
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  const int32_t mtia_device_type = aoti_torch_device_type_mtia();
+  EXPECT_EQ(mtia_device_type, static_cast<int32_t>(c10::DeviceType::MTIA));
+  EXPECT_EQ(
+      torch_device_to_pyobject(mtia_device_type, /*device_index=*/0, &py_out),
+      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 }
 
 TEST(TorchPyObjectConversion, DtypeCodeValidatedBeforeNarrowing) {
