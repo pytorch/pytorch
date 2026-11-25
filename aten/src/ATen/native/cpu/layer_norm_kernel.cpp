@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <tuple>
+#include <type_traits>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -17,6 +18,7 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -627,9 +629,241 @@ void LayerNormBackwardKernelImpl(
   }
 }
 
+template <typename T>
+void RMSNormKernelImplInternal(
+    const Tensor& X,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    opmath_t<T> eps,
+    Tensor* Y,
+    Tensor* rstd) {
+  using math_t = opmath_t<T>;
+  using Vec = vec::Vectorized<math_t>;
+
+  const T* X_data{X.const_data_ptr<T>()};
+  const T* gamma_data{gamma.defined() ? gamma.const_data_ptr<T>() : nullptr};
+  T* Y_data{Y->data_ptr<T>()};
+  math_t* rstd_data{rstd->data_ptr<math_t>()};
+
+  at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+    for (const auto i : c10::irange(start, end)) {
+      const T* X_ptr{X_data + i * N};
+      T* Y_ptr{Y_data + i * N};
+      const math_t rstd_val{math_t{1} / std::sqrt(RowwiseMeanSquare(X_ptr, N) + eps)};
+      rstd_data[i] = rstd_val;
+
+      // For reduced T, vec::map computes in float and rounds once on store.
+      if (gamma_data == nullptr) {
+        vec::map<T>([rstd_val](Vec x) { return x * Vec{rstd_val}; }, Y_ptr, X_ptr, N);
+      } else {
+        vec::map2<T>(
+            [rstd_val](Vec x, Vec gamma) { return x * Vec{rstd_val} * gamma; },
+            Y_ptr,
+            X_ptr,
+            gamma_data,
+            N);
+      }
+    }
+  });
+}
+
+void RMSNormKernelImpl(
+    const Tensor& X,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    double eps,
+    Tensor* Y,
+    Tensor* rstd) {
+  TORCH_DCHECK_EQ(X.numel(), M * N);
+  DCHECK(!gamma.defined() || gamma.numel() == N);
+
+  // Reuses the tag of rms_norm_composite, which this kernel replaces: selective
+  // builds select dtypes per tag, so a new tag would break builds traced before.
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, X.scalar_type(), "rms_norm", [&]() {
+    RMSNormKernelImplInternal<scalar_t>(
+        X, gamma, M, N, static_cast<opmath_t<scalar_t>>(eps), Y, rstd);
+  });
+}
+
+// dgamma_partial += dY * (X * rstd), accumulated in opmath_t<T>. No vec::
+// helper reads reduced-precision inputs into a float output, so reduced types
+// get a hand-written loop.
+template <typename T>
+void RMSNormAccumulateWeightGrad(
+    opmath_t<T>* dgamma_partial,
+    const T* dY_ptr,
+    const T* X_ptr,
+    opmath_t<T> rstd_val,
+    int64_t N) {
+  using math_t = opmath_t<T>;
+  using fVec = vec::Vectorized<math_t>;
+
+  if constexpr (std::is_same_v<T, math_t>) {
+    vec::map3<T>(
+        [rstd_val](fVec acc, fVec dy, fVec x) { return acc + dy * (x * fVec{rstd_val}); },
+        dgamma_partial,
+        dgamma_partial,
+        dY_ptr,
+        X_ptr,
+        N);
+  } else {
+    // One vector of T converts to two float vectors, so each step updates two
+    // float vectors of the partial sum.
+    using bVec = vec::Vectorized<T>;
+    const fVec rstd_fvec{rstd_val};
+    int64_t d{0};
+    for (; d < N - (N % bVec::size()); d += bVec::size()) {
+      const auto [dy_fvec0, dy_fvec1]{convert_to_float<T>(bVec::loadu(dY_ptr + d))};
+      const auto [x_fvec0, x_fvec1]{convert_to_float<T>(bVec::loadu(X_ptr + d))};
+      math_t* acc_ptr{dgamma_partial + d};
+      const fVec acc_fvec0{fVec::loadu(acc_ptr) + dy_fvec0 * (x_fvec0 * rstd_fvec)};
+      const fVec acc_fvec1{fVec::loadu(acc_ptr + fVec::size()) + dy_fvec1 * (x_fvec1 * rstd_fvec)};
+      acc_fvec0.store(acc_ptr);
+      acc_fvec1.store(acc_ptr + fVec::size());
+    }
+
+    for (; d < N; d++) {
+      const math_t x{static_cast<math_t>(X_ptr[d])};
+      dgamma_partial[d] += static_cast<math_t>(dY_ptr[d]) * (x * rstd_val);
+    }
+  }
+}
+
+template <typename T>
+void RMSNormBackwardKernelImplInternal(
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    Tensor* dX,
+    Tensor* dgamma) {
+  using math_t = opmath_t<T>;
+  using Vec = vec::Vectorized<math_t>;
+
+  const T* dY_data{dY.const_data_ptr<T>()};
+  const T* X_data{X.const_data_ptr<T>()};
+  const math_t* rstd_data{rstd.const_data_ptr<math_t>()};
+  const T* gamma_data{gamma.defined() ? gamma.const_data_ptr<T>() : nullptr};
+  T* dX_data{dX->defined() ? dX->data_ptr<T>() : nullptr};
+  T* dgamma_data{dgamma->defined() ? dgamma->data_ptr<T>() : nullptr};
+  const math_t scale{math_t{1} / static_cast<math_t>(N)};
+
+  // Same two-pass dgamma reduction as LayerNorm: per-thread partial sums fused
+  // with dX while the row is in cache, then a reduction over threads. Unlike
+  // LayerNorm, the partials are kept in opmath_t (rstd's dtype): a bfloat16 or
+  // half running sum stops growing after a few hundred equal increments.
+  const int num_threads{at::get_num_threads()};
+  Tensor buffer;
+  math_t* buffer_data{nullptr};
+  if (dgamma_data != nullptr) {
+    buffer = at::zeros({num_threads, N}, rstd.options());
+    buffer_data = buffer.data_ptr<math_t>();
+  }
+
+  at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+    const int tid{at::get_thread_num()};
+    TORCH_CHECK(
+        tid < num_threads,
+        "expect thread id smaller than ",
+        num_threads,
+        ", got thread id ",
+        tid);
+    math_t* dgamma_partial{buffer_data == nullptr ? nullptr : buffer_data + tid * N};
+
+    for (const auto i : c10::irange(start, end)) {
+      const T* dY_ptr{dY_data + i * N};
+      const T* X_ptr{X_data + i * N};
+      const math_t rstd_val{rstd_data[i]};
+
+      if (dgamma_partial != nullptr) {
+        RMSNormAccumulateWeightGrad<T>(dgamma_partial, dY_ptr, X_ptr, rstd_val, N);
+      }
+
+      if (dX_data == nullptr) {
+        continue;
+      }
+
+      // With g = dY * gamma: dX = rstd * g + b * X, where b = -sum(X * g) * rstd^3 / N.
+      const math_t sum_xg{gamma_data == nullptr
+          ? vec::map2_reduce_all<T>(
+                [](Vec dy, Vec x) { return dy * x; },
+                [](Vec a, Vec b) { return a + b; },
+                dY_ptr,
+                X_ptr,
+                N)
+          : vec::map3_reduce_all<T>(
+                [](Vec dy, Vec x, Vec gamma) { return dy * gamma * x; },
+                [](Vec a, Vec b) { return a + b; },
+                dY_ptr,
+                X_ptr,
+                gamma_data,
+                N)};
+      const math_t b{-sum_xg * rstd_val * rstd_val * rstd_val * scale};
+
+      T* dX_ptr{dX_data + i * N};
+      if (gamma_data == nullptr) {
+        vec::map2<T>(
+            [rstd_val, b](Vec dy, Vec x) { return Vec{rstd_val} * dy + Vec{b} * x; },
+            dX_ptr,
+            dY_ptr,
+            X_ptr,
+            N);
+      } else {
+        vec::map3<T>(
+            [rstd_val, b](Vec dy, Vec gamma, Vec x) {
+              return Vec{rstd_val} * (dy * gamma) + Vec{b} * x;
+            },
+            dX_ptr,
+            dY_ptr,
+            gamma_data,
+            X_ptr,
+            N);
+      }
+    }
+  });
+
+  // Sum the per-thread partials for each column.
+  if (dgamma_data != nullptr) {
+    at::parallel_for(0, N, 1, [&](int64_t start, int64_t end) {
+      for (const auto j : c10::irange(start, end)) {
+        math_t dgamma_v{0};
+        for (const auto t : c10::irange(num_threads)) {
+          dgamma_v += buffer_data[t * N + j];
+        }
+        dgamma_data[j] = static_cast<T>(dgamma_v);
+      }
+    });
+  }
+}
+
+void RMSNormBackwardKernelImpl(
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    Tensor* dX,
+    Tensor* dgamma) {
+  TORCH_DCHECK_EQ(dY.numel(), M * N);
+  TORCH_DCHECK_EQ(X.numel(), M * N);
+  TORCH_DCHECK_EQ(rstd.numel(), M);
+  DCHECK(!gamma.defined() || gamma.numel() == N);
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, X.scalar_type(), "rms_norm", [&]() {
+    RMSNormBackwardKernelImplInternal<scalar_t>(dY, X, rstd, gamma, M, N, dX, dgamma);
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl)
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl)
+REGISTER_DISPATCH(RMSNormKernel, &RMSNormKernelImpl)
+REGISTER_DISPATCH(RMSNormBackwardKernel, &RMSNormBackwardKernelImpl)
 
 } // namespace at::native
