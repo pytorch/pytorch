@@ -19816,6 +19816,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # for constant buffers and so would pass even if a clone were generated.
         self.assertNotIn("aten::clone" if config.cpp_wrapper else "aten.clone", code[0])
 
+    @requires_gpu_and_triton
+    def test_lite_mode_triton_kernel_in_subgraph(self):
+        # Only the cond branch has the functional Triton HOP, so lite mode must
+        # reinplace and decompose it there, not just in the root graph.
+        from torch.testing._internal.triton_utils import add_kernel
+
+        def true_fn(x, y):
+            out = torch.zeros_like(x)
+            n_elements = out.numel()
+            add_kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
+            return out
+
+        def f(pred, x, y):
+            return torch.cond(pred, true_fn, lambda x, y: x - y, (x, y))
+
+        x = torch.randn(64, device=GPU_TYPE)
+        y = torch.randn(64, device=GPU_TYPE)
+
+        opt_f = torch.compile(f, mode="lite", fullgraph=True)
+        result, code = run_and_get_code(opt_f, torch.tensor(True), x, y)
+        self.assertEqual(result, x + y)
+        self.assertEqual(opt_f(torch.tensor(False), x, y), x - y)
+
+        self.assertIn(
+            "call_add_kernel" if config.cpp_wrapper else "add_kernel", code[0]
+        )
+        self.assertNotIn("aten::clone" if config.cpp_wrapper else "aten.clone", code[0])
+
     @lowering.force_fallback(aten.sort.default)
     def test_size_asserts_for_multi_output_fallback(self):
         @torch.compile
