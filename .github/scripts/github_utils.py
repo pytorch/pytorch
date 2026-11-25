@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import warnings
 from dataclasses import dataclass
 from typing import Any, cast, TYPE_CHECKING
@@ -17,6 +18,11 @@ if TYPE_CHECKING:
 
 
 GITHUB_API_URL = "https://api.github.com"
+# GitHub now and then answers 401 to one request made with a valid token, while
+# the same token keeps working for other requests. Retry those a few times, but
+# no more, so a token that is really revoked still fails quickly. A 401 means
+# GitHub did not act on the request, so retrying a POST or PATCH is safe too.
+GH_UNAUTHORIZED_RETRY_DELAYS_SECONDS = (5, 15)
 
 
 @dataclass
@@ -43,39 +49,47 @@ def gh_fetch_url_and_headers(
     if headers is None:
         headers = {}
     token = os.environ.get("GITHUB_TOKEN")
+    retry_delays: list[float] = []
     if token is not None and url.startswith(f"{GITHUB_API_URL}/"):
         headers["Authorization"] = f"token {token}"
+        retry_delays = list(GH_UNAUTHORIZED_RETRY_DELAYS_SECONDS)
 
     data_ = None
     if data is not None:
         data_ = data.encode() if isinstance(data, str) else json.dumps(data).encode()
 
-    try:
-        request = Request(url, headers=headers, data=data_, method=method)
-        # urlopen's own default applies when no timeout is given.
-        kwargs = {} if timeout is None else {"timeout": timeout}
-        with urlopen(request, **kwargs) as conn:
-            return conn.headers, reader(conn)
-    except HTTPError as err:
-        if (
-            err.code == 403
-            and all(
-                key in err.headers
-                for key in ["X-RateLimit-Limit", "X-RateLimit-Remaining"]
-            )
-            and int(err.headers["X-RateLimit-Remaining"]) == 0
-        ):
-            print(
-                f"""{url}
-                Rate limit exceeded:
-                Used: {err.headers["X-RateLimit-Used"]}
-                Limit: {err.headers["X-RateLimit-Limit"]}
-                Remaining: {err.headers["X-RateLimit-Remaining"]}
-                Resets at: {err.headers["x-RateLimit-Reset"]}"""
-            )
-        else:
-            print(f"Error fetching {url} {err}")
-        raise
+    while True:
+        try:
+            request = Request(url, headers=headers, data=data_, method=method)
+            # urlopen's own default applies when no timeout is given.
+            kwargs = {} if timeout is None else {"timeout": timeout}
+            with urlopen(request, **kwargs) as conn:
+                return conn.headers, reader(conn)
+        except HTTPError as err:
+            if err.code == 401 and retry_delays:
+                delay = retry_delays.pop(0)
+                print(f"Error fetching {url} {err}, retrying in {delay} seconds")
+                time.sleep(delay)
+                continue
+            if (
+                err.code == 403
+                and all(
+                    key in err.headers
+                    for key in ["X-RateLimit-Limit", "X-RateLimit-Remaining"]
+                )
+                and int(err.headers["X-RateLimit-Remaining"]) == 0
+            ):
+                print(
+                    f"""{url}
+                    Rate limit exceeded:
+                    Used: {err.headers["X-RateLimit-Used"]}
+                    Limit: {err.headers["X-RateLimit-Limit"]}
+                    Remaining: {err.headers["X-RateLimit-Remaining"]}
+                    Resets at: {err.headers["x-RateLimit-Reset"]}"""
+                )
+            else:
+                print(f"Error fetching {url} {err}")
+            raise
 
 
 def gh_fetch_url(

@@ -27,7 +27,13 @@ from typing import Any, TYPE_CHECKING
 from unittest import main, mock, TestCase
 from urllib.error import HTTPError, URLError
 
-from github_utils import gh_fetch_url, gh_graphql, GHGraphQLError, GitHubComment
+from github_utils import (
+    gh_fetch_url,
+    gh_graphql,
+    GH_UNAUTHORIZED_RETRY_DELAYS_SECONDS,
+    GHGraphQLError,
+    GitHubComment,
+)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from greenlight_guard import (
     GREENLIGHT_LOGIN,
@@ -5463,6 +5469,67 @@ class TestFetchUrlTimeout(TestCase):
         )
         gh_fetch_url(url, reader=lambda conn: None)
         self.assertEqual(mock_urlopen.call_args.kwargs, {})
+
+
+def _unauthorized(url: str) -> HTTPError:
+    return HTTPError(url, 401, "Unauthorized", {}, None)  # type: ignore[arg-type]
+
+
+@mock.patch("github_utils.time.sleep")
+@mock.patch("github_utils.urlopen")
+@mock.patch.dict(os.environ, {"GITHUB_TOKEN": "token"})
+class TestFetchUrlUnauthorizedRetry(TestCase):
+    url = "https://api.github.com/graphql"  # @lint-ignore
+
+    def _fetch(self, url: str) -> Any:
+        with mock.patch("builtins.print"):
+            return gh_fetch_url(url, reader=lambda conn: "ok")
+
+    def test_retries_a_401_from_github(
+        self, mock_urlopen: Any, mock_sleep: Any
+    ) -> None:
+        mock_urlopen.side_effect = [_unauthorized(self.url), mock.MagicMock()]
+        self.assertEqual(self._fetch(self.url), "ok")
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once_with(GH_UNAUTHORIZED_RETRY_DELAYS_SECONDS[0])
+
+    def test_gives_up_after_the_last_retry(
+        self, mock_urlopen: Any, mock_sleep: Any
+    ) -> None:
+        mock_urlopen.side_effect = _unauthorized(self.url)
+        with self.assertRaises(HTTPError):
+            self._fetch(self.url)
+        self.assertEqual(
+            mock_urlopen.call_count, len(GH_UNAUTHORIZED_RETRY_DELAYS_SECONDS) + 1
+        )
+        self.assertEqual(
+            [c.args[0] for c in mock_sleep.call_args_list],
+            list(GH_UNAUTHORIZED_RETRY_DELAYS_SECONDS),
+        )
+
+    def test_other_errors_are_not_retried(
+        self, mock_urlopen: Any, mock_sleep: Any
+    ) -> None:
+        mock_urlopen.side_effect = HTTPError(self.url, 403, "Forbidden", {}, None)  # type: ignore[arg-type]
+        with self.assertRaises(HTTPError):
+            self._fetch(self.url)
+        self.assertEqual(mock_urlopen.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    def test_no_retry_without_a_github_token(
+        self, mock_urlopen: Any, mock_sleep: Any
+    ) -> None:
+        # Without our token, or for a URL outside the GitHub API that never
+        # gets it (e.g. Dr.CI on HUD), a 401 is real and retrying cannot help.
+        hud_url = "https://hud.pytorch.org/api/drci/drci"  # @lint-ignore
+        for url, env in ((self.url, {}), (hud_url, {"GITHUB_TOKEN": "token"})):
+            mock_urlopen.reset_mock()
+            mock_urlopen.side_effect = _unauthorized(url)
+            with mock.patch.dict(os.environ, env, clear=True):
+                with self.assertRaises(HTTPError):
+                    self._fetch(url)
+            self.assertEqual(mock_urlopen.call_count, 1)
+        mock_sleep.assert_not_called()
 
 
 if __name__ == "__main__":
