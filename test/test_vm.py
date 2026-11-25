@@ -170,6 +170,53 @@ class TestVmTracedCall(TestCase):
             self.assertEqual(got, [1.0, 1.5, 1.5, -0.5])
             self.assertEqual(y, f(x, 0.5)[0], atol=0, rtol=0)
 
+    @isolated
+    def test_device_argument_is_another_object_on_every_call(self, device):
+        # `tensor.device` makes a new object on every read: the region is for
+        # the device it names, and runs from the fifth call on.
+        import torch._rust_inductor as ri
+
+        def f(x, where):
+            return (torch.arange(8, device=where) + x).sin().cos().tanh().exp()
+
+        ri.COUNT = True
+        g = vm(f, passes=EARLY)
+        for call in range(8):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(
+                g(x, x.device), f(x, x.device), atol=0, rtol=0, msg=f"call {call}"
+            )
+        self.assertEqual(
+            (region_runs(), ri.stats["compiled"] + ri.stats["reused"]), (4, 1)
+        )
+
+    @isolated
+    def test_string_argument_is_compared_by_value(self, device):
+        # A str made anew on every call, changed and changed back: each value
+        # has its region, found again when the value comes back.
+        import torch._rust_inductor as ri
+
+        def f(x, how):
+            y = (x.sin() * 2 + 1).cos().tanh()
+            return y.sum() if how == "sum" else y.mean()
+
+        ri.COUNT = True
+        g = vm(f, passes=EARLY)
+        runs, traced = [], []
+        for how, calls in [("sum", 5), ("mean", 3), ("sum", 3), ("mean", 2)]:
+            for _ in range(calls):
+                x = torch.randn(4, 8, device=device)
+                before = region_runs()
+                made = "".join(list(how))
+                self.assertIsNot(made, how)
+                self.assertEqual(g(x, made), f(x, how), atol=0, rtol=0)
+                runs.append(region_runs() - before)
+            traced.append(ri.stats["traced"])
+        self.assertGreater(runs[4], 0)
+        self.assertGreater(runs[7], 0)
+        self.assertEqual((runs[10], runs[12]), (runs[4], runs[7]))
+        self.assertEqual(traced[3], traced[1])
+
 
 instantiate_device_type_tests(TestVmTracedCall, globals())
 
