@@ -68,8 +68,10 @@ MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
   return {uuid_++, 0};
 }
 
-HostMemPool::HostMemPool() : id_(MemPool::graph_pool_handle(true)) {
-  at::getHostAllocator(at::kCUDA)->create_pool(id_);
+HostMemPool::HostMemPool(
+    std::shared_ptr<CUDACachingAllocator::CUDAAllocator> allocator)
+    : id_(MemPool::graph_pool_handle(true)) {
+  at::getHostAllocator(at::kCUDA)->create_pool(id_, std::move(allocator));
 }
 
 HostMemPool::~HostMemPool() {

@@ -1836,8 +1836,9 @@ class HostMemPool(_HostMemPool):
     Pinned allocations of a thread inside ``use_mem_pool(host_pool)`` come from
     this pool, and blocks freed by any thread return to it. The pool keeps its
     cached blocks apart from other pools; it does not choose where memory is
-    placed. A typical use is one pool per NUMA node, entered by the loader
-    threads bound to that node; see :ref:`cuda-pinned-host-memory-pools`.
+    placed, unless :meth:`from_py_allocator` created it. A typical use is one
+    pool per NUMA node, entered by the loader threads bound to that node; see
+    :ref:`cuda-pinned-host-memory-pools`.
 
     Creating a pool allocates no memory. A HostMemPool cannot be a CUDA graph's
     ``pool``, but a graph keeps the pool until it is reset if the pool's
@@ -1846,6 +1847,38 @@ class HostMemPool(_HostMemPool):
     the reset of the last such graph does; what remains is freed by a later
     :func:`torch.accelerator.empty_host_cache`.
     """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @classmethod
+    def from_py_allocator(
+        cls,
+        alloc_fn: Callable[[int, int, int], int | None],
+        free_fn: Callable[[int, int, int, int], None],
+    ) -> "HostMemPool":
+        r"""Create a HostMemPool whose blocks Python callbacks allocate and free.
+
+        ``alloc_fn(size, device, stream)`` allocates ``size`` bytes of pinned
+        host memory, such as memory from ``cudaHostAlloc``, or memory placed
+        with ``numa_alloc_onnode`` and registered with ``cudaHostRegister``. It
+        returns the address as an integer, or ``None`` or zero on failure.
+        ``free_fn(ptr, size, device, stream)`` frees the memory. The callbacks
+        have the signatures of :meth:`MemPool.from_py_allocator`; ``device``
+        and ``stream`` can be ignored.
+
+        Memory that is not pinned host memory is given back to ``free_fn``, and
+        the allocation raises an error. The pool's blocks never come from the
+        pinned reserve segment, and ``pinned_use_cuda_host_register`` does not
+        apply to them. During a CUDA graph capture the callbacks run in relaxed
+        capture mode.
+
+        See :ref:`cuda-host-mem-pool-allocators` for an example.
+        """
+        pool = cls.__new__(cls)
+        allocator = torch._C._cuda_createPythonAllocator(alloc_fn, free_fn)
+        _HostMemPool.__init__(pool, allocator)
+        return pool
 
     @property
     def id(self) -> tuple[int, int]:
