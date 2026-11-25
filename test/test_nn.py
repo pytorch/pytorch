@@ -8119,6 +8119,50 @@ class TestNNDeviceType(NNTestCase):
                 rms_device(x_device).backward(grad_output.to(device))
                 self.assertEqual(x.grad, x_device.grad, lambda msg: f"{msg}\ninput grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @toleranceOverride({torch.float: tol(atol=1e-5, rtol=1e-4),
+                        torch.half: tol(atol=2e-3, rtol=2e-3),
+                        torch.bfloat16: tol(atol=1e-2, rtol=1e-2)})
+    def test_layer_norm_rms_norm_narrow_rows(self, device, dtype):
+        # on CUDA, rows that fit in one warp take the packed launch with several rows per block
+        # covers odd vector counts, both sides of the one warp limit and partial last blocks
+        widths = [4, 8, 12, 16, 20, 36, 64, 68, 124, 128, 132]
+        rows = [1, 7, 1031, 4100]
+        eps = 1e-5
+        for m, n in itertools.product(rows, widths):
+            x = torch.randn(m, n, device=device, dtype=dtype)
+            weight = torch.randn(n, device=device, dtype=dtype)
+            bias = torch.randn(n, device=device, dtype=dtype)
+            x_ref = x.double()
+            mean_ref = x_ref.mean(-1, keepdim=True)
+            rstd_ref = (x_ref.var(-1, unbiased=False, keepdim=True) + eps).rsqrt()
+            rms_rstd_ref = (x_ref.pow(2).mean(-1, keepdim=True) + eps).rsqrt()
+
+            for w, b in [(None, None), (weight, None), (None, bias), (weight, bias)]:
+                y, mean, rstd = torch.native_layer_norm(x, [n], w, b, eps)
+                y_ref = (x_ref - mean_ref) * rstd_ref
+                if w is not None:
+                    y_ref = y_ref * w.double()
+                if b is not None:
+                    y_ref = y_ref + b.double()
+                self.assertEqual(y.double(), y_ref, lambda msg: f"{msg}\nlayer_norm output failed: {m=} {n=}")
+                self.assertEqual(mean.double().reshape(-1), mean_ref.reshape(-1),
+                                 lambda msg: f"{msg}\nlayer_norm mean failed: {m=} {n=}", rtol=1e-4, atol=1e-5)
+                self.assertEqual(rstd.double().reshape(-1), rstd_ref.reshape(-1),
+                                 lambda msg: f"{msg}\nlayer_norm rstd failed: {m=} {n=}", rtol=1e-4, atol=1e-5)
+
+            for w in [None, weight]:
+                # keep rms_norm on the ATen kernel when a Python-native override is installed
+                with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+                    y, rstd = torch._fused_rms_norm(x, [n], w, eps)
+                y_ref = x_ref * rms_rstd_ref
+                if w is not None:
+                    y_ref = y_ref * w.double()
+                self.assertEqual(y.double(), y_ref, lambda msg: f"{msg}\nrms_norm output failed: {m=} {n=}")
+                self.assertEqual(rstd.double().reshape(-1), rms_rstd_ref.reshape(-1),
+                                 lambda msg: f"{msg}\nrms_norm rstd failed: {m=} {n=}", rtol=1e-4, atol=1e-5)
+
     @onlyAccelerator
     @largeTensorTest("40GB")
     def test_layer_norm_large_tensor(self, device):
