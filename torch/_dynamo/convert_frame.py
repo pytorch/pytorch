@@ -218,7 +218,9 @@ class TODO_UNKNOWN:
 
 
 def _clear_fake_mode_weakrefs(
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode | None,
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    | torch._subclasses.fake_tensor.CppFakeTensorMode
+    | None,
 ) -> None:
     """Clear WeakIdRef entries from a FakeTensorMode's describer."""
     if fake_mode is None:
@@ -350,6 +352,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+            import torch._inductor.config as inductor_config
+
+            prior_inductor_deterministic = inductor_config.deterministic
             prior_mobile_allocator_state = (
                 torch._C._is_default_mobile_cpu_allocator_set()
             )
@@ -359,8 +364,8 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             if torch.cuda.is_available():
                 with torch._C.DisableTorchFunction():
                     cuda_rng_state = torch.cuda.get_rng_state()
-            cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
-                "cuda", "matmul"
+            cuda_matmul_fp32_prec = torch.backends._get_fp32_precision_state(
+                "cuda.matmul"
             )
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
@@ -377,9 +382,15 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
-                torch.use_deterministic_algorithms(
+                torch._C._set_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
+                # Not torch.use_deterministic_algorithms(prior_deterministic): it
+                # would also set Inductor's flag to prior_deterministic, turning
+                # off deterministic mode set through Inductor alone. Restore the
+                # flag to its own prior value instead.
+                if inductor_config.deterministic != prior_inductor_deterministic:
+                    inductor_config.deterministic = prior_inductor_deterministic
                 torch.random.set_rng_state(torch_rng_state)
                 torch.set_default_dtype(prior_dtype)
                 curr_mobile_allocator_state = (
@@ -390,9 +401,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 if cuda_rng_state is not None:
                     with torch._C.DisableTorchFunction():
                         torch.cuda.set_rng_state(cuda_rng_state)
-                torch._C._set_fp32_precision_setter(
-                    "cuda", "matmul", cuda_matmul_fp32_prec
-                )
+                torch.backends._set_fp32_precision_state(cuda_matmul_fp32_prec)
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
                 if not guards.check():
                     raise AssertionError(
@@ -920,16 +929,16 @@ def trace_frame(
 ) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
     if (
-        torch.cuda.is_available()
-        and hasattr(torch._C, "_cuda_isCurrentStreamCapturing")
-        and not isinstance(torch._C._cuda_isCurrentStreamCapturing, type)
-        and torch.cuda.is_current_stream_capturing()
+        accelerator is not None
+        and torch.accelerator.current_stream().is_capturing()
         and not _in_hop_compile()
     ):
+        device_type = accelerator.type.upper()
         raise exc.TorchRuntimeError(
-            "torch.compile cannot JIT compile during CUDA graph capture. "
-            "Execute warmup iterations outside of CUDA graph capture to trigger "
+            f"torch.compile cannot JIT compile during {device_type} graph capture. "
+            f"Execute warmup iterations outside of {device_type} graph capture to trigger "
             "compilation, then capture the graph after compilation has completed."
         )
 
@@ -1127,7 +1136,10 @@ class BackendInput:
     backend_id: str
     graph_module: torch.fx.GraphModule
     example_inputs: Any
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    fake_mode: (
+        torch._subclasses.fake_tensor.FakeTensorMode
+        | torch._subclasses.fake_tensor.CppFakeTensorMode
+    )
     tensor_to_context: WeakIdKeyDictionary
 
 

@@ -20,6 +20,7 @@
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/py/IntrusivePtrNoGilDestructor.hpp>
 #include <torch/csrc/distributed/c10d/py/PyBackend.hpp>
 #include <torch/csrc/distributed/c10d/py/PyProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
@@ -35,8 +36,8 @@
 #endif
 
 #ifdef USE_C10D_NCCL
+#include <torch/csrc/distributed/c10d/NCCLCommon.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.hpp>
@@ -108,60 +109,37 @@ bool registerGilChecker() {
 static bool registered = registerGilChecker();
 #endif // USE_C10D_NCCL
 
-// Wrapper to ensure GIL is released before destructing ProcessGroupGloo
-// TODO: move this somewhere more generally useful
-template <typename T>
-class IntrusivePtrNoGilDestructor {
-  c10::intrusive_ptr<T> impl_{};
+#ifdef USE_C10D_GLOO
 
- public:
-  IntrusivePtrNoGilDestructor() = default;
-  IntrusivePtrNoGilDestructor(const IntrusivePtrNoGilDestructor&) = default;
-  IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) noexcept = default;
-  IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) =
-      default;
-  IntrusivePtrNoGilDestructor& operator=(
-      IntrusivePtrNoGilDestructor&&) noexcept = default;
-  /* implicit */ IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl)
-      : impl_(std::move(impl)) {}
-  // This ctor is very important; see
-  // https://github.com/pybind/pybind11/issues/2957
-  explicit IntrusivePtrNoGilDestructor(T* impl)
-      // NOLINTNEXTLINE(bugprone-exception-escape)
-      : impl_(c10::intrusive_ptr<T>::unsafe_steal_from_new(impl)) {}
-  // NOLINTNEXTLINE(bugprone-exception-escape)
-  ~IntrusivePtrNoGilDestructor() {
-    if (impl_) {
-      if (PyGILState_Check()) {
-        pybind11::gil_scoped_release release;
-        impl_.reset();
-      } else {
-        impl_.reset();
-      }
-    }
+std::optional<std::array<int64_t, 3>> get_python_gc_counts() {
+  if (!Py_IsInitialized()) {
+    return std::nullopt;
   }
-  T& operator*() const noexcept {
-    return *impl_;
-  }
-  T* operator->() const noexcept {
-    return impl_.get();
-  }
-  [[nodiscard]] T* get() const noexcept {
-    return impl_.get();
-  }
-  void reset() noexcept {
-    impl_.reset();
-  }
-  operator bool() const noexcept {
-    return impl_;
-  }
-};
+  pybind11::gil_scoped_acquire gil;
+  py::tuple counts =
+      py::module_::import("gc").attr("get_count")().cast<py::tuple>();
+  return std::array<int64_t, 3>{
+      counts[0].cast<int64_t>(),
+      counts[1].cast<int64_t>(),
+      counts[2].cast<int64_t>()};
+}
+
+bool registerGcCountGetter() {
+  c10d::get_gc_count_getter() = &get_python_gc_counts;
+  return true;
+}
+
+static bool registered_gc_count_getter = registerGcCountGetter();
+#endif // USE_C10D_GLOO
 
 } // anonymous namespace
 
-PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true)
-
 namespace torch::distributed::c10d {
+
+#ifdef USE_C10D_NCCL_LEGACY
+// Binds the legacy ProcessGroupNCCL ("nccl-legacy"); defined in fb/.
+void initNCCLLegacyBindings(py::module& module);
+#endif // USE_C10D_NCCL_LEGACY
 
 namespace {
 
@@ -1256,6 +1234,20 @@ Example:
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
 
+  const auto shmem_ops = ::c10d::nvshmem_extension::shmem_ops();
+  py::enum_<::c10d::nvshmem_extension::ShmemSignalOp>(module, "_ShmemSignalOp")
+      .value("SET", shmem_ops.signal_set)
+      .value("ADD", shmem_ops.signal_add);
+
+  py::enum_<::c10d::nvshmem_extension::ShmemCompareOp>(
+      module, "_ShmemCompareOp")
+      .value("EQ", shmem_ops.cmp_eq)
+      .value("NE", shmem_ops.cmp_ne)
+      .value("GT", shmem_ops.cmp_gt)
+      .value("GE", shmem_ops.cmp_ge)
+      .value("LT", shmem_ops.cmp_lt)
+      .value("LE", shmem_ops.cmp_le);
+
   // Check if NVSHMEM is available on current system.
   module.def(
       "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
@@ -1578,7 +1570,10 @@ Returns:
 The operation a pre/post hook is firing for. Values mostly follow the
 dispatcher ops, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is
 distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
-``recv`` from any source reports ``RECV``.)")
+``recv`` from any source reports ``RECV``. ``SPLIT``, ``NEW_WINDOW`` and
+``RECONFIGURE`` fire with no tensors; the post-hook ``work`` is ``None`` for
+``SPLIT`` and ``NEW_WINDOW``, which pass the new ``group`` or ``window``
+instead.)")
       .value("SEND", ::c10d::HookOpName::SEND)
       .value("RECV", ::c10d::HookOpName::RECV)
       .value("BROADCAST", ::c10d::HookOpName::BROADCAST)
@@ -1603,6 +1598,7 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
           "REDUCE_SCATTER_TENSOR_COALESCED",
           ::c10d::HookOpName::REDUCE_SCATTER_TENSOR_COALESCED)
       .value("ALLTOALL_BASE", ::c10d::HookOpName::ALLTOALL_BASE)
+      .value("RECONFIGURE", ::c10d::HookOpName::RECONFIGURE)
       .value("UNKNOWN", ::c10d::HookOpName::UNKNOWN);
 
   py::class_<::c10d::PreHookArgs>(
@@ -1633,11 +1629,19 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readwrite(
           "op_id",
           &::c10d::PreHookArgs::op_id,
-          "Identifies the operation; the matching post-hook gets the same ``op_id``.");
+          "Identifies the operation; the matching post-hook gets the same ``op_id``.")
+      .def_readwrite(
+          "device",
+          &::c10d::PreHookArgs::device,
+          "Device type (index unset) the operation was dispatched for, set only for ``barrier``; ``None`` otherwise, including tensorless lifecycle ops.");
 
   py::class_<::c10d::PostHookArgs>(
       module,
       "PostHookArgs",
+#if PYBIND11_VERSION_MAJOR >= 3
+      // A kept copy may hold the last reference to a group or work.
+      py::release_gil_before_calling_cpp_dtor(),
+#endif
       "Arguments passed to a post-hook, see ``ProcessGroup.register_post_hook``.")
       .def(py::init<>())
       .def_readwrite(
@@ -1651,11 +1655,23 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readwrite(
           "work",
           &::c10d::PostHookArgs::work,
-          "``Work`` handle of the issued operation; may be ``None``.")
+          "``Work`` handle of the issued operation; ``None`` for ``SPLIT`` and "
+          "``NEW_WINDOW`` and may be ``None`` for synchronous operations.")
       .def_readwrite(
           "op_id",
           &::c10d::PostHookArgs::op_id,
-          "Same ``op_id`` as the matching pre-hook call.");
+          "Same ``op_id`` as the matching pre-hook call.")
+      .def_readwrite(
+          "group",
+          &::c10d::PostHookArgs::group,
+          "New ``ProcessGroup`` for ``SPLIT``; ``None`` on ranks not in it and "
+          "for other operations. When created by ``torch.distributed.split_group``, "
+          "the hook runs before the group is registered, so lookups such as "
+          "``get_rank(group)`` or ``get_process_group_ranks`` fail on it.")
+      .def_readwrite(
+          "window",
+          &::c10d::PostHookArgs::window,
+          "New window for ``NEW_WINDOW``; ``None`` for other operations.");
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
@@ -2455,7 +2471,15 @@ Arguments:
     wait_for_workers (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
-    use_libuv (bool, optional): If True, use libuv for ``TCPServer`` backend. Default is True.
+    use_libuv (bool, optional): Deprecated since 2.16 and ignored; ``TCPServer`` always uses libuv. ``False`` emits a ``FutureWarning``. Default is True.
+    tls_cert (str, optional): Path to a PEM certificate (chain). Enables TLS with mutual certificate authentication, which requires ``tls_cert``, ``tls_key`` and ``tls_ca`` and must be enabled on both client and server. If no ``tls_*`` option is set, the ``TORCH_TCPSTORE_TLS_CERT``, ``TORCH_TCPSTORE_TLS_KEY``, ``TORCH_TCPSTORE_TLS_CA``, ``TORCH_TCPSTORE_TLS_PSK`` and ``TORCH_TCPSTORE_TLS_PSK_FILE`` environment variables are used instead; TLS is disabled when all selected settings are empty or unset unless ``TORCH_TCPSTORE_TLS_REQUIRE=1`` is set; the require switch accepts only ``0`` or ``1`` and also applies to clones; otherwise empty values and paths containing NUL bytes raise an error. ``clone()`` preserves the resolved configuration, including disabled TLS, regardless of later environment changes. Certificate files are reloaded from the resolved paths, so prefer absolute paths; replacing them affects later clones. Reusing a ``multi_tenant`` server with a different TLS configuration raises. Keep the TLS environment variables stable while constructing stores. Fresh stores created internally, including by ``init_process_group`` with ``env://``, torchrun/the elastic agent, distributed debug, and the asynchronous checkpoint prefix-store helper, only enable TLS through the environment variables; explicit options on another store do not configure them. 64-bit Linux only; loads OpenSSL >= 1.1.1 (``libssl.so.3`` or ``libssl.so.1.1``) at runtime. TLS 1.2 permits only ECDHE with AEAD ciphers; TLS 1.3 uses its standard cipher suites. The server closes connections that do not finish their TLS handshake within 10 seconds. This protects only the TCPStore control channel, not Gloo/NCCL data traffic or other listeners. Any certificate signed by the CA is accepted; the hostname and subject are not checked, so use a dedicated CA. A certificate may be used for both server and client connections (rank 0 runs both), so it needs both the serverAuth and clientAuth extended key usages, or none; any extended key usage on CA certificates in the chain must also include both. Default is None.
+    tls_key (str, optional): Path to the unencrypted PEM private key, which may be the same file as ``tls_cert``. Default is None.
+    tls_ca (str, optional): Path to the PEM CA bundle used to verify the peer certificate. Default is None.
+    tls_psk (str, optional): The pre-shared key value, not a filename. An empty value disables TLS only if all selected TLS settings are empty or unset. Used verbatim as UTF-8 bytes (32 to 256 bytes, no NUL); no hex or base64 decoding is performed. Enables TLS 1.3 with pre-shared key authentication instead of certificates; it cannot be combined with ``tls_cert``, ``tls_key``, ``tls_ca`` or ``tls_psk_file``. Client and server must use the same key. Use a fresh key for each job and separate keys for different protocols (for example, derive them using HKDF with distinct context labels). The key must be random, with at least 128 bits of entropy, not a passphrase: a captured handshake allows offline guessing. For example, generate a value with ``secrets.token_hex(32)`` without printing it. The environment variable ``TORCH_TCPSTORE_TLS_PSK`` also contains the value directly; prefer ``tls_psk_file``/``TORCH_TCPSTORE_TLS_PSK_FILE`` when available. Secret values remain in process memory and may appear in core dumps. ``clone()`` reuses the resolved value, independent of later environment changes. 64-bit Linux only; the OpenSSL and internal-store notes for ``tls_cert`` apply. Any holder of the key can impersonate either endpoint and gets full read/write access to every key. Keep the value secret; avoid shell tracing and command-line arguments that expose it. Distribution is up to the user. Constructor ``TypeError`` diagnostics omit all argument values, including for plaintext stores; the original message, exception subtype, notes, and chaining are not preserved. This does not prevent user-defined conversion or representation methods from exposing values. Default is None.
+    tls_psk_file (str, optional): Preferred PSK source: an owner-only regular file containing the raw 32 to 256 key bytes. The file must be owned by the effective user, have no group or other permissions, and must not be a symlink. Contents are not stripped or decoded; NUL bytes are rejected. It is exclusive with all other TLS settings. If no ``tls_*`` option is set, ``TORCH_TCPSTORE_TLS_PSK_FILE`` supplies the path. The file is read once during construction; clones retain the resolved key. An empty path disables TLS only if all selected settings are empty or unset. Default is None.
+
+.. note:: The server limits keys (including any prefix) to 8 KiB, values to 8 MiB per request and multi-key requests to 128K keys; it disconnects clients that exceed them.
+
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
@@ -2476,7 +2500,27 @@ Example::
                       bool waitWorkers,
                       bool multiTenant,
                       std::optional<int> masterListenFd,
-                      bool useLibUV) {
+                      bool useLibUV,
+                      std::optional<std::string> tlsCert,
+                      std::optional<std::string> tlsKey,
+                      std::optional<std::string> tlsCa,
+                      std::optional<std::string> tlsPsk,
+                      std::optional<std::string> tlsPskFile) {
+            if (!useLibUV) {
+              static std::atomic<bool> warned{false};
+              if (!warned.load() || c10::WarningUtils::get_warnAlways()) {
+                if (PyErr_WarnEx(
+                        PyExc_FutureWarning,
+                        "TCPStore use_libuv=False (USE_LIBUV=0, ?use_libuv=0) is "
+                        "deprecated and ignored since PyTorch 2.16: libuv is the "
+                        "only backend. Remove the option to silence this warning.",
+                        1) != 0) {
+                  throw py::error_already_set();
+                }
+                warned.store(true);
+              }
+            }
+
             // gil_scoped_release is not safe as a call_guard in init.
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
@@ -2496,7 +2540,11 @@ Example::
                 .timeout = timeout,
                 .multiTenant = multiTenant,
                 .masterListenFd = masterListenFd,
-                .useLibUV = useLibUV};
+                .tlsCert = std::move(tlsCert),
+                .tlsKey = std::move(tlsKey),
+                .tlsCa = std::move(tlsCa),
+                .tlsPsk = std::move(tlsPsk),
+                .tlsPskFile = std::move(tlsPskFile)};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2512,6 +2560,12 @@ Example::
           py::arg("multi_tenant") = false,
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = true,
+          py::kw_only(),
+          py::arg("tls_cert") = py::none(),
+          py::arg("tls_key") = py::none(),
+          py::arg("tls_ca") = py::none(),
+          py::arg("tls_psk") = py::none(),
+          py::arg("tls_psk_file") = py::none(),
           R"(Creates a new TCPStore.)")
       .def_property_readonly(
           "host",
@@ -2524,12 +2578,46 @@ Example::
       .def_property_readonly(
           "libuvBackend",
           &::c10d::TCPStore::isLibUvBackend,
-          R"(Returns True if it's using the libuv backend.)")
+          R"(Always True; libuv is the only ``TCPServer`` backend.)")
       .def(
           "__repr__",
           &::c10d::TCPStore::repr,
           R"(Returns a string representation of the TCPStore.)",
           py::call_guard<py::gil_scoped_release>());
+
+  // pybind's argument-mismatch errors echo every argument, including secrets.
+  // Forward through the original constructor to retain its conversion rules,
+  // but discard TypeError diagnostics before they can expose a PSK.
+  {
+    auto tcpStore = module.attr("TCPStore");
+    auto init = tcpStore.attr("__init__");
+    auto doc = init.attr("__doc__").cast<std::string>();
+    py::options options;
+    options.disable_function_signatures();
+    tcpStore.attr("__init__") = py::cpp_function(
+        [init](
+            py::detail::value_and_holder& v_h,
+            const py::args& args,
+            const py::kwargs& kwargs) {
+          try {
+            init(
+                py::handle(reinterpret_cast<PyObject*>(v_h.inst)),
+                *args,
+                **kwargs);
+          } catch (const py::error_already_set& error) {
+            if (error.matches(PyExc_TypeError)) {
+              // @allow-raw-throw: Preserve TypeError without secret context.
+              throw py::type_error(
+                  "Invalid TCPStore arguments (values omitted to protect TLS secrets)");
+            }
+            throw;
+          }
+        },
+        py::is_method(tcpStore),
+        py::detail::is_new_style_constructor(),
+        py::name("__init__"),
+        doc.c_str());
+  }
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
@@ -3387,10 +3475,6 @@ Args:
               &::c10d::ProcessGroup::unregisterAbortHook,
               py::arg("hook_id"),
               "Remove the abort hook registered with ``hook_id``.")
-          .def_property_readonly(
-              "supports_completion_hooks",
-              &::c10d::ProcessGroup::supportsCompletionHooks,
-              "Whether the default backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3422,7 +3506,8 @@ Args:
 Register ``hook`` to be called with a ``PostHookArgs`` after each operation
 issued through this process group is issued, not when it completes; wait on
 ``PostHookArgs.work`` to observe completion. If a hook raises, the operation
-has already been issued but its ``Work`` is not returned to the caller.
+has already been issued but its result (``Work``, new group or window) is not
+returned to the caller.
 Otherwise behaves like ``register_pre_hook``.
 
 Args:
@@ -3624,10 +3709,6 @@ Args:
               &::c10d::Backend::unregisterAbortHook,
               py::arg("hook_id"),
               "Remove the abort hook registered with ``hook_id``.")
-          .def_property_readonly(
-              "supports_completion_hooks",
-              &::c10d::Backend::supportsCompletionHooks,
-              "Whether the backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -4310,131 +4391,26 @@ supported.
 #endif
 
 #ifdef USE_C10D_NCCL
-  auto processGroupNCCL =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCL>(
-          module, "ProcessGroupNCCL", backend)
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size,
-                          c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>
-                              options) {
-                // gil_scoped_release is not safe as a call_guard in init.
-                // https://github.com/pybind/pybind11/issues/5473
-                py::gil_scoped_release nogil{};
-
-                return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
-                    store, rank, size, std::move(options));
-              }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::arg("options"),
-              R"(Create a new ProcessGroupNCCL instance.)")
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size,
-                          const std::chrono::milliseconds& timeout) {
-                // gil_scoped_release is not safe as a call_guard in init.
-                // https://github.com/pybind/pybind11/issues/5473
-                py::gil_scoped_release nogil{};
-
-                auto options = ::c10d::ProcessGroupNCCL::Options::create();
-                options->is_high_priority_stream = false;
-                options->timeout = timeout;
-                return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
-                    store, rank, size, options);
-              }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
-              R"(Create a new ProcessGroupNCCL instance.)")
-          .def("_comm_ptr", &::c10d::ProcessGroupNCCL::getCommPtr)
-          .def_property_readonly(
-              "comm_ptr",
-              &::c10d::ProcessGroupNCCL::getCommPtr,
-              R"(
-            The communicator of the current device, as an opaque handle.
-
-            .. warning ::
-                Unsafe to use. The collectives launched into the communicator
-                externally outside ProcessGroupNCCL are not monitored by the
-                watchdog. Please do not modify or free the communicator as the
-                communicator is managed by the ProcessGroupNCCL. Please also
-                check the readiness of the communicator before launching any
-                collectives into the communicator.
-            )")
-          .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
-          .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
-          .def(
-              "comm_split_count",
-              &::c10d::ProcessGroupNCCL::getCommSplitCounter)
-          .def(
-              "_set_default_timeout",
-              &::c10d::ProcessGroupNCCL::setTimeout,
-              py::arg("timeout"),
-              py::call_guard<py::gil_scoped_release>())
-          .def_property_readonly(
-              "options",
-              &::c10d::ProcessGroupNCCL::getOptions,
-              R"(Return the options used to create this ProcessGroupNCCL instance.)")
-          .def_property_readonly(
-              "uid", &::c10d::ProcessGroupNCCL::getUid, R"(Return the uid.)")
-          .def_property(
-              "bound_device_id",
-              &::c10d::ProcessGroupNCCL::getBoundDeviceId,
-              &::c10d::ProcessGroupNCCL::setBoundDeviceId,
-              R"(Return the bound device id.)")
-          .def(
-              "perform_nocolor_split",
-              &::c10d::ProcessGroupNCCL::performNocolorSplit)
-          .def(
-              "register_mem_pool",
-              &::c10d::ProcessGroupNCCL::registerMemPool,
-              py::arg("pool"),
-              py::arg("symm") = false,
-              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, unregistered segments are registered as NCCL symmetric windows instead; already registered segments are left as is. This is collective, as are later allocations from the pool. ``symm`` is ignored when PyTorch is built against NCCL older than 2.27.)")
-          .def(
-              "deregister_mem_pool",
-              &::c10d::ProcessGroupNCCL::deregisterMemPool,
-              py::arg("pool"),
-              R"(Deregister ``pool``'s segments from this communicator.)")
-          .def(
-              "_is_initialized",
-              &::c10d::ProcessGroupNCCL::isInitialized,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "get_error",
-              &::c10d::ProcessGroupNCCL::getError,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_set_enable_nan_check",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 bool enable_nan_check) {
-                self->setEnableNanCheck(enable_nan_check);
-              },
-              py::arg("enable_nan_check"),
-              py::call_guard<py::gil_scoped_release>())
-          .def_static(
-              "get_build_nccl_version",
-              [] {
-                return std::make_tuple(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH);
-              })
-          .def_static("get_runtime_nccl_version", [] {
-            return ::c10d::getNcclVersionTuple();
-          });
+  auto processGroupNCCL2 =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCL>(
+          module, "ProcessGroupNCCL2", backend);
+  processGroupNCCL2
+      .def_static(
+          "get_build_nccl_version",
+          [] { return std::make_tuple(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH); })
+      .def_static("get_runtime_nccl_version", [] {
+        return ::c10d::getNcclVersionTuple();
+      });
 
 #ifdef NCCL_HAS_CTA_POLICY
-  processGroupNCCL.def_property_readonly_static(
+  processGroupNCCL2.def_property_readonly_static(
       "NCCL_CTA_POLICY_DEFAULT",
       [](const py::object&) { return NCCL_CTA_POLICY_DEFAULT; });
-  processGroupNCCL.def_property_readonly_static(
+  processGroupNCCL2.def_property_readonly_static(
       "NCCL_CTA_POLICY_EFFICIENCY",
       [](const py::object&) { return NCCL_CTA_POLICY_EFFICIENCY; });
 #ifdef NCCL_CTA_POLICY_ZERO // requires NCCL version >= 2.28
-  processGroupNCCL.def_property_readonly_static(
+  processGroupNCCL2.def_property_readonly_static(
       "NCCL_CTA_POLICY_ZERO",
       [](const py::object&) { return NCCL_CTA_POLICY_ZERO; });
 #endif // NCCL_CTA_POLICY_ZERO
@@ -4445,7 +4421,7 @@ supported.
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
   py::class_<ncclConfig_t>(
-      processGroupNCCL,
+      processGroupNCCL2,
       "NCCLConfig",
       R"(
 ncclConfig_t data type for configuring NCCL communicators.
@@ -4526,8 +4502,8 @@ for details.
           },
           py::arg("memo"));
 
-  intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
-      processGroupNCCL,
+  intrusive_ptr_class_<::c10d::NCCLOptions>(
+      processGroupNCCL2,
       "Options",
       backendOptions,
       R"(
@@ -4551,6 +4527,27 @@ Attributes:
             group that never communicates allocates no NCCL resources. Such a
             group can't be split from until its first operation. Default is
             False.
+    encryption_psk (str, optional): nccl2 only. Pre-shared key NCCL uses to
+            encrypt and authenticate its built-in TCP sockets (bootstrap,
+            proxy, RAS, socket transport and InfiniBand connection setup)
+            with TLS 1.3. GPU data paths, external net plugins and the c10d
+            Store are not encrypted. The key is process-global and applies to
+            every NCCL user in the process: set it on the first nccl2 group,
+            identically on every rank, before any other NCCL communicator
+            exists (only earlier nccl2 groups are checked). Later groups must
+            pass the same key or none. Ranks with mismatched keys may hang
+            rather than error. NCCL requires at least 32 bytes; use a
+            uniformly random secret (e.g. ``secrets.token_hex(32)``), not a
+            passphrase. Requires NCCL 2.32.3+ built with
+            ``TLS_BACKEND=OPENSSL3`` with ``libcrypto.so.3`` and
+            ``libssl.so.3`` available at runtime; otherwise group or
+            communicator creation fails; ROCm is unsupported. Groups must not
+            be constructed concurrently while a key is being set. If None and
+            no key has been applied yet, the ``TORCH_NCCL_ENCRYPTION_PSK``
+            environment variable is used when non-empty, so setting it after
+            a keyless first group makes later group creation fail. The key
+            persists for the life of the process, across
+            ``destroy_process_group``. Default is None.
 
 Example::
     >>> import torch.distributed as dist
@@ -4565,30 +4562,34 @@ Example::
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
-      .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config)
+      .def_readwrite("config", &::c10d::NCCLOptions::config)
       .def_readwrite(
           "is_high_priority_stream",
-          &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
-      .def_readwrite(
-          "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
-      .def_readwrite(
-          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
-      .def_readwrite("lazy_init", &::c10d::ProcessGroupNCCL::Options::lazy_init)
+          &::c10d::NCCLOptions::is_high_priority_stream)
+      .def_readwrite("split_from", &::c10d::NCCLOptions::split_from)
+      .def_readwrite("split_color", &::c10d::NCCLOptions::split_color)
+      .def_readwrite("lazy_init", &::c10d::NCCLOptions::lazy_init)
+      .def_readwrite("encryption_psk", &::c10d::NCCLOptions::encryption_psk)
       .def_readwrite(
           "use_pg_for_symm_mem_rendezvous",
-          &::c10d::ProcessGroupNCCL::Options::use_pg_for_symm_mem_rendezvous)
+          &::c10d::NCCLOptions::use_pg_for_symm_mem_rendezvous)
       .def(
           "__copy__",
-          [](const ::c10d::ProcessGroupNCCL::Options& self) {
-            return ::c10d::ProcessGroupNCCL::Options(self);
+          [](const ::c10d::NCCLOptions& self) {
+            return ::c10d::NCCLOptions(self);
           })
       .def(
           "__deepcopy__",
-          [](const ::c10d::ProcessGroupNCCL::Options& self,
-             const py::dict& /*memo*/) {
-            return ::c10d::ProcessGroupNCCL::Options(self);
+          [](const ::c10d::NCCLOptions& self, const py::dict& /*memo*/) {
+            return ::c10d::NCCLOptions(self);
           },
           py::arg("memo"));
+
+#ifdef USE_C10D_NCCL_LEGACY
+  initNCCLLegacyBindings(module);
+#else
+  module.attr("ProcessGroupNCCL") = processGroupNCCL2;
+#endif // USE_C10D_NCCL_LEGACY
 
 #endif
 
@@ -4724,16 +4725,15 @@ Returns:
 #endif
 
 #ifdef USE_C10D_NCCL
-  auto processGroupNCCL2 =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCL>(
-          module, "ProcessGroupNCCL2", backend)
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size,
-                          c10::intrusive_ptr<
-                              ::c10d::nccl2::ProcessGroupNCCL::Options> options,
-                          std::optional<at::Device> device_id) {
+  processGroupNCCL2
+      .def(
+          py::init(
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
+                 int rank,
+                 int size,
+                 c10::intrusive_ptr<::c10d::nccl2::ProcessGroupNCCL::Options>
+                     options,
+                 std::optional<at::Device> device_id) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -4743,52 +4743,50 @@ Returns:
                 backend->setBoundDeviceId(device_id);
                 return backend;
               }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::arg("options"),
-              py::arg("device_id") = std::nullopt,
-              R"(Create a new ProcessGroupNCCL2 instance.)")
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size) {
-                py::gil_scoped_release nogil{};
-                auto options =
-                    ::c10d::nccl2::ProcessGroupNCCL::Options::create();
-                auto backend =
-                    c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
-                        store, rank, size, options);
-                backend->setBoundDeviceId(std::nullopt);
-                return backend;
-              }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              R"(Create a new ProcessGroupNCCL2 instance.)")
-          .def(
-              "get_error",
-              &::c10d::nccl2::ProcessGroupNCCL::getError,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "register_mem_pool",
-              &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
-              py::arg("pool"),
-              py::arg("symm") = false,
-              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, its segments also get symmetric windows; this is collective, as are later allocations from the pool. Call :meth:`deregister_mem_pool` before re-registering with a different ``symm``.)")
-          .def(
-              "deregister_mem_pool",
-              &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool,
-              py::arg("pool"),
-              R"(Deregister ``pool`` from this communicator and tear down its segment windows.)")
-          .def(
-              "perform_nocolor_split",
-              &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
-          .def("_comm_ptr", &::c10d::nccl2::ProcessGroupNCCL::getCommPtr)
-          .def_property_readonly(
-              "comm_ptr",
-              &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,
-              R"(
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("options"),
+          py::arg("device_id") = std::nullopt,
+          R"(Create a new ProcessGroupNCCL2 instance.)")
+      .def(
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size) {
+            py::gil_scoped_release nogil{};
+            auto options = ::c10d::nccl2::ProcessGroupNCCL::Options::create();
+            auto backend = c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
+                store, rank, size, options);
+            backend->setBoundDeviceId(std::nullopt);
+            return backend;
+          }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          R"(Create a new ProcessGroupNCCL2 instance.)")
+      .def(
+          "get_error",
+          &::c10d::nccl2::ProcessGroupNCCL::getError,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "register_mem_pool",
+          &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
+          py::arg("pool"),
+          py::arg("symm") = false,
+          R"(Register ``pool``'s segments with this communicator. With ``symm=True``, its segments also get symmetric windows; this is collective, as are later allocations from the pool. Call :meth:`deregister_mem_pool` before re-registering with a different ``symm``.)")
+      .def(
+          "deregister_mem_pool",
+          &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool,
+          py::arg("pool"),
+          R"(Deregister ``pool`` from this communicator and tear down its segment windows.)")
+      .def(
+          "perform_nocolor_split",
+          &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
+      .def("_comm_ptr", &::c10d::nccl2::ProcessGroupNCCL::getCommPtr)
+      .def_property_readonly(
+          "comm_ptr",
+          &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,
+          R"(
             This process group's ``ncclComm_t``, as an opaque handle.
 
             The process group holds a single communicator, created in its
@@ -4800,12 +4798,10 @@ Returns:
                 process group are not monitored by the watchdog, so check the
                 communicator's readiness before launching any.
             )")
-          .def_property_readonly(
-              "options",
-              &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
-              R"(Return the options used to create this ProcessGroupNCCL2 instance.)");
-
-  processGroupNCCL2.attr("Options") = processGroupNCCL.attr("Options");
+      .def_property_readonly(
+          "options",
+          &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
+          R"(Return the options used to create this ProcessGroupNCCL2 instance.)");
 
   intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCLLazy>(
       module, "ProcessGroupNCCLLazy", backend)
@@ -5084,8 +5080,17 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                 Also, users can use ``fut.then(call_back_func)`` to register a callback function to be called
                 when the work is completed, without blocking the current thread.
 
-            .. warning ::
-                ``get_future_result`` API supports NCCL
+            Raises ``NotImplementedError`` if the backend's work does not support it.
+
+            Gloo send/recv works complete the future only in ``wait()``; it stays
+            pending until the work is waited on.
+
+            Python ``Work`` subclasses may override this to return a
+            ``torch.futures.Future``. FlightRecorder calls it once per op as
+            the op is issued, so overrides must be cheap and must not block.
+            FlightRecorder retires the op once the future completes
+            successfully; if it fails (e.g. ``set_exception``) the op stays
+            un-retired.
            )")
           .def(
               "get_future",
@@ -5190,15 +5195,14 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       int rank,
                       int size,
-                      c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>
-                          options) {
+                      c10::intrusive_ptr<::c10d::NCCLOptions> options) {
             return c10::make_intrusive<::c10d::NCCLXStub>(
                 store, rank, size, std::move(options));
           }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("options") = ::c10d::ProcessGroupNCCL::Options::create());
+          py::arg("options") = ::c10d::NCCLOptions::create());
 #endif
 
   auto pythonCallbackWork =
@@ -5474,8 +5478,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       R"(
 Records the operations of a process group into the flight recorder using
 pre/post hooks, for backends without a native flight recorder. Attached
-automatically to new process groups unless the buffer size
-(``TORCH_FR_BUFFER_SIZE``, or ``TORCH_NCCL_TRACE_BUFFER_SIZE``) is 0 or
+automatically to groups from init_process_group, new_group and
+torch.distributed.split_group (see attach) unless the buffer size
+(``TORCH_FR_BUFFER_SIZE``, or ``TORCH_NCCL_TRACE_BUFFER_SIZE``) is <= 0 or
 every backend of the group records natively.)")
       .def_static(
           "attach",
@@ -5485,9 +5490,17 @@ every backend of the group records natively.)")
           R"(
 Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
-with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
-backend has native FlightRecorder support. The hook detaches when remove()
-is called or the returned handle is garbage collected.
+with _dump_fr_trace / _dump_fr_trace_json), except those served by a backend
+that records natively: "nccl" (stock ProcessGroupNCCL, not nccl2) and "xccl".
+Groups from init_process_group, new_group and torch.distributed.split_group
+already have one attached, unless the default group provides its own
+new_group; attaching another records each op twice, under separate pg_ids.
+The hook detaches when remove() is called or the returned handle is garbage
+collected. If the backend times
+collectives the hook holds each Work (and its output tensors) until its
+result and the group's next collective; call remove() rather than dropping
+the handle, so pending result callbacks don't destroy it, with those Works,
+on a backend thread.
 
 global_ranks maps the group's ranks to world ranks; it names the per-rank
 dump file and is published as the group's membership. Leave it empty only
@@ -5554,7 +5567,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
         Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo".
         Returns:
                 Stringified json work traces.
                 Default settings return everything.
@@ -5580,7 +5593,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo".
             Returns:
                 Stringified pickle work traces.
                 Default settings return everything.
