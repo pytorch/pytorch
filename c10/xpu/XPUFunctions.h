@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/xpu/XPUDeviceProp.h>
 #include <c10/xpu/XPUMacros.h>
 
@@ -34,7 +35,7 @@ C10_XPU_API void get_device_properties(
 
 C10_XPU_API DeviceIndex get_device_idx_from_pointer(void* ptr);
 
-static inline void check_device_index(DeviceIndex device_index) {
+inline void check_device_index(DeviceIndex device_index) {
   TORCH_CHECK(
       device_index >= 0 && device_index < c10::xpu::device_count(),
       "The device index is out of range. It must be in [0, ",
@@ -42,6 +43,21 @@ static inline void check_device_index(DeviceIndex device_index) {
       "), but got ",
       static_cast<int>(device_index),
       ".");
+}
+
+inline void memcpy_and_sync(
+    void* dst,
+    const void* src,
+    int64_t nbytes,
+    sycl::queue& queue) {
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (interp) [[unlikely]] {
+    (*interp)->trace_gpu_stream_synchronization(
+        c10::kXPU, reinterpret_cast<uintptr_t>(&queue));
+  }
+
+  queue.memcpy(dst, src, nbytes);
+  queue.wait_and_throw();
 }
 
 } // namespace c10::xpu
