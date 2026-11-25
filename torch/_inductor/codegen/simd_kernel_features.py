@@ -14,12 +14,12 @@ import torch
 from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
-from .. import ir
+from .. import config, ir
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.tiling import get_pointwise_prefixes
-from ..scheduler import SchedulerNode
+from ..scheduler import grid_split_factors, SchedulerNode
 from ..utils import cache_on_self
 from ..virtualized import V
 
@@ -220,12 +220,23 @@ class SIMDKernelFeatures:
             buffer_names.update(node.used_buffer_names())
         return [V.graph.get_buffer(name) for name in buffer_names]
 
-    @cache_on_self
-    def select_index_dtype(self) -> torch.dtype:
+    def _index_dtype_numel(self) -> sympy.Expr:
+        """The number of elements the indexing covers."""
         # In theory we can separately check xnumel and rnumel are <= int_max
         # but some indexers do use the full linear index so we need to be
         # conservative here.
         total_numel = self.numel * self.reduction_numel
+
+        grid_split = self.get_grid_split()
+        if grid_split:
+            total_numel = self.numel * ir.grid_split_chunk(
+                self.reduction_numel, grid_split
+            )
+        return total_numel
+
+    @cache_on_self
+    def select_index_dtype(self) -> torch.dtype:
+        total_numel = self._index_dtype_numel()
 
         from .simd import SIMDScheduling
 
@@ -254,7 +265,7 @@ class SIMDKernelFeatures:
         int_max = torch.iinfo(torch.int32).max
         sizevars = V.graph.sizevars
         sizes = SIMDScheduling.indexing_sizes(
-            self.numel * self.reduction_numel, self._index_dtype_buffers()
+            self._index_dtype_numel(), self._index_dtype_buffers()
         )
         unproven: list[sympy.Expr] = []
         for size in OrderedSet(sizevars.simplify(size) for size in sizes):
@@ -382,6 +393,18 @@ class SIMDKernelFeatures:
         else:
             reduction_hint_val = ReductionHint.DEFAULT
         return reduction_hint_val
+
+    @cache_on_self
+    def get_grid_split(self) -> int | None:
+        if not config.triton.split_reductions_as_grid:
+            return None
+        grid_splits = grid_split_factors(self.reduction_nodes())
+        if len(grid_splits) > 1:
+            raise AssertionError(
+                "fused reductions must use one consistent grid split factor, "
+                f"got {grid_splits}"
+            )
+        return next(iter(grid_splits), None)
 
     @cache_on_self
     def buffer_read_counts(self) -> dict[str, int]:
