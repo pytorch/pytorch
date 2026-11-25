@@ -1995,15 +1995,6 @@ static PyObject* THPModule_override_stale_capture_stream(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPModule_ensureCUDADeviceGuardSet(
-    PyObject* self,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::impl::ensureCUDADeviceGuardSet();
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 struct TorchModuleState {
   PyObject* log_api_usage_seen; // dict used by _log_api_usage_once
 };
@@ -2404,10 +2395,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      reinterpret_cast<PyCFunction>(
          reinterpret_cast<void (*)()>(THPModule_has_torch_function_variadic)),
      METH_FASTCALL,
-     nullptr},
-    {"_ensureCUDADeviceGuardSet",
-     THCPModule_ensureCUDADeviceGuardSet,
-     METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}
 
@@ -2832,6 +2819,10 @@ PyObject* initModule() {
               c10::OperatorName(name, overload));
         });
   }
+  py_module.def("_ensureDeviceGuardSet", [](std::string& device_type) {
+    c10::impl::ensureDeviceGuardSet(c10::Device(device_type).type());
+  });
+
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
   py_module.def(
@@ -2883,6 +2874,11 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
     return t.is_fake();
+  });
+
+  py_module.def("_enable_fake_tensor_custom_op_profiles", []() {
+    torch::fake_tensor::custom_op_profiles_ever_enabled.store(
+        true, std::memory_order_relaxed);
   });
 
   py_module.def("_fake_device", [](const at::Tensor& t) -> c10::Device {
@@ -3060,6 +3056,17 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("fake"),
       py::arg("constant"));
 
+  py_module.def(
+      "_invalidate_fake_constant_aliases",
+      [](py::object mode, const at::Tensor& tensor) {
+        TORCH_CHECK(tensor.defined(), "Expected a defined tensor");
+        auto fake_mode = torch::fake_tensor::getCppFakeTensorMode(mode.ptr());
+        fake_mode->invalidate_constant_aliases(
+            tensor.storage().unsafeGetStorageImpl());
+      },
+      py::arg("mode"),
+      py::arg("tensor"));
+
   py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
     return py::reinterpret_steal<py::object>(
         torch::utils::fake_tensor_to_list(t));
@@ -3128,8 +3135,8 @@ Call this whenever a new thread is created in order to propagate values from
           // dispatcher too.
           torch::DisableTorchDispatch no_dispatch;
           c10::impl::DisablePythonDispatcher no_python_dispatcher;
-          out_impl = impl->shallow_copy_and_detach(
-              impl->version_counter(), /*allow_tensor_metadata_change=*/true);
+          out_impl = meta.detach().getIntrusivePtr();
+          out_impl->set_allow_tensor_metadata_change(true);
         }
         // Before marking the shared storage, as this can throw
         out_impl->set_requires_grad(meta.requires_grad());
@@ -3621,24 +3628,44 @@ Call this whenever a new thread is created in order to propagate values from
             at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
       });
 
+  // raw=True reads and writes the setting as stored, before inheritance is
+  // resolved: "none", or "default" for the initial state of cuda conv/rnn,
+  // where it inherits. It lets code save and restore a setting exactly;
+  // writing back a resolved value would pin a setting that was inheriting.
   py_module.def(
       "_get_fp32_precision_getter",
-      [](const std::string& backend, const std::string& op) {
-        return at::precision2str(at::globalContext().float32Precision(
-            at::str2backend(backend), at::str2op(op)));
-      });
+      [](const std::string& backend, const std::string& op, bool raw) {
+        auto& ctx = at::globalContext();
+        const auto b = at::str2backend(backend);
+        const auto o = at::str2op(op);
+        if (!raw) {
+          return at::precision2str(ctx.float32Precision(b, o));
+        }
+        const auto p = ctx.rawFloat32Precision(b, o);
+        return p == at::Float32Precision::DEFAULT ? std::string("default")
+                                                  : at::precision2str(p);
+      },
+      py::arg("backend"),
+      py::arg("op"),
+      py::arg("raw") = false);
 
   py_module.def(
       "_set_fp32_precision_setter",
       [](const std::string& backend,
          const std::string& op,
-         const std::string& precision) {
+         const std::string& precision,
+         bool raw) {
         at::globalContext().setFloat32Precision(
             at::str2backend(backend),
             at::str2op(op),
-            at::str2precision(precision));
+            raw && precision == "default" ? at::Float32Precision::DEFAULT
+                                          : at::str2precision(precision));
         return precision;
-      });
+      },
+      py::arg("backend"),
+      py::arg("op"),
+      py::arg("precision"),
+      py::arg("raw") = false);
 
   py_module.def(
       "_stash_obj_in_tls", [](const std::string& key, py::handle arg) {

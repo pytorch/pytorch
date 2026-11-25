@@ -1162,6 +1162,17 @@ static int devicePropertiesIndex(const cudaDeviceProp& prop) {
   return index;
 }
 
+static std::optional<int> deviceXccCount(const cudaDeviceProp& prop) {
+#if defined(USE_ROCM) && ROCM_VERSION >= 70000
+  int xcc_count = 0;
+  AT_CUDA_CHECK(hipDeviceGetAttribute(
+      &xcc_count, hipDeviceAttributeNumberOfXccs, devicePropertiesIndex(prop)));
+  return xcc_count;
+#else
+  return std::nullopt;
+#endif // defined(USE_ROCM) && ROCM_VERSION >= 70000
+}
+
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDeviceProperties class to torch._C
   auto m = py::handle(module).cast<py::module>();
@@ -1240,12 +1251,22 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly("pci_device_id", &cudaDeviceProp::pciDeviceID)
       .def_readonly("pci_domain_id", &cudaDeviceProp::pciDomainID)
       .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
+      // Number of XCCs (accelerator complex dies), from HIP's
+      // hipDeviceAttributeNumberOfXccs. Recent HIP reports it for the current
+      // compute partition; the ROCm 7.0 header documents it as the device's
+      // XCC count. None on CUDA builds and on ROCm before 7.0.
+      .def_property_readonly("xcc_count", &deviceXccCount)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
+#if USE_ROCM
+        auto xcc_count = deviceXccCount(prop);
+#endif // USE_ROCM
         stream << "_CudaDeviceProperties(name='" << prop.name
                << "', major=" << prop.major << ", minor=" << prop.minor
 #if USE_ROCM
                << ", gcnArchName='" << prop.gcnArchName << '\''
+               << ", xcc_count="
+               << (xcc_count ? std::to_string(*xcc_count) : "None")
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
@@ -1692,6 +1713,22 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
       });
+
+  m.def(
+      "_host_beginAllocateCurrentThreadToPool",
+      [](at::cuda::MempoolId_t mempool_id) {
+        at::getHostAllocator(at::kCUDA)->begin_allocate_current_thread_to_pool(
+            mempool_id);
+      },
+      py::call_guard<py::gil_scoped_release>());
+
+  m.def(
+      "_host_endAllocateCurrentThreadToPool",
+      [](at::cuda::MempoolId_t mempool_id) {
+        at::getHostAllocator(at::kCUDA)->end_allocate_current_thread_to_pool(
+            mempool_id);
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   m.def(
       "_cuda_checkPoolLiveAllocations",

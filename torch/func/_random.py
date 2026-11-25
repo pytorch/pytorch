@@ -55,6 +55,20 @@ def key(
         shape ``(2,)`` encoding a ``(seed, offset)`` pair. The offset determines
         the starting position in the Philox output stream.
 
+        Each Philox call on a ``(seed, offset)`` pair produces 128 random bits,
+        which yield ``E = 4`` values for dtypes of 32 bits or fewer, or ``E = 2``
+        for 64-bit dtypes. Each value of :func:`uniform`, :func:`randint`, and
+        :func:`bits` comes from its own ``128 / E`` bits, while :func:`normal`
+        derives each pair of values from each pair's worth of bits via the
+        Box-Muller transform. Element ``i`` (in row-major order) of a key's
+        output, or of each slice a batched key generates, is value ``i % E`` of
+        the call at ``(offset + i // E) % 2**64``. Thus the key
+        ``torch.tensor([seed, offset + k], dtype=torch.uint64)`` skips the
+        first ``k * E`` elements, generating a contiguous range of the output
+        starting there (e.g. a row shard of a parameter) directly. Such keys
+        share counters with :func:`split` and :func:`fold_in` children of the
+        original key, so don't both shift and derive from the same key.
+
     Example::
 
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
