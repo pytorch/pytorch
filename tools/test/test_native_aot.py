@@ -4,6 +4,7 @@ import os
 import tempfile
 import textwrap
 import unittest
+from dataclasses import replace
 
 import yaml
 from tools.test.codegen_test_utils import gen_register_dispatch_key
@@ -300,6 +301,13 @@ DECLARE_DISPATCH(embfoo_aot_fn, embfoo_aot_stub)
         self.assertLess(
             body.index("return aot_result;"), body.index("embbar_cuda(self)")
         )
+
+        for guarded in (False, True):
+            body = "\n".join(gen(replace(f, device_guard=guarded)))
+            self.assertEqual(body.count("OptionalDeviceGuard"), 1)
+            self.assertLess(
+                body.index("OptionalDeviceGuard"), body.index("embbar_aot_stub(c10::")
+            )
 
     def test_stub_definition(self) -> None:
         defn = native_aot.gen_stub_definition(self.manifest)

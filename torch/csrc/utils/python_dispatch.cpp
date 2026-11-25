@@ -8,6 +8,7 @@
 #include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/symbol.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
@@ -20,6 +21,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/Synchronized.h>
@@ -1081,22 +1083,48 @@ void initDispatchBindings(PyObject* module) {
             c10::parseDispatchKey(dispatch));
       });
 
+  const auto call_safe_kernel = [](const c10::SafeKernelFunction& self,
+                                   c10::DispatchKeySet keyset,
+                                   const py::args& args,
+                                   const py::kwargs& kwargs,
+                                   bool allow_numbers) {
+    const auto& op = self.opHandle();
+    auto stack = [&] {
+      torch::jit::ToIValueAllowNumbersAsTensors guard(allow_numbers);
+      return torch::jit::createStackForSchema(
+          op.schema(), args, kwargs, /*self=*/std::nullopt);
+    }();
+    self.callBoxed(op, keyset, &stack);
+    return torch::jit::createPyObjectForStack(std::move(stack));
+  };
+
   // Bind SafeKernelFunction class
   py::class_<c10::SafeKernelFunction>(m, "_SafeKernelFunction")
       .def(
           "call_boxed",
-          [](const c10::SafeKernelFunction& self,
-             c10::DispatchKeySet keyset,
-             const py::args& args,
-             const py::kwargs& kwargs) {
+          [call_safe_kernel](
+              const c10::SafeKernelFunction& self,
+              c10::DispatchKeySet keyset,
+              const py::args& args,
+              const py::kwargs& kwargs) {
             const auto& op = self.opHandle();
-            auto stack = torch::jit::createStackForSchema(
-                op.schema(),
-                args,
-                kwargs,
-                /*self=*/std::nullopt);
-            self.callBoxed(op, keyset, &stack);
-            return torch::jit::createPyObjectForStack(std::move(stack));
+            const auto symbol = c10::Symbol::fromQualString(op.schema().name());
+            const bool allow_numbers = symbol.is_prims() ||
+                symbol.is_nvprims() ||
+                (symbol.is_aten() &&
+                 torch::should_allow_numbers_as_tensors(
+                     symbol.toUnqualString()));
+            return call_safe_kernel(self, keyset, args, kwargs, allow_numbers);
+          })
+      .def(
+          "_call_boxed_from_python_kernel",
+          [call_safe_kernel](
+              const c10::SafeKernelFunction& self,
+              c10::DispatchKeySet keyset,
+              const py::args& args,
+              const py::kwargs& kwargs) {
+            // Python kernels receive wrapped Tensor scalars as numbers.
+            return call_safe_kernel(self, keyset, args, kwargs, true);
           })
       .def(
           "__repr__",
