@@ -9433,6 +9433,20 @@ class TestMPS(TestCaseMPS):
         event.signal(steps)
         self.assertEqual(x.cpu(), torch.full((8,), steps + 1.0))
 
+    def test_mps_event_host_signal_elapsed_time(self):
+        x = torch.ones(1024, 1024, device="mps")
+        event, pending = torch.mps.Event(), torch.mps.Event()
+        start, end = torch.mps.Event(enable_timing=True), torch.mps.Event(enable_timing=True)
+        self.addCleanup(event.signal, 1)
+        event.wait(value=1)
+        for _ in range(40):
+            pending.record()
+        start.record()
+        x = x @ x
+        end.record()
+        event.signal(1)
+        self.assertGreater(start.elapsed_time(end), 0)
+
     def test_mps_event_host_signal_orders_host_writes(self):
         steps = 8
         x = torch.zeros(steps, device="mps")

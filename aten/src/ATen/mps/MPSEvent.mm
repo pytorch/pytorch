@@ -54,7 +54,8 @@ void MPSEvent::recordLocked(bool syncEvent, MPSStream* stream) {
   [commandBuffer encodeSignalEvent:m_event value:signalCounter];
   m_recorded.store(true);
   if (syncEvent) {
-    m_stream->synchronize(SyncType::COMMIT);
+    // A timing event's command buffer must end here, so its commit is not deferrable
+    m_stream->synchronize(SyncType::COMMIT, !m_enable_timing);
   }
 }
 
@@ -66,7 +67,6 @@ static bool encodeEventWait(MTLSharedEvent_t event, uint64_t value, MPSStream* s
   stream->endKernelCoalescing();
   id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
   [commandBuffer encodeWaitForEvent:event value:value];
-  stream->markEventWaitEncoded();
   // The stream is not idle until the awaited event signals
   stream->markWorkEncoded();
   if (syncEvent) {
@@ -241,7 +241,10 @@ void MPSEventPool::waitForHostSignal(id_t event_id, MPSStream* stream, uint64_t 
   const auto host_event = event->m_hostEvent;
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      encodeEventWait(host_event, value, stream, /*syncEvent=*/true);
+      if (encodeEventWait(host_event, value, stream, /*syncEvent=*/false)) {
+        stream->markHostWaitEncoded();
+        stream->synchronize(SyncType::COMMIT);
+      }
     }
   });
 }

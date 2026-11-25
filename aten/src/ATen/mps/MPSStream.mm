@@ -116,14 +116,14 @@ void MPSStream::commitIfNeeded() {
   }
 }
 
-void MPSStream::synchronize(SyncType syncType) {
+void MPSStream::synchronize(SyncType syncType, bool deferrable) {
   endKernelCoalescing();
   switch (syncType) {
     case SyncType::NONE:
       // typically in GPU to GPU copies we won't commit explicitly
       break;
     case SyncType::COMMIT:
-      commit();
+      commit(deferrable);
       break;
     case SyncType::COMMIT_ADAPTIVE:
       // the adaptive commit only commits if we hit the low watermark memory threshold
@@ -142,16 +142,16 @@ void MPSStream::synchronize(SyncType syncType) {
   }
 }
 
-void MPSStream::commit() {
+void MPSStream::commit(bool deferrable) {
   _kernelsSinceCommit = 0;
-  // A command buffer committed behind an event wait cannot complete before the awaited event signals, and the
-  // calling thread may be the one that has to signal it (torch.mps.Event.signal). Those commits must not add up
+  // A command buffer committed behind a host signal wait cannot complete before the host signals, and the
+  // calling thread may be the one that has to signal (torch.mps.Event.signal). Those commits must not add up
   // to the 64 uncompleted command buffers at which Metal blocks the caller (see commitIfNeeded), so past
   // kMaxCommandBuffersInFlight keep encoding into the current command buffer. A completion handler retries.
   const auto mustDefer = [this] {
-    return _eventWaitsInFlight > 0 && _commandBuffersInFlight >= kMaxCommandBuffersInFlight;
+    return _hostWaitsInFlight > 0 && _commandBuffersInFlight >= kMaxCommandBuffersInFlight;
   };
-  if (mustDefer()) {
+  if (deferrable && mustDefer()) {
     _commitDeferred = true;
     // A handler that ran before the flag was set does not retry, so check again
     if (mustDefer()) {
@@ -194,7 +194,7 @@ void MPSStream::commitAndWait() {
     checkLastError();
   }
   _hasWorkSinceQuerySignal = false;
-  _hasEventWait = false;
+  _hasHostWait = false;
   _commitDeferred = false;
 }
 
@@ -234,14 +234,14 @@ void MPSStream::addErrorHandler() {
   // so that checkLastError() raises it at the next synchronization point, rather than
   // silently returning garbage, similar to how CUDA reports asynchronous errors.
   ++_commandBuffersInFlight;
-  const bool hasEventWait = std::exchange(_hasEventWait, false);
-  if (hasEventWait) {
-    ++_eventWaitsInFlight;
+  const bool hasHostWait = std::exchange(_hasHostWait, false);
+  if (hasHostWait) {
+    ++_hostWaitsInFlight;
   }
   [commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
     --_commandBuffersInFlight;
-    if (hasEventWait) {
-      --_eventWaitsInFlight;
+    if (hasHostWait) {
+      --_hostWaitsInFlight;
     }
     if (_commitDeferred) {
       dispatch_async(_serialQueue, ^() {

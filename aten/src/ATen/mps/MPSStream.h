@@ -84,7 +84,7 @@ class TORCH_API MPSStream {
   // is only valid for the rest of that block.
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
-  void synchronize(SyncType syncType);
+  void synchronize(SyncType syncType, bool deferrable = true);
   // Commits once enough kernels are encoded, so that the GPU runs them while the host keeps encoding
   void commitIfNeeded();
   void copy(MTLBuffer_t srcBuffer,
@@ -120,10 +120,10 @@ class TORCH_API MPSStream {
     _hasWorkSinceQuerySignal = true;
   }
 
-  // Any caller that encodes an event wait into `commandBuffer` must call this function, so that the commits
+  // Any caller that encodes a host signal wait into `commandBuffer` must call this function, so that the commits
   // behind the wait stay bounded, see `commit`.
-  void markEventWaitEncoded() {
-    _hasEventWait = true;
+  void markHostWaitEncoded() {
+    _hasHostWait = true;
   }
 
   /// Get the MPS device index that this stream is associated with.
@@ -166,9 +166,9 @@ class TORCH_API MPSStream {
   uint32_t _kernelsSinceCommit = 0;
   static constexpr uint32_t kMaxCommandBuffersInFlight = 32;
   std::atomic<uint32_t> _commandBuffersInFlight{0};
-  // Whether the current command buffer has an event wait, and how many such command buffers are in flight
-  bool _hasEventWait = false;
-  std::atomic<uint32_t> _eventWaitsInFlight{0};
+  // Whether the current command buffer has a host signal wait, and how many such command buffers are in flight
+  bool _hasHostWait = false;
+  std::atomic<uint32_t> _hostWaitsInFlight{0};
   // Whether a commit was deferred, for a completion handler to retry
   std::atomic<bool> _commitDeferred{false};
   // Buffer that contains last raised error
@@ -184,7 +184,7 @@ class TORCH_API MPSStream {
   std::optional<CommandBufferError> _commandBufferError;
 
   // use synchronize() to access any of these commit functions outside MPSStream
-  void commit();
+  void commit(bool deferrable = true);
   void commitAndWait();
   void commitAndContinue();
   void flush();
