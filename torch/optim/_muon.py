@@ -48,14 +48,6 @@ def _zeropower_via_newtonschulz(
     Implementation reference: https://github.com/KellerJordan/Muon/blob/master/muon.py
     with suggestions by @jxbz, @leloykun, and @YouJiacheng.
     """
-    if ns_steps >= 100:
-        raise ValueError(
-            "Number of steps must be less than 100 for computational efficiency"
-        )
-    if len(update.shape) != 2:
-        raise ValueError("Input tensor update must be a 2D matrix")
-    if len(ns_coefficients) != 3:
-        raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
     ortho_update = update.to(dtype=torch.bfloat16, copy=True)
     if update.size(0) > update.size(1):
@@ -361,6 +353,8 @@ def _single_tensor_muon(
         buf = muon_momentum_bufs[i]
         buf.lerp_(grad, 1 - momentum)
         update = grad.lerp(buf, momentum) if nesterov else buf
+        if update.ndim != 2:
+            raise ValueError("Muon update must be a 2D matrix")
 
         update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
 
@@ -401,6 +395,10 @@ def _multi_tensor_muon(
         updates = list(torch._foreach_lerp(grads, muon_momentum_bufs, momentum))
     else:
         updates = list(muon_momentum_bufs)
+
+    for u in updates:
+        if u.ndim != 2:
+            raise ValueError("Muon update must be a 2D matrix")
 
     # Phase 2: Newton-Schulz per tensor. Standard NS has no natural batching,
     # so per-tensor preserves bit-for-bit numerics with _single_tensor_muon.
@@ -456,6 +454,13 @@ def muon(
     adjust_lr_fn: str | None,
     has_complex: bool,
 ) -> None:
+    if ns_steps >= 100:
+        raise ValueError(
+            "Number of steps must be less than 100 for computational efficiency"
+        )
+    if len(ns_coefficients) != 3:
+        raise ValueError("Coefficients must be a tuple of exactly 3 values")
+
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(
             params, differentiable=False, use_fused=False
