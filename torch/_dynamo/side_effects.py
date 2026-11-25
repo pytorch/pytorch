@@ -2054,8 +2054,6 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     # reverse order.
     side_effect_occurred = False
     for name, value in reversed(side_effects.store_attr_mutations.get(var, {}).items()):
-        if side_effects.is_noop_global_delete(var, name, value):
-            continue
         mutation_kind = side_effects.get_attr_mutation_kind(var, name)
         if isinstance(var, variables.NewGlobalVariable):
             if not isinstance(var.source, GlobalSource):  # type: ignore[attr-defined]
@@ -2069,15 +2067,20 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 # Through 3.15, STORE_GLOBAL would write the null as an
                 # ordinary value into the dict, so DELETE_GLOBAL must be
                 # emitted.
-                cg.tx.output.update_co_names(name)
-                ctx.suffixes.append([create_instruction("DELETE_GLOBAL", argval=name)])
-                side_effect_occurred = True
+                if name in cg.tx.output.global_scope:
+                    cg.tx.output.update_co_names(name)
+                    ctx.suffixes.append(
+                        [create_instruction("DELETE_GLOBAL", argval=name)]
+                    )
+                    side_effect_occurred = True
             else:
                 cg.tx.output.update_co_names(name)
                 cg(value)
                 ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
                 side_effect_occurred = True
         elif isinstance(value, variables.DeletedVariable):
+            if side_effects.is_noop_global_delete(var, name, value):
+                continue
             if isinstance(var, variables.CellVariable):
                 # Cells created during inlining (no local_name) are rebuilt via
                 # make_cell(), which leaves None in the cell; existing cells
