@@ -170,6 +170,49 @@ def _connect_rank_worker(rank, port):
         asyncio.run(transport.close_async(timeout=5))
 
 
+def _mixed_batch_worker(rank, connection):
+    with new_transport("nixl", timeout=10) as transport:
+        tensors = [
+            torch.tensor(
+                [2 * i + 1, 2 * i + 2, 0, 0] if rank else [0] * 4,
+                dtype=torch.uint8,
+                device=device,
+            )
+            for i, device in enumerate(("cpu", "cuda"))
+        ]
+        memories = [transport.register_memory(t) for t in tensors]
+        torch.cuda.synchronize()
+        if rank == 1:
+            connection.send_bytes(transport.bind())
+            for memory in memories:
+                connection.send_bytes(memory.to_remote_buffer().serialize())
+            if _receive(connection) != b"done":
+                raise AssertionError("unexpected control-plane message")
+            expected = [[1, 2, 1, 2], [3, 4, 3, 4]]
+        else:
+            transport.connect(_receive(connection))
+            remotes = [
+                NIXLRemoteBuffer.deserialize(_receive(connection)) for _ in memories
+            ]
+            reads, writes = [], []
+            for i, memory in enumerate(memories):
+                for j, remote in enumerate(remotes):
+                    # Read one byte from each peer memory type, then write it back
+                    # into a disjoint slot on the peer.
+                    view = memory.to_mutable_view(j, 1)
+                    reads.append((view, remote[i : i + 1]))
+                    writes.append((view, remote[2 + i : 3 + i]))
+            asyncio.run(transport.read_batch_async(reads))
+            transport.write_batch(writes, async_op=True).wait()
+            connection.send_bytes(b"done")
+            expected = [[1, 3, 0, 0], [2, 4, 0, 0]]
+        for tensor, values in zip(tensors, expected):
+            torch.testing.assert_close(
+                tensor.cpu(), torch.tensor(values, dtype=torch.uint8)
+            )
+    connection.close()
+
+
 def _next_notifications(transport):
     notifications = transport.wait_notifications(timeout=10)
     if not notifications:
@@ -246,6 +289,15 @@ class TestNIXLNative(TestCase):
     def test_three_process_cpu_connect_rank(self):
         store = dist.TCPStore("127.0.0.1", 0, is_master=True, wait_for_workers=False)
         self._spawn(_connect_rank_worker, [(store.port,)] * 3, [])
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required")
+    def test_two_process_mixed_device_batches(self):
+        connections = multiprocessing.Pipe()
+        self._spawn(
+            _mixed_batch_worker,
+            [(connection,) for connection in connections],
+            connections,
+        )
 
     def _spawn(self, worker, args, connections):
         context = multiprocessing.get_context("spawn")
