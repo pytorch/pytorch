@@ -515,9 +515,14 @@ def _register_namedtuple(
     serialized.
 
     Args:
-        cls: the namedtuple class to register. A tuple subclass that is built
-        as ``cls(*fields)`` also works, and its specs save and load. The key
-        path APIs, such as ``tree_flatten_with_path``, also need ``cls._fields``.
+        cls: the namedtuple class to register. In the Python pytree, a tuple
+        subclass that is built as ``cls(*values)`` also works; the C++ pytree
+        treats such a class as a leaf. It can't load specs that a namedtuple
+        class saved under the same name, unless its only base is ``tuple`` and
+        its ``_fields`` is a tuple of strings. Such a spec unflattens to
+        ``cls``, but is not equal to a spec made from a ``cls`` instance. The
+        key path APIs, such as ``tree_flatten_with_path``, also need
+        ``cls._fields``.
         serialized_type_name: The serialized name for the class. This is
         required if you want to serialize the pytree TreeSpec containing this
         class.
@@ -913,26 +918,12 @@ def _namedtuple_serialize(context: Context) -> DumpableContext:
     return serialized_type_name
 
 
-def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
-    if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
-        raise NotImplementedError(
-            f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
-            "because we couldn't find a serialized name."
-        )
-
-    typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
-    # Best effort: the name can point to any registered type when the spec was
-    # edited, or when the class under the name changed since it was saved.
-    # A class registered with _register_namedtuple loads too. The
-    # collections.namedtuple factory shares its flatten function but is not a class.
-    node = SUPPORTED_NODES.get(typ)
-    if isinstance(typ, type) and (
-        is_namedtuple_class(typ)
-        or (node is not None and node.flatten_fn is _namedtuple_flatten)
-    ):
-        return typ
+def _namedtuple_class_error(
+    dumpable_context: DumpableContext, typ: Any, class_may_have_changed: bool
+) -> TypeError:
     if (
-        not isinstance(typ, type)
+        not class_may_have_changed
+        or not isinstance(typ, type)
         or typ in BUILTIN_TYPES
         or typ.__module__.split(".")[0] == "torch"
     ):
@@ -944,13 +935,56 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
             "Otherwise, regenerate the serialized artifact with the current "
             "class. To load it as is, register the original namedtuple class "
             "with `torch.utils._pytree._register_namedtuple(cls, "
-            f"serialized_type_name={dumpable_context!r})`, which replaces {typ} "
-            "under this name in this process."
+            f"serialized_type_name={dumpable_context!r})`. Then this name loads "
+            f"as that class in this process, but {typ} still saves under it."
         )
-    raise TypeError(
+    return TypeError(
         f"Can't deserialize TreeSpec of namedtuple class {dumpable_context}: "
         f"the name points to {typ}, which is not a namedtuple class. {hint}"
     )
+
+
+def _namedtuple_lookup(dumpable_context: DumpableContext) -> Any:
+    if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
+        raise NotImplementedError(
+            f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
+            "because we couldn't find a serialized name."
+        )
+    return SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
+
+
+def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
+    typ = _namedtuple_lookup(dumpable_context)
+    # Best effort: the name can point to any registered type when the spec was
+    # edited. A class registered with _register_namedtuple loads too. The
+    # collections.namedtuple factory shares its flatten function but is not a class.
+    node = SUPPORTED_NODES.get(typ)
+    if isinstance(typ, type) and (
+        is_namedtuple_class(typ)
+        or (node is not None and node.flatten_fn is _namedtuple_flatten)
+    ):
+        return typ
+    raise _namedtuple_class_error(dumpable_context, typ, class_may_have_changed=False)
+
+
+def _namedtuple_node_deserialize(dumpable_context: DumpableContext) -> Context:
+    typ = _namedtuple_lookup(dumpable_context)
+    # Only namedtuple classes are saved under this node (see _get_node_type).
+    # Releases before 2.8 also saved a direct tuple subclass with string
+    # _fields here. This node rebuilds it as cls(*values), so it loads only
+    # when registered with _register_namedtuple, which builds it the same way.
+    fields = getattr(typ, "_fields", None)
+    node = SUPPORTED_NODES.get(typ)
+    if is_namedtuple_class(typ) or (
+        isinstance(typ, type)
+        and typ.__bases__ == (tuple,)
+        and isinstance(fields, tuple)
+        and all(type(field) is str for field in fields)
+        and node is not None
+        and node.flatten_fn is _namedtuple_flatten
+    ):
+        return typ
+    raise _namedtuple_class_error(dumpable_context, typ, class_may_have_changed=True)
 
 
 def _ordereddict_flatten(d: OrderedDict[Any, T]) -> tuple[list[T], Context]:
@@ -1080,7 +1114,7 @@ _private_register_pytree_node(
     _namedtuple_unflatten,
     serialized_type_name="collections.namedtuple",
     to_dumpable_context=_namedtuple_serialize,
-    from_dumpable_context=_namedtuple_deserialize,
+    from_dumpable_context=_namedtuple_node_deserialize,
     flatten_with_keys_fn=_namedtuple_flatten_with_keys,
 )
 _private_register_pytree_node(

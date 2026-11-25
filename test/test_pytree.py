@@ -1217,6 +1217,24 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
             python_pytree.treespec_loads(python_pytree.treespec_dumps(spec)), spec
         )
 
+    def test_pytree_serialize_namedtuple_with_custom_flatten(self):
+        Point = namedtuple("Point", ["x", "y"])
+        python_pytree.register_pytree_node(
+            Point,
+            lambda p: (list(p), None),
+            lambda values, _: Point(*values),
+            serialized_type_name=(
+                "test_pytree.test_pytree_serialize_namedtuple_with_custom_flatten.Point"
+            ),
+        )
+        self.addCleanup(python_pytree._deregister_pytree_node, Point)
+        self.addCleanup(python_pytree.treespec_loads.cache_clear)
+        spec = python_pytree.tree_structure(Point(1, 2))
+        self.assertIs(spec.type, namedtuple)
+        self.assertEqual(
+            python_pytree.treespec_loads(python_pytree.treespec_dumps(spec)), spec
+        )
+
     @parametrize(
         "name,hint",
         [
@@ -1224,6 +1242,10 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
             subtest(("torch.Size", "edited or is corrupt"), name="torch_size"),
             subtest(("collections.namedtuple", "edited or is corrupt"), name="factory"),
             subtest(("test_pytree.Data", "_register_namedtuple"), name="dataclass"),
+            subtest(
+                ("test_pytree.Pair", "_register_namedtuple"),
+                name="registered_tuple_subclass",
+            ),
         ],
     )
     def test_pytree_deserialize_namedtuple_class_check(self, name, hint):
@@ -1235,9 +1257,89 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
 
         python_pytree.register_dataclass(Data, serialized_type_name="test_pytree.Data")
         self.addCleanup(python_pytree._deregister_pytree_node, Data)
+        python_pytree._register_namedtuple(
+            GlobalPair, serialized_type_name="test_pytree.Pair"
+        )
+        self.addCleanup(python_pytree._deregister_pytree_node, GlobalPair)
         node = {"type": "collections.namedtuple", "context": name, "children_spec": []}
         with self.assertRaisesRegex(TypeError, f"not a namedtuple class.*{hint}"):
             python_pytree.treespec_loads(json.dumps([1, node]))
+
+    def test_pytree_deserialize_registered_namedtuple_class_check(self):
+        import json
+
+        @dataclass
+        class Data:
+            x: int
+
+        python_pytree.register_dataclass(Data, serialized_type_name="test_pytree.Data")
+        self.addCleanup(python_pytree._deregister_pytree_node, Data)
+        python_pytree._register_namedtuple(
+            GlobalPair, serialized_type_name="test_pytree.Pair"
+        )
+        self.addCleanup(python_pytree._deregister_pytree_node, GlobalPair)
+        node = {
+            "type": "test_pytree.Pair",
+            "context": "test_pytree.Data",
+            "children_spec": [],
+        }
+        with self.assertRaisesRegex(
+            TypeError, "not a namedtuple class.*edited or is corrupt"
+        ):
+            python_pytree.treespec_loads(json.dumps([1, node]))
+
+    def test_pytree_deserialize_namedtuple_node_legacy_tuple_subclass(self):
+        import json
+
+        class LegacyPair(tuple):
+            __slots__ = ()
+            _fields = ("a", "b")
+
+            def __new__(cls, a, b):
+                return super().__new__(cls, (a, b))
+
+        class Sub(LegacyPair):
+            pass
+
+        class OwnFlatten(tuple):
+            __slots__ = ()
+            _fields = ("a", "b")
+
+        prefix = (
+            "test_pytree.test_pytree_deserialize_namedtuple_node_legacy_tuple_subclass"
+        )
+        for cls in (LegacyPair, Sub):
+            python_pytree._register_namedtuple(
+                cls, serialized_type_name=f"{prefix}.{cls.__name__}"
+            )
+        python_pytree.register_pytree_node(
+            OwnFlatten,
+            lambda p: (list(p), None),
+            lambda values, _: OwnFlatten(values),
+            serialized_type_name=f"{prefix}.OwnFlatten",
+        )
+        for cls in (LegacyPair, Sub, OwnFlatten):
+            self.addCleanup(python_pytree._deregister_pytree_node, cls)
+        self.addCleanup(python_pytree.treespec_loads.cache_clear)
+
+        def load(cls):
+            leaf = {"type": None, "context": None, "children_spec": []}
+            node = {
+                "type": "collections.namedtuple",
+                "context": f"{prefix}.{cls.__name__}",
+                "children_spec": [leaf, leaf],
+            }
+            return python_pytree.treespec_loads(json.dumps([1, node]))
+
+        spec = load(LegacyPair)
+        self.assertIs(spec.type, namedtuple)
+        result = spec.unflatten([1, 2])
+        self.assertIs(type(result), LegacyPair)
+        self.assertEqual(result, (1, 2))
+        for cls in (Sub, OwnFlatten):
+            with self.subTest(cls=cls.__name__):
+                with self.assertRaisesRegex(TypeError, "not a namedtuple class"):
+                    load(cls)
 
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:

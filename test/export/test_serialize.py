@@ -2178,7 +2178,10 @@ class TestSaveLoad(TestCase):
             def forward(self, x):
                 return Out(x.sum(), x * 2)
 
-        name = "test.export.test_serialize.test_load_namedtuple_output.Out"
+        name = (
+            "test.export.test_serialize."
+            "test_load_namedtuple_output_whose_class_changed.Out"
+        )
         pytree._register_namedtuple(Out, serialized_type_name=name)
         artifact = serialize(export(M(), (torch.ones(2),)))
         pytree._deregister_pytree_node(Out)
