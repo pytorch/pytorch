@@ -150,8 +150,6 @@
   "test/distributed/rpc/test_share_memory.py",
   "test/distributed/tensor/debug/test_comm_mode.py",
   "test/distributed/tensor/debug/test_comm_mode_features.py",
-  "test/distributed/tensor/debug/test_debug_mode.py",
-  "test/distributed/tensor/debug/test_op_coverage.py",
   "test/distributed/tensor/experimental/test_local_map.py",
   "test/distributed/tensor/experimental/test_register_sharding.py",
   "test/distributed/tensor/experimental/test_tp_transform.py",

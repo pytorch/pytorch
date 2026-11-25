@@ -1394,7 +1394,7 @@ class TestDTensorDebugMode(TestCase):
 
 
 class TestDebugModeUtils(TestCase):
-    """Test DebugMode with NCCL backend without using DTensor."""
+    """Test CPU-safe DebugMode hash utilities."""
 
     hw_classification = HardwareClassification.GENERIC
 
