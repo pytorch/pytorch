@@ -101,17 +101,17 @@ class MkldnnMemory : public dnnl::memory {
     using dims = typename memory::dims;
     using data_type = typename memory::data_type;
 
-    desc() : memory::desc(){};
+    desc() : memory::desc(){}
 
     // copy ctor
     desc(const desc& adesc) : memory::desc(adesc) {
       set_g(adesc.g());
-    };
+    }
 
     // supplement group info for memory::desc
     desc(const memory::desc& adesc, dim groups = 1) : memory::desc(adesc) {
       set_g(groups);
-    };
+    }
 
     desc& operator=(const desc& adesc) {
       memory::desc::operator=(adesc);
@@ -119,7 +119,7 @@ class MkldnnMemory : public dnnl::memory {
       return *this;
     }
 
-    desc(const dnnl_memory_desc_t& adata) : memory::desc(adata){};
+    desc(const dnnl_memory_desc_t& adata) : memory::desc(adata){}
 
     desc(const dims& adims, data_type adata_type, format_tag aformat_tag)
         : memory::desc(adims, adata_type, aformat_tag) {
@@ -244,7 +244,7 @@ class MkldnnMemory : public dnnl::memory {
 
     inline bool is_plain() const {
       return is_blocking_desc() && get_inner_nblks() == 0;
-    };
+    }
 
     inline bool is_opaque() const {
       return is_opaque_desc();
@@ -278,7 +278,7 @@ class MkldnnMemory : public dnnl::memory {
           && strides[h] == dims[w] * dims[c]
           && strides[w] == dims[c]
           && strides[c] == 1;
-    };
+    }
 
     // The logic of this function differs from PyTorch
     // It may cause error in edge cases.
@@ -322,7 +322,7 @@ class MkldnnMemory : public dnnl::memory {
         return strides[n] == dims[w] * dims[c] && strides[w] == dims[c] &&
             strides[c] == 1;
       }
-    };
+    }
 
     // workaround for issue intel/mkl-dnn#588
     bool is_4c_blocked() {
@@ -433,7 +433,7 @@ class MkldnnMemory : public dnnl::memory {
     // API available since oneDNN v3.4.1
     std::vector<uint8_t> get_blob() {
       std::vector<uint8_t> out_blob = memory::desc::get_blob();
-      
+
       int groups = g();
       // We need to add the groups info into the serialized ideep desc.
       // For example, a 4D FWK weight with groups > 1 will become a 5D oneDNN md,
@@ -442,7 +442,7 @@ class MkldnnMemory : public dnnl::memory {
       // when interacting with the FWK.
       // We use little endian encoding here when serializing groups
       out_blob.insert(out_blob.end(), (uint8_t*)&groups, (uint8_t*)&groups + sizeof(int));
-      
+
       return out_blob;
     }
 
@@ -1171,7 +1171,7 @@ class MkldnnMemory : public dnnl::memory {
 
   // For backward compatibility. Will be deprecated
   void transpose_from(const MkldnnMemory& src, const std::vector<int>& perms = {}) {
-    *this = std::move(src.permute(perms));
+    *this = src.permute(perms);
   }
 
  private:
