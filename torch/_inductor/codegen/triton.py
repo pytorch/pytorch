@@ -3649,6 +3649,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._host_tma_descriptor_buffers: dict[str, OrderedSet[str]] = {}
         self._device_tma_buffers: OrderedSet[str] = OrderedSet()
         self.hint_override = hint_override
+        # Set on mix-order split-size candidates: the benchmark module then also
+        # times the wrapper's finish of the partials (see
+        # codegen_benchmark_post_call). Maps split-reduction intermediates to
+        # the final outputs.
+        self.mix_order_benchmark_rename: dict[str, str] | None = None
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._pdl_load_index = 0
         self._pdl_has_wait = False
@@ -3963,7 +3968,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if isinstance(dim, sympy.Symbol):
                 continue
             return False
-        return True
+        # The launcher builds one descriptor per launch, so shape and strides may
+        # only depend on launch-time sizes, never on a range or loaded value.
+        size_symts = (SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.UNBACKED_INT)
+        return all(
+            symbol_is_type(sym, size_symts)
+            for dim in (*indexing.shape, *indexing.strides)
+            for sym in sympy.sympify(dim).free_symbols
+        )
 
     def _can_materialize_host_tma(
         self,
@@ -3971,11 +3983,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         indexing: TensorDescriptorOptions,
         dtype: torch.dtype,
     ) -> bool:
+        # Template epilogue accesses sit inside the persistent tile loop. With a
+        # zero constant offset the base is the bare kernel arg, indexing() has
+        # already rejected indirect indices, and _is_host_tma_materializable keeps
+        # shape/strides launch-invariant, so only the per-tile load/store offsets
+        # vary and one host-built descriptor is valid for every tile. The forced
+        # device path already relies on this when it lifts the same descriptor
+        # into the kernel prologue.
+        # Launch-time sizes are only wired up for template operands (see
+        # tma_descriptor's launch_args), so a template epilogue access with a
+        # dynamic dim keeps its in-kernel descriptor.
+        static_dims = all(
+            sympy.sympify(dim).is_number for dim in (*indexing.shape, *indexing.strides)
+        )
         return (
             has_triton_stable_tma_api()
             and config.triton.enable_host_side_tma
-            and not indexing.can_lift
             and indexing.constant_offset == 0
+            and (static_dims or not indexing.can_lift)
             and var not in self._host_tma_non_materializable
             and self._is_host_tma_materializable(indexing, dtype)
         )
@@ -4775,7 +4800,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # descriptor can be built on the host. Register it and return early --
             # no in-kernel tl.make_tensor_descriptor is emitted for it.
             if self._can_materialize_host_tma(var, indexing, V.graph.get_dtype(name)):
-                if var not in self.host_tma_descriptor_args:
+                if var in self.host_tma_descriptor_args:
+                    # A second consumer of an arg the template already described
+                    # would silently reuse the template's block shape.
+                    self._reject_if_template_host_tma(var)
+                else:
                     self.host_tma_descriptor_args[var] = indexing
                 self._host_tma_descriptor_buffers.setdefault(var, OrderedSet()).add(
                     name
@@ -4786,9 +4815,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif (
                 has_triton_stable_tma_api()
                 and config.triton.enable_host_side_tma
-                and not indexing.can_lift
                 and indexing.constant_offset != 0
             ):
+                # Reject before discarding: discarding first would drop a template
+                # operand's descriptor and leave its in-kernel uses uncompilable.
+                self._reject_if_template_host_tma(var)
                 self._host_tma_non_materializable.add(var)
                 self._discard_host_tma_descriptor(var)
 
@@ -7893,6 +7924,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
                 )
+                self.codegen_benchmark_post_call(result, call_args, signature)
 
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
@@ -7926,6 +7958,38 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
         return result
+
+    def codegen_benchmark_post_call(
+        self, result: IndentedBuffer, call_args: list[str], signature: list[Any]
+    ) -> None:
+        """Hook to emit code the benchmark times along with the kernel launch."""
+        if self.mix_order_benchmark_rename is None:
+            return
+        # Also time the wrapper's finish of the mix-order partials.
+        idx = next(
+            i for i, sig in enumerate(signature) if isinstance(sig, WorkspaceArg)
+        )
+
+        def hint(expr: sympy.Expr) -> str:
+            # Same hints as get_args, so the slices match the workspace.
+            return str(
+                V.graph.sizevars.optimization_hint_with_override(
+                    expr, hint_override=self.hint_override
+                )
+            )
+
+        nsplit = hint((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size)
+        for buffer_name, reduced in self.mix_order_partial_finishes(
+            f"args[{idx}]",
+            nsplit,
+            hint(self.numels["r0_"]),
+            self.mix_order_benchmark_rename,
+        ):
+            # Like the wrapper, cast the fp32 workspace to the output dtype
+            # (its trailing .view() to the output shape is free).
+            if (dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+                reduced += f".to({dtype})"
+            result.writeline(reduced)
 
     def imports_for_benchmark_kernel(self):
         # Dedent BEFORE substituting get_raw_stream: a multi-line override would
@@ -8141,6 +8205,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         return out
 
+    def body_fixed_blocks(self, sig_arg_names: OrderedSet[str]) -> dict[str, int]:
+        """Blocks defined in the kernel body rather than passed as a kernel arg."""
+        fixed_blocks: dict[str, int] = {}
+        if self.persistent_reduction:
+            for rt in self.range_trees:
+                if rt.is_reduction:
+                    block_name = f"{rt.prefix.upper()}BLOCK"
+                    if block_name not in sig_arg_names:
+                        try:
+                            val = self._get_persistent_reduction_block(rt.numel)
+                            if self.is_native_matmul:
+                                val = max(val, 16)
+                            fixed_blocks[block_name] = val
+                        except (TypeError, ValueError):
+                            pass
+        return fixed_blocks
+
     def resolved_host_tma_descriptor_args(
         self,
         descriptor_args: dict[str, TensorDescriptorOptions | dict[str, Any]]
@@ -8156,19 +8237,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         sig_arg_names = OrderedSet(
             arg.name for arg in signature if hasattr(arg, "name")
         )
-        fixed_blocks: dict[str, int] = {}
-        if self.persistent_reduction:
-            for rt in self.range_trees:
-                if rt.is_reduction:
-                    block_name = f"{rt.prefix.upper()}BLOCK"
-                    if block_name not in sig_arg_names:
-                        try:
-                            val = self._get_persistent_reduction_block(rt.numel)
-                            if self.is_native_matmul:
-                                val = max(val, 16)
-                            fixed_blocks[block_name] = val
-                        except (TypeError, ValueError):
-                            pass
+        fixed_blocks = self.body_fixed_blocks(sig_arg_names)
 
         def _resolve_block_dim(s):
             s_str = str(s)
@@ -8187,6 +8256,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             except (TypeError, ValueError):
                 return str(s)
 
+        output_args = OrderedSet(
+            v for v in self.args.output_buffers.values() if isinstance(v, str)
+        ) | OrderedSet(
+            b.inner_name
+            for b in self.args.inplace_buffers.values()
+            if isinstance(b, InplacedBuffer)
+        )
         resolved = {}
         for inner, opts in (
             self.host_tma_descriptor_args
@@ -8201,6 +8277,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 "shape": [_resolve_tensor_dim(s) for s in opts.shape],
                 "strides": [_resolve_tensor_dim(s) for s in opts.strides],
             }
+            if inner in output_args:
+                resolved[inner]["is_output"] = True
         return resolved
 
     @functools.cached_property

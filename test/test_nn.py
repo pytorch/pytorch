@@ -40,7 +40,8 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf, skipIfCppFakeTensor
+    TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf, skipIfCppFakeTensor, \
+    skipIfXpu
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -6004,7 +6005,7 @@ class TestAddRelu(TestCase):
 
 dynamo_wrapper_skips = {}
 dynamo_wrapper_skips["xpu"] = {
-    # intel/torch-xpu-ops/issues/5401
+    # https://github.com/intel/torch-xpu-ops/issues/5401
     'test_Hardshrink_no_batch_dim_xpu',
     'test_Softshrink_no_batch_dim_xpu',
     'test_Conv1d_zero_batch_xpu_fp32',
@@ -6480,6 +6481,7 @@ class TestNNDeviceType(NNTestCase):
         expected_grad = torch.sigmoid(-x.detach().abs()) * scale
         self.assertEqual(grad, expected_grad)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5508")
     def test_grid_sample_backward_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -7863,6 +7865,8 @@ class TestNNDeviceType(NNTestCase):
     @onlyAccelerator
     @parametrize_test("shape", [(2, 20001), (2, 4097), (100, 256), (300, 33)])
     def test_layer_norm_backward_shapes(self, device, shape):
+        if torch.device(device).type == "xpu" and shape[-1] >= 8192:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/6310")
         normalized_shape = shape[-1:]
         args = [torch.randn(s, dtype=torch.half) for s in (shape, normalized_shape, normalized_shape)]
         grad = torch.randn(shape, dtype=torch.half)
@@ -8237,6 +8241,7 @@ class TestNNDeviceType(NNTestCase):
                 _test_module_empty_input(self, mod, inp)
 
     @onlyAccelerator
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5528")
     @dtypes(torch.float, torch.half, torch.bfloat16)
     def test_groupnorm_unaligned_input(self, device, dtype):
         shape = (2, 32, 16, 16)
@@ -8451,6 +8456,7 @@ class TestNNDeviceType(NNTestCase):
                 padding=[0, 0, 0, 0, -2, -2])
 
     @onlyNativeDeviceTypes
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5508")
     def test_Pad_backward_channel_mismatch(self, device):
         # regression test for https://github.com/pytorch/pytorch/issues/142834: a
         # gradOutput whose channel dim doesn't match the input used to segfault in
@@ -8657,6 +8663,8 @@ class TestNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
+        if torch.device(device).type == "xpu" and dtype == torch.complex64:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/5515")
         for mod, inp in [
                 (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device, dtype=dtype)),
                 (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
@@ -9906,10 +9914,43 @@ class TestNNDeviceType(NNTestCase):
         unittest.skip('Lanczos mode does not support align_corners=True'),
         lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type == 'cpu' and p['antialias'] and p['align_corners'],
     )
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6206")
     def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
         self._test_upsamplingBiMode2d(
             device, antialias, align_corners, mode, memory_format
         )
+
+    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic", "lanczos"])
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("dtype", [torch.uint8, torch.float32])
+    @decorateIf(
+        unittest.skip("antialias is only supported for bilinear, bicubic and lanczos"),
+        lambda p: p["antialias"] and p["mode"] not in ("bilinear", "bicubic", "lanczos"),
+    )
+    @decorateIf(
+        unittest.skip("lanczos requires antialias=True and is CPU only"),
+        lambda p: p["mode"] == "lanczos" and (not p["antialias"] or torch.device(p["device"]).type != "cpu"),
+    )
+    @decorateIf(
+        unittest.skip("no uint8 kernel for this mode on this device"),
+        lambda p: p["dtype"] == torch.uint8 and torch.device(p["device"]).type != "cpu"
+        and p["mode"] not in ("nearest", "nearest-exact")
+        and not (torch.device(p["device"]).type == "mps" and p["mode"] == "bilinear" and not p["antialias"]),
+    )
+    def test_upsampling2d_channels_last_view_with_size1_batch(self, device, mode, antialias, dtype):
+        # Channels-last contiguous, but the size-1 batch dim has stride 3 rather than H * W * C.
+        x = torch.randint(0, 256, (31, 47, 3), dtype=torch.uint8, device=device).to(dtype).permute(2, 0, 1)[None]
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+        x_ref = torch.empty_like(x, memory_format=torch.channels_last).copy_(x)
+        for size in [(20, 30), (62, 94)]:
+            out = F.interpolate(x, size=size, mode=mode, antialias=antialias)
+            expected = F.interpolate(x_ref, size=size, mode=mode, antialias=antialias)
+            self.assertEqual(out, expected)
+            if dtype == torch.uint8 and torch.device(device).type == "cpu" and mode in ("bilinear", "bicubic", "lanczos"):
+                # x is recognized as channels-last, for the uint8 AVX2 / NEON kernels.
+                self.assertEqual(out.stride(), expected.stride())
+            else:
+                self.assertTrue(out.is_contiguous())
 
     @onlyCUDA
     @skipIfRocm
@@ -10164,8 +10205,8 @@ class TestNNDeviceType(NNTestCase):
         batch_size,
     ):
         # Check output value consistency between resized_input_uint8 and resized input_float
-        if torch.device(device).type == "cuda":
-            raise SkipTest("CUDA implementation is not yet supporting uint8")
+        if torch.device(device).type in ["cuda", "xpu"]:
+            raise SkipTest("CUDA/XPU implementation is not yet supporting uint8")
 
         if mode == "lanczos":
             if not antialias:
@@ -10204,11 +10245,11 @@ class TestNNDeviceType(NNTestCase):
         if non_contig is False:
             self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
 
-        # FIXME if-clause shows the current behaviour which is definitely unexpected.
-        # Ideally we want to fix it such that both the ui8 and f32 outputs are also channels_last
-        # See for more details: https://github.com/pytorch/pytorch/pull/100373
         if batch_size == 1 and check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
-            self.assertTrue(output_ui8.is_contiguous())
+            # Channels-last inputs whose size-1 batch dim has a non-standard stride are only recognized
+            # as channels-last for uint8 on CPU.
+            self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format) if torch.device(device).type == "cpu"
+                            else output_ui8.is_contiguous())
             self.assertTrue(output_f32.is_contiguous())
         else:
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
@@ -10241,8 +10282,8 @@ class TestNNDeviceType(NNTestCase):
     def test_upsamplingBiLinear2d_consistency_interp_size_bug(self, device, memory_format, align_corners, input_size, output_size):
         # Non-regression test for https://github.com/pytorch/pytorch/pull/101403
 
-        if torch.device(device).type == "cuda":
-            raise SkipTest("CUDA implementation is not yet supporting uint8")
+        if torch.device(device).type in ["cuda", "xpu"]:
+            raise SkipTest("CUDA/XPU implementation is not yet supporting uint8")
 
         mode = "bilinear"
         input_ui8 = torch.randint(0, 256, size=(1, 3, input_size, input_size), dtype=torch.uint8, device=device)
@@ -11399,6 +11440,7 @@ class TestNNDeviceType(NNTestCase):
     @skipIfRocmVersionLessThan((7, 14))
     @skipMPS  # MPS has no CUDA-style grid-y launch limit
     @onlyAccelerator
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5567")
     def test_upsamplingNearest2d_launch_fail(self, device):
         m = nn.Upsample(scale_factor=2)
         # launch grid_y == 2**16 (larger than maximum y-dimension limit 65535)
@@ -11561,6 +11603,7 @@ class TestNNDeviceType(NNTestCase):
             torch.__future__.set_overwrite_module_params_on_conversion(False)
 
     @onlyAccelerator
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4462")
     @dtypes(torch.half, torch.float)
     def test_softmax(self, device, dtype):
         input = torch.rand(32, 100, device=device, dtype=dtype, requires_grad=True)
@@ -12112,6 +12155,140 @@ class TestNNDeviceType(NNTestCase):
                 self.assertTrue(bool(d_input.isfinite().all()))
                 self.assertEqual(d_input, reference[0])
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_grid_sample_expanded_axis_beyond_int_range(self, device, dtype):
+        # A size-1 input expanded along one spatial axis to 2**31 + 1 elements
+        # stores one value but selects the 64-bit kernels. Such axes are not
+        # otherwise supported on CUDA: the coordinate helpers take int sizes.
+        # The bounds checks must use the same int sizes, so that a grid
+        # coordinate of -2 on that axis, which is outside the input, still reads
+        # zero padding (and has a zero gradient), as on CPU.
+        big = 2**31 + 1
+        bw2d = torch.ops.aten.grid_sampler_2d_backward.default
+        bw3d = torch.ops.aten.grid_sampler_3d_backward.default
+        for dims, axis in ((2, 0), (2, 1), (3, 0), (3, 1), (3, 2)):
+            spatial = [1] * dims
+            spatial[axis] = big
+            # Grid coordinates are ordered (x, y[, z]): the last spatial axis first.
+            point = [0.] * dims
+            point[dims - 1 - axis] = -2.
+            grid_cpu = torch.tensor(point, dtype=dtype).reshape((1,) * (dims + 1) + (dims,))
+            inp_cpu = torch.ones((1, 1) + (1,) * dims, dtype=dtype).expand(1, 1, *spatial)
+            inp = torch.ones((1, 1) + (1,) * dims, device=device, dtype=dtype).expand(1, 1, *spatial)
+            grad_output_cpu = torch.ones((1, 1) + (1,) * dims, dtype=dtype)
+            modes = (0, 1, 2) if dims == 2 else (0, 1)
+            fw = torch.grid_sampler_2d if dims == 2 else torch.grid_sampler_3d
+            bw = bw2d if dims == 2 else bw3d
+            for mode in modes:
+                with self.subTest(dims=dims, axis=axis, mode=mode):
+                    expected = fw(inp_cpu, grid_cpu, mode, 0, True)
+                    self.assertEqual(expected.item(), 0)
+                    actual = fw(inp, grid_cpu.to(device), mode, 0, True)
+                    self.assertEqual(actual.cpu(), expected)
+                    tail = (mode, 0, True, [False, True])
+                    expected_grid = bw(grad_output_cpu, inp_cpu, grid_cpu, *tail)[1]
+                    actual_grid = bw(grad_output_cpu.to(device), inp, grid_cpu.to(device), *tail)[1]
+                    self.assertEqual(actual_grid.cpu(), expected_grid)
+
+    @onlyCUDA
+    @largeTensorTest(lambda self, device, mode, input_requires_grad:
+                     (20 if input_requires_grad else 10) * 1024**3, device="cuda")
+    # Nearest grid-gradient-only calls are left out: their grid gradient is
+    # zero and the kernel reads no input, so no large offset is exercised.
+    @parametrize_test("mode,input_requires_grad", [(0, False), (0, True), (1, True)])
+    def test_grid_sample_3d_large_spatial_offset(self, device, mode, input_requires_grad):
+        # The last depth slab of this input starts at 2**31 elements, so the 3D
+        # kernels index in 64 bits and the spatial offsets of input-gradient
+        # scatters must not be computed in 32 bits. Forward and grid-gradient
+        # reads index the input directly in the kernel's index type; the
+        # bilinear grid-gradient-only case, with its forward check, is a
+        # control. The 8 GiB input is held once without grad_input and twice
+        # with it.
+        depth, height, width = 32769, 256, 256
+        inp = torch.zeros((1, 1, depth, height, width), device=device, dtype=torch.float32)
+        self.assertEqual((depth - 1) * inp.stride(2), 2**31)
+        reference = torch.zeros(1, 1, 5, 5, 5, dtype=torch.float32)
+        # Make the far-slab grid gradient nonzero, so dropped or incorrectly
+        # addressed input reads cannot accidentally pass.
+        for (z, y, x), value in (((0, 0, 0), 1.), ((-1, 0, 0), 3.), ((-1, 0, 1), 5.)):
+            reference[0, 0, z, y, x] = value
+            inp[0, 0, z, y, x] = value
+        grad_output = torch.tensor([[[[[1., 2.]]]]], dtype=torch.float32)
+        grid = torch.tensor([[[[[-1., -1., -1.], [-1., -1., 1.]]]]], dtype=torch.float32)
+        if mode == 0 and not input_requires_grad:
+            expected_out = torch.grid_sampler_3d(reference, grid, mode, 0, True)
+            self.assertNotEqual(expected_out[0, 0, 0, 0, 1].item(), 0)
+            actual_out = torch.grid_sampler_3d(inp, grid.to(device), mode, 0, True)
+            self.assertEqual(actual_out.cpu(), expected_out)
+        bw = torch.ops.aten.grid_sampler_3d_backward.default
+        tail = (mode, 0, True, [input_requires_grad, True])
+        expected = bw(grad_output, reference, grid, *tail)
+        if mode == 0:
+            self.assertNotEqual(expected[1][0, 0, 0, 1, 0].item(), 0)
+        actual = bw(grad_output.to(device), inp, grid.to(device), *tail)
+        if input_requires_grad:
+            self.assertEqual(actual[0][0, :, 0, 0, 0].cpu(), expected[0][0, :, 0, 0, 0])
+            self.assertEqual(actual[0][0, :, -1, 0, 0].cpu(), expected[0][0, :, -1, 0, 0])
+            self.assertEqual(actual[0].sum().cpu(), expected[0].sum())
+        else:
+            self.assertIsNone(actual[0])
+        expected[1][..., 0] *= (width - 1) / 4
+        expected[1][..., 1] *= (height - 1) / 4
+        expected[1][..., 2] *= (depth - 1) / 4
+        self.assertEqual(actual[1].cpu(), expected[1])
+
+    @onlyCUDA
+    @largeTensorTest(lambda self, device, mode, input_requires_grad:
+                     (20 if input_requires_grad else 10) * 1024**3, device="cuda")
+    # Nearest grid-gradient-only calls are left out: their grid gradient is
+    # zero and the kernel reads no input, so no large offset is exercised.
+    @parametrize_test("mode,input_requires_grad",
+                      [(0, False), (0, True), (1, True), (2, False), (2, True)])
+    def test_grid_sample_2d_large_spatial_offset(self, device, mode, input_requires_grad):
+        # The last row of this channels-last input starts at 2**31 elements, so
+        # the 2D kernels index in 64 bits and the spatial offsets of bicubic
+        # forward reads, input-gradient scatters and bicubic grid-gradient reads
+        # must not be computed in 32 bits. The bilinear grid-gradient-only case
+        # reads the input directly in the kernel's index type and is a control.
+        # The 8 GiB input is held once without grad_input and twice with it.
+        height, width = 32769, 65536
+        inp = torch.empty((1, 1, height, width), device=device, dtype=torch.float32,
+                          memory_format=torch.channels_last).zero_()
+        self.assertEqual((height - 1) * inp.stride(2), 2**31)
+        reference = torch.zeros(1, 1, 5, 5, dtype=torch.float32)
+        reference[0, :, 0, 0] = torch.tensor([1.])
+        reference[0, :, -1, 0] = torch.tensor([3.])
+        # Make the far-row bicubic grid gradient nonzero, so dropped or
+        # incorrectly addressed input reads cannot accidentally pass.
+        reference[0, :, -1, 1] = torch.tensor([5.])
+        inp[0, :, 0, 0] = reference[0, :, 0, 0].to(device)
+        inp[0, :, -1, 0] = reference[0, :, -1, 0].to(device)
+        inp[0, :, -1, 1] = reference[0, :, -1, 1].to(device)
+        grad_output = torch.tensor([[[[1., 2.]]]], dtype=torch.float32)
+        grid = torch.tensor([[[[-1., -1.], [-1., 1.]]]], dtype=torch.float32)
+        if mode == 2 and not input_requires_grad:
+            # Bicubic forward reads the far row through the same helper.
+            expected_out = torch.grid_sampler_2d(reference, grid, mode, 0, True)
+            self.assertNotEqual(expected_out[0, 0, 0, 1].item(), 0)
+            actual_out = torch.grid_sampler_2d(inp, grid.to(device), mode, 0, True)
+            self.assertEqual(actual_out.cpu(), expected_out)
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        tail = (mode, 0, True, [input_requires_grad, True])
+        expected = bw(grad_output, reference, grid, *tail)
+        if mode == 2:
+            self.assertNotEqual(expected[1][0, 0, 1, 0].item(), 0)
+        actual = bw(grad_output.to(device), inp, grid.to(device), *tail)
+        if input_requires_grad:
+            self.assertEqual(actual[0][0, :, 0, 0].cpu(), expected[0][0, :, 0, 0])
+            self.assertEqual(actual[0][0, :, -1, 0].cpu(), expected[0][0, :, -1, 0])
+            self.assertEqual(actual[0].sum().cpu(), expected[0].sum())
+        else:
+            self.assertIsNone(actual[0])
+        expected[1][..., 0] *= (width - 1) / 4
+        expected[1][..., 1] *= (height - 1) / 4
+        self.assertEqual(actual[1].cpu(), expected[1])
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float, torch.half, torch.bfloat16)
@@ -12404,6 +12581,7 @@ class TestNNDeviceType(NNTestCase):
                 F.nll_loss(x, t, weight=weight)
 
     @onlyAccelerator
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5565")
     def test_nll_loss_1d_input_backward(self, device):
         # For 1D (no batch dim) input aten.nll_loss_backward uses only target[0].
         # The MPS Metal kernel used to dispatch target.numel() threads, reading
@@ -12471,6 +12649,7 @@ class TestNNDeviceType(NNTestCase):
     # Ref: https://github.com/pytorch/pytorch/issues/190139
     @onlyAccelerator
     @largeTensorTest("5GB")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4723")
     def test_nll_loss2d_backward_large_sample_offset(self, device):
         batch_size = 2**16 + 1
         num_classes = 2**15
@@ -13534,6 +13713,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5510")
     def test_transformerencoderlayer(self, device, dtype):
         # this is a deterministic test for TransformerEncoderLayer
         d_model = 4
@@ -13544,7 +13724,7 @@ class TestNNDeviceType(NNTestCase):
 
         atol = 1e-5
         rtol = 1e-7
-        if "cuda" in device:
+        if torch.device(device).type == "cuda":
             atol = 1e-3
             rtol = 1e-2
 
@@ -13989,6 +14169,7 @@ class TestNNDeviceType(NNTestCase):
     @skipMPS
     @onlyAccelerator
     @largeTensorTest("30GB")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5566")
     def test_spatial_softmax_backward_64bit_indexing(self, device):
         # Softmax over a non-last dim (inner_size != 1) routes the backward to
         # cunn_SpatialSoftMaxBackward, a separate kernel from the inner_size==1
@@ -15854,7 +16035,7 @@ class TestNNDeviceType(NNTestCase):
     @set_default_dtype(torch.double)
     @parametrize_test("requires_grad", [True, False])
     @parametrize_test("apply_dp", [
-        subtest(True, decorators=[unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator"), onlyAccelerator]),
+        subtest(True, decorators=[unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator"), onlyAccelerator, skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2228")]),
         False,
     ])
     def test_spectral_norm(self, device, apply_dp, requires_grad):
@@ -16248,6 +16429,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(m(inp)[0].cpu(), out_expected[0], atol=1e-4, rtol=5e-3)
 
     @skipMPS
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5509")
     def test_RNN_input_size_zero(self, device):
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             input = torch.zeros((5, 0, 3), device=device)
@@ -16276,6 +16458,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2228")
     def test_data_parallel_with_empty_parameter_shapes(self, device):
         class MyModule(nn.Module):
             def __init__(self):
@@ -16300,6 +16483,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2228")
     def test_broadcast_double_backwards(self, device):
         tensors = (torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
                    torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
@@ -16310,6 +16494,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2228")
     def test_broadcast_not_requiring_grad(self, device):
         variables = [
             torch.randn(1, 2, device=device, requires_grad=True),
@@ -16325,6 +16510,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2228")
     def test_broadcast_no_grad(self, device):
         x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device=device)
         with torch.no_grad():
@@ -16791,6 +16977,10 @@ class TestNNDeviceType(NNTestCase):
 
             if mode == "train" and mixed and dims == 3 and dtype == torch.half and fmt_ref == ("NCHW", "native"):
                 self.skipTest("Failed on CUDA")
+
+        if torch.device(device).type == "xpu":
+            if mode == "train" and mixed and dtype == torch.bfloat16 and fmt_ref in (("NCHW", "cpu"), ("NHWC", "NCHW")):
+                self.skipTest("https://github.com/intel/torch-xpu-ops/issues/5564")
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
@@ -17766,6 +17956,7 @@ class TestNNCUDA(NNTestCase):
                 torch.ones(1, device=device),
             )
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5527")
     @dtypes(torch.float, torch.half, torch.bfloat16)
     def test_groupnorm_nhwc_cuda(self, device, dtype):
         for shape, groups, memory_format in [
@@ -18083,6 +18274,7 @@ if __name__ == '__main__':
         self.assertTrue(has_device_side_assert(stderr),
                         lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5529")
     @parametrize_test("op,normalized_shape,has_weight", [
         subtest(("layer_norm", [64], False), name="layer_norm_1d_no_weight"),
         subtest(("layer_norm", [8, 16], True), name="layer_norm_multidim"),
@@ -18794,7 +18986,7 @@ instantiate_parametrized_tests(TestFusedRMSNormOverrideNumerics)
 
 instantiate_device_type_tests(TestNNCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
-instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True, allow_xpu=True)
 instantiate_parametrized_tests(TestNN)
 
 # pytest-xdist workers import this file instead of running it as __main__.
