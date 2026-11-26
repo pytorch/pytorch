@@ -68,6 +68,7 @@ def get_extension():
     ]
 
     extension = CppExtension
+    libraries = []
     # allow including <cuda_runtime.h>
     if torch.cuda.is_available():
         extra_compile_args["cxx"].append("-DLAE_USE_CUDA")
@@ -79,6 +80,7 @@ def get_extension():
         ]
         extension = CUDAExtension
         sources.extend(CSRC_DIR.glob("**/*.cu"))
+        libraries.append("hipblas" if torch.version.hip else "cublas")
         for prev_dir in PREV_CSRC_DIRS:
             sources.extend(prev_dir.glob("**/*.cu"))
 
@@ -90,6 +92,7 @@ def get_extension():
             "libtorch_agn_2_16._C",
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,
+            libraries=libraries,
             extra_compile_args=extra_compile_args,
             extra_link_args=[],
         )
