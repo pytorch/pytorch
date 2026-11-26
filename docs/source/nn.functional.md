@@ -99,16 +99,37 @@ scaled_dot_product_attention.
     tanhshrink
     softsign
     softplus
-    softmin
-    softmax
     softshrink
-    gumbel_softmax
-    log_softmax
     tanh
     sigmoid
     hardsigmoid
     silu
     mish
+```
+
+## Non-linear activation functions (other)
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    softmin
+    softmax
+    gumbel_softmax
+    log_softmax
+
+.. _Link 1: https://arxiv.org/abs/1611.00712
+.. _Link 2: https://arxiv.org/abs/1611.01144
+```
+
+## Normalization functions
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
     batch_norm
     group_norm
     instance_norm
@@ -116,9 +137,6 @@ scaled_dot_product_attention.
     local_response_norm
     rms_norm
     normalize
-
-.. _Link 1: https://arxiv.org/abs/1611.00712
-.. _Link 2: https://arxiv.org/abs/1611.01144
 ```
 
 ## Linear functions
