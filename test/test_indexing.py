@@ -1347,6 +1347,32 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(v[:, [0, 4, 2]].shape, (5, 3, 3))
         self.assertEqual(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
 
+    @dtypes(torch.bool, torch.bfloat16, torch.int32, torch.long, torch.cdouble)
+    @dtypesIfMPS(torch.bool, torch.bfloat16, torch.int32, torch.long)
+    def test_index_single_dim_element_gather(self, device, dtype):
+        # One indexed dim whose rows the vectorized row gather does not take
+        # (one element, or not a multiple of 16 bytes); gfx1250 runs these as an
+        # element gather. The index lengths include fleet table[idx] lengths
+        # and one long enough that the element gather strides over its grid.
+        table = make_tensor((4099, 1), device=device, dtype=dtype)
+        for n in (1, 1040, 5362, (1 << 20) + 3):
+            idx = torch.randint(-4099, 4099, (n,), device=device)
+            self.assertEqual(table[idx], table.cpu()[idx.cpu()], atol=0, rtol=0)
+        src = make_tensor((513, 7), device=device, dtype=dtype)
+        ref = src.cpu()
+        idx = torch.randint(513, (37, 3), device=device)
+        cols = torch.tensor([5, 0, 5, 2, 6], device=device)
+        # 2-D index into a strided column, an indexed inner dim, and 7-element
+        # rows (112 bytes for cdouble, which take the vectorized row gather).
+        self.assertEqual(src[:, 3][idx], ref[:, 3][idx.cpu()], atol=0, rtol=0)
+        self.assertEqual(src[:, cols], ref[:, cols.cpu()], atol=0, rtol=0)
+        self.assertEqual(src.T[:, idx[:, 0]], ref.T[:, idx[:, 0].cpu()], atol=0, rtol=0)
+        self.assertEqual(src[idx[:, 0]], ref[idx[:, 0].cpu()], atol=0, rtol=0)
+        # Control: rows that are a multiple of 16 bytes keep the vectorized row
+        # gather.
+        wide = make_tensor((513, 16), device=device, dtype=dtype)
+        self.assertEqual(wide[idx[:, 0]], wide.cpu()[idx[:, 0].cpu()], atol=0, rtol=0)
+
     @dtypes(
         torch.cfloat, torch.cdouble, torch.float, torch.bfloat16, torch.long, torch.bool
     )
@@ -2690,6 +2716,18 @@ class TestIndexingCUDA(TestCase):
 
         self.assertTrue(ran_sorted)
         self.assertEqual(source.grad, expected, atol=0, rtol=0)
+
+    @dtypes(torch.bool, torch.bfloat16, torch.float32)
+    def test_index_single_dim_copies_bits(self, device, dtype):
+        # The element gather copies elements bit for bit (NaN payloads, signed
+        # zeros, bool bytes other than 0 and 1), for negative indices too.
+        int_dtype = {1: torch.uint8, 2: torch.int16, 4: torch.int32}[dtype.itemsize]
+        info = torch.iinfo(int_dtype)
+        n = 300001
+        bits = torch.randint(info.min, info.max, (n,), dtype=int_dtype, device=device)
+        idx = torch.randint(-n, n, (200000,), device=device)
+        actual = bits.view(dtype)[idx].view(int_dtype).cpu()
+        self.assertEqual(actual, bits.cpu()[idx.cpu()], atol=0, rtol=0)
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to

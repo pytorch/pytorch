@@ -197,8 +197,30 @@ void index_copy_kernel_impl(
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
 }
 
+#ifdef USE_ROCM
+// True if an `index` with one indexed dim can run as a batched element gather:
+// the vectorized row gather declines it (e.g. table[idx] on a [N, 1] table, rows
+// that are not a multiple of 16 bytes, or an indexed inner dim).
+static inline bool can_use_index_batched_element_gather(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
+  if (index_size.size() != 1) {
+    return false;
+  }
+  constexpr size_t alignment = 16;
+  if (at::native::fast_gather_kernel_eligible<alignment>(iter, static_cast<char*>(iter.data_ptr(0)), static_cast<char*>(iter.data_ptr(1)), index_stride[0], iter.element_size(0))) {
+    return false;
+  }
+  return at::native::can_use_batched_element_gather(iter);
+}
+#endif
+
 template <typename scalar_t>
 void index_kernel_impl(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
+#ifdef USE_ROCM
+  if (at::native::is_gfx1250_device(iter.device(0).index()) && can_use_index_batched_element_gather(iter, index_size, index_stride)) {
+    at::native::launch_batched_element_gather_kernel(iter, index_size[0], index_stride[0], /*allow_neg_indices=*/true);
+    return;
+  }
+#endif
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* const out_data, const char* const in_data, const int64_t offset) {
     *reinterpret_cast<scalar_t*>(out_data) = *reinterpret_cast<const scalar_t*>(in_data + offset);
   }, true);

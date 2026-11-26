@@ -150,6 +150,17 @@ struct _cuda_scatter_gather_internal_kernel {
       // the dst and src are contiguous and all the dims and pts are multiple of 16
       constexpr size_t element_size = sizeof(scalar_t);
       constexpr size_t alignment = 16;
+#ifdef USE_ROCM
+      if (iter.ndim() == 2 && iter.strides(2)[1] != static_cast<int64_t>(iter.element_size(2)) &&
+          is_gfx1250_device(iter.device(0).index()) &&
+          at::native::fast_gather_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size, /*allow_strided_index=*/true) &&
+          at::native::can_use_vectorized_gather_strided_index<alignment>(iter.device(0).index(), iter.shape()[0] * element_size, iter.shape()[1])) {
+        const auto idx_stride = iter.strides(2)[1] / static_cast<int64_t>(iter.element_size(2));
+        at::native::launch_vectorized_gather_strided_index_kernel<alignment, index_t>(self_ptr, src_ptr, (index_t*)index_ptr, idx_stride,
+            iter.shape()[1], iter.shape()[0] * element_size, index_size, index_stride * element_size, iter.strides(0)[1]);
+        return;
+      }
+#endif
       if (at::native::fast_gather_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
         auto slice_size = iter.shape()[0] * element_size;
         auto num_ind = iter.shape()[1];
@@ -160,6 +171,26 @@ struct _cuda_scatter_gather_internal_kernel {
         at::native::vectorized_gather_kernel_launch<alignment, index_t>(self_ptr, src_ptr, (index_t*)index_ptr, num_ind, slice_size, ind_dim_size, inp_stride_bytes, out_stride_bytes);
         return;
       }
+#ifdef USE_ROCM
+      // gfx1250: gathers that neither row gather above takes run as batched
+      // gathers instead of _scatter_gather_elementwise_kernel: a row gather
+      // when the index is constant along the inner dim (e.g. expanded along
+      // the last dim, with rows of any 2-byte alignment and more than two
+      // dims), else an element gather.
+      if constexpr (std::is_same_v<func_t, TensorAssign>) {
+        if (is_gfx1250_device(iter.device(0).index())) {
+          const auto index_stride_bytes = index_stride * static_cast<int64_t>(element_size);
+          if (at::native::can_use_batched_row_gather(iter, index_stride_bytes)) {
+            at::native::launch_batched_row_gather_kernel(iter, index_size, index_stride_bytes, /*allow_neg_indices=*/false);
+            return;
+          }
+          if (at::native::can_use_batched_element_gather(iter)) {
+            at::native::launch_batched_element_gather_kernel(iter, index_size, index_stride_bytes, /*allow_neg_indices=*/false);
+            return;
+          }
+        }
+      }
+#endif
     }
 
     if constexpr (is_scatter_like && std::is_same_v<func_t, TensorAssign>) {
