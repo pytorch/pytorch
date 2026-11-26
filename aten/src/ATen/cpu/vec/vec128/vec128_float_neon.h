@@ -7,7 +7,7 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 
-#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#if (defined(__aarch64__) || defined(_M_ARM64)) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 #include <sleef.h>
 #endif
 
@@ -31,7 +31,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 //    https://github.com/android/ndk/issues/1248
 //    https://bugs.llvm.org/show_bug.cgi?id=45824
 // Most likely we will do aarch32 support with inline asm.
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(_M_ARM64)
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
@@ -128,7 +128,15 @@ class Vectorized<float> {
   Vectorized(float32x4_t v) : values(v) {}
   Vectorized(float val) : values{vdupq_n_f32(val)} {}
   Vectorized(float val0, float val1, float val2, float val3)
+#if defined(_M_ARM64) && !defined(__clang__)
+  {
+    // MSVC's NEON vector types do not support per-lane aggregate initialization.
+    const float lanes[] = {val0, val1, val2, val3};
+    values = vld1q_f32(lanes);
+  }
+#else
       : values{val0, val1, val2, val3} {}
+#endif
   Vectorized(float (&arr)[4]) : Vectorized(arr[0], arr[1], arr[2], arr[3]) {}
   operator float32x4_t() const {
     return values;
@@ -180,24 +188,39 @@ class Vectorized<float> {
         return a;
       case 1: {
         Vectorized<float> vec;
+#if defined(_M_ARM64) && !defined(__clang__)
+        constexpr uint32_t mask_low[] = {0xFFFFFFFF, 0x0, 0x0, 0x0};
+        vec.values = vreinterpretq_f32_u32(vld1q_u32(mask_low));
+#else
         static uint32x4_t mask_low = {0xFFFFFFFF, 0x0, 0x0, 0x0};
         vec.values = vreinterpretq_f32_u32(mask_low);
+#endif
         vec.values =
             vbslq_f32(vreinterpretq_u32_f32(vec.values), b.values, a.values);
         return vec;
       }
       case 2: {
         Vectorized<float> vec;
+#if defined(_M_ARM64) && !defined(__clang__)
+        constexpr uint32_t mask_low[] = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
+        vec.values = vreinterpretq_f32_u32(vld1q_u32(mask_low));
+#else
         static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
         vec.values = vreinterpretq_f32_u32(mask_low);
+#endif
         vec.values =
             vbslq_f32(vreinterpretq_u32_f32(vec.values), b.values, a.values);
         return vec;
       }
       case 3: {
         Vectorized<float> vec;
+#if defined(_M_ARM64) && !defined(__clang__)
+        constexpr uint32_t mask_low[] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
+        vec.values = vreinterpretq_f32_u32(vld1q_u32(mask_low));
+#else
         static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
         vec.values = vreinterpretq_f32_u32(mask_low);
+#endif
         vec.values =
             vbslq_f32(vreinterpretq_u32_f32(vec.values), b.values, a.values);
         return vec;
@@ -408,7 +431,11 @@ class Vectorized<float> {
     constexpr float ln2_lo = 0x1.7f7d1cp-20f;
     constexpr float c0 = 0x1.0e4020p-7f;
     constexpr float c2 = 0x1.555e66p-3f;
+#if defined(_M_ARM64) && !defined(__clang__)
+    const float32x4_t ln2_c02 = Vectorized<float>(ln2_hi, ln2_lo, c0, c2);
+#else
     const float32x4_t ln2_c02 = {ln2_hi, ln2_lo, c0, c2};
+#endif
 
     const uint32x4_t exponent_bias = vdupq_n_u32(0x3f800000);
     const float32x4_t c1 = vdupq_n_f32(0x1.573e2ep-5f);

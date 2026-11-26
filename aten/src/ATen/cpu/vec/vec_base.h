@@ -69,7 +69,7 @@ Windows llvm will not have this definition.
 #endif
 #define VECTOR_WIDTH 64
 #define int_vector __m512i
-#elif (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)) || \
+#elif ((defined(__aarch64__) || defined(_M_ARM64)) && !defined(CPU_CAPABILITY_SVE256)) || \
     defined(CPU_CAPABILITY_ZVECTOR) // CPU_CAPABILITY_AVX512
 // SVE code expects 256-vectors; leave that set for SVE?
 #if defined(__GNUC__)
@@ -205,7 +205,7 @@ struct Vectorized {
   }
   template <
       typename... Args,
-      typename = std::enable_if_t<(sizeof...(Args) == size())>>
+      typename = std::enable_if_t<(sizeof...(Args) > 1 && sizeof...(Args) == size())>>
   Vectorized(Args... vals) : values{vals...} {}
   Vectorized(const T (&arr)[kSize]) { // NOLINT(*-avoid-c-arrays)
     std::copy(std::begin(arr), std::end(arr), values.begin());
