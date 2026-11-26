@@ -356,7 +356,11 @@ def _aligned_mv(x, vector, plans):
 
 class RuntimeCudaNativeMv(ir.ExternKernelOut):
     def codegen(self, wrapper):
-        if V.graph.cpp_wrapper:
+        if V.graph.aot_mode:
+            from .cuda_native_mv_aoti import codegen_cuda_native_mv
+
+            codegen_cuda_native_mv(self, wrapper)
+        elif V.graph.cpp_wrapper:
             wrapper.include_extra_header(
                 "torch/csrc/inductor/cpp_wrapper/lazy_triton_compile.h"
             )

@@ -1431,6 +1431,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self._declared_aux_stream_slots: OrderedSet[int] = OrderedSet()
         self._aoti_current_stream_guard_declared = False
         self._aoti_stream_helpers_emitted = False
+        self._cuda_native_mv_helpers_written = False
         self._tma_descriptor_helpers_written = False
 
     def generate_debug_sync(self, buffer):
