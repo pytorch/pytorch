@@ -20190,23 +20190,31 @@ A.last
         res = opt_f(x)
         self.assertEqual(ref, res)
 
-    @parametrize("op", ["sdpa", "torch_sum", "tensor_sum", "dropout"])
-    def test_symbool_as_bool_arg(self, op):
-        fns = {
-            "sdpa": lambda x: F.scaled_dot_product_attention(
-                x, x, x, is_causal=x.shape[2] > 1
+    @parametrize(
+        "fn",
+        [
+            subtest(
+                lambda x: F.scaled_dot_product_attention(
+                    x, x, x, is_causal=x.shape[0] > 2
+                ),
+                name="sdpa",
             ),
-            "torch_sum": lambda x: torch.sum(x, 0, keepdim=x.shape[0] > 1),
-            "tensor_sum": lambda x: x.sum(0, keepdim=x.shape[0] > 1),
-            "dropout": lambda x: F.dropout(x, 0.0, training=x.shape[0] > 1),
-        }
-
-        fn = fns[op]
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
-
-        for shape in [(2, 4, 16, 8), (3, 4, 1, 8)]:
-            x = torch.randn(shape)
+            subtest(
+                lambda x: torch.sum(x, 0, keepdim=x.shape[0] > 2), name="torch_sum"
+            ),
+            subtest(lambda x: x.sum(0, keepdim=x.shape[0] > 2), name="tensor_sum"),
+            subtest(
+                lambda x: F.dropout(x, 1.0, training=x.shape[0] > 2), name="dropout"
+            ),
+        ],
+    )
+    def test_symbool_as_bool_arg(self, fn):
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+        for size in (2, 3):
+            x = torch.randn(size, 4, 16, 8)
             self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_builtin_complex(self):
         def f(x):
