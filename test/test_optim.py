@@ -1067,7 +1067,11 @@ class TestOptimRenewed(TestCase):
     @largeTensorTest("72GB", "cuda")
     @serialTest()
     @optims(
-        [optim for optim in optim_db if "foreach" in optim.supported_impls],
+        [
+            optim
+            for optim in optim_db
+            if "foreach" in optim.supported_impls and optim.optim_cls.__name__ != "Muon"
+        ],
         dtypes=[torch.float16],
     )
     def test_foreach_large_tensor(self, device, dtype, optim_info):
@@ -1086,46 +1090,45 @@ class TestOptimRenewed(TestCase):
         # situation 2 only, but that's better than skipping the test.
         numel = 2**32 - 2**23 if optim_cls.__name__ == "Adafactor" else 2**32
         optim_inputs = optim_info.optim_inputs_func(device=device)
-        if optim_cls.__name__ == "Muon":
-            # Regular OptimInfo tests cover all Muon configurations. This test only
-            # needs one Newton-Schulz step to exercise foreach indexing beyond 2**32
-            # elements; match_rms_adamw keeps the float16 parameter update observable.
-            optim_inputs = [
-                optim_input
-                for optim_input in optim_inputs
-                if optim_input.kwargs.get("adjust_lr_fn") == "match_rms_adamw"
-            ]
         for optim_input in optim_inputs:
-            shape = (3, (numel + 2) // 3) if optim_cls.__name__ == "Muon" else (numel,)
-            # Muon's per-element update for this extreme shape rounds away at
-            # one in float16, so start from zero when checking for an update.
-            initial_value = 0 if optim_cls.__name__ == "Muon" else 1
-            params = [torch.full(shape, initial_value, device=device, dtype=dtype)]
+            params = [torch.ones(numel, device=device, dtype=dtype)]
             params[0].grad = torch.ones_like(params[0])
-            kwargs = optim_input.kwargs
-            if optim_cls.__name__ == "Muon":
-                kwargs = {**kwargs, "ns_steps": 1}
-            optimizer = optim_cls(params, foreach=True, **kwargs)
+            optimizer = optim_cls(params, foreach=True, **optim_input.kwargs)
             optimizer.step()
 
             # Every element saw the same param and grad, so they must all agree.
             # Compare with a size 1 param for reference.
             self.assertEqual(params[0].min(), params[0].max())
-            if optim_cls.__name__ == "Muon":
-                momentum_buffer = optimizer.state[params[0]]["momentum_buffer"]
-                self.assertEqual(momentum_buffer.min(), momentum_buffer.max())
-                self.assertNotEqual(momentum_buffer.flatten()[0], 0)
-                # Only match_rms_adamw scales this extreme shape enough for the
-                # parameter update to remain observable in float16.
-                if kwargs.get("adjust_lr_fn") == "match_rms_adamw":
-                    self.assertNotEqual(params[0].flatten()[0], initial_value)
-                # Muon scales its update by the parameter shape, so a smaller
-                # reference tensor is not numerically comparable.
-                continue
             ref = torch.ones(1, device=device, dtype=dtype)
             ref.grad = torch.ones_like(ref)
             optim_cls([ref], foreach=True, **optim_input.kwargs).step()
-            self.assertEqual(params[0].flatten()[0], ref.flatten()[0])
+            self.assertEqual(params[0][0], ref[0])
+
+    @onlyAccelerator
+    @skipMPS
+    @largeTensorTest("72GB", "cuda")
+    @serialTest()
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls.__name__ == "Muon"],
+        dtypes=[torch.float16],
+    )
+    def test_foreach_large_tensor_muon(self, device, dtype, optim_info):
+        # Same indexing check as test_foreach_large_tensor, with a 2D param. There is
+        # no size-1 reference since Muon's update depends on the matrix shape, and
+        # match_rms_adamw scales the update enough to be observable in float16.
+        numel = 2**32
+        param = torch.zeros(3, (numel + 2) // 3, device=device, dtype=dtype)
+        param.grad = torch.ones_like(param)
+        optimizer = optim_info.optim_cls(
+            [param], foreach=True, ns_steps=1, adjust_lr_fn="match_rms_adamw"
+        )
+        optimizer.step()
+
+        self.assertEqual(param.min(), param.max())
+        self.assertNotEqual(param.flatten()[0], 0)
+        momentum_buffer = optimizer.state[param]["momentum_buffer"]
+        self.assertEqual(momentum_buffer.min(), momentum_buffer.max())
+        self.assertNotEqual(momentum_buffer.flatten()[0], 0)
 
     @onlyAccelerator
     @skipMPS
@@ -2733,19 +2736,22 @@ class TestOptimRenewed(TestCase):
         from torch.optim import Adam, AdamW
 
         optim_cls = optim_info.optim_cls
-        model = torch.nn.Linear(5, 5, bias=optim_cls.__name__ != "Muon")
+        # Muon only accepts 2D parameters.
+        model = torch.nn.Linear(5, 5, bias=False)
         model.to(dtype=dtype, device=device)
         inpt = torch.rand(2, 5, dtype=dtype, device=device)
 
         import inspect
 
-        # AdamW dispatches to superclass' adam
         if optim_cls.__name__ == "Muon":
+            # Muon.__module__ is overridden to torch.optim, so getmodule() would not
+            # find the implementation module.
             import torch.optim._muon as muon_module
 
             module = muon_module
             module_name = "_multi_tensor_muon"
         elif optim_cls is AdamW:
+            # AdamW dispatches to superclass' adam
             module = inspect.getmodule(Adam)
             module_name = "_multi_tensor_adam"
         else:

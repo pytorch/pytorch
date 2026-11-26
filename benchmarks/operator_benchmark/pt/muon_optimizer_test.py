@@ -15,42 +15,18 @@ muon_impls = op_bench.op_list(
     ],
 )
 
-muon_configs = op_bench.config_list(
-    attr_names=["case_name", "num_params", "rows", "cols"],
-    attrs=[
-        ["one_rect_512x1024", 1, 512, 1024],
-        ["one_rect_512x1536", 1, 512, 1536],
-        ["one_rect_512x2048", 1, 512, 2048],
-        ["two_rect_512x1024", 2, 512, 1024],
-        ["two_rect_512x1536", 2, 512, 1536],
-        ["two_rect_512x2048", 2, 512, 2048],
-        ["three_rect_512x1024", 3, 512, 1024],
-        ["three_rect_512x1536", 3, 512, 1536],
-        ["three_rect_512x2048", 3, 512, 2048],
-        ["four_rect_512x1024", 4, 512, 1024],
-        ["four_rect_512x1536", 4, 512, 1536],
-        ["four_rect_512x2048", 4, 512, 2048],
-        ["sixteen_rect_512x1024", 16, 512, 1024],
-        ["sixteen_rect_512x1536", 16, 512, 1536],
-        ["sixteen_rect_512x2048", 16, 512, 2048],
-        ["two_square_1024", 2, 1024, 1024],
-        ["three_square_1024", 3, 1024, 1024],
-        ["four_square_1024", 4, 1024, 1024],
-        ["sixteen_square_1024", 16, 1024, 1024],
-    ],
-    cross_product_configs={
-        "device": ["cuda"],
-    },
+muon_configs = op_bench.cross_product_configs(
+    num_params=[1, 2, 3, 4, 16, 64],
+    shape=[(512, 1024), (2048, 512), (1024, 1024)],
+    device=["cuda"],
     tags=["long"],
 )
 
 
 class MuonOptimizerBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, op_func, device, case_name, num_params, rows, cols):
+    def init(self, op_func, device, num_params, shape):
         self.params = [
-            torch.nn.Parameter(
-                torch.randn(rows, cols, device=device, dtype=torch.float32)
-            )
+            torch.nn.Parameter(torch.randn(*shape, device=device, dtype=torch.float32))
             for _ in range(num_params)
         ]
         for p in self.params:
