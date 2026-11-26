@@ -72,7 +72,6 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
-    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -124,7 +123,6 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
-    StorageOverlapPartition,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -3435,9 +3433,10 @@ class GuardBuilder(GuardBuilderBase):
 
         def check_fn(x: object) -> bool:
             # Mirrors _constant_subclass_base_value: base_type is a union of
-            # int/float/str, none of which typecheck against an opaque arg,
+            # int/float/str/complex, none of which typecheck against an opaque arg,
             # but x is an instance of base_type by construction.
-            return base_type(x) == base_value  # pyrefly: ignore[bad-argument-type]
+            # pyrefly: ignore[bad-argument-type, no-matching-overload]
+            return base_type(x) == base_value
 
         self.get_guard_manager(guard).add_lambda_guard(
             check_fn,
@@ -6712,23 +6711,6 @@ class CheckFunctionManager:
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
-                    [code_part],
-                    None,
-                )
-                add_code_part(code_part, None, True)
-            elif isinstance(guard, StorageOverlapPartition):
-                partition_guard_managers = [
-                    builder.get_guard_manager_from_source(s)
-                    for s in guard.input_sources
-                ]
-                code_part = (
-                    "___check_storage_overlap_partition("
-                    f"[{', '.join(source.name for source in guard.input_sources)}], "
-                    f"{guard.overlapping_indices})"
-                )
-                install_storage_overlap_partition_guard(
-                    partition_guard_managers,
-                    guard.overlapping_indices,
                     [code_part],
                     None,
                 )
