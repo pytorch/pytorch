@@ -7878,8 +7878,6 @@ class TestVmGraphResults(TestCase):
                 del GraphUnusedPlain.extra
             del GRAPH_UNUSED_LOG[:]
 
-    # A call returns a tensor where eager raises.
-    @unittest.expectedFailure
     @isolated
     def test_a_function_a_path_went_into_binds_what_it_is_not_handed(self, device):
         def keep(gm, input_types):
@@ -8523,8 +8521,6 @@ class TestVmGraphResults(TestCase):
                     wanted = list(range(14)) if when == "always" else [7, 10]
                     self.assertEqual(there, wanted, msg=msg)
 
-    # Once a region runs, the results differ from eager's (first failing case: a function whose defaults are rebound).
-    @unittest.expectedFailure
     @isolated
     def test_a_form_runs_only_under_the_checks_of_its_path(self, device):
         def keep(gm, input_types):

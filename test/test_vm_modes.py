@@ -1655,6 +1655,162 @@ MODES_ARGUMENTS = {
 }
 
 
+# What a call binds from the function object it enters: its code, and the
+# defaults it fills the missing arguments from.
+def modes_scaled(h, scale=2.0, shift=1.0):
+    return h * scale + shift
+
+
+def modes_scaled_kw(h, *, scale=2.0, shift=1.0):
+    return h * scale + shift
+
+
+def modes_body(h, scale=2.0, shift=1.0):
+    return h * scale + shift
+
+
+def modes_other_body(h, scale=2.0, shift=1.0):
+    return h * scale - shift
+
+
+class ModesScaler:
+    def scaled(self, h, scale=2.0, shift=1.0):
+        return h * scale + shift
+
+    def other(self, h, scale=2.0, shift=1.0):
+        return h * scale - shift
+
+
+MODES_SCALER = ModesScaler()
+MODES_CODES = (modes_body.__code__, modes_other_body.__code__)
+MODES_METHOD_CODES = (ModesScaler.scaled.__code__, ModesScaler.other.__code__)
+
+
+def modes_fills_defaults(x):
+    return (modes_scaled(torch.relu(x) + 1) * 2).sum()
+
+
+def modes_fills_keyword_defaults(x):
+    return (modes_scaled_kw(torch.relu(x) + 1) * 2).sum()
+
+
+def modes_runs_code(x):
+    return (modes_body(torch.relu(x) + 1) * 2).sum()
+
+
+def modes_runs_method(x):
+    return (MODES_SCALER.scaled(torch.relu(x) + 1) * 2).sum()
+
+
+# The same call in a loop: its blocks are one span.
+def modes_fills_defaults_in_a_loop(x):
+    y = torch.relu(x) + 1
+    for _ in range(3):
+        y = modes_scaled(y) * 0.5
+    return y.sum()
+
+
+def modes_new_defaults(other):
+    modes_scaled.__defaults__ = (7.0, 3.0) if other else (2.0, 1.0)
+
+
+def modes_new_keyword_defaults(other):
+    scale, shift = (7.0, 3.0) if other else (2.0, 1.0)
+    modes_scaled_kw.__kwdefaults__ = {"scale": scale, "shift": shift}
+
+
+def modes_new_keyword_default(other):
+    modes_scaled_kw.__kwdefaults__["scale"] = 7.0 if other else 2.0
+
+
+def modes_new_code(other):
+    modes_body.__code__ = MODES_CODES[other]
+
+
+def modes_new_method_code(other):
+    ModesScaler.scaled.__code__ = MODES_METHOD_CODES[other]
+
+
+MODES_REBOUND = {
+    "defaults": (modes_fills_defaults, modes_new_defaults),
+    "keyword_defaults": (modes_fills_keyword_defaults, modes_new_keyword_defaults),
+    "keyword_default_in_place": (
+        modes_fills_keyword_defaults,
+        modes_new_keyword_default,
+    ),
+    "code": (modes_runs_code, modes_new_code),
+    "code_of_a_method": (modes_runs_method, modes_new_method_code),
+    "defaults_under_a_span": (modes_fills_defaults_in_a_loop, modes_new_defaults),
+}
+
+
+# State of an object that a call or an attribute load reads in C code, and
+# that the program changes without binding a name anew.
+class ModesHolder:
+    def __init__(self):
+        self.k = 2.0
+
+
+def modes_pick(a=1.0):
+    return a
+
+
+@functools.cache
+def modes_cached():
+    return MODES_KEPT[0]
+
+
+MODES_HOLDER = ModesHolder()
+MODES_PARTIAL = functools.partial(modes_pick, a=2.0)
+
+
+def modes_reads_attribute(x):
+    return modes_around(x, MODES_HOLDER.k)
+
+
+def modes_calls_partial(x):
+    return modes_around(x, MODES_PARTIAL())
+
+
+def modes_calls_method(x):
+    return modes_around(x, 2.0).modes_times()
+
+
+def modes_calls_cached(x):
+    return modes_around(x, modes_cached())
+
+
+def modes_new_dict(other):
+    MODES_HOLDER.__dict__ = {"k": 5.0 if other else 2.0}
+
+
+def modes_new_keyword(other):
+    MODES_PARTIAL.keywords["a"] = 5.0 if other else 2.0
+
+
+def modes_new_method(other):
+    by = 4 if other else 2
+    torch.Tensor.modes_times = lambda self: self * by
+
+
+def modes_new_cache(other):
+    MODES_KEPT[0] = 5.0 if other else 3.0
+    modes_cached.cache_clear()
+
+
+MODES_STATES = {
+    "dict_of_an_object": (modes_reads_attribute, modes_new_dict),
+    "keywords_of_a_partial": (modes_calls_partial, modes_new_keyword),
+    "method_put_on_the_tensor_class": (modes_calls_method, modes_new_method),
+    "cache_of_a_function": (modes_calls_cached, modes_new_cache),
+}
+
+
+# A generator the function is handed and hands on to an operator.
+def modes_draws(x, gen):
+    return modes_work(x) * torch.rand(8, generator=gen, device=x.device)
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmStateRead(TestCase):
     """State a program reads and a region has no check of its own for: a
@@ -1711,6 +1867,54 @@ class TestVmStateRead(TestCase):
             got, want = compiled(x, arg), fn(x, arg)
             self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
         # The operations in front of the read are still a region.
+        self.assertGreater(region_runs(compiled), 0)
+
+    @parametrize("what", list(MODES_REBOUND))
+    @isolated
+    def test_function_object_rebound_between_calls(self, device, what):
+        # Rebound before the eighth call and put back before the eleventh.
+        fn, rebind = MODES_REBOUND[what]
+        compiled = vm(fn, passes=EARLY)
+        for call in range(12):
+            if call in (0, 7, 10):
+                rebind(call == 7)
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            got, want = compiled(x), fn(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertGreater(sum(r["runs"] for r in rows), 0)
+        if what == "defaults_under_a_span":
+            self.assertIn("span", [r["kind"] for r in rows if r["runs"]], msg=str(rows))
+
+    @parametrize("what", list(MODES_STATES))
+    @isolated
+    def test_state_of_an_object_that_c_code_reads(self, device, what):
+        fn, change = MODES_STATES[what]
+        modes_reset(device)
+        compiled = vm(fn, passes=EARLY)
+        for call in range(12):
+            if call in (0, 6, 9):
+                change(call == 6)
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            got, want = compiled(x), fn(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertGreater(region_runs(compiled), 0)
+
+    @isolated
+    def test_generator_handed_in_is_the_one_drawn_from(self, device):
+        # Two regions with the same code, each with the generator of its
+        # trace: what is made of one graph is not the other's.
+        ours = [torch.Generator(device).manual_seed(seed) for seed in (1, 2)]
+        eagers = [torch.Generator(device).manual_seed(seed) for seed in (1, 2)]
+        compiled = vm(modes_draws, passes=EARLY)
+        for call in range(12):
+            other = 6 <= call < 9
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            got, want = compiled(x, ours[other]), modes_draws(x, eagers[other])
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
         self.assertGreater(region_runs(compiled), 0)
 
     @parametrize("fn", MODES_ASKS, name_fn=lambda fn: fn.__name__[6:])

@@ -73,6 +73,7 @@ unsafe extern "C" {
     pub fn tr_type_heap(tp: *mut pyo3::ffi::PyTypeObject) -> c_int;
     pub fn tr_super_next(cls: *mut PyObject, obj: *mut PyObject) -> *mut PyObject;
     pub fn tr_dict_version(d: *mut PyObject) -> u64;
+    pub fn tr_instance_dict(obj: *mut PyObject) -> *mut PyObject;
     pub fn tr_view_dict(o: *mut PyObject) -> *mut PyObject;
     pub fn tr_proxy_dict(o: *mut PyObject) -> *mut PyObject;
     pub fn tr_builtin_self(callable: *mut PyObject) -> *mut PyObject;

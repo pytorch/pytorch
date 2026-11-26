@@ -319,6 +319,7 @@ pub unsafe fn run(c: &Compiled, prep: &Prepared, f: *mut Frame, start: Start) ->
         // Between this frame's instrs no instr is running (the caller puts
         // back what was, once the frame is gone).
         if act.reading {
+            reads::function(tr_frame_func(f));
             reads::set_in_instr(false);
         }
         let result = match start {

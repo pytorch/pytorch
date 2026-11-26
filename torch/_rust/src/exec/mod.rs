@@ -3006,6 +3006,12 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
     if is_call(&ins.op) && callees.get(&v).and_then(|c| c.get(py)).is_some_and(|f| user_pure(f.as_ptr())) {
         return Ok(());
     }
+    // A function behind functools.lru_cache answers from its cache, which no
+    // region checks (cache_clear, an entry pushed out): hit or miss, the
+    // call is made where the code makes it.
+    if is_call(&ins.op) && callees.get(&v).and_then(|c| c.get(py)).is_some_and(|f| unsafe { effects::lru_cache_wrapper(f.as_ptr()) }) {
+        return Err(format!("{} called a function behind functools.lru_cache, whose cache no region checks", here()));
+    }
     let effects = unsafe { &*prep.effects.get() };
     let (mut frames, mut torch_ops, mut indirect) = (None, false, false);
     for (seq, _) in effects.get(Site::Instr(v)) {
@@ -3096,9 +3102,6 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
         Ok(())
     } else if plain_class(py, &f) {
         // A new object, whose __init__ (if Python's) entered a frame judged above.
-        Ok(())
-    } else if unsafe { effects::lru_cache_wrapper(f.as_ptr()) } {
-        // A hit (a miss enters the function's frame, judged above).
         Ok(())
     } else if depth > 0 && !partial && mutators().contains(&(f.as_ptr() as usize)) && ins.args.len() > 1 && own_container(ins.args[1]) {
         // A method changing a container this frame made (CALL's [method, self, ...]).

@@ -20,6 +20,13 @@
 //   - a subscript or a membership test of a dict (str or int key) or a list
 //     (int index), and dict.get: the item;
 //   - a cell read: the cell's content;
+//   - a frame of a Python function: which code the function has, and the
+//     defaults a call fills its arguments from (the tuple by identity, the
+//     keyword-only ones also item by item);
+//   - an attribute found in (or missing from) an object's __dict__: which
+//     dict the object has;
+//   - a call of a functools.partial: its function and arguments, and its
+//     keywords whole;
 //   - any other instruction or builtin handed a dict, a list, a set or a dict
 //     view (iterating it, unpacking it, slicing it, zip, sorted, ...): the
 //     whole content, in order; len() and truth: the length.
@@ -161,18 +168,37 @@ struct Read {
     at: String,
 }
 
+// A Python function a frame of which ran under the traced body: the code
+// that ran, and the defaults its call was filled from, are the function's
+// for as long as it has them (`f.__code__ = ...`, `f.__defaults__ = ...`).
+struct Function {
+    func: Py<PyAny>,
+    code: Py<PyAny>,
+    defaults: Option<Py<PyAny>>,
+    kwdefaults: Option<Py<PyAny>>,
+}
+
+// An object and the __dict__ its attributes were read from: the items read
+// are the object's for as long as it has that dict (`obj.__dict__ = {...}`).
+struct Dicted {
+    obj: Py<PyAny>,
+    dict: Py<PyAny>,
+}
+
 #[derive(Default)]
 struct Entries {
     groups: Vec<Group>,
     typed: Vec<Typed>,
     classes: Vec<Class>,
     reads: Vec<Read>,
+    functions: Vec<Function>,
+    dicted: Vec<Dicted>,
 }
 
 impl Entries {
     fn len(&self) -> usize {
         let groups: usize = self.groups.iter().map(|g| g.items.len() + g.whole.as_ref().map_or(0, |w| w.items.len()) + usize::from(g.len.is_some())).sum();
-        groups + self.typed.len() + self.classes.iter().map(|c| c.names.len()).sum::<usize>() + self.reads.len()
+        groups + self.typed.len() + self.classes.iter().map(|c| c.names.len()).sum::<usize>() + self.reads.len() + self.functions.len() + self.dicted.len()
     }
 }
 
@@ -440,6 +466,15 @@ impl Class {
     }
 }
 
+impl Function {
+    // Three fields of the function object: no attribute is looked up.
+    unsafe fn holds(&self) -> bool {
+        let f = self.func.as_ptr() as *mut ffi::PyFunctionObject;
+        let is = |now: *mut PyObject, was: &Option<Py<PyAny>>| now == was.as_ref().map_or(std::ptr::null_mut(), |w| w.as_ptr());
+        (*f).func_code == self.code.as_ptr() && is((*f).func_defaults, &self.defaults) && is((*f).func_kwdefaults, &self.kwdefaults)
+    }
+}
+
 impl Read {
     unsafe fn holds(&self) -> bool {
         match &self.name {
@@ -603,6 +638,62 @@ impl Trace {
         self.entries.classes[i].names.push((own(name), None));
     }
 
+    // A frame of the function `f` starts under the traced body. Its
+    // keyword-only defaults are a dict: read whole, as a call fills from it.
+    unsafe fn function(&mut self, f: *mut PyObject) {
+        if f.is_null() || ffi::PyFunction_Check(f) == 0 || !self.seen.insert((f as usize, 1)) {
+            return;
+        }
+        let o = f as *mut ffi::PyFunctionObject;
+        let (code, defaults, kwdefaults) = ((*o).func_code, (*o).func_defaults, (*o).func_kwdefaults);
+        let held = |p: *mut PyObject| (!p.is_null()).then(|| own(p));
+        self.count += 1;
+        self.entries.functions.push(Function { func: own(f), code: own(code), defaults: held(defaults), kwdefaults: held(kwdefaults) });
+        if !kwdefaults.is_null() && ffi::PyDict_Check(kwdefaults) != 0 {
+            self.whole(kwdefaults, Holder::Dict);
+        }
+    }
+
+    // obj's attributes were looked up in `dict`, its __dict__.
+    unsafe fn dicted(&mut self, obj: *mut PyObject, dict: *mut PyObject) {
+        if !dict.is_null() && self.seen.insert((obj as usize, 2)) {
+            self.count += 1;
+            self.entries.dicted.push(Dicted { obj: own(obj), dict: own(dict) });
+        }
+    }
+
+    // What a call of `obj` reads from it, for the two classes of C whose
+    // objects a region may call: a functools.partial's function, arguments
+    // and keywords (a dict: whole); and the cache of a function behind
+    // functools.lru_cache, which nothing here can look at.
+    unsafe fn state_called(&mut self, obj: *mut PyObject) {
+        if obj.is_null() {
+            return;
+        }
+        if ffi::PyObject_TypeCheck(obj, builtins().partial as *mut ffi::PyTypeObject) != 0 {
+            for name in [c"func", c"args", c"keywords"] {
+                let n = ffi::PyUnicode_InternFromString(name.as_ptr());
+                let v = if n.is_null() { n } else { ffi::PyObject_GenericGetAttr(obj, n) };
+                if v.is_null() {
+                    ffi::PyErr_Clear();
+                    self.refused = Some("it calls a functools.partial it cannot read".into());
+                } else {
+                    if self.seen.insert((obj as usize, n as usize)) {
+                        self.count += 1;
+                        self.entries.reads.push(Read { obj: own(obj), name: Some(own(n)), want: Want::Is, value: Some(own(v)), at: place() });
+                    }
+                    if ffi::PyDict_Check(v) != 0 {
+                        self.whole(v, Holder::Dict);
+                    }
+                    ffi::Py_DECREF(v);
+                }
+                ffi::Py_XDECREF(n);
+            }
+        } else if super::effects::lru_cache_wrapper(obj) && !super::user_pure(obj) {
+            self.refused = Some("it calls a function behind functools.lru_cache, whose cache it cannot check".into());
+        }
+    }
+
     // An attribute lookup on an instance of tp: which code resolves it.
     unsafe fn resolves(&mut self, obj: *mut PyObject) {
         self.special(obj, c"__getattribute__");
@@ -639,6 +730,10 @@ impl Trace {
             ffi::Py_XDECREF(dict);
             if own_attr || UNCHECKED_OF_A_TENSOR.contains(&n.as_str()) {
                 self.refused = Some(format!("it reads a tensor's .{n}"));
+            } else {
+                // What the class has under the name (a method the program
+                // put on torch.Tensor); which class it is, the guard says.
+                self.looked(ffi::Py_TYPE(obj), name);
             }
             return;
         }
@@ -651,6 +746,7 @@ impl Trace {
             1 => {
                 self.typed(obj, name);
                 self.resolves(obj);
+                self.dicted(obj, dict);
                 if !dict.is_null() {
                     self.item(dict, Holder::Dict, name, Want::Absent, std::ptr::null_mut());
                 }
@@ -658,6 +754,7 @@ impl Trace {
             2 => {
                 self.typed(obj, name);
                 self.resolves(obj);
+                self.dicted(obj, dict);
                 self.dict_item(dict, name, false);
             }
             3 => {
@@ -696,6 +793,7 @@ impl Trace {
 
 // The builtins whose reads are recorded by item rather than whole.
 struct Builtins {
+    partial: usize,
     getattr: usize,
     hasattr: usize,
     getattribute: usize,
@@ -711,6 +809,7 @@ fn builtins() -> &'static Builtins {
         let py = unsafe { Python::assume_attached() };
         let at = |code: &std::ffi::CStr| py.eval(code, None, None).map_or(0, |o| o.as_ptr() as usize);
         Builtins {
+            partial: at(c"__import__('functools').partial"),
             getattr: at(c"getattr"),
             hasattr: at(c"hasattr"),
             getattribute: at(c"object.__getattribute__"),
@@ -766,9 +865,18 @@ pub unsafe fn super_attr(cls: *mut PyObject, obj: *mut PyObject, name: *mut PyOb
     });
 }
 
-// obj, which is no function, was called: its class's __call__ ran.
+// A frame of the Python function `f` starts under the traced body.
+pub unsafe fn function(f: *mut PyObject) {
+    with(|t| t.function(f));
+}
+
+// obj, which is no function, was called: its class's __call__ ran, and if
+// its class is C's, what that reads from the object.
 pub unsafe fn called(obj: *mut PyObject) {
-    with(|t| t.special(obj, c"__call__"));
+    with(|t| {
+        t.special(obj, c"__call__");
+        t.state_called(obj);
+    });
 }
 
 // container[key] was read (`ran`: by Python code, which records its own).
@@ -939,11 +1047,13 @@ unsafe fn sweep(e: &mut Entries) {
         // would pass for gone, and the checks on it would be lost).
         let gone: HashSet<usize> = mine.iter().filter(|(o, n)| ffi::Py_REFCNT(**o as *mut PyObject) == **n).map(|(o, _)| *o).collect();
         let gone = |o: &Py<PyAny>| gone.contains(&(o.as_ptr() as usize));
-        let before = (e.typed.len(), e.reads.len(), e.groups.len());
+        let before = (e.typed.len(), e.reads.len(), e.groups.len(), e.functions.len() + e.dicted.len());
         e.typed.retain(|t| !gone(&t.obj));
         e.reads.retain(|r| !gone(&r.obj));
         e.groups.retain(|g| !gone(&g.holder) && !g.empty());
-        if before == (e.typed.len(), e.reads.len(), e.groups.len()) {
+        e.functions.retain(|f| !gone(&f.func));
+        e.dicted.retain(|d| !gone(&d.obj));
+        if before == (e.typed.len(), e.reads.len(), e.groups.len(), e.functions.len() + e.dicted.len()) {
             break;
         }
     }
@@ -966,6 +1076,15 @@ fn held(e: &Entries, hold: &mut impl FnMut(&Py<PyAny>)) {
         hold(&r.obj);
         r.name.iter().for_each(&mut *hold);
         r.value.iter().for_each(&mut *hold);
+    }
+    for f in &e.functions {
+        hold(&f.func);
+        hold(&f.code);
+        f.defaults.iter().chain(&f.kwdefaults).for_each(&mut *hold);
+    }
+    for d in &e.dicted {
+        hold(&d.obj);
+        hold(&d.dict);
     }
     for g in &e.groups {
         hold(&g.holder);
@@ -1027,6 +1146,10 @@ impl Reads {
             "a namespace or a container"
         } else if !e.reads.iter().all(|r| r.holds()) {
             "a cell or a slot"
+        } else if !e.functions.iter().all(|f| f.holds()) {
+            "the code or the defaults of a function"
+        } else if e.dicted.iter().any(|d| tr_instance_dict(d.obj.as_ptr()) != d.dict.as_ptr()) {
+            "the __dict__ of an object"
         } else if let Some(why) = self.constants_fail() {
             why
         } else {
@@ -1199,6 +1322,7 @@ impl Reads {
         e.groups.retain(|g| !given(&g.holder));
         e.typed.retain(|t| !given(&t.obj));
         e.reads.retain(|r| !given(&r.obj));
+        e.dicted.retain(|d| !given(&d.obj));
     }
 
     /// The entries as text, for debugging.
@@ -1230,6 +1354,8 @@ impl Reads {
                 _ => format!("{h}[{}] {} {}", show(&i.key), if i.want == Want::Is { "is" } else { "==" }, i.value.as_ref().map_or("?".into(), &show)),
             }));
         }
+        out.extend(e.functions.iter().map(|f| format!("{} keeps its code and its defaults", show(&f.func))));
+        out.extend(e.dicted.iter().map(|d| format!("{}.__dict__ is {}", show(&d.obj), show(&d.dict))));
         out.extend(e.reads.iter().map(|r| match &r.name {
             None => format!("{} holds {}", show(&r.obj), r.value.as_ref().map_or("?".into(), &show)),
             Some(n) => format!("{}.{} {} {}{}", show(&r.obj), n.bind(py), if r.want == Want::Is { "is" } else { "==" }, r.value.as_ref().map_or("?".into(), &show), r.at),
@@ -1312,6 +1438,8 @@ pub fn _region_reads(py: Python<'_>) -> PyResult<(Option<Py<Reads>>, Option<Stri
         }
         // What the traced run changed after reading it was its own.
         e.reads.retain(|r| r.holds());
+        e.functions.retain(|f| f.holds());
+        e.dicted.retain(|d| tr_instance_dict(d.obj.as_ptr()) == d.dict.as_ptr());
         for g in &mut e.groups {
             let (h, kind) = (g.holder.as_ptr(), g.kind);
             g.items.retain(|i| i.holds(h, kind));

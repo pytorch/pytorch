@@ -2083,6 +2083,13 @@ uint64_t tr_dict_version(PyObject* d) {
   return ((PyDictObject*)d)->ma_version_tag;
 }
 
+// obj's __dict__ as it is now (borrowed), or NULL if it has none. No code
+// of obj's class runs.
+PyObject* tr_instance_dict(PyObject* obj) {
+  PyObject** at = _PyObject_GetDictPtr(obj);
+  return at == NULL ? NULL : *at;
+}
+
 // The dict a view (keys, values, items) is of (borrowed), or NULL.
 PyObject* tr_view_dict(PyObject* o) {
   if (PyDictViewSet_Check(o) || PyDictValues_Check(o)) {

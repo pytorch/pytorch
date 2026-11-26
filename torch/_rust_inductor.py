@@ -2114,22 +2114,57 @@ def _overlap(tensors, consts, reads, checked):
     return overlap
 
 
+# What a graph's code spells out: a node's argument of one of these classes
+# is the same for two graphs with the same code.
+_SPELLED = (
+    *(int, float, bool, str, complex, bytes, type(None), type(Ellipsis)),
+    *(torch.dtype, torch.device, torch.layout, torch.memory_format),
+)
+
+
+def _named(gm):
+    """The objects a graph's code only names: the functions its nodes call,
+    what they are handed that is no node and no plain value, and the
+    attributes of the module it reads (the tensors among those are the
+    region's constants by now; what is left is an object the trace was
+    handed, such as the torch.Generator of `torch.rand(8, generator=g)`).
+    Two graphs with the same code may name different ones, and what is made
+    of a graph holds its own."""
+    named = []
+
+    def leaf(a):
+        if not isinstance(a, (torch.fx.Node, *_SPELLED)):
+            named.append(a)
+        return a
+
+    for n in gm.graph.nodes:
+        if n.op == "call_function":
+            named.append(n.target)
+        elif n.op == "get_attr":
+            named.append(getattr(gm, n.target))
+        torch.fx.node.map_aggregate((n.args, n.kwargs), leaf)
+    return named
+
+
 def _compile(name, gm, example, consts, args, plan, types):
     from torch._inductor.compile_fx import compile_fx
 
     if block_pipeline is None:
+        named = _named(gm)
         key = (
             gm.code,
             tuple(_meta(t) for t in example + consts),
             torch.is_grad_enabled(),
             _shares(example, consts),
+            tuple(map(id, named)),
         )
         if key not in _compiled:
-            _compiled[key] = compile_fx(gm, example + consts)
+            # Keeps what the key names by address.
+            _compiled[key] = (compile_fx(gm, example + consts), named)
             stats["compiled"] += 1
         else:
             stats["reused"] += 1
-        return _compiled[key]
+        return _compiled[key][0]
     split = (
         _split_host(gm, len(example))
         if any(n.target in _SKIP_OPS for n in gm.graph.nodes)
@@ -2167,6 +2202,8 @@ def _compile_vm(name, gm, example, consts, input_types):
     # unless a pass read a weight's value. Those traced in the same autocast
     # state: a lowering compiles for the state it is called in (AOT Autograd
     # turns autocast off around its backward only if it compiled under it).
+    # The same graph: the same code, naming the same objects (see _named).
+    named = _named(gm)
     key = (
         block_pipeline,
         gm.code,
@@ -2176,6 +2213,7 @@ def _compile_vm(name, gm, example, consts, input_types):
         torch.is_grad_enabled(),
         autocast_on().raw_repr(),
         _shares(example, consts),
+        tuple(map(id, named)),
     )
     own = (*key, tuple(map(id, consts)))
     for k in (key, own):
@@ -2184,8 +2222,10 @@ def _compile_vm(name, gm, example, consts, input_types):
             stats["reused"] += 1
             return _compiled[k][0]
     compiled, const_read = block_pipeline(name, gm, example + consts, input_types)
-    # Keeps the constants alive while their ids key the entry.
-    _compiled[own if const_read else key] = (compiled, consts, _unwritten(consts))
+    # Keeps the constants, and what the code names, alive while their ids key
+    # the entry.
+    entry = (compiled, consts, _unwritten(consts), named)
+    _compiled[own if const_read else key] = entry
     stats["compiled"] += 1
     return compiled
 
