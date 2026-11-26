@@ -1535,20 +1535,23 @@ else:
         self.assertEqual(o1_2_ref, o1_2)
 
     @torch._dynamo.config.patch(error_on_recompile=True)
-    def test_mark_unbacked_hint_consistency(self):
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-        x = torch.randn(1)
-        torch._dynamo.decorators.mark_unbacked(x, 0)
-
-        @torch.compile(backend="eager")
+    def test_mark_unbacked_refined_to_constant_is_not_guarded(self):
+        # An unbacked input dim refined to a constant stays unguarded; the runtime
+        # assert, not a recompile, rejects a different size.
+        @torch.compile(backend="eager", fullgraph=True)
         def f(x):
-            if guard_size_oblivious(x.size(0) != 1):
-                return x + 3
-            else:
-                return x + 4
+            torch._check(x.shape[0] == 10)
+            return x + 1
 
-        self.assertEqual(f(x), x + 3)
+        x = torch.randn(10)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        self.assertEqual(f(x), x + 1)
+
+        bad = torch.randn(5)
+        torch._dynamo.decorators.mark_unbacked(bad, 0)
+        with self.assertRaisesRegex(RuntimeError, "u0") as cm:
+            f(bad)
+        self.assertNotIsInstance(cm.exception, torch._dynamo.exc.RecompileError)
 
     @torch._dynamo.config.patch(error_on_recompile=True)
     def test_mark_unbacked_channels_last(self):

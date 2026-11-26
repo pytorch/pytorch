@@ -1907,6 +1907,12 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         # Distros that package ROCm under /usr give /usr/include; see the CUDA branch below.
         if rocm_home_include != '/usr/include':
             paths.append(rocm_home_include)
+        # The hipccl directory holds libhipcxx, rocprim, hipCUB, rocThrust.
+        # In newer versions of ROCm, hipCUB and rocThrust require libhipcxx,
+        # which is only provided via hipccl.
+        hipccl_include = _join_rocm_home('include', 'hipccl')
+        if os.path.exists(hipccl_include):
+            paths.append(hipccl_include)
     elif device_type == "cuda":
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
