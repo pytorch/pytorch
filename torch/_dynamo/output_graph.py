@@ -1085,7 +1085,7 @@ class OutputGraph(OutputGraphCommon):
 
     @property
     def deleted_globals_by_dict(self) -> dict[int, tuple[Any, set[str]]]:
-        # Owned by SideEffects so clone()/restore snapshots include it.
+        # Owned by SideEffects so clone()-based HOP snapshots include it.
         return self.side_effects.deleted_globals_by_dict
 
     def check_deleted_global_access(self, globals_dict: Any, name: str | None) -> None:

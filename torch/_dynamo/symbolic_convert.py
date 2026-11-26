@@ -2683,9 +2683,9 @@ class InstructionTranslatorBase(
         # module-__dict__ accesses to the name graph-break instead of
         # racing the replayed delete. The entry keeps the dict alive so its
         # id() key cannot be reused.
-        entry = self.output.deleted_globals_by_dict.get(id(self.f_globals))
+        entry = side_effects.deleted_globals_by_dict.get(id(self.f_globals))
         if entry is None:
-            self.output.deleted_globals_by_dict[id(self.f_globals)] = (
+            side_effects.deleted_globals_by_dict[id(self.f_globals)] = (
                 self.f_globals,
                 {name},
             )
@@ -3505,8 +3505,9 @@ class InstructionTranslatorBase(
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop().realize()
+        deleted_globals = self.output.side_effects.deleted_globals_by_dict
         if (
-            self.output.deleted_globals_by_dict
+            deleted_globals
             and isinstance(obj, variables.PythonModuleVariable)
             and attr == "__dict__"
         ):
@@ -3515,7 +3516,7 @@ class InstructionTranslatorBase(
             # view derived from the dict model is stale after a delete.
             self.output.check_deleted_global_access(obj.value.__dict__, None)
         elif (
-            self.output.deleted_globals_by_dict
+            deleted_globals
             and isinstance(obj, variables.PythonModuleVariable)
             and not self.output.side_effects.has_pending_mutation_of_attr(obj, attr)
         ):

@@ -246,6 +246,8 @@ class SideEffects:
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
     keepalive: list[object]
+    # Keyed by id() of the globals dict; the value holds the dict alive so its
+    # id cannot be reused. See OutputGraph.check_deleted_global_access.
     deleted_globals_by_dict: dict[int, tuple[Any, set[str]]]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
@@ -261,6 +263,7 @@ class SideEffects:
         | None = None,
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
+        deleted_globals_by_dict: dict[int, tuple[Any, set[str]]] | None = None,
         keepalive: list[object] | None = None,
         save_for_backward: list[
             tuple[AutogradFunctionContextVariable, list[VariableTracker]]
@@ -283,7 +286,7 @@ class SideEffects:
         self.store_attr_mutations = store_attr_mutations or {}
         self.attr_mutation_kinds = attr_mutation_kinds or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
-        self.deleted_globals_by_dict: dict[int, tuple[Any, set[str]]] = {}
+        self.deleted_globals_by_dict = deleted_globals_by_dict or {}
         # Snapshot per compile (policy must not change mid-compilation): stacks
         # are only read when formatting messages for the side_effects log or
         # the dynamo_side_effects structured-trace artifact.
@@ -456,14 +459,14 @@ class SideEffects:
                 k: dict(v) for k, v in self.attr_mutation_kinds.items()
             },
             mutation_user_stacks=self.mutation_user_stacks,
+            deleted_globals_by_dict={
+                key: (globals_dict, set(names))
+                for key, (globals_dict, names) in self.deleted_globals_by_dict.items()
+            },
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
         )
-        result.deleted_globals_by_dict = {
-            key: (globals_dict, set(names))
-            for key, (globals_dict, names) in self.deleted_globals_by_dict.items()
-        }
         return result
 
     def __contains__(self, item: object) -> bool:
@@ -560,10 +563,8 @@ class SideEffects:
         mutation_kind: AttrMutationKind = AttrMutationKind.GENERIC_SETATTR,
         mutated_source: Source | None = None,
     ) -> None:
-        output_graph = self.output_graph_weakref()
         if (
-            output_graph is not None
-            and output_graph.deleted_globals_by_dict
+            self.deleted_globals_by_dict
             and not isinstance(value, variables.DeletedVariable)
             and isinstance(item, variables.PythonModuleVariable)
             and not self.has_pending_mutation_of_attr(item, name)
@@ -571,7 +572,9 @@ class SideEffects:
             # No pending on the module VT: the replayed delete races this
             # write. With one (e.g. an inlined delete), the setattr chain
             # orders them.
-            output_graph.check_deleted_global_access(item.value.__dict__, name)
+            output_graph = self.output_graph_weakref()
+            if output_graph is not None:
+                output_graph.check_deleted_global_access(item.value.__dict__, name)
         if not self.is_attribute_mutation(item):
             raise AssertionError(
                 f"Expected attribute mutation for {item} in store_attr"
