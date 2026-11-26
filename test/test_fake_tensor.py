@@ -2289,6 +2289,60 @@ def forward(self, x_1):
             prims.utils.compare_tensor_meta(y, dispatched, check_strides=True)
             self.assertIs(maybe_get_fake_mode(dispatched), mode)
 
+    def test_fast_binary_backed_size_oblivious_broadcast(self):
+        from torch._dynamo.source import LocalSource
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        def make_sym(shape_env, name, val):
+            source = LocalSource(name)
+            sym = shape_env.create_symbol(
+                val, source, DimDynamic.DYNAMIC, do_not_specialize_zero_one=True
+            )
+            return shape_env.create_symintnode(sym, hint=val, source=source)
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            shape_env = ShapeEnv(specialize_zero_one=False)
+            mode = FakeTensorMode(shape_env=shape_env)
+            s_one_left = make_sym(shape_env, "s_one_left", 1)
+            s_one_right = make_sym(shape_env, "s_one_right", 1)
+            s_one_b = make_sym(shape_env, "s_one_b", 1)
+            s_four = make_sym(shape_env, "s_four", 4)
+            s_pair_a = make_sym(shape_env, "s_pair_a", 1)
+            s_pair_b = make_sym(shape_env, "s_pair_b", 1)
+
+            with mode:
+                # Backed hint-1 broadcast against concrete non-1 and backed non-1.
+                self.assertEqual(
+                    torch.ops.aten.add.Tensor(
+                        torch.empty(s_one_left, 3), torch.empty(4, 3)
+                    ).shape,
+                    (4, 3),
+                )
+                self.assertEqual(
+                    torch.ops.aten.add.Tensor(
+                        torch.empty(4, 3), torch.empty(s_one_right, 3)
+                    ).shape,
+                    (4, 3),
+                )
+                self.assertEqual(
+                    torch.ops.aten.add.Tensor(
+                        torch.empty(s_one_b, 3), torch.empty(s_four, 3)
+                    ).shape,
+                    (s_four, 3),
+                )
+                # Two backed hint-1 dims unify without specializing either to 1.
+                out = torch.ops.aten.add.Tensor(
+                    torch.empty(s_pair_a, 3), torch.empty(s_pair_b, 3)
+                )
+                self.assertEqual(out.shape, (s_pair_a, 3))
+
+            self.assertEqual(shape_env.evaluate_expr(s_one_left.node.expr), 1)
+            self.assertEqual(shape_env.evaluate_expr(s_one_right.node.expr), 1)
+            self.assertEqual(shape_env.evaluate_expr(s_one_b.node.expr), 1)
+            # s_pair_a and s_pair_b were unified cleanly rather than pinned to 1.
+            self.assertEqual(s_pair_a.node.expr, s_pair_b.node.expr)
+            self.assertIn(s_pair_b.node.expr, shape_env.replacements.values())
+
     def test_nanmean_out(self):
         # Regression test to ensure we don't error out.
         with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
