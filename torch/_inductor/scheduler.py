@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
-    from .codegen.multi_kernel import MultiKernel
+    from .codegen.multi_kernel import MultiKernelBase
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
     from .memory import FreeableInputBuffer
@@ -13773,7 +13773,7 @@ class BaseScheduling:  # noqa: docstring_linter
 
     def codegen_node(
         self, node: FusedSchedulerNode | SchedulerNode
-    ) -> Kernel[Any] | MultiKernel | None:
+    ) -> Kernel[Any] | MultiKernelBase | None:
         """
         Generate a kernel given a list of pre-fused nodes.
         """
