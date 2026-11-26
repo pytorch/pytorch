@@ -169,6 +169,10 @@ test_failures = {
         ("cpu",), is_skip=True
     ),
     "test_view_as_complex_non_contiguous_dynamic_shapes": TestFailure(("cpu",)),
+    # all dims are size 1, so there is no symbolic loop bound
+    "test_index_put_duplicate_indices_single_element_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
     # XPU always convert conv1d to conv2d and can not match the expected codegen result.
     "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
@@ -249,17 +253,12 @@ test_failures = {
         ("cpu", "cuda", "xpu")
     ),
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    # XPU falls back max_pool2d_with_indices_backward to ATen eager (see
-    # torch/_decomp/decompositions.py), so no Triton kernel is generated.
-    "test_max_pool2d_with_indices_backward_dynamic_shapes": TestFailure(("xpu",)),
+    # Unsupported XPU configurations still fall back to ATen eager, so no
+    # Triton kernel is generated.
     "test_max_pool2d_with_indices_backward2_dynamic_shapes": TestFailure(("xpu",)),
-    "test_max_pool2d_with_indices_backward3_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward4_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(("xpu",)),
-    "test_max_pool2d_with_indices_backward_fallback_dynamic_shapes": TestFailure(
-        ("xpu",)
-    ),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),

@@ -21,21 +21,33 @@ DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
   registerDeviceGuard(type, impl);
 }
 
-void ensureCUDADeviceGuardSet() {
-  constexpr auto cuda_idx = static_cast<std::size_t>(DeviceType::CUDA);
-
-  const DeviceGuardImplInterface* p =
-      device_guard_impl_registry[cuda_idx].load();
-
-  // A non-null `ptr` indicates that the CUDA guard is already set up,
-  // implying this is using cuda build
-  if (p && p->deviceCount() == 0) {
-    // In following cases, we override CUDA guard interface with a no-op
-    // device guard. When p->deviceCount() == 0, cuda build is enabled, but no
-    // cuda devices available.
-    static FakeGuardImpl<DeviceType::CUDA> fake_cuda_guard;
-    device_guard_impl_registry[cuda_idx].store(&fake_cuda_guard);
+// A non-null registry entry means the backend is compiled in;
+// deviceCount() == 0 means no device is visible, so swap in a no-op guard.
+// This lets us trace device kernels under FakeTensorMode without touching
+// a physical device.
+void ensureDeviceGuardSet(DeviceType type) {
+  auto& slot = device_guard_impl_registry[static_cast<size_t>(type)];
+  const DeviceGuardImplInterface* p = slot.load();
+  if (!p || p->deviceCount() != 0) {
+    return;
   }
+
+  switch (type) {
+#define CASE(D, _)                                  \
+  case DeviceType::D: {                             \
+    static FakeGuardImpl<DeviceType::D> fake_guard; \
+    slot.store(&fake_guard);                        \
+    break;                                          \
+  }
+    C10_FORALL_BACKEND_DEVICE_TYPES(CASE, unused)
+#undef CASE
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unsupported device type: ", type);
+  }
+}
+
+void ensureCUDADeviceGuardSet() {
+  ensureDeviceGuardSet(DeviceType::CUDA);
 }
 
 } // namespace c10::impl
