@@ -37,7 +37,7 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.backends import common as dynamo_common
-from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
     chromium_event_timed,
@@ -89,6 +89,7 @@ from torch._inductor.output_code import (
 )
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.utils import (
+    _device_is_available,
     BoxedBool,
     count_tangents,
     fresh_cache,
@@ -1696,7 +1697,7 @@ class _InProcessFxCompile(FxCompile):
             )
             with V.set_fake_mode(fake_mode):
                 # has some issues with memory in training
-                device_context = get_cuda_device_context(gm)
+                device_context = get_device_context(gm)
                 with device_context:
                     _recursive_post_grad_passes(gm, is_inference=is_inference)
                 V.debug.fx_graph_transformed(gm, example_inputs)
@@ -2655,9 +2656,14 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
 
 def get_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
     """
-    Returns a device context manager if the graph lives on a single device whose
-    backend provides a real device guard. If CUDA is unavailable, or the backend
-    only provides the fallback protocol, returns a null context.
+    Returns a device context manager when the graph runs on a single device of
+    a backend whose DeviceInterface provides a real device guard
+    (exposes_device_guard). CUDA takes precedence, as historically: a graph
+    with exactly one cuda device uses torch.cuda.device even alongside other
+    device types.  Otherwise the graph must live on exactly one non-cpu,
+    non-meta device type (CPU scalars and meta placeholders are incidental),
+    on a single index of that type, and the backend must report itself
+    available on this host; any other shape returns a null context.
     """
     all_devices = get_all_devices(gm)
 
@@ -2673,34 +2679,29 @@ def get_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]
         return contextlib.nullcontext()
 
     # No single cuda device.  Extend the same semantic to any other device type
-    # that has an interface with a real device context manager: only a graph that
-    # lives on exactly one device type is eligible.
+    # that has an interface with a real device context manager.  cpu and meta
+    # are placeholders (CPU scalar inputs, fake intermediate states), not where
+    # the graph runs; discard them the way the wrapper codegen picks the graph
+    # device type (torch/_inductor/graph.py), so the guard does not depend on
+    # incidental CPU tensors.
     device_types: OrderedSet[str] = OrderedSet(device.type for device in all_devices)
+    device_types.discard("cpu")
+    device_types.discard("meta")
     if len(device_types) != 1:
         return contextlib.nullcontext()
 
     device_type = next(iter(device_types))
-    try:
-        interface = get_interface_for_device(device_type)
-    except NotImplementedError:
-        # Backend has no registered interface; it cannot provide a context.
+    if not _device_is_available(device_type):
+        # No registered interface, or one that reports the backend
+        # unavailable / cannot answer: entering its guard on this host would
+        # raise where the pre-decouple behavior was a no-op (mocked device
+        # tags, AOT cross-compile flows).
         return contextlib.nullcontext()
 
-    if interface.device in (DeviceInterface.device, torch.device):
-        # Base implementation raises if used. torch.device's context-manager
-        # protocol is a default-device TorchFunctionMode, not a device guard,
-        # so it is not a valid substitute (this is the common shape for
-        # backends registered via rename_privateuse1_backend).
-        return contextlib.nullcontext()
-
-    # Mirror the cuda branch's availability fallback: entering a real device
-    # guard of a backend that is not available on this host would raise,
-    # where the pre-decouple behavior was a no-op (mocked device tags, AOT
-    # cross-compile flows).
-    try:
-        if not interface.is_available():
-            return contextlib.nullcontext()
-    except NotImplementedError:
+    interface = get_interface_for_device(device_type)
+    if not interface.exposes_device_guard():
+        # The interface only carries the raising base stub or torch.device
+        # (a default-device TorchFunctionMode, not a guard): nothing to enter.
         return contextlib.nullcontext()
 
     devices: OrderedSet[torch.device] = OrderedSet(
@@ -2711,8 +2712,9 @@ def get_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]
     return contextlib.nullcontext()
 
 
-# Legacy patch point: internal call sites resolve this name at call time, so
-# downstream monkeypatches keep intercepting; also kept for import compatibility.
+# Kept for import compatibility with the pre-decouple CUDA-only name; internal
+# call sites use get_device_context, so patching this alias does not intercept
+# them.
 get_cuda_device_context = get_device_context
 
 
@@ -2728,7 +2730,7 @@ def partition_fn(
     partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
-    device_context = get_cuda_device_context(gm)
+    device_context = get_device_context(gm)
     with device_context:
         # We can skip the invoke_subgraph because the
         # entire_partition_fn is called recursively for invoke_subgraph

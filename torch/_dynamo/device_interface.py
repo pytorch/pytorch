@@ -218,6 +218,24 @@ class DeviceInterface:
         return cls.Stream is not DeviceInterface.Stream
 
     @classmethod
+    def exposes_device_guard(cls) -> bool:
+        """
+        True when a subclass provides a real device guard in ``device``: a
+        context manager that switches the current device on entry, like
+        ``torch.cuda.device``. Consumers (e.g. the compile-time device context
+        in Inductor's compile_fx) consult this hook instead of inspecting the
+        attribute directly.
+
+        Overriding the device slot is the contract for guard support, the way
+        overriding Stream is the contract for stream support. The base
+        ``device`` is a raising sentinel, so compare against it rather than
+        None; ``torch.device`` is also rejected: its context-manager protocol
+        enters a default-device TorchFunctionMode, which does not switch the
+        current device and so is not a device guard.
+        """
+        return cls.device not in (DeviceInterface.device, torch.device)
+
+    @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
         reduction heuristics / max-autotune heuristics.  Defaults to
