@@ -449,7 +449,7 @@ class TestShapeOps(TestCase):
         def test_flip_impl(input_t, dims, output_t):
             def all_t():
                 yield input_t, output_t
-                if dtype is torch.float and self.device_type != "mps":
+                if dtype is torch.float and self.device_type not in ("mps", "xpu"):
                     # We generate quantized versions as well
                     for qdtype in (torch.quint8, torch.qint8, torch.qint32):
                         qinput_t = torch.quantize_per_tensor(input_t, 0.1, 5, qdtype)

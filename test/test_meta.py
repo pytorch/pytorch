@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
     xfailIfTorchDynamo,
-    skipIfXpu,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -914,6 +913,14 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
 }
 
+# Same contract as CUDA: the XPU kernel returns an empty (0,) buffer while the meta
+# decomposition follows the CPU full-size buffer (see log_sigmoid_forward in
+# torch/_decomp/decompositions.py).
+meta_dispatch_device_expected_failures['xpu'] = {
+    aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
+    aten.log_sigmoid_forward.output: {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
+}
+
 meta_dispatch_device_skips['cpu'] = {
     aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
 
@@ -1598,10 +1605,10 @@ class TestMeta(_TestMetaBase):
 
 
 @unMarkDynamoStrictTest
-class TestMetaCudaRef(_TestMetaBase):
+class TestMetaDeviceType(_TestMetaBase):
     # Tests whose reference stride/output comes from the CUDA kernel, so the
     # whole class is restricted to CUDA via only_for='cuda'.
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfCrossRef
     @suppress_warnings
@@ -2699,7 +2706,6 @@ class TestMetaKernelRegistrations(TestCase):
             )
             self.assertEqual(result, expected)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181490")
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -3043,7 +3049,7 @@ class TestMetaKernelRegistrations(TestCase):
 
 
 instantiate_device_type_tests(TestMeta, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestMetaDeviceType, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 
 def print_op_str_if_not_supported(op_str):
