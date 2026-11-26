@@ -490,6 +490,170 @@ for _op in (
     _op.register_effect(torch.library.EffectType.ORDERED)
 
 
+def _validate_quantized_scales(tokens, scales):
+    if scales.ndim != 2 or tokens.ndim != 2 or scales.shape[0] != tokens.shape[0]:
+        raise ValueError("scales must be 2D with one row per token row")
+    if scales.dtype not in (
+        torch.uint8,
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+    ):
+        raise ValueError("unsupported scale dtype")
+    if (
+        not scales.is_contiguous()
+        or scales.shape[1] == 0
+        or (scales.shape[1] * scales.element_size()) % 16
+    ):
+        raise ValueError("contiguous scale rows must be nonempty and 16-byte aligned")
+
+
+@torch.library.custom_op(
+    "_nccl_ep::dispatch_quantized_async",
+    mutates_args=(),
+    schema=(
+        "(torch.distributed._token_switch._NCCLEPObject handle, Tensor tokens, "
+        "Tensor scales, Tensor topk_weights, SymInt capacity, str layout, "
+        "*, bool initialize_tokens=True) -> "
+        "(Tensor, Tensor, Tensor?, Tensor)"
+    ),
+)
+def _dispatch_quantized_async_op(
+    handle: _NCCLEPObject,
+    tokens: torch.Tensor,
+    scales: torch.Tensor,
+    topk_weights: torch.Tensor,
+    capacity: int,
+    layout: str,
+    *,
+    initialize_tokens: bool = True,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]:
+    outputs = _dispatch_quantized_async_fake(
+        handle,
+        tokens,
+        scales,
+        topk_weights,
+        capacity,
+        layout,
+        initialize_tokens=initialize_tokens,
+    )
+    received, weights, ids, received_scales = outputs
+    _import_nccl_ep()._nccl_ep_dispatch_quantized(
+        handle.native(),
+        tokens,
+        scales,
+        topk_weights,
+        received,
+        received_scales,
+        weights,
+        ids,
+        async_op=True,
+    )
+    return outputs
+
+
+@_dispatch_quantized_async_op.register_fake
+def _dispatch_quantized_async_fake(
+    handle, tokens, scales, topk_weights, capacity, layout, *, initialize_tokens=True
+):
+    _validate_quantized_scales(tokens, scales)
+    received, weights, ids = _dispatch_async_fake(
+        handle,
+        tokens,
+        topk_weights,
+        capacity,
+        layout,
+        initialize_tokens=initialize_tokens,
+    )
+    return received, weights, ids, scales.new_zeros(capacity, scales.shape[1])
+
+
+@torch.library.custom_op("_nccl_ep::combine_quantized_async", mutates_args=())
+def _combine_quantized_async_op(
+    handle: _NCCLEPObject,
+    expert_tokens: torch.Tensor,
+    num_tokens: int,
+) -> torch.Tensor:
+    output = _combine_quantized_async_fake(handle, expert_tokens, num_tokens)
+    _import_nccl_ep()._nccl_ep_combine_quantized(
+        handle.native(), expert_tokens, output, async_op=True
+    )
+    return output
+
+
+@_combine_quantized_async_op.register_fake
+def _combine_quantized_async_fake(handle, expert_tokens, num_tokens):
+    if expert_tokens.ndim != 2 or expert_tokens.dtype != torch.bfloat16:
+        raise ValueError("MXFP8 combine requires 2D BF16 tokens")
+    if expert_tokens.shape[1] == 0 or expert_tokens.shape[1] % 512:
+        raise ValueError("MXFP8 combine hidden size must be a positive multiple of 512")
+    return expert_tokens.new_zeros(num_tokens, expert_tokens.shape[1])
+
+
+@torch.library.custom_op("_nccl_ep::dispatch_backward_quantized_async", mutates_args=())
+def _dispatch_backward_quantized_async_op(
+    handle: _NCCLEPObject,
+    grad_tokens: torch.Tensor,
+    scales: torch.Tensor,
+    capacity: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    outputs = _dispatch_backward_quantized_async_fake(
+        handle, grad_tokens, scales, capacity
+    )
+    _import_nccl_ep()._nccl_ep_dispatch_backward_quantized(
+        handle.native(), grad_tokens, scales, *outputs, async_op=True
+    )
+    return outputs
+
+
+@_dispatch_backward_quantized_async_op.register_fake
+def _dispatch_backward_quantized_async_fake(handle, grad_tokens, scales, capacity):
+    # Reuse the scale contract without allocating or communicating score rows.
+    _validate_quantized_scales(grad_tokens, scales)
+    return (
+        grad_tokens.new_zeros(capacity, grad_tokens.shape[1]),
+        scales.new_zeros(capacity, scales.shape[1]),
+    )
+
+
+@torch.library.custom_op("_nccl_ep::combine_backward_quantized_async", mutates_args=())
+def _combine_backward_quantized_async_op(
+    handle: _NCCLEPObject,
+    grad_tokens: torch.Tensor,
+    grad_topk_weights: torch.Tensor,
+    num_tokens: int,
+    top_k: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    outputs = _combine_backward_quantized_async_fake(
+        handle, grad_tokens, grad_topk_weights, num_tokens, top_k
+    )
+    _import_nccl_ep()._nccl_ep_combine_backward_quantized(
+        handle.native(), grad_tokens, grad_topk_weights, *outputs, async_op=True
+    )
+    return outputs
+
+
+@_combine_backward_quantized_async_op.register_fake
+def _combine_backward_quantized_async_fake(
+    handle, grad_tokens, grad_topk_weights, num_tokens, top_k
+):
+    output = _combine_quantized_async_fake(handle, grad_tokens, num_tokens)
+    if grad_topk_weights.dtype != torch.float32:
+        raise ValueError("routing-score gradients must use float32")
+    return output, grad_topk_weights.new_zeros(num_tokens, top_k)
+
+
+for _op in (
+    _dispatch_quantized_async_op,
+    _combine_quantized_async_op,
+    _dispatch_backward_quantized_async_op,
+    _combine_backward_quantized_async_op,
+):
+    _op.register_effect(torch.library.EffectType.ORDERED)
+
+
 class _DispatchAutograd(torch.autograd.Function):
     @staticmethod
     def forward(
@@ -999,6 +1163,103 @@ class TokenSwitchNCCL(TokenSwitch):
                 self._max_recv_tokens_per_rank,
             )
         )
+
+    def dispatch_quantized(
+        self,
+        routing: Routing,
+        tokens: torch.Tensor,
+        scales: torch.Tensor,
+        topk_weights: torch.Tensor,
+        max_recv_tokens: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]:
+        """Forward physical token and scale rows without converting their values.
+
+        Scales may contain an arbitrary aligned row width, including opaque
+        sideband bytes. This raw transport has no autograd formula. A logical
+        quantized training layer must define its own surrogate derivative and
+        choose forward and backward transport independently.
+        """
+        if max_recv_tokens < self._max_recv_tokens_per_rank:
+            raise ValueError(
+                f"NCCL EP dispatch outputs require at least "
+                f"{self._max_recv_tokens_per_rank} rows (max_recv_tokens_per_rank), "
+                f"got {max_recv_tokens}"
+            )
+        from torch.distributed._functional_collectives import wait_tensor
+
+        received, weights, ids, received_scales = _dispatch_quantized_async_op(
+            routing._opaque_handle,
+            tokens,
+            scales,
+            topk_weights,
+            max_recv_tokens,
+            routing.layout,
+        )
+        return (
+            wait_tensor(received),
+            wait_tensor(weights),
+            wait_tensor(ids) if ids is not None else None,
+            wait_tensor(received_scales),
+        )
+
+    def combine_quantized(
+        self,
+        routing: Routing,
+        expert_tokens: torch.Tensor,
+    ) -> torch.Tensor:
+        """Combine BF16 rows using native MXFP8 communication.
+
+        The native expert-major local-permute path quantizes internally and
+        returns BF16. This raw operation has no implicit autograd formula.
+        """
+        from torch.distributed._functional_collectives import wait_tensor
+
+        return wait_tensor(
+            _combine_quantized_async_op(
+                routing._opaque_handle,
+                expert_tokens,
+                routing.topk_idx.shape[0],
+            )
+        )
+
+    def dispatch_backward_quantized(
+        self,
+        routing: Routing,
+        grad_tokens: torch.Tensor,
+        scales: torch.Tensor,
+        max_recv_tokens: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Redispatch raw token-gradient and scale rows without score metadata."""
+        if max_recv_tokens < self._max_recv_tokens_per_rank:
+            raise ValueError(
+                f"NCCL EP dispatch outputs require at least "
+                f"{self._max_recv_tokens_per_rank} rows (max_recv_tokens_per_rank), "
+                f"got {max_recv_tokens}"
+            )
+        from torch.distributed._functional_collectives import wait_tensor
+
+        tokens, received_scales = _dispatch_backward_quantized_async_op(
+            routing._opaque_handle, grad_tokens, scales, max_recv_tokens
+        )
+        return wait_tensor(tokens), wait_tensor(received_scales)
+
+    def combine_backward_quantized(
+        self,
+        routing: Routing,
+        grad_tokens: torch.Tensor,
+        grad_topk_weights: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return BF16 token gradients and FP32 scores in one MXFP8 combine."""
+        from torch.distributed._functional_collectives import wait_tensor
+
+        tokens, weights = _combine_backward_quantized_async_op(
+            routing._opaque_handle,
+            grad_tokens,
+            grad_topk_weights,
+            routing.topk_idx.shape[0],
+            routing.topk_idx.shape[1],
+        )
+        return wait_tensor(tokens), wait_tensor(weights)
 
 
 from torch.distributed._token_switch.mori import _import_mori, TokenSwitchMoRI

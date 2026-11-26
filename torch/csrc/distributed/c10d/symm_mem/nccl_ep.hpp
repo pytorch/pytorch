@@ -128,4 +128,37 @@ TORCH_API void nccl_ep_combine_backward(
     at::Tensor& out_topk_weights,
     bool async_op = false);
 
+TORCH_API void nccl_ep_dispatch_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    const at::Tensor& scales,
+    const at::Tensor& topk_weights,
+    at::Tensor& out_tokens,
+    at::Tensor& out_scales,
+    std::optional<at::Tensor> out_topk_weights,
+    std::optional<at::Tensor> out_topk_idx,
+    bool async_op = false);
+
+TORCH_API void nccl_ep_dispatch_backward_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    const at::Tensor& scales,
+    at::Tensor& out_tokens,
+    at::Tensor& out_scales,
+    bool async_op = false);
+
+TORCH_API void nccl_ep_combine_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    at::Tensor& out_tokens,
+    bool async_op = false);
+
+TORCH_API void nccl_ep_combine_backward_quantized(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& tokens,
+    const at::Tensor& topk_weights,
+    at::Tensor& out_tokens,
+    at::Tensor& out_topk_weights,
+    bool async_op = false);
+
 } // namespace c10d::nccl_ep

@@ -100,4 +100,45 @@ PYBIND11_MODULE(_nccl_ep, m) {
       py::arg("out_tokens"),
       py::arg("out_topk_weights"),
       py::arg("async_op") = false);
+
+  m.def(
+      "_nccl_ep_dispatch_quantized",
+      &nccl_ep_dispatch_quantized,
+      py::arg("handle"),
+      py::arg("tokens"),
+      py::arg("scales"),
+      py::arg("topk_weights"),
+      py::arg("out_tokens"),
+      py::arg("out_scales"),
+      py::arg("out_topk_weights"),
+      py::arg("out_topk_idx"),
+      py::arg("async_op") = false);
+
+  m.def(
+      "_nccl_ep_dispatch_backward_quantized",
+      &nccl_ep_dispatch_backward_quantized,
+      py::arg("handle"),
+      py::arg("tokens"),
+      py::arg("scales"),
+      py::arg("out_tokens"),
+      py::arg("out_scales"),
+      py::arg("async_op") = false);
+
+  m.def(
+      "_nccl_ep_combine_quantized",
+      &nccl_ep_combine_quantized,
+      py::arg("handle"),
+      py::arg("tokens"),
+      py::arg("out_tokens"),
+      py::arg("async_op") = false);
+
+  m.def(
+      "_nccl_ep_combine_backward_quantized",
+      &nccl_ep_combine_backward_quantized,
+      py::arg("handle"),
+      py::arg("tokens"),
+      py::arg("topk_weights"),
+      py::arg("out_tokens"),
+      py::arg("out_topk_weights"),
+      py::arg("async_op") = false);
 }
