@@ -148,7 +148,11 @@ from .simd import (
     SIMDKernel,
     SIMDScheduling,
 )
-from .simd_kernel_features import tiling_scores_suggest_inner_reduction
+from .simd_kernel_features import (
+    DisableReduction,
+    EnableReduction,
+    tiling_scores_suggest_inner_reduction,
+)
 from .triton_utils import (
     config_of,
     equal_1_arg_indices,
@@ -7568,6 +7572,64 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.prologue.clear()
         self.prologue_cache.clear()
 
+    def _reduction_loop_unroll_factor(self, tree: IterationRangesRoot) -> int | None:
+        """Explicit unroll factor for the reduction loop, if any.
+
+        Only kernels with a single plain R0 loop over a static size and an
+        autotuned R0_BLOCK are considered; the reduction heuristic makes the
+        device-specific call.
+        """
+        features = self.features
+        rnumel = V.graph.sizevars.simplify(tree.numel)
+        if (
+            # Not a single plain R0 loop over the whole row.
+            not tree.is_reduction
+            or self.cooperative_reduction
+            or self.is_combo_kernel
+            or self.is_native_matmul
+            or self.num_reduction_dims != 1
+            or features.indexing_node_schedule is not features.node_schedule
+            # Dynamic size: the iterations and the masked tail are unknown.
+            or not isinstance(rnumel, (sympy.Integer, int))
+            # Fixed R0_BLOCK: the heuristic's block-size estimate does not apply.
+            or self.fixed_config
+            or self._strict_reduction_rblock() is not None
+        ):
+            return None
+        device = triton_meta_device_props(V.graph.get_current_device_or_throw())
+        # Only sm_107 asks for the unroll; skip the analysis below elsewhere.
+        if device.type != "cuda" or device.cc != 107:
+            return None
+        # The schedule lists the kernel's nodes, with DisableReduction /
+        # EnableReduction markers around nodes that run outside the reduction
+        # loop (pointwise prologues and epilogues). Skip kernels with more than
+        # one loop (e.g. a max pass then a sum pass). The count relies on how
+        # SIMDScheduling.generate_node_schedule builds the schedule so far:
+        # markers always come as a DisableReduction ... EnableReduction pair,
+        # so a loop starts at each node that opens the schedule or directly
+        # follows EnableReduction.
+        num_loops = sum(
+            prev is EnableReduction and entry is not DisableReduction
+            for prev, entry in itertools.pairwise(
+                [EnableReduction, *features.node_schedule]
+            )
+        )
+        if num_loops > 1:
+            return None
+        from ..heuristics.registry import get_codegen_heuristic
+        from ..heuristics.triton_codegen.reduction import ReductionHeuristic
+
+        heuristic = get_codegen_heuristic("reduction", device.type)
+        if not isinstance(heuristic, ReductionHeuristic):
+            return None
+        scalar_accumulators = AutotuneHint.SCALAR_ACCUMULATORS in self.autotune_hints
+        return heuristic.get_loop_unroll_factor(
+            rnumel=int(rnumel),
+            reduction_hint=features.get_reduction_hint(self.tiling_scores),
+            scalar_accumulators=scalar_accumulators,
+            device=device,
+        )
+
     def codegen_body(self):
         """
         Concat output code from index_code, loads, compute, stores,
@@ -7694,8 +7756,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         num_stages = ", num_stages = 2"
                     else:
                         num_stages = ""
+                    loop_unroll = ""
+                    if tree is loop_trees[-1] and (
+                        unroll_factor := self._reduction_loop_unroll_factor(tree)
+                    ):
+                        loop_unroll = f", loop_unroll_factor={unroll_factor}"
                     self.body.writeline(
-                        f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}):"
+                        f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}{loop_unroll}):"
                     )
                 with self.body.indent(offset=level + 1):
                     self.iteration_ranges_codegen_header(tree, self.body)

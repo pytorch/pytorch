@@ -22,7 +22,11 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_BLOCK,
     TRITON_MAX_MIX_ORDER_XBLOCK,
 )
-from torch._inductor.runtime.runtime_utils import last_power_of_2, next_power_of_2
+from torch._inductor.runtime.runtime_utils import (
+    ceildiv,
+    last_power_of_2,
+    next_power_of_2,
+)
 from torch._inductor.runtime.tiling import (
     get_max_block,
     get_pointwise_prefixes,
@@ -33,7 +37,14 @@ from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
+    from torch._inductor.runtime.hints import DeviceProperties
     from torch._inductor.runtime.triton_compat import Config
+
+
+# Explicit unrolling for selected sm_107 masked-tail reductions.
+# The heuristic below limits its use to eligible reduction loops.
+_RUBIN_UNROLL_MIN_ITERATIONS = 8
+_RUBIN_LOOP_UNROLL_FACTOR = 4
 
 
 # ------------------------------------------------------------------
@@ -568,6 +579,36 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     c.kwargs.pop(f"{p.upper()}BLOCK")  # type: ignore[union-attr]
 
         return configs
+
+    def get_loop_unroll_factor(
+        self,
+        *,
+        rnumel: int,
+        reduction_hint: ReductionHint,
+        scalar_accumulators: bool,
+        device: DeviceProperties,
+    ) -> int | None:
+        """Explicit ``loop_unroll_factor`` for a looped reduction's ``tl.range``.
+
+        Called by Triton codegen for the reduction loop of a single-loop,
+        non-persistent reduction kernel with a static reduction size.
+        Returns None to leave unrolling to the backend compiler.
+        """
+        if (
+            device.type != "cuda"
+            or device.cc != 107
+            or reduction_hint != ReductionHint.INNER
+            # Mixed results: the unroll slows their large R0_BLOCK configs.
+            or scalar_accumulators
+        ):
+            return None
+        # Iterations of the largest R0_BLOCK get_configs picks; ptxas still
+        # unrolls the loop when rnumel is a multiple of it (no masked tail).
+        r0_block = self._max_r0_block(device.major)
+        iterations = ceildiv(rnumel, r0_block)
+        if rnumel % r0_block == 0 or iterations <= _RUBIN_UNROLL_MIN_ITERATIONS:
+            return None
+        return _RUBIN_LOOP_UNROLL_FACTOR
 
     # ------------------------------------------------------------------
     # Hook methods for device-specific overrides
