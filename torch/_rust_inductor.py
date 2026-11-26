@@ -554,15 +554,28 @@ _VALUES_OUT = (torch.Tensor.tolist, torch.Tensor.numpy, torch.Tensor.__array__)
 
 def _sized_by_its_tensors(out, args, kwargs) -> bool:
     """Whether no size of what a torch call returned (``out``) can depend on
-    a float the call was handed: each tensor it returned has no dimensions,
-    or the broadcast size of the call's tensor arguments, or a size the call
-    was given as a sequence of ints. A region takes every size inside it for
-    what its trace saw, so only a float handed to such a call may be an
-    input of the graph: `x * t`, `torch.clamp(x, min=t)`, `torch.full((3,),
-    t)`, and not `torch.arange(0, t)` or an interpolation by the scale t,
-    whose result has another size for another t."""
+    a float the call was handed: each tensor it returned is one the call was
+    given by position, or has no dimensions, or the broadcast size of the
+    call's tensor arguments, or a size the call was given as a sequence of
+    ints. A region takes every size inside it for what its trace saw, so
+    only a float handed to such a call may be an input of the graph: `x *
+    t`, `torch.clamp(x, min=t)`, `torch.full((3,), t)`, and not
+    `torch.arange(0, t)` or an interpolation by the scale t, whose result
+    has another size for another t. A call that hands back a tensor it was
+    given wrote it in place, which leaves its size (the call raises where
+    the result does not fit): `x.mul_(t)`, and the foreach operators, which
+    are judged tensor by tensor because the tensors of their lists have
+    sizes of their own and no broadcast size (`torch._foreach_div_(xs,
+    ts)`). A tensor given as ``out=`` is no such operand: it is resized to
+    the result."""
     given = [*args, *kwargs.values()]
     flat = [x for a in given for x in (a if type(a) in (list, tuple) else (a,))]
+    operands = [x for a in args for x in (a if type(a) in (list, tuple) else (a,))]
+    outs = out if type(out) in (list, tuple) else (out,)
+    outs = [o for o in outs if isinstance(o, torch.Tensor)]
+    made = [o for o in outs if not any(o is x for x in operands)]
+    if outs and not made:
+        return True
     try:
         whole = torch.broadcast_shapes(
             *(x.shape for x in flat if isinstance(x, torch.Tensor))
@@ -574,11 +587,8 @@ def _sized_by_its_tensors(out, args, kwargs) -> bool:
         for a in given
         if isinstance(a, (list, tuple)) and all(type(i) is int for i in a)
     ]
-    outs = out if type(out) in (list, tuple) else (out,)
     return all(
-        o.dim() == 0 or o.shape == whole or tuple(o.shape) in sizes
-        for o in outs
-        if isinstance(o, torch.Tensor)
+        o.dim() == 0 or o.shape == whole or tuple(o.shape) in sizes for o in made
     )
 
 

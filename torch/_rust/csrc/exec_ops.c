@@ -2119,6 +2119,18 @@ PyObject* tr_view_dict(PyObject* o) {
   return NULL;
 }
 
+// Whether o is an OrderedDict: a dict that keeps an order of its own, which
+// is not the order of the dict's table (move_to_end changes only the former).
+int tr_ordered(PyObject* o) {
+  return PyODict_Check(o);
+}
+
+// A new iterator over the keys of an OrderedDict in its order: the type's
+// own, so that no __iter__ of a subclass runs.
+PyObject* tr_ordered_keys(PyObject* o) {
+  return PyODict_Type.tp_iter(o);
+}
+
 // descrobject.c's mappingproxyobject.
 typedef struct {
   PyObject_HEAD

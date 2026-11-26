@@ -77,6 +77,8 @@ unsafe extern "C" {
     pub fn tr_instance_dict(obj: *mut PyObject) -> *mut PyObject;
     pub fn tr_view_dict(o: *mut PyObject) -> *mut PyObject;
     pub fn tr_proxy_dict(o: *mut PyObject) -> *mut PyObject;
+    pub fn tr_ordered(o: *mut PyObject) -> c_int;
+    pub fn tr_ordered_keys(o: *mut PyObject) -> *mut PyObject;
     pub fn tr_builtin_self(callable: *mut PyObject) -> *mut PyObject;
     pub fn tr_descr_name(descr: *mut PyObject) -> *mut PyObject;
     pub fn tr_store_attr_kind(tp: *mut pyo3::ffi::PyTypeObject, name: *mut PyObject, generic: c_int, del: c_int) -> c_int;

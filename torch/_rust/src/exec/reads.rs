@@ -29,7 +29,8 @@
 //     keywords whole;
 //   - any other instruction or builtin handed a dict, a list, a set or a dict
 //     view (iterating it, unpacking it, slicing it, zip, sorted, ...): the
-//     whole content, in order; len() and truth: the length.
+//     whole content, in order (an OrderedDict's own order, which is not the
+//     order of the dict's table); len() and truth: the length.
 // Tuples aren't recorded: what they hold can't change.
 //
 // Values are compared by exact type and value if they are an int, a float
@@ -428,9 +429,49 @@ pub(super) unsafe fn dict_get(d: *mut PyObject, k: *mut PyObject) -> *mut PyObje
     x
 }
 
+// Whether every key of dict d is a str or an int: finding one again (as an
+// OrderedDict does for each step of its iterator) runs no Python code.
+unsafe fn plain_keys(d: *mut PyObject) -> bool {
+    let (mut pos, mut k, mut v) = (0, std::ptr::null_mut(), std::ptr::null_mut());
+    while ffi::PyDict_Next(d, &mut pos, &mut k, &mut v) != 0 {
+        if !key_ok(k) {
+            return false;
+        }
+    }
+    true
+}
+
+// Whether what `holder` holds can be compared in the order C code reads it
+// in: an OrderedDict only while its keys are plain (see snapshot).
+unsafe fn ordered_ok(holder: *mut PyObject, kind: Holder) -> bool {
+    kind != Holder::Dict || tr_ordered(holder) == 0 || plain_keys(holder)
+}
+
+// What `holder` holds, in the order its own C code hands it out. An
+// OrderedDict's order is not its table's (move_to_end changes the one and
+// not the other): its keys are taken from the iterator of OrderedDict
+// itself. Call only when ordered_ok.
 unsafe fn snapshot(holder: *mut PyObject, kind: Holder) -> Vec<*mut PyObject> {
     let mut out = vec![];
     match kind {
+        Holder::Dict if tr_ordered(holder) != 0 => {
+            let keys = tr_ordered_keys(holder);
+            while !keys.is_null() {
+                let k = ffi::PyIter_Next(keys);
+                if k.is_null() {
+                    break;
+                }
+                // The dict holds the key as well.
+                ffi::Py_DECREF(k);
+                let v = dict_get(holder, k);
+                if v.is_null() {
+                    break;
+                }
+                out.extend([k, v]);
+            }
+            ffi::Py_XDECREF(keys);
+            ffi::PyErr_Clear();
+        }
         Holder::Dict => {
             let (mut pos, mut k, mut v) = (0, std::ptr::null_mut(), std::ptr::null_mut());
             while ffi::PyDict_Next(holder, &mut pos, &mut k, &mut v) != 0 {
@@ -473,6 +514,9 @@ impl Item {
 
 impl Whole {
     unsafe fn holds(&self, holder: *mut PyObject, kind: Holder) -> bool {
+        if !ordered_ok(holder, kind) {
+            return false;
+        }
         let now = snapshot(holder, kind);
         now.len() == self.items.len() && now.iter().zip(&self.items).all(|(a, b)| *a == b.as_ptr() || (exact_scalar(*a) && equal(*a, b.as_ptr())))
     }
@@ -584,7 +628,9 @@ impl Trace {
         if self.group_of.get(&(holder as usize)).is_some_and(|i| self.entries.groups[*i].whole.is_some()) || self.own.contains(&(holder as usize)) {
             return;
         }
-        if self.changed.contains(&(holder as usize)) {
+        // What cannot be compared later is refused when the trace is over,
+        // unless the holder died with the run.
+        if self.changed.contains(&(holder as usize)) || !ordered_ok(holder, kind) {
             let at = place();
             let g = self.group(holder, kind);
             g.late = true;
@@ -1233,7 +1279,9 @@ impl Reads {
             sweep(e);
         }
         let passes = |g: &Group| {
-            let v = if g.kind == Holder::Dict { tr_dict_version(g.holder.as_ptr()) } else { 0 };
+            // The order of an OrderedDict changes under the same version tag.
+            let tagged = g.kind == Holder::Dict && !(g.whole.is_some() && tr_ordered(g.holder.as_ptr()) != 0);
+            let v = if tagged { tr_dict_version(g.holder.as_ptr()) } else { 0 };
             if v != 0 && v == g.version.get() {
                 return true;
             }
@@ -1628,7 +1676,8 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
         // (swept above) or the region checks all of it as it is given (then
         // what was read is that and the run's own writes).
         if let Some(g) = e.groups.iter().find(|g| g.late && !given.iter().any(|x| x.as_ptr() == g.holder.as_ptr())) {
-            return Ok((None, Some(format!("it reads a {} whole after changing it{}", type_name(g.holder.as_ptr()), g.late_at))));
+            let why = if ordered_ok(g.holder.as_ptr(), g.kind) { "whole after changing it" } else { "whole, and its keys are not all strs or ints" };
+            return Ok((None, Some(format!("it reads a {} {why}{}", type_name(g.holder.as_ptr()), g.late_at))));
         }
         // What changed after the run read it, by other ways than the run's
         // recorded writes, is no check. What the run read of a container (or

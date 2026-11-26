@@ -480,6 +480,50 @@ class TestVmTracedTensors(TestCase):
         rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
         self.assertTrue(any("adam" in r["where"] and r["runs"] for r in rows), msg=rows)
 
+    @parametrize("optimizer", ("Adam", "AdamW"))
+    @isolated
+    def test_foreach_optimizer_step_is_a_region(self, device, optimizer):
+        # The foreach form (the default on a GPU) hands its operators lists of
+        # tensors of different sizes, with floats it computes from the
+        # learning rate and from the step count it reads from a tensor: all
+        # inputs of the region's graph, so one region serves every step.
+        def make():
+            torch.manual_seed(0)
+            layers = [torch.nn.Linear(64, 64), torch.nn.Tanh(), torch.nn.Linear(64, 8)]
+            net = torch.nn.Sequential(*layers).to(device)
+            opt = getattr(torch.optim, optimizer)(net.parameters(), foreach=True)
+
+            def step(x):
+                opt.zero_grad(set_to_none=True)
+                loss = net(x).square().mean()
+                loss.backward()
+                opt.step()
+                return loss.detach()
+
+            return net, opt, step
+
+        (net, opt, step), (eager_net, eager_opt, eager_step) = make(), make()
+        compiled = vm(step, passes=EARLY)
+        for call in range(12):
+            # As a scheduler does between steps.
+            lr = 0.001 * 0.9**call
+            opt.param_groups[0]["lr"] = eager_opt.param_groups[0]["lr"] = lr
+            x = torch.randn(8, 64, device=device)
+            got, want = compiled(x), eager_step(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        weights, expected = list(net.parameters()), list(eager_net.parameters())
+        self.assertEqual(weights, expected, atol=0, rtol=0)
+        rows = [r for r in vm.regions(compiled) if "_multi_tensor_adam" in r["where"]]
+        rows = [r for r in rows if r["state"] != "not movable"]
+        steps = [r for r in rows if r["state"] == "region" and r["runs"]]
+        self.assertTrue(steps, msg=str(rows))
+        # A float is checked by value only where the code branches on it (the
+        # weight decay): another learning rate is no miss.
+        decay = f"(float) == {opt.defaults['weight_decay']!r}"
+        for r in steps:
+            self.assertEqual(r["misses"], {}, msg=str(r))
+            self.assertEqual([v for v in r["values"] if not v.endswith(decay)], [])
+
 
 instantiate_device_type_tests(TestVmTracedTensors, globals())
 

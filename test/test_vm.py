@@ -2851,6 +2851,67 @@ READS_MODULE = types_module.ModuleType("reads_module")
 READS_MODULE.factor = 2.0
 
 
+class ReadsBackwards(collections.OrderedDict):
+    """An OrderedDict with an __iter__ of its own."""
+
+    def __iter__(self):
+        return iter(sorted(dict.keys(self), reverse=True))
+
+
+class ReadsHeld:
+    """Tables that are state of an object: a region reaches them by reads."""
+
+    def __init__(self):
+        self.table = collections.OrderedDict(a=2.0, b=3.0, c=5.0)
+        self.twin = collections.OrderedDict(self.table)
+        self.backwards = ReadsBackwards(self.table)
+        self.pairs = collections.OrderedDict([((0, 1), 2.0), ((1, 0), 3.0)])
+
+
+READS_HELD = ReadsHeld()
+
+
+def reads_table_iterated(y):
+    # A result that depends on the order the names come in.
+    for k, name in enumerate(READS_HELD.table):
+        y = y * (0.5 + 0.1 * k) + (ord(name) - 96) * 0.05
+    return y
+
+
+def reads_table_reversed(y):
+    for k, name in enumerate(reversed(READS_HELD.table)):
+        y = y * (0.5 + 0.1 * k) + (ord(name) - 96) * 0.05
+    return y
+
+
+def reads_table_listed(y):
+    for k, name in enumerate(list(READS_HELD.table)):
+        y = y * (0.5 + 0.1 * k) + (ord(name) - 96) * 0.05
+    return y
+
+
+def reads_table_backwards(y):
+    for k, name in enumerate(READS_HELD.backwards):
+        y = y * (0.5 + 0.1 * k) + (ord(name) - 96) * 0.05
+    return y
+
+
+def reads_table_pairs(y):
+    for k, (first, _) in enumerate(READS_HELD.pairs):
+        y = y * (0.5 + 0.1 * k) + first * 0.05
+    return y
+
+
+def reads_moves(table):
+    """A switch between the order a table was made in and the first key at
+    the end."""
+
+    def switch(second):
+        table.move_to_end("a", last=second)
+
+    return switch
+
+
 class ReadsConfig:
     bias = 1.0
 
@@ -3271,6 +3332,94 @@ class TestVmReads(TestCase):
         for call in range(12):
             READS_CONFIG.factor = 0.25 * (call + 1)
             self.assertEqual(g(x), eager(x), atol=0, rtol=0, msg=f"call {call}")
+
+    @isolated
+    def test_order_of_an_ordered_dict_iterated(self, device):
+        # move_to_end changes nothing a plain dict has: neither an item nor
+        # the order of the table.
+        self.alternating(
+            device, reads_through(reads_table_iterated), reads_moves(READS_HELD.table)
+        )
+
+    @isolated
+    def test_order_of_an_ordered_dict_reversed(self, device):
+        def switch(second):
+            if second:
+                READS_HELD.table[READS_HELD.table.popitem(last=False)[0]] = 2.0
+            else:
+                READS_HELD.table.move_to_end("a", last=False)
+
+        self.alternating(device, reads_through(reads_table_reversed), switch)
+
+    @isolated
+    def test_order_of_an_ordered_dict_listed(self, device):
+        self.alternating(
+            device, reads_through(reads_table_listed), reads_moves(READS_HELD.table)
+        )
+
+    @isolated
+    def test_order_of_an_ordered_dict_compared(self, device):
+        self.alternating(
+            device,
+            reads_through(
+                lambda y: y * 3 if READS_HELD.table == READS_HELD.twin else y - 1
+            ),
+            reads_moves(READS_HELD.twin),
+        )
+
+    @isolated
+    def test_key_of_an_ordered_dict_added_and_deleted(self, device):
+        def switch(second):
+            if second:
+                READS_HELD.table["d"] = 7.0
+            else:
+                READS_HELD.table.pop("d", None)
+
+        self.alternating(device, reads_through(reads_table_iterated), switch)
+
+    @isolated
+    def test_order_of_an_ordered_dict_with_an_iter_of_its_own(self, device):
+        # The check walks it with OrderedDict's own iterator, whatever the
+        # subclass hands out: a changed order is another state.
+        self.alternating(
+            device,
+            reads_through(reads_table_backwards),
+            reads_moves(READS_HELD.backwards),
+        )
+
+    @isolated
+    def test_ordered_dict_whose_keys_are_not_plain(self, device):
+        # Walking an OrderedDict hashes its keys: with keys other than strs
+        # and ints the check would run their code, so there is none to make.
+        fn = reads_through(reads_table_pairs)
+        g = vm(fn, passes=EARLY)
+        for call in range(10):
+            if call == 6:
+                READS_HELD.pairs.move_to_end((0, 1))
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        rows = [
+            r
+            for r in vm.regions(g)
+            if r["function"].endswith("outer") and r["kind"] == "block"
+        ]
+        self.assertEqual([r["state"] for r in rows], ["refused"], msg=str(rows))
+        self.assertIn("its keys are not all strs or ints", rows[0]["why"])
+
+    @isolated
+    def test_order_of_an_ordered_dict_that_is_an_argument(self, device):
+        # Its order is part of the structure the region is entered on.
+        table = collections.OrderedDict(
+            (name, torch.full((8,), 0.1 * (k + 1), device=device))
+            for k, name in enumerate("abc")
+        )
+
+        def weighted(y):
+            for k, name in enumerate(table):
+                y = y * (0.5 + 0.1 * k) + table[name]
+            return y
+
+        self.alternating(device, reads_through(weighted), reads_moves(table))
 
 
 instantiate_device_type_tests(TestVmReads, globals())
