@@ -13805,43 +13805,31 @@ class TestAOTAutogradDeviceWithCache(
 class _AOTAutogradHardwareTestBase(_TestAOTAutogradBase):
     _compile_autocast = TestAOTAutogradDevice._compile_autocast
 
-    def _test_backward_pass_autocast(
-        self, device, *, backward_autocast, forward_autocast, expected_grad
-    ):
-        with torch._functorch.config.patch(backward_pass_autocast=backward_autocast):
-            out, grad = self._compile_autocast(
-                device, forward_autocast=forward_autocast
-            )
-        self.assertEqual(out, torch.zeros_like(out))
-        self.assertEqual(grad, torch.full_like(grad, expected_grad))
-
 
 class TestAOTAutogradAutocast(_AOTAutogradHardwareTestBase):
     hw_classification = HardwareClassification.CPU
 
+    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
     def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.ones_like(grad))
 
+    @torch._functorch.config.patch(backward_pass_autocast="off")
     def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.zeros_like(grad))
 
+    @torch._functorch.config.patch(backward_pass_autocast="off")
     def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
+        device_type = torch.device(device).type
+        with torch._functorch.config.patch(
+            backward_pass_autocast=[{"device_type": device_type}]
+        ):
+            out, grad = self._compile_autocast(device, forward_autocast=False)
+            self.assertEqual(out, torch.zeros_like(out))
+            self.assertEqual(grad, torch.ones_like(grad))
 
 
 @inherit_device_tests
@@ -13862,31 +13850,29 @@ class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
+    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
     def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.ones_like(grad))
 
     @onlyAccelerator
+    @torch._functorch.config.patch(backward_pass_autocast="off")
     def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.zeros_like(grad))
 
     @onlyAccelerator
+    @torch._functorch.config.patch(backward_pass_autocast="off")
     def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
+        device_type = torch.device(device).type
+        with torch._functorch.config.patch(
+            backward_pass_autocast=[{"device_type": device_type}]
+        ):
+            out, grad = self._compile_autocast(device, forward_autocast=False)
+            self.assertEqual(out, torch.zeros_like(out))
+            self.assertEqual(grad, torch.ones_like(grad))
 
 
 @inherit_device_tests
