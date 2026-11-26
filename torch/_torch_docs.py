@@ -2987,6 +2987,88 @@ In-place version of :func:`torch.clamp`
 )
 
 add_docstr(
+    torch.clamp_min,
+    r"""
+clamp_min(input, min, *, out=None) -> Tensor
+
+Clamps all elements in :attr:`input` to be greater than or equal to :attr:`min`.
+Equivalent to :func:`torch.clamp(input, min=min) <torch.clamp>`.
+
+.. math::
+    y_i = \max(x_i, \text{{min}}_i)
+
+Args:
+    {input}
+    min (Number or Tensor): lower-bound of the range to be clamped to
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-1.7120,  0.1734, -0.0478, -0.0922])
+    >>> torch.clamp_min(a, -0.5)
+    tensor([-0.5000,  0.1734, -0.0478, -0.0922])
+
+    >>> min = torch.linspace(-1, 1, steps=4)
+    >>> torch.clamp_min(a, min)
+    tensor([-1.0000,  0.1734,  0.3333,  1.0000])
+""".format(**common_args),
+)
+
+add_docstr(
+    torch.clamp_min_,
+    r"""
+clamp_min_(input, min) -> Tensor
+
+In-place version of :func:`torch.clamp_min`
+""",
+)
+
+add_docstr(
+    torch.clamp_max,
+    r"""
+clamp_max(input, max, *, out=None) -> Tensor
+
+Clamps all elements in :attr:`input` to be less than or equal to :attr:`max`.
+Equivalent to :func:`torch.clamp(input, max=max) <torch.clamp>`.
+
+.. math::
+    y_i = \min(x_i, \text{{max}}_i)
+
+Args:
+    {input}
+    max (Number or Tensor): upper-bound of the range to be clamped to
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-1.7120,  0.1734, -0.0478, -0.0922])
+    >>> torch.clamp_max(a, 0.1)
+    tensor([-1.7120,  0.1000, -0.0478, -0.0922])
+
+    >>> max = torch.linspace(-1, 1, steps=4)
+    >>> torch.clamp_max(a, max)
+    tensor([-1.7120, -0.3333, -0.0478, -0.0922])
+""".format(**common_args),
+)
+
+add_docstr(
+    torch.clamp_max_,
+    r"""
+clamp_max_(input, max) -> Tensor
+
+In-place version of :func:`torch.clamp_max`
+""",
+)
+
+add_docstr(
     torch.clip,
     r"""
 clip(input, min=None, max=None, *, out=None) -> Tensor

@@ -1105,6 +1105,42 @@ Alias for :meth:`~Tensor.clamp_`.
 )
 
 add_docstr_all(
+    "clamp_min",
+    r"""
+clamp_min(min) -> Tensor
+
+See :func:`torch.clamp_min`
+""",
+)
+
+add_docstr_all(
+    "clamp_min_",
+    r"""
+clamp_min_(min) -> Tensor
+
+In-place version of :meth:`~Tensor.clamp_min`
+""",
+)
+
+add_docstr_all(
+    "clamp_max",
+    r"""
+clamp_max(max) -> Tensor
+
+See :func:`torch.clamp_max`
+""",
+)
+
+add_docstr_all(
+    "clamp_max_",
+    r"""
+clamp_max_(max) -> Tensor
+
+In-place version of :meth:`~Tensor.clamp_max`
+""",
+)
+
+add_docstr_all(
     "clone",
     r"""
 clone(*, memory_format=torch.preserve_format) -> Tensor

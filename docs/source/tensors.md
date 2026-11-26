@@ -300,6 +300,10 @@ view of a storage and defines numeric operations on it.
     Tensor.chunk
     Tensor.clamp
     Tensor.clamp_
+    Tensor.clamp_max
+    Tensor.clamp_max_
+    Tensor.clamp_min
+    Tensor.clamp_min_
     Tensor.clip
     Tensor.clip_
     Tensor.clone
