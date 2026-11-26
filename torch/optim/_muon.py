@@ -11,6 +11,7 @@ from torch import Tensor
 from .optimizer import (
     _default_to_fused_or_foreach,
     _disable_dynamo_if_unsupported,
+    _foreach_doc,
     _functional_api_doc,
     _params_doc,
     _to_scalar,
@@ -319,9 +320,7 @@ Muon.__doc__ = (
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
             If not specified, we will default to use "original". (default: None)
-        foreach (bool, optional): whether to use the multi-tensor (``torch._foreach_*``) implementation.
-            It fuses all operations across parameters except the Newton-Schulz iterations, which still run
-            per parameter. If ``None`` (the default), foreach is used on supported devices. (default: None)
+        {_foreach_doc}. The Newton-Schulz iterations still run per parameter.
 
     Example:
         >>> # xdoctest: +SKIP

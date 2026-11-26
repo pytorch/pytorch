@@ -211,7 +211,7 @@ Below is a table showing the available and default implementations of each algor
     :class:`Adamax`;foreach;yes;no
     :class:`ASGD`;foreach;yes;no
     :class:`LBFGS`;for-loop;no;no
-    :class:`Muon`;for-loop;no;no
+    :class:`Muon`;foreach;yes;no
     :class:`NAdam`;foreach;yes;no
     :class:`RAdam`;foreach;yes;no
     :class:`RMSprop`;foreach;yes;no
