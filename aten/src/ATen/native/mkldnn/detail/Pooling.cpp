@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/Pooling.h>
-#include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/IdeepUtils.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -8,23 +8,23 @@
 namespace at::native::mkldnn {
 
 void pooling_forward(
-    const ideep::tensor& src,
+    const MkldnnMemory& src,
     const dnnl::memory::dims& output_sizes,
-    ideep::tensor& dst,
+    MkldnnMemory& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& kernel,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
     dnnl::algorithm algorithm,
     dnnl::prop_kind prop_kind) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   const bool with_workspace = prop_kind == dnnl::prop_kind::forward_training &&
       algorithm == dnnl::algorithm::pooling_max;
 
   // Workaround for oneDNN issue intel/mkl-dnn#588 (kept from ideep).
   auto src_desc = src._get_unblocked_desc_if_4c_blocked();
 
-  ideep::tensor::desc dst_desc(
+  MkldnnMemory::desc dst_desc(
       output_sizes, src.get_data_type(), dnnl::memory::format_tag::any);
 
   dnnl::primitive_attr op_attr;
@@ -53,7 +53,7 @@ void pooling_forward(
     dst.set_scale(src.get_scale());
   }
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args{
       {DNNL_ARG_SRC, expected_src},
@@ -64,14 +64,14 @@ void pooling_forward(
     args.insert({DNNL_ARG_WORKSPACE, dst.get_workspace()});
   }
 
-  dnnl::pooling_forward(pd).execute(ideep::stream::default_stream(), args);
+  dnnl::pooling_forward(pd).execute(IStream::default_stream(), args);
 }
 
 void pooling_backward(
-    const ideep::tensor& diff_dst,
-    const ideep::tensor& dst,
-    const ideep::tensor& src,
-    ideep::tensor& diff_src,
+    const MkldnnMemory& diff_dst,
+    const MkldnnMemory& dst,
+    const MkldnnMemory& src,
+    MkldnnMemory& diff_src,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& kernel,
     const dnnl::memory::dims& padding_l,
@@ -86,7 +86,7 @@ void pooling_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto src_desc = src.get_desc();
   auto dst_desc = dst.get_desc();
 
@@ -126,7 +126,7 @@ void pooling_backward(
   // pd.diff_src_desc().
   diff_src.reinit_if_possible(pd.diff_src_desc());
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args{
       {DNNL_ARG_DIFF_DST, expected_diff_dst},
@@ -139,7 +139,7 @@ void pooling_backward(
     args.insert({DNNL_ARG_WORKSPACE, expected_workspace});
   }
 
-  dnnl::pooling_backward(pd).execute(ideep::stream::default_stream(), args);
+  dnnl::pooling_backward(pd).execute(IStream::default_stream(), args);
 }
 
 } // namespace at::native::mkldnn
