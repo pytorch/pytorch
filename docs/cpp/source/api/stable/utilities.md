@@ -30,6 +30,12 @@ tensors and CUDA operations.
 // Previous device is restored
 ```
 
+## Generator Class
+
+```{doxygenclass} torch::stable::Generator
+:members:
+```
+
 ## InferenceMode Class
 
 ```{doxygenclass} torch::stable::InferenceMode

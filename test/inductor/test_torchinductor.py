@@ -21949,6 +21949,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         table = torch.rand(1, 8, 64, 80, device=self.device) * 4
         self.common(fn, (x, y, table), check_lowp=False)
 
+    def test_nonowning_layout_not_inplaced_before_concat_reuse(self):
+        def fn(a, b, w1, w2, w3):
+            n = a.shape[-1]
+            x = a + torch.mm(a.view(1, n), w1).view(1, 1, n)
+            cat_buf = torch.cat([x, b], dim=-1)
+            y = torch.mm(cat_buf.view(1, 2 * n), w2)
+            z = x + y[:, :n].view(1, 1, n)
+            h = torch.mm(z.view(1, n), w3)
+            clobber = torch.relu(h + 10.0)
+            return z + clobber[:, :n].view(1, 1, n)
+
+        a = torch.randn(1, 1, 64, device=self.device)
+        b = torch.randn(1, 1, 64, device=self.device)
+        w1 = torch.randn(64, 64, device=self.device)
+        w2 = torch.randn(128, 64, device=self.device)
+        w3 = torch.randn(64, 128, device=self.device)
+        self.common(fn, (a, b, w1, w2, w3), check_lowp=False)
+
     # end of class CommonTemplate - add new tests here
 
 
