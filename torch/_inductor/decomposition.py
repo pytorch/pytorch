@@ -2789,17 +2789,24 @@ def _strict_native_batch_norm(decomp_fn, op, *, force_cudnn=False):
                     save_mean, variance = aten.batch_norm_update_stats.default(
                         input, None, None, 0.0
                     )
-                assert save_mean is not None  # noqa: S101
+                if save_mean is None:
+                    raise AssertionError(f"Expected non-None values, got {save_mean=}")
                 mean = save_mean.reshape(shape)
                 if not cudnn:
-                    assert variance is not None  # noqa: S101
+                    if variance is None:
+                        raise AssertionError(
+                            f"Expected non-None values, got {variance=}"
+                        )
                     var = variance.reshape(shape)
                 running_mean, running_var = (
                     values.get("running_mean"),
                     values.get("running_var"),
                 )
                 if running_mean is not None and not cudnn:
-                    assert running_var is not None and variance is not None  # noqa: S101
+                    if running_var is None or variance is None:
+                        raise AssertionError(
+                            f"Expected non-None values, got {running_var=}, {variance=}"
+                        )
                     momentum = torch.scalar_tensor(
                         values["momentum"], dtype=dtype, device=input.device
                     )
@@ -2824,11 +2831,17 @@ def _strict_native_batch_norm(decomp_fn, op, *, force_cudnn=False):
                     values["running_mean"],
                     values["running_var"],
                 )
-                assert running_mean is not None and running_var is not None  # noqa: S101
+                if running_mean is None or running_var is None:
+                    raise AssertionError(
+                        f"Expected non-None values, got {running_mean=}, {running_var=}"
+                    )
                 mean = running_mean.to(dtype).reshape(shape)
                 var = running_var.to(dtype).reshape(shape)
             if training and cudnn:
-                assert saved_invstd is not None  # noqa: S101
+                if saved_invstd is None:
+                    raise AssertionError(
+                        f"Expected non-None values, got {saved_invstd=}"
+                    )
                 invstd = saved_invstd.reshape(shape)
                 if (
                     "functional" not in op._schema.name
@@ -2837,7 +2850,8 @@ def _strict_native_batch_norm(decomp_fn, op, *, force_cudnn=False):
                     values["running_mean"].copy_(new_running_mean)
                     values["running_var"].copy_(new_running_var)
             else:
-                assert var is not None  # noqa: S101
+                if var is None:
+                    raise AssertionError(f"Expected non-None values, got {var=}")
                 invstd = torch.rsqrt(var + values["eps"])
             weight = values.get("weight")
             bias = values.get("bias")
@@ -2886,7 +2900,8 @@ def _strict_native_batch_norm(decomp_fn, op, *, force_cudnn=False):
                 scaled = (input.to(dtype) - mean) * weight
                 output = inductor_prims.fma(scaled, invstd, bias).to(input.dtype)
             if training:
-                assert save_mean is not None  # noqa: S101
+                if save_mean is None:
+                    raise AssertionError(f"Expected non-None values, got {save_mean=}")
                 result = (output, save_mean, invstd.reshape(-1))
                 if op._schema.name in (
                     "aten::_batch_norm_with_update",
