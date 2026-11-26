@@ -4,12 +4,10 @@ import json
 import logging
 import re
 import sys
-import unittest
 
 import torch
 import torch.distributed as dist
 from torch.distributed.c10d_logger import _c10d_logger, _exception_logger
-from torch.distributed.distributed_c10d import is_backend_available
 
 
 if not dist.is_available():
@@ -20,7 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
-from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
+from torch.testing._internal.common_distributed import DistributedTestBase, with_comms
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -65,11 +63,6 @@ class C10dErrorLoggerTestDevice(DistributedTestBase):
     def process_group(self):
         return dist.group.WORLD
 
-    def destroy_comms(self):
-        # Wait for all ranks to reach here before starting shutdown.
-        dist.barrier()
-        dist.destroy_process_group()
-
     @_exception_logger
     def _failed_broadcast_raise_exception(self, rank_device):
         tensor = torch.arange(2, dtype=torch.int64, device=rank_device)
@@ -84,15 +77,9 @@ class C10dErrorLoggerTestDevice(DistributedTestBase):
             pass
 
     @onlyAccelerator
+    @with_comms(barrier_on_success=True)
     def test_exception_logger(self, device) -> None:
         device_type = torch.device(device).type
-        if torch.get_device_module(device_type).device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
-        backend = self.backend(device_type)
-        if not is_backend_available(backend):
-            raise unittest.SkipTest(f"Backend '{backend}' is not available")
-        self.create_pg(device_type)
-
         rank_device = (
             torch.device("cpu")
             if device_type == "cpu"
@@ -143,8 +130,6 @@ class C10dErrorLoggerTestDevice(DistributedTestBase):
             # In this test case, local_rank = global_rank, since we don't have multiple processes on one node.
             self.assertIn("local_rank", error_msg_dict.keys())
             self.assertIn(str(dist.get_rank()), error_msg_dict["local_rank"])
-
-        self.destroy_comms()
 
 
 instantiate_device_type_tests(C10dErrorLoggerTestDevice, globals(), allow_xpu=True)
