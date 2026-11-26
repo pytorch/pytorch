@@ -421,17 +421,18 @@ pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 # batch_linear_lhs is enabled by default on XPU with static split widths.
 # Assign a merged dict to keep these defaults; assigning a new dict replaces
 # them. Keys: devices (device types or torch.device), min_fuse_set_size,
-# static_widths_only, and max_fuse_tensor_bytes_batch_linear_lhs (max fused
-# weight bytes, counting the copies added for returned outputs). The cap only
-# exists in the shipped entry: a partial dict drops it. A group whose fused
-# bytes are not statically known never fuses under a cap, so a cap with
-# static_widths_only: False is a silent no-op for symbolic widths.
+# static_widths_only, max_fuse_tensor_bytes_batch_linear_lhs (max fused weight
+# bytes plus copies for returned outputs), and skip_user_visible (skip
+# projections whose outputs reach the graph output; enabled in the shipped
+# default). The cap lives only in the shipped entry: a partial dict drops it. A
+# group whose fused bytes are not statically known is declined under a cap.
 post_grad_fusion_options: dict[str, dict[str, Any]] = {
     "batch_linear_lhs": {
         "devices": ("xpu",),
         "min_fuse_set_size": 2,
         "static_widths_only": True,
         "max_fuse_tensor_bytes_batch_linear_lhs": 4 << 20,
+        "skip_user_visible": True,
     },
 }
 

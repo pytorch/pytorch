@@ -790,6 +790,10 @@ class BatchLinearLHSFusion(BatchFusion):
             bias_m, input_m, weight_m = node.args[:3]
         else:
             return None
+        if self.graph_search_options.get(
+            "skip_user_visible", False
+        ) and self._reaches_user_visible_output(node, node.graph):
+            return None
         if not self._is_input_2d(input_m) or not self._is_input_2d(weight_m):  # type: ignore[arg-type]
             return None
         # Leave int8 weight-only quantization patterns for the WOQ matcher.

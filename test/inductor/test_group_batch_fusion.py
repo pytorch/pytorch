@@ -642,6 +642,7 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(default["min_fuse_set_size"], 2)
         self.assertTrue(default["static_widths_only"])
         self.assertEqual(default["max_fuse_tensor_bytes_batch_linear_lhs"], 4 << 20)
+        self.assertTrue(default["skip_user_visible"])
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -885,9 +886,33 @@ class TestGroupBatchFusion(TestCase):
 
     def test_batch_linear_lhs_default_options_fuse_fake_xpu_graph(self):
         # Pin the shipped post_grad_fusion_options against the pass without
-        # an XPU device: a fake-xpu graph under the defaults must produce
-        # exactly one fusion. Dropping a shipped key, or making the guards
-        # or cap over-restrictive, turns this into zero.
+        # an XPU device: a fake-xpu graph with pointwise-consumed projections
+        # must fuse under the defaults. The next test pins the user-visible
+        # exclusion.
+        def f(x, w1, w2):
+            return torch.sigmoid(torch.mm(x, w1.t())), torch.sigmoid(
+                torch.mm(x, w2.t())
+            )
+
+        with FakeTensorMode():
+            fake_inputs = [
+                torch.randn(32, 64, device="xpu"),
+                torch.randn(16, 64, device="xpu"),
+                torch.randn(32, 64, device="xpu"),
+            ]
+            gm = make_fx(f)(*fake_inputs)
+
+        counters.clear()
+        opts = default_graph_search_options.copy()
+        opts.update(config.post_grad_fusion_options["batch_linear_lhs"])
+        rule = BatchLinearLHSFusion(graph_search_options=opts)
+        apply_group_batch_fusion(gm.graph, rule)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        counters.clear()
+
+    def test_batch_linear_lhs_default_options_skip_fake_xpu_user_visible(self):
+        # The shipped default leaves returned projections unfused so their
+        # contiguous output copies stay off the default path.
         def f(x, w1, w2):
             return torch.mm(x, w1.t()), torch.mm(x, w2.t())
 
@@ -904,7 +929,7 @@ class TestGroupBatchFusion(TestCase):
         opts.update(config.post_grad_fusion_options["batch_linear_lhs"])
         rule = BatchLinearLHSFusion(graph_search_options=opts)
         apply_group_batch_fusion(gm.graph, rule)
-        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
         counters.clear()
 
     @parametrize("dynamic", [False, True])
