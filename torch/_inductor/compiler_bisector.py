@@ -148,11 +148,11 @@ class CompilerBisector:
 
     @classmethod
     def get_dir(cls) -> str:
-        if cls.in_process_cache:
-            return os.path.join(cls.in_process_cache, SUBDIR_NAME)
-        if directory := os.environ.get("TORCH_BISECT_DIR"):
-            return directory
-        return os.path.join(cache_dir(), SUBDIR_NAME)
+        # TORCH_BISECT_DIR hands the parent's private root to probes across cache changes.
+        directory = (
+            cls.in_process_cache or os.environ.get("TORCH_BISECT_DIR") or cache_dir()
+        )
+        return os.path.join(directory, SUBDIR_NAME)
 
     @classmethod
     def write_lines_to_file(
@@ -581,7 +581,6 @@ class CompilerBisector:
                 stack.callback(setattr, cls, "bisection_enabled", cls.bisection_enabled)
                 cls.in_process_cache = directory
                 cls.bisection_enabled = True
-                stack.callback(cls.delete_bisect_status)
 
             return cls._do_bisect(fn, cli_interface)
 
@@ -739,6 +738,8 @@ def command_line_usage() -> None:
         print(HELP_TEXT)
         sys.exit(1)
 
+    # CLI sessions own their state; only probes consume the inherited handoff.
+    os.environ.pop("TORCH_BISECT_DIR", None)
     bisection_manager = CompilerBisector()
     command = sys.argv[1]
 
@@ -765,7 +766,7 @@ def command_line_usage() -> None:
         def test_function() -> bool:
             # Pass bisection state to subprocess via environment variables
             env = os.environ.copy()
-            env["TORCH_BISECT_DIR"] = bisection_manager.get_dir()
+            env["TORCH_BISECT_DIR"] = os.path.dirname(bisection_manager.get_dir())
             backend = bisection_manager.get_backend()
             subsystem = bisection_manager.get_subsystem()
 

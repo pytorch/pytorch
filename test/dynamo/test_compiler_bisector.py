@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import os
 from contextlib import contextmanager
 from importlib import import_module
 from pathlib import Path
@@ -146,13 +147,99 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.backend, "eager")
         self.assertEqual(out.subsystem, None)
 
+    def test_end_ignores_env_dir(self):
+        import subprocess
+        import sys
+
+        with TemporaryDirectory() as directory:
+            cache = Path(directory, "cache")
+            manual = cache / "bisect" / "bisect_status.txt"
+            manual.parent.mkdir(parents=True)
+            manual.write_text("backend=eager\nsubsystem=\n")
+            unrelated = Path(directory, "bisect", "bisect_status.txt")
+            unrelated.parent.mkdir()
+            unrelated.write_text("preserve")
+            env = dict(
+                os.environ,
+                TORCH_BISECT_DIR=directory,
+                TORCHINDUCTOR_CACHE_DIR=str(cache),
+            )
+
+            subprocess.run(
+                [sys.executable, "-m", "torch._inductor.compiler_bisector", "end"],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=60,
+            )
+
+            self.assertEqual(unrelated.read_text(), "preserve")
+            self.assertFalse(manual.parent.exists())
+
+    def test_run_session_cleanup(self):
+        import subprocess
+        import sys
+        import textwrap
+
+        probe = textwrap.dedent("""\
+            import sys
+            from pathlib import Path
+            from torch._inductor.compiler_bisector import CompilerBisector
+            from torch._inductor.utils import fresh_cache
+
+            with fresh_cache():
+                session = Path(CompilerBisector.get_dir())
+                status = session / "bisect_status.txt"
+                if status.read_text() != "backend=eager\\nsubsystem=\\n":
+                    raise RuntimeError("probe cannot read parent state")
+                print(f"session={session}", flush=True)
+            sys.exit(1)
+            """)
+        with TemporaryDirectory() as directory:
+            manual = Path(directory, "bisect", "bisect_status.txt")
+            manual.parent.mkdir()
+            manual.write_text("manual session")
+            unrelated = Path(directory, "unrelated")
+            unrelated.write_text("preserve")
+            env = dict(
+                os.environ,
+                TORCH_BISECT_DIR=directory,
+                TORCHINDUCTOR_CACHE_DIR=directory,
+            )
+            output = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "torch._inductor.compiler_bisector",
+                    "run",
+                    sys.executable,
+                    "-c",
+                    probe,
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=60,
+            )
+
+            self.assertIn("BisectionResult(backend='eager'", output.stdout)
+            lines = output.stdout.splitlines()
+            paths = [line[8:] for line in lines if line.startswith("session=")]
+            self.assertEqual(len(paths), 1)
+            self.assertFalse(Path(paths[0]).parent.exists())
+            self.assertEqual(manual.read_text(), "manual session")
+            self.assertEqual(unrelated.read_text(), "preserve")
+
     @parametrize("outcome", ["return", "exception", "interrupt"])
     def test_session_cleanup(self, outcome):
-        import os
-
         with (
             TemporaryDirectory() as directory,
-            patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": directory}),
+            patch.dict(
+                os.environ,
+                {"TORCHINDUCTOR_CACHE_DIR": directory, "TORCH_BISECT_DIR": directory},
+            ),
         ):
             manual = Path(directory, "bisect", "bisect_status.txt")
             manual.parent.mkdir()
@@ -173,9 +260,10 @@ class TestCompilerBisector(TestCase):
                 return False
 
             if error is None:
-                CompilerBisector.do_bisect(repro)
+                result = CompilerBisector.do_bisect(repro)
+                self.assertEqual(result.backend, "eager")
             else:
-                with self.assertRaises(error):
+                with self.assertRaisesRegex(error, "probe failed"):
                     CompilerBisector.do_bisect(repro)
 
             self.assertIsNotNone(session)
@@ -218,7 +306,6 @@ class TestCompilerBisectorDevice(TestCase):
         super().setUp()
 
     def test_bisect_run_debuginfo(self, device):
-        import os
         import subprocess
         from pathlib import Path
         from unittest.mock import patch
@@ -450,7 +537,6 @@ class TestCompilerBisectorCuda(TestCase):
     @skipIf(not has_triton(), "requires triton", device_type=("cuda"))
     def test_cudagraph_bisect_max(self, device):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""
-        import os
         from unittest.mock import patch
 
         from torch._dynamo.utils import counters
