@@ -9483,23 +9483,23 @@ class TritonScheduling(SIMDScheduling):
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
-        pins = (
-            self.tensor_descriptor_variant_pins(
-                DeviceProperties.create(V.graph.get_current_device_or_throw())
-            )
-            if allow_tma_variants and not is_scan
-            else []
+        pins = self.tensor_descriptor_variant_pins(
+            DeviceProperties.create(V.graph.get_current_device_or_throw())
         )
         if pins:
             from .nv_universal_gemm.nv_universal_gemm_scheduling import (
                 NVUniversalGemmScheduling,
             )
 
+            # Every unmeasured kernel keeps pointer loads, including a multi_kernel pool built below.
+            kernel_kwargs = {**kernel_kwargs, **pins[0]}
             previous_nodes = V.graph.scheduler.previous_nodes
-            # Host-side descriptors cannot materialize dynamic shapes, and device-side TMA trails the baseline.
+            # Callers that keep one choice, such as mix-order reductions, and scans get no pool; host descriptors cannot materialize dynamic shapes.
             # A kernel right after a PDL-enabled NVGEMM may launch with selective PDL, which no MultiKernel choice takes.
             if (
-                kernel_features.numel.free_symbols
+                not allow_tma_variants
+                or is_scan
+                or kernel_features.numel.free_symbols
                 or kernel_features.reduction_numel.free_symbols
                 or (
                     previous_nodes is not None
@@ -9508,14 +9508,13 @@ class TritonScheduling(SIMDScheduling):
                     )
                 )
             ):
-                kernel_kwargs = {**kernel_kwargs, **pins[0]}
                 pins = []
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
         choices = self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
         # A multi_kernel pool was asked for explicitly.
         if len(choices) > 1 or not pins:
             return choices
-        # The pinned choices replace the unpinned kernel, which Kernel.__init__ already counted.
+        # The pinned choices replace that kernel, which Kernel.__init__ already counted.
         metrics.generated_kernel_count -= 1
         choices = [
             kernel_type(*kernel_args, **{**kernel_kwargs, **pin}) for pin in pins
@@ -9547,6 +9546,7 @@ class TritonScheduling(SIMDScheduling):
             )
             # Picking by measured time is what these forbid.
             or config.deterministic
+            or torch.are_deterministic_algorithms_enabled()
             or config.batch_invariant
             # These force a sub-kernel by index into multi_kernel's own order.
             or config.triton.multi_kernel > 1

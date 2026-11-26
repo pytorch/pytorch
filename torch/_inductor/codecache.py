@@ -5930,11 +5930,15 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # We don't store the source code on the CachingAutotuner itself
         # since it can be very large.
         self.reload_kernel_from_src: Callable[[], Any] | None = None
+        # A multi-kernel and wait() can resolve the same future; precompile it once.
+        self._resolved = False
 
     def result(self, timeout: float | None = None) -> CachingAutotuner:
         # timeout is accepted for interface parity with other CodeCacheFuture
         # subclasses; this work is synchronous in-process and has no pending
         # future to wait on.
+        if self._resolved:
+            return self.static_autotuner
         if self.reload_kernel_from_src is None:
             raise AssertionError(
                 "reload_kernel_from_src must be set before calling result()"
@@ -5948,4 +5952,5 @@ class StaticAutotunerFuture(CodeCacheFuture):
                 reload_kernel=self.reload_kernel_from_src,
                 static_triton_bundle_key=None,  # no need to save again
             )
+            self._resolved = True
             return self.static_autotuner

@@ -132,10 +132,12 @@ class MultiKernelTest(TestCase):
 
     def test_failed_subkernels_remap_args_and_skip_single_survivor_benchmark(self):
         # A failed optional sub-kernel comes back as its exception, as one missing under no_compilation() does.
+        counters.clear()
         with torch.compiler.precompile.no_compilation():
             failed = AsyncCompile().triton(
                 "triton_missing", "def triton_missing():\n    pass\n", optional=True
             )
+        self.assertEqual(counters["precompile"]["forbidden_compilation"], 0)
         events = []
         call = self._benchmark_lock_call(events)
         k0, k1 = call._kernels

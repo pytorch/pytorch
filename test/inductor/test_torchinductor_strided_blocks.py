@@ -27,6 +27,7 @@ from torch.testing._internal.common_cuda import SM100OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     decorateIf,
+    DeterministicGuard,
     instantiate_parametrized_tests,
     MI200_ARCH,
     NAVI_ARCH,
@@ -2750,6 +2751,8 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
         ):
             with config.patch(patches):
                 self.assertEqual(pins(cuda), [], msg=str(patches))
+        with DeterministicGuard(True):
+            self.assertEqual(pins(cuda), [])
 
     def test_auto_and_all_pool_contents(self):
         def fn(x):
@@ -2808,6 +2811,37 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
         self.assertEqual(result, scale_rows(x, y), exact_device=True)
         # Only a single launch takes selective PDL, so a pooled consumer would show none.
         FileCheck().check_count("'launch_pdl': True", 1, exactly=True).run(code)
+
+    @config.patch({"split_reductions": False})
+    def test_mix_order_reductions_skip_the_pool(self):
+        if not config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def rmsnorm(x, w):
+            x_float = x.float()
+            rsqrt = torch.rsqrt((x_float * x_float).mean(-1, keepdim=True) + 1e-5)
+            return (x_float * rsqrt * w).to(x.dtype)
+
+        x = torch.randn(
+            32768, 768, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
+        )
+        w = torch.randn(768, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True)
+        dy = torch.randn_like(x)
+
+        def fwd_bwd(fn):
+            x.grad = w.grad = None
+            fn(x, w).backward(dy)
+            return x.grad, w.grad
+
+        expected = fwd_bwd(rmsnorm)
+        metrics.reset()
+        result, (_, bwd_code) = run_and_get_code(fwd_bwd, torch.compile(rmsnorm))
+        self.assertEqual(result, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        # RSPLIT_SIZE marks the mix-order kernel, which no pool measures, so it keeps pointer loads.
+        FileCheck().check("'RSPLIT_SIZE': 'constexpr'").check_not(
+            "'uses_tma': True"
+        ).check("@triton.jit").run(bwd_code)
 
     @config.patch(
         {
