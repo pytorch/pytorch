@@ -2759,8 +2759,11 @@ def generic_hasattr_str(
                 and inspect.getattr_static(obj.value, name, NO_SUCH_SUBOBJ)
                 is NO_SUCH_SUBOBJ
             )
-            guard = obj.source and not is_constant_source(obj.source)
-            if guard and not found_by_user_getattr:
+            if (
+                obj.source
+                and not is_constant_source(obj.source)
+                and not found_by_user_getattr
+            ):
                 install_guard(
                     obj.source.make_guard(
                         functools.partial(GuardBuilder.HASATTR, attr=name)
@@ -2770,7 +2773,8 @@ def generic_hasattr_str(
     except ObservedAttributeError:
         tx.exn_vt_stack.clear_current_exception()
         # No CPython analogue. A False answer rests on the attribute staying
-        # absent, and nothing else guards that.
+        # absent, and nothing else guards that. A constant source cannot be
+        # guarded and is assumed not to change.
         if obj.source and not is_constant_source(obj.source):
             install_guard(
                 obj.source.make_guard(
