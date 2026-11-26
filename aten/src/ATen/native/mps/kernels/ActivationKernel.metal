@@ -104,14 +104,10 @@ REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
 
 struct elu_functor {
   template <typename T>
-  inline T operator()(const T self_, const ELUParams<T> params) {
-    using op_T = opmath_t<T>;
-    auto alpha = static_cast<op_T>(params.alpha);
-    auto scale = static_cast<op_T>(params.scale);
-    auto input_scale = static_cast<op_T>(params.input_scale);
-    auto self = static_cast<op_T>(self_);
-    auto neg_res = alpha * (::metal::precise::exp(self * input_scale) - 1);
-    return static_cast<T>(scale * (self < 0 ? neg_res : self));
+  inline T operator()(const T self_, const ELUParams params) {
+    auto self = static_cast<float>(self_);
+    auto neg_res = params.alpha * c10::metal::expm1f(self * params.input_scale);
+    return static_cast<T>(params.scale * (self < 0 ? neg_res : self));
   }
 };
 
@@ -120,13 +116,12 @@ struct elu_backward_functor {
   inline T operator()(
       const T grad_output_,
       const T self_,
-      ELUBackwardParams<T> params) {
-    using op_T = opmath_t<T>;
-    auto alpha = static_cast<op_T>(params.alpha);
-    auto scale = static_cast<op_T>(params.scale);
-    auto input_scale = static_cast<op_T>(params.input_scale);
-    auto grad_output = static_cast<op_T>(grad_output_);
-    auto self = static_cast<op_T>(self_);
+      ELUBackwardParams params) {
+    auto alpha = params.alpha;
+    auto scale = params.scale;
+    auto input_scale = params.input_scale;
+    auto grad_output = static_cast<float>(grad_output_);
+    auto self = static_cast<float>(self_);
 
     if (params.is_result) {
       auto neg_coef = input_scale * (self + alpha * scale);
@@ -139,21 +134,13 @@ struct elu_backward_functor {
   }
 };
 
-#define REGISTER_ELU_OP(T)            \
-  typedef ELUParams<T> ELUParams_##T; \
-  REGISTER_UNARY_ALPHA_OP(elu, T, ELUParams_##T, T);
+REGISTER_UNARY_ALPHA_OP(elu, float, ELUParams, float);
+REGISTER_UNARY_ALPHA_OP(elu, half, ELUParams, half);
+REGISTER_UNARY_ALPHA_OP(elu, bfloat, ELUParams, bfloat);
 
-REGISTER_ELU_OP(float);
-REGISTER_ELU_OP(half);
-REGISTER_ELU_OP(bfloat);
-
-#define REGISTER_ELU_BACKWARD_OP(T)                   \
-  typedef ELUBackwardParams<T> ELUBackwardParams_##T; \
-  REGISTER_BINARY_ALPHA_OP(elu_backward, T, ELUBackwardParams_##T, T);
-
-REGISTER_ELU_BACKWARD_OP(float);
-REGISTER_ELU_BACKWARD_OP(half);
-REGISTER_ELU_BACKWARD_OP(bfloat);
+REGISTER_BINARY_ALPHA_OP(elu_backward, float, ELUBackwardParams, float);
+REGISTER_BINARY_ALPHA_OP(elu_backward, half, ELUBackwardParams, half);
+REGISTER_BINARY_ALPHA_OP(elu_backward, bfloat, ELUBackwardParams, bfloat);
 
 struct softplus_functor {
   template <typename T>
@@ -268,6 +255,28 @@ struct prelu_functor {
 REGISTER_BINARY_OP(prelu, float, float);
 REGISTER_BINARY_OP(prelu, half, half);
 REGISTER_BINARY_OP(prelu, bfloat, bfloat);
+
+struct prelu_backward_functor {
+  template <typename T>
+  inline T operator()(const T x, const T weight, const T grad) {
+    return float(x) > 0 ? grad : static_cast<T>(float(weight) * float(grad));
+  }
+};
+
+struct prelu_backward_weight_functor {
+  template <typename T>
+  inline T operator()(const T x, const T, const T grad) {
+    return float(x) > 0 ? T(0) : static_cast<T>(float(x) * float(grad));
+  }
+};
+
+REGISTER_TERNARY_OP(prelu_backward, float, float);
+REGISTER_TERNARY_OP(prelu_backward, half, half);
+REGISTER_TERNARY_OP(prelu_backward, bfloat, bfloat);
+
+REGISTER_TERNARY_OP(prelu_backward_weight, float, float);
+REGISTER_TERNARY_OP(prelu_backward_weight, half, half);
+REGISTER_TERNARY_OP(prelu_backward_weight, bfloat, bfloat);
 
 struct silu_functor {
   template <typename T>

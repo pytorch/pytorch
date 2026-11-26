@@ -1,6 +1,7 @@
 """Functional interface."""
 
 import dataclasses
+import enum
 import importlib
 import math
 import warnings
@@ -36,6 +37,22 @@ from torch.overrides import (
 # Set visibility of the bound enums to this module
 ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
+
+
+class ScalingAlgorithm(enum.IntEnum):
+    r"""Algorithm used to compute and encode block scales for :func:`quantize_tensor`."""
+
+    MXFP_E8M0_RU = 0
+    r"""MXFP E8M0 round-up scaling, described in `Algorithm 1
+    <https://arxiv.org/pdf/2506.08027>`_.
+
+    The block's maximum absolute input value, divided by the largest
+    representable quantized value, is rounded up to E8M0. If any input in the
+    block is ``NaN`` or ``+/-Inf``, the scale is E8M0 ``NaN`` (byte ``0xff``).
+    An all-zero block instead receives the smallest E8M0 scale,
+    :math:`2^{-127}` (byte ``0x00``), because E8M0 has no zero encoding.
+    """
+
 
 if TYPE_CHECKING:
     from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
@@ -420,13 +437,13 @@ See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
     input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
-    kernel_size: size of the pooling region. Can be a single number or a
+    kernel_size: size of the pooling region. Can be a single number, a single-element tuple or a
       tuple `(kT, kH, kW)`
-    stride: stride of the pooling operation. Can be a single number or a
+    stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`. Should be at most half
-      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
+      single number, a single-element tuple or a tuple `(padT, padH, padW)`.
+      Should be at most half of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
       Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
@@ -4525,7 +4542,7 @@ def multilabel_margin_loss(
                                   Default: 'mean'.
 
     Returns:
-       Tensor: Mutilabel margin loss.
+       Tensor: Multilabel margin loss.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -4602,6 +4619,9 @@ def multilabel_soft_margin_loss(
     Args:
        input (Tensor): Predicted values.
        target (Tensor): Ground truth values.
+       weight (Tensor, optional): a manual rescaling weight given to each
+                               class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+                               treated as if having all ones.
        size_average (bool, optional): Deprecated (see :attr:`reduction`).
        reduce (bool, optional): Deprecated (see :attr:`reduction`).
        reduction (str, optional): Specifies the reduction to apply to the output:
@@ -4610,7 +4630,7 @@ def multilabel_soft_margin_loss(
                                   Default: 'mean'.
 
     Returns:
-       Tensor: Mutilabel soft margin loss.
+       Tensor: Multilabel soft margin loss.
     """
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
@@ -5085,7 +5105,8 @@ def interpolate(  # noqa: F811
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for resizing are: `nearest`, `linear` (3D-only),
-    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `lanczos` (4D-only, CPU only), `area`, `nearest-exact`
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `lanczos` (4D-only, CPU only), `area`, `nearest-exact`,
+    `inter-area` (4D-only, CPU only)
 
     Args:
         input (Tensor): the input tensor
@@ -5095,7 +5116,8 @@ def interpolate(  # noqa: F811
             its length has to match the number of spatial dimensions; `input.dim() - 2`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
-            ``'trilinear'`` | ``'lanczos'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
+            ``'trilinear'`` | ``'lanczos'`` | ``'area'`` | ``'nearest-exact'`` | ``'inter-area'``.
+            Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
             If set to ``True``, the input and output tensors are aligned by the
@@ -5132,6 +5154,15 @@ def interpolate(  # noqa: F811
         and ``align_corners=False``, the result matches PIL's ``Image.LANCZOS`` resampling filter.
 
     .. note::
+        Mode ``mode='inter-area'`` matches OpenCV's ``cv2.resize`` with ``interpolation=cv2.INTER_AREA``.
+        With ``size``, it matches ``cv2.resize(x, (w, h))``. With ``scale_factor``, it is used like OpenCV's
+        ``fx`` / ``fy`` (unless ``recompute_scale_factor=True``), but the output size is
+        ``floor(input_size * scale_factor)`` as for the other modes, where OpenCV rounds to the nearest.
+        It only supports 4-D input and CPU, and doesn't support ``align_corners``, ``antialias``,
+        or autograd (backward or forward-mode AD).
+        For ``uint8`` inputs, rounding can cause differences from OpenCV.
+
+    .. note::
         Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation
         algorithms and fixes known issues with ``mode='nearest'``. This mode is introduced to keep
         backward compatibility.
@@ -5159,7 +5190,7 @@ def interpolate(  # noqa: F811
             antialias=antialias,
         )
 
-    if mode in ("nearest", "area", "nearest-exact"):
+    if mode in ("nearest", "area", "nearest-exact", "inter-area"):
         if align_corners is not None:
             raise ValueError(
                 "align_corners option can only be set with the "
@@ -5288,6 +5319,10 @@ def interpolate(  # noqa: F811
         # pyrefly: ignore [bad-argument-type]
         return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
 
+    if input.dim() == 4 and mode == "inter-area":
+        # pyrefly: ignore [bad-argument-type]
+        return torch._C._nn._upsample_inter_area2d(input, output_size, scale_factors)
+
     if input.dim() == 3 and mode == "area":
         if output_size is None:
             raise AssertionError("output_size is unexpectedly None")
@@ -5325,8 +5360,13 @@ def interpolate(  # noqa: F811
             )
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
+        # Use the native path only for non-HIP CUDA; preserve fallbacks elsewhere.
         if not torch.jit.is_scripting():
-            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+            if (
+                not input.is_cpu
+                and not (input.is_cuda and torch.version.hip is None)
+                and torch.are_deterministic_algorithms_enabled()
+            ):
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
@@ -5424,10 +5464,15 @@ def interpolate(  # noqa: F811
         raise NotImplementedError("Got 5D input, but linear mode needs 3D input")
     if input.dim() == 5 and mode == "bilinear":
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
+    if input.dim() == 3 and mode == "inter-area":
+        raise NotImplementedError("Got 3D input, but inter-area mode needs 4D input")
+    if input.dim() == 5 and mode == "inter-area":
+        raise NotImplementedError("Got 5D input, but inter-area mode needs 4D input")
 
     raise NotImplementedError(
         "Input Error: Only 3D, 4D and 5D input Tensors supported"
         f" (got {input.dim()}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | lanczos | area | nearest-exact"
+        " | inter-area (4D only)"
         f" (got {mode})"
     )
 
@@ -5643,7 +5688,7 @@ def grid_sample(
             used internally will actually be trilinear. However, when the input is 4-D,
             the interpolation mode will legitimately be bilinear. Likewise
             ``mode='bicubic'`` is tricubic on a 5-D input, the separable cubic kernel
-            extended over the third axis; CPU and CUDA, ROCm included, implement the 5-D case.
+            extended over the third axis; CPU, XPU and CUDA, ROCm included, implement the 5-D case.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -6178,7 +6223,7 @@ def normalize(
     input: Tensor,
     p: float = 2.0,
     dim: int = 1,
-    eps: float = 1e-12,
+    eps: float | None = None,
     out: Tensor | None = None,
 ) -> Tensor:
     r"""Perform :math:`L_p` normalization of inputs over specified dimension.
@@ -6195,7 +6240,10 @@ def normalize(
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int or tuple of ints): the dimension to reduce. Default: 1
-        eps (float): small value to avoid division by zero. Default: 1e-12
+        eps (float, optional): small value to avoid division by zero. If not specified,
+            uses the machine epsilon of the norm's dtype, ``torch.finfo(dtype).eps``.
+            The norm's dtype can differ from the input's, e.g. it is real for complex
+            inputs and float32 under CUDA or XPU autocast. Default: ``None``
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
@@ -6203,11 +6251,14 @@ def normalize(
         return handle_torch_function(
             normalize, (input, out), input, p=p, dim=dim, eps=eps, out=out
         )
+    norm = input.norm(p, dim, keepdim=True)
+    if eps is None:
+        eps = torch.finfo(norm.dtype).eps
     if out is None:
-        denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
+        denom = norm.clamp_min(eps).expand_as(input)
         return input / denom
     else:
-        denom = input.norm(p, dim, keepdim=True).clamp_min_(eps).expand_as(input)
+        denom = norm.clamp_min_(eps).expand_as(input)
         return torch.div(input, denom, out=out)
 
 
@@ -7271,6 +7322,222 @@ def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
     return [li.value for li in l]
 
 
+def quantize_tensor(
+    input: Tensor,
+    *,
+    dim: tuple[int, int],
+    scaling_type: ScalingType,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: ScalingAlgorithm,
+    swizzle_type: SwizzleType,
+    scaling_type_use_square_block_size: bool = False,
+) -> tuple[Tensor, Tensor]:
+    r"""quantize_tensor(input, *, dim, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
+
+    Subdivide ``input`` into 2D regions of ``scaling_type`` along the axes
+    specified in ``dim``, then quantize according to ``scaling_algorithm``
+    and ``qdata_dtype`` and return ``(qdata, scale)`` for use with
+    :func:`scaled_mm`.
+    Currently supported formats: ``mxfp8``. See the code samples at the bottom
+    of this docblock for how to configure supported formats.
+
+    A swizzled scale layout is modeled as packed ``[1, L]`` over the requested
+    quantization dims, with ``L`` being swizzle-specific.  For example, for an input
+    of shape ``(B, M, K)`` and ``dim=(1, 2)`` and
+    ``swizzle_type=SwizzleType.SWIZZLE_32_4_4``, the output scale shape will be
+    ``(B, 1, ceil_div(M, 128) * ceil_div(K, 128) * 32 * 16)``.
+
+    Both outputs preserve the axis positions of the input. For both outputs,
+    the quantization axes from ``dim`` form contiguous slices when viewed
+    in ``dim=(outer, inner)`` order, with the inner dim varying the fastest
+    and outer next-fastest. For example:
+
+    - ``mxfp8`` unswizzled quantization of input shaped ``(M, K)`` with
+      strides ``(K, 1)`` and ``dim=(0, 1)`` will result in ``qdata`` with
+      shape ``(M, K)`` and strides ``(K, 1)``, and ``scale`` with
+      shape ``(M, K // 32)`` and strides ``(K // 32, 1)``.
+    - ``mxfp8`` swizzled quantization of input shaped ``(M, K)`` with
+      strides ``(K, 1)`` and ``dim=(1, 0)`` will result in ``qdata`` with
+      shape ``(M, K)`` and strides ``(1, M)``, and ``scale`` with
+      shape ``(L, 1)`` and strides ``(1, L)``, with ``L`` being
+      swizzle-specific.
+    - ``mxfp8`` swizzled quantization of input shaped ``(K, M)`` with
+      strides ``(1, K)`` and ``dim=(0, 1)`` will result in ``qdata`` with
+      shape ``(K, M)`` and strides ``(M, 1)``, and ``scale`` with
+      shape ``(1, L)`` and strides ``(L, 1)``, with ``L`` being
+      swizzle-specific.
+    - ``mxfp8`` swizzled quantization of input shaped ``(B, K, N)`` with
+      strides ``(N * K, 1, K)`` and ``dim=(2, 1)`` will result in ``qdata``
+      with shape ``(B, K, N)`` and strides ``(N * K, 1, K)`` and ``scale``
+      with shape ``(B, L, 1)`` and strides ``(L, 1, L)``, with ``L`` being
+      swizzle-specific.
+
+    Automatic autograd is not supported for this op, users are encouraged to define
+    their own derivative.
+
+    This implementation currently requires an NVIDIA SM100 or newer GPU and the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. The hardware support may
+    expand in the future.
+
+    Args:
+        input (Tensor): Tensor with at least two dimensions and dtype
+          ``float16``, ``bfloat16``, or ``float32``.
+        dim (tuple[int, int]): Ordered outer and inner quantization axes.
+        scaling_type (ScalingType): The size of the local region corresponding to
+          a single inner scale, as well as the layout of the output inner scale.
+          Currently supported values: ``ScalingType.BlockWise1x32``.
+        qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
+          data. Currently supported values: ``torch.float8_e4m3fn``. Special value
+          handling is format dependent. For example, for ``mxfp8`` an input
+          ``NaN`` or ``Inf`` makes every quantized value sharing its scale ``NaN``;
+          all-zero blocks quantize to zero.
+        scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
+          local region of the ``input`` (with its size specified by ``scaling_type``)
+          to the inner scale and inverse inner scale corresponding to that region.
+          Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
+        swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
+          Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
+          ``SwizzleType.SWIZZLE_32_4_4``.
+        scaling_type_use_square_block_size (bool, optional): When ``True``,
+          modify the size of the local region corresponding to a single scale
+          value to be a square (for example, modify ``1x32`` to be ``32x32``).
+          Note that the output scale size is still controlled by ``scaling_type``
+          and ``swizzle_type``. If this flag is ``True``, currently only
+          ``SwizzleType.SWIZZLE_32_4_4`` is supported. Default: ``False``.
+
+    Returns:
+        tuple[Tensor, Tensor]: Quantized data in the logical input shape and
+          scales with the dtype and layout honoring the ``scaling_algorithm``,
+          ``scaling_type``, and ``swizzle_type`` settings. For example, for
+          ``mxfp8`` on a 2D tensor with ``dim=(0, 1)``, unswizzled scales have
+          shape ``(rows, cols // 32)``; swizzled scales have shape ``(1, L)``, where
+          ``L = 512 * ceil(rows / 128) * ceil(cols / 128)``. Batch axes retain
+          their positions in both results.
+
+    Examples::
+
+        >>> # xdoctest: +SKIP("requires NVIDIA SM100+ and CuTeDSL")
+        >>> import torch
+        >>> import torch.nn.functional as F
+        >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        >>> mxfp8_kwargs = dict(
+        ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     scaling_algorithm=F.ScalingAlgorithm.MXFP_E8M0_RU,
+        ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
+        ... )
+        >>> # mxfp8 dim-k with swizzled scales
+        >>> qdata_k, scale_k = F.quantize_tensor(x, dim=(-2, -1), **mxfp8_kwargs)
+        >>> # mxfp8 dim-m on the same tensor
+        >>> qdata_m, scale_m = F.quantize_tensor(x, dim=(-1, -2), **mxfp8_kwargs)
+        >>> # mxfp8 dim-k with scales shared over 32x32 blocks
+        >>> qdata_square, scale_square = F.quantize_tensor(
+        ...     x, dim=(-2, -1), **mxfp8_kwargs, scaling_type_use_square_block_size=True
+        ... )
+        >>> # mxfp8 dim-k with unswizzled scales
+        >>> plain_kwargs = {**mxfp8_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
+        >>> qdata_plain, scale_plain = F.quantize_tensor(x, dim=(-2, -1), **plain_kwargs)
+    """
+    # TODO(future PR): add torch.export support for the native quantization op.
+    outputs = torch.ops.aten._quantize_tensor.default(
+        input,
+        dim=dim,
+        scaling_type=scaling_type.value,
+        qdata_dtype=qdata_dtype,
+        scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
+        swizzle_type=swizzle_type.value,
+        scaling_type_use_square_block_size=scaling_type_use_square_block_size,
+    )
+    return outputs[0], outputs[1]
+
+
+def quantize_tensor_dual(
+    input: Tensor,
+    *,
+    dim: tuple[int, int],
+    scaling_type: ScalingType,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: ScalingAlgorithm,
+    swizzle_type: SwizzleType,
+    scaling_type_use_square_block_size: bool = False,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    r"""quantize_tensor_dual(input, *, dim, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
+
+    Subdivide ``input`` into 2D regions of ``scaling_type`` along the axes
+    specified in ``dim`` as well as ``dim[::-1]``, then quantize according to
+    ``scaling_algorithm`` and ``qdata_dtype`` and return
+    ``(qdata0, scale0, qdata1, scale1)`` for use with :func:`scaled_mm`.
+
+    See :func:`quantize_tensor` to quantize along only one direction.
+
+    Automatic autograd is not supported for this op, users are encouraged to define
+    their own derivative.
+
+    This implementation currently requires an NVIDIA SM100 or newer GPU and the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. The hardware support may
+    expand in the future.
+
+    Args:
+        input (Tensor): Tensor with at least two dimensions and dtype
+          ``float16``, ``bfloat16``, or ``float32``.
+        dim (tuple[int, int]): Ordered outer and inner quantization axes.
+        scaling_type (ScalingType): The size of the local region corresponding to
+          a single inner scale, as well as the layout of the output inner scale.
+          Currently supported values: ``ScalingType.BlockWise1x32``.
+        qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
+          data. Currently supported values: ``torch.float8_e4m3fn``. Special value
+          handling is format dependent. For example, for ``mxfp8`` an input
+          ``NaN`` or ``Inf`` makes every quantized value sharing its scale ``NaN``;
+          all-zero blocks quantize to zero.
+        scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
+          local region of the ``input`` (with its size specified by ``scaling_type``)
+          to the inner scale and inverse inner scale corresponding to that region.
+          Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
+        swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
+          Currently supported values: ``SwizzleType.SWIZZLE_32_4_4``.
+        scaling_type_use_square_block_size (bool, optional): When ``True``,
+          modify the size of the local region corresponding to a single scale
+          value to be a square (for example, modify ``1x32`` to be ``32x32``).
+          Note that the output scale size is still controlled by ``scaling_type``
+          and ``swizzle_type``. Note: currently only ``False`` is supported.
+          Default: ``False``.
+
+    Returns:
+        tuple[Tensor, Tensor, Tensor, Tensor]: ``(qdata, scale, qdata_reverse, scale_reverse)``.
+          For example, for input of shape ``(M, K)`` and the
+          ``mxfp8`` format, both quantized tensors have shape ``(M, K)``.
+          When ``dim=(0, 1)``, the dim-K result is contiguous; the dim-M result has strides
+          ``(1, M)``. Their E8M0 scales have shapes ``(1, L)`` and
+          ``(L, 1)``, respectively, where
+          ``L = 512 * ceil(M / 128) * ceil(K / 128)``.
+
+    Examples::
+
+        >>> # xdoctest: +SKIP("requires NVIDIA SM100+ and CuTeDSL")
+        >>> import torch
+        >>> import torch.nn.functional as F
+        >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        >>> mxfp8_kwargs = dict(
+        ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     scaling_algorithm=F.ScalingAlgorithm.MXFP_E8M0_RU,
+        ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
+        ... )
+        >>> # mxfp8 dim-km with swizzled scales
+        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, dim=(-2, -1), **mxfp8_kwargs)
+    """
+    outputs = torch.ops.aten._quantize_tensor_dual.default(
+        input,
+        dim=dim,
+        scaling_type=scaling_type.value,
+        qdata_dtype=qdata_dtype,
+        scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
+        swizzle_type=swizzle_type.value,
+        scaling_type_use_square_block_size=scaling_type_use_square_block_size,
+    )
+    return outputs[0], outputs[1], outputs[2], outputs[3]
+
+
 def scaled_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -7292,6 +7559,21 @@ def scaled_mm(
     Applies a scaled matrix-multiply, mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
+    Packed MNxK4 scaling uses matching ``BlockWise1x32`` or ``BlockWise1x128`` recipes
+    with ``SWIZZLE_MN_K4`` on both inputs. Inputs must be ``float8_e4m3fn`` or
+    ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
+    It requires cuBLASLt 13.8.1 or later
+    (bundled with CUDA 13.4) on SM10.x/SM11.x, and supports bfloat16, float16, and
+    float32 outputs. Bias requires bfloat16 or float16 output with matching dtype.
+    ``use_fast_accum`` is forwarded to cuBLASLt for MNxK4.
+    MNxK4 requires row-major ``mat_a`` and column-major ``mat_b``.
+    Scales are contiguous ``float8_e8m0fnu`` tensors with 16-byte-aligned data pointers.
+    For block size ``B`` (32 or 128) and outer extent ``O`` (M for A, N for B),
+    the physical row-major byte order is ``[ceil(K / (4 * B)), round_up(O, 4), 4]``:
+    four consecutive K-block scales are packed together for each outer position.
+    Each scale buffer has ``16 * ceil(O / 4) * ceil(K / (4 * B))`` elements.
+    M need not be a multiple of four; K and N must be divisible by 16. Padding entries are ignored.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled
@@ -7303,7 +7585,19 @@ def scaled_mm(
         output_dtype: dtype used for the output tensor
         contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
             dimensions are also accepted).
-        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+        use_fast_accum: Request tensor-core fast accumulation for supported recipes.
+            Hopper ``BlockWise1x128``/``BlockWise128x128`` require ``False``;
+            MNxK4 forwards the flag to cuBLASLt.
+
+    .. note::
+        ``SwizzleType.SWIZZLE_128`` is the gfx1250 layout for MX (block 32)
+        and NVFP4 (block 16). Each block scale has
+        ``rows * round_up(K / block, 128 / block)`` elements: K-groups of
+        ``128 / block`` scales, stored group-major. When ``K`` is a multiple
+        of 128 and ``K > 128``, linear scales have that same count, so passing
+        them with ``SWIZZLE_128`` is accepted and the result is wrong. Reorder
+        the scales. ``torch._scaled_mm`` cannot name a swizzle; on gfx1250 use
+        this function and pass ``SWIZZLE_128``.
     """
 
     scale_a = _expand_single_value(scale_a)
@@ -7480,6 +7774,41 @@ def scaled_grouped_mm(
     Applies a grouped scaled matrix-multiply, grouped_mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
+    When ``scale_recipe_a`` and ``scale_recipe_b`` are each the single recipe ``TensorWise``,
+    each float32 scale contains either a single value shared by all groups
+    or one value per group in a contiguous 1D tensor. Each input may use either scale layout.
+    Both inputs must be ``float8_e4m3fn`` or ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
+    At most 1024 groups are supported.
+    TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored.
+    It supports bfloat16, float16, and float32 outputs.
+
+    Hopper block scaling requires CUDA 13.4 or later on SM9.x and supports recipe pairs
+    1x128/1x128, 1x128/128x128, and 128x128/1x128 with float32 scales and two
+    ``float8_e4m3fn`` inputs. Each group packs
+    its scales separately. For outer extent ``O`` (M for A, N for B), let ``L = ceil(K / 128)``.
+    A 1x128 group stores ``O * L`` values with the outer dimension contiguous; a 128x128
+    group stores ``round_up(L, 4) * ceil(O / 128)`` values with the padded K-block dimension
+    contiguous. Scales are contiguous, with 16-byte-aligned group starts. A 3D operand uses
+    shape ``(groups, values_per_group)``; a 2D operand uses a 1D tensor concatenating
+    the flattened group scales in offset order, covering only the groups selected by ``offs``. M and N must be multiples
+    of 4. These recipes support bfloat16, float16, and float32 outputs and require
+    ``use_fast_accum=False``. Swizzle metadata must be omitted or ``NO_SWIZZLE``.
+
+    Packed MNxK4 scaling uses the recipes, byte order, element count, and alignment
+    described in :func:`scaled_mm`, independently for each group. A 3D operand uses
+    scale shape ``(groups, elements_per_group)``; a 2D operand concatenates each
+    group's flattened scale buffer in offset order. Each group starts at a 16-byte
+    boundary. Per-group M need not be a multiple of four. K and the total N
+    dimension must be divisible by 16, including when ``offs`` splits N. Group output
+    starts must be 16-byte aligned: starting N offsets must be multiples of 8
+    for bfloat16/float16 output or 4 for float32 output. Invalid group output
+    alignment triggers a device assertion. It requires
+    cuBLASLt 13.8.1 or later (bundled with CUDA 13.4) on SM10.x/SM11.x and accepts
+    bfloat16, float16, and float32 outputs. ``use_fast_accum`` is forwarded to cuBLASLt
+    for MNxK4.
+
+    Other recipes require bfloat16 output.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled
@@ -7489,9 +7818,13 @@ def scaled_grouped_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         offs: optional offsets into the source tensors denoting group start indices
-        output_dtype: dtype used for the output tensor
+        output_dtype: output dtype; the cuBLASLt recipes described above (including ``TensorWise``
+          alone on both inputs) accept bfloat16, float16, or float32; other recipes require bfloat16
         contraction_dim: describe which dimensions are :math:`K` in the matmul.
-        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+        use_fast_accum: Request tensor-core fast accumulation for cuBLASLt recipes
+            (including MNxK4) and CUDA RowWise scaling. Hopper
+            ``BlockWise1x128``/``BlockWise128x128`` require ``False``.
+            MSLK recipes and ROCm ignore this flag.
     """
 
     scale_a = _expand_single_value(scale_a)

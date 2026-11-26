@@ -9,7 +9,14 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS, xfailIf
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_CI,
+    IS_FBCODE,
+    IS_WINDOWS,
+    xfailIf,
+)
+from torch.testing._internal.inductor_utils import RUN_CPU
 
 
 # TORCHINDUCTOR_LITE_MODE=1 (the inductor_aoti_fallback CI config) falls back to
@@ -24,6 +31,16 @@ if IS_WINDOWS and IS_CI:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+if not RUN_CPU:
+    # Every test in this file is a CPU test.
+    _reason = (
+        "CPU tests not selected: no C++ compiler, or the device filter excludes cpu"
+    )
+    if __name__ == "__main__":
+        sys.stderr.write(_reason + "\n")
+        sys.exit(0)
+    raise unittest.SkipTest(_reason)
 
 try:
     try:
@@ -168,6 +185,32 @@ class AOTInductorArrayRefTestsTemplate(AOTInductorTestsTemplate):
             r"cached_output_\d+\{RAIIAtenTensorHandle\("
         ).run(code)
 
+    def test_minimal_arrayref_rejects_non_dense_constant_output(self):
+        # See NOTE(arrayref_constant_output).
+        if not self.use_minimal_arrayref_interface:
+            self.skipTest("only the minimal arrayref interface wraps outputs")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                return (x + 1, self.cst[:, :6].t())
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(5, device=self.device),)
+        with (
+            config.patch(
+                {
+                    "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                    "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+                }
+            ),
+            self.assertRaisesRegex(Exception, "Returning a non-dense constant"),
+        ):
+            AOTIRunnerUtil.compile(model, example_inputs)
+
     def test_simple_v2_interface(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -300,6 +343,14 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
     # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
+    # Native lowering has existing while_loop ArrayRefTensor/handle conversion
+    # gaps. ATen fallback (lite) mode supports these cases and must not xfail.
+    **{
+        f"test_while_loop_captured_view_handle_lifetime_view_kind_{view_kind}_iterations_{iterations}": fail_stack_allocation()
+        for view_kind in ("repeat", "dtype", "slice")
+        for iterations in (0, 1, 3)
+        if not LITE_MODE
+    },
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
     "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
@@ -335,6 +386,14 @@ CPU_TEST_FAILURES = {
     ),
     # When running test_seq with test_issue_140766, the process segfaults
     "test_seq": fail_stack_allocation(is_skip=True),
+    # Non-dense constant outputs are rejected; see
+    # test_minimal_arrayref_rejects_non_dense_constant_output.
+    "test_return_non_dense_view_constant": fail_minimal_arrayref_interface(
+        is_skip=True
+    ),
+    "test_constant_folding_return_non_dense_view": fail_minimal_arrayref_interface(
+        is_skip=True
+    ),
 }
 
 # Additional failures under lite mode, tracked in
@@ -367,6 +426,9 @@ LITE_MODE_TEST_FAILURES = {
     "test_quanatized_int8_linear": fail_stack_allocation(),
     # Wrong results
     "test_return_view_constant": fail_stack_allocation(),
+    "test_return_non_dense_view_constant": fail_stack_allocation(),
+    # The constant view is a fallback kernel output, so it is not rejected
+    "test_minimal_arrayref_rejects_non_dense_constant_output": fail_minimal_arrayref_interface(),
     # Expects split/cat merge passes, which lite mode disables
     "test_simple_split": fail_stack_allocation(),
 }
@@ -384,6 +446,7 @@ if LITE_MODE:
 
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -404,6 +467,7 @@ copy_tests(
 class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface(
     TestCase
 ):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -433,6 +497,8 @@ if IS_FBCODE:
 
 
 class TestCppWrapperCpuSelection(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     # https://github.com/pytorch/pytorch/issues/199205
     @xfailIf(LITE_MODE)
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})

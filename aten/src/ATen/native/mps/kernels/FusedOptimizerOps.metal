@@ -1,9 +1,5 @@
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
-
-using metal::max;
-bfloat max(bfloat a, bfloat b) {
-  return a > b ? a : b;
-}
 
 #define kmaxThreadGroups 32
 #define kmaxTensors 32
@@ -108,7 +104,7 @@ inline void adam_math_amsgrad(
   const auto bias_correction2 =
       1 - metal::precise::pow(beta2, casted_state_steps);
   const auto bias_correction2_sqrt = metal::precise::sqrt(bias_correction2);
-  max_exp_avg_sq = max(max_exp_avg_sq, exp_avg_sq);
+  max_exp_avg_sq = c10::metal::max(max_exp_avg_sq, exp_avg_sq);
 
   const auto denom =
       (metal::precise::sqrt(max_exp_avg_sq) / bias_correction2_sqrt) + eps;
@@ -116,8 +112,10 @@ inline void adam_math_amsgrad(
   grad = grad_;
 }
 
+// Without always_inline this gets outlined (a call per element), which makes
+// the half and bfloat Adam kernels 1.5x slower
 template <typename T, typename state_steps_t, ADAM_MODE adam_mode>
-inline void adam_math(
+inline __attribute__((always_inline)) void adam_math(
     device T& param,
     device T& grad,
     device T& exp_avg,

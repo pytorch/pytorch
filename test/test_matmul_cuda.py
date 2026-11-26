@@ -14,7 +14,7 @@ from itertools import product
 
 import torch
 import torch.nn.functional as F
-from torch.profiler import profile, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity, supported_activities
 
 from torch.quantization._quantized_conversions import (
     pack_int4_to_int8,
@@ -24,21 +24,23 @@ from torch.quantization._quantized_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
-    _get_torch_cuda_version,
     BF16X9_API_SUPPORTED,
     BF16X9_SUPPORTED,
     blas_library_context,
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM,
     SM90OrLater,
     SM100OrLater,
-    SM120OrLater,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
+    preserves_device_selection,
+    onlyOn,
     skipCUDAIfNotRocm,
+    skipXPU,
     tol as xtol,
     toleranceOverride,
 )
@@ -194,6 +196,9 @@ def _float32_matrix_from_bits(bits, device):
 
 
 class TestMatmulCuda(InductorTestCase):
+    setUpClass = classmethod(preserves_device_selection(InductorTestCase.setUpClass.__func__))
+
+    @preserves_device_selection
     def setUp(self):
         super().setUp()
         # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
@@ -628,6 +633,7 @@ class TestMatmulCuda(InductorTestCase):
                 self.assertEqual(output, a.expand_as(output), atol=1e-3, rtol=0)
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    @unittest.skipIf(torch.version.cuda is None or not IS_SM90, "cublasSetSmCountTarget requires CUDA and sm90")
     def test_legacy_cublas_honors_sm_carveout(self, device):
         if torch.version.cuda is None or not IS_SM90:
             raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA and sm90")
@@ -670,6 +676,7 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(no_carveout, no_carveout_again)
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    @unittest.skipIf(torch.version.cuda is None or not IS_SM90, "cublasSetSmCountTarget requires CUDA and sm90")
     def test_sm_carveout_invalid_value_throws(self, device):
         if torch.version.cuda is None or not IS_SM90:
             raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA and sm90")
@@ -1053,13 +1060,15 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
 
     # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(TEST_CUDA and not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
-    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
-        device = "cuda"
+    def test_grouped_gemm_compiled(self, device, op, a_row_major, b_row_major, max_autotune):
+        if max_autotune and torch.device(device).type == "xpu":
+            self.skipTest("XPU has no Triton grouped_mm template, only the ATEN kernel")
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
 
@@ -1298,9 +1307,7 @@ class TestMatmulCuda(InductorTestCase):
             return torch.cat(outputs, dim=1)
         return torch.stack([torch.mm(a, b) for a, b in zip(A, B)])
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
-    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 3), "cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
-    @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM, "requires CUDA >= 13.3 and SM9.x-SM11.x")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("jagged_size", [31, 32])
     @parametrize("a_row_major", [False, True])
@@ -1313,9 +1320,7 @@ class TestMatmulCuda(InductorTestCase):
             C = torch._grouped_mm(A, B, offs=offs)
         self.assertEqual(C, C_ref)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
-    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 3), "cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
-    @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM, "requires CUDA >= 13.3 and SM9.x-SM11.x")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("jagged_size", [31, 32])
     @parametrize("a_row_major", [False, True])
@@ -1333,10 +1338,9 @@ class TestMatmulCuda(InductorTestCase):
             C = f(A, B, offs)
         self.assertEqual(C, C_ref)
 
-    def test_grouped_gemm_doubly_non_contiguous(self):
+    def test_grouped_gemm_doubly_non_contiguous(self, device):
         # Verify that doubly-non-contiguous inputs (neither stride is 1)
         # are rejected by _grouped_mm_validate_inputs.
-        device = "cuda"
         dtype = torch.bfloat16
         k = 32
         ngroups = 5
@@ -1351,9 +1355,7 @@ class TestMatmulCuda(InductorTestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid strides/sizes"):
             torch._grouped_mm(A, B, offs=offs)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
-    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 3), "cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
-    @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM, "requires CUDA >= 13.3 and SM9.x-SM11.x")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/3d"])
     def test_grouped_gemm_cublaslt_int64_indexing(self, op):
         # Verify that the int64 indexing path works correctly when a
@@ -1416,14 +1418,21 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(C, C_ref)
 
     @skipCUDAIfNotRocm
+    @skipXPU
     # Fails with triton 3.7
     @parametrize("backend", ["ck", "ck_tile"])
     def test_grouped_gemm_rocm_ck_flag(self, backend):
+        if ProfilerActivity.CUDA not in supported_activities():
+            self.skipTest("CUDA profiling is not supported")
+
         # env var that enables the backend, and a substring of its kernel name for both equal and unequal K
         env_var, CK_EQUAL_K_HINT, CK_UNEQUAL_K_HINT = {
             "ck": ("ROCM_ALLOW_GROUP_GEMM_CK", "kernel_grouped_gemm_xdl_splitk", "kernel_grouped_gemm_xdl_splitk"),
-            "ck_tile": ("ROCM_ALLOW_GROUP_GEMM_CK_TILE", "ck_tile::GroupedGemmKernel", "ck_tile::GroupedGemmKernel"),
+            # matches ck_tile::GroupedGemmKernel and the StreamingGroupedGemmKernel built on it
+            "ck_tile": ("ROCM_ALLOW_GROUP_GEMM_CK_TILE", "GroupedGemmKernel", "GroupedGemmKernel"),
         }[backend]
+        # ck_tile is on by default and is tried before ck, so the other backend is turned off
+        other_env_var = {"ck": "ROCM_ALLOW_GROUP_GEMM_CK_TILE", "ck_tile": "ROCM_ALLOW_GROUP_GEMM_CK"}[backend]
         if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
             raise unittest.SkipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
         HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
@@ -1434,12 +1443,12 @@ class TestMatmulCuda(InductorTestCase):
         def uses_hipblaslt(kernels: set[str]) -> bool:
             return any(HIPBLASLT_HINT in k for k in kernels)
 
-        def run_grouped_mm(equal_k: bool):
+        def run_grouped_mm(equal_k: bool, size=(4, 16, 32, 64)):
             device = "cuda"
             dtype = torch.bfloat16
             if equal_k:
                 # 3d-3d grouped GEMM with identical K for all groups
-                G, M, N, K = 4, 16, 32, 64
+                G, M, N, K = size
                 a = torch.randn(G, M, K, device=device, dtype=dtype)
                 b = torch.randn(G, N, K, device=device, dtype=dtype)
                 return F.grouped_mm(a, b.transpose(-2, -1), out_dtype=dtype)
@@ -1452,26 +1461,52 @@ class TestMatmulCuda(InductorTestCase):
             b = torch.randn(N, K_total, device=device, dtype=dtype)
             return F.grouped_mm(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
 
-        def collect_kernel_names(equal_k: bool):
+        def collect_kernel_names(equal_k: bool, size=(4, 16, 32, 64)):
             kernels = set()
             with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 record_shapes=False,
                 with_stack=False,
             ) as prof:
-                run_grouped_mm(equal_k=equal_k)
+                run_grouped_mm(equal_k=equal_k, size=size)
             for evt in prof.key_averages(group_by_input_shape=False):
                 kernels.add(evt.key)
             return kernels
 
-        with rocm_group_gemm_ck_env(None, var=env_var):
+        with rocm_group_gemm_ck_env("0", var=other_env_var), rocm_group_gemm_ck_env("0", var=env_var):
             self.assertTrue(uses_hipblaslt(collect_kernel_names(equal_k=True)))
-        with rocm_group_gemm_ck_env("1", var=env_var):
+        with rocm_group_gemm_ck_env("0", var=other_env_var), rocm_group_gemm_ck_env("1", var=env_var):
             ck_equal_kernels = collect_kernel_names(equal_k=True)
             self.assertTrue(has_ck_kernel(ck_equal_kernels, CK_EQUAL_K_HINT))
 
             ck_unequal_kernels = collect_kernel_names(equal_k=False)
             self.assertTrue(has_ck_kernel(ck_unequal_kernels, CK_UNEQUAL_K_HINT))
+
+        # Unset, the heuristic picks ck_tile for a small GEMM and hipBLASLt for one above every GPU's threshold
+        if backend == "ck_tile":
+            with rocm_group_gemm_ck_env("0", var=other_env_var), rocm_group_gemm_ck_env(None, var=env_var):
+                self.assertTrue(has_ck_kernel(collect_kernel_names(equal_k=True), CK_EQUAL_K_HINT))
+                large_kernels = collect_kernel_names(equal_k=True, size=(2, 4096, 4096, 4096))
+                self.assertFalse(has_ck_kernel(large_kernels, CK_EQUAL_K_HINT))
+                self.assertTrue(uses_hipblaslt(large_kernels))
+
+    @skipCUDAIfNotRocm
+    @skipXPU
+    def test_grouped_gemm_ck_tile_bf16_rounding(self):
+        if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
+            raise unittest.SkipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
+        # Truncating float to bf16 stays within the default bf16 tolerance, so check the direction of the rounding
+        # error instead: truncation always rounds toward zero, round-to-nearest only about half the time.
+        G, M, N, K = 4, 64, 128, 256
+        a = torch.randn(G * M, K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(G, N, K, device="cuda", dtype=torch.bfloat16)
+        offs = torch.arange(1, G + 1, device="cuda", dtype=torch.int32) * M
+        with rocm_group_gemm_ck_env("1", var="ROCM_ALLOW_GROUP_GEMM_CK_TILE"):
+            out = F.grouped_mm(a, b.transpose(-2, -1), offs=offs, out_dtype=torch.bfloat16)
+        ref = torch.cat([a[g * M:(g + 1) * M].double() @ b[g].double().t() for g in range(G)])
+        diff = out.double() != ref
+        toward_zero = (out.double().abs() < ref.abs())[diff].float().mean().item()
+        self.assertLess(toward_zero, 0.6)  # round-to-nearest gives about 0.5, truncation about 1.0
 
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -1835,8 +1870,8 @@ class TestMixedDtypesLinearCuda(TestCase):
                 atol,
             )
 
-instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
-instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu", allow_xpu=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

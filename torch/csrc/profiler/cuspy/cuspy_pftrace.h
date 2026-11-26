@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace torch::profiler::impl {
@@ -68,7 +69,7 @@ struct PftraceArrAnno {
 // top-level keys each become an annotation, a list/scalar/parse-failure becomes
 // a single "annotation".
 struct PftraceJsonAnno {
-  const int32_t* offsets; // length n + 1
+  const int64_t* offsets; // length n + 1
   const char* buffer;
 };
 
@@ -161,7 +162,7 @@ struct PftraceRenderStages {
   // event_wait_offsets[i+1]) -> GpuRenderStageEvent.event_wait_ids (field 18),
   // which the viewer draws as node->node flow arrows (the graph dependency
   // DAG).
-  const int32_t* event_wait_offsets;
+  const int64_t* event_wait_offsets;
   const uint64_t* event_wait_ids;
   std::vector<PftraceComputeArg> launch_args; // -> ComputeKernelLaunch.args
   std::vector<PftraceRenderExtra> extra; // -> GpuRenderStageEvent.extra_data
@@ -174,7 +175,7 @@ struct PftraceRenderStages {
   // the render stage as extra_data (mirrors the chrome path's
   // metadata-into-args, so consumers need no correlation-id join). meta_offsets
   // nullable (no metadata column).
-  const int32_t* meta_offsets; // nullable, length n + 1
+  const int64_t* meta_offsets; // nullable, length n + 1
   const char* meta_buffer;
 };
 
@@ -199,7 +200,7 @@ struct PftraceGroup {
   // gpu_corr_ids[gpu_corr_offsets[i], gpu_corr_offsets[i+1]) -- the
   // render-stage event_ids this host launch submitted (a graph launch links to
   // all its replay's nodes). Empty slice (offsets equal) = no link.
-  const int32_t* gpu_corr_offsets;
+  const int64_t* gpu_corr_offsets;
   const int64_t* gpu_corr_ids;
   // nullable: per-slice interned EventCategory iid (index into category_table +
   // 1), emitted as TrackEvent.category_iids so the viewer can tell cpu_op /
@@ -247,6 +248,9 @@ struct PftraceGpuCounter {
 //
 // compression_level is the gzip level applied to the serialized trace (0-9;
 // 1 = fast, the default). Invalid levels fall back to uncompressed bytes.
+//
+// metadata holds the JSON export's top-level fields as (name, JSON value)
+// pairs, emitted as ChromeMetadata entries.
 TORCH_API std::string cuspyEncodePftrace(
     int64_t base_ns,
     const std::vector<PftraceTrack>& tracks,
@@ -257,6 +261,7 @@ TORCH_API std::string cuspyEncodePftrace(
     const std::vector<PftraceGfxContext>& gfx_contexts,
     const PftraceRenderStages& stages,
     const PftraceGpuCounter& counters,
-    int compression_level);
+    int compression_level,
+    const std::vector<std::pair<std::string, std::string>>& metadata = {});
 
 } // namespace torch::profiler::impl
