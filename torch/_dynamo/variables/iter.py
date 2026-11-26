@@ -327,22 +327,6 @@ class IteratorVariable(VariableTracker):
         return self
 
 
-class FormatIteratorVariable(IteratorVariable):
-    def __init__(self, iterator: Any) -> None:
-        super().__init__()
-        self.iterator = iterator
-
-    def python_type(self) -> type:
-        return type(self.iterator)
-
-    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        try:
-            item = next(self.iterator)
-        except (StopIteration, ValueError) as exc:
-            raise_observed_exception(type(exc), tx, args=list(exc.args))
-        return VariableTracker.build(tx, item)
-
-
 class ChainVariable(IteratorVariable):
     """
     Represents itertools.chain(*iterables) — yields one item per tp_iternext_impl call.
