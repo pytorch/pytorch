@@ -21,7 +21,7 @@ MemPool::MemPool(
     bool is_user_created,
     bool use_on_oom,
     bool no_split)
-    : is_user_created_(is_user_created) {
+    : is_user_created_(is_user_created), has_allocator_(allocator != nullptr) {
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {
@@ -59,6 +59,13 @@ int MemPool::use_count() {
 
 c10::DeviceIndex MemPool::device() {
   return device_;
+}
+
+std::optional<c10::DeviceIndex> MemPool::allocator_device() {
+  if (has_allocator_) {
+    return device_;
+  }
+  return std::nullopt;
 }
 
 MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
