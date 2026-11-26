@@ -1142,7 +1142,7 @@ def identity_child_hook(module, args, output):
 
 
 class ParentWithChildModule(torch.nn.Module):
-    # Calling a CHILD module routes through nn.Module.__call__, whose hook-dict
+    # Calling a child with a registered hook routes through dispatch, whose hook-dict
     # guards are rooted at Dynamo's synthetic __import_torch_dot_nn_... alias.
     # That is the shape a reloaded artifact could not resolve.
     def __init__(self):
@@ -6929,12 +6929,10 @@ from user code:
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
         artifacts = model.forward.compiled_results[0]._artifacts
         state = load_guards_state(artifacts.guards_state)
-        # Only the generated builtin name and replayable import aliases are expected.
         recorded = set(state.output_graph.global_scope)
         recorded.discard(state.output_graph.name_of_builtins_dict_key_in_fglobals)
-        self.assertTrue(
-            recorded and recorded.issubset(artifacts.runtime_env.import_sources)
-        )
+        self.assertTrue(recorded)
+        self.assertLessEqual(recorded, artifacts.runtime_env.import_sources.keys())
         data = model._save_aot_compiled_module()
         torch._dynamo.reset()
         self._hide_leaked_dynamo_globals()
