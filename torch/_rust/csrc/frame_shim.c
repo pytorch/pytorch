@@ -60,6 +60,22 @@ PyObject* tr_frame_locals(_PyInterpreterFrame* f) {
   return f->f_locals;
 }
 
+// Whether `func` is one of the hooks the interpreter calls for the events it
+// reports (those registered through `sys`): Python code that runs from
+// wherever such an event happens.
+int tr_event_hook(PyObject* func) {
+  PyObject* hooks = _PyInterpreterState_GET()->audit_hooks;
+  if (hooks == NULL || !PyList_CheckExact(hooks)) {
+    return 0;
+  }
+  for (Py_ssize_t i = 0; i < PyList_GET_SIZE(hooks); i++) {
+    if (PyList_GET_ITEM(hooks, i) == func) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 PyObject* tr_frame_func(_PyInterpreterFrame* f) {
   return f->f_funcobj;
 }

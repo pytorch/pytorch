@@ -122,6 +122,9 @@ struct Act<'a> {
     // Whether this activation runs a traced region's body (or a frame under
     // it): what its instrs read is recorded (see reads.rs).
     reading: bool,
+    // Whether this activation runs a frame under a traced body: it runs
+    // only what the optimizer's verdict covered (see covered.rs).
+    under_body: bool,
 }
 
 // An activation's buffers, pooled per thread so a call allocates nothing.
@@ -315,6 +318,7 @@ pub unsafe fn run(c: &Compiled, prep: &Prepared, f: *mut Frame, start: Start) ->
             edge,
             stop: std::ptr::null(),
             reading: reads::entered_by_body(),
+            under_body: reads::entered_by_body(),
         };
         // Between this frame's instrs no instr is running (the caller puts
         // back what was, once the frame is gone).
@@ -360,6 +364,7 @@ pub unsafe fn run_graph(prep: &Prepared, inputs: &[*mut PyObject]) -> Result<Vec
         edge,
         stop: std::ptr::null(),
         reading: false,
+        under_body: false,
     };
     for (obj, p) in inputs.iter().zip(&prep.cfg[ENTRY].params) {
         act.set(*p, xincref(*obj));
@@ -923,6 +928,7 @@ impl Act<'_> {
                 breaker_flag: self.breaker_flag,
                 stop: std::ptr::null(),
                 reading: self.reading,
+                under_body: self.under_body,
             };
             for (obj, q) in params.into_iter().zip(&origin.cfg[ENTRY].params) {
                 sub.set(*q, obj);
@@ -1529,6 +1535,8 @@ impl Act<'_> {
         };
         let types = sp.state.types.lock().unwrap().clone();
         let passed: Vec<u32> = sp.passed.iter().map(|k| sp.inputs.len() as u32 + k).collect();
+        // A span is traced MAX_GAVE_UP times at most, whatever gave it up.
+        super::covered::place(sp.state.gave_up.load(std::sync::atomic::Ordering::Relaxed));
         let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, sp.asked, &mut body));
         for (cell, old) in cells {
             PyCell_Set(cell, old);
@@ -1562,8 +1570,10 @@ impl Act<'_> {
                 };
                 eprintln!("region {}: gave up, {at}: {}", sp.name, traced.as_ref().err().map_or("?".into(), |e| e.to_string()));
             }
-            // Another call may stay on the ways seen: it is traced again, a
-            // few times.
+            // Another call may stay on the ways seen, or find the code this
+            // one was refused for judged (see covered.rs): it is traced
+            // again, a few times.
+            super::covered::later();
             if sp.state.gave_up.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1 >= super::region::MAX_GAVE_UP {
                 sp.state.off.store(true, std::sync::atomic::Ordering::Relaxed);
             }
@@ -1710,7 +1720,8 @@ impl Act<'_> {
             for step in &code.steps {
                 let v = step.v;
                 this.set_instr(cfg[v].origin as c_int);
-                if this.exec(v, &cfg[v]).is_err() {
+                let callee = this.callee(step.flags, &cfg[v]);
+                if this.guarded(v, &cfg[v], callee).is_err() {
                     failed = true;
                     this.reading = false;
                     return Err(());
@@ -1737,7 +1748,15 @@ impl Act<'_> {
         let read: std::collections::HashSet<ValueId> = ver.body.iter().flat_map(|v| cfg[*v].args.iter().copied()).collect();
         let unread: Vec<u32> = (0..ids.len() as u32).filter(|i| unused.contains(i) || !read.contains(&ids[*i as usize])).collect();
         let types = (*self.p.region_types[b.idx()].get()).clone();
+        let later = &self.p.region_later[b.idx()];
+        super::covered::place(later.load(std::sync::atomic::Ordering::Relaxed));
         let traced = super::outside_executor(|| super::region::trace(&name, &args, &types, &unread, false, false, &mut body));
+        // Refused for code no call ran before: the block runs it now, as
+        // written, and is traced again (see covered.rs).
+        let again = super::covered::later();
+        if again {
+            later.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         let debug = std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some();
         if failed {
             // The body raised under tracing (which also raises on what only
@@ -1746,7 +1765,11 @@ impl Act<'_> {
             if debug && let Err(e) = &traced {
                 eprintln!("region {name}: the body raised under tracing: {e}");
             }
-            self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+            if again {
+                self.p.region_runs[b.idx()].store(0, std::sync::atomic::Ordering::Relaxed);
+            } else {
+                self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             for v in &ver.body {
                 self.set(*v, std::ptr::null_mut());
             }
@@ -1784,6 +1807,7 @@ impl Act<'_> {
                 }
             },
             Ok(_) => self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed),
+            Err(_) if again => {}
             Err(e) => {
                 if debug {
                     eprintln!("region {name}: trace failed: {e}");
@@ -1815,14 +1839,7 @@ impl Act<'_> {
             self.set_instr(ins.origin as c_int);
         }
         // The callable a call's frame (if any) would be entered for directly.
-        let callee = if flags & FLAG_CALL != 0 {
-            let c = self.val(ins.args[0]);
-            Some(if c.is_null() { self.val(ins.args[1]) } else { c })
-        } else if flags & FLAG_CALL_EX != 0 {
-            Some(self.val(ins.args[0]))
-        } else {
-            None
-        };
+        let callee = self.callee(flags, ins);
         let rec = self.rec;
         if !rec.is_null() {
             // The function a frame entered for the instr would run directly:
@@ -1857,20 +1874,7 @@ impl Act<'_> {
         if let Some(cl) = clone {
             super::NEXT_CLONE.set((cl.code.as_ptr() as usize, self.f as usize, Arc::as_ptr(&cl.compiled) as usize));
         }
-        // A backward is nothing a region does again: a traced body that
-        // comes to one is refused before the engine runs, and anywhere else
-        // the engine runs outside the executor (see backward.rs).
-        let done = match callee {
-            Some(f) if super::backward::is(f) => {
-                if self.reading {
-                    super::backward::refuse();
-                    Err(Exc::Error)
-                } else {
-                    super::outside_executor(|| self.exec(*v, ins))
-                }
-            }
-            _ => self.exec(*v, ins),
-        };
+        let done = self.guarded(*v, ins, callee);
         if clone.is_some() {
             super::NEXT_CLONE.set((0, 0, 0));
         }
@@ -1890,6 +1894,50 @@ impl Act<'_> {
         }
         self.drop_all(kills);
         Next::Step
+    }
+
+    // The callable instr `ins` (with `flags`) calls, if it is a call.
+    #[inline(always)]
+    unsafe fn callee(&self, flags: u8, ins: &Instr) -> Option<*mut PyObject> {
+        if flags & FLAG_CALL != 0 {
+            let c = self.val(ins.args[0]);
+            Some(if c.is_null() { self.val(ins.args[1]) } else { c })
+        } else if flags & FLAG_CALL_EX != 0 {
+            Some(self.val(ins.args[0]))
+        } else {
+            None
+        }
+    }
+
+    // Runs instr v (a call of `callee`, if it is one), but for what is asked
+    // first. A backward is nothing a region does again: a traced body that
+    // comes to one is refused before the engine runs, and anywhere else the
+    // engine runs outside the executor (see backward.rs). And a traced body
+    // runs what the optimizer's verdict covered, and nothing else (see
+    // covered.rs).
+    #[inline(always)]
+    unsafe fn guarded(&mut self, v: ValueId, ins: &Instr, callee: Option<*mut PyObject>) -> R {
+        match callee {
+            Some(f) if super::backward::is(f) => {
+                if self.reading {
+                    super::backward::refuse();
+                    Err(Exc::Error)
+                } else {
+                    super::outside_executor(|| self.exec(v, ins))
+                }
+            }
+            _ if self.reading => match super::covered::step(self.c, self.under_body, ins.origin, callee, (*self.p.callees.get()).get(&v)) {
+                Ok(trusted) => {
+                    let _trusted = trusted.then(super::covered::Trusted::enter);
+                    self.exec(v, ins)
+                }
+                Err(why) => {
+                    super::region::refuse(pyo3::Python::assume_attached(), &why, super::covered::pending());
+                    Err(Exc::Error)
+                }
+            },
+            _ => self.exec(v, ins),
+        }
     }
 
     // Whether LoadAttr/LoadMethod `ins` of name `n` reads what the span being

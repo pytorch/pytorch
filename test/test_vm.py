@@ -1388,10 +1388,420 @@ class TestVmGivenUpTraces(TestCase):
         ]
         rows = [r for r in rows if r["function"] == "backward_first_at_the_trace"]
         self.assertEqual([r["state"] for r in rows], ["refused"], msg=str(rows))
-        self.assertIn("it runs a backward", rows[0]["why"])
+        self.assertIn("no call before it ran", rows[0]["why"])
 
 
 instantiate_device_type_tests(TestVmGivenUpTraces, globals())
+
+
+class UnseenBox:
+    """What the code under test changes besides its tensors."""
+
+    def __init__(self):
+        import io
+        import itertools
+
+        self.n = 0
+        self.last = None
+        self.counter = itertools.count()
+        self.buf = io.StringIO()
+
+
+UNSEEN_COUNT = 0
+
+
+def unseen_stores(box, y, on):
+    if on:
+        box.n = box.n + 1
+    return y * 2
+
+
+def unseen_keeps(box, y, on):
+    if on:
+        box.last = y
+    return y * 2
+
+
+def unseen_counts(box, y, on):
+    if on:
+        next(box.counter)
+    return y * 2
+
+
+def unseen_writes(box, y, on):
+    if on:
+        box.buf.write("x")
+    return y * 2
+
+
+def unseen_binds(box, y, on):
+    global UNSEEN_COUNT
+    if on:
+        UNSEEN_COUNT = UNSEEN_COUNT + 1
+    return y * 2
+
+
+def unseen_loops(box, y, on):
+    for _ in range(int(on)):
+        box.n = box.n + 1
+    return y * 2
+
+
+def unseen_scales(box, y, on):
+    if on:
+        y = y * 3
+    return y * 2
+
+
+def unseen_ways(box, y, on):
+    if on == 1:
+        y = y * 3
+    elif on == 2:
+        y = y * 5
+    elif on == 3:
+        y = y * 7
+    elif on == 4:
+        y = y * 9
+    return y * 2
+
+
+def unseen_reflected(box, y, on):
+    return 2 - y
+
+
+def unseen_double(box, y):
+    return y * 2
+
+
+def unseen_counting(box, y):
+    box.n = box.n + 1
+    return y * 2
+
+
+def unseen_picks(box, y, on):
+    return (unseen_double, unseen_counting)[on](box, y)
+
+
+def unseen_triple(box, y):
+    return y * 3
+
+
+def unseen_picks_plain(box, y, on):
+    return (unseen_double, unseen_triple)[on](box, y)
+
+
+def unseen_picks_builtin(box, y, on):
+    (id, next)[on](box.counter)
+    return y * 2
+
+
+def unseen_around(helper):
+    def around(box, x, on):
+        return (helper(box, x.sin(), on) + 1).cos().tanh()
+
+    return around
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmUnseenCode(TestCase):
+    """A function is judged by what its calls were seen to do. The traced
+    call may be the first to take a branch, to run a loop's body, or to call
+    another function: what that code does besides tensor operations is done
+    on every call, as eager does it, and such a trace gives no region. The
+    code is observed as the call goes on, and the place is traced again: it
+    gets its region a call later if that code only computes."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, helper, device, state, on=lambda call: call >= 3):
+        # Ten calls, each side with a box of its own; `on` from the fourth
+        # call, the first that is traced. `state`: what a call leaves.
+        fn = unseen_around(helper)
+        g = vm_early(fn)
+        boxes = (UnseenBox(), UnseenBox())
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            sides = []
+            for side, box in zip((fn, g), boxes):
+                before = UNSEEN_COUNT
+                out = side(box, x, on(call))
+                sides.append((out, state(box), UNSEEN_COUNT - before))
+            self.assertEqual(sides[1], sides[0], atol=0, rtol=0, msg=f"call {call}")
+        return [
+            r
+            for r in vm.regions(g)
+            if r["where"].startswith("unseen_around.<locals>.around:")
+            and r["kind"] == "block"
+        ]
+
+    def no_region(self, helper, device, state, why="no call before it ran"):
+        rows = self.calls(helper, device, state)
+        self.assertEqual([r["state"] for r in rows], ["refused"], msg=str(rows))
+        self.assertIn(why, rows[0]["why"])
+        return rows
+
+    def a_call_later(self, helper, device):
+        # The fourth call's trace is refused and leaves the place open; the
+        # fifth call is traced again and finds the code judged: a region
+        # from the sixth call on.
+        rows = self.calls(helper, device, lambda box: box.n)
+        self.assertEqual([r["state"] for r in rows], ["region"], msg=str(rows))
+        self.assertEqual(rows[0]["runs"], 5, msg=str(rows))
+        self.assertEqual(
+            [t[0] for t in rows[0]["traces"]], ["not yet", "region"], msg=str(rows)
+        )
+        self.assertIn("trace 1 of 3", rows[0]["traces"][0][1])
+
+    @isolated
+    def test_attribute_stored_in_a_branch_first_taken_by_the_traced_call(self, device):
+        rows = self.no_region(unseen_stores, device, lambda box: box.n)
+        # Observed as the fourth call went on, and found to store: the
+        # fifth call's trace closes the place.
+        self.assertEqual(
+            [t[0] for t in rows[0]["traces"]], ["not yet", "refused"], msg=str(rows)
+        )
+        self.assertIn("did more than compute", rows[0]["why"])
+
+    @isolated
+    def test_tensor_kept_in_a_branch_first_taken_by_the_traced_call(self, device):
+        self.no_region(unseen_keeps, device, lambda box: box.last)
+
+    @isolated
+    def test_counter_advanced_in_a_branch_first_taken_by_the_traced_call(self, device):
+        self.no_region(
+            unseen_counts, device, lambda box: box.counter.__reduce__()[1][0]
+        )
+
+    @isolated
+    def test_buffer_written_in_a_branch_first_taken_by_the_traced_call(self, device):
+        self.no_region(unseen_writes, device, lambda box: len(box.buf.getvalue()))
+
+    @isolated
+    def test_global_bound_in_a_branch_first_taken_by_the_traced_call(self, device):
+        self.no_region(unseen_binds, device, lambda box: 0)
+
+    @isolated
+    def test_loop_whose_body_first_runs_in_the_traced_call(self, device):
+        self.no_region(unseen_loops, device, lambda box: box.n)
+
+    @isolated
+    def test_function_first_called_by_the_traced_call(self, device):
+        self.no_region(unseen_picks, device, lambda box: box.n)
+
+    @isolated
+    def test_builtin_first_called_by_the_traced_call(self, device):
+        self.no_region(
+            unseen_picks_builtin,
+            device,
+            lambda box: box.counter.__reduce__()[1][0],
+            "no call before it called there",
+        )
+
+    @isolated
+    def test_function_that_only_computes_gets_its_region_a_call_later(self, device):
+        self.a_call_later(unseen_picks_plain, device)
+
+    @isolated
+    def test_branch_that_only_computes_gets_its_region_a_call_later(self, device):
+        self.a_call_later(unseen_scales, device)
+
+    @isolated
+    def test_place_is_closed_after_three_traces_that_each_ran_new_code(self, device):
+        # Each call from the fourth on takes a way no call took before.
+        rows = self.calls(
+            unseen_ways, device, lambda box: box.n, on=lambda call: max(0, call - 2)
+        )
+        self.assertEqual([r["state"] for r in rows], ["refused"], msg=str(rows))
+        self.assertEqual(
+            [t[0] for t in rows[0]["traces"]],
+            ["not yet", "not yet", "refused"],
+            msg=str(rows),
+        )
+        self.assertIn("trace 3 of 3", rows[0]["why"])
+
+    @isolated
+    def test_operator_that_torch_hands_to_the_function_modes_is_in_a_region(
+        self, device
+    ):
+        # `2 - y` is Tensor.__rsub__, whose wrapper in torch hands the call
+        # to the function modes when one is on: under a trace, the trace's.
+        rows = self.calls(unseen_reflected, device, lambda box: box.n)
+        self.assertEqual([r["state"] for r in rows], ["region"], msg=str(rows))
+        self.assertEqual([t[0] for t in rows[0]["traces"]], ["region"], msg=str(rows))
+        self.assertEqual(rows[0]["runs"], 6, msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmUnseenCode, globals())
+
+
+COMPILERS_NET = COMPILERS_WEIGHTS = None
+
+
+def compilers_per_row(row):
+    return (COMPILERS_NET(row).sin() * 2).cos().tanh()
+
+
+def compilers_vmap(x):
+    return torch.func.vmap(compilers_per_row)(x)
+
+
+def compilers_vmap_over_columns(x):
+    return torch.func.vmap(compilers_per_row, in_dims=1)(x.reshape(8, -1))
+
+
+def compilers_grad_per_sample(x):
+    return torch.func.vmap(torch.func.grad(lambda row: compilers_per_row(row).sum()))(x)
+
+
+def compilers_jvp(x):
+    return torch.func.jvp(
+        compilers_per_row, (x[0],), (torch.ones(8, device=x.device),)
+    )[1]
+
+
+def compilers_functional_call(x):
+    y = torch.func.functional_call(
+        COMPILERS_NET, COMPILERS_WEIGHTS, (x.sin().cos() * 2 + 1,)
+    )
+    return (y * 2).cos().tanh().exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmCompilers(TestCase):
+    """torch.compile, torch.export and the transforms of torch.func are
+    Python programs of their own. Called from a function on the VM, their
+    code and all it calls runs on CPython: the call gives what eager gives,
+    nothing of them is converted, and the function's own blocks around the
+    call keep their regions."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def against_eager(self, fn, device, eager=None):
+        global COMPILERS_NET, COMPILERS_WEIGHTS
+        torch.manual_seed(0)
+        COMPILERS_NET = torch.nn.Linear(8, 8).to(device)
+        COMPILERS_WEIGHTS = dict(COMPILERS_NET.named_parameters())
+        g = vm_early(fn)
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            self.assertEqual(g(x), (eager or fn)(x), atol=0, rtol=0, msg=f"call {call}")
+        return vm.regions(g)
+
+    def left_to_cpython(self, rows, name):
+        calls = [r for r in rows if r["kind"] == "call" and r["function"] == name]
+        self.assertTrue(calls, msg=str(rows))
+        self.assertTrue(
+            all("runs on CPython" in r["why"] for r in calls), msg=str(calls)
+        )
+
+    @isolated
+    def test_function_under_vmap(self, device):
+        # A transform runs the function through a level of its own: no
+        # region is made of what runs under it.
+        rows = self.against_eager(compilers_vmap, device)
+        self.assertEqual([r for r in rows if r["state"] == "region"], [])
+        self.left_to_cpython(rows, "compilers_vmap")
+
+    @isolated
+    def test_function_under_vmap_over_another_dimension(self, device):
+        self.against_eager(compilers_vmap_over_columns, device)
+
+    @isolated
+    def test_gradient_per_sample(self, device):
+        self.against_eager(compilers_grad_per_sample, device)
+
+    @isolated
+    def test_function_under_jvp(self, device):
+        self.against_eager(compilers_jvp, device)
+
+    @isolated
+    def test_functional_call_with_regions_around_it(self, device):
+        rows = self.against_eager(compilers_functional_call, device)
+        self.left_to_cpython(rows, "compilers_functional_call")
+        mine = [
+            r
+            for r in rows
+            if r["function"] == "compilers_functional_call" and r["state"] == "region"
+        ]
+        self.assertEqual([r["runs"] for r in mine], [6, 6], msg=str(rows))
+
+    @isolated
+    def test_module_the_program_compiled(self, device):
+        torch.manual_seed(0)
+        net = torch.nn.Linear(8, 8).to(device)
+        fast = torch.compile(net, backend="eager")
+
+        def f(x):
+            return (fast(x.sin().cos() * 2 + 1) * 2).cos().tanh().exp()
+
+        def eager(x):
+            return (net(x.sin().cos() * 2 + 1) * 2).cos().tanh().exp()
+
+        rows = self.against_eager(f, device, eager)
+        self.left_to_cpython(
+            rows, "TestVmCompilers.test_module_the_program_compiled.<locals>.f"
+        )
+        mine = [
+            r for r in rows if r["function"].endswith(".f") and r["state"] == "region"
+        ]
+        self.assertEqual([r["runs"] for r in mine], [6, 6], msg=str(rows))
+        # Nothing of Dynamo was converted for the executor.
+        held = dict(torch._rust._cfg_plan_stats())
+        self.assertLess(held["code objects"] + held["clones"], 100, msg=str(held))
+
+    @isolated
+    def test_compiled_module_under_a_function_named_pure(self, device):
+        # The pass list takes `helper` at its word; the trace that comes to
+        # the compiled module inside it is given up all the same.
+        torch.manual_seed(0)
+        net = torch.nn.Linear(8, 8).to(device)
+        fast = torch.compile(net, backend="eager")
+
+        def helper(y):
+            return fast(y)
+
+        def f(x):
+            return (helper(x.sin().cos() * 2 + 1) * 2).cos().tanh().exp()
+
+        g = vm(f, passes=vm.configure(EARLY, pure_calls={"pure": (helper,)}))
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            want = (net(x.sin().cos() * 2 + 1) * 2).cos().tanh().exp()
+            self.assertEqual(g(x), want, atol=0, rtol=0, msg=f"call {call}")
+        rows = [
+            r
+            for r in vm.regions(g)
+            if r["function"].endswith(".f") and r["kind"] == "block"
+        ]
+        self.assertTrue(
+            rows and all(r["state"] in ("gave up", "refused") for r in rows),
+            msg=str(rows),
+        )
+
+    @isolated
+    def test_module_exported_inside_the_function(self, device):
+        torch.manual_seed(0)
+        net = torch.nn.Linear(8, 8).to(device)
+        made = []
+
+        def f(x):
+            if not made:
+                made.append(torch.export.export(net, (x,)).module())
+            return (made[0](x.sin().cos() * 2 + 1) * 2).cos().tanh().exp()
+
+        def eager(x):
+            return (net(x.sin().cos() * 2 + 1) * 2).cos().tanh().exp()
+
+        self.against_eager(f, device, eager)
+
+
+instantiate_device_type_tests(TestVmCompilers, globals())
 
 
 def sized_tail(y, n):
@@ -7786,8 +8196,6 @@ class TestVmGraphResults(TestCase):
             self.assertEqual(compiled(x, at), fn(x, at), atol=0, rtol=0)
         GRAPH_BEHIND_LOG.clear()
 
-    # A call returns a tensor where eager raises.
-    @unittest.expectedFailure
     @isolated
     def test_an_instruction_that_nothing_uses_stays_where_it_can_fail(self, device):
         def keep(gm, input_types):
@@ -8848,8 +9256,6 @@ class TestVmGraphResults(TestCase):
                 del GraphQuietText.__lt__
             del GRAPH_COMPARE_LOG[:]
 
-    # The results, or the calls of a metaclass's Python code between the tensor operations, differ from eager's.
-    @unittest.expectedFailure
     @isolated
     def test_the_text_of_a_class_is_part_of_a_path(self, device):
         def keep(gm, input_types):

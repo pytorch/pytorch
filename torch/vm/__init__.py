@@ -512,8 +512,12 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
       ``lines`` (``(first, last)``, None for a span);
     - ``state``: ``"region"``, or why it is none in short: ``"too small"``,
       ``"refused"`` (the trace depends on something a region cannot hold or
-      check) or ``"gave up"`` (the traced run raised, or left the span by a
-      way no earlier run took); ``why`` has the reason in full;
+      check), ``"not yet"`` (the traced call ran code that no call before
+      it ran: that code is observed as the call goes on, and the place is
+      traced again on its next call, three traces at most; ``why`` says
+      which trace it was) or ``"gave up"`` (the traced run raised, or left
+      the span by a way no earlier run took); ``why`` has the reason in
+      full;
     - ``ops``, ``inputs``, ``constants`` of the graph, ``variants`` (how many
       regions the place has: one per state it was traced in), ``reads`` (how
       many reads of state outside its arguments they are checked against);
@@ -575,6 +579,9 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
             },
         )
         row["traces"].append((t.state, t.why))
+        if row["state"] == "not yet" and t.state != "region":
+            # The place was left open: its state is what came after.
+            row.update(state=t.state, why=t.why)
         if t.state == "region":
             row.update(
                 state="region",

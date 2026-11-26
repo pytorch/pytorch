@@ -18,6 +18,7 @@ unsafe extern "C" {
     pub fn tr_frame_qualname(f: *mut Frame) -> *mut PyObject;
     pub fn tr_frame_localsplus(f: *mut Frame) -> *mut *mut PyObject;
     pub fn tr_frame_func(f: *mut Frame) -> *mut PyObject;
+    pub fn tr_event_hook(func: *mut PyObject) -> c_int;
     pub fn tr_frame_owned_by_generator(f: *mut Frame) -> c_int;
     pub fn tr_frame_prev_instr_slot(f: *mut Frame) -> *mut *mut u16;
     pub fn tr_frame_code_units(f: *mut Frame) -> *mut u16;

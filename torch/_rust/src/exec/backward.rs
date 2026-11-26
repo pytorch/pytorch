@@ -83,5 +83,5 @@ pub unsafe fn is(callable: *mut PyObject) -> bool {
 
 // Refuses the trace running on this thread where its body calls the engine.
 pub fn refuse() {
-    super::region::refuse(unsafe { Python::assume_attached() }, "it runs a backward, which writes .grad and frees the graph it went through");
+    super::region::refuse(unsafe { Python::assume_attached() }, "it runs a backward, which writes .grad and frees the graph it went through", false);
 }

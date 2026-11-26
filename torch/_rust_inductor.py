@@ -462,9 +462,11 @@ def _skip_tracer_frames() -> None:
     this file, of torch.fx and of torch.overrides to CPython and takes the
     frames they enter back (a function mode's handler calls the body's
     function). Those listed here run on CPython with everything they call:
-    the float subclass, the handlers of the dispatch modes, and the stand-in
+    the float subclass, the handlers of the dispatch modes, the stand-in
     for ``autograd.Function.apply``, whose forward the graph calls anew on
-    every run."""
+    every run, and what the trace does for itself (the broadcast of a
+    call's sizes, the node for a scalar's value, a refusal): a traced body runs only
+    code the optimizer judged, and that is none of the body's."""
     global _tracer_frames_skipped
     if _tracer_frames_skipped:
         return
@@ -479,6 +481,9 @@ def _skip_tracer_frames() -> None:
         _tracing_apply,
         _refusing_init,
         _opaque_call,
+        _sized_by_its_tensors,
+        _item_node,
+        _refuse,
     ]
     for f in own:
         if hasattr(f, "__code__"):
@@ -575,6 +580,22 @@ def _sized_by_its_tensors(out, args, kwargs) -> bool:
     )
 
 
+def _item_node(t: torch.Tensor):
+    """The value of the CPU scalar ``t`` as eager reads it (no sync), and the
+    graph node that reads it on every call of the region."""
+    with torch.utils._python_dispatch._disable_current_modes():
+        value = t.item()
+    tracer = _tracer()
+    proxy = tracer.create_proxy(
+        "call_function",
+        torch.ops.aten._local_scalar_dense.default,
+        (tracer.unwrap_proxy(t),),
+        {},
+    )
+    proxy.node.meta["val"] = value
+    return value, proxy.node
+
+
 class _ScalarArgs(TorchFunctionMode):
     """Puts the _Scalars a torch call is given back into the node the call
     traced: the dispatcher hands make_fx new Python floats. The node's float
@@ -611,20 +632,11 @@ class _ScalarArgs(TorchFunctionMode):
                 and t.device.type == "cpu"
                 and t.numel() == 1
             ):
-                # A CPU scalar's value (no sync): a graph node, so the region
-                # reads it on every call.
-                with torch.utils._python_dispatch._disable_current_modes():
-                    value = t.item()
-                tracer = _tracer()
-                proxy = tracer.create_proxy(
-                    "call_function",
-                    torch.ops.aten._local_scalar_dense.default,
-                    (tracer.unwrap_proxy(t),),
-                    {},
-                )
-                proxy.node.meta["val"] = value
+                # A CPU scalar's value: a graph node, so the region reads
+                # it on every call.
+                value, node = _item_node(t)
                 if type(value) is float:
-                    return _new_scalar(value, ("node", proxy.node), frozenset([_DATA]))
+                    return _new_scalar(value, ("node", node), frozenset([_DATA]))
                 _scalar_state["specialized"].add(_DATA)
                 return value
         given = _floats_in([args, kwargs], [])
@@ -959,16 +971,18 @@ _compiled: dict[Any, Any] = {}
 
 
 class _Refused(Exception):
-    pass
+    # Whether the place is traced again: refused for code that had not run.
+    later = False
 
 
-def _refuse(why: str) -> _Refused:
+def _refuse(why: str, later: bool = False) -> _Refused:
     """The exception to raise into the code a trace is running, to refuse
     the trace where it is. That code may catch it (an ``except Exception``
     of the program's around the place) and go on, so the executor is told as
     well: it gives the trace up when its body ends, whatever path the code
     took from here, and runs the block as it is."""
     e = _Refused(why)
+    e.later = later
     _rust()._region_refuse(e)
     return e
 
@@ -2667,7 +2681,7 @@ def trace_region(
         # The executor runs the block again from its start.
         _put_back(backups)
         if isinstance(e, _Refused):
-            _traced(name, "refused", str(e))
+            _traced(name, "not yet" if e.later else "refused", str(e))
         else:
             _traced(name, "gave up", f"{type(e).__name__}: {e}")
         raise

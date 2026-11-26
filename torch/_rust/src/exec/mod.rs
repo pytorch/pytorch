@@ -5,6 +5,8 @@
 
 pub mod autograd;
 mod backward;
+mod compilers;
+mod covered;
 pub mod effects;
 pub mod ffi;
 pub mod graph;
@@ -167,6 +169,9 @@ pub struct Prepared {
     // traced into a region, and whether it can't be (see region.rs).
     pub region_runs: Box<[AtomicU32]>,
     pub region_off: Box<[AtomicBool]>,
+    // By block: how many of its traces were refused for code no call ran
+    // before and left it to be traced again (see covered.rs).
+    pub region_later: Box<[AtomicU32]>,
     // By block: the types of its last version's params then inputs over its
     // runs while observing (see region::observing; torch.vm's input_types).
     pub region_types: Box<[ffi::GilCell<Vec<types::Slot>>]>,
@@ -327,6 +332,7 @@ impl Prepared {
             trainings,
             region_runs: (0..cfg_blocks).map(|_| AtomicU32::new(0)).collect(),
             region_off: (0..cfg_blocks).map(|_| AtomicBool::new(false)).collect(),
+            region_later: (0..cfg_blocks).map(|_| AtomicU32::new(0)).collect(),
             region_types: (0..cfg_blocks).map(|_| ffi::GilCell::new(vec![])).collect(),
             region_lineage: ffi::GilCell::new(vec![]),
             kept: AtomicBool::new(false),
@@ -505,6 +511,8 @@ pub struct Compiled {
     // The origins of the calls a cfg pass made movable when this was last
     // optimized: pure for its callers too (see pure_compiled).
     declared: Mutex<HashSet<u32>>,
+    // What a verdict of the optimizer covered of the code (see covered.rs).
+    covered: covered::Units,
 }
 
 fn code_lines(code: &Bound<'_, PyAny>) -> PyResult<Vec<(u32, u32, i32)>> {
@@ -555,6 +563,7 @@ impl Compiled {
             code: code.as_ptr() as usize,
             path: vec![],
             declared: Mutex::new(HashSet::new()),
+            covered: covered::Units::default(),
         })
     }
 
@@ -636,7 +645,7 @@ pub fn _set_cfg_record(on: bool) {
 }
 
 unsafe extern "C" fn free_compiled(p: *mut c_void) {
-    if !p.is_null() && p != trampoline::mark() {
+    if !p.is_null() && p != trampoline::mark() && p != compilers::mark() {
         drop(Arc::from_raw(p as *const Compiled));
     }
 }
@@ -656,6 +665,9 @@ enum Lookup<'a> {
     Compiled(&'a Compiled),
     // A trampoline (see trampoline.rs), run by CPython's evaluator.
     Trampoline,
+    // A compiler's code (see compilers.rs), run by CPython's evaluator with
+    // every frame it enters.
+    Outside,
     // A Python exception is set.
     Error,
 }
@@ -671,11 +683,18 @@ unsafe fn compiled<'a>(code: *mut pyo3::ffi::PyObject) -> Lookup<'a> {
     if p == trampoline::mark() {
         return Lookup::Trampoline;
     }
+    if p == compilers::mark() {
+        return Lookup::Outside;
+    }
     if !p.is_null() {
         return Lookup::Compiled(&*(p as *const Compiled));
     }
     Python::attach(|py| {
         let code_obj = Bound::from_borrowed_ptr(py, code);
+        // Decided before anything is made for the code.
+        if compilers::is(&code_obj) {
+            return if PyUnstable_Code_SetExtra(code, index, compilers::mark()) < 0 { Lookup::Error } else { Lookup::Outside };
+        }
         match Compiled::new(&code_obj) {
             Ok(c) => {
                 let c = Arc::new(c);
@@ -763,9 +782,24 @@ unsafe fn tracer_code(code: *mut pyo3::ffi::PyObject) -> Option<bool> {
         pyo3::ffi::PyErr_Clear();
         return None;
     };
+    // The import machinery, which the interpreter runs for an import (a
+    // relative one asks its module's spec for the parent): an import that
+    // finds its module there does nothing a later call would miss.
+    if f.starts_with("<frozen importlib") {
+        return Some(true);
+    }
+    // The standard library's context managers, which torch.overrides uses
+    // around a function mode's handler: their code only passes control to
+    // the generator it wraps, whose frames are the executor's again.
+    if f.ends_with("/contextlib.py") {
+        return Some(false);
+    }
     let at = f.rfind("/torch/")?;
     let rest = &f[at + 7..];
     if rest == "_ops.py" || rest.starts_with("_library/") {
+        Some(true)
+    } else if rest == "utils/weak.py" {
+        // The trace's table of tensors, when one of them goes.
         Some(true)
     } else if rest.starts_with("fx/") || rest == "overrides.py" || rest == "_rust_inductor.py" {
         Some(false)
@@ -804,7 +838,11 @@ unsafe extern "C" fn eval_frame(
         }
         return outside_executor(|| prev(tstate, frame, throwflag));
     }
-    if !gen_frame && gc_callback(frame) {
+    // What the interpreter runs from wherever something happens is no code
+    // of the instr running then: a collection's callback, and, while a
+    // region's body is traced, a hook for the events the interpreter
+    // reports (the trace's own machinery raises some: it compiles code).
+    if !gen_frame && (gc_callback(frame) || tracing && tr_event_hook(tr_frame_func(frame)) != 0) {
         return outside_executor(|| prev(tstate, frame, throwflag));
     }
     if tracing && let Some(deep) = tracer_code(code) {
@@ -821,6 +859,17 @@ unsafe extern "C" fn eval_frame(
         match compiled(code) {
             Lookup::Compiled(c) => Some(c),
             Lookup::Trampoline => return prev(tstate, frame, throwflag),
+            Lookup::Outside => {
+                // A region is no place for what a compiler made or does:
+                // its kernels are no operators a trace would see.
+                if reads::on() {
+                    let name = Bound::from_borrowed_ptr(Python::assume_attached(), tr_frame_qualname(frame)).to_string();
+                    reads::refuse(format!("it runs {name}, code of a compiler or of a function transform, which runs on CPython"));
+                }
+                // The instr that entered it did enter a frame.
+                effects::frame_entered(frame, gen_frame);
+                return outside_executor(|| prev(tstate, frame, throwflag));
+            }
             Lookup::Error => None,
         }
     };
@@ -832,7 +881,7 @@ unsafe extern "C" fn eval_frame(
         if !c.cold.load(Ordering::Relaxed) && BYPASSED.load(Ordering::Relaxed) && !c.auto_optimized.load(Ordering::Relaxed) {
             c.cold.store(true, Ordering::Relaxed);
         }
-        if c.cold.load(Ordering::Relaxed) && !tracing {
+        if c.cold.load(Ordering::Relaxed) && !tracing && !(!gen_frame && covered::observes(c)) {
             return if c.deep.load(Ordering::Relaxed) { outside_executor(|| prev(tstate, frame, throwflag)) } else { prev(tstate, frame, throwflag) };
         }
     }
@@ -861,7 +910,11 @@ unsafe extern "C" fn eval_frame(
         );
         return leave(tstate, frame, gen_frame, run::Outcome::Error);
     }
-    let plan = c.plan();
+    // A frame of code that a trace was refused for runs the first plan,
+    // which records, so that the next trace finds what it ran judged (see
+    // covered.rs).
+    let observed = !tracing && !gen_frame && covered::observes(c);
+    let plan = if observed { unsafe { &*(&*c.plans.lock().unwrap()[0] as *const Plan) } } else { c.plan() };
     let start = if gen_frame {
         let unit = tr_frame_get_instr(frame) as u32;
         let Some(&(b, ver, i)) = plan.resume.get(&unit) else {
@@ -904,6 +957,9 @@ unsafe extern "C" fn eval_frame(
             }
             c.sweep();
         }
+    }
+    if observed {
+        covered::observed(c, matches!(outcome, run::Outcome::Return(_)));
     }
     // What the frame held is dropped with no instr of the body running
     // (see reads.rs); then the caller's instr goes on.
@@ -1352,6 +1408,9 @@ fn new_clones(py: Python<'_>, c: &Compiled, plan: &Plan, current: &Plan) -> Hash
             continue;
         }
         let Ok(code) = f.getattr("__code__") else { continue };
+        if compilers::is(&code) {
+            continue;
+        }
         let Ok(mut clone) = Compiled::new(&code) else { continue };
         if clone.flags & GENERATOR_FLAGS != 0 {
             continue;
@@ -1815,6 +1874,7 @@ pub(crate) fn add_region(c: &Compiled, prep: usize, b: BlockId, traced: region::
     let new = &c.plan().prep;
     for (i, flag) in plan.prep.region_off.iter().enumerate() {
         new.region_off[i].store(flag.load(Ordering::Relaxed), Ordering::Relaxed);
+        new.region_later[i].store(plan.prep.region_later[i].load(Ordering::Relaxed), Ordering::Relaxed);
         unsafe { *new.region_types[i].get() = (*plan.prep.region_types[i].get()).clone() };
     }
     unsafe { *new.region_lineage.get() = lineage.iter().copied().chain([here]).collect() };
@@ -3299,6 +3359,7 @@ fn pure_compiled(py: Python<'_>, c: &Compiled, own: Own, depth: u32, memo: &mut 
     // taken as the pass said, here as in the code's own blocks.
     let declared = c.declared.lock().unwrap().clone();
     let said = |v: &ValueId| is_call(&cfg[*v].op) && declared.contains(&cfg[*v].origin);
+    let mut judged = vec![];
     let r = cfg.block_ids().try_for_each(|b| {
         let blk = &cfg[b];
         let body = blk.versions.first().map_or(&[][..], |ver| &ver.body[..]);
@@ -3306,6 +3367,7 @@ fn pure_compiled(py: Python<'_>, c: &Compiled, own: Own, depth: u32, memo: &mut 
         if !entered {
             return Ok(());
         }
+        judged.push(b);
         body.iter().filter(|v| !said(v)).try_for_each(|v| pure_instr(py, prep, *v, clones, depth, &own, memo))?;
         let ok = effects.get(Site::Block(b)).iter().all(|(seq, _)| seq.iter().all(|e| matches!(e, effects::Effect::TorchOp { op, args } if !impure_op(op, args))));
         if ok { Ok(()) } else { Err(format!("bb{} has effects", b.0)) }
@@ -3326,8 +3388,84 @@ fn pure_compiled(py: Python<'_>, c: &Compiled, own: Own, depth: u32, memo: &mut 
             cfg.instrs.len()
         );
     }
+    if r.is_ok() {
+        // What a traced body may run of this code (see covered.rs).
+        covered::judged(c, judged.iter().flat_map(|b| cfg[*b].versions.first()).flat_map(|ver| ver.body.iter()).map(|v| cfg[*v].origin));
+    }
     memo.insert(key, r.clone());
     r
+}
+
+// Judges the code `c` runs from what its frames did until now, for a traced
+// body that comes to it (see covered.rs): whether they only computed, or
+// None if none has run to its end.
+fn judge(py: Python<'_>, c: &Compiled) -> Option<bool> {
+    if !c.auto_optimized.load(Ordering::Relaxed) {
+        return None;
+    }
+    let code = unsafe { Bound::from_borrowed_ptr(py, c.code as *mut pyo3::ffi::PyObject) };
+    let own = Own { nargs: arg_slots(&code), free: vec![], fresh_self: false };
+    Some(pure_compiled(py, c, own, 1, &mut HashMap::new()).is_ok())
+}
+
+// The block of the Cfg a code was converted to (its first Plan's) that holds
+// the instruction at code unit `unit`, and whether a frame was seen in it.
+fn block_at(first: &Plan, unit: u32) -> Option<(BlockId, bool)> {
+    let cfg = &first.prep.cfg;
+    let types = unsafe { &*first.prep.types.get() };
+    let ran = |v: &ValueId| types.get(v.idx()).is_some_and(|t| t.ty.is_some());
+    let b = cfg.block_ids().find(|b| cfg[*b].versions.first().is_some_and(|ver| ver.body.iter().any(|v| cfg[*v].origin == unit)))?;
+    let body = cfg[b].versions.first().map_or(&[][..], |ver| &ver.body[..]);
+    Some((b, b == crate::cfg::ir::ENTRY || cfg[b].params.iter().any(ran) || body.iter().any(ran)))
+}
+
+// Whether a frame of `c` was seen in the block that holds the instruction
+// at code unit `unit` (as pure_compiled takes a block for entered).
+fn entered(c: &Compiled, unit: u32) -> bool {
+    let first = unsafe { &*(&*c.plans.lock().unwrap()[0] as *const Plan) };
+    block_at(first, unit).is_some_and(|(_, entered)| entered)
+}
+
+// Whether the instruction at code unit `unit` of c's code is in a block by
+// which torch's own library hands a call over to the function modes: a
+// block no frame of `c` was seen in, whose only calls are of the global
+// `handle_torch_function`, and that writes nothing outside its frame.
+// Some(the code units of the block). Such a block runs when
+// `has_torch_function` is true for the call: under a region's trace that is
+// the trace's own mode, which calls the function again with itself off (see
+// covered.rs).
+fn hand_over(c: &Compiled, unit: u32) -> Option<Vec<u32>> {
+    if !c.filename.contains("/torch/") {
+        return None;
+    }
+    let first = unsafe { &*(&*c.plans.lock().unwrap()[0] as *const Plan) };
+    let cfg = &first.prep.cfg;
+    let (b, entered) = block_at(first, unit)?;
+    if entered {
+        return None;
+    }
+    let body = &cfg[b].versions.first()?.body;
+    let handler: Vec<ValueId> = body.iter().copied().filter(|v| matches!(cfg[*v].op, Op::LoadGlobal(n) if cfg.names[n as usize] == "handle_torch_function")).collect();
+    let mut calls = 0;
+    for v in body {
+        let ins = &cfg[*v];
+        match ins.op {
+            Op::Call { .. } if ins.args.first().is_some_and(|f| handler.contains(f)) || ins.args.get(1).is_some_and(|f| handler.contains(f)) => calls += 1,
+            Op::Bytecode { opcode: opcodes::CALL_FUNCTION_EX, .. } if ins.args.first().is_some_and(|f| handler.contains(f)) => calls += 1,
+            Op::Call { .. } | Op::Bytecode { opcode: opcodes::CALL_FUNCTION_EX, .. } => return None,
+            Op::StoreAttr(_) | Op::StoreDeref { .. } | Op::DeleteDeref { .. } => return None,
+            Op::Bytecode { opcode, .. }
+                if matches!(
+                    opcode,
+                    opcodes::STORE_GLOBAL | opcodes::DELETE_GLOBAL | opcodes::STORE_SUBSCR | opcodes::DELETE_SUBSCR | opcodes::DELETE_ATTR | opcodes::STORE_NAME | opcodes::DELETE_NAME
+                ) =>
+            {
+                return None;
+            }
+            _ => {}
+        }
+    }
+    (calls > 0).then(|| body.iter().map(|v| cfg[*v].origin).collect())
 }
 
 // Whether Python function `f` ran its torch ops in its own frame, entering
@@ -3388,6 +3526,9 @@ unsafe fn lookup<'a>(code: &Bound<'_, PyAny>) -> PyResult<&'a Compiled> {
     let index = extra_index();
     if index < 0 || PyUnstable_Code_GetExtra(code.as_ptr(), index, &mut p) < 0 {
         return Err(PyErr::fetch(code.py()));
+    }
+    if p == compilers::mark() {
+        return Err(pyo3::exceptions::PyValueError::new_err("it is code of a compiler or of a function transform, which runs on CPython"));
     }
     if p.is_null() || p == trampoline::mark() {
         return Err(pyo3::exceptions::PyValueError::new_err("the CFG executor hasn't run this code"));

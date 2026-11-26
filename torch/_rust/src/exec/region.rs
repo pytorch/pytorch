@@ -186,9 +186,10 @@ pub fn _region_refuse(why: Py<PyAny>) {
 
 // Refuses the trace running on this thread from the executor, in place of
 // what its body was about to do: the refusal (`why`: "it ...", as any) is
-// the error raised there.
-pub fn refuse(py: Python<'_>, why: &str) {
-    match py.import("torch._rust_inductor").and_then(|m| m.call_method1("_refuse", (why,))) {
+// the error raised there. `later`: the place is traced again (see
+// covered.rs), which torch.vm.regions shows as "not yet".
+pub fn refuse(py: Python<'_>, why: &str, later: bool) {
+    match py.import("torch._rust_inductor").and_then(|m| m.call_method1("_refuse", (why, later))) {
         Ok(e) => PyErr::from_value(e).restore(py),
         Err(e) => e.restore(py),
     }
@@ -207,7 +208,7 @@ pub unsafe fn kept(outs: &[*mut PyObject]) {
         handed.and_then(|l| py.import("torch._rust_inductor")?.call_method1("_kept_by", (l,))).and_then(|k| k.extract::<Option<String>>())
     });
     if let Ok(Some(class)) = by {
-        refuse(py, &format!("it hands a float argument on in a {class}, which a region cannot make again"));
+        refuse(py, &format!("it hands a float argument on in a {class}, which a region cannot make again"), false);
         ffi::PyErr_Clear();
     }
 }
@@ -653,6 +654,15 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     super::reads::end();
     TRACING.set(false);
     BODY.set(None);
+    // A refusal is asked about until the next trace begins (see refused):
+    // what it keeps then is its text, not the frames it was raised through
+    // and the tensors in them.
+    REFUSAL.with_borrow(|e| {
+        if let Some(e) = e {
+            ffi::PyException_SetTraceback(e.as_ptr(), ffi::Py_None());
+            ffi::PyException_SetContext(e.as_ptr(), std::ptr::null_mut());
+        }
+    });
     let r = r?;
     if r.is_none() {
         return Ok(None);
