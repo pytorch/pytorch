@@ -118,8 +118,8 @@ class TestSplitSource(_WorldStateTestCase):
         parent._get_backend.return_value = split_src
         return parent
 
-    def _split_source(self, parent_backend, backend):
-        parent = self._parent()
+    def _split_source(self, parent_backend, backend, split_src=None):
+        parent = self._parent(split_src)
         pg_map = {} if parent_backend is None else {parent: (parent_backend, None)}
         with mock.patch.dict(c10d._world.pg_map, pg_map, clear=True):
             return c10d._get_split_source(parent, backend)
@@ -173,6 +173,18 @@ class TestSplitSource(_WorldStateTestCase):
         split_src.supports_splitting = True
         self._drive_non_member(split_src, requested_backend="cuda:mccl")
         split_src.perform_nocolor_split.assert_not_called()
+
+    def test_split_source_without_nocolor_split_skips_split(self):
+        split_src = mock.MagicMock(spec=["supports_splitting"])
+        split_src.supports_splitting = True
+        self.assertIsNone(
+            self._split_source("cuda:nccl", "cuda:nccl", split_src=split_src)
+        )
+
+    def test_non_member_skips_nocolor_split_without_method(self):
+        split_src = mock.MagicMock(spec=["supports_splitting"])
+        split_src.supports_splitting = True
+        self._drive_non_member(split_src)
 
 
 class TestAbortReleasesNvshmemAfterAbort(_WorldStateTestCase):
