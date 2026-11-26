@@ -217,6 +217,10 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         [
             (
                 (f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0",),
+                f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0",
+            ),
+            (
+                (f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0",),
                 f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:1",
             ),
             (
