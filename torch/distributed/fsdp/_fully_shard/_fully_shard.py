@@ -1202,6 +1202,46 @@ class FSDPModule:
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.unshard_async_op = unshard_in_current_stream
 
+    def set_reduce_output_in_current_stream(
+        self, reduce_output_in_current_stream: bool, *, recurse: bool = True
+    ) -> None:
+        """
+        Sets whether FSDP allocates its reduce-scatter output and post-reduce
+        sharded-gradient buffers on the current stream instead of on its
+        separate reduce-scatter and all-reduce streams. The current stream is
+        the one that is current when FSDP issues the post-backward reduction,
+        normally the one backward and the optimizer run on, so the resulting
+        sharded gradients share that stream's memory pool. Defaults to
+        ``False``.
+
+        Setting this to ``True`` avoids inter-stream memory fragmentation when
+        sharded gradients are consumed and freed (e.g. via ``zero_grad()``) on
+        the compute stream: stream-segregated caching allocators do not reuse
+        memory freed on one stream for allocations on another. Unlike
+        :meth:`set_unshard_in_current_stream`, all reduction collectives and
+        post-reduce kernels (reduce-scatter, all-reduce, scaling, dtype cast,
+        and gradient accumulation) continue to execute on the separate
+        reduce-scatter / all-reduce streams, preserving compute/communication
+        overlap. Buffer lifetimes are managed with event-guarded reference
+        retention rather than ``record_stream``.
+
+        Args:
+            reduce_output_in_current_stream (bool): Whether to allocate
+                reduce-scatter output and post-reduce sharded-gradient buffers
+                on the current stream.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.reduce_output_in_current_stream = (
+                        reduce_output_in_current_stream
+                    )
+
     def get_all_gather_copy_in_stream(self) -> torch.Stream:
         """
         Returns the stream FSDP issues its all-gather copy-ins on. A copy-in

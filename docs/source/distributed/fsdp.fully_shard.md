@@ -136,6 +136,14 @@ both ``AG(a,d)`` and ``RS(c)`` overlap with compute. This pipelining is why
 the recommended pattern is to apply ``fully_shard`` bottom-up to each layer
 before applying it to the root.
 
+Similarly to all-gather, reduce-scatter output buffers (which back sharded
+gradients) are allocated on the RS/AR streams by default, even though sharded
+gradients are consumed and freed on the compute stream.
+``set_reduce_output_in_current_stream`` allocates reduce-scatter outputs and
+post-reduce sharded-gradient cast buffers on the current stream instead, while
+keeping the reduction collectives and post-reduce kernels on the separate
+RS/AR streams to preserve compute/communication overlap.
+
 To control the size of each communication group, choose which modules to wrap:
 wrapping more fine-grained modules produces smaller, more overlappable groups
 (similar to smaller DDP buckets), while wrapping fewer modules produces larger

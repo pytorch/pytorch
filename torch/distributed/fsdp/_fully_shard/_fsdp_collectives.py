@@ -679,12 +679,13 @@ def foreach_reduce(
     *,
     prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
     all_reduce_comm: AllReduce = DefaultAllReduce(),
+    reduce_output_in_current_stream: bool = False,
 ) -> tuple[
     torch.Tensor | list[torch.Tensor],
     torch.Event,
     torch.Stream,
     torch.Event,
-    torch.Tensor | None,
+    torch.Tensor | list[torch.Tensor] | None,
     torch.Event | None,
     torch.Tensor | None,
 ]:
@@ -739,6 +740,7 @@ def foreach_reduce(
             reduce_dtype,
             device,
             div_factors,
+            reduce_output_in_current_stream=reduce_output_in_current_stream,
         )
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
@@ -769,8 +771,32 @@ def foreach_reduce(
     # that copy_in holds
     del copy_in
     unsharded_grads.clear()
+    # Allocate reduce_output on current_stream only when it feeds the
+    # post-reduce sharded gradients (consumed/freed on current_stream). HSDP
+    # partial-accumulation steps (all_reduce_grads=False) stay internal to
+    # reduce_scatter_stream. Doing this after clearing unsharded_grads and
+    # before wait_stream(current_stream) lets reduce_output reuse freed
+    # gradient blocks with no extra synchronization.
+    alloc_output_in_current_stream = (
+        reduce_output_in_current_stream
+        and device.type != "cpu"
+        and (all_reduce_group is None or all_reduce_grads)
+    )
+    reduce_output: torch.Tensor | None = None
+    if alloc_output_in_current_stream:
+        if skip_reduce_scatter:
+            if all_reduce_group is None:
+                reduce_output = reduce_scatter_input
+            else:
+                reduce_output = torch.empty_like(reduce_scatter_input)
+        else:
+            reduce_output = reduce_scatter_comm.allocate(
+                (reduce_scatter_output_numel,),
+                dtype=reduce_dtype,
+                device=device,
+            )
     reduce_scatter_stream.wait_stream(current_stream)
-    all_reduce_input = None
+    all_reduce_input: torch.Tensor | list[torch.Tensor] | None = None
     all_reduce_event = None
 
     with device_handle.stream(reduce_scatter_stream):
@@ -780,18 +806,20 @@ def foreach_reduce(
                 # The packed input already is the reduction output
                 reduce_output = reduce_scatter_input
             else:
-                # HSDP/replicate keeps a separate output, allocated in the RS
-                # stream, since its all-reduce and partial accumulation outlive
-                # the input
-                reduce_output = torch.empty_like(reduce_scatter_input)
+                if reduce_output is None:
+                    # HSDP/replicate keeps a separate output, allocated in the
+                    # RS stream, since its all-reduce and partial accumulation
+                    # outlive the input
+                    reduce_output = torch.empty_like(reduce_scatter_input)
                 reduce_output.copy_(reduce_scatter_input)
             _div_if_needed(reduce_output, divide_in_op)
         else:
-            reduce_output = reduce_scatter_comm.allocate(
-                (reduce_scatter_output_numel,),
-                dtype=reduce_dtype,
-                device=device,
-            )
+            if reduce_output is None:
+                reduce_output = reduce_scatter_comm.allocate(
+                    (reduce_scatter_output_numel,),
+                    dtype=reduce_dtype,
+                    device=device,
+                )
             reduce_scatter_comm(
                 output_tensor=reduce_output,
                 input_tensor=reduce_scatter_input,
@@ -854,6 +882,7 @@ def foreach_reduce(
             all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops post reduce_scatter
 
+    allocated_output_buffers: list[torch.Tensor] = []
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
         # Casting may rebind to a new tensor. Do NOT rely on this rebind to manage
@@ -869,10 +898,22 @@ def foreach_reduce(
         # caller's stream. The op is a no-op by default; a backend whose free is
         # a device op that releases the memory registers an impl that records
         # the consumer stream, so the free is ordered behind that read.
-        record_grad_output_stream(reduce_output, current_stream)
-        sharded_grads = _cast_and_view_sharded_grads(
-            reduce_output, fsdp_params, padded_sharded_numels, current_stream
-        )
+        if not alloc_output_in_current_stream:
+            record_grad_output_stream(reduce_output, current_stream)
+            sharded_grads = _cast_and_view_sharded_grads(
+                reduce_output, fsdp_params, padded_sharded_numels, current_stream
+            )
+        else:
+            sharded_grads = _cast_and_view_sharded_grads(
+                reduce_output,
+                fsdp_params,
+                padded_sharded_numels,
+                current_stream,
+                alloc_in_consumer_stream=True,
+                device_handle=device_handle,
+                allocated_buffers=allocated_output_buffers,
+                wait_consumer_stream=all_reduce_hook is not None,
+            )
 
         # Accumulate the reduced gradients in each parameter's sharded dtype.
         for fsdp_param, new_sharded_grad in zip(fsdp_params, sharded_grads):
@@ -913,16 +954,38 @@ def foreach_reduce(
                     fsdp_param.grad_offload_event = post_reduce_stream.record_event()
             _accumulate_sharded_grad(fsdp_param, new_sharded_grad)
         post_reduce_event = post_reduce_stream.record_event()
-    # The RS output is allocated in the RS stream and used in the default
-    # stream (for optimizer); the sharded parameters hold refs through the end
-    # of backward, so its memory is not reused for later RSs. A reused input is
-    # instead allocated in the current stream and read by the post-reduce ops
-    # above, so keep it alive until they finish. With all_reduce_input set, its
-    # AllReduceState is only released after waiting on the post-reduce event.
-    if reduce_output is reduce_scatter_input and all_reduce_input is None:
+    reduce_scatter_keepalive: torch.Tensor | list[torch.Tensor] = reduce_scatter_input
+    if alloc_output_in_current_stream:
+        # Current-stream-allocated output buffers are written and read on
+        # post_reduce_stream, so keep Python refs alive until post_reduce_event
+        # completes rather than calling record_stream.
+        output_keepalive: list[torch.Tensor] = []
+        if reduce_output is not reduce_scatter_input:
+            output_keepalive.append(reduce_output)
+        output_keepalive.extend(allocated_output_buffers)
+        if all_reduce_input is not None:
+            # HSDP / all_reduce_hook: keep per-layer on AllReduceState guarded
+            # by post_reduce_event so cross-layer slow all-reduce overlap is
+            # preserved.
+            all_reduce_input = (
+                [reduce_output, *allocated_output_buffers]
+                if allocated_output_buffers
+                else reduce_output
+            )
+            all_reduce_event = post_reduce_event
+        elif output_keepalive or reduce_output is reduce_scatter_input:
+            # 1D FSDP (post_reduce_stream == reduce_scatter_stream): retain on
+            # ReduceScatterState until post_reduce_event so early-free cases
+            # (dtype cast, grad accum, CPU offload, optim-in-backward) cannot
+            # recycle the block on current_stream while post_reduce_stream still
+            # uses it.
+            if output_keepalive:
+                reduce_scatter_keepalive = [reduce_scatter_input, *output_keepalive]
+            reduce_scatter_event = post_reduce_event
+    elif reduce_output is reduce_scatter_input and all_reduce_input is None:
         reduce_scatter_event = post_reduce_event
     return (
-        reduce_scatter_input,
+        reduce_scatter_keepalive,
         reduce_scatter_event,
         post_reduce_stream,
         post_reduce_event,
@@ -939,6 +1002,8 @@ def _reduce_single_rank(
     reduce_dtype: torch.dtype,
     device: torch.device,
     div_factors: list[float],
+    *,
+    reduce_output_in_current_stream: bool = False,
 ) -> tuple[
     list[torch.Tensor], torch.Event, torch.Stream, torch.Event, None, None, None
 ]:
@@ -951,6 +1016,9 @@ def _reduce_single_rank(
     """
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
+    alloc_cast_in_current_stream = (
+        reduce_output_in_current_stream and device.type != "cpu"
+    )
     # Like the copy-in of the buffered path, this copy runs on the current
     # stream, so the gradients are freed here
     reduce_grads = [
@@ -959,6 +1027,7 @@ def _reduce_single_rank(
     ]
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
+    keepalive_grads: list[torch.Tensor] = list(reduce_grads)
     with device_handle.stream(reduce_scatter_stream):
         for fsdp_param, reduce_grad in zip(fsdp_params, reduce_grads):
             # With one rank, the sharded size is the gradient size except for
@@ -967,21 +1036,33 @@ def _reduce_single_rank(
             reduce_grad = reduce_grad.view(fsdp_param.sharded_size)
             for factor in div_factors:
                 reduce_grad.div_(factor)
-            new_sharded_grad = _to_dtype_if_needed(
-                reduce_grad, fsdp_param.sharded_grad_dtype
-            )
+            grad_dtype = fsdp_param.sharded_grad_dtype
             if (
-                fsdp_param.sharded_param.grad is None
-                and new_sharded_grad is not reduce_grad
+                alloc_cast_in_current_stream
+                and grad_dtype is not None
+                and reduce_grad.dtype != grad_dtype
             ):
-                # Allocated in the reduce-scatter stream and used in the current one
-                record_grad_output_stream(new_sharded_grad, current_stream)
+                with device_handle.stream(current_stream):
+                    new_sharded_grad = torch.empty(
+                        reduce_grad.shape, dtype=grad_dtype, device=reduce_grad.device
+                    )
+                new_sharded_grad.copy_(reduce_grad)
+                keepalive_grads.append(new_sharded_grad)
+            else:
+                new_sharded_grad = _to_dtype_if_needed(reduce_grad, grad_dtype)
+                if (
+                    fsdp_param.sharded_param.grad is None
+                    and new_sharded_grad is not reduce_grad
+                ):
+                    # Allocated in the reduce-scatter stream and used in the current one
+                    record_grad_output_stream(new_sharded_grad, current_stream)
             _accumulate_sharded_grad(fsdp_param, new_sharded_grad)
-        # The copies can be the sharded gradients, which the hooks may read on
-        # this stream, so keep them alive until the hooks finish
+        # The copies (and any current-stream-allocated casts) can be the sharded
+        # gradients, which hooks or accumulation may read on this stream, so
+        # keep them alive until post-reduce finishes
         post_reduce_event = reduce_scatter_stream.record_event()
     return (
-        reduce_grads,
+        keepalive_grads,
         post_reduce_event,
         reduce_scatter_stream,
         post_reduce_event,
@@ -1014,6 +1095,11 @@ def _cast_and_view_sharded_grads(
     fsdp_params: list[FSDPParam],
     padded_sharded_numels: Sequence[int],
     consumer_stream: torch.Stream,
+    *,
+    alloc_in_consumer_stream: bool = False,
+    device_handle: Any = None,
+    allocated_buffers: list[torch.Tensor] | None = None,
+    wait_consumer_stream: bool = False,
 ) -> list[torch.Tensor]:
     # Inputs follow the sharded gradient dtype order cached at lazy init.
     # Each contiguous region needs at most one flat cast/allocation after
@@ -1040,17 +1126,38 @@ def _cast_and_view_sharded_grads(
     # those regions are larger.
     copy_uncast = cast_numel > reduce_output_numel - cast_numel
     flat_grad_offset = 0  # [0, reduce_output_numel - 1]
+
+    def _alloc_and_copy(src: torch.Tensor, *, dtype: torch.dtype) -> torch.Tensor:
+        nonlocal wait_consumer_stream
+        with device_handle.stream(consumer_stream):
+            dst = torch.empty(src.shape, dtype=dtype, device=src.device)
+        if wait_consumer_stream:
+            device_handle.current_stream().wait_stream(consumer_stream)
+            wait_consumer_stream = False
+        dst.copy_(src)
+        if allocated_buffers is not None:
+            allocated_buffers.append(dst)
+        return dst
+
     for grad_dtype, param_group in runs:
         group_numel = sum(numel for _, numel in param_group)
         group_output = reduce_output
         if group_numel != reduce_output_numel:
             group_output = group_output.narrow(0, flat_grad_offset, group_numel)
-        new_output = _to_dtype_if_needed(group_output, grad_dtype)
-        if new_output is group_output and copy_uncast:
-            new_output = group_output.clone()
-        if new_output is not group_output:
-            # These sharded gradients alias the new buffer instead
-            record_grad_output_stream(new_output, consumer_stream)
+        if alloc_in_consumer_stream and device_handle is not None:
+            if grad_dtype is not None and group_output.dtype != grad_dtype:
+                new_output = _alloc_and_copy(group_output, dtype=grad_dtype)
+            elif copy_uncast:
+                new_output = _alloc_and_copy(group_output, dtype=group_output.dtype)
+            else:
+                new_output = group_output
+        else:
+            new_output = _to_dtype_if_needed(group_output, grad_dtype)
+            if new_output is group_output and copy_uncast:
+                new_output = group_output.clone()
+            if new_output is not group_output:
+                # These sharded gradients alias the new buffer instead
+                record_grad_output_stream(new_output, consumer_stream)
         group_output = new_output
         group_offset = group_output.storage_offset()
         for fsdp_param, padded_sharded_numel in param_group:
@@ -1064,13 +1171,17 @@ def _cast_and_view_sharded_grads(
                 padded_stride = make_contiguous_strides_for(
                     fsdp_param.padded_sharded_param_size
                 )
-                grad = torch.as_strided(
+                strided_grad = torch.as_strided(
                     group_output,
                     size=fsdp_param.sharded_size,
                     stride=padded_stride,
                     storage_offset=group_offset,
-                ).clone(memory_format=torch.contiguous_format)
-                record_grad_output_stream(grad, consumer_stream)
+                )
+                if alloc_in_consumer_stream and device_handle is not None:
+                    grad = _alloc_and_copy(strided_grad, dtype=group_output.dtype)
+                else:
+                    grad = strided_grad.clone(memory_format=torch.contiguous_format)
+                    record_grad_output_stream(grad, consumer_stream)
             else:
                 grad = torch.as_strided(
                     group_output,
