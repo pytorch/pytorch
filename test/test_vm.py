@@ -703,6 +703,126 @@ class TestVmFloatArguments(TestCase):
 instantiate_device_type_tests(TestVmFloatArguments, globals())
 
 
+class KeysName:
+    """A key that is equal to another of its class by one field of two."""
+
+    def __init__(self, name, scale):
+        self.name, self.scale = name, scale
+
+    def __eq__(self, other):
+        return type(other) is KeysName and other.name == self.name
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __repr__(self):
+        return f"KeysName({self.name!r}, {self.scale})"
+
+
+def keys_work(x):
+    return ((x.sin() * 2).cos() + 1).tanh().exp()
+
+
+def keys_read(x, table):
+    (w,) = table.values()
+    return keys_work(x) * w, repr(list(table))
+
+
+def keys_read_inside(x, tables):
+    (w,) = tables[0]["inner"].values()
+    return keys_work(x) * w, repr(list(tables[0]["inner"]))
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmDictKeys(TestCase):
+    """A region that takes a dict runs for a dict with the keys its trace
+    saw: 1, True and 1.0 are one key to a dict and three to the code that
+    reads the keys."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, fn, device, make, first, second):
+        # Six calls with one key, then six with a key that is equal to it.
+        g = vm_early(fn)
+        w = torch.ones(8, device=device)
+        for call in range(12):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            arg = make(second if call >= 6 else first, w)
+            (got, got_text), (want, want_text) = g(x, arg), fn(x, arg)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(got_text, want_text, msg=f"call {call}")
+        return [
+            r
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["state"] == "region"
+        ]
+
+    def a_region_per_key(self, fn, device, make, first, second):
+        (row,) = self.calls(fn, device, make, first, second)
+        self.assertEqual(row["variants"], 2, msg=str(row))
+
+    @isolated
+    def test_int_key_and_an_equal_bool(self, device):
+        self.a_region_per_key(keys_read, device, lambda k, w: {k: w}, 1, True)
+
+    @isolated
+    def test_int_key_and_an_equal_float(self, device):
+        self.a_region_per_key(keys_read, device, lambda k, w: {k: w}, 1, 1.0)
+
+    @isolated
+    def test_tuple_key_and_an_equal_tuple_of_other_classes(self, device):
+        self.a_region_per_key(
+            keys_read, device, lambda k, w: {k: w}, (1, "a"), (True, "a")
+        )
+
+    @isolated
+    def test_tuple_key_of_strs_is_one_region(self, device):
+        (row,) = self.calls(
+            keys_read, device, lambda k, w: {k: w}, ("a", "b"), ("a", "b")
+        )
+        self.assertEqual((row["variants"], row["misses"]), (1, {}), msg=str(row))
+
+    @isolated
+    def test_key_of_a_dict_inside_a_list_and_a_dict(self, device):
+        self.a_region_per_key(
+            keys_read_inside, device, lambda k, w: [{"inner": {k: w}}], 1, True
+        )
+
+    @isolated
+    def test_key_of_a_defaultdict(self, device):
+        self.a_region_per_key(
+            keys_read,
+            device,
+            lambda k, w: collections.defaultdict(list, {k: w}),
+            1,
+            True,
+        )
+
+    @isolated
+    def test_key_of_a_class_with_an_equality_of_its_own(self, device):
+        # Equal keys of one class that differ: no region is checked on them.
+        rows = self.calls(
+            keys_read,
+            device,
+            lambda k, w: {k: w},
+            KeysName("a", 1.0),
+            KeysName("a", 2.0),
+        )
+        self.assertEqual(rows, [])
+
+    @isolated
+    def test_frozenset_key(self, device):
+        rows = self.calls(
+            keys_read, device, lambda k, w: {k: w}, frozenset({1}), frozenset({True})
+        )
+        self.assertEqual(rows, [])
+
+
+instantiate_device_type_tests(TestVmDictKeys, globals())
+
+
 def given_up_count(y):
     try:
         return int((y > 0).sum())

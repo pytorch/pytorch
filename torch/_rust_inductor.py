@@ -761,17 +761,30 @@ def _made_of(x):
     return None
 
 
+def _key_kind(k):
+    """What tells a dict key, or a pytree node's context, from one that is
+    equal to it and of another class: its class, with the classes inside a
+    tuple or a list. 1, True and 1.0 are one key to a dict and three to the
+    code that reads it."""
+    t = type(k)
+    return (t, *map(_key_kind, k)) if t is tuple or t is list else t
+
+
 def _walk(x, leaves, shape):
     """Appends x's leaves to `leaves` and its structure to `shape`: as
     _flatten, without pytree for exact lists, tuples and dicts (run on every
-    region call)."""
+    region call). A dict's and a pytree node's entries are the only ones of
+    three items: the class, the keys (the context), and their _key_kind."""
     t = type(x)
     if t is list or t is tuple:
         shape.append((t, len(x)))
         for y in x:
             _walk(y, leaves, shape)
     elif t is dict:
-        shape.append((dict, tuple(x)))
+        kinds = tuple(map(type, x))
+        if tuple in kinds:
+            kinds = tuple(map(_key_kind, x))
+        shape.append((dict, tuple(x), kinds))
         for y in x.values():
             _walk(y, leaves, shape)
     elif (made := _made_of(x)) is not None:
@@ -792,7 +805,7 @@ def _walk(x, leaves, shape):
         # A registered pytree node, one level at a time: no TreeSpec to build
         # and compare on every call.
         children, context = node.flatten_fn(x)
-        shape.append((t, context))
+        shape.append((t, context, _key_kind(context)))
         for y in children:
             _walk(y, leaves, shape)
     else:
@@ -1159,16 +1172,27 @@ def _meta(t: torch.Tensor):
     return (type(t), t.dtype, t.device, t.shape, t.stride(), t.requires_grad)
 
 
-def _zero_key(shape) -> bool:
-    """Whether a dict of a container arg (or a pytree node's keys) has the
-    key 0.0 or -0.0: the two are equal as keys and are two numbers, so the
-    structure a region checks would take one for the other."""
-    return any(
-        type(k) is float and k == 0.0
-        for s in shape
-        if type(s) is tuple and len(s) == 2 and type(s[1]) in (tuple, list)
-        for k in s[1]
-    )
+def _unsure_key(k) -> bool:
+    """Whether a dict key (or a part of a pytree node's context) can be equal
+    to one of its own class that is not the same to the code that reads it:
+    0.0 and -0.0, and a value of a class with an ``==`` of its own that isn't
+    known (a frozenset, whose items ``==`` compares; a class that compares
+    one field of two). The structure a region checks would take one for the
+    other."""
+    t = type(k)
+    if t is tuple or t is list:
+        return any(map(_unsure_key, k))
+    if t is float:
+        return k == 0.0
+    return t not in _IMMUTABLE and t is not bytes and t.__eq__ is not object.__eq__
+
+
+def _has_number(kind) -> bool:
+    """Whether a _key_kind has a number in it: numbers of two classes can be
+    equal, and rust.TreeChecks compares keys and contexts with ``==`` alone."""
+    if type(kind) is tuple:
+        return any(map(_has_number, kind))
+    return kind in (bool, int, float)
 
 
 # How func reads a leaf of a container arg: as a graph input (a tensor,
@@ -1228,12 +1252,19 @@ def _plan(args, unused, span=False, scalars=False):
         elif _is_tree(a) or _made_of(a) is not None:
             leaves, shape = [], []
             _walk(a, leaves, shape)
-            if _zero_key(shape):
-                raise _Refused(f"arg {i} holds a dict with the key 0.0 or -0.0")
+            keyed = [s for s in shape if type(s) is tuple and len(s) == 3]
+            for kind, keys, _ in keyed:
+                for k in keys if type(keys) in (tuple, list) else (keys,):
+                    if _unsure_key(k):
+                        raise _Refused(
+                            f"arg {i} holds a {kind.__name__} with the key {k!r}, which can be equal to a key that is not the same"
+                        )
             plain = scalars and _plain_tree(a)
             leaf_checks = [_leaf_check(x, f"arg {i}", plain) for x in leaves]
             fast = None
-            if all(c[0] != _FLOAT for c in leaf_checks):
+            if all(c[0] != _FLOAT for c in leaf_checks) and not any(
+                _has_number(s[2]) for s in keyed
+            ):
                 try:
                     fast = _rust().TreeChecks(a)
                 except TypeError:
