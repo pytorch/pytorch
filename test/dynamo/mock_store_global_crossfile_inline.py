@@ -76,3 +76,7 @@ def delete_flip_value_fn():
 def delete_missing_value_fn():
     global delete_missing_value
     del delete_missing_value
+
+
+def builtin_only_fn(x):
+    return len(x) + abs(int(x.sum()))

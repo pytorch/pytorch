@@ -963,6 +963,28 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x + 2)
             self.assertEqual(mod.__dict__[name], 2)
 
+    def test_inlined_builtin_load_skips_globals_source(self):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        with crossfile_globals() as mod:
+
+            def fn(x):
+                return mod.builtin_only_fn(x)
+
+            x = torch.ones(2, 2)
+            orig = InliningInstructionTranslator.get_globals_source_and_value
+            calls = []
+
+            def spy(self, name):
+                calls.append(name)
+                return orig(self, name)
+
+            with mock.patch.object(
+                InliningInstructionTranslator, "get_globals_source_and_value", spy
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(calls, [])
+
     def test_delete_missing_global_read_after_caught_failed_del(self):
         with mock.patch.dict(globals()):
 
