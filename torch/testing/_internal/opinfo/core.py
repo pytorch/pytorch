@@ -2330,7 +2330,7 @@ def generate_elementwise_binary_with_scalar_samples(
         if op.supports_one_python_scalar:
             yield SampleInput(
                 lhs_scalar,
-                args=(rhs,),
+                args=(rhs if op.supports_lhs_python_scalar_autograd else rhs.detach(),),
                 kwargs=op.sample_kwargs(device, dtype, lhs_scalar)[0],
             )
 
@@ -2549,6 +2549,7 @@ class BinaryUfuncInfo(OpInfo):
         always_returns_bool=False,  # Set to true if the op always returns bool tensors
         supports_rhs_python_scalar=True,  # Whether the operator allows Tensor x scalar inputs
         supports_one_python_scalar=False,  # Whether the operator allows scalar x tensor and tensor x scalar inputs
+        supports_lhs_python_scalar_autograd=True,
         supports_two_python_scalars=False,  # Whether the operator allows scalar x scalar inputs
         **kwargs,
     ):
@@ -2587,6 +2588,7 @@ class BinaryUfuncInfo(OpInfo):
         self.always_returns_bool = always_returns_bool
         self.supports_rhs_python_scalar = supports_rhs_python_scalar
         self.supports_one_python_scalar = supports_one_python_scalar
+        self.supports_lhs_python_scalar_autograd = supports_lhs_python_scalar_autograd
         self.supports_two_python_scalars = supports_two_python_scalars
 
         if self.supports_two_python_scalars:
