@@ -44,6 +44,7 @@ from typing import (
     cast,
     Literal,
     NamedTuple,
+    NoReturn,
     NotRequired,
     Optional,
     TYPE_CHECKING,
@@ -61,6 +62,7 @@ import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx, Tensor
 from torch._C._dynamo import guards
+from torch._dynamo import graph_break_hints
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
@@ -73,6 +75,7 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     maybe_get_fake_device,
     maybe_get_item_memo,
     maybe_set_fake_device,
@@ -94,7 +97,7 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
+from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_binary_slice,
@@ -786,6 +789,11 @@ class OutputGraph(OutputGraphCommon):
         self.compile_id: int = next(_compile_id_counter)
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
+        # Names deleted in this trace, keyed by id() of the globals dict they
+        # were deleted from; the entry keeps the dict alive so the id cannot
+        # be reused. Later module-object or module-__dict__ accesses to those
+        # names graph-break (see check_deleted_global_access).
+        self.deleted_globals_by_dict: dict[int, tuple[Any, set[str]]] = {}
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -1066,6 +1074,27 @@ class OutputGraph(OutputGraphCommon):
         self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
         self._cached_replayed_side_effect_source_refs: tuple[str, ...] | None = None
 
+    # TODO(follow-up): replace this break with real support, ordering the
+    # module-object access against the replayed global delete.
+    def deleted_global_access_unsupported(self, context: str) -> NoReturn:
+        unimplemented(
+            gb_type="DELETE_GLOBAL with a module namespace access",
+            context=context,
+            explanation=(
+                "A module object or module __dict__ access in the same trace as a "
+                "global delete would race the delete, which is replayed after "
+                "the graph. Eager resume has to order them instead."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def check_deleted_global_access(self, globals_dict: Any, name: str | None) -> None:
+        """Graph-break if this trace deleted `name` from `globals_dict`; with
+        name=None (a view of the whole dict), if it deleted any name."""
+        entry = self.deleted_globals_by_dict.get(id(globals_dict))
+        if entry is not None and (name is None or name in entry[1]):
+            self.deleted_global_access_unsupported(f"name: {name}")
+
     def track_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
         self.local_generators.append(gen)
 
@@ -1317,10 +1346,12 @@ class OutputGraph(OutputGraphCommon):
         self,
         fn: Callable[..., Any],
         args: tuple[Any, ...],
-        ctor_arg_sources: tuple[Source | None, ...] | None = None,
+        ctor_arg_sources: tuple[Source | VariableTracker | None, ...] | None = None,
     ) -> VariableTracker:
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
+        Each arg is codegen'd from its entry in ctor_arg_sources (a Source, or a
+        VariableTracker that reconstructs it), or as a constant if that is None.
         """
         example_value = fn(*args)
         varname = self.new_var()
@@ -1342,7 +1373,11 @@ class OutputGraph(OutputGraphCommon):
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
-        self.synthetic_source_ctor_info[source] = (fn, args, ctor_arg_sources)
+        # invoke_subgraph re-creates synthetic inputs from these sources, which it
+        # can't do for a VariableTracker.
+        if not any(isinstance(s, VariableTracker) for s in ctor_arg_sources or ()):
+            sources = cast(tuple[Source | None, ...] | None, ctor_arg_sources)
+            self.synthetic_source_ctor_info[source] = (fn, args, sources)
         result = VariableTracker.build(self.root_tx, example_value, source)
         # Realize the VT because we will delete the guards on it in the next line.
         result = result.realize()
@@ -1711,7 +1746,7 @@ class OutputGraph(OutputGraphCommon):
         return self
 
     @property
-    def fake_mode(self) -> torch._subclasses.FakeTensorMode:
+    def fake_mode(self) -> torch._subclasses.FakeTensorMode | CppFakeTensorMode:
         if self.tracing_context.fake_mode is None:
             raise AssertionError("tracing_context.fake_mode must not be None")
         return self.tracing_context.fake_mode
@@ -2274,85 +2309,6 @@ class OutputGraph(OutputGraphCommon):
 
         return stack_values, meta
 
-    def _has_live_globals_namespace(self, tx: "InstructionTranslatorBase") -> bool:
-        from .bytecode_analysis import livevars_analysis
-        from .variables.dicts import GlobalDictVariable
-        from .variables.functions import LocalGeneratorObjectVariable
-
-        current_tx: InstructionTranslatorBase | None = tx
-        found = False
-        live_values: list[Any] = []
-
-        def frame_values(frame: "InstructionTranslatorBase") -> list[Any]:
-            # Keep persistent roots aligned with has_live_graph_intermediate.
-            values: list[Any] = [
-                frame.stack,
-                frame.symbolic_cellvars,
-                frame.post_prune_cell_and_freevars,
-                frame.debug_locals,
-                [frame.exn_vt_stack[i] for i in range(len(frame.exn_vt_stack))],
-                frame.active_generic_context_managers,
-                [
-                    entry.with_context
-                    for entry in frame.block_stack
-                    if entry.with_context is not None
-                ],
-            ]
-            if frame.exn_vt_stack._current_exception is not None:
-                values.append(frame.exn_vt_stack._current_exception)
-            instruction = frame.current_instruction
-            if instruction not in frame.instructions:
-                instruction = frame.instructions[0]
-            for name in livevars_analysis(frame.instructions, instruction):
-                key = name.replace(".", "implicit") if name.startswith(".") else name
-                if key in frame.symbolic_locals:
-                    values.append(frame.symbolic_locals[key])
-            return values
-
-        while current_tx is not None:
-            current_tx.prune_dead_locals()
-            live_values.extend(frame_values(current_tx))
-            current_tx = current_tx.parent
-        # Mutations of existing objects survive even without a live local alias.
-        live_values.extend(
-            var
-            for var in self.side_effects.id_to_variable.values()
-            if isinstance(
-                var.mutation_type, (AttributeMutationExisting, ValueMutationExisting)
-            )
-            and self.side_effects.is_modified(var)
-        )
-        live_values.extend(
-            [
-                self.backward_state,
-                self.side_effects.tensor_hooks,
-                self.side_effects.save_for_backward,
-            ]
-        )
-        visit_cache: dict[int, Any] = {}
-        seen_generator_tracers: set[int] = set()
-
-        def check(value: VariableTracker) -> None:
-            nonlocal found
-            # Realizing unrelated lazy values here would introduce extra guards.
-            if type.__instancecheck__(GlobalDictVariable, value):
-                found = True
-            elif type.__instancecheck__(LocalGeneratorObjectVariable, value):
-                tracer = cast(LocalGeneratorObjectVariable, value).inline_tracer
-                if id(tracer) not in seen_generator_tracers:
-                    seen_generator_tracers.add(id(tracer))
-                    live_values.extend(frame_values(tracer))
-                    live_values.append(tracer.gi_exc_state.items)
-
-        while live_values and not found:
-            VariableTracker.visit(
-                check,
-                live_values.pop(),
-                cache=visit_cache,
-                side_effects=self.side_effects,
-            )
-        return found
-
     def compile_subgraph(
         self,
         tx: "InstructionTranslatorBase",
@@ -2376,17 +2332,6 @@ class OutputGraph(OutputGraphCommon):
 
         if self.root_tx is None:
             raise AssertionError("root_tx must not be None")
-
-        if reason.graph_break and self._has_live_globals_namespace(tx):
-            unimplemented(
-                gb_type="live globals namespace across graph break",
-                context=tx.f_code.co_name,
-                explanation=(
-                    "Dynamo cannot resume a frame with a live globals namespace."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-                skip_frame=True,
-            )
 
         # Finalize shapes_spec wiring: errors if any spec assumption/derived
         # check still has unbound IntVar dependencies (i.e. an IntVar

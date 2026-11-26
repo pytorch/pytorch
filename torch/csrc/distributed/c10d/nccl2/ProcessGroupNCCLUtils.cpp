@@ -543,15 +543,18 @@ void ProcessGroupNCCL::enqueueWork(
   if (getGraphCaptureMode()) {
     auto capture_info = c10::cuda::captureInfoMayInitCtx(stream);
     if (capture_info.status == c10::cuda::CaptureStatus::Active) {
-      std::lock_guard<std::mutex> lock(graph_capture_work_mutex_);
-
-      // Check if this is the first work object for this graph
-      bool is_first_work = graph_capture_work_refs_[capture_info.id].empty();
-
-      graph_capture_work_refs_[capture_info.id].push_back(work->state_);
+      bool is_first_work = false;
+      {
+        std::lock_guard<std::mutex> lock(graph_capture_work_mutex_);
+        auto& graph_work_refs = graph_capture_work_refs_[capture_info.id];
+        is_first_work = graph_work_refs.empty();
+        graph_work_refs.push_back(work->state_);
+      }
 
       // If this is the first work object for this graph, set up automatic
-      // cleanup
+      // cleanup. Do not hold graph_capture_work_mutex_ here: HIP runs
+      // graphCleanupCallback while holding a runtime lock that the user object
+      // APIs called by retainGraphUserObject also take.
       if (is_first_work) {
         c10::cuda::retainGraphUserObject(
             capture_info.graph,

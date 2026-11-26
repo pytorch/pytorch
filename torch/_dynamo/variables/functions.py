@@ -102,11 +102,13 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     store_attr_mutation,
+    unmodeled_get,
     unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
 from .constant import ConstantVariable
+from .exception import FrameVariable
 from .object_protocol import python_constant_repr_impl
 from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
@@ -162,7 +164,7 @@ _TIME_FUNCTION_NAMES = (
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
-# Module-level cache keyed by the function object
+# Module-level cache keyed by the code object
 _spec_cache: WeakKeyDictionary[Any, Any] = WeakKeyDictionary()
 
 
@@ -182,8 +184,7 @@ def get_pytree_SUPPORTED_NODES_source() -> AttrSource:
 
 
 class FunctionSpec:
-    def __init__(self, func: FunctionType) -> None:
-        code = func.__code__
+    def __init__(self, code: types.CodeType) -> None:
         vn = code.co_varnames
 
         self.posonly_count = code.co_posonlyargcount
@@ -201,10 +202,7 @@ class FunctionSpec:
         self.varkw_name = vn[off] if code.co_flags & CO_VARKEYWORDS else None
 
     def update_defaults(
-        self,
-        func: FunctionType,
-        defaults: tuple[object, ...],
-        kwdefaults: dict[str, object],
+        self, defaults: tuple[object, ...], kwdefaults: dict[str, object]
     ) -> None:
         # Defaults can change from function call to function call. So re-update
         # them on every call.
@@ -220,11 +218,11 @@ class FunctionSpec:
         }
 
 
-def _get_spec(func: FunctionType) -> FunctionSpec:
-    spec = _spec_cache.get(func)
+def _get_spec(code: types.CodeType) -> FunctionSpec:
+    spec = _spec_cache.get(code)
     if spec is None:
-        spec = FunctionSpec(func)
-        _spec_cache[func] = spec
+        spec = FunctionSpec(code)
+        _spec_cache[code] = spec
     return spec
 
 
@@ -240,7 +238,7 @@ def bind_args_cached(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> dict[str, VariableTracker]:
-    spec = _get_spec(func)
+    spec = _get_spec(func.__code__)
 
     se = tx.output.side_effects
     has_pending_defaults = se.has_pending_mutation_of_attr(vt, "__defaults__")
@@ -261,13 +259,53 @@ def bind_args_cached(
             else {}
         )
 
+    return _bind_args_with_spec(
+        spec,
+        tx,
+        fn_source,
+        has_pending_defaults,
+        has_pending_kwdefaults,
+        pending_defaults,
+        pending_kwdefaults,
+        args,
+        kwargs,
+    )
+
+
+def bind_args_nested(
+    tx: "InstructionTranslatorBase",
+    code: types.CodeType,
+    defaults: tuple[object, ...],
+    kwdefaults: dict[str, object],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> dict[str, VariableTracker]:
+    # Nested functions have no source and their defaults are already VTs, so
+    # no guards or default sources are needed.
+    spec = _get_spec(code)
+    return _bind_args_with_spec(
+        spec, tx, None, False, False, defaults, kwdefaults, args, kwargs
+    )
+
+
+def _bind_args_with_spec(
+    spec: FunctionSpec,
+    tx: "InstructionTranslatorBase",
+    fn_source: Source | None,
+    has_pending_defaults: bool,
+    has_pending_kwdefaults: bool,
+    defaults: tuple[object, ...],
+    kwdefaults: dict[str, object],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> dict[str, VariableTracker]:
     # Fast path: simple positional-only, no defaults, no varargs/varkw
     # This is the common case for small utility functions called repeatedly.
     if (
         not has_pending_defaults
         and not has_pending_kwdefaults
         and len(args) == spec.arg_count
-        and not func.__defaults__
+        and not defaults
         and not kwargs
         and not spec.varargs_name
         and not spec.varkw_name
@@ -279,7 +317,7 @@ def bind_args_cached(
         }
 
     # Full path with all features
-    spec.update_defaults(func, pending_defaults, pending_kwdefaults)
+    spec.update_defaults(defaults, kwdefaults)
     ba = {}
     rem_kw = dict(kwargs)
     guarded_pos_defaults_len = False
@@ -367,13 +405,6 @@ def wrap_bound_arg(
         return variables.LazyVariableTracker.create(val, source, tx=tx)
 
 
-def wrap_args_kwargs(tx: "InstructionTranslatorBase", result: dict[str, Any]) -> None:
-    for k, v in list(result.items()):
-        if isinstance(v, (tuple, dict)):
-            # args/kwargs
-            result[k] = wrap_bound_arg(tx, v)
-
-
 def init_cellvars(
     parent: "InstructionTranslatorBase",
     result: dict[str, VariableTracker],
@@ -442,14 +473,6 @@ fn_known_dunder_attrs = {
 }
 
 
-def _get_globals(
-    vt: "BaseUserFunctionVariable", tx: "InstructionTranslatorBase"
-) -> VariableTracker:
-    from .dicts import globals_dict_variable
-
-    return globals_dict_variable(tx, vt.get_globals())
-
-
 # GetSet setters for the function slots whose write is the same for every
 # function VT: the value goes to the side effects table, keyed on the VT.
 def _set_name(
@@ -472,6 +495,14 @@ def _set_qualname(
     store_attr_mutation(tx, vt, "__qualname__", value)
 
 
+def _get_globals(
+    vt: "BaseUserFunctionVariable", tx: "InstructionTranslatorBase"
+) -> VariableTracker:
+    from .dicts import GlobalDictVariable
+
+    return GlobalDictVariable.create(tx, vt.get_globals(), vt.get_source())
+
+
 class BaseUserFunctionVariable(VariableTracker):
     def self_args(self) -> list[VariableTracker]:
         return []
@@ -482,26 +513,6 @@ class BaseUserFunctionVariable(VariableTracker):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
         return VariableTracker.build(tx, repr(self.as_python_constant()))
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in ("__setattr__", "__delattr__"):
-            # Data descriptors from tp_getset/tp_members win over the instance
-            # dict, as in PyObject_GenericSetAttr.
-            value = args[1] if name == "__setattr__" else None
-            if args[0].is_python_constant():
-                entry = self.lookup_tp_getset_member(args[0].as_python_constant())
-                if entry is not None:
-                    out = entry.setter(self, tx, value)
-                    return out if out is not None else ConstantVariable.create(None)
-            dict_method = "__setitem__" if value is not None else "__delitem__"
-            return self.get_dict_vt(tx).call_method(tx, dict_method, list(args), {})
-        return super().call_method(tx, name, list(args), kwargs)
 
     def get_filename(self) -> str:
         return self.get_code().co_filename
@@ -642,9 +653,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
-
-    def get_value_for_setattr(self) -> object | None:
-        return self.fn
 
     def __init__(
         self,
@@ -892,6 +900,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         ),
         "__closure__": Member(_get_closure, readonly_setter),
         "__globals__": Member(_get_globals, readonly_setter),
+        "__builtins__": Member(unmodeled_get, readonly_setter),
     }
 
     tp_getset = {
@@ -930,14 +939,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors func_descr_get which calls PyMethod_New to bind
         # the function to an instance, and returns the function itself when
         # there is no instance.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1119
-        if obj.is_constant_none():
+        if obj is None:
             return self
         source = obj.source and AttrSource(obj.source, self.fn.__name__)
         return UserMethodVariable(self, obj, source=source)
@@ -1358,6 +1367,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
         self.remaining_items: list[VariableTracker] = []
+        self.frame = FrameVariable(inline_tracer)  # noqa: RVT001
         inline_tracer.output.track_generator(self)
 
     def get_code(self) -> types.CodeType:
@@ -1446,10 +1456,13 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
             tracer.push(arg)
-            with self.inline_tracer.link_gi_exc_state():
+            tracer.exn_vt_stack.push_segment(tracer.gi_exc_state)
+            try:
                 if exc:
                     self.throw_pending()
                 return tracer.inline_call_()
+            finally:
+                tracer.exn_vt_stack.pop_segment()
         except ObservedUserStopIteration:
             # PEP 479: pre-3.12 has no STOPITERATION_ERROR opcode, so convert a
             # StopIteration that escapes the generator body to RuntimeError here
@@ -1531,13 +1544,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L832
         return self.gen_send_ex2(tx, ConstantVariable.create(None), False)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
-
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
         return self
@@ -1566,10 +1572,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return self.inline_tracer.frame_state == FrameState.FRAME_CREATED
 
     def _frame_state_finished(self) -> bool:
-        return self.inline_tracer.frame_state in {
-            FrameState.FRAME_COMPLETED,
-            FrameState.FRAME_CLEARED,
-        }
+        state = self.inline_tracer.frame_state
+        return state is FrameState.FRAME_COMPLETED or state is FrameState.FRAME_CLEARED
 
     def _frame_state_suspended(self) -> bool:
         return self.inline_tracer.frame_state in {
@@ -1587,6 +1591,20 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # yielded by the generator, or raises StopIteration if the generator
         # exits without yielding another value
         return self.gen_send_ex(tx, args[0], False)
+
+    def gen_close_iter(
+        self, tx: "InstructionTranslatorBase", yf: VariableTracker
+    ) -> None:
+        # https://github.com/python/cpython/blob/3.13/Objects/genobject.c (gen_close_iter)
+        # Only call yf.close() if it exists; e.g. tuple_iterator has no close().
+        if isinstance(yf, LocalGeneratorObjectVariable):
+            yf.call_method(tx, "close", [], {})
+            return
+        from .object_protocol import generic_getattr
+
+        meth = generic_getattr(tx, yf, "close", default=None)
+        if meth is not None:
+            meth.call_function(tx, [], {})
 
     def gen_close(
         self,
@@ -1620,7 +1638,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         if yf:
             with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
                 try:
-                    yf.call_method(tx, "close", [], {})
+                    self.gen_close_iter(tx, yf)
                 except ObservedException:
                     err = True
 
@@ -1689,9 +1707,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # CPython has an extra flag for handling async generators
             if pyerr_given_exception_match(arg, GeneratorExit):
                 try:
-                    # CPython uses gen_close_iter here
                     with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
-                        yf.call_method(tx, "close", [], {})
+                        self.gen_close_iter(tx, yf)
                 except ObservedException:
                     pass
                 return throw_here()
@@ -1704,11 +1721,18 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         return throw_here()
 
+    def _gen_getframe(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/genobject.c#L734
+        if self._frame_state_finished():
+            return ConstantVariable.create(None)
+        return self.frame
+
     tp_methods = {
         "send": Method(gen_send),
         "close": Method(gen_close),
         "throw": Method(gen_throw),
     }
+    tp_getset = {"gi_frame": GetSet(_gen_getframe, readonly_setter)}
 
 
 class ContextlibContextManagerLocalGeneratorObjectVariable(
@@ -2057,6 +2081,13 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
             return SourcelessBuilder.create_internal_torch_ctx_manager(
                 func
             ).call_function(tx, [self.im_self, *args], kwargs)
+        elif func is torch.cuda.use_mem_pool._recreate_cm:
+            # A function decorated with use_mem_pool: rebuild the context from
+            # the decorator's arguments, as for the `with` form.
+            args_var = self.im_self.tp_getattro_impl(tx, "_args")
+            use_mem_pool = torch.cuda.use_mem_pool
+            ctx = SourcelessBuilder.create_internal_torch_ctx_manager(use_mem_pool)
+            return ctx.call_function(tx, args_var.unpack_var_sequence(tx), {})
         if self.is_constant:
             fn = getattr(self.im_self.value, func.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
@@ -2099,7 +2130,7 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # method_descr_get: a bound method does not re-bind. Only reached where
@@ -2439,6 +2470,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         ),
         "__closure__": Member(_get_closure, readonly_setter),
         "__globals__": Member(_get_globals, readonly_setter),
+        "__builtins__": Member(unmodeled_get, readonly_setter),
     }
 
     tp_getset = {
@@ -2652,18 +2684,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return d.as_python_constant() if d else None
         return super().const_getattr(tx, name)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if name == "__code__":
-            return VariableTracker.build(tx, hasattr(self, "code"))
-        if name == "__defaults__":
-            return VariableTracker.build(tx, hasattr(self, "defaults"))
-        vt = ConstantVariable.create(name)
-        if vt in self.get_dict_vt(tx):
-            return ConstantVariable.create(True)
-        return super().call_obj_hasattr(tx, name)
-
     def has_self(self) -> bool:
         return False
 
@@ -2678,25 +2698,24 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     ) -> dict[str, VariableTracker]:
         code = self.get_code()
         defaults = tuple(self.defaults.items) if self.defaults else ()  # type: ignore[attr-defined]
-        # inspect.signature mis-binds more defaults than parameters; CPython
-        # only uses the last co_argcount of them.
-        defaults = defaults[max(0, len(defaults) - code.co_argcount) :]
-        func = types.FunctionType(
-            code,
-            self.f_globals,
-            self.fn_name.as_python_constant(),
-            defaults or None,
-            tuple(make_cell(None) for _ in range(len(self.get_code().co_freevars))),
+        kwdefaults = (
+            self.kwdefaults.keys_as_python_constant() if self.kwdefaults else {}  # type: ignore[missing-attribute]
         )
-        if self.kwdefaults:
-            func.__kwdefaults__ = self.kwdefaults.keys_as_python_constant()  # type: ignore[missing-attribute]
-        try:
-            bound = inspect.signature(func).bind(*args, **kwargs)
-            bound.apply_defaults()
-        except TypeError as e:
-            raise BindArgsTypeError(e.args[0]) from e
-        result = dict(bound.arguments.items())
-        wrap_args_kwargs(parent.output.root_tx, result)  # type: ignore[arg-type]
+        result = bind_args_nested(
+            parent.output.root_tx,
+            code,
+            defaults,
+            kwdefaults,
+            args,
+            kwargs,  # type: ignore[arg-type]
+        )
+        # Match inspect.signature(), which renames a comprehension's ".N"
+        # iterator argument to "implicitN"; symbolic_convert expects that key.
+        if code.co_argcount and code.co_varnames[0].startswith("."):
+            result = {
+                k.replace(".", "implicit") if k.startswith(".") else k: v
+                for k, v in result.items()
+            }
         init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
@@ -2837,12 +2856,6 @@ class SkipFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
-
-    def get_value_for_setattr(self) -> object | None:
-        mod = getattr(self.value, "__module__", None) or ""
-        if mod == "torch" or mod.startswith(("torch.", "torch_")):
-            return None
-        return self.value
 
     def as_python_constant(self) -> Any:
         return self.value
@@ -4089,6 +4102,8 @@ class FunctoolsPartialVariable(VariableTracker):
         try:
             return super().tp_getattro_impl(tx, name)
         except NotImplementedError:
+            if hasattr(functools.partial(identity), name):
+                raise
             raise_observed_exception(AttributeError, tx, args=[name])
 
     def as_python_constant(self) -> Any:
@@ -4134,9 +4149,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         return cls(value, source=source)
-
-    def get_value_for_setattr(self) -> object | None:
-        return self.fn
 
     def __init__(self, fn: _F, **kwargs: Any) -> None:
         super().__init__(**kwargs)

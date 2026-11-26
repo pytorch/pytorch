@@ -17,6 +17,7 @@ guard generation, and in code reconstruction by providing methods to rebuild
 the code needed to recreate values.
 """
 
+import builtins
 import dataclasses
 import enum
 import functools
@@ -242,6 +243,39 @@ class RandomValueSource(Source):
     @functools.cached_property
     def _name_template(self) -> str:
         return f"random_value_{_esc_str(self.random_call_index)}"
+
+
+@dataclass_with_cached_hash(frozen=True)
+class FrameGlobalsSource(Source):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if codegen.tx.output.frame_state is None:
+            # Standalone graph capture runs the generated code with its own globals.
+            from . import graph_break_hints
+            from .exc import unimplemented
+
+            unimplemented(
+                gb_type="frame globals escape during standalone capture",
+                context="globals namespace",
+                explanation="Standalone capture cannot return the original frame's globals dictionary.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(builtins),
+                    codegen.create_load_attr("globals"),
+                ]
+            )
+        )
+        codegen.extend_output(create_call_function(0, False))
+
+    @property
+    def guard_source(self) -> GuardSource:
+        return GuardSource.GLOBAL
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return "G"
 
 
 @dataclass_with_cached_hash(frozen=True)
@@ -1385,6 +1419,9 @@ class ShapeEnvSource(Source):
 @dataclass_with_cached_hash(frozen=True)
 class CurrentStreamSource(Source):
     device: device_type
+    # Distinguishes separate queries of one device; guards and
+    # reconstruction use only `device`.
+    query_id: int | None = None
 
     @functools.cached_property
     def _name_template(self) -> str:
