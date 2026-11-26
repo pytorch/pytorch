@@ -1188,7 +1188,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(FRAME_COMPILE_COUNTER[0], 1)
 
     @parametrize("ndim", [1, 2, 3])
-    @config.patch(force_disable_caches=True)
     def test_conv_backward_no_recompile(self, device, ndim):
         conv = getattr(torch.nn.functional, f"conv{ndim}d")
         weight = torch.randn(16, 1, *[3] * ndim, device=device, requires_grad=True)
