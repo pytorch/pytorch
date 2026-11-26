@@ -2030,6 +2030,31 @@ if __name__ == "__main__":
 
         self.assertEqual(b.sum().item(), 11000.0)
 
+    def test_graph_capture_error_mode(self):
+        # XPU accepts CUDA's capture modes for API parity; non-default ones fall back to default.
+        for mode in ("default", "global", "thread_local", "relaxed"):
+            a = torch.ones(16, device="xpu")
+            g = torch.xpu.XPUGraph()
+            with torch.xpu.graph(g, capture_error_mode=mode):
+                b = a + 1
+            g.replay()
+            torch.xpu.synchronize()
+            self.assertEqual(b, torch.full_like(a, 2))
+
+            s = torch.xpu.Stream()
+            g = torch.xpu.XPUGraph()
+            with torch.xpu.stream(s):
+                g.capture_begin(capture_error_mode=mode)
+                c = a + 2
+                g.capture_end()
+            torch.xpu.current_stream().wait_stream(s)
+            g.replay()
+            torch.xpu.synchronize()
+            self.assertEqual(c, torch.full_like(a, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "Unknown capture error mode"):
+            torch.xpu.XPUGraph().capture_begin(capture_error_mode="bogus")
+
     def test_accelerator_graph_simple(self):
         s = torch.Stream()
         g = torch.accelerator.Graph()

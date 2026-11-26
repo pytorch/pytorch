@@ -70,7 +70,11 @@ class XPUGraph(_XPUGraph):
     def __new__(cls, keep_graph: bool = False) -> Self:
         return super().__new__(cls, keep_graph)
 
-    def capture_begin(self, pool: _POOL_HANDLE | None = None) -> None:
+    def capture_begin(
+        self,
+        pool: _POOL_HANDLE | None = None,
+        capture_error_mode: str = "default",
+    ) -> None:
         r"""Begin capturing XPU work on the current xpu stream.
 
         Typically, you shouldn't call ``capture_begin`` yourself.
@@ -80,8 +84,11 @@ class XPUGraph(_XPUGraph):
             pool (optional): Token (returned by :func:`~torch.xpu.graph_pool_handle` or
                 :meth:`other_Graph_instance.pool()<torch.xpu.XPUGraph.pool>`) that hints this graph may share memory
                 with the indicated pool.
+            capture_error_mode (str, optional): Can be "default", "global", "thread_local" or "relaxed".
+                Accepted for API compatibility with :meth:`torch.cuda.CUDAGraph.capture_begin`. XPU currently
+                only supports "default"; other modes emit a warning and fall back to the default capture behavior.
         """
-        super().capture_begin(pool=pool)
+        super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
 
     def capture_end(self) -> None:
         r"""End XPU graph capture on the current stream.
@@ -157,6 +164,9 @@ class graph:
             may share memory from the specified pool.
         stream (torch.xpu.Stream, optional): If supplied, will be set as the current stream in the context.
             If not supplied, ``graph`` sets its own internal side stream as the current stream in the context.
+        capture_error_mode (str, optional): Can be "default", "global", "thread_local" or "relaxed".
+            Accepted for API compatibility with :class:`torch.cuda.graph`. XPU currently only supports
+            "default"; other modes emit a warning and fall back to the default capture behavior.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
@@ -171,6 +181,7 @@ class graph:
         xpu_graph: XPUGraph,
         pool: _POOL_HANDLE | None = None,
         stream: torch.xpu.Stream | None = None,
+        capture_error_mode: str = "default",
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
@@ -186,6 +197,7 @@ class graph:
             raise AssertionError("capture_stream must not be None")
         self.stream_ctx = self.capture_stream
         self.xpu_graph = xpu_graph
+        self.capture_error_mode = capture_error_mode
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
@@ -194,7 +206,9 @@ class graph:
         torch.xpu.empty_cache()
         self.stream_ctx.__enter__()
 
-        self.xpu_graph.capture_begin(*self.pool)
+        self.xpu_graph.capture_begin(
+            *self.pool, capture_error_mode=self.capture_error_mode
+        )
 
     def __exit__(self, *args: object) -> None:
         self.xpu_graph.capture_end()

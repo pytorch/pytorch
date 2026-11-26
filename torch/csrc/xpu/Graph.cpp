@@ -23,13 +23,30 @@ void THXPGraph_init(PyObject* module) {
       .def(
           "capture_begin",
           [](::at::xpu::XPUGraph& self,
-             std::optional<c10::xpu::MempoolId_t> pool_opt) {
+             std::optional<c10::xpu::MempoolId_t> pool_opt,
+             const std::string& capture_error_mode) {
             c10::xpu::MempoolId_t pool = pool_opt.has_value()
                 ? pool_opt.value()
                 : c10::xpu::MempoolId_t{0, 0};
-            return self.capture_begin(pool);
+            at::GraphCaptureMode capture_mode = at::GraphCaptureMode::Default;
+            if (capture_error_mode == "default") {
+              capture_mode = at::GraphCaptureMode::Default;
+            } else if (capture_error_mode == "global") {
+              capture_mode = at::GraphCaptureMode::Global;
+            } else if (capture_error_mode == "thread_local") {
+              capture_mode = at::GraphCaptureMode::ThreadLocal;
+            } else if (capture_error_mode == "relaxed") {
+              capture_mode = at::GraphCaptureMode::Relaxed;
+            } else {
+              TORCH_CHECK(
+                  false,
+                  "Unknown capture error mode. Expected `default`, `global`, `thread_local`, or `relaxed`, got ",
+                  capture_error_mode);
+            }
+            return self.capture_begin(pool, capture_mode);
           },
           py::arg("pool"),
+          py::arg("capture_error_mode") = "default",
           py::call_guard<py::gil_scoped_release>())
       .def(
           "capture_end",
