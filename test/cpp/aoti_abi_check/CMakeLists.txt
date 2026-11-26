@@ -48,6 +48,7 @@ set(AOTI_ABI_CHECK_VEC_TEST_SRCS
 
 if(USE_CUDA)
   list(APPEND AOTI_ABI_CHECK_TEST_SRCS
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_cast.cu
     ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_kernel_utils.cu
   )
 endif()
@@ -78,6 +79,14 @@ endif()
 add_executable(test_aoti_abi_check
   ${AOTI_ABI_CHECK_TEST_SRCS}
 )
+# A HIP source makes CMake link this target with ROCm clang. CMake builds gtest
+# without PIC flags, and in manywheel builds that HIP link produces a PIE, which
+# ld.lld rejects for those objects. Keep the host linker.
+if(USE_ROCM)
+  set_target_properties(test_aoti_abi_check PROPERTIES
+    LINKER_LANGUAGE CXX
+    HIP_ARCHITECTURES "${PYTORCH_ROCM_ARCH}")
+endif()
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
@@ -98,9 +107,11 @@ endif()
 # Disable unused-variable warnings for variables that are only used to test compilation
 target_compile_options_if_supported(test_aoti_abi_check -Wno-unused-variable)
 target_compile_options_if_supported(test_aoti_abi_check -Wno-unused-but-set-variable)
-# Add -Wno-dangling-pointer for GCC 13
+# Add -Wno-dangling-pointer for GCC 13. C++ only: ROCm clang compiles the HIP
+# source and does not know the flag.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
-  target_compile_options_if_supported(test_aoti_abi_check -Wno-dangling-pointer)
+  target_compile_options(test_aoti_abi_check PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-dangling-pointer>)
 endif()
 
 foreach(test_src ${AOTI_ABI_CHECK_VEC_TEST_SRCS})
