@@ -2700,38 +2700,36 @@ class GraphModule(torch.nn.Module):
         self.assertIn("dirty_idx = [0]", graph)
 
     def test_mark_dirty_returned_through_inplace_op(self):
-        # A dirty input returned through another in-place op is still the
-        # dirty input, so it counts as returned.
+        # A dirty input returned through another in-place op graph breaks, so
+        # the input's requires_grad and grad_fn afterwards match eager.
         from torch.autograd import Function
 
         class MyFunction(Function):
             @staticmethod
-            def forward(ctx, x):
-                x.mul_(2)
-                ctx.mark_dirty(x)
-                return x.add_(1)
+            def forward(ctx, a, b):
+                ctx.mark_dirty(a)
+                return a.add_(b)
 
             @staticmethod
             def backward(ctx, grad):
-                return grad * 2
+                return grad, grad
 
-        def fn(x):
-            y = x.clone()
-            return MyFunction.apply(y), y
+        def fn(x, y):
+            out = MyFunction.apply(x, y)
+            return out, x.requires_grad, x.grad_fn is not None
 
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
-        x_ref = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
-        x_res = x_ref.detach().clone().requires_grad_(True)
-        ref, res = fn(x_ref), compiled(x_res)
+        y = torch.randn(3, requires_grad=True)
+        x_ref, x_res = torch.randn(3), torch.randn(3)
+        x_res.copy_(x_ref)
+        ref = fn(x_ref, y)
+        res = torch.compile(fn, backend="aot_eager")(x_res, y)
         self.assertEqual(ref, res)
-        ref[0].sum().backward()
-        res[0].sum().backward()
-        self.assertEqual(x_ref.grad, x_res.grad)
-        graph = torch._dynamo.testing.normalize_gm(
-            cnt.graphs[0].print_readable(print_output=False)
-        )
-        self.assertIn("dirty_idx = [0]", graph)
+        self.assertEqual(ref[1:], (True, True))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "mark_dirty input not returned"
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(torch.randn(3), y)
 
     def test_mark_non_differentiable_through_inplace_output(self):
         # A marked tensor returned through an in-place op is still the marked
@@ -2839,6 +2837,93 @@ class GraphModule(torch.nn.Module):
                         lambda x: func_cls.apply(x), backend="eager", fullgraph=True
                     )(x)
 
+    def test_mark_non_tensor_argument_not_in_final_marks(self):
+        # Eager checks only the marks left at the end of forward, so a
+        # non-tensor argument to a replaced mark or to a mark made in backward
+        # is not an error, and fullgraph=True compiles.
+        from torch.autograd import Function
+
+        class NonDifferentiableReplaced(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.mark_non_differentiable(5)
+                ctx.mark_non_differentiable(out)
+                return out, x * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad2 * 3
+
+        class DirtyReplaced(Function):
+            @staticmethod
+            def forward(ctx, x):
+                x.mul_(2)
+                ctx.mark_dirty(5)
+                ctx.mark_dirty(x)
+                return x, x * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 * 2 + grad2 * 3
+
+        class MarkedInBackward(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2, x * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                ctx.mark_non_differentiable(5)
+                ctx.mark_dirty(5)
+                return grad1 * 2 + grad2 * 3
+
+        for func_cls in (NonDifferentiableReplaced, DirtyReplaced, MarkedInBackward):
+            with self.subTest(func_cls.__name__):
+                torch._dynamo.reset()
+
+                def fn(x):
+                    return func_cls.apply(x.clone())
+
+                compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+                x_ref = torch.randn(3, requires_grad=True)
+                x_res = x_ref.detach().clone().requires_grad_(True)
+                ref, res = fn(x_ref), compiled(x_res)
+                self.assertEqual(ref, res)
+                for r, c in zip(ref, res):
+                    self.assertEqual(r.requires_grad, c.requires_grad)
+                torch.autograd.backward([t.sum() for t in ref if t.requires_grad])
+                torch.autograd.backward([t.sum() for t in res if t.requires_grad])
+                self.assertEqual(x_ref.grad, x_res.grad)
+
+    def test_mark_non_differentiable_in_forward_traced_alone(self):
+        # The graph break in forward makes Dynamo trace forward as its own
+        # frame, where ctx.mark_non_differentiable graph breaks so the mark
+        # runs in eager and applies.
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.mark_non_differentiable(out)
+                torch._dynamo.graph_break()
+                return out, x * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad2 * 3
+
+        def fn(x):
+            return MyFunction.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        ref = fn(x)
+        res = torch.compile(fn, backend="aot_eager")(x)
+        self.assertEqual(ref, res)
+        self.assertEqual([t.requires_grad for t in ref], [t.requires_grad for t in res])
+        self.assertFalse(res[0].requires_grad)
+
     def test_mark_returned_input_without_grad_non_differentiable(self):
         # A returned marked input that does not require grad comes back as a
         # view of the input, not as a detached alias.
@@ -2889,6 +2974,29 @@ class GraphModule(torch.nn.Module):
         (ref1, ref2), _ = self._check_marks_match_eager(MyFunction)
         self.assertFalse(ref1.requires_grad)
         self.assertTrue(ref2.requires_grad)
+
+        class Dirty(Function):
+            @staticmethod
+            def forward(ctx, x):
+                x.mul_(2)
+                ctx.mark_dirty(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                if ctx.dirty_tensors is not None:
+                    raise AssertionError("dirty_tensors is still set in backward")
+                return grad * 2
+
+        def fn(x):
+            return Dirty.apply(x.clone())
+
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x_ref = torch.randn(3, requires_grad=True)
+        x_res = x_ref.detach().clone().requires_grad_(True)
+        fn(x_ref).sum().backward()
+        compiled(x_res).sum().backward()
+        self.assertEqual(x_ref.grad, x_res.grad)
 
     def test_default_values(self):
         from torch.autograd import Function
