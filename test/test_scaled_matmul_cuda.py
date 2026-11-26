@@ -1668,13 +1668,21 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     def test_scaled_addmm_mxfp8(self, device, output_dtype):
         m = n = k = 128
         input = torch.randn(m, n, device=device, dtype=output_dtype)
-        mat1_ref = torch.eye(m, k, device=device, dtype=torch.bfloat16)
-        mat2_ref = torch.eye(n, k, device=device, dtype=torch.bfloat16)
+        # Small integers and power-of-two block scales are exact in fp8/e8m0.
+        mat1_ref = torch.randint(-4, 5, (m, k), device=device).float()
+        mat2_ref = torch.randint(-4, 5, (n, k), device=device).float()
+        scale_a = torch.randint(-1, 2, (m, k // 32), device=device).float().exp2()
+        scale_b = torch.randint(-1, 2, (n, k // 32), device=device).float().exp2()
+        reference = (
+            input.float()
+            + (mat1_ref * scale_a.repeat_interleave(32, 1))
+            @ (mat2_ref * scale_b.repeat_interleave(32, 1)).t()
+        ).to(output_dtype)
         mat1 = mat1_ref.to(e4m3_type)
         mat2 = mat2_ref.to(e4m3_type).t()
         swizzle = mx_swizzle_for(device, mat1.dtype)
-        scale_a = torch.ones(m, k // 32, device=device, dtype=torch.float8_e8m0fnu)
-        scale_b = torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+        scale_a = scale_a.to(torch.float8_e8m0fnu)
+        scale_b = scale_b.to(torch.float8_e8m0fnu)
         if swizzle == SwizzleType.SWIZZLE_32_4_4:
             scale_a, scale_b = to_blocked(scale_a), to_blocked(scale_b)
 
@@ -1691,9 +1699,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             "swizzle_b": swizzle,
         }
         actual = scaled_addmm(input, *args, **kwargs)
-        reference = (
-            input.float() + mat1_ref.float() @ mat2_ref.float().t()
-        ).to(output_dtype)
         self.assertEqual(actual, reference)
 
         self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
@@ -1709,13 +1714,19 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         alpha, beta = 4.0, -0.5
         input = torch.randn(m, n, device=device, dtype=output_dtype)
         input_before = input.clone()
-        mat1_ref = torch.eye(m, k, device=device, dtype=torch.bfloat16)
-        mat2_ref = torch.eye(n, k, device=device, dtype=torch.bfloat16)
-        mat1 = _bfloat16_to_float4_e2m1fn_x2(mat1_ref)
-        mat2 = _bfloat16_to_float4_e2m1fn_x2(mat2_ref).t()
+        # Small integers and power-of-two block scales are exact in fp4/e4m3.
+        mat1_ref = torch.randint(-4, 5, (m, k), device=device).float()
+        mat2_ref = torch.randint(-4, 5, (n, k), device=device).float()
+        scale_a = torch.randint(-1, 2, (m, k // 16), device=device).float().exp2()
+        scale_b = torch.randint(-1, 2, (n, k // 16), device=device).float().exp2()
+        product = (mat1_ref * scale_a.repeat_interleave(16, 1)) @ (
+            mat2_ref * scale_b.repeat_interleave(16, 1)
+        ).t()
+        mat1 = _bfloat16_to_float4_e2m1fn_x2(mat1_ref.bfloat16())
+        mat2 = _bfloat16_to_float4_e2m1fn_x2(mat2_ref.bfloat16()).t()
         swizzle = mx_swizzle_for(device, mat1.dtype)
-        scale_a = torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
-        scale_b = torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
+        scale_a = scale_a.to(torch.float8_e4m3fn)
+        scale_b = scale_b.to(torch.float8_e4m3fn)
         if swizzle == SwizzleType.SWIZZLE_32_4_4:
             scale_a, scale_b = to_blocked(scale_a), to_blocked(scale_b)
         gemm_scale = 1.0
@@ -1732,7 +1743,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         args = (mat1, mat2, scale_a, recipe, scale_b, recipe)
         kwargs = {"swizzle_a": swizzle, "swizzle_b": swizzle}
-        product = mat1_ref.float() @ mat2_ref.float().t()
         expected = (beta * input.float() + alpha * gemm_scale * product).to(
             output_dtype
         )
