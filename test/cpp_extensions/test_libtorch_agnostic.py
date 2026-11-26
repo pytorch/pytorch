@@ -169,7 +169,7 @@ class TestLibtorchAgnostic(TestCase):
         else:
             print(f"Skipping 2.16 extension (running on PyTorch {torch.__version__})")
 
-    def assertStableATenError(self, error_type, *, regex_before, regex_after):
+    def assertStableError(self, error_type, *, regex_before, regex_after):
         regex = regex_before if _torchVersionLessThan(2, 13) else regex_after
         return self.assertRaisesRegex(error_type, regex)
 
@@ -475,7 +475,7 @@ class TestLibtorchAgnostic(TestCase):
         result = libtorch_agnostic.ops.my_masked_select(t, broadcast_mask)
         self.assertEqual(result, torch.masked_select(t, broadcast_mask))
 
-        with self.assertStableATenError(
+        with self.assertStableError(
             RuntimeError,
             regex_before="API call failed",
             regex_after="expected BoolTensor for mask",
@@ -786,7 +786,7 @@ class TestLibtorchAgnostic(TestCase):
             ):
                 libtorch_agnostic.ops.my_transpose(t, 1, 2)
         else:
-            with self.assertStableATenError(
+            with self.assertStableError(
                 RuntimeError,
                 regex_before="API call failed",
                 regex_after=r"Dimension out of range \(expected to be in range of \[-2, 1\], but got 2\)",
@@ -1623,7 +1623,7 @@ for warning in w:
         self.assertEqual(actual, x.repeat_interleave(2, dim=1, output_size=6))
         actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2)
         self.assertEqual(actual, x.repeat_interleave(2))
-        with self.assertStableATenError(
+        with self.assertStableError(
             RuntimeError,
             regex_before="API call failed",
             regex_after="repeat_interleave: Invalid output_size, expected 6 but got 5",
@@ -3186,7 +3186,7 @@ except RuntimeError as e:
             lambda: libtorch_agnostic.ops.our_subtract_torch_error_check(a, b),
         )
 
-        with self.assertStableATenError(
+        with self.assertStableError(
             RuntimeError,
             # Runtime predates the shim: dlsym returns null, so we fall back to
             # the same simple call-site message as the non-stable check.
