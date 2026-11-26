@@ -10,6 +10,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/env.h>
@@ -1159,12 +1160,10 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
         } else {
           import_err = hipMemImportFromShareableHandle(
               &handles[r],
-#if ROCM_VERSION >= 70100
-              reinterpret_cast<void*>(
-                  static_cast<uintptr_t>(imported_handles[r])),
-#else
-              (void*)(uintptr_t) & (imported_handles[r]),
-#endif
+              c10::cuda::hipMemImportTakesFdByValue()
+                  ? reinterpret_cast<void*>(
+                        static_cast<uintptr_t>(imported_handles[r]))
+                  : static_cast<void*>(&imported_handles[r]),
               kMemHandleTypePosixFd);
         }
         if (import_err != hipSuccess) {
