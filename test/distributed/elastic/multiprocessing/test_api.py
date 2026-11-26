@@ -141,7 +141,9 @@ class SignalHandlingTest(TestCase):
         os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = " SIGTERM , SIGTREM "
 
         with (
-            patch("torch.distributed.elastic.multiprocessing.api.IS_WINDOWS", is_windows),
+            patch(
+                "torch.distributed.elastic.multiprocessing.api.IS_WINDOWS", is_windows
+            ),
             patch("torch.distributed.elastic.multiprocessing.api.signal", mock_signal),
         ):
             PContext.start(mock_pcontext)
@@ -171,7 +173,9 @@ class SignalHandlingTest(TestCase):
         os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = "SIGTERM"
 
         with (
-            patch("torch.distributed.elastic.multiprocessing.api.IS_WINDOWS", is_windows),
+            patch(
+                "torch.distributed.elastic.multiprocessing.api.IS_WINDOWS", is_windows
+            ),
             patch("torch.distributed.elastic.multiprocessing.api.signal", mock_signal),
         ):
             PContext.start(mock_pcontext)
@@ -215,7 +219,8 @@ class SignalHandlingTest(TestCase):
             PContext.start(mock_pcontext)
 
         expected_calls = [
-            call(15, _terminate_process_handler), call(2, _terminate_process_handler)
+            call(15, _terminate_process_handler),
+            call(2, _terminate_process_handler),
         ]
         mock_signal.signal.assert_has_calls(expected_calls)
         self.assertEqual(mock_signal.signal.call_count, len(expected_calls))
@@ -233,7 +238,9 @@ class SignalHandlingTest(TestCase):
             else [" SIGTERM ", " SIGINT "]
         )
         for sig_name in registered_signals:
-            mock_logger.info.assert_any_call("Registered signal handler for %s", sig_name)
+            mock_logger.info.assert_any_call(
+                "Registered signal handler for %s", sig_name
+            )
         mock_pcontext._start.assert_called_once()
         for tail_log in mock_pcontext._tail_logs:
             tail_log.start.assert_called_once()
@@ -298,16 +305,12 @@ class SignalHandlingTest(TestCase):
         ]  # Extract the signal from each call
 
         # Verify both SIGUSR1 and SIGUSR2 were registered
-        self.assertIn(
-            10, registered_signals, "SIGUSR1 should be registered"
-        )
-        self.assertIn(
-            12, registered_signals, "SIGUSR2 should be registered"
-        )
+        self.assertIn(10, registered_signals, "SIGUSR1 should be registered")
+        self.assertIn(12, registered_signals, "SIGUSR2 should be registered")
 
         # Verify the correct handler was registered for both signals
-        for call in signal_calls:
-            sig, handler = call[0]
+        for signal_call in signal_calls:
+            sig, handler = signal_call[0]
             if sig in [10, 12]:
                 self.assertEqual(
                     handler,
