@@ -200,13 +200,6 @@ class OptimizeForInferenceTemplate(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # A class-level skipIf decorator cannot be used on a device-type test
-        # template: it wraps the class into a function that
-        # instantiate_device_type_tests cannot instantiate. CPU needs no
-        # triton; every other device type does, so skip those variants here.
-        # Keep the check before super().setUpClass(): unittest does not call
-        # tearDownClass when setUpClass raises SkipTest, so raising after the
-        # class-level config patch is entered would leave it unclosed.
         if cls.device_type != "cpu" and not HAS_TRITON:
             raise unittest.SkipTest("requires triton")
         super().setUpClass()
