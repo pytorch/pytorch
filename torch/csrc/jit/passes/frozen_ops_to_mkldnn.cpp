@@ -40,7 +40,6 @@
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/detail/Eltwise.h>
-#include <ideep.hpp>
 #endif
 
 // clang-format on
@@ -242,7 +241,7 @@ Operation createUnaryOp(
     c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
     // we cast `a` to an `ideep::tensor`, so we can get at its descriptor
     // which we then use to set up `out` tensor w/ the same props as a
-    auto a_it = at::native::itensor_from_mkldnn(a);
+    auto a_it = at::native::memory_from_mkldnn(a);
     auto mkldnn_raw_data = a_it.get_data_handle();
     auto a_options_with_strided = a.options().layout(c10::kStrided);
 
@@ -260,14 +259,14 @@ Operation createUnaryOp(
     if (!inplace) {
       // `a_it.get_desc()` will allocate a tensor
       // of the right physical size.
-      auto it_empty = ideep::tensor(a_it.get_desc());
+      auto it_empty = at::native::mkldnn::MkldnnMemory(a_it.get_desc());
       TORCH_INTERNAL_ASSERT(it_empty.get_desc() == a_it.get_desc());
-      out = at::native::new_with_itensor_mkldnn(
+      out = at::native::new_with_mkldnn_memory(
           std::move(it_empty),
           c10::optTypeMetaToScalarType(a.options().dtype_opt()),
           a.options().device_opt());
 
-      out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
+      out_raw_data = at::native::memory_from_mkldnn(out).get_data_handle();
     }
 
     TORCH_INTERNAL_ASSERT(
@@ -359,8 +358,8 @@ Operation BroadOp(const Node* node) {
         // We use a very simple heuristic to convert an arg in nchw
         // to the blocked format of the other argument.
         c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-        auto a_it = at::native::itensor_from_mkldnn(exp_a);
-        auto b_it = at::native::itensor_from_mkldnn(exp_b);
+        auto a_it = at::native::memory_from_mkldnn(exp_a);
+        auto b_it = at::native::memory_from_mkldnn(exp_b);
 
         // `is_public_format` means a tensor's physical layout isn't in MKLDNN
         // blocked layout e.g. nchw or nhwc but not nChw8c
@@ -375,13 +374,13 @@ Operation BroadOp(const Node* node) {
         }
 
         auto a_options = exp_a.options();
-        auto a_out = at::native::new_with_itensor_mkldnn(
+        auto a_out = at::native::new_with_mkldnn_memory(
             std::move(a_it),
             c10::optTypeMetaToScalarType(a_options.dtype_opt()),
             a_options.device_opt());
         push(stack, a_out);
         auto b_options = exp_b.options();
-        auto b_out = at::native::new_with_itensor_mkldnn(
+        auto b_out = at::native::new_with_mkldnn_memory(
             std::move(b_it),
             c10::optTypeMetaToScalarType(b_options.dtype_opt()),
             b_options.device_opt());
@@ -497,8 +496,8 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
 }
 
 Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
-  ideep::tensor& x = at::native::itensor_from_mkldnn(tensor);
-  ideep::tensor& z = at::native::itensor_from_mkldnn(out);
+  at::native::mkldnn::MkldnnMemory& x = at::native::memory_from_mkldnn(tensor);
+  at::native::mkldnn::MkldnnMemory& z = at::native::memory_from_mkldnn(out);
   at::native::mkldnn::eltwise_forward(
       x,
       z,
