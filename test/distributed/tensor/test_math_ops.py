@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 import torch
 import torch.distributed as dist
+from torch._decomp import decomposition_table, register_decomposition
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -28,6 +29,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -42,6 +44,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
+    TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -339,10 +342,10 @@ class DTensorBoolReductionTest(_DTensorBoolReductionTestBase):
 
     @skipGPUIf(torch.accelerator.device_count() < 2, "requires two accelerator devices")
     def test_bool_reduction_in_decompositions(self, device):
-        # isin and binary_cross_entropy get their strategies by tracing their
+        # isin, and the custom op below, get their strategies by tracing their
         # decompositions, which call any/all. Those strategies must not see a
-        # Partial from any/all: isin would return a rank-local bool tensor and
-        # binary_cross_entropy would average uneven shards.
+        # Partial from any/all: isin would return a rank-local bool tensor and the
+        # custom op would average uneven shards.
         mesh = self._get_mesh(device)
         elements = torch.arange(6, device=mesh.device_type)
         test_elements = torch.tensor([5, 7, 9, 11], device=mesh.device_type)
@@ -353,14 +356,26 @@ class DTensorBoolReductionTest(_DTensorBoolReductionTestBase):
         self.assertFalse(any(p.is_partial() for p in result.placements))
         self.assertEqual(result.full_tensor(), torch.isin(elements, test_elements))
 
-        torch.manual_seed(0)
-        inp = torch.rand(5, 2, device=mesh.device_type) * 0.98 + 0.01
-        target = torch.rand(5, 2, device=mesh.device_type)
-        loss = F.binary_cross_entropy(
-            distribute_tensor(inp, mesh, [Shard(0)]),
-            distribute_tensor(target, mesh, [Shard(0)]),
-        )
-        self.assertEqual(loss.full_tensor(), F.binary_cross_entropy(inp, target))
+        # Checks its input with all() before averaging, as the decomposition of
+        # binary_cross_entropy does. That op has its own sharding strategy, so this
+        # custom op stands in for it.
+        with torch.library._scoped_library("dtensor_bool_decomp", "FRAGMENT") as lib:
+            lib.define("checked_mean(Tensor x) -> Tensor")
+
+            def checked_mean(x):
+                aten._assert_async.msg(torch.all(x >= 0), "x must be non-negative")
+                return x.mean()
+
+            lib.impl("checked_mean", checked_mean, "CompositeExplicitAutograd")
+            op = torch.ops.dtensor_bool_decomp.checked_mean.default
+            register_decomposition(op)(checked_mean)
+            try:
+                torch.manual_seed(0)
+                x = torch.rand(5, 2, device=mesh.device_type)
+                result = op(distribute_tensor(x, mesh, [Shard(0)]))
+                self.assertEqual(result.full_tensor(), x.mean())
+            finally:
+                decomposition_table.pop(op, None)
 
     @skipGPUIf(torch.accelerator.device_count() < 2, "requires two accelerator devices")
     def test_trunc_normal_rejection_loop_stays_in_sync(self, device):
@@ -749,6 +764,215 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             else:
                 self.assertTrue(dist_x.grad.placements[0].is_shard(dim=shard_dim))
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
+    @parametrize(
+        "loss_name",
+        [
+            "binary_cross_entropy",
+            "binary_cross_entropy_with_logits",
+            "huber_loss",
+            "mse_loss",
+            "smooth_l1_loss",
+            "soft_margin_loss",
+        ],
+    )
+    def test_pointwise_loss_on_sharded_input(self, loss_name):
+        device_mesh = self.build_device_mesh()
+        loss_fn = getattr(torch.nn.functional, loss_name)
+        for rows in (2 * self.world_size, 3 * self.world_size - 1):
+            x = torch.randn(rows, 3, device=self.device_type, dtype=torch.float64)
+            target = torch.rand(rows, 3, device=self.device_type, dtype=torch.float64)
+            if loss_name == "binary_cross_entropy":
+                x = x.sigmoid()
+            elif loss_name == "soft_margin_loss":
+                target = target.round() * 2 - 1
+            weight_cases = [({}, {})]
+            if loss_name.startswith("binary_cross_entropy"):
+                # A weight that broadcasts against the input stays replicated; one
+                # shaped like the input is sharded with it, and its "mean" backward
+                # was wrong when these losses went through their decompositions.
+                weight_cases = []
+                for shape, placement in (((3,), Replicate()), ((rows, 3), Shard(0))):
+                    w = torch.rand(shape, device=self.device_type, dtype=torch.float64)
+                    dist_w = distribute_tensor(w, device_mesh, [placement])
+                    weight_cases.append(({"weight": w}, {"weight": dist_w}))
+            reductions = ("mean", "sum", "none")
+            for (kwargs, dist_kwargs), reduction in itertools.product(
+                weight_cases, reductions
+            ):
+                ref_x = x.clone().requires_grad_()
+                ref = loss_fn(ref_x, target, reduction=reduction, **kwargs)
+                ref.sum().backward()
+
+                dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+                dist_x.requires_grad_()
+                dist_target = distribute_tensor(target, device_mesh, [Shard(0)])
+                out = loss_fn(dist_x, dist_target, reduction=reduction, **dist_kwargs)
+                loss = out.sum()
+                comm_mode = CommDebugMode()
+                with comm_mode:
+                    loss.backward()
+                weight = [w.placements for w in dist_kwargs.values()]
+                msg = f"rows={rows} reduction={reduction} weight={weight}"
+                self.assertEqual(out.full_tensor(), ref, msg=msg)
+                self.assertEqual(dist_x.grad.full_tensor(), ref_x.grad, msg=msg)
+
+                even = rows % self.world_size == 0
+                expected_out = {
+                    "none": Shard(0),
+                    "sum": Partial("sum"),
+                    "mean": Partial("avg") if even else Replicate(),
+                }[reduction]
+                self.assertEqual(out.placements, (expected_out,), msg=msg)
+                # The backward stays sharded, also for "mean": the *_backward kernels
+                # run as "sum" with a scaled grad_output, and autograd's formula for
+                # binary_cross_entropy_with_logits divides by the global numel.
+                self.assertEqual(dist_x.grad.placements, (Shard(0),), msg=msg)
+                self.assertEqual(comm_mode.get_total_counts(), 0, msg=msg)
+
+    @with_comms
+    def test_pointwise_loss_uneven_2d_mesh(self):
+        # The Partial("avg") filter must count the shards of all mesh dims.
+        if self.world_size != 4:
+            self.skipTest("needs a 2x2 mesh")
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+        cases = [
+            ((6, 3), [Shard(0), Shard(0)]),
+            ((4, 7), [Shard(0), Shard(1)]),
+        ]
+        for shape, placements in cases:
+            x = torch.randn(shape, device=self.device_type, dtype=torch.float64)
+            target = torch.randn(shape, device=self.device_type, dtype=torch.float64)
+            ref_x = x.clone().requires_grad_()
+            ref = torch.nn.functional.mse_loss(ref_x, target)
+            ref.backward()
+
+            dist_x = distribute_tensor(x, device_mesh, placements).requires_grad_()
+            dist_target = distribute_tensor(target, device_mesh, placements)
+            out = torch.nn.functional.mse_loss(dist_x, dist_target)
+            out.backward()
+            self.assertEqual(out.full_tensor(), ref, msg=str(placements))
+            self.assertEqual(dist_x.grad.full_tensor(), ref_x.grad, msg=str(placements))
+
+        # This 16-row _StridedShard layout keeps Partial("avg") on both mesh dims; 12
+        # rows, though even, still all-gather (_is_spec_evenly_sharded_on_dim
+        # over-counts split_factor).
+        x = torch.randn(16, 3, device=self.device_type, dtype=torch.float64)
+        target = torch.randn(16, 3, device=self.device_type, dtype=torch.float64)
+        placements = [_StridedShard(0, split_factor=2), Shard(0)]
+        dist_x = distribute_tensor(x, device_mesh, placements)
+        dist_target = distribute_tensor(target, device_mesh, placements)
+        out = torch.nn.functional.mse_loss(dist_x, dist_target)
+        self.assertEqual(out.placements, (Partial("avg"), Partial("avg")))
+        self.assertEqual(out.full_tensor(), torch.nn.functional.mse_loss(x, target))
+
+    @with_comms
+    def test_pointwise_loss_out_variants(self):
+        device_mesh = self.build_device_mesh()
+        x = torch.randn(2 * self.world_size, 3, device=self.device_type)
+        target = torch.randn(2 * self.world_size, 3, device=self.device_type)
+        dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+        dist_target = distribute_tensor(target, device_mesh, [Shard(0)])
+
+        def dtensor_like(t, placement):
+            if placement.is_partial():
+                return DTensor.from_local(torch.empty_like(t), device_mesh, [placement])
+            return distribute_tensor(torch.empty_like(t), device_mesh, [placement])
+
+        # reduction -> sharded placements of the loss out buffer and of grad_input
+        cases = {
+            0: (Shard(0), Shard(0)),
+            1: (Partial("avg"), Shard(0)),
+            2: (Partial("sum"), Shard(0)),
+        }
+        for reduction, sharded in cases.items():
+            ref = aten.mse_loss(x, target, reduction)
+            grad = torch.ones_like(ref)
+            ref_grad = aten.mse_loss_backward(grad, x, target, reduction)
+            grad_placement = Shard(0) if reduction == 0 else Replicate()
+            dist_grad = distribute_tensor(grad, device_mesh, [grad_placement])
+            # A Replicate out after a sharded one: the out placement is part of
+            # the sharding cache key, so the second call must not reuse the first.
+            for out_placement, grad_input_placement in (sharded, [Replicate()] * 2):
+                msg = f"reduction={reduction} out={out_placement}"
+                out = dtensor_like(ref, out_placement)
+                grad_input = dtensor_like(ref_grad, grad_input_placement)
+                comm_mode = CommDebugMode()
+                with comm_mode:
+                    aten.mse_loss.out(dist_x, dist_target, reduction, out=out)
+                if out_placement != Replicate():
+                    self.assertEqual(comm_mode.get_total_counts(), 0, msg=msg)
+                with comm_mode:
+                    result = aten.mse_loss_backward.grad_input(
+                        dist_grad, dist_x, dist_target, reduction, grad_input=grad_input
+                    )
+                self.assertIs(result, grad_input, msg=msg)
+                if grad_input_placement != Replicate():
+                    self.assertEqual(comm_mode.get_total_counts(), 0, msg=msg)
+                self.assertEqual(out.placements, (out_placement,), msg=msg)
+                self.assertEqual(
+                    grad_input.placements, (grad_input_placement,), msg=msg
+                )
+                self.assertEqual(out.full_tensor(), ref, msg=msg)
+                self.assertEqual(grad_input.full_tensor(), ref_grad, msg=msg)
+
+        # Uneven rows: Partial("avg") is not a valid output placement, so a
+        # Replicate out buffer is honored and a Partial("avg") one is rejected
+        # instead of being filled with a biased value.
+        rows = 2 * self.world_size + 1
+        x = torch.randn(rows, 3, device=self.device_type)
+        target = torch.randn(rows, 3, device=self.device_type)
+        dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+        dist_target = distribute_tensor(target, device_mesh, [Shard(0)])
+        ref = aten.mse_loss(x, target, 1)
+        out = dtensor_like(ref, Replicate())
+        aten.mse_loss.out(dist_x, dist_target, 1, out=out)
+        self.assertEqual(out.full_tensor(), ref)
+        with self.assertRaisesRegex(RuntimeError, "no valid sharding strategy"):
+            aten.mse_loss.out(
+                dist_x, dist_target, 1, out=dtensor_like(ref, Partial("avg"))
+            )
+
+    @with_comms
+    def test_binary_cross_entropy_squeezed_shapes(self):
+        # The BCE kernels squeeze their inputs instead of broadcasting them, so an
+        # input and target that differ only in size-1 dims are valid and have to
+        # run replicated rather than through the elementwise rule.
+        device_mesh = self.build_device_mesh()
+        x = torch.rand(2 * self.world_size, 1, device=self.device_type)
+        target = torch.rand(2 * self.world_size, device=self.device_type)
+        dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+        dist_target = distribute_tensor(target, device_mesh, [Shard(0)])
+        for reduction in range(3):
+            ref = aten.binary_cross_entropy(x, target, None, reduction)
+            out = aten.binary_cross_entropy(dist_x, dist_target, None, reduction)
+            self.assertEqual(out.full_tensor(), ref, msg=f"reduction={reduction}")
+            grad = torch.ones_like(ref)
+            ref_grad = aten.binary_cross_entropy_backward(
+                grad, x, target, None, reduction
+            )
+            dist_grad = distribute_tensor(grad, device_mesh, [Replicate()])
+            grad_input = aten.binary_cross_entropy_backward(
+                dist_grad, dist_x, dist_target, None, reduction
+            )
+            self.assertEqual(grad_input.full_tensor(), ref_grad)
+
+    @with_comms
+    def test_binary_cross_entropy_domain_check(self):
+        if self.device_type != "cpu":
+            self.skipTest("only the CPU kernel raises a catchable range error")
+        device_mesh = self.build_device_mesh()
+        x = torch.rand(2 * self.world_size, 3, device=self.device_type)
+        target = torch.rand(2 * self.world_size, 3, device=self.device_type)
+        # The kernel checks the range on each rank's own shard, so put an
+        # out-of-range value in every shard: a rank that did not raise would
+        # otherwise block in the next collective.
+        x[:, 0] = 1.5
+        dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+        dist_target = distribute_tensor(target, device_mesh, [Shard(0)])
+        with self.assertRaisesRegex(RuntimeError, "between 0 and 1"):
+            torch.nn.functional.binary_cross_entropy(dist_x, dist_target)
 
     @with_comms
     @skip_unless_torch_gpu
@@ -2771,6 +2995,94 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                     self.assertEqual(dt_weight_bwd.grad.full_tensor(), ref_weight.grad)
                 if use_bias:
                     self.assertEqual(dt_bias_bwd.grad.full_tensor(), ref_bias.grad)
+
+
+class TestPointwiseLossRegistration(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_mean_backward_has_no_sharded_strategy(self):
+        # The custom op handler rewrites "mean" backwards, so only direct sharding
+        # propagation reaches this rule. It must keep them replicated: the kernel
+        # divides by its input's numel, and on a shard that is the local numel.
+        from torch.distributed.tensor._dtensor_spec import TensorMeta
+        from torch.distributed.tensor._ops._math_ops import (
+            pointwise_loss_single_dim_strategy as strategy,
+        )
+
+        def meta(*shape):
+            return TensorMeta(torch.Size(shape), (1,) * len(shape), torch.float32)
+
+        op = aten.mse_loss_backward.default
+        args = (meta(), meta(8, 3), meta(8, 3))
+        self.assertEqual(strategy(op, (*args, 1), {}), [])
+        self.assertNotEqual(strategy(op, (*args, 2), {}), [])
+
+    def test_squeeze_check_with_symbolic_shapes(self):
+        # torch.compile(dynamic=True) passes symbolic shapes, which must neither be
+        # hashed nor guarded on: equal ones get the same strategies as static
+        # shapes, and ones that differ in size-1 dims fall back to replication.
+        from torch._dynamo.source import ConstantSource
+        from torch.distributed.tensor._dtensor_spec import TensorMeta
+        from torch.distributed.tensor._ops._math_ops import (
+            pointwise_loss_single_dim_strategy as strategy,
+        )
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        n = shape_env.create_symintnode(
+            shape_env.create_symbol(8, ConstantSource("n")), hint=8
+        )
+
+        def meta(*shape):
+            return TensorMeta(torch.Size(shape), (1,) * len(shape), torch.float32)
+
+        op = aten.binary_cross_entropy.default
+        expected = repr(strategy(op, (meta(8, 3), meta(8, 3), None, 1), {}))
+        self.assertIn("Partial(avg)", expected)
+        symbolic = strategy(op, (meta(n, 3), meta(n, 3), None, 1), {})
+        self.assertEqual(repr(symbolic), expected)
+        self.assertEqual(strategy(op, (meta(n, 1), meta(n), None, 1), {}), [])
+        u0, u1 = shape_env.create_unbacked_symint(), shape_env.create_unbacked_symint()
+        self.assertEqual(strategy(op, (meta(u0, 3), meta(u1, 3), None, 1), {}), [])
+
+    def test_overloads_registered(self):
+        # Every overload is registered explicitly with the full-mesh filter, which
+        # autogen would drop for the forward .out overloads; every backward
+        # overload, and no forward one, gets the "mean" custom op handler.
+        from torch.distributed.tensor._ops._math_ops import (
+            _pointwise_loss_backward_handler,
+            _pointwise_loss_full_mesh_strategy_filter,
+        )
+
+        strategies = (
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs
+        )
+        handlers = DTensor._op_dispatcher._custom_op_handlers
+        packets = {
+            aten.binary_cross_entropy: False,
+            aten.binary_cross_entropy_with_logits: False,
+            aten.huber_loss: False,
+            aten.mse_loss: False,
+            aten.smooth_l1_loss: False,
+            aten.soft_margin_loss: False,
+            aten.binary_cross_entropy_backward: True,
+            aten.huber_loss_backward: True,
+            aten.mse_loss_backward: True,
+            aten.smooth_l1_loss_backward: True,
+            aten.soft_margin_loss_backward: True,
+        }
+        for packet, is_backward in packets.items():
+            for op in packet.op_overloads():
+                self.assertIs(
+                    strategies[op].full_mesh_strategy_filter,
+                    _pointwise_loss_full_mesh_strategy_filter,
+                    msg=str(op),
+                )
+                self.assertEqual(
+                    handlers.get(op) is _pointwise_loss_backward_handler,
+                    is_backward,
+                    msg=str(op),
+                )
 
 
 instantiate_device_type_tests(DTensorBoolReductionTest, globals())

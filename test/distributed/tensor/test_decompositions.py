@@ -131,6 +131,37 @@ class TestDecompSharding(TestCase):
             cache = _get_python_sharding_prop_cache_info()
             self.assertEqual(cache_size, cache.currsize)
 
+    def test_custom_decomp_ending_in_mean(self):
+        """A decomposition that ends in mean propagates Partial("avg")."""
+        from torch.distributed.tensor import empty as d_empty
+
+        with torch.library._scoped_library("sharding_decomps", "FRAGMENT") as my_lib:
+            my_lib.define("square_mean(Tensor x) -> Tensor")
+
+            @torch.library.impl(my_lib, "square_mean", "CPU")
+            def square_mean_impl(x):
+                return (x * x).mean()
+
+            @torch.library.register_fake("sharding_decomps::square_mean")
+            def square_mean_meta(x):
+                return x.new_empty(())
+
+            @register_decomposition(torch.ops.sharding_decomps.square_mean.default)
+            def square_mean_decomp(x):
+                return (x * x).mean()
+
+            square_mean = torch.ops.sharding_decomps.square_mean
+            mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+            x = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
+            self.assertEqual(square_mean(x).placements, (Partial("avg"),))
+
+            mesh_2d = DeviceMesh("cpu", torch.arange(self.world_size).reshape(-1, 2))
+            strided = [_StridedShard(0, split_factor=2), Shard(0)]
+            x = d_empty(16, device_mesh=mesh_2d, placements=strided)
+            self.assertEqual(
+                square_mean(x).placements, (Partial("avg"), Partial("avg"))
+            )
+
     def test_misc_ops_with_no_sharding_rules(self):
         """miscellaneous aten ops"""
         from torch.distributed.tensor import empty as d_empty
@@ -146,35 +177,13 @@ class TestDecompSharding(TestCase):
             self.assertTrue(op not in sharding_prop.op_single_dim_strategy_funcs)
             self.assertTrue(op not in sharding_prop.op_to_rules)
 
-        # binary_cross_entropy_with_logits
-        check_no_strategy(aten.binary_cross_entropy_with_logits.default)
-        input = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
-        target = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
-        weight = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
-        out = aten.binary_cross_entropy_with_logits.default(input, target, weight)
-        self.assertEqual(out.placements, (Partial("avg"),))
-
-        # mse_loss
-        check_no_strategy(aten.mse_loss.default)
-        input = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
-        target = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
-        out = aten.mse_loss.default(input, target)
-        self.assertEqual(out.placements, (Partial("avg"),))
-
-        # smooth_l1_loss
-        check_no_strategy(aten.smooth_l1_loss.default)
-        input = d_empty(
-            16,
-            device_mesh=mesh_2d,
-            placements=[_StridedShard(0, split_factor=2), Shard(0)],
-        )
-        target = d_empty(
-            16,
-            device_mesh=mesh_2d,
-            placements=[_StridedShard(0, split_factor=2), Shard(0)],
-        )
-        out = aten.smooth_l1_loss.default(input, target)
-        self.assertEqual(out.placements, (Partial("avg"), Partial("avg")))
+        # softplus_backward: pointwise, keeps the _StridedShard placement
+        check_no_strategy(aten.softplus_backward.default)
+        strided = [_StridedShard(0, split_factor=2), Shard(0)]
+        grad = d_empty(16, device_mesh=mesh_2d, placements=strided)
+        input = d_empty(16, device_mesh=mesh_2d, placements=strided)
+        out = aten.softplus_backward.default(grad, input, 1.0, 20.0)
+        self.assertEqual(out.placements, tuple(strided))
 
         # expand_copy: has a registered strategy (same as expand)
         input = d_empty(16, 1, device_mesh=mesh, placements=[Partial("min")])
