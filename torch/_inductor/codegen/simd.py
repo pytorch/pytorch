@@ -4885,6 +4885,13 @@ class SIMDScheduling(BaseScheduling):
         )
 
     @staticmethod
+    def _keeps_all(kernel: Any, buffers: OrderedSet[str]) -> bool:
+        kept = OrderedSet(
+            name for leaf in leaf_kernels(kernel) for name in leaf.must_keep_buffers
+        )
+        return all(name in kept for name in buffers)
+
+    @staticmethod
     def _check_same_graph_effects(kernels: list[Any]) -> None:
         for kernel in kernels[1:]:
             for attr in (
@@ -4958,11 +4965,26 @@ class SIMDScheduling(BaseScheduling):
                 self._create_node_schedule_kernel, kernel_features
             )
             int32_kernel = build(torch.int32)
-            int64_kernel = build(torch.int64, plan.int64_hints)
+            int64_kernel = build(
+                torch.int64, optimization_hint_overrides=plan.int64_hints
+            )
             keep = self._union_must_keep_buffers([int32_kernel, int64_kernel])
             if keep is not None:
-                int32_kernel = build(torch.int32, must_keep_buffers=keep)
-                int64_kernel = build(torch.int64, plan.int64_hints, keep)
+                # Rebuild only the kernels that remove a buffer in keep; a discarded
+                # build is not a generated kernel.
+                discarded = 0
+                if not self._keeps_all(int32_kernel, keep):
+                    discarded += len(leaf_kernels(int32_kernel))
+                    int32_kernel = build(torch.int32, must_keep_buffers=keep)
+                if not self._keeps_all(int64_kernel, keep):
+                    discarded += len(leaf_kernels(int64_kernel))
+                    int64_kernel = build(
+                        torch.int64,
+                        optimization_hint_overrides=plan.int64_hints,
+                        must_keep_buffers=keep,
+                    )
+                # pyrefly: ignore [bad-assignment]
+                metrics.generated_kernel_count -= discarded
             self._check_same_graph_effects([int32_kernel, int64_kernel])
             final_kernel = ConditionalMultiKernel(
                 [(plan.int32_condition, int32_kernel), (sympy.true, int64_kernel)]
@@ -5013,6 +5035,7 @@ class SIMDScheduling(BaseScheduling):
         self,
         kernel_features: SIMDKernelFeatures,
         index_dtype: torch.dtype | None = None,
+        *,
         optimization_hint_overrides: dict[sympy.Symbol, int] | None = None,
         must_keep_buffers: OrderedSet[str] | None = None,
     ) -> SIMDKernel | BenchmarkedMultiKernel:
