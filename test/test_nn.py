@@ -17234,10 +17234,6 @@ class TestNNDeviceType(NNTestCase):
             if mode == "train" and mixed and dims == 3 and dtype == torch.half and fmt_ref == ("NCHW", "native"):
                 self.skipTest("Failed on CUDA")
 
-        if torch.device(device).type == "xpu":
-            if mode == "train" and mixed and dtype == torch.bfloat16 and fmt_ref in (("NCHW", "cpu"), ("NHWC", "NCHW")):
-                self.skipTest("https://github.com/intel/torch-xpu-ops/issues/5564")
-
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
 
