@@ -134,6 +134,7 @@ TORCH_API void prepareTrace(
     const ProfilerExtensionMap& profiler_extensions = {});
 
 void toggleCollectionDynamic(const bool enable);
+void stopCollection();
 void startTrace();
 ActivityTraceWrapper stopTrace();
 void pushCorrelationId(uint64_t correlation_id);
