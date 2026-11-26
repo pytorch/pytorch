@@ -3617,19 +3617,19 @@ def cuda_native_mv_value(
     PARTIAL,
     row,
     cta,
-    K: tl.constexpr,
-    S0: tl.constexpr,
-    S1: tl.constexpr,
-    VS: tl.constexpr,
-    CTAS: tl.constexpr,
+    K,
+    S0,
+    S1,
+    VS,
+    CTAS,
     THREADS: tl.constexpr,
-    ACTIVE_THREADS: tl.constexpr,
-    INNER_CHUNK: tl.constexpr,
-    INNER_STRIDE: tl.constexpr,
+    ACTIVE_THREADS,
+    INNER_CHUNK,
+    INNER_STRIDE,
     KIND: tl.constexpr,
     ACC_TYPE: tl.constexpr,
     FINAL: tl.constexpr,
-    PARTIAL_CTAS: tl.constexpr,
+    PARTIAL_CTAS,
 ):
     r"""Compute a real GEMV partial or final value in native reduction order."""
     if FINAL and KIND != 2 and KIND != 3:
@@ -3642,7 +3642,7 @@ def cuda_native_mv_value(
         elif FINAL and KIND == 2:
             lane = tl.arange(0, THREADS)
             total = tl.full((THREADS,), 0, ACC_TYPE)
-            for chunk in range(triton.cdiv(CTAS, THREADS)):
+            for chunk in range(tl.cdiv(CTAS, THREADS)):
                 index = lane + chunk * THREADS
                 total += tl.load(PARTIAL + row * PARTIAL_CTAS + index, index < CTAS, 0)
             for shift in tl.static_range(THREADS // 2, 16, -32):
@@ -3659,10 +3659,12 @@ def cuda_native_mv_value(
             lane = tl.arange(0, THREADS)
             total = tl.full((THREADS,), 0, ACC_TYPE)
             if KIND == 2:
-                pair: tl.constexpr = S1 == 1 and VS == 1 and ACC_TYPE != tl.float64
+                pair = S1 == 1 and VS == 1 and ACC_TYPE != tl.float64
                 second = tl.full((THREADS,), 0, ACC_TYPE)
-                for chunk in range(triton.cdiv(K, THREADS * CTAS * (2 if pair else 1))):
-                    index = (lane + THREADS * (cta + CTAS * chunk)) * (2 if pair else 1)
+                for chunk in range(tl.cdiv(K, THREADS * CTAS * (tl.where(pair, 2, 1)))):
+                    index = (lane + THREADS * (cta + CTAS * chunk)) * (
+                        tl.where(pair, 2, 1)
+                    )
                     valid = index < K
                     x = tl.load(X + row * S0 + index * S1, valid, 0).to(ACC_TYPE)
                     vector = tl.load(VECTOR + index * VS, valid, 0).to(ACC_TYPE)
@@ -3679,21 +3681,21 @@ def cuda_native_mv_value(
                 if pair:
                     total = (tl.full((THREADS,), 0, ACC_TYPE) + total) + second
             elif KIND == 3:
-                CHUNK: tl.constexpr = triton.cdiv(K, CTAS)
-                for step in range(triton.cdiv(CHUNK, THREADS)):
+                CHUNK = tl.cdiv(K, CTAS)
+                for step in range(tl.cdiv(CHUNK, THREADS)):
                     index = cta * CHUNK + lane + step * THREADS
                     valid = (index < K) & (lane + step * THREADS < CHUNK)
                     x = tl.load(X + row * S0 + index * S1, valid, 0).to(ACC_TYPE)
                     vector = tl.load(VECTOR + index * VS, valid, 0).to(ACC_TYPE)
                     total = tl.where(valid, tl.fma(x, vector, total), total)
             else:
-                STEP: tl.constexpr = INNER_CHUNK * (
-                    ACTIVE_THREADS if INNER_STRIDE == 1 else INNER_STRIDE
+                STEP = INNER_CHUNK * (
+                    tl.where(INNER_STRIDE == 1, ACTIVE_THREADS, INNER_STRIDE)
                 )
-                for chunk in range(triton.cdiv(K, STEP)):
+                for chunk in range(tl.cdiv(K, STEP)):
                     for step in range(INNER_CHUNK):
                         index = (
-                            lane * (INNER_CHUNK if INNER_STRIDE == 1 else 1)
+                            lane * (tl.where(INNER_STRIDE == 1, INNER_CHUNK, 1))
                             + chunk * STEP
                             + step * INNER_STRIDE
                         )
@@ -3723,22 +3725,22 @@ def cuda_native_complex_mv_value(
     PARTIAL,
     row,
     cta,
-    K: tl.constexpr,
-    S0: tl.constexpr,
-    S1: tl.constexpr,
-    VS: tl.constexpr,
-    CTAS: tl.constexpr,
+    K,
+    S0,
+    S1,
+    VS,
+    CTAS,
     THREADS: tl.constexpr,
-    ACTIVE_THREADS: tl.constexpr,
-    INNER_CHUNK: tl.constexpr,
-    INNER_STRIDE: tl.constexpr,
+    ACTIVE_THREADS,
+    INNER_CHUNK,
+    INNER_STRIDE,
     KIND: tl.constexpr,
     ACC_TYPE: tl.constexpr,
     FINAL: tl.constexpr,
-    PARTIAL_CTAS: tl.constexpr,
-    SWAP: tl.constexpr,
-    PRODUCT: tl.constexpr,
-    PRE_SCALE: tl.constexpr,
+    PARTIAL_CTAS,
+    SWAP,
+    PRODUCT,
+    PRE_SCALE,
 ):
     r"""Compute a complex GEMV partial or final value in native reduction order."""
     if FINAL and KIND != 2 and KIND != 3:
@@ -3754,7 +3756,7 @@ def cuda_native_complex_mv_value(
         elif FINAL and KIND == 2:
             lane = tl.arange(0, THREADS)
             total_real = tl.full((THREADS,), 0, ACC_TYPE)
-            for chunk_real in range(triton.cdiv(CTAS, THREADS)):
+            for chunk_real in range(tl.cdiv(CTAS, THREADS)):
                 index_real = lane + chunk_real * THREADS
                 total_real += tl.load(
                     PARTIAL + 2 * (row * PARTIAL_CTAS + index_real) + 0,
@@ -3774,7 +3776,7 @@ def cuda_native_complex_mv_value(
             for index_real in tl.static_range(4):
                 real += tl.gather(sums_real, tl.full((1,), index_real, tl.int32), 0)
             total_imag = tl.full((THREADS,), 0, ACC_TYPE)
-            for chunk_imag in range(triton.cdiv(CTAS, THREADS)):
+            for chunk_imag in range(tl.cdiv(CTAS, THREADS)):
                 index_imag = lane + chunk_imag * THREADS
                 total_imag += tl.load(
                     PARTIAL + 2 * (row * PARTIAL_CTAS + index_imag) + 1,
@@ -3798,35 +3800,35 @@ def cuda_native_complex_mv_value(
             total_real = tl.full((THREADS,), 0, ACC_TYPE)
             total_imag = tl.full((THREADS,), 0, ACC_TYPE)
             if KIND == 2:
-                CHUNK: tl.constexpr = K
-                STEP: tl.constexpr = THREADS * CTAS
-                INNER: tl.constexpr = 1
+                CHUNK = K
+                STEP = THREADS * CTAS
+                INNER = 1
             elif KIND == 3:
-                CHUNK: tl.constexpr = triton.cdiv(K, CTAS)
-                STEP: tl.constexpr = INNER_CHUNK * (
-                    ACTIVE_THREADS if INNER_STRIDE == 1 else INNER_STRIDE
+                CHUNK = tl.cdiv(K, CTAS)
+                STEP = INNER_CHUNK * (
+                    tl.where(INNER_STRIDE == 1, ACTIVE_THREADS, INNER_STRIDE)
                 )
-                INNER: tl.constexpr = INNER_CHUNK
+                INNER = INNER_CHUNK
             else:
-                CHUNK: tl.constexpr = K
-                STEP: tl.constexpr = INNER_CHUNK * (
-                    THREADS if INNER_STRIDE == 1 else INNER_STRIDE
+                CHUNK = K
+                STEP = INNER_CHUNK * (
+                    tl.where(INNER_STRIDE == 1, THREADS, INNER_STRIDE)
                 )
-                INNER: tl.constexpr = INNER_CHUNK
-            for chunk in range(triton.cdiv(CHUNK, STEP)):
+                INNER = INNER_CHUNK
+            for chunk in range(tl.cdiv(CHUNK, STEP)):
                 for step in range(INNER):
                     if KIND == 2:
                         index = lane + THREADS * cta + chunk * STEP
                     elif KIND == 3:
                         index = (
                             cta * CHUNK
-                            + lane * (INNER_CHUNK if INNER_STRIDE == 1 else 1)
+                            + lane * (tl.where(INNER_STRIDE == 1, INNER_CHUNK, 1))
                             + chunk * STEP
                             + step * INNER_STRIDE
                         )
                     else:
                         index = (
-                            lane * (INNER_CHUNK if INNER_STRIDE == 1 else 1)
+                            lane * (tl.where(INNER_STRIDE == 1, INNER_CHUNK, 1))
                             + chunk * STEP
                             + step * INNER_STRIDE
                         )
@@ -3858,7 +3860,7 @@ def cuda_native_complex_mv_value(
             )
             real = tl.gather(total_real, tl.full((1,), 0, tl.int32), 0)
             imag = tl.gather(total_imag, tl.full((1,), 0, tl.int32), 0)
-    if FINAL and not PRE_SCALE:
+    if FINAL and PRE_SCALE == 0:
         real, imag = tl.fma(real, 1.0, -imag * 0.0), tl.fma(imag, 1.0, real * 0.0)
     return real, imag
 
@@ -3868,18 +3870,18 @@ def cuda_native_mv_mma_value(
     X,
     VECTOR,
     cta,
-    M: tl.constexpr,
-    K: tl.constexpr,
-    S0: tl.constexpr,
-    S1: tl.constexpr,
-    VS: tl.constexpr,
-    K_SLICE: tl.constexpr,
+    M,
+    K,
+    S0,
+    S1,
+    VS,
+    K_SLICE,
 ):
     row = tl.program_id(0) * 16 + tl.arange(0, 16)
     column = tl.arange(0, 16)
     inner = tl.arange(0, 64)
     total = tl.full((16, 16), 0, tl.float32)
-    for chunk in range(triton.cdiv(K_SLICE, 64)):
+    for chunk in range(tl.cdiv(K_SLICE, 64)):
         index = cta * K_SLICE + chunk * 64 + inner
         valid = (index < K) & (chunk * 64 + inner < K_SLICE)
         matrix = tl.load(
