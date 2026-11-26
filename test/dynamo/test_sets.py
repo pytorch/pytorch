@@ -7,6 +7,7 @@ import sys
 import unittest
 from collections import OrderedDict
 from collections.abc import Iterable
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -427,7 +428,7 @@ class TestSetGuards(LoggingTestCase):
         x = torch.ones(1)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x), fn(x))
-        with unittest.mock.patch.object(OrderedSet, "extra", 3, create=True):
+        with mock.patch.object(OrderedSet, "extra", 3, create=True):
             self.assertEqual(compiled(x), fn(x))
             OrderedSet.extra = 7
             self.assertEqual(compiled(x), fn(x))
