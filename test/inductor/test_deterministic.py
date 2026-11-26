@@ -16,22 +16,26 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    skipIf,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
     skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
+from torch.utils._triton import has_triton
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
+requires_triton = skipIf(
+    not has_triton(), "requires triton for CUDA or XPU", device_type=("cuda", "xpu")
+)
 
-@instantiate_parametrized_tests
+
 class DeterministicTestGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -77,6 +81,17 @@ class DeterministicTestGeneric(TestCase):
             compiled_out = compiled()
 
             torch.testing.assert_close(eager, compiled_out)
+
+    def test_compile_does_not_leak_deterministic_mode(self):
+        # Something may turn on deterministic algorithms while compiling a
+        # frame (e.g. numeric_utils); Dynamo undoes it, Inductor's flag too.
+        def backend(gm, example_inputs):
+            torch.use_deterministic_algorithms(True)
+            return gm.forward
+
+        torch.compile(lambda x: x + 1, backend=backend)(torch.randn(4))
+        self.assertFalse(torch.are_deterministic_algorithms_enabled())
+        self.assertFalse(inductor_config.deterministic)
 
 
 class DeterministicTestRun2Run(TestCase):
@@ -145,32 +160,7 @@ class DeterministicTestRun2Run(TestCase):
                 ),
             )
 
-    @inductor_config.patch(deterministic=True)
-    def test_deterministic_flag_survives_compile(self):
-        # Dynamo restores the deterministic-algorithms state after each frame;
-        # that must not turn off Inductor's deterministic mode.
-        from torch._inductor.utils import run_and_get_code
 
-        x = torch.randn(16, device=GPU_TYPE)
-        for fn in (lambda x: x + 1, lambda x: x * 2):
-            torch._dynamo.reset()
-            _, (code,) = run_and_get_code(torch.compile(fn), x)
-            self.assertIn("'deterministic': True", code)
-        self.assertTrue(inductor_config.deterministic)
-
-    def test_compile_does_not_leak_deterministic_mode(self):
-        # Something may turn on deterministic algorithms while compiling a
-        # frame (e.g. numeric_utils); Dynamo undoes it, Inductor's flag too.
-        def backend(gm, example_inputs):
-            torch.use_deterministic_algorithms(True)
-            return gm.forward
-
-        torch.compile(lambda x: x + 1, backend=backend)(torch.randn(4))
-        self.assertFalse(torch.are_deterministic_algorithms_enabled())
-        self.assertFalse(inductor_config.deterministic)
-
-
-@unittest.skipIf(not HAS_TRITON, "requires triton")
 class DeterministicTestAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -178,11 +168,16 @@ class DeterministicTestAccelerator(TestCase):
         super().setUp()
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(fresh_cache())
+        # Keep deterministic state from leaking between tests: some tests turn
+        # deterministic algorithms on without restoring them.
+        self._exit_stack.enter_context(inductor_config.patch(deterministic=False))
+        self._exit_stack.enter_context(DeterministicGuard(False))
 
     def tearDown(self) -> None:
         self._exit_stack.close()
         super().tearDown()
 
+    @requires_triton
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, device, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -200,6 +195,7 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["pad_mm_bench"] > 0)
 
+    @requires_triton
     @parametrize("deterministic", [False, True])
     @inductor_config.patch(max_autotune=True)
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
@@ -219,6 +215,7 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["select_algorithm_autotune"] > 0)
 
+    @requires_triton
     def test_pointwise_coordesc_tuning(self, device):
         @torch.compile(mode="max-autotune")
         def f(x):
@@ -229,6 +226,7 @@ class DeterministicTestAccelerator(TestCase):
 
         self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
+    @requires_triton
     @parametrize("deterministic", [False, True])
     def test_reduction_coordesc_tuning(self, device, deterministic):
         with inductor_config.patch(
@@ -249,6 +247,7 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
+    @requires_triton
     @parametrize("fp_fusion", [True, False])
     @parametrize("deterministic", [False, True])
     def test_fp_fusion(self, device, deterministic, fp_fusion):
@@ -259,11 +258,17 @@ class DeterministicTestAccelerator(TestCase):
         ):
             x = torch.randn(16, device=device)
             _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2 + 1), x)
-        # Deterministic mode alone keeps FMA contraction.
-        self.assertIn(f"'enable_fp_fusion': {fp_fusion}", code)
+        # Deterministic mode also turns off Triton's contraction.
+        triton_fusion = fp_fusion and not deterministic
+        self.assertIn(f"'enable_fp_fusion': {triton_fusion}", code)
 
-    @inductor_config.patch({"deterministic": True, "triton.enable_fp_fusion": False})
-    def test_pointwise_config_numerics(self, device):
+    @requires_triton
+    @parametrize(
+        "deterministic,fp_fusion",
+        [(True, True), (False, False)],
+        name_fn=lambda d, f: "deterministic" if d else "fp_fusion_off",
+    )
+    def test_pointwise_config_numerics(self, device, deterministic, fp_fusion):
         # XBLOCK=128 and XBLOCK=256 contract different products into an FMA here.
         def fn(x, buf):
             return x / x.shape[0] * 0.01 + buf * 0.99
@@ -282,6 +287,12 @@ class DeterministicTestAccelerator(TestCase):
 
             torch._dynamo.reset()
             with (
+                inductor_config.patch(
+                    {
+                        "deterministic": deterministic,
+                        "triton.enable_fp_fusion": fp_fusion,
+                    }
+                ),
                 fresh_cache(),
                 unittest.mock.patch.object(CachingAutotuner, "bench", bench),
             ):
@@ -291,6 +302,7 @@ class DeterministicTestAccelerator(TestCase):
         self.assertNotEqual(xblocks[0], xblocks[1])
         self.assertEqual(outs[0].view(torch.int32), outs[1].view(torch.int32))
 
+    @requires_triton
     @inductor_config.patch(batch_invariant=True)
     def test_persistent_reduction_batch_invariance(self, device):
         H = 768
@@ -323,6 +335,7 @@ class DeterministicTestAccelerator(TestCase):
             )
             size //= 2
 
+    @requires_triton
     def test_cumsum_deterministic(self, device):
         from torch._inductor.utils import run_and_get_code
 
@@ -335,6 +348,20 @@ class DeterministicTestAccelerator(TestCase):
         for _ in range(5):
             self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
         self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
+
+    @requires_triton
+    @inductor_config.patch(deterministic=True)
+    def test_deterministic_flag_survives_compile(self, device):
+        # Dynamo restores the deterministic-algorithms state after each frame;
+        # that must not turn off Inductor's deterministic mode.
+        from torch._inductor.utils import run_and_get_code
+
+        x = torch.randn(16, device=device)
+        for fn in (lambda x: x + 1, lambda x: x * 2):
+            torch._dynamo.reset()
+            _, (code,) = run_and_get_code(torch.compile(fn), x)
+            self.assertIn("'deterministic': True", code)
+        self.assertTrue(inductor_config.deterministic)
 
 
 instantiate_device_type_tests(
@@ -352,7 +379,5 @@ instantiate_device_type_tests(
 
 
 if __name__ == "__main__":
-    from torch.utils._triton import has_triton
-
     if has_triton():
         run_tests()
