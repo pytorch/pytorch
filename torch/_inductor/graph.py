@@ -2088,9 +2088,13 @@ class GraphLowering(torch.fx.Interpreter):
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
 
-            pending_shared_read_cat = any(
-                pending.result is result
-                for pending in self.pending_shared_read_cats.values()
+            pending_cat = (
+                self.pending_shared_read_cats.get(next(iter(n.users)))
+                if len(n.users) == 1
+                else None
+            )
+            pending_shared_read_cat = (
+                pending_cat is not None and pending_cat.result is result
             )
 
             # Materialize when an IRNode accumulates too many reads.

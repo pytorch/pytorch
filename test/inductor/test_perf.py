@@ -380,6 +380,172 @@ class SharedReadCatTests(TestCase):
         return result, "\n".join(code), metrics.generated_kernel_count
 
     @requires_gpu_and_triton
+    def test_tuple_cat_inputs(self):
+        for cast in (False, True):
+            with self.subTest(cast=cast):
+                x = T(32)
+                rewritten = []
+
+                def tuple_inputs(graph):
+                    for node in graph.nodes:
+                        if node.target == aten.cat.default:
+                            node.args = (tuple(node.args[0]), *node.args[1:])
+                            rewritten.append(node)
+
+                def fn(x):
+                    result = torch.cat((x + 1, x * 2), 0)
+                    return result.bfloat16() if cast else result
+
+                original = lowering._cat_inputs_share_read
+                decisions = []
+
+                def record(inputs):
+                    decision = original(inputs)
+                    decisions.append(decision)
+                    return decision
+
+                admitted = not torch.__version__.startswith("2.11.")
+                with config.patch(post_grad_custom_post_pass=tuple_inputs):
+                    with patch.object(lowering, "_cat_inputs_share_read", record):
+                        actual, code, kernels = self.compile_cat(fn, (x,))
+                    with patch.object(
+                        lowering, "_cat_inputs_share_read", return_value=False
+                    ):
+                        expected, _, _ = self.compile_cat(fn, (x,))
+                self.assertTrue(rewritten)
+                self.assertTrue(decisions)
+                self.assertEqual(decisions, [admitted] * len(decisions))
+                self.assert_same_bits(actual, expected)
+                self.assertEqual(kernels, 1)
+                self.assertEqual(code.count("tl.store("), 2 if admitted else 1)
+
+    @requires_gpu_and_triton
+    def test_shared_read_unique_io_limit(self):
+        for extra, io_count in ((0, 3), (1, 4), (2, 5), (3, 4)):
+            for limit in (None, io_count - 1, io_count):
+                for cast in (False, True):
+                    with self.subTest(extra=extra, limit=limit, cast=cast):
+                        x, y, z, scalar = T(32), T(32), T(32), T(1)
+
+                        def fn(x, y, z, scalar):
+                            if extra == 1:
+                                a, b = x + y, x * y
+                            elif extra == 2:
+                                a, b = x + y, x * z
+                            elif extra == 3:
+                                a, b = x + scalar, x * scalar
+                            else:
+                                a, b = x + 1, x * 2
+                            result = torch.cat((a, b), 0)
+                            return result.bfloat16() if cast else result
+
+                        original = lowering._cat_inputs_share_read
+                        decisions = []
+
+                        def record(inputs):
+                            decision = original(inputs)
+                            decisions.append(decision)
+                            return decision
+
+                        admitted = limit is None or limit >= io_count
+                        with config.patch(max_fusion_unique_io_buffers=limit):
+                            with patch.object(lowering, "_cat_inputs_share_read", record):
+                                actual, code, kernels = self.compile_cat(
+                                    fn, (x, y, z, scalar)
+                                )
+                            with patch.object(
+                                lowering, "_cat_inputs_share_read", return_value=False
+                            ):
+                                expected, _, _ = self.compile_cat(
+                                    fn, (x, y, z, scalar)
+                                )
+                        self.assertTrue(decisions)
+                        self.assertEqual(decisions, [admitted] * len(decisions))
+                        self.assert_same_bits(actual, expected)
+                        self.assertEqual(kernels, 1)
+                        self.assertEqual(code.count("tl.store("), 2 if admitted else 1)
+
+    @requires_gpu_and_triton
+    def test_pending_cat_lookup(self):
+        from torch._inductor.graph import GraphLowering
+
+        for count in (4, 8):
+            with self.subTest(count=count):
+                mappings = []
+                node_counts = []
+
+                class PendingRecords(dict):
+                    def __init__(self):
+                        super().__init__()
+                        self.scanned = 0
+                        self.lookups = 0
+                        self.peak = 0
+
+                    def values(self):
+                        for record in super().values():
+                            self.scanned += 1
+                            yield record
+
+                    def get(self, key, default=None):
+                        self.lookups += 1
+                        return super().get(key, default)
+
+                    def __setitem__(self, key, value):
+                        super().__setitem__(key, value)
+                        self.peak = max(self.peak, len(self))
+
+                original_init = GraphLowering.__init__
+
+                def record_init(graph, *args, **kwargs):
+                    original_init(graph, *args, **kwargs)
+                    records = PendingRecords()
+                    graph.pending_shared_read_cats = records
+                    mappings.append(records)
+
+                def postpone_casts(graph):
+                    cats = [
+                        node for node in graph.nodes if node.target == aten.cat.default
+                    ]
+                    self.assertEqual(len(cats), count)
+                    anchor = cats[-1]
+                    for cat in cats:
+                        cast = next(iter(cat.users))
+                        self.assertEqual(
+                            cast.target, torch.ops.prims.convert_element_type.default
+                        )
+                        anchor.append(cast)
+                        anchor = cast
+                    graph.lint()
+                    node_counts.append(len(list(graph.nodes)))
+
+                def fn(x):
+                    cats = [
+                        torch.cat((x + i + 1, x * (i + 2)), 0) for i in range(count)
+                    ]
+                    return tuple(cat.bfloat16() for cat in cats)
+
+                x = T(32)
+                with config.patch(post_grad_custom_post_pass=postpone_casts):
+                    with patch.object(GraphLowering, "__init__", record_init):
+                        actual, code, _ = self.compile_cat(fn, (x,))
+                    with patch.object(
+                        lowering, "_cat_inputs_share_read", return_value=False
+                    ):
+                        expected, _, _ = self.compile_cat(fn, (x,))
+                for a, b in zip(actual, expected):
+                    self.assert_same_bits(a, b)
+                self.assertTrue(mappings)
+                self.assertTrue(node_counts)
+                self.assertEqual(max(record.peak for record in mappings), count)
+                self.assertEqual(sum(record.scanned for record in mappings), 0)
+                self.assertGreater(sum(record.lookups for record in mappings), 0)
+                self.assertLessEqual(
+                    sum(record.lookups for record in mappings), sum(node_counts)
+                )
+                self.assertTrue(all(not record for record in mappings))
+                self.assertEqual(code.count("tl.store("), 2 * count)
+
+    @requires_gpu_and_triton
     def test_terminal_cast_padding(self):
         for width in (1025, 1100):
             for target in (torch.float16, torch.bfloat16):
