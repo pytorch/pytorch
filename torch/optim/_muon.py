@@ -126,6 +126,7 @@ class Muon(Optimizer):
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: str | None = None,
+        *,
         foreach: bool | None = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
