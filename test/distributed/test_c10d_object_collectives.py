@@ -1,9 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from functools import partial, wraps
 
-import torch
 import torch.distributed as dist
 
 
@@ -12,7 +10,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
+from torch.testing._internal.common_distributed import DistributedTestBase, with_comms
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -28,32 +26,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-
-def with_comms(func=None):
-    if func is None:
-        return partial(
-            with_comms,
-        )
-
-    @wraps(func)
-    def wrapper(self, device, *args, **kwargs):
-        # The device arg is injected per device variant by
-        # instantiate_device_type_tests; every test method takes it as the
-        # first positional argument after self.
-        device_type = torch.device(device).type
-        if device_type != "cpu":
-            device_count = torch.get_device_module(device_type).device_count()
-            if device_count < self.world_size:
-                sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
-
-        self.pg = self.create_pg(device=device_type)
-        try:
-            return func(self, device, *args, **kwargs)
-        finally:
-            torch.distributed.destroy_process_group()
-
-    return wrapper
 
 
 class TestObjectCollectives(DistributedTestBase):

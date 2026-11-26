@@ -408,6 +408,58 @@ def with_dist_debug_levels(levels):
     return decorator
 
 
+def with_comms(func=None, *, skip_gloo_device_count=False, barrier_on_success=False):
+    """
+    Initializes the default process group on the variant's device before the
+    test and destroys it afterwards. Usable bare or with arguments.
+
+    The decorated test must declare a ``device`` parameter, which
+    ``instantiate_device_type_tests`` injects as a keyword argument. Only the
+    device type is used: it selects the comm backend, is handed to
+    ``create_pg`` and is what the test body receives.
+
+    Args:
+        skip_gloo_device_count (bool): skip the device count check when the
+            device resolves to the gloo backend, which does not need one
+            device per rank.
+        barrier_on_success (bool): run ``dist.barrier()`` after a successful
+            test, before destroying the process group, so every rank finishes
+            the test before shutdown starts.
+    """
+
+    if func is None:
+        return partial(
+            with_comms,
+            skip_gloo_device_count=skip_gloo_device_count,
+            barrier_on_success=barrier_on_success,
+        )
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        device_type = torch.device(kwargs["device"]).type
+        if (
+            device_type != "cpu"
+            and not (
+                skip_gloo_device_count
+                and self.backend(device_type) == c10d.Backend.GLOO
+            )
+            and torch.accelerator.device_count() < self.world_size
+        ):
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+
+        kwargs["device"] = device_type
+        self.pg = self.create_pg(device=device_type)
+        try:
+            result = func(self, *args, **kwargs)
+            if barrier_on_success:
+                c10d.barrier()
+            return result
+        finally:
+            c10d.destroy_process_group()
+
+    return wrapper
+
+
 def requires_gloo():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_gloo_available(),
