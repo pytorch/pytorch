@@ -2441,6 +2441,54 @@ TEST(StaticRuntime, VarStack) {
   testStaticRuntime(var_stack_script, args1, args2);
 }
 
+// [1, 1] column views of a [1, N] row have strides [N, 1] and count as
+// contiguous, so they reach the native serial stack kernel. The inputs and the
+// output sit inside larger buffers, so a wrong copy length stays in bounds and
+// shows up as wrong values.
+TEST(StaticRuntime, SerialStackOfSingleElementStridedViews) {
+  constexpr int64_t kWidth = 566;
+  const auto base = at::arange(4 * kWidth, at::kFloat).view({4, kWidth});
+  const auto a = base.narrow(0, 0, 1).narrow(1, kWidth - 1, 1);
+  const auto b = base.narrow(0, 2, 1).narrow(1, 7, 1);
+  ASSERT_TRUE(a.is_contiguous());
+  ASSERT_EQ(a.strides(), b.strides());
+
+  auto buffer = at::full({4 * kWidth}, -1.0, at::kFloat);
+  auto out = buffer.narrow(0, 0, 2).view({2, 1, 1});
+  at::_stack_out(out, {a, b}, 0);
+
+  EXPECT_TRUE(at::equal(out, at::stack({a, b}, 0)));
+  EXPECT_TRUE(at::equal(
+      buffer.narrow(0, 2, 4 * kWidth - 2),
+      at::full({4 * kWidth - 2}, -1.0, at::kFloat)));
+}
+
+// A size-1 stack dim may carry any stride and still be contiguous.
+TEST(StaticRuntime, SerialStackIntoOutputWithStridedSingleElementDim) {
+  const auto a = at::full({1, 1}, 3.0, at::kFloat);
+  auto out = at::zeros({1000}, at::kFloat).as_strided({1, 1, 1}, {999, 1, 1});
+  ASSERT_TRUE(out.is_contiguous());
+
+  at::_stack_out(out, {a}, 0);
+
+  EXPECT_TRUE(at::equal(out, at::stack({a}, 0)));
+}
+
+// Both VarStack inputs are [1, 1] views with strides [566, 1] into rows of
+// larger bases. x's base holds smaller values than y's, so a wrong copy length
+// changes the result. Static runtime allocates the output, so only the inputs
+// are padded.
+TEST(StaticRuntime, VarStackOfSingleElementStridedViews) {
+  const auto script = R"JIT(
+    def forward(self, x: Tensor, y: Tensor):
+        return torch.max(torch.stack([x[:, 565:566], y[:, 565:566]], 0), 0)[0].clone()
+  )JIT";
+
+  const auto x_base = at::full({2, 566}, -1.0, at::kFloat);
+  const auto y_base = at::full({2, 566}, 1.0, at::kFloat);
+  testStaticRuntime(script, {x_base.narrow(0, 0, 1), y_base.narrow(0, 0, 1)});
+}
+
 TEST(StaticRuntime, FmodTensor) {
   const auto fmod_tensor = R"JIT(
     def forward(self, a: Tensor, b: Tensor):

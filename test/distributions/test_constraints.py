@@ -1,6 +1,5 @@
 # Owner(s): ["module: distributions"]
 
-
 import torch
 from torch.distributions import biject_to, constraints, transform_to
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -99,7 +98,7 @@ def build_constraint(constraint_fn, args, device="cpu"):
     )
 
 
-class TestConstraints(TestCase):
+class TestConstraintsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("constraint_fn, result, value", EXAMPLES)
@@ -111,7 +110,7 @@ class TestConstraints(TestCase):
             )
 
     @parametrize("constraint_fn, args", [(c[0], c[1:]) for c in CONSTRAINTS])
-    def test_biject_to(self, constraint_fn, args, device):
+    def test_biject_to(self, device, constraint_fn, args):
         constraint = build_constraint(constraint_fn, args, device=device)
         try:
             t = biject_to(constraint)
@@ -146,7 +145,7 @@ class TestConstraints(TestCase):
             )
 
     @parametrize("constraint_fn, args", [(c[0], c[1:]) for c in CONSTRAINTS])
-    def test_transform_to(self, constraint_fn, args, device):
+    def test_transform_to(self, device, constraint_fn, args):
         constraint = build_constraint(constraint_fn, args, device=device)
         t = transform_to(constraint)
         if constraint_fn is constraints.corr_cholesky:
@@ -163,7 +162,8 @@ class TestConstraints(TestCase):
             raise AssertionError(f"Error in transform_to({constraint}) pseudoinverse")
 
 
-instantiate_device_type_tests(TestConstraints, globals())
+instantiate_device_type_tests(TestConstraintsDevice, globals(), allow_xpu=True)
+
 
 if __name__ == "__main__":
     run_tests()

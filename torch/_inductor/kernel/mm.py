@@ -77,7 +77,9 @@ from ..utils import (
     use_triton_tdm_template,
     use_triton_template,
     use_triton_tma_template,
+    use_triton_xpu_template,
 )
+from .decompose_k import decompose_k_subgraph_template
 from .mm_common import (
     _fits_int32_buffer_span,
     _is_static_problem,
@@ -119,7 +121,7 @@ mm_template = TritonTemplate(
     # See more details in https://github.com/pytorch/pytorch/pull/146293
     else load_kernel_template("triton_mm_rocm"),
     cache_codegen_enabled_for_template=True,
-    prologue_loads_all_inputs=True,
+    prologue_loads_all_named_inputs=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(
@@ -144,6 +146,20 @@ persistent_mm_template = TritonTemplate(
     source=load_kernel_template("triton_persistent_mm"),
 )
 
+# Intel XPU: the persistent descriptor template above with Xe2-tuned configs from
+# its own heuristics; mm_xpu_non_persistent runs it with one tile per work-group.
+xpu_persistent_mm_template = TritonTemplate(
+    name="mm_xpu_persistent",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_tma_mm"),
+)
+
+xpu_non_persistent_mm_template = TritonTemplate(
+    name="mm_xpu_non_persistent",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_tma_mm"),
+)
+
 
 scaled_mm_device_tma_epilogue_scaling_template = TritonTemplate(
     name="scaled_mm_device_tma_epilogue_scaling",
@@ -166,7 +182,8 @@ flydsl_mm_template = FlyDSLTemplate(
 blackwell_ws_persistent_tma_mm_template = TritonTemplate(
     name="blackwell_ws_persistent_tma",
     grid=blackwell_persistent_mm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm")
+    + load_kernel_template("triton_gemm_helpers"),
 )
 
 
@@ -481,58 +498,6 @@ def get_flydsl_mm_template_kwargs(
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
 
-def decomposeK(a, b, k_splits):
-    m = a.shape[0]
-    n = b.shape[1]
-    k = a.shape[1]
-
-    k_parts = k // k_splits
-    B = k_splits
-    a_reshaped = torch.permute(a.reshape(m, B, k_parts), (1, 0, 2))
-    b_reshaped = b.reshape(B, k_parts, n)
-    result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
-    reduced_buf = torch.sum(result, 0)
-    return reduced_buf.to(a.dtype)
-
-
-class DecomposeKSugraphTemplate(SubgraphTemplate):
-    def __init__(self):
-        super().__init__(
-            name="decompose_k",
-        )
-
-    def generate(  # type: ignore[override]
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        k_split: int,
-    ) -> SubgraphChoiceCaller:
-        from torch._dispatch.python import enable_python_dispatcher
-
-        from ..decomposition import select_decomp_table
-
-        name = f"decompose_k_mm_{k_split}_split"
-        description = f"{k_split=}"
-
-        with enable_python_dispatcher():
-            decompositions = select_decomp_table()
-            fn = make_fx(
-                functools.partial(decomposeK, k_splits=k_split),
-                decompositions,
-            )
-
-            return super().generate(
-                name=name,
-                input_nodes=input_nodes,
-                layout=layout,
-                make_fx_graph=fn,
-                description=description,
-            )
-
-
-decompose_k_subgraph_template = DecomposeKSugraphTemplate()
-
-
 class ContiguousTemplate(SubgraphTemplate):
     def __init__(self, name: str, description: str, fn: Any):
         self.name = name
@@ -650,7 +615,10 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
             args = [make_pointwise(_to_dtype)(x) for x in args]
         mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(mul_pointwise, 1)
+        # Else mm(x_bf16, y_bf16, out_dtype=torch.float32) would return bf16.
+        dot_reduction = make_reduction("dot", override_return_dtype=out_dtype)(
+            mul_pointwise, 1
+        )
 
         return dot_reduction
 
@@ -725,14 +693,20 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         if use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
-        # Triton Templates typically perform very poorly for large K.
-        # Its highly unlikely that if we want to use decompose_k, then
-        # Triton will ever win.
-        #
-        # To be conservative we increase this threshold for N/M by 2.
-        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
-        if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
+        # CUDA drops Triton mm from the default search once decompose_k applies
+        # at twice the usual threshold. The exhaustive search still includes it.
+        # HIP keeps Triton mm.
+        keep_triton_mm = (
+            torch.version.hip is not None
+            or inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+            or not use_decompose_k_choice(m, n, k, threshold_multiple=2)
+        )
+        if keep_triton_mm:
             templates_to_use.append(mm_template)
+
+            if use_triton_xpu_template(mat1, mat2, layout=layout):
+                templates_to_use.append(xpu_persistent_mm_template)
+                templates_to_use.append(xpu_non_persistent_mm_template)
 
             if use_triton_blackwell_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
@@ -1014,17 +988,23 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
             )
 
     if use_native_matmul(mat1, mat2):
-        if beta == 0:
-            arg1 = 0
-        else:
-            arg1 = lowerings[aten.mul](beta, inp)
-
         if alpha == 0:
-            arg2 = 0
+            # Skip mat1 @ mat2 but keep its [M, N] shape: inp may be a [N] bias.
+            product = lowerings[aten.full](
+                [mat1.get_size()[0], mat2.get_size()[1]],
+                0,
+                dtype=mat1.get_dtype(),
+                device=mat1.get_device(),
+            )
         else:
-            arg2 = lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2))
-
-        return lowerings[aten.add](arg1, arg2)
+            product = lowerings[aten.mm](mat1, mat2)
+            if alpha != 1:
+                product = lowerings[aten.mul](alpha, product)
+        if beta == 0:
+            return product
+        if beta != 1:
+            inp = lowerings[aten.mul](beta, inp)
+        return lowerings[aten.add](inp, product)
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(
@@ -1574,6 +1554,7 @@ def scaled_mm_v2_constraint(
             if (
                 device == "cuda"
                 and not torch.version.hip
+                and scale.get_dtype() == torch.float32
                 and recipe in (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128)
             ):
                 matrix = operands["self" if side == "a" else "mat2"]

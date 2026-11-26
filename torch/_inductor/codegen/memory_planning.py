@@ -7,6 +7,8 @@ import itertools
 import pprint
 from typing import Any, Protocol, TYPE_CHECKING
 
+import sympy
+
 import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
@@ -27,8 +29,6 @@ from .wrapper import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-
-    import sympy
 
 
 @dataclasses.dataclass
@@ -125,6 +125,13 @@ class AllocationTreeNode:
         """Number of bytes needed at runtime"""
         raise NotImplementedError
 
+    def get_aligned_symbolic_size(self) -> sympy.Expr:
+        """Aligned byte size.
+
+        Overrides must preserve value equivalence to align(get_symbolic_size()).
+        """
+        return align(self.get_symbolic_size())
+
     def finalize(self, pool, offset) -> AllocationTreeNode:
         """Called after all allocations have been made"""
         return self
@@ -147,16 +154,6 @@ class Allocation(AllocationTreeNode):
     pool: AllocationPool | None = None
     offset: sympy.Expr | None = None
     earliest_available: float | None = None
-
-    def __post_init__(self) -> None:
-        has_unbacked_sym = False
-        for s in self.node.get_layout().size:
-            if free_unbacked_symbols(s):
-                has_unbacked_sym = True
-                break
-
-        if has_unbacked_sym:
-            self.earliest_available = self.get_live_ranges().begin
 
     @property
     def device(self):
@@ -234,14 +231,15 @@ class MemorySplitProtocol(Protocol):
     get_live_ranges: CachedMethod[[], LiveRanges]
     get_size_hint: CachedMethod[[], int]
     get_symbolic_size: CachedMethod[[], sympy.Expr]
+    get_aligned_symbolic_size: CachedMethod[[], sympy.Expr]
 
     def _allocate(self, block: Allocation, is_last: bool) -> bool: ...
 
 
 class ClearCacheOnAllocateMixin(MemorySplitProtocol):
     """
-    Helper to assist in caching get_live_ranges, get_size_hint, and
-    get_symbolic_size.
+    Helper to assist in caching get_live_ranges, get_size_hint,
+    get_symbolic_size, and get_aligned_symbolic_size.
     """
 
     def allocate(self, block: Allocation, is_last: bool):
@@ -254,6 +252,7 @@ class ClearCacheOnAllocateMixin(MemorySplitProtocol):
         self.get_live_ranges.clear_cache(self)
         self.get_size_hint.clear_cache(self)
         self.get_symbolic_size.clear_cache(self)
+        self.get_aligned_symbolic_size.clear_cache(self)
 
 
 @dataclasses.dataclass
@@ -327,6 +326,12 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
             return 0  # type: ignore[return-value]
         return Max(*[x.get_symbolic_size() for x in self.allocations])
 
+    @cache_on_self
+    def get_aligned_symbolic_size(self) -> sympy.Expr:
+        if not self.allocations:
+            return sympy.S.Zero
+        return Max(*[x.get_aligned_symbolic_size() for x in self.allocations])
+
     def is_empty(self):
         return len(self.allocations) == 1 and self.allocations[0].is_empty()
 
@@ -375,12 +380,19 @@ class SpatialSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
 
     @cache_on_self
     def get_symbolic_size(self) -> sympy.Expr:
-        return align(self.left.get_symbolic_size()) + self.right.get_symbolic_size()
+        return self.left.get_aligned_symbolic_size() + self.right.get_symbolic_size()
+
+    @cache_on_self
+    def get_aligned_symbolic_size(self) -> sympy.Expr:
+        return (
+            self.left.get_aligned_symbolic_size()
+            + self.right.get_aligned_symbolic_size()
+        )
 
     def finalize(self, pool, offset):
         self.left = self.left.finalize(pool, offset)
         self.right = self.right.finalize(
-            pool, offset + align(self.left.get_symbolic_size())
+            pool, offset + self.left.get_aligned_symbolic_size()
         )
         self.clear_cache()
         if self.right.is_empty():
@@ -438,7 +450,7 @@ class AllocationPool:
                 )
             else:
                 self.restrict_live_range = LiveRange(
-                    min(self.restrict_live_range.begin, block_earliest_available),
+                    max(self.restrict_live_range.begin, block_earliest_available),
                     self.restrict_live_range.end,
                 )
 
@@ -795,6 +807,7 @@ class MemoryPlanner:
                 outputs.append(group.allocation)
             else:
                 intermediates.append(group.allocation)
+        self.compute_earliest_available(outputs + intermediates)
 
         for block in sorted(
             outputs,
@@ -815,6 +828,28 @@ class MemoryPlanner:
             self.pools.allocate(block)
 
         self.pools.finalize()
+
+    def compute_earliest_available(self, blocks: list[Allocation]):
+        """
+        A block whose layout uses unbacked symbols can only go in a pool created
+        after those symbols are defined. Each symbol is defined before the first
+        block that uses it is allocated, so a block is available from the latest
+        first use among its unbacked symbols.
+        """
+        block_symbols = []
+        first_use: dict[sympy.Symbol, float] = {}
+        for block in blocks:
+            layout = block.node.get_layout()
+            symbols = free_unbacked_symbols(
+                (*layout.size, *layout.stride, block.symbolic_size)
+            )
+            block_symbols.append(symbols)
+            begin = block.live_range.begin
+            for s in symbols:
+                first_use[s] = min(first_use.get(s, begin), begin)
+        for block, symbols in zip(blocks, block_symbols):
+            if symbols:
+                block.earliest_available = max(first_use[s] for s in symbols)
 
     def mark_first_last_usage(self, lines):
         """

@@ -162,7 +162,8 @@ std::string cuspyEncodePftrace(
     const std::vector<PftraceGfxContext>& gfx_contexts,
     const PftraceRenderStages& stages,
     const PftraceGpuCounter& counters,
-    int compression_level) {
+    int compression_level,
+    const std::vector<std::pair<std::string, std::string>>& metadata) {
   protozero::HeapBuffered<pbz::Trace> trace;
 
   // Time base: the packet timestamps are absolute (base_ns + offset,
@@ -182,6 +183,17 @@ std::string cuspyEncodePftrace(
     auto* real = cs->add_clocks();
     real->set_clock_id(pbz::BUILTIN_CLOCK_REALTIME);
     real->set_timestamp(static_cast<uint64_t>(base_ns));
+  }
+
+  if (!metadata.empty()) {
+    auto* pkt = trace->add_packet();
+    pkt->set_trusted_packet_sequence_id(1);
+    auto* bundle = pkt->set_chrome_events();
+    for (const auto& [name, json] : metadata) {
+      auto* md = bundle->add_metadata();
+      md->set_name(name);
+      md->set_json_value(json);
+    }
   }
 
   // Per-gpu InternedGpuCounterDescriptor iid (its own interned-id space). The
@@ -317,11 +329,11 @@ std::string cuspyEncodePftrace(
       // those render stages. The extension type is absent from the
       // amalgamation, so emit by field id.
       if (g.gpu_corr_offsets) {
-        const int32_t off = g.gpu_corr_offsets[i];
-        const int32_t end = g.gpu_corr_offsets[i + 1];
+        const int64_t off = g.gpu_corr_offsets[i];
+        const int64_t end = g.gpu_corr_offsets[i + 1];
         if (end > off) {
           auto* gc = te->BeginNestedMessage<protozero::Message>(3000);
-          for (int32_t j = off; j < end; ++j) {
+          for (int64_t j = off; j < end; ++j) {
             gc->AppendVarInt(1, static_cast<uint64_t>(g.gpu_corr_ids[j]));
           }
         }
@@ -353,8 +365,8 @@ std::string cuspyEncodePftrace(
         }
       }
       for (const auto& a : g.json_annos) {
-        const int32_t off = a.offsets[i];
-        const int32_t len = a.offsets[i + 1] - off;
+        const int64_t off = a.offsets[i];
+        const int64_t len = a.offsets[i + 1] - off;
         if (len > 0) {
           emitJsonBlob(te, a.buffer + off, static_cast<size_t>(len));
         }
@@ -392,9 +404,9 @@ std::string cuspyEncodePftrace(
     // viewer draws them as flow arrows (the CUDA-graph node->node dependency
     // DAG).
     if (stages.event_wait_offsets) {
-      const int32_t off = stages.event_wait_offsets[i];
-      const int32_t end = stages.event_wait_offsets[i + 1];
-      for (int32_t j = off; j < end; ++j) {
+      const int64_t off = stages.event_wait_offsets[i];
+      const int64_t end = stages.event_wait_offsets[i + 1];
+      for (int64_t j = off; j < end; ++j) {
         gse->add_event_wait_ids(stages.event_wait_ids[j]);
       }
     }
@@ -442,8 +454,8 @@ std::string cuspyEncodePftrace(
     // Per-row collective-descriptor JSON, spread as extra_data (mirrors the
     // chrome path spreading metadata into the GPU op's args).
     if (stages.meta_offsets) {
-      const int32_t off = stages.meta_offsets[i];
-      const int32_t len = stages.meta_offsets[i + 1] - off;
+      const int64_t off = stages.meta_offsets[i];
+      const int64_t len = stages.meta_offsets[i + 1] - off;
       if (len > 0) {
         emitJsonExtraData(
             gse, stages.meta_buffer + off, static_cast<size_t>(len));
@@ -498,7 +510,8 @@ std::string cuspyEncodePftrace(
     const std::vector<PftraceGfxContext>& /*gfx_contexts*/,
     const PftraceRenderStages& /*stages*/,
     const PftraceGpuCounter& /*counters*/,
-    int /*compression_level*/) {
+    int /*compression_level*/,
+    const std::vector<std::pair<std::string, std::string>>& /*metadata*/) {
   TORCH_CHECK(
       false,
       "PyTorch was built without native .pftrace support: the CUPTI stubs were "

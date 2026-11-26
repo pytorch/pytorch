@@ -124,3 +124,90 @@ TEST(TorchScriptTest, TestPickle) {
   double eps = 0.0001;
   ASSERT_TRUE(diff < eps && diff > -eps);
 }
+
+namespace {
+std::vector<c10::TensorImpl*> tensorImpls(const std::vector<at::Tensor>& ts) {
+  std::vector<c10::TensorImpl*> impls;
+  impls.reserve(ts.size());
+  for (const auto& t : ts) {
+    impls.push_back(t.unsafeGetTensorImpl());
+  }
+  return impls;
+}
+} // namespace
+
+TEST(TorchScriptTest, TestPickleTensorTableLongMemoId) {
+  // 300 memoized strings push the tensor global's memo id past 255, so the
+  // later tensor references use LONG_BINGET.
+  std::vector<c10::IValue> elems;
+  for (int i = 0; i < 300; ++i) {
+    elems.emplace_back(std::to_string(i));
+  }
+  const std::vector<at::Tensor> expected = {
+      torch::rand(2), torch::rand(3), torch::rand(4)};
+  elems.insert(elems.end(), expected.begin(), expected.end());
+
+  std::vector<at::Tensor> tensor_table;
+  const auto data = torch::jit::pickle(
+      c10::ivalue::Tuple::create(std::move(elems)), &tensor_table);
+  const auto loaded =
+      torch::jit::unpickle(data.data(), data.size(), nullptr, tensor_table);
+
+  std::vector<at::Tensor> actual;
+  for (const auto& elem : loaded.toTupleRef().elements()) {
+    if (elem.isTensor()) {
+      actual.push_back(elem.toTensor());
+    }
+  }
+  EXPECT_EQ(tensorImpls(tensor_table), tensorImpls(expected));
+  EXPECT_EQ(tensorImpls(actual), tensorImpls(expected));
+}
+
+TEST(TorchScriptTest, TestPickleTensorTableBytes) {
+  using namespace std::string_literals;
+  const auto expected =
+      // PROTO 2
+      "\x80\x02"s +
+      // GLOBAL torch.jit._pickle.build_tensor_from_id, BINPUT 0
+      "ctorch.jit._pickle\nbuild_tensor_from_id\nq\x00"s +
+      // MARK, BININT1 0, TUPLE, REDUCE
+      "(K\x00tR"s +
+      // BINGET 0, MARK, BININT1 1, TUPLE, REDUCE
+      "h\x00(K\x01tR"s +
+      // TUPLE2, STOP
+      "\x86."s;
+
+  std::vector<c10::IValue> elems;
+  elems.emplace_back(torch::zeros(1));
+  elems.emplace_back(torch::zeros(1));
+  const c10::IValue tuple = c10::ivalue::Tuple::create(std::move(elems));
+
+  std::vector<at::Tensor> tensor_table;
+  const auto data = torch::jit::pickle(tuple, &tensor_table);
+
+  EXPECT_EQ(std::string(data.begin(), data.end()), expected);
+}
+
+TEST(TorchScriptTest, TestPickleSaveLiteralTensors) {
+  // Each dtype appears twice so the second tensor reuses the cached storage
+  // type, and the sparse tensor reuses the dense tensors' OrderedDict.
+  const std::vector<at::Tensor> expected = {
+      torch::rand(2),
+      torch::rand(3),
+      torch::arange(4),
+      torch::arange(5),
+      torch::rand({2, 3}).to_sparse()};
+
+  const auto data = torch::jit::pickle_save(c10::ivalue::Tuple::create(
+      std::vector<c10::IValue>(expected.begin(), expected.end())));
+  const auto loaded = torch::jit::pickle_load(data);
+
+  const auto& elems = loaded.toTupleRef().elements();
+  ASSERT_EQ(elems.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    const auto& actual = elems[i].toTensor();
+    EXPECT_EQ(actual.layout(), expected[i].layout());
+    EXPECT_EQ(actual.scalar_type(), expected[i].scalar_type());
+    EXPECT_TRUE(torch::equal(actual.to_dense(), expected[i].to_dense()));
+  }
+}

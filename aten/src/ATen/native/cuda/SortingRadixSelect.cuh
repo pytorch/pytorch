@@ -975,16 +975,16 @@ __device__ __forceinline__ uint32_t waveSum(uint32_t x) {
 // Maximum of `x` over the wave, returned wave-uniform (same DPP pattern as waveSum; 0 is the identity).
 __device__ __forceinline__ uint32_t waveMax(uint32_t x) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
-  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x111, 0xf, 0xf, true)));
-  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x112, 0xf, 0xf, true)));
-  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x114, 0xf, 0xf, true)));
-  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x118, 0xf, 0xf, true)));
-  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x142, 0xa, 0xf, false)));
-  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x143, 0xc, 0xf, false)));
+  x = ::max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x111, 0xf, 0xf, true)));
+  x = ::max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x112, 0xf, 0xf, true)));
+  x = ::max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x114, 0xf, 0xf, true)));
+  x = ::max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x118, 0xf, 0xf, true)));
+  x = ::max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x142, 0xa, 0xf, false)));
+  x = ::max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x143, 0xc, 0xf, false)));
   return static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(x), 63));
 #else
   for (int o = C10_WARP_SIZE / 2; o > 0; o >>= 1) {
-    x = max(x, __shfl_xor(x, o));
+    x = ::max(x, __shfl_xor(x, o));
   }
   return x;
 #endif
@@ -993,16 +993,16 @@ __device__ __forceinline__ uint32_t waveMax(uint32_t x) {
 // Minimum of `x` over the wave, returned wave-uniform (0xffffffff is the identity).
 __device__ __forceinline__ uint32_t waveMin(uint32_t x) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
-  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x111, 0xf, 0xf, false)));
-  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x112, 0xf, 0xf, false)));
-  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x114, 0xf, 0xf, false)));
-  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x118, 0xf, 0xf, false)));
-  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x142, 0xa, 0xf, false)));
-  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x143, 0xc, 0xf, false)));
+  x = ::min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x111, 0xf, 0xf, false)));
+  x = ::min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x112, 0xf, 0xf, false)));
+  x = ::min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x114, 0xf, 0xf, false)));
+  x = ::min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x118, 0xf, 0xf, false)));
+  x = ::min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x142, 0xa, 0xf, false)));
+  x = ::min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x143, 0xc, 0xf, false)));
   return static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(x), 63));
 #else
   for (int o = C10_WARP_SIZE / 2; o > 0; o >>= 1) {
-    x = min(x, __shfl_xor(x, o));
+    x = ::min(x, __shfl_xor(x, o));
   }
   return x;
 #endif
@@ -1012,13 +1012,13 @@ __device__ __forceinline__ uint32_t waveMin(uint32_t x) {
 // in from outside the row read 0, the identity). Elsewhere every lane of the row holds it.
 __device__ __forceinline__ uint32_t rowMax16(uint32_t x) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
-  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x111, 0xf, 0xf, true)));
-  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x112, 0xf, 0xf, true)));
-  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x114, 0xf, 0xf, true)));
-  return max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x118, 0xf, 0xf, true)));
+  x = ::max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x111, 0xf, 0xf, true)));
+  x = ::max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x112, 0xf, 0xf, true)));
+  x = ::max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x114, 0xf, 0xf, true)));
+  return ::max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x118, 0xf, 0xf, true)));
 #else
   for (int o = 8; o > 0; o >>= 1) {
-    x = max(x, __shfl_xor(x, o, 16));
+    x = ::max(x, __shfl_xor(x, o, 16));
   }
   return x;
 #endif
@@ -1059,7 +1059,7 @@ __device__ __forceinline__ uint32_t rankSelectWave(const uint32_t (&v)[S], uint3
   uint32_t best = 0xffffffffu;
 #pragma unroll
   for (int r = 0; r < S; ++r) {
-    best = min(best, above[r] < kEff ? v[r] : 0xffffffffu);
+    best = ::min(best, above[r] < kEff ? v[r] : 0xffffffffu);
   }
   return waveMin(best);
 }
@@ -1132,7 +1132,7 @@ __device__ __forceinline__ void sortDesc(uint32_t (&c)[N], std::integer_sequence
     if constexpr (j > 0) {
       uint32_t t;
       [&]<int... P>(std::integer_sequence<int, P...>) {
-        ((t = max(c[j - 1 - P], c[j - P]), c[j - P] = min(c[j - 1 - P], c[j - P]), c[j - 1 - P] = t), ...);
+        ((t = ::max(c[j - 1 - P], c[j - P]), c[j - P] = ::min(c[j - 1 - P], c[j - P]), c[j - 1 - P] = t), ...);
       }(std::make_integer_sequence<int, j>{});
     }
   };
@@ -1361,7 +1361,7 @@ __device__ __forceinline__ void loadChunks(const scalar_t* data, index_t sliceSi
   if constexpr (Rem > 0) {
     constexpr int V = Rem >= MaxV ? MaxV : (Rem >= 4 ? 4 : (Rem >= 2 ? 2 : 1));
     const index_t i0 = static_cast<index_t>(Off) * bd + static_cast<index_t>(tid) * V;
-    const int held = min(max(static_cast<int>(sliceSize) - static_cast<int>(i0), 0), V);
+    const int held = ::min(::max(static_cast<int>(sliceSize) - static_cast<int>(i0), 0), V);
     nValid += static_cast<uint32_t>(held);
     const index_t base = i0 < sliceSize - V ? i0 : sliceSize - V;
     if constexpr (V == 1) {
@@ -1487,7 +1487,7 @@ __device__ __forceinline__ void radixSelectRegs(
       uint32_t best = 0;
 #pragma unroll
       for (int e = 0; e < E; ++e) {
-        best = max(best, (static_cast<uint32_t>(keys[e]) & keyMask) ^ flipKey);
+        best = ::max(best, (static_cast<uint32_t>(keys[e]) & keyMask) ^ flipKey);
       }
       index_t* waveBest = smem + MAX_WARPS * RADIX_SIZE;
       best = waveMax(best);
@@ -1523,7 +1523,7 @@ __device__ __forceinline__ void radixSelectRegs(
 #pragma unroll
       for (int e = 0; e < E; ++e) {
         t[e] = (static_cast<uint32_t>(keys[e]) & keyMask) ^ flipKey;
-        best = max(best, t[e]);
+        best = ::max(best, t[e]);
       }
       const uint32_t rowsPerWave = C10_WARP_SIZE / 16;
       const uint32_t rm = rowMax16(best);

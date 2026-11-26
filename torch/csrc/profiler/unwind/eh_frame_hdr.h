@@ -36,7 +36,6 @@ struct EHFrameHdr {
         case DW_EH_PE_uleb128:
         case DW_EH_PE_sleb128:
           throw UnwindError("uleb/sleb table encoding not supported");
-          break;
         default:
           throw UnwindError("unknown table encoding");
       }

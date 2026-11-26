@@ -69,6 +69,7 @@ __all__ = [
     "MemPool",
     "LocalizedAllocator",
     "use_mem_pool",
+    "HostMemPool",
 ]
 
 
@@ -91,12 +92,25 @@ if not hasattr(torch._C, "_MemPool"):
     )
     torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
 
+if not hasattr(torch._C, "_HostMemPool"):
+    # Define dummy base classes
+    torch._C.__dict__["_HostMemPool"] = _dummy_type("_HostMemPool")
+    torch._C.__dict__["_host_beginAllocateCurrentThreadToPool"] = _dummy_type(
+        "_host_beginAllocateCurrentThreadToPool"
+    )
+    torch._C.__dict__["_host_endAllocateCurrentThreadToPool"] = _dummy_type(
+        "_host_endAllocateCurrentThreadToPool"
+    )
+
 from torch._C import (  # noqa: F401
     _cuda_beginAllocateCurrentThreadToPool,
     _cuda_beginAllocateToPool,
     _cuda_CUDAAllocator,
     _cuda_endAllocateToPool,
     _cuda_releasePool,
+    _host_beginAllocateCurrentThreadToPool,
+    _host_endAllocateCurrentThreadToPool,
+    _HostMemPool,
     _MemPool,
 )
 
@@ -1401,23 +1415,6 @@ def get_allocator_backend() -> str:
     return torch._C._cuda_getAllocatorBackend()
 
 
-_ALLOC_FN = ctypes.CFUNCTYPE(
-    ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
-)
-_FREE_FN = ctypes.CFUNCTYPE(
-    None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
-)
-
-
-def _as_ptr_int(ptr: Any) -> int:
-    if ptr is None:
-        return 0
-    value = getattr(ptr, "value", ptr)
-    if value is None:
-        return 0
-    return int(value)
-
-
 def _make_locality_allocation_prop(
     driver: Any, device_id: int, locality_domain_id: int
 ) -> Any:
@@ -1439,12 +1436,11 @@ def _make_device_access_desc(driver: Any, device_id: int) -> Any:
     return desc
 
 
-class _LocalizedAllocatorOwner:
-    """Python callbacks require serialized allocator activity across all threads.
+class _LocalizedSegmentAllocator:
+    """Allocates and frees the localized segments a ``LocalizedAllocator`` pool requests.
 
-    The native allocator can hold its mutex while acquiring the GIL for these
-    callbacks. Another thread holding the GIL in an allocator-state query can
-    therefore deadlock; a Python lock here cannot fix that lock inversion.
+    This object and its native allocator reference each other, so both live for the
+    process. It must not reference a ``LocalizedAllocator``, which would then too.
     """
 
     def __init__(self, locality_domain_id: int, device_id: int) -> None:
@@ -1468,27 +1464,21 @@ class _LocalizedAllocatorOwner:
         self._make_allocation_prop = _make_locality_allocation_prop
         self._make_access_desc = _make_device_access_desc
         self._log_error = logging.getLogger(__name__).error
-        self._alloc_cb = _ALLOC_FN(self._alloc_callback)
-        self._free_cb = _FREE_FN(self._free_callback)
-        alloc_ptr = ctypes.cast(self._alloc_cb, ctypes.c_void_p).value
-        free_ptr = ctypes.cast(self._free_cb, ctypes.c_void_p).value
-        if alloc_ptr is None or free_ptr is None:
-            raise RuntimeError("Failed to create localized allocator callbacks")
-        self.alloc_ptr = alloc_ptr
-        self.free_ptr = free_ptr
         self._context = self._check_result(
             # pyrefly: ignore [missing-attribute]
             self._driver.cuDevicePrimaryCtxRetain(device_id)
         )
+        # Pools share this native allocator and never drop its last reference: the
+        # caching allocator destroys pools under its mutex, and destroying the
+        # callbacks takes the GIL, which a thread waiting for the mutex can hold.
+        self.cuda_allocator = torch._C._cuda_createPythonAllocator(
+            self._alloc_callback, self._free_callback
+        )
 
     def _alloc_callback(self, size: int, device: int, stream: int | None) -> int:
-        try:
-            if self._is_finalizing():
-                return 0
-            return self.allocate(size, device, stream)
-        except BaseException as error:
-            self._report_errors([("allocation", error)])
+        if self._is_finalizing():
             return 0
+        return self.allocate(size, device, stream)
 
     def _free_callback(
         self, ptr: int | None, size: int, device: int, stream: int | None
@@ -1527,9 +1517,6 @@ class _LocalizedAllocatorOwner:
             errors.append((operation.__name__, error))
             return False
 
-    def cuda_allocator(self) -> _cuda_CUDAAllocator:
-        return torch._C._cuda_customAllocator(self.alloc_ptr, self.free_ptr)
-
     def allocate(self, size: int, device_id: int, stream: int | None) -> int:
         if size == 0:
             return 0
@@ -1556,7 +1543,14 @@ class _LocalizedAllocatorOwner:
         mapped = False
         try:
             # pyrefly: ignore [missing-attribute]
-            handle = check(drv.cuMemCreate(padded_size, prop, 0))
+            err, created = drv.cuMemCreate(padded_size, prop, 0)
+            # As in the caching allocator, only out-of-memory is a failed allocation
+            # (it frees cached blocks and retries); other CUDA errors raise.
+            # pyrefly: ignore [missing-attribute]
+            if err == drv.CUresult.CUDA_ERROR_OUT_OF_MEMORY:
+                return 0
+            check((err,))
+            handle = created
             ptr = int(
                 check(
                     # pyrefly: ignore [missing-attribute]
@@ -1692,6 +1686,10 @@ class MemPool(_MemPool):
     r"""MemPool represents a pool of memory in a caching allocator. Currently,
     it's just the ID of the pool object maintained in the CUDACachingAllocator.
 
+    The pool belongs to the device that is current when the pool is created. A
+    pool with an :attr:`allocator` can route allocations only on that device,
+    given by :attr:`allocator_device`.
+
     Args:
         allocator(torch._C._cuda_CUDAAllocator, optional): a
             torch._C._cuda_CUDAAllocator object that can be used to
@@ -1754,6 +1752,12 @@ class MemPool(_MemPool):
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
 
+    @property
+    def allocator_device(self) -> int | None:
+        r"""Returns the device of the custom allocator of this pool, or ``None``
+        if the pool has no custom allocator."""
+        return super().allocator_device
+
     def use_count(self) -> int:  # pylint: disable=useless-parent-delegation
         r"""Returns the reference count of this pool."""
         return super().use_count()
@@ -1778,9 +1782,8 @@ class MemPool(_MemPool):
         return snapshot
 
 
-# Native pools retain only callback addresses, not the Python callback owners.
-# Reuse one owner per device/domain; a native reference also pins it through shutdown.
-_LOCALITY_ALLOCATORS: dict[tuple[int, int], _LocalizedAllocatorOwner] = {}
+# Reuse one segment allocator per device/domain.
+_LOCALITY_ALLOCATORS: dict[tuple[int, int], _LocalizedSegmentAllocator] = {}
 
 
 class LocalizedAllocator(_CUDAAllocator):
@@ -1796,13 +1799,6 @@ class LocalizedAllocator(_CUDAAllocator):
         device (torch.device or int, optional): Owning CUDA device.
             Defaults to the current device.
 
-    .. warning::
-        Concurrent allocator activity is unsupported. Allocation, freeing, and
-        allocator-state queries (including ``MemPool.use_count()``) from other
-        threads must not overlap use of this allocator. Native allocator
-        callbacks acquire the GIL while holding the allocator mutex, which can
-        deadlock with a thread holding the GIL while waiting for that mutex.
-
     .. note::
         Use this allocator only on its owning device; access from other devices
         is not supported. Callback owners are retained for the process lifetime,
@@ -1810,6 +1806,8 @@ class LocalizedAllocator(_CUDAAllocator):
         One owner and primary-context reference per device/domain are deliberately
         retained, including during interpreter shutdown.
         Releasing physical memory waits for its allocation stream.
+        Running out of device memory fails the allocation, so the caching
+        allocator can free cached memory and retry; other CUDA errors raise.
         Freeing is best-effort: failures are logged, not raised. Memory that
         cannot safely be unmapped is left for the driver to reclaim at exit.
     """
@@ -1824,16 +1822,11 @@ class LocalizedAllocator(_CUDAAllocator):
         device_id = _get_device_index(device, optional=True)
         key = (device_id, locality_domain_id)
         if key not in _LOCALITY_ALLOCATORS:
-            owner = _LocalizedAllocatorOwner(locality_domain_id, device_id)
-            # Deliberately retain one owner/context per device/domain until process exit.
-            # A Python cache alone can be cleared before the last native pool teardown.
-            incref = ctypes.pythonapi.Py_IncRef
-            incref.argtypes = [ctypes.py_object]
-            incref.restype = None
-            incref(owner)
-            _LOCALITY_ALLOCATORS[key] = owner
+            _LOCALITY_ALLOCATORS[key] = _LocalizedSegmentAllocator(
+                locality_domain_id, device_id
+            )
         self._localized_allocator = _LOCALITY_ALLOCATORS[key]
-        super().__init__(self._localized_allocator.cuda_allocator())
+        super().__init__(self._localized_allocator.cuda_allocator)
 
     @property
     def locality_domain_id(self) -> int:
@@ -1846,16 +1839,67 @@ class LocalizedAllocator(_CUDAAllocator):
         return self._localized_allocator.device_id
 
 
-@contextlib.contextmanager
-def use_mem_pool(pool: MemPool, device: "Device" = None):
+class HostMemPool(_HostMemPool):
+    r"""HostMemPool represents a pool of pinned (page-locked) host memory in the
+    CUDA host caching allocator, with no device memory.
+
+    Pinned allocations of a thread inside ``use_mem_pool(host_pool)`` come from
+    this pool, and blocks freed by any thread return to it. The pool keeps its
+    cached blocks apart from other pools; it does not choose where memory is
+    placed. A typical use is one pool per NUMA node, entered by the loader
+    threads bound to that node; see :ref:`cuda-pinned-host-memory-pools`.
+
+    Creating a pool allocates no memory. A HostMemPool cannot be a CUDA graph's
+    ``pool``, but a graph keeps the pool until it is reset if the pool's
+    context is entered while the current stream is capturing into the graph.
+    Deleting the pool frees its cached blocks, or, if a graph keeps the pool,
+    the reset of the last such graph does; what remains is freed by a later
+    :func:`torch.accelerator.empty_host_cache`.
+    """
+
+    @property
+    def id(self) -> tuple[int, int]:
+        r"""Returns the ID of this pool as a tuple of two ints."""
+        return super().id
+
+    def use_count(self) -> int:  # pylint: disable=useless-parent-delegation
+        r"""Returns the reference count of this pool: 1 for the pool object, plus
+        one for each open ``use_mem_pool`` context and each graph that keeps it."""
+        return super().use_count()
+
+
+class _PinnedRoutes(threading.local):
+    def __init__(self) -> None:
+        # The open use_mem_pool contexts that route pinned memory on this
+        # thread, innermost last.
+        self.stack: list[use_mem_pool] = []
+
+
+_pinned_routes = _PinnedRoutes()
+
+
+def _check_mem_pool_device(pool: _MemPool, device: int) -> None:
+    allocator_device = pool.allocator_device
+    if allocator_device is not None and allocator_device != device:
+        raise RuntimeError(
+            f"This memory pool has a custom allocator on device {allocator_device} and "
+            f"cannot route allocations on device {device}. Create the pool while "
+            f"device {device} is the current device."
+        )
+
+
+class use_mem_pool(contextlib.ContextDecorator):
     r"""A context manager that routes allocations to a given pool.
 
     Args:
-        pool(torch.cuda.MemPool): a MemPool object to be made active so that
-            allocations route to this pool.
+        pool (torch.cuda.MemPool or torch.cuda.HostMemPool): the pool that the
+            current thread's allocations route to. A :class:`MemPool` takes
+            device allocations; a :class:`HostMemPool` takes pinned host
+            allocations, such as ``torch.empty(n, pin_memory=True)``.
         device (torch.device or int, optional): selected device. Uses MemPool on
             the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
+            if :attr:`device` is ``None`` (default). Must be ``None`` for a
+            HostMemPool.
 
     .. note::
         This context manager makes only current thread's allocations route to
@@ -1865,38 +1909,71 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
 
     .. note::
         When used during :class:`~torch.cuda.CUDAGraph` capture, the graph
-        retains the pool until the graph is reset or destroyed.
+        retains the pool until the graph is reset or destroyed. The newest of
+        the capture and the context wins: allocations on the capturing stream
+        go to the pool when the context is entered inside the capture, and to
+        the graph's pool when the capture is begun inside the context.
+
+    .. note::
+        Contexts that route pinned memory must be exited in reverse order, on
+        the thread that entered them; otherwise exiting raises an error and
+        changes nothing.
     """
-    device_index = (
-        torch.cuda.current_device() if device is None else _get_device_index(device)
-    )
-    _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id)
-    try:
+
+    def __init__(self, pool: "MemPool | HostMemPool", device: "Device" = None) -> None:
+        if isinstance(pool, HostMemPool) and device is not None:
+            raise ValueError("device does not apply to a HostMemPool")
+        self._args = (pool, device)
+        self._pool = pool
+        # The device of each open entry, for a MemPool: the same context can be
+        # re-entered on another device.
+        self._device_indices: list[int] = []
+
+    def _recreate_cm(self) -> "use_mem_pool":
+        return type(self)(*self._args)
+
+    def __enter__(self) -> None:
+        if isinstance(self._pool, HostMemPool):
+            _host_beginAllocateCurrentThreadToPool(self._pool.id)
+            _pinned_routes.stack.append(self)
+        else:
+            # The current device on entry, not at construction, as it was when
+            # use_mem_pool was a generator.
+            device = self._args[1]
+            if device is None:
+                device = torch.cuda.current_device()
+            device_index = _get_device_index(device)
+            _check_mem_pool_device(self._pool, device_index)
+            _cuda_beginAllocateCurrentThreadToPool(device_index, self._pool.id)
+            self._device_indices.append(device_index)
         if torch.cuda.is_current_stream_capturing():
-            graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
-            graph._retain_pool(pool)
-        yield
-    finally:
-        _cuda_endAllocateToPool(device_index, pool.id)
-        _cuda_releasePool(device_index, pool.id)
+            try:
+                graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+                graph._retain_pool(self._pool)
+            except BaseException:
+                self.__exit__()
+                raise
+
+    def __exit__(self, *args: object) -> None:
+        if isinstance(self._pool, HostMemPool):
+            # The native end checks the pool id only, so it cannot tell this
+            # context from another one of the same pool on this thread.
+            stack = _pinned_routes.stack
+            if not stack or stack[-1] is not self:
+                raise RuntimeError(
+                    "use_mem_pool contexts that route pinned memory must be exited "
+                    "in reverse order of entry, on the thread that entered them"
+                )
+            _host_endAllocateCurrentThreadToPool(self._pool.id)
+            stack.pop()
+        else:
+            device_index = self._device_indices.pop()
+            _cuda_endAllocateToPool(device_index, self._pool.id)
+            _cuda_releasePool(device_index, self._pool.id)
 
 
-# Process-lifetime singleton: the UVM pluggable allocator + the ctypes closures
-# behind it, lazily built (lock-guarded) by _make_uvm_allocator and reused.
-_UVM_ALLOCATOR = None
-_UVM_ALLOCATOR_LOCK = threading.Lock()
-
-
-def _make_uvm_allocator():
-    r"""Build the UVM ``CUDAPluggableAllocator`` and the ctypes closures behind it.
-
-    Returns ``(c_alloc, c_free, allocator)``. UVM alloc/free are stateless (device
-    is passed per call), so one allocator serves all calls and devices. Raises
-    ``ImportError`` if ``cuda-python`` is unavailable.
-    """
-    import logging
-    import traceback
-
+def _make_uvm_pool():
+    r"""Build a Python-callback MemPool backed by CUDA managed memory."""
     try:
         from cuda.bindings import runtime as _rt  # pyrefly: ignore[missing-import]
     except ImportError:
@@ -1905,20 +1982,6 @@ def _make_uvm_allocator():
             "(cuda.bindings.runtime) for cudaMallocManaged, cudaMemAdvise, "
             "and cudaFree."
         ) from None
-
-    log = logging.getLogger(__name__)
-
-    _ALLOC_FN = ctypes.CFUNCTYPE(
-        ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
-    )
-    _FREE_FN = ctypes.CFUNCTYPE(
-        None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
-    )
-
-    def _check(result, msg: str = ""):
-        err = result if not isinstance(result, tuple) else result[0]
-        if err != _rt.cudaError_t.cudaSuccess:
-            raise RuntimeError(f"CUDA error: {err}. {msg}")
 
     _advise_uses_struct = hasattr(_rt, "cudaMemLocation")
 
@@ -1961,65 +2024,53 @@ def _make_uvm_allocator():
         _uvm_advise_supported_cache[cache_key] = supported
         return supported
 
-    def _uvm_alloc(size, device, stream, _runtime=_rt):
-        try:
-            err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
-            _check(err, f"cudaMallocManaged({size})")
-            ptr = int(ptr)
-            if device >= 0 and _device_supports_uvm_advise(device, _runtime):
-                _check(
-                    _mem_advise(
-                        ptr,
-                        size,
-                        _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
-                        device,
-                    ),
-                    "cudaMemAdvise(SetPreferredLocation)",
+    def _uvm_alloc(size, device, _stream, _runtime=_rt):
+        with torch.cuda.device(device):
+            result = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
+            if result[0] == _runtime.cudaError_t.cudaErrorMemoryAllocation:
+                return 0
+            ptr = int(
+                _check_cuda_bindings(
+                    result, msg=f"CUDA error in cudaMallocManaged({size})"
                 )
-                _check(
-                    _mem_advise(
-                        ptr,
-                        size,
-                        _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
-                        device,
-                    ),
-                    "cudaMemAdvise(SetAccessedBy)",
-                )
-            return ptr
-        except Exception:
-            log.error(
-                "[_use_uvm] FAILED to allocate %d bytes (%.2f GiB) via UVM."
-                " CUDACachingAllocator will raise an OOM error as a result."
-                " You can ignore free-memory numbers reported by PyTorch"
-                " as they are irrelevant for UVM.\nException:\n%s",
-                size,
-                size / (1024**3),
-                traceback.format_exc(),
             )
-            return 0
-
-    def _uvm_free(ptr, size, device, stream, _runtime=_rt):
-        """Best-effort free; guards against interpreter shutdown."""
-        try:
-            if ptr:
-                _check(_runtime.cudaFree(ptr))
-        except Exception:
-            if log is not None and traceback is not None:
-                try:
-                    log.error(
-                        "[_use_uvm] exception in free:\n%s",
-                        traceback.format_exc(),
+            try:
+                if _device_supports_uvm_advise(device, _runtime):
+                    _check_cuda_bindings(
+                        _mem_advise(
+                            ptr,
+                            size,
+                            _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
+                            device,
+                        ),
+                        msg="CUDA error in cudaMemAdvise(SetPreferredLocation)",
                     )
-                except Exception:
-                    pass
+                    _check_cuda_bindings(
+                        _mem_advise(
+                            ptr,
+                            size,
+                            _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
+                            device,
+                        ),
+                        msg="CUDA error in cudaMemAdvise(SetAccessedBy)",
+                    )
+            except Exception:
+                _check_cuda_bindings(
+                    _runtime.cudaFree(ptr),
+                    msg="CUDA error in cudaFree while cleaning up after cudaMemAdvise failure",
+                )
+                raise
+            return ptr
 
-    c_alloc = _ALLOC_FN(_uvm_alloc)
-    c_free = _FREE_FN(_uvm_free)
-    alloc_ptr = ctypes.cast(c_alloc, ctypes.c_void_p).value
-    free_ptr = ctypes.cast(c_free, ctypes.c_void_p).value
-    # pyrefly: ignore[bad-argument-type]
-    allocator = torch._C._cuda_customAllocator(alloc_ptr, free_ptr)
-    return c_alloc, c_free, allocator
+    def _uvm_free(ptr, size, device, _stream, _runtime=_rt):
+        if ptr:
+            with torch.cuda.device(device):
+                _check_cuda_bindings(
+                    _runtime.cudaFree(ptr),
+                    msg="CUDA error in cudaFree while releasing a UVM allocation",
+                )
+
+    return MemPool.from_py_allocator(_uvm_alloc, _uvm_free)
 
 
 @contextlib.contextmanager
@@ -2053,16 +2104,7 @@ def _use_uvm(device: "Device" = None):
     .. note::
         Requires the ``cuda-python`` package (``cuda.bindings``).
     """
-    # A tensor's block can stay cached in the PrivatePool after _use_uvm() returns
-    # and be freed later by a global empty_cache(); per-call ctypes closures would
-    # be GC'd by then, dangling the free callback. Build once and reuse instead.
-    global _UVM_ALLOCATOR
-    if _UVM_ALLOCATOR is None:
-        with _UVM_ALLOCATOR_LOCK:
-            if _UVM_ALLOCATOR is None:
-                _UVM_ALLOCATOR = _make_uvm_allocator()
-    allocator = _UVM_ALLOCATOR[2]
-
-    pool = MemPool(allocator=allocator)
+    with torch.cuda.device(device):
+        pool = _make_uvm_pool()
     with use_mem_pool(pool, device=device):
         yield pool
