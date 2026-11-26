@@ -23,7 +23,8 @@ cuda_bn_statistics_template = TritonTemplate(
 
 def cuda_bn_statistics(x):
     device = x.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError(f"Expected non-None values, got {device=}")
     x.realize()
     if V.graph.is_negative_buffer(x.get_name()):
         x = L.clone(x)
@@ -64,13 +65,14 @@ cuda_bn_channels_last_template = TritonTemplate(
 
 def cuda_bn_channels_last_statistics(x, value):
     device = x.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError(f"Expected non-None values, got {device=}")
     x = L.constrain_to_fake_tensor(x, value)
     x.realize()
     size = [V.graph.sizevars.guard_int(s) for s in x.get_size()]
     c = size[1]
     n = math.prod(size) // c
-    pow2 = lambda value: 1 << max(0, value.bit_length() - 1)
+    pow2 = lambda value: 1 << max(0, value.bit_length() - 1)  # noqa: E731
     bw = min(pow2(c), 32)
     bh = min(pow2((n + 15) // 16), 512 // bw)
     if bw * bh != 512:
@@ -161,9 +163,13 @@ def cuda_bn_backward_fused(
     n, c, spatial = size[0], size[1], math.prod(size[2:])
     dtype = torch.float64 if x.get_dtype() == torch.float64 else torch.float32
     device = x.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError(f"Expected non-None values, got {device=}")
     if training:
-        assert save_mean is not None and save_invstd is not None
+        if save_mean is None or save_invstd is None:
+            raise AssertionError(
+                f"Expected non-None values, got {save_mean=}, {save_invstd=}"
+            )
         mean, invstd = save_mean, save_invstd
     else:
         mean = L.to_dtype(running_mean, dtype)
@@ -185,7 +191,7 @@ def cuda_bn_backward_fused(
     mean = ir.ExternKernel.require_contiguous(mean)
     if channels_last:
         count = n * spatial
-        pow2 = lambda value: 1 << max(0, value.bit_length() - 1)
+        pow2 = lambda value: 1 << max(0, value.bit_length() - 1)  # noqa: E731
         bw = min(pow2(c), 32)
         bh = min(pow2((count + 15) // 16), 512 // bw)
         if bw * bh != 512:

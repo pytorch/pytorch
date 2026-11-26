@@ -37,9 +37,11 @@ def cudnn_bn_statistics(input, running_mean, running_var, momentum, eps):
     from torch._prims_common import suggest_memory_format
 
     device = input.get_device()
-    assert device is not None  # noqa: S101
+    if device is None:
+        raise AssertionError(f"Expected non-None values, got {device=}")
     node = V.graph.current_node.args[0]
-    assert isinstance(node, torch.fx.Node)  # noqa: S101
+    if not isinstance(node, torch.fx.Node):
+        raise AssertionError(f"Expected torch.fx.Node, got {type(node)!r}")
     value = node.meta["val"]
     channels_last = input.get_dtype() != torch.float64 and suggest_memory_format(
         value
@@ -155,9 +157,11 @@ def cudnn_bn_backward(grad, input, weight, save_mean, save_invstd):
     )
 
     device = input.get_device()
-    assert device is not None  # noqa: S101
+    if device is None:
+        raise AssertionError(f"Expected non-None values, got {device=}")
     node = V.graph.current_node.args[1]
-    assert isinstance(node, torch.fx.Node)  # noqa: S101
+    if not isinstance(node, torch.fx.Node):
+        raise AssertionError(f"Expected torch.fx.Node, got {type(node)!r}")
     value = node.meta["val"]
     memory_format = suggest_memory_format(value)
     channels_last = input.get_dtype() != torch.float64 and memory_format in (
