@@ -100,8 +100,6 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
-    _cuda_mul_mutation_storage_nodes,
-    _cuda_native_mutation_destination,
     _cuda_replay_view_path,
     _cuda_view_copy_destination,
     constrain_to_fake_tensors,
@@ -453,11 +451,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.inputs_to_check = inputs_to_check
         self._defers_input_alignment = False
         self.input_alignment_to_preserve = OrderedSet[str]()
-        self.cuda_mul_mutation_storage_nodes = (
-            _cuda_mul_mutation_storage_nodes(gm.graph)
-            if config.strict_pointwise
-            else OrderedSet()
-        )
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -2224,32 +2217,9 @@ class GraphLowering(torch.fx.Interpreter):
                 debug("fallback_handler")
                 target = n.target
                 fallback_args, fallback_kwargs = self.fetch_args_kwargs_from_env(n)
-                native_destination = None
-                if n in self.cuda_mul_mutation_storage_nodes:
-                    native_destination = _cuda_native_mutation_destination(n)
-                    if native_destination is not None:
-                        from torch.fx.experimental.proxy_tensor import (
-                            _is_original_aten_mutation,
-                        )
-
-                        if _is_original_aten_mutation(n, allow_destination_cast=False):
-                            target = n.meta["original_aten"]
-                        destination, metadata = native_destination
-                        destination.realize()
-                        self.preserve_input_alignment((destination.get_name(),))
-                        n.meta["val"] = metadata
-                        if torch.Tag.out in target.tags:
-                            from torch._library._out_variant import get_out_arg_names
-
-                            fallback_kwargs = {
-                                **fallback_kwargs,
-                                get_out_arg_names(target)[0]: destination,
-                            }
                 result = fallback_handler(target, add_to_fallback_set=False)(
                     *fallback_args, **fallback_kwargs
                 )
-                if native_destination is not None and target == n.target:
-                    result = copy_(native_destination[0], result)
             elif (
                 n.op == "call_function"
                 and isinstance(

@@ -573,28 +573,6 @@ def _register_lowering(
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
 
-        if (
-            isinstance(out, TensorBox)
-            and is_strict_cuda_triton(out.get_device())
-            and V.graph.current_node.target in aten_fn
-            and V.graph.current_node in V.graph.cuda_mul_mutation_storage_nodes
-        ):
-            # Native mutations must retain their storage for saved activations too.
-            native_destination = _cuda_native_mutation_destination(V.graph.current_node)
-            if native_destination is not None:
-                destination, metadata = native_destination
-                if (
-                    isinstance(out.data, ir.StorageBox)
-                    and isinstance(out.data.data, ir.Buffer)
-                    and isinstance(out.data.data.get_layout(), ir.FixedLayout)
-                ):
-                    # External conversions already own a fixed allocation.
-                    out = copy_(destination, out)
-                else:
-                    out = mutate_to(destination, out, unsafe_alias=True)
-                V.graph.preserve_input_alignment((out.get_name(),))
-                V.graph.current_node.meta["val"] = metadata
-
         return out
 
     aten_fn = get_overloads(aten_fn)
@@ -9573,73 +9551,6 @@ def _cuda_replay_view_path(value, view_path):
         )
         value = lowerings[view_op](value, *args, **kwargs)
     return value
-
-
-def _cuda_mul_mutation_storage_nodes(graph):
-    from torch.fx.experimental.proxy_tensor import _original_aten_view_mutation_base
-
-    from .fx_utils import get_node_storage, get_storage
-
-    nodes = list(graph.nodes)
-    reaches_mul = OrderedSet()
-    for current in reversed(nodes):
-        for user in current.users:
-            if (
-                user.target == aten.mul.Tensor
-                and user.meta.get("original_aten", user.target)
-                in (aten.mul.Tensor, aten.mul_.Tensor)
-                and all(
-                    isinstance(arg, torch.fx.Node)
-                    and isinstance(value := arg.meta.get("val"), torch.Tensor)
-                    and value.dtype == torch.float64
-                    and (
-                        value.device.type == "cuda"
-                        or (value.device.type == "cpu" and value.ndim == 0)
-                    )
-                    for arg in user.args[:2]
-                )
-            ):
-                reaches_mul.add(current)
-                break
-            if user not in reaches_mul or not user.args:
-                continue
-            if user.args[0] is not current:
-                if (
-                    len(user.args) > 1
-                    and user.args[1] is current
-                    and _original_aten_view_mutation_base(user) is not None
-                ):
-                    reaches_mul.add(current)
-                    break
-                continue
-            mutation = user.meta.get("original_aten_mutation")
-            current_mutation = current.meta.get("original_aten_mutation")
-            value = (
-                current_mutation[0]
-                if isinstance(current_mutation, tuple)
-                and _cuda_mul_native_mutation(current)
-                else _original_aten_reference_value(current)
-            )
-            native_alias = (
-                isinstance(mutation, tuple)
-                and isinstance(value, torch.Tensor)
-                and isinstance(mutation[0], torch.Tensor)
-                and get_storage(value) == get_storage(mutation[0])
-            )
-            if (_cuda_mul_native_mutation(user) and native_alias) or (
-                get_node_storage(current) is not None
-                and get_node_storage(current) == get_node_storage(user)
-            ):
-                reaches_mul.add(current)
-                break
-    return OrderedSet(
-        node
-        for node in nodes
-        if node in reaches_mul
-        and isinstance(value := node.meta.get("val"), torch.Tensor)
-        and _cuda_mul_native_mutation(node)
-        and is_strict_cuda_triton(value.device)
-    )
 
 
 def _cuda_pointwise_execution(inputs, values, *, native_output=None, with_chunks=False):
