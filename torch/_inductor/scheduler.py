@@ -5813,6 +5813,14 @@ class Scheduler:
         if node1 is node2:
             return False
 
+        if (node1.is_reduction() or node2.is_reduction()) and (
+            (node1.get_buffer_names() | node2.get_buffer_names())
+            & V.graph.no_fuse_with_reduction
+        ):
+            WhyNoFuse(node1, node2)("shared-read cat preserves independent reduction")
+            return False
+
+
         # Prevent fusion across stream boundaries
         if self._has_multi_stream_nodes():
             stream1 = self.node_to_stream.get(node1)
