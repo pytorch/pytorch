@@ -8,6 +8,7 @@ import subprocess
 import sys
 import unittest
 from dataclasses import dataclass
+from unittest.mock import Mock
 
 import torch
 import torch.distributed as dist
@@ -1938,6 +1939,260 @@ class TokenSwitchLifecycleTest(MultiProcContinuousTest):
             self.assertEqual(_work_count(), initial_work_count)
         del routing, switch
         gc.collect()
+
+
+class TestRoutingUpdate(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_update_reuses_handle(self):
+        switch = TokenSwitchNCCL.__new__(TokenSwitchNCCL)
+        handle = Mock()
+        old_ids = torch.zeros(4, 1, dtype=torch.int64)
+        new_ids = torch.ones_like(old_ids)
+        counts = torch.zeros(1, dtype=torch.int32)
+        routing = Routing(handle, old_ids, "expert_major")
+        updated = switch.update_routing(routing, new_ids, counts)
+        handle.update.assert_called_once()
+        self.assertIs(handle.update.call_args.args[0], new_ids)
+        self.assertEqual(handle.update.call_args.args[1], counts)
+        self.assertIsNot(handle.update.call_args.args[1], counts)
+        self.assertIs(updated.handle, handle)
+        self.assertIs(updated.topk_idx, new_ids)
+        self.assertEqual(updated.layout, routing.layout)
+        self.assertIs(routing.topk_idx, old_ids)
+
+
+def _source_rows(rank):
+    return torch.arange(16, device="cuda") + 16 * rank + 1
+
+
+@requires_nccl_ep()
+class TokenSwitchRoutingTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    def _check_received(self, received, sources):
+        # Receive-slot order is layout-specific; compare the received row set.
+        values = received[:, 0].float()
+        values = values[values != 0].sort().values
+        empty = torch.empty(0, dtype=torch.int64, device="cuda")
+        expected = torch.cat([empty, *map(_source_rows, sources)]).float()
+        self.assertEqual(values, expected.sort().values, rtol=0, atol=0)
+
+    @skip_if_lt_x_gpu(2)
+    def test_changing_routes_eager_and_graph(self):
+        torch.cuda.set_device(self.rank)
+        for layout in ("flat", "expert_major"):
+            for dtype in (torch.int32, torch.int64):
+                switch = TokenSwitchNCCL(
+                    dist.distributed_c10d._get_default_group(),
+                    self.world_size,
+                    16,
+                    self.world_size * 16,
+                    128,
+                )
+                self.addCleanup(switch.close)
+                ids = torch.full((16, 1), self.rank, device="cuda", dtype=dtype)
+                counts = torch.zeros(1, device="cuda", dtype=torch.int32)
+                routing = switch.create_routing(ids, counts, layout=layout)
+                with self.assertRaisesRegex(TypeError, "int32 or int64"):
+                    routing.handle.update(ids.float(), counts)
+                with self.assertRaisesRegex(ValueError, "original top-k shape"):
+                    routing.handle.update(ids[:8], counts)
+                with self.assertRaisesRegex(ValueError, "original device"):
+                    routing.handle.update(torch.zeros(16, 1, dtype=dtype), counts)
+                if layout == "expert_major":
+                    with self.assertRaisesRegex(ValueError, "per-expert token counts"):
+                        routing.handle.update(ids)
+                rows = _source_rows(self.rank)[:, None]
+                tokens = rows.expand(16, 64).to(torch.bfloat16)
+                weights = rows.float() / 128
+                capacity = self.world_size * 16
+                outputs = switch._alloc_dispatch_outputs(
+                    routing, tokens, weights, capacity, 64, 1
+                )
+                combined = torch.zeros_like(tokens)
+                token_grads = torch.zeros_like(tokens)
+                weight_grads = torch.zeros_like(weights)
+                expert_grads = torch.zeros_like(outputs[0])
+
+                def step():
+                    updated = switch.update_routing(routing, ids, counts)
+                    for output in outputs:
+                        if output is not None:
+                            output.zero_()
+                    switch.dispatch(updated, tokens, weights, out=outputs)
+                    switch.combine(updated, outputs[0], out=combined)
+                    switch._dispatch_backward(
+                        updated, outputs[0], outputs[1], token_grads, weight_grads
+                    )
+                    expert_grads.zero_()
+                    switch._combine_backward(updated, tokens, expert_grads)
+
+                # Warm every native variant before capture, on a side stream.
+                warmup = torch.cuda.Stream()
+                warmup.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(warmup):
+                    for _ in range(3):
+                        step()
+                torch.cuda.current_stream().wait_stream(warmup)
+                for phase in range(3):
+                    ids.fill_((self.rank + phase + 1) % self.world_size)
+                    step()
+                    self.assertEqual(combined, tokens, rtol=0, atol=0)
+                    self.assertEqual(token_grads, tokens, rtol=0, atol=0)
+                    self.assertEqual(weight_grads, weights, rtol=0, atol=0)
+                    self.assertEqual(expert_grads, outputs[0], rtol=0, atol=0)
+                    source = (self.rank - phase - 1) % self.world_size
+                    self._check_received(outputs[0], [source])
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph):
+                    step()
+                for phase in range(self.world_size + 2):
+                    # Alternate balanced routes with all ranks targeting one rank.
+                    destination = (
+                        phase % self.world_size
+                        if phase % 2
+                        else (self.rank + phase) % self.world_size
+                    )
+                    ids.fill_(destination)
+                    graph.replay()
+                    self.assertEqual(combined, tokens, rtol=0, atol=0)
+                    self.assertEqual(token_grads, tokens, rtol=0, atol=0)
+                    self.assertEqual(weight_grads, weights, rtol=0, atol=0)
+                    self.assertEqual(expert_grads, outputs[0], rtol=0, atol=0)
+                    sources = [
+                        source
+                        for source in range(self.world_size)
+                        if (
+                            phase % self.world_size
+                            if phase % 2
+                            else (source + phase) % self.world_size
+                        )
+                        == self.rank
+                    ]
+                    self._check_received(outputs[0], sources)
+                    # One local expert, so both layouts count every received token.
+                    self.assertEqual(
+                        counts,
+                        torch.full_like(counts, 16 * len(sources)),
+                        rtol=0,
+                        atol=0,
+                    )
+                del graph
+                gc.collect()
+                switch.close()
+                gc.collect()
+
+
+@requires_nccl_ep()
+class TokenSwitchCompileTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    @skip_if_lt_x_gpu(2)
+    def test_fullgraph_changing_route_training_replay(self):
+        torch.cuda.set_device(self.rank)
+        for layout in ("flat", "expert_major"):
+            torch._dynamo.reset()
+            switch = TokenSwitchNCCL(
+                dist.distributed_c10d._get_default_group(),
+                self.world_size,
+                16,
+                self.world_size * 16,
+                128,
+            )
+            self.addCleanup(switch.close)
+            ids = torch.full((16, 1), self.rank, device="cuda", dtype=torch.int32)
+            counts = torch.zeros(1, device="cuda", dtype=torch.int32)
+            routing = switch.create_routing(ids, counts, layout=layout)
+            initial_work_count = torch._C._distributed_c10d._get_work_registry_size()
+            # Row-distinct values; the loss below makes every gradient row
+            # depend on which token was routed into it.
+            rows = _source_rows(self.rank)[:, None]
+            tokens = rows.expand(16, 64).to(torch.bfloat16).requires_grad_()
+            weights = (rows.float() / 128).requires_grad_()
+
+            def forward(tokens, weights, ids):
+                updated = switch.update_routing(routing, ids, counts)
+                received, scores, _ = switch.dispatch(
+                    updated, tokens, weights, self.world_size * 16
+                )
+                return switch.combine(updated, received), scores, received
+
+            compiled = torch.compile(forward, fullgraph=True)
+            tokens.grad = torch.zeros_like(tokens)
+            weights.grad = torch.zeros_like(weights)
+
+            def step():
+                tokens.grad.zero_()
+                weights.grad.zero_()
+                output, scores, received = compiled(tokens, weights, ids)
+                token_scale = tokens.detach().float()
+                score_scale = received.detach()[:, 0].float().view_as(scores)
+                loss = (output.float() * token_scale).sum() + (
+                    scores * score_scale
+                ).sum()
+                loss.backward()
+                return output, received
+
+            warmup = torch.cuda.Stream()
+            warmup.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(warmup):
+                for _ in range(3):
+                    step()
+            torch.cuda.current_stream().wait_stream(warmup)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                output, received = step()
+            for phase in range(self.world_size + 2):
+                destination = (
+                    phase % self.world_size
+                    if phase % 2
+                    else (self.rank + phase) % self.world_size
+                )
+                ids.fill_(destination)
+                graph.replay()
+                self.assertEqual(output, tokens, rtol=0, atol=0)
+                self.assertEqual(tokens.grad, tokens, rtol=0, atol=0)
+                self.assertEqual(weights.grad, rows.float(), rtol=0, atol=0)
+                sources = [
+                    source
+                    for source in range(self.world_size)
+                    if (
+                        phase % self.world_size
+                        if phase % 2
+                        else (source + phase) % self.world_size
+                    )
+                    == self.rank
+                ]
+                values = received[:, 0].float()
+                values = values[values != 0].sort().values
+                empty = torch.empty(0, dtype=torch.int64, device="cuda")
+                expected = torch.cat([empty, *map(_source_rows, sources)]).float()
+                self.assertEqual(values, expected.sort().values, rtol=0, atol=0)
+                # One local expert, so both layouts count every received token.
+                self.assertEqual(
+                    counts,
+                    torch.full_like(counts, 16 * len(sources)),
+                    rtol=0,
+                    atol=0,
+                )
+            self.assertEqual(
+                torch._C._distributed_c10d._get_work_registry_size(),
+                initial_work_count,
+                rtol=0,
+                atol=0,
+            )
+            del graph
+            gc.collect()
+            switch.close()
 
 
 if __name__ == "__main__":
