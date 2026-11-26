@@ -1684,7 +1684,7 @@ def tuned_scaled_mm_v2(
     #   - the blockwise MX/NVFP4 recipes BlockWise1x32/1x16 (also how XPU
     #     expresses MX/NVFP4, with NO_SWIZZLE)
     #   - multi-level scales (two-level NVFP4)
-    #   - any non-fp32 block scale
+    #   - any non-fp32 scale, on either operand
     # Call the eager v2 op directly to preserve its recipes and scale conventions.
     def fallback():
         # contraction_dim is a non-optional int[] in the schema (default []);

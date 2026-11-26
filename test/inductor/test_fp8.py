@@ -12,7 +12,13 @@ from torch._C import FileCheck
 from torch._inductor import config, inductor_prims, ir, utils
 from torch._inductor.fx_passes.misc_patterns import _misc_patterns_init
 from torch._inductor.graph import GraphLowering
-from torch._inductor.kernel.mm import scaled_mm_v2_choice, scaled_mm_v2_constraint
+from torch._inductor.kernel.mm import (
+    blackwell_ws_persistent_tma_mm_template,
+    scaled_mm_device_tma_epilogue_scaling_template,
+    scaled_mm_device_tma_main_loop_scaling_template,
+    scaled_mm_v2_choice,
+    scaled_mm_v2_constraint,
+)
 from torch._inductor.lowering import clone as lowering_clone, register_lowering
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
@@ -1746,12 +1752,14 @@ class TestFP8Lowering(TestCase):
     )
     @onlyCUDA
     @parametrize("api", ("v1", "v2"))
-    def test_blockwise_fp32_scaling_skips_blackwell_epilogue_template(
-        self, api, device
+    @parametrize("recipe", ("blockwise", "rowwise"))
+    def test_blackwell_epilogue_template_only_for_epilogue_scaling(
+        self, api, recipe, device
     ):
         # https://github.com/pytorch/pytorch/issues/193802: the Blackwell mm
         # template only scales in its epilogue, and autotuning used to pick it for
-        # blockwise recipes, silently returning wrong results.
+        # blockwise recipes, silently returning wrong results. It must still be
+        # offered for the recipes it scales correctly.
         from torch._inductor.select_algorithm import (
             add_preprocessing_fn,
             clear_preprocessing_fns,
@@ -1761,14 +1769,27 @@ class TestFP8Lowering(TestCase):
         torch.manual_seed(0)
         x = torch.randn(M, K, device=device)
         w = torch.randn(N, K, device=device)
-        x_fp8, x_scale = _quantize_blockwise(x, torch.float8_e4m3fn, 1, 128)
-        w_fp8, w_scale = _quantize_blockwise(w, torch.float8_e4m3fn, 128, 128)
-        ref = (x_fp8.double() * x_scale.double().repeat_interleave(128, 1)) @ (
-            w_fp8.double()
-            * w_scale.double().repeat_interleave(128, 0).repeat_interleave(128, 1)
-        ).t()
-        x_scale = _prepare_blockwise_scale(x_scale, 1, 128)
-        w_scale = _prepare_blockwise_scale(w_scale, 128, 128)
+        if recipe == "blockwise":
+            x_fp8, x_scale = _quantize_blockwise(x, torch.float8_e4m3fn, 1, 128)
+            w_fp8, w_scale = _quantize_blockwise(w, torch.float8_e4m3fn, 128, 128)
+            ref = (x_fp8.double() * x_scale.double().repeat_interleave(128, 1)) @ (
+                w_fp8.double()
+                * w_scale.double().repeat_interleave(128, 0).repeat_interleave(128, 1)
+            ).t()
+            x_scale = _prepare_blockwise_scale(x_scale, 1, 128)
+            w_scale = _prepare_blockwise_scale(w_scale, 128, 128)
+            recipe_a = ScalingType.BlockWise1x128
+            recipe_b = ScalingType.BlockWise128x128
+            expected_template = scaled_mm_device_tma_main_loop_scaling_template
+        else:
+            x_fp8, x_scale = _quantize_rowwise(x, torch.float8_e4m3fn)
+            w_fp8, w_scale = _quantize_rowwise(w, torch.float8_e4m3fn)
+            ref = (x_fp8.double() * x_scale.double()) @ (
+                w_fp8.double() * w_scale.double()
+            ).t()
+            w_scale = w_scale.t()  # scale_b should be (1, N)
+            recipe_a = recipe_b = ScalingType.RowWise
+            expected_template = scaled_mm_device_tma_epilogue_scaling_template
 
         def fn(x_fp8, w_t_fp8, x_scale, w_scale):
             if api == "v1":
@@ -1779,9 +1800,9 @@ class TestFP8Lowering(TestCase):
                 x_fp8,
                 w_t_fp8,
                 x_scale,
-                ScalingType.BlockWise1x128,
+                recipe_a,
                 w_scale,
-                ScalingType.BlockWise128x128,
+                recipe_b,
                 output_dtype=torch.float32,
             )
 
@@ -1810,8 +1831,12 @@ class TestFP8Lowering(TestCase):
         finally:
             clear_preprocessing_fns(clear_defaults=False)
 
-        self.assertNotIn("triton_blackwell_ws_persistent_tma", templates)
-        self.assertIn("triton_scaled_mm_device_tma_main_loop_scaling", templates)
+        blackwell_template = f"triton_{blackwell_ws_persistent_tma_mm_template.name}"
+        if recipe == "blockwise":
+            self.assertNotIn(blackwell_template, templates)
+        else:
+            self.assertIn(blackwell_template, templates)
+        self.assertIn(f"triton_{expected_template.name}", templates)
         rel = ((actual.double() - ref).abs().sum() / ref.abs().sum()).item()
         self.assertLess(rel, 1e-3, f"relative error {rel} against fp64 reference")
 
@@ -1819,8 +1844,9 @@ class TestFP8Lowering(TestCase):
     @onlyCUDA
     @parametrize("fp32_side", ("a", "b"))
     def test_blockwise_scaling_mixed_scale_dtypes_falls_back(self, fp32_side, device):
-        # The Triton scaled_mm lowering reads both block scales as fp32, so a
-        # single non-fp32 scale must go to the eager op.
+        # Eager rejects blockwise scales unless both are fp32, so Inductor must
+        # fall back to the eager op for any other combination instead of
+        # offering the Triton templates.
         from torch._inductor.exc import InductorError
         from torch._inductor.kernel import mm
 
