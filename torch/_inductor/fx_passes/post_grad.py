@@ -96,6 +96,7 @@ from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
+from .skew_scatter import skew_scatter_pass
 from .slice_scatter_chunking import slice_scatter_chunking_pass
 from .split_cat import POST_GRAD_PATTERNS
 
@@ -453,6 +454,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
+            )
+        if config.skew_scatter_enabled:
+            GraphTransformObserver(gm, "skew_scatter").apply_graph_pass(
+                skew_scatter_pass
             )
         if config.partitioned_scatter_enabled:
             GraphTransformObserver(
