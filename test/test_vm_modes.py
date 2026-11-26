@@ -2788,6 +2788,432 @@ class TestVmKinds(TestCase):
 instantiate_device_type_tests(TestVmKinds, globals())
 
 
+def modes_value_front(x):
+    return (x * 3).relu() + x.sigmoid()
+
+
+def modes_value_branch(x):
+    y = modes_value_front(x)
+    if (y > 10).any():
+        y = y * 2
+    return y.exp().cos().sin().tanh()
+
+
+def modes_value_bool(x):
+    y = modes_value_front(x)
+    flag = bool((y > 10).all())
+    return (y.exp().cos() + 1).tanh(), flag
+
+
+def modes_value_int(x):
+    y = modes_value_front(x)
+    n = int((y > 1).sum())
+    return (y.exp().cos() + 1).tanh(), n
+
+
+def modes_value_float(x):
+    y = modes_value_front(x)
+    s = float(y.sum())
+    return (y.exp().cos() + 1).tanh(), s
+
+
+def modes_value_int_item(x):
+    y = modes_value_front(x)
+    n = (y > 1).sum().item()
+    return (y.exp().cos() + 1).tanh(), n
+
+
+def modes_value_tolist(x):
+    y = modes_value_front(x)
+    values = y.sum(1).tolist()
+    return (y.exp().cos() + 1).tanh(), values
+
+
+def modes_value_equal(x):
+    y = modes_value_front(x)
+    if torch.equal(y.clamp(max=10), y):
+        y = y + 1
+    return y.exp().cos().sin().tanh()
+
+
+def modes_value_assert(x):
+    loss = modes_value_front(x).square().mean()
+    # What `assert torch.isfinite(loss)` does, without the statement.
+    if not torch.isfinite(loss):
+        raise AssertionError("the loss is not finite")
+    return (loss.exp().cos() + 1).tanh()
+
+
+def modes_value_index(x):
+    y = modes_value_front(x)
+    k = (y > 1).sum() % 3
+    row = y[k]
+    return (row.exp().cos() + 1).tanh()
+
+
+def modes_value_store_index(x):
+    y = modes_value_front(x)
+    k = (y > 1).sum() % 3
+    y[k] = 0.0
+    return (y.exp().cos() + 1).tanh()
+
+
+def modes_value_checked(y):
+    if (y > 10).any():
+        y = y * 2
+    return y
+
+
+def modes_value_in_callee(x):
+    y = modes_value_front(x)
+    y = modes_value_checked((y - 1).abs().sqrt())
+    return y.exp().cos().sin().tanh()
+
+
+# The function, and the torch operations in front of its read.
+MODES_VALUE_READS = {
+    "branch": (modes_value_branch, 6),
+    "bool": (modes_value_bool, 6),
+    "int": (modes_value_int, 6),
+    "float": (modes_value_float, 5),
+    "int_item": (modes_value_int_item, 6),
+    "tolist": (modes_value_tolist, 5),
+    "equal": (modes_value_equal, 5),
+    "assert": (modes_value_assert, 10),
+    "in_callee": (modes_value_in_callee, 7),
+    # A tensor with no dimensions as an index: torch reads its value.
+    "index": (modes_value_index, 7),
+    "store_index": (modes_value_store_index, 7),
+}
+
+
+def modes_value_out(x):
+    y = modes_value_front(x)
+    s = y.sum().item()
+    return (y.exp().cos() + 1).tanh(), s
+
+
+def modes_value_operand(x):
+    y = modes_value_front(x)
+    s = y.mean().item()
+    return (y.cos() + s).tanh() * s
+
+
+def modes_value_arithmetic(x):
+    y = modes_value_front(x)
+    s = y.mean().item() * 0.5 + 1
+    return (y.cos() * s).tanh(), s
+
+
+MODES_VALUE_KEPT = {
+    "out": (modes_value_out, 10),
+    "operand": (modes_value_operand, 10),
+    "arithmetic": (modes_value_arithmetic, 11),
+}
+
+
+def modes_value_compared(x):
+    y = modes_value_front(x)
+    s = y.mean().item()
+    if s > 5:
+        y = y * 2
+    return y.exp().cos().sin().tanh(), s
+
+
+def modes_value_loop(x):
+    err = modes_value_front(x).sum()
+    n = 0
+    while err.item() > 1.0:
+        err = (err * 0.5).sin().abs() * 0.9 + err * 0.1
+        n += 1
+    return err, n
+
+
+def modes_value_formatted(x):
+    y = modes_value_front(x)
+    text = f"{y.mean().item():.3f}"
+    return (y.exp().cos() + 1).tanh(), text
+
+
+def modes_value_rounded(x):
+    y = modes_value_front(x)
+    r = round(y.mean().item(), 2)
+    return (y.exp().cos() + 1).tanh(), r
+
+
+def modes_value_mean(y):
+    return y.mean().item()
+
+
+def modes_value_from_callee(x):
+    y = modes_value_front(x)
+    s = modes_value_mean(y)
+    if s > 5:
+        y = y * 2
+    return y.exp().cos().sin().tanh(), s
+
+
+MODES_VALUE_NEEDED = {
+    "compared": (modes_value_compared, 5),
+    "loop": (modes_value_loop, 5),
+    "formatted": (modes_value_formatted, 5),
+    "rounded": (modes_value_rounded, 5),
+    "from_callee": (modes_value_from_callee, 4),
+}
+
+
+def modes_value_step(net, opt, x):
+    opt.zero_grad()
+    loss = ((net(x).relu() * 2).sigmoid() - x).square().mean()
+    loss.backward()
+    opt.step()
+    return loss.item()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmValueReads(TestCase):
+    """A region ends in front of an instruction that hands a tensor's value
+    to Python (``if t.any():``, ``bool(t)``, ``int(t)``, ``float(t)``,
+    ``t.item()``, ``t.tolist()``, ``torch.equal``): the operations in front
+    of it are a region, the read is made by every call, and what is behind
+    it is judged on its own. A float read by ``t.item()`` from a CPU tensor
+    stays a value of the region's graph while the traced run hands it only
+    to what the graph records; a run that needs it in Python ends the region
+    in front of that read from the next call on."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def inputs(self, call, device):
+        # Two ranges, so that what a read gives differs between calls.
+        torch.manual_seed(call)
+        return torch.rand(3, 8, device=device) + 5 * (call % 3 == 1)
+
+    def run_both(self, fn, device, calls=40):
+        compiled = vm(fn, passes=EARLY)
+        for call in range(calls):
+            x = self.inputs(call, device)
+            want, got = fn(x), compiled(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(
+                [type(v) for v in got] if isinstance(got, tuple) else type(got),
+                [type(v) for v in want] if isinstance(want, tuple) else type(want),
+            )
+        return [r for r in vm.regions(compiled) if r["function"] == fn.__qualname__]
+
+    def cut(self, rows, front, needed=False):
+        """The one row of the read, with a region of `front` operations in
+        front of it and no region across it (one may end, and another begin,
+        on the line of the read)."""
+        why = "reads a tensor's value"
+        why += ", which the traced run needed in Python" if needed else ""
+        reads = [r for r in rows if r["state"] == "not movable" and why in r["why"]]
+        self.assertEqual(len({r["lines"] for r in reads}), 1, msg=f"{rows}")
+        self.assertTrue(needed or all(r["why"].endswith(why) for r in reads))
+        if not needed and "tolist" not in reads[0]["function"]:
+            self.assertIn(" ran aten::", reads[0]["why"])
+        line = reads[0]["lines"][0]
+        regions = [r for r in rows if r["state"] == "region"]
+        for r in regions:
+            first, last = r["lines"] or (line, line)
+            self.assertTrue(last <= line or first >= line, msg=f"{r['where']}")
+        ahead = [r for r in regions if r["lines"] and r["lines"][1] <= line]
+        self.assertEqual([r["ops"] for r in ahead], [front], msg=f"{rows}")
+        self.assertGreater(ahead[0]["runs"], 30)
+        whole = [r for r in rows if r["state"] == "refused" and r["kind"] == "block"]
+        self.assertEqual(
+            [r["why"] for r in whole if "value" in r["why"] or "aten" in r["why"]], []
+        )
+
+    @parametrize("case", list(MODES_VALUE_READS))
+    @isolated
+    def test_region_ends_in_front_of_the_read(self, device, case):
+        fn, front = MODES_VALUE_READS[case]
+        rows = self.run_both(fn, device)
+        if case == "store_index" and not any(r["state"] == "not movable" for r in rows):
+            # Torch stores through an index that is on a GPU without
+            # reading it: nothing ends the region.
+            regions = [r["ops"] for r in rows if r["state"] == "region"]
+            return self.assertEqual(regions, [12], msg=f"{rows}")
+        self.cut(rows, front)
+
+    @isolated
+    def test_read_is_made_by_every_call(self, device):
+        # The assertion fails on the call whose data fails it, not before.
+        compiled = vm(modes_value_assert, passes=EARLY)
+        for call in range(20):
+            x = self.inputs(call, device)
+            if call in (9, 15):
+                x[0, 0] = math.inf
+                for fn in (modes_value_assert, compiled):
+                    with self.assertRaises(AssertionError, msg=f"call {call}"):
+                        fn(x)
+            else:
+                self.assertEqual(compiled(x), modes_value_assert(x), atol=0, rtol=0)
+
+    @parametrize("case", list(MODES_VALUE_KEPT))
+    @isolated
+    def test_float_item_handed_to_the_graph_stays_in_the_region(self, device, case):
+        fn, ops = MODES_VALUE_KEPT[case]
+        rows = self.run_both(fn, device)
+        if torch.device(device).type != "cpu":
+            # Read from another device, it is a read as any other.
+            return self.cut(rows, 5)
+        regions = [r for r in rows if r["state"] == "region"]
+        self.assertEqual([r["ops"] for r in regions], [ops], msg=f"{rows}")
+        self.assertGreater(regions[0]["runs"], 30)
+        self.assertEqual([r for r in rows if r["state"] == "not movable"], [])
+
+    @parametrize("case", list(MODES_VALUE_NEEDED))
+    @isolated
+    def test_float_item_the_run_needs_ends_the_region(self, device, case):
+        fn, front = MODES_VALUE_NEEDED[case]
+        rows = self.run_both(fn, device)
+        self.cut(rows, front, needed=torch.device(device).type == "cpu")
+
+    @isolated
+    def test_training_step_that_ends_in_a_read(self, device):
+        torch.manual_seed(0)
+        nets = [torch.nn.Linear(8, 8).to(device)]
+        nets.append(torch.nn.Linear(8, 8).to(device))
+        nets[1].load_state_dict(nets[0].state_dict())
+        opts = [torch.optim.SGD(n.parameters(), lr=0.05, momentum=0.9) for n in nets]
+        compiled = vm(modes_value_step, passes=EARLY)
+        for call in range(40):
+            x = self.inputs(call, device)
+            want = modes_value_step(nets[0], opts[0], x)
+            got = compiled(nets[1], opts[1], x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertIs(type(got), float)
+            for p, q in zip(nets[0].parameters(), nets[1].parameters()):
+                self.assertEqual(q, p, atol=0, rtol=0, msg=f"call {call}")
+        rows = vm.regions(compiled)
+        step = [r for r in rows if r["function"] == "modes_value_step"]
+        forward = [r for r in step if r["state"] == "region"]
+        self.assertEqual([r["ops"] for r in forward], [8], msg=f"{step}")
+        self.assertGreater(forward[0]["runs"], 30)
+
+
+instantiate_device_type_tests(TestVmValueReads, globals())
+
+
+class ModesRowsBox:
+    k = 0
+    items = None
+
+
+MODES_ROWS_BOX = ModesRowsBox()
+MODES_ROWS_BOX.items = []
+
+
+def modes_rows_body(x):
+    return ((x.sin() * 2).cos() + 1).tanh()
+
+
+def modes_rows_tail(y):
+    return (y * 3).relu() + y.sigmoid()
+
+
+def modes_rows_literal(x):
+    y = modes_rows_body(x)
+    n = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], device=x.device)
+    return modes_rows_tail(y) * n
+
+
+def modes_rows_store(x):
+    y = modes_rows_body(x)
+    MODES_ROWS_BOX.k = y.shape[-1]
+    return modes_rows_tail(y)
+
+
+def modes_rows_iadd(x):
+    y = modes_rows_body(x)
+    items = MODES_ROWS_BOX.items
+    items += [1]
+    return modes_rows_tail(y)
+
+
+def modes_rows_says(x):
+    print(end="")
+    return (x.sin() * 2).cos()
+
+
+def modes_rows_twice(x):
+    return modes_rows_says(x).tanh() + modes_rows_says(x * 2).exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmReportRows(TestCase):
+    """What ``torch.vm.regions`` says of where a region ends is true of the
+    plan that runs: an instruction that is inside a region has no row, an
+    instruction that ends one has one row with its line and the reason, and
+    a block that is refused for a store names the store."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def rows(self, fn, device, calls=12, of=None):
+        """The rows of `of` (`fn` itself if None) after `calls` calls."""
+        compiled = vm(fn, passes=vm.configure(EARLY, pure_calls=3))
+        for call in range(calls):
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            self.assertEqual(compiled(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        rows = vm.regions(compiled)
+        ends = [r for r in rows if r["state"] == "not movable"]
+        said = [(r["where"], r["why"]) for r in ends]
+        self.assertEqual(len(said), len(set(said)), msg="a row said twice")
+        return [r for r in rows if r["function"] == (of or fn).__qualname__]
+
+    @isolated
+    def test_call_inside_a_region_has_no_row(self, device):
+        # torch.tensor(...) detaches what it makes: the verdict on the call
+        # alone refuses it, the rule for torch's own functions takes it.
+        rows = self.rows(modes_rows_literal, device)
+        self.assertEqual([r["ops"] for r in rows if r["state"] == "region"], [11])
+        self.assertEqual([r for r in rows if r["state"] == "not movable"], [])
+
+    @isolated
+    def test_store_that_refuses_a_block_is_named(self, device):
+        rows = self.rows(modes_rows_store, device)
+        (row,) = (r for r in rows if r["state"] == "refused")
+        line = modes_rows_store.__code__.co_firstlineno + 2
+        self.assertIn(f"(line {line}: ", row["why"])
+        self.assertIn("StoreAttr", row["why"])
+        self.assertEqual(MODES_ROWS_BOX.k, 8)
+
+    @isolated
+    def test_in_place_operator_that_ends_a_region_has_a_row(self, device):
+        rows = self.rows(modes_rows_iadd, device)
+        line = modes_rows_iadd.__code__.co_firstlineno + 3
+        (row,) = (r for r in rows if r["state"] == "not movable")
+        self.assertEqual(row["lines"], (line, line))
+        self.assertIn("changes its left operand in place", row["why"])
+        regions = [r["lines"] for r in rows if r["state"] == "region"]
+        self.assertEqual(regions, [(line - 3, line), (line + 1, line + 1)])
+        # Eager's calls and the VM's: one item each.
+        self.assertEqual(MODES_ROWS_BOX.items, [1] * 24)
+
+    @isolated
+    def test_row_is_of_the_plan_that_runs(self, device):
+        # The callee is judged in several rounds, and each call site of it
+        # has a plan of its own: one row per instruction that ends a region.
+        rows = self.rows(modes_rows_twice, device)
+        line = modes_rows_twice.__code__.co_firstlineno + 1
+        ends = [r for r in rows if r["state"] == "not movable"]
+        self.assertEqual([r["lines"] for r in ends], [(line, line)] * 2)
+        for r in ends:
+            self.assertIn("called <built-in function print>", r["why"])
+
+    @isolated
+    def test_row_of_a_callee_is_said_once(self, device):
+        rows = self.rows(modes_rows_twice, device, of=modes_rows_says)
+        ends = [r for r in rows if r["state"] == "not movable"]
+        line = modes_rows_says.__code__.co_firstlineno + 1
+        self.assertEqual([r["lines"] for r in ends], [(line, line)], msg=f"{ends}")
+
+
+instantiate_device_type_tests(TestVmReportRows, globals())
+
+
 def sizes_range_into_out(x, t):
     steps = torch.arange(0, t * 10, 1.0, out=torch.empty(0, device=x.device))
     return modes_work(x).sum() * steps.shape[0]
@@ -2968,15 +3394,19 @@ class TestVmScalarSizes(TestCase):
     @parametrize("call", ("interpolate", "range"))
     @isolated
     def test_value_read_from_a_tensor(self, device, call):
-        # Nothing to check the region on: no region holds the call.
+        # Nothing to check a region that holds the read on: the region ends
+        # in front of the read, and the call behind it has the float as an
+        # argument (see the tests above).
         def scalar(t):
             return (torch.tensor(t),)
 
         fns = (sizes_scale_read_from_a_tensor, sizes_range_read_from_a_tensor)
         fn = dict(zip(("interpolate", "range"), fns))[call]
         rows = self.rows(fn, device, (1.0, 0.5, 2.0), "traced", argument=scalar)
-        refused = [r["why"] for r in rows if r["state"] == "refused"]
-        self.assertIn("it branches on a value it reads from a tensor", refused)
+        ends = [r["why"] for r in rows if r["state"] == "not movable"]
+        needed = "reads a tensor's value, which the traced run needed in Python"
+        self.assertTrue(any(w.endswith(needed) for w in ends), msg=str(rows))
+        self.assertEqual([r["why"] for r in rows if r["state"] == "refused"], [])
 
     @isolated
     def test_scalars_that_stay_inputs(self, device):

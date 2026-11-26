@@ -641,8 +641,13 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
             "notes": [],
         }
     out = list(places.values())
+    # A code has one plan per call site that entered it: a row once.
+    said = set()
     for code, line, why in rust._cfg_impure():
         function = code.rpartition("@")[0]
+        if (function, line, why) in said:
+            continue
+        said.add((function, line, why))
         out.append(
             {
                 "where": f"{function} line {line}",

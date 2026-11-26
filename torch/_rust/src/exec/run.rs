@@ -1373,12 +1373,14 @@ impl Act<'_> {
         // torch ops, which a region does run again.
         let body = &self.cfg[b].versions[vi].body;
         let code = self.c.map_or(0, |c| c.code);
-        let escapes = body.iter().any(|v| super::escaping_write(self.cfg, code, body, *v) && !writes::taken(self.p, code, &self.cfg[*v]));
+        let store = body.iter().find(|v| super::escaping_write(self.cfg, code, body, **v) && !writes::taken(self.p, code, &self.cfg[**v]));
+        let escapes = store.is_some();
         if work < 2 || escapes {
             self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
             if let (Some(c), true) = (self.c, work > 0) {
-                let (state, why) = if escapes {
-                    ("refused", "it stores into something that outlives it, so it runs as it is".to_string())
+                let (state, why) = if let Some(v) = store {
+                    let ins = &self.cfg[*v];
+                    ("refused", format!("it stores into something that outlives it (line {}: %{} {:?}), so it runs as it is", c.line(ins.origin), v.0, ins.op))
                 } else {
                     ("too small", format!("{work} op, fewer than 2"))
                 };
@@ -1540,6 +1542,8 @@ impl Act<'_> {
         let passed: Vec<u32> = sp.passed.iter().map(|k| sp.inputs.len() as u32 + k).collect();
         // A span is traced MAX_GAVE_UP times at most, whatever gave it up.
         super::covered::place(sp.state.gave_up.load(std::sync::atomic::Ordering::Relaxed));
+        let (traced_code, traced_by) = self.c.map_or((0, 0), |c| (c.code, c as *const super::Compiled as usize));
+        super::value_reads::begin(traced_code, traced_by);
         let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, sp.asked, &mut body));
         for (cell, old) in cells {
             PyCell_Set(cell, old);
@@ -1756,6 +1760,7 @@ impl Act<'_> {
         let types = (*self.p.region_types[b.idx()].get()).clone();
         let later = &self.p.region_later[b.idx()];
         super::covered::place(later.load(std::sync::atomic::Ordering::Relaxed));
+        super::value_reads::begin(c.code, c as *const super::Compiled as usize);
         let traced = super::outside_executor(|| super::region::trace(&name, &args, &types, &unread, false, false, &mut body));
         // Refused for code no call ran before: the block runs it now, as
         // written, and is traced again (see covered.rs).
@@ -1936,6 +1941,9 @@ impl Act<'_> {
                 }
             }
             _ if self.reading => {
+                if !self.under_body {
+                    super::value_reads::at(ins.origin);
+                }
                 let operands: Vec<*mut PyObject> = if super::kinds::asked(&ins.op) { ins.args.iter().map(|x| self.val(*x)).collect() } else { vec![] };
                 match super::covered::step(self.c, self.under_body, ins, &operands, callee, (*self.p.callees.get()).get(&v)) {
                     Ok(trusted) => {
@@ -2003,6 +2011,7 @@ impl Act<'_> {
                     reads::used(&all);
                 } else {
                     reads::called(a(0));
+                    reads::starred(a(1));
                 }
             }
             _ => {

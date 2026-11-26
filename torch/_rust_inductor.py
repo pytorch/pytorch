@@ -624,6 +624,8 @@ class _ScalarArgs(TorchFunctionMode):
     def __init__(self, graph: torch.fx.Graph) -> None:
         super().__init__()
         self.graph = graph
+        # Looked up here: an import under the body would be a frame of it.
+        self.value_read = _rust()._region_value_read
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
@@ -653,6 +655,9 @@ class _ScalarArgs(TorchFunctionMode):
                 # it on every call.
                 value, node = _item_node(t)
                 if type(value) is float:
+                    # Where the region ends if the run needs the float in
+                    # Python (see exec/value_reads.rs).
+                    self.value_read()
                     return _new_scalar(value, ("node", node), frozenset([_DATA]))
                 _scalar_state["specialized"].add(_DATA)
                 return value
@@ -2768,8 +2773,12 @@ def trace_region(
     )
     if unchecked is not None:
         result.setdefault("refused", unchecked)
+    # Whether the code is planned again with its regions ending in front of
+    # the read: the place as it is goes, and gets no row.
+    cut_at_read = False
     if _DATA in state["specialized"]:
         result["refused"] = "it branches on a value it reads from a tensor"
+        cut_at_read = _rust()._region_value_needed()
     elif in_vm:
         result["arithmetic"] = _arithmetic(
             _scalars_to_nodes(
@@ -2786,7 +2795,8 @@ def trace_region(
                 plan[i][2][leaf] = (_FLOAT, value)
     if "refused" in result:
         stats["refused"] += 1
-        _traced(name, "refused", result["refused"])
+        if not cut_at_read:
+            _traced(name, "refused", result["refused"])
         if DEBUG:
             print(f"region {name}: refused: {result['refused']}")
         return None

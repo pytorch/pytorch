@@ -1195,7 +1195,10 @@ pub unsafe fn called(obj: *mut PyObject) {
 pub unsafe fn subscript(container: *mut PyObject, key: *mut PyObject, ran: bool) {
     with(|t| {
         if ffi::PyDict_Check(container) != 0 && key_ok(key) {
-            if !ran {
+            // A dict subclass's __missing__ ran because C code found no such
+            // key: no frame reads that, and one that stores nothing leaves
+            // the key absent.
+            if !ran || dict_get(container, key).is_null() {
                 t.dict_item(container, key, false);
             }
         } else if ffi::PyList_Check(container) != 0 && ffi::Py_TYPE(key) == &raw mut ffi::PyLong_Type && !ran {
@@ -1251,6 +1254,23 @@ pub unsafe fn cell(cell: *mut PyObject, value: *mut PyObject) {
 // are read whole.
 pub unsafe fn used(objs: &[*mut PyObject]) {
     with(|t| objs.iter().for_each(|o| t.used(*o, false)));
+}
+
+// `f(*o)` ran with a Python callee. A lone starred operand that is no tuple
+// is made into the frame's tuple by the instruction itself, in C: a container
+// is read whole, in order (its items are handed on unread), and an object of
+// a Python class is iterated as its class says. A tuple is the frame's as it
+// is: nothing is read.
+pub unsafe fn starred(o: *mut PyObject) {
+    if o.is_null() || ffi::PyTuple_CheckExact(o) != 0 {
+        return;
+    }
+    with(|t| {
+        if let Some((h, kind)) = Trace::container(o) {
+            t.whole(h, kind);
+        }
+        t.handed(o);
+    });
 }
 
 // The truth (or length) of obj was taken.

@@ -18,6 +18,7 @@ mod made;
 pub mod overlap;
 pub mod reads;
 pub mod region;
+mod rows;
 pub mod scalars;
 mod run;
 mod shown;
@@ -26,6 +27,7 @@ mod special;
 pub mod torch_ops;
 mod trampoline;
 pub mod types;
+pub mod value_reads;
 pub mod writes;
 
 use std::cell::Cell;
@@ -961,6 +963,13 @@ unsafe extern "C" fn eval_frame(
                 e.write_unraisable(py, None);
             }
             c.sweep();
+        } else if value_reads::again(c) {
+            // A trace of its code was given up for a value the run read
+            // from a tensor: planned again, its regions end at that read.
+            if let Err(e) = outside_executor(|| optimize_now(py, c, None, true)) {
+                e.write_unraisable(py, None);
+            }
+            c.sweep();
         }
     }
     if observed {
@@ -1356,13 +1365,6 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
         }
         let changed = writes_said || !more.is_empty() || !forced.is_empty() || !split.is_empty();
         declared = more.iter().filter_map(|v| plan.prep.cfg.instrs.get(v.idx())).filter(|i| is_call(&i.op)).map(|i| i.origin).collect();
-        // What was said of them before the pass spoke no longer keeps
-        // anything out of a region.
-        let said: Vec<String> = IMPURE_NOW.with_borrow(|m| more.iter().filter_map(|v| m.get(&(&plan.prep as *const Prepared as usize, v.0)).cloned()).collect());
-        if !said.is_empty() {
-            let code = PURE_DEBUG_CODE.with_borrow(|q| q.clone());
-            IMPURE.lock().unwrap().retain(|(c, _, w)| *c != code || !said.contains(w));
-        }
         movable.extend(more);
         if changed && spannable {
             found = spans::find(py, &plan.prep, c.code, &movable, &current.prep.clones, &c.qualname, &forced, &split);
@@ -1375,6 +1377,8 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
     if block.is_none() {
         *c.declared.lock().unwrap() = declared;
     }
+    // The rows of torch.vm.regions for what this plan leaves not movable.
+    IMPURE_NOW.with_borrow(|refused| rows::planned(c, &plan.prep, &blocks, &movable, refused, block.is_none()));
     let obs = crate::cfg::optimize::Observed { movable, aten, calls, nulls };
     let (mut pinned, mut elided) = (vec![], vec![]);
     let renumbered = crate::cfg::optimize::optimize_blocks(&mut cfg, &blocks, &obs, &inlines, &mut pinned, &mut elided, block.is_some())
@@ -2168,7 +2172,8 @@ fn observed_ops(
             let pure = clones.filter(|_| PURE_CALLS.load(Ordering::Relaxed)).is_some_and(|clones| {
                 ins.op.can_raise() && pure_site(py, prep, code, *v, clones, &mut memo)
             });
-            let ok = pure || match &ins.op {
+            // What reads a tensor's value is movable by no rule.
+            let ok = pure || value_reads::seen(py, prep, code, *v).is_none() && match &ins.op {
                 Op::LoadLocal { .. }
                 | Op::LoadLocalChecked { .. }
                 | Op::StoreLocal { .. }
@@ -3078,6 +3083,11 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, code: usize, v: ValueId, clones: 
     if !ins.op.can_raise() {
         return Ok(());
     }
+    // A tensor's value handed to Python is where a region ends, whatever
+    // the tables say of the call that reads it (see value_reads.rs).
+    if let Some(why) = value_reads::seen(py, prep, code, v) {
+        return Err(format!("{} {why}", here()));
+    }
     let callees = unsafe { &*prep.callees.get() };
     // The autograd engine (see backward.rs): the named case of the rule at
     // the end of this function, that a C callee in none of the tables ends
@@ -3216,18 +3226,14 @@ thread_local! {
     static IMPURE_NOW: std::cell::RefCell<HashMap<(usize, u32), String>> = std::cell::RefCell::new(HashMap::new());
 }
 
-// Why a site isn't pure (see pure_site), as (code, line, why): what
-// TORCH_RUST_PURE_DEBUG prints, kept for torch.vm.regions. Each once.
-static IMPURE: Mutex<Vec<(String, i32, String)>> = Mutex::new(Vec::new());
 const MAX_IMPURE: usize = 4096;
 
-/// Why the sites that keep the code around them out of a region aren't pure:
-/// (qualname@depth, line, why) for each call that isn't movable and each
-/// other instr with effects that isn't, as judged when their code was last
-/// optimized.
+/// Why the instructions that end a region are not movable: (qualname@depth,
+/// line, why) for each one the last plan of its code left where it is (see
+/// rows.rs).
 #[pyfunction]
 pub fn _cfg_impure() -> Vec<(String, i32, String)> {
-    IMPURE.lock().unwrap().clone()
+    rows::all(&registered().iter().map(|c| Arc::as_ptr(c) as usize).collect())
 }
 
 // Whether the frames of `code` were only seen computing, judged from its own
@@ -3339,21 +3345,10 @@ fn pure_site(py: Python<'_>, prep: &Prepared, code: usize, v: ValueId, clones: &
     match pure_instr(py, prep, code, v, clones, 0, &Own { nargs: TOP_NARGS.get(), ..Own::default() }, memo) {
         Ok(()) => true,
         Err(why) => {
-            let effects = !effects_empty(prep, v);
-            if std::env::var_os("TORCH_RUST_PURE_DEBUG").is_some() && effects {
+            if std::env::var_os("TORCH_RUST_PURE_DEBUG").is_some() && !effects_empty(prep, v) {
                 PURE_DEBUG_CODE.with_borrow(|q| eprintln!("impure: {q}: {why}"));
             }
-            let ins = &prep.cfg[v];
-            let call = is_call(&ins.op);
-            IMPURE_NOW.with_borrow_mut(|m| m.insert((prep as *const Prepared as usize, v.0), why.clone()));
-            if effects || call {
-                let code = PURE_DEBUG_CODE.with_borrow(|q| q.clone());
-                let line = PURE_DEBUG_LINES.with_borrow(|l| l.iter().find(|(s, e, _)| *s <= ins.origin && ins.origin < *e).map_or(0, |x| x.2));
-                let mut seen = IMPURE.lock().unwrap();
-                if seen.len() < MAX_IMPURE && !seen.iter().any(|(c, l, w)| *c == code && *l == line && *w == why) {
-                    seen.push((code, line, why));
-                }
-            }
+            IMPURE_NOW.with_borrow_mut(|m| m.insert((prep as *const Prepared as usize, v.0), why));
             false
         }
     }

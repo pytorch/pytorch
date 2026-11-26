@@ -579,13 +579,17 @@ class TestVmFloatArguments(TestCase):
     @isolated
     def test_predicate_on_a_value_read_from_a_tensor(self, device):
         # The third value makes the logarithm NaN: the branch on what C
-        # code says of the value is decided on every call, by no region.
-        self.assertEqual(self.rows(floats_item_tested, device), [])
+        # code says of the value is decided on every call, behind the region
+        # of the nine operations in front of the read.
+        (row,) = self.rows(floats_item_tested, device)
+        self.assertEqual(row["ops"], 9, msg=str(row))
 
     @isolated
     def test_values_of_a_tensor_as_a_list_and_as_an_array(self, device):
-        # Each call hands back that call's values.
-        self.assertEqual(self.rows(floats_values_as_a_list, device), [])
+        # Each call hands back that call's values: the region ends in front
+        # of the first read, with the seven operations before it.
+        (row,) = self.rows(floats_values_as_a_list, device)
+        self.assertEqual(row["ops"], 7, msg=str(row))
 
     def subclass_calls(self, fn, device, make, extra=()):
         # Twelve calls with three values in turn, each compared with eager's.
@@ -1027,7 +1031,7 @@ instantiate_device_type_tests(TestVmTensorFacts, globals())
 
 def given_up_count(y):
     try:
-        return int((y > 0).sum())
+        return y[y > 0].shape[0]
     except Exception:
         return -1
 
@@ -1041,7 +1045,7 @@ def given_up_handler(x):
 def given_up_handler_here(x):
     y = x.sin() * 2
     try:
-        n = int((y > 0).sum())
+        n = y[y > 0].shape[0]
     except BaseException:
         n = -1
     return (y * n + 1).cos().tanh().exp()
@@ -1050,20 +1054,20 @@ def given_up_handler_here(x):
 def given_up_draw(x, gen):
     r = torch.rand(4, 8, device=x.device)
     y = x.sin() * 2 + r
-    n = int((y > 0).sum())
+    n = y[y > 0].shape[0]
     return (y * n + 1).cos().tanh().exp()
 
 
 def given_up_dropout(x, gen):
     y = torch.nn.functional.dropout(x.sin() * 2, 0.5) + torch.randn_like(x)
-    n = int((y > 0).sum())
+    n = y[y > 0].shape[0]
     return (y * n + 1).cos().tanh().exp()
 
 
 def given_up_own_generator(x, gen):
     r = torch.rand(4, 8, device=x.device, generator=gen)
     y = x.sin() * 2 + r
-    n = int((y > 0).sum())
+    n = y[y > 0].shape[0]
     return (y * n + 1).cos().tanh().exp()
 
 
@@ -1113,7 +1117,7 @@ def given_up_in_a_loop(x):
     total = y
     for _ in range(3):
         try:
-            n = int((y > 0).sum())
+            n = y[y > 0].shape[0]
         except Exception:
             n = -1
         total = (total + y * n).cos().tanh()
@@ -1156,13 +1160,14 @@ def backward_first_at_the_trace(w, v, x, on):
 
 def given_up_after_a_write(x, acc):
     acc.add_(x.sin().cos().tanh().exp())
-    # A trace is given up here: it reads values out of a tensor.
-    return acc * float(acc.sum() > 0)
+    # A trace is given up here: the size of what the mask picks depends on
+    # the data.
+    return acc * acc[acc > 0].shape[0]
 
 
 def given_up_after_a_write_to_a_view(x, acc):
     acc[1:].mul_(x.sin().cos().tanh().exp()[1:])
-    return acc * float(acc.sum() > 0)
+    return acc * acc[acc > 0].shape[0]
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
@@ -1173,10 +1178,13 @@ class TestVmGivenUpTraces(TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def gives_up(self, device):
-        # Reading a value from a GPU tensor ends the block where the read is
-        # seen, before any trace: only the CPU has a trace to give up.
-        return torch.device(device).type == "cpu"
+    # What gives a trace up here is a tensor indexed by a mask: no call
+    # that was observed says that its size depends on the data, the trace
+    # finds it, on every device. (A read of a tensor's value ends the block
+    # where the read is seen, before any trace.)
+    SIZED_BY_DATA = (
+        "it runs aten.index.Tensor, which makes a tensor whose size depends on the data"
+    )
 
     def calls(self, fn, device):
         g = vm_early(fn)
@@ -1195,16 +1203,12 @@ class TestVmGivenUpTraces(TestCase):
     def test_refusal_caught_by_a_handler_of_a_function_the_block_calls(self, device):
         # The handler is the program's, for errors of the program's.
         rows = self.calls(given_up_handler, device)
-        if self.gives_up(device):
-            self.assertEqual(
-                rows, [("refused", "it runs aten._local_scalar_dense.default")]
-            )
+        self.assertEqual(rows, [("refused", self.SIZED_BY_DATA)])
 
     @isolated
     def test_refusal_caught_by_a_handler_in_the_block(self, device):
         rows = self.calls(given_up_handler_here, device)
-        if self.gives_up(device):
-            self.assertNotIn("region", [state for state, _ in rows[:1]], msg=str(rows))
+        self.assertNotIn("region", [state for state, _ in rows[:1]], msg=str(rows))
 
     def draws(self, fn, device):
         # Each call after the same seed on both sides: the result, and the
@@ -1236,22 +1240,19 @@ class TestVmGivenUpTraces(TestCase):
     @isolated
     def test_random_draw_in_a_block_whose_trace_is_given_up(self, device):
         rows = self.draws(given_up_draw, device)
-        if self.gives_up(device):
-            self.assertEqual(rows, ["refused"])
+        self.assertEqual(rows, ["refused"])
 
     @isolated
     def test_dropout_in_a_block_whose_trace_is_given_up(self, device):
         rows = self.draws(given_up_dropout, device)
-        if self.gives_up(device):
-            self.assertEqual(rows, ["refused"])
+        self.assertEqual(rows, ["refused"])
 
     @isolated
     def test_draw_from_a_generator_of_the_program_in_a_block_whose_trace_is_given_up(
         self, device
     ):
         rows = self.draws(given_up_own_generator, device)
-        if self.gives_up(device):
-            self.assertEqual(rows, ["refused"])
+        self.assertEqual(rows, ["refused"])
 
     def against_eager(self, fn, device, arg):
         # Ten calls; `arg(call)` is the second argument. An error is compared
@@ -1330,12 +1331,9 @@ class TestVmGivenUpTraces(TestCase):
             for r in vm.regions(self.loop_calls(device))
             if r["function"] == "given_up_in_a_loop"
         ]
-        if self.gives_up(device):
-            self.assertIn(
-                ("span", "refused"),
-                [(r["kind"], r["state"]) for r in rows],
-                msg=str(rows),
-            )
+        self.assertIn(
+            ("span", "refused"), [(r["kind"], r["state"]) for r in rows], msg=str(rows)
+        )
 
     def loop_calls(self, device):
         g = vm_early(given_up_in_a_loop)
@@ -3028,6 +3026,43 @@ def reads_calls_scaled(x):
     return (y * 2).sin() + y.cos() - y.tanh()
 
 
+STARRED = [0.5, 0.25]
+
+
+def starred_pair(a, b):
+    return a * 2 + b
+
+
+def starred_global(y):
+    return y * starred_pair(*STARRED)
+
+
+def starred_on(*args):
+    return starred_pair(*args)
+
+
+def starred_first(a, rest):
+    return a * 2
+
+
+def starred_first_of(*args):
+    return starred_first(*args)
+
+
+class MissingHalf(dict):
+    """Answers 0.5 for a key it does not have, and stores nothing."""
+
+    def __missing__(self, key):
+        return 0.5
+
+
+class MissingOther(dict):
+    """Answers for a key it does not have from another key."""
+
+    def __missing__(self, key):
+        return self["other"] * 2
+
+
 def reads_through(inner):
     """A function with one region that is traced through a call of `inner`."""
 
@@ -3927,6 +3962,184 @@ class TestVmReads(TestCase):
             ["arg 1 leaf 0 (float, checked by float value)"],
             msg=str(row),
         )
+
+    @isolated
+    def test_list_starred_into_a_python_function(self, device):
+        # `starred_pair(*values)`: the instruction makes the frame's tuple
+        # from the list in C, so the region depends on what the list holds.
+        kept = ReadsConfig()
+        kept.pair = [0.5, 0.25]
+        fn = reads_through(lambda y: y * starred_pair(*kept.pair))
+        self.alternating(
+            device, fn, lambda second: kept.pair.__setitem__(0, 0.75 if second else 0.5)
+        )
+
+    @isolated
+    def test_global_list_starred_into_a_python_function(self, device):
+        self.alternating(
+            device,
+            reads_through(starred_global),
+            lambda second: STARRED.__setitem__(0, 0.75 if second else 0.5),
+        )
+
+    @isolated
+    def test_list_of_a_module_starred_into_a_python_function(self, device):
+        layer = torch.nn.Identity()
+        layer.pair = [0.5, 0.25]
+        fn = reads_through(lambda y: y * starred_pair(*layer.pair))
+        self.alternating(
+            device,
+            fn,
+            lambda second: layer.pair.__setitem__(1, 0.125 if second else 0.25),
+        )
+
+    @isolated
+    def test_starred_list_that_grows(self, device):
+        # Three items raise in the callee's frame as they do in eager; the
+        # two items that follow are another state of the region.
+        kept = ReadsConfig()
+        kept.pair = [0.5, 0.25]
+        fn = reads_through(lambda y: y * starred_pair(*kept.pair))
+        g = vm(fn, passes=EARLY)
+        for call in range(12):
+            if call == 6:
+                kept.pair.append(0.125)
+            if call == 8:
+                del kept.pair[0]
+            x = torch.randn(4, 8, device=device)
+            if len(kept.pair) == 3:
+                with self.assertRaisesRegex(
+                    TypeError, "takes 2 positional arguments but 3 were given"
+                ):
+                    g(x)
+            else:
+                self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+
+    @isolated
+    def test_two_starred_lists(self, device):
+        kept = ReadsConfig()
+        kept.one, kept.two = [0.5], [0.25]
+        fn = reads_through(lambda y: y * starred_pair(*kept.one, *kept.two))
+        self.alternating(
+            device,
+            fn,
+            lambda second: kept.two.__setitem__(0, 0.125 if second else 0.25),
+        )
+
+    @isolated
+    def test_generator_starred_into_a_python_function(self, device):
+        # The call consumes the generator once; what the generator's frame
+        # reads of the list is the region's.
+        kept = ReadsConfig()
+        kept.pair = [0.5, 0.25]
+        fn = reads_through(lambda y: y * starred_pair(*(v for v in kept.pair)))
+        self.alternating(
+            device, fn, lambda second: kept.pair.__setitem__(0, 0.75 if second else 0.5)
+        )
+
+    @isolated
+    def test_arguments_forwarded_as_a_tuple(self, device):
+        # `starred_pair(*args)` with the caller's own `*args`: the tuple is
+        # the callee's as it is, and what it holds is read where it is used.
+        kept = ReadsConfig()
+        kept.a = 0.5
+        fn = reads_through(lambda y: y * starred_on(kept.a, 0.25))
+        self.alternating(
+            device, fn, lambda second: setattr(kept, "a", 0.75 if second else 0.5)
+        )
+
+    @isolated
+    def test_list_inside_a_forwarded_tuple_is_no_read(self, device):
+        # The list is handed on through `*args` and nobody reads it: the
+        # region does not depend on what it holds.
+        kept = ReadsConfig()
+        kept.rest = [0.25]
+        fn = reads_through(lambda y: y * starred_first_of(0.5, kept.rest))
+        g = vm(fn, passes=EARLY)
+        for call in range(10):
+            kept.rest[0] = 0.125 * (call % 3)
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"].endswith("outer") and r["kind"] != "call"
+        )
+        self.assertEqual(
+            (row["state"], row["variants"], dict(row["misses"])),
+            ("region", 1, {}),
+            msg=str(row),
+        )
+
+    def absent_then_present(self, device, table):
+        # `table["n"]` while the key is absent, present, absent again,
+        # present again.
+        kept = ReadsConfig()
+        kept.table = table
+        fn = reads_through(lambda y: y * (kept.table["n"] + 0.25))
+        self.alternating(
+            device,
+            fn,
+            lambda second: table.__setitem__("n", 2)
+            if second
+            else table.pop("n", None),
+        )
+
+    @isolated
+    def test_absent_key_of_a_counter(self, device):
+        # Counter.__missing__ answers 0 and reads nothing: that the key is
+        # absent is the region's to check.
+        import collections
+
+        self.absent_then_present(device, collections.Counter())
+
+    @isolated
+    def test_absent_key_of_a_dict_whose_missing_stores_nothing(self, device):
+        self.absent_then_present(device, MissingHalf())
+
+    @isolated
+    def test_absent_key_answered_from_another_key(self, device):
+        self.absent_then_present(device, MissingOther(other=0.125))
+
+    @isolated
+    def test_key_that_answers_for_an_absent_one_changes(self, device):
+        # What __missing__'s frame reads is recorded by that frame.
+        kept = ReadsConfig()
+        kept.table = MissingOther(other=0.125)
+        fn = reads_through(lambda y: y * (kept.table["n"] + 0.25))
+        self.alternating(
+            device,
+            fn,
+            lambda second: kept.table.__setitem__("other", 0.375 if second else 0.125),
+        )
+
+    @isolated
+    def test_absent_key_of_a_defaultdict_is_stored_on_every_call(self, device):
+        # A defaultdict stores the key it is asked for: every call leaves
+        # it there, as eager does, also after it was taken out again.
+        import collections
+
+        kept, twin = ReadsConfig(), ReadsConfig()
+        kept.table, twin.table = (
+            collections.defaultdict(float),
+            collections.defaultdict(float),
+        )
+        fn = reads_through(lambda y: y * (kept.table["n"] + 0.25))
+        eager = reads_through(lambda y: y * (twin.table["n"] + 0.25))
+        g = vm(fn, passes=EARLY)
+        for call in range(13):
+            if call % 3 == 2:
+                kept.table.pop("n", None)
+                twin.table.pop("n", None)
+            if call in (7, 8):
+                kept.table["n"] = twin.table["n"] = 0.5
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), eager(x), atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(
+                sorted(kept.table.items()),
+                sorted(twin.table.items()),
+                msg=f"call {call}",
+            )
 
 
 instantiate_device_type_tests(TestVmReads, globals())
