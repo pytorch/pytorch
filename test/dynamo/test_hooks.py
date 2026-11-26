@@ -109,10 +109,8 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     @staticmethod
     def compile_counted(fn, record=None):
         counter = torch._dynamo.testing.CompileCounter()
-        if record is not None:
-            opt = torch._dynamo.optimize(counter, nopython=True, guard_export_fn=record)
-            return opt(fn), counter
-        return torch.compile(fn, backend=counter, fullgraph=True), counter
+        opt = torch._dynamo.optimize(counter, nopython=True, guard_export_fn=record)
+        return opt(fn), counter
 
     def test_always_call_hook(self):
         opt, cnt = self.compile_counted(lambda x, module: module(x))
@@ -664,9 +662,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(allow_unspec_int_on_nn_module=True)
     def test_materialized_hook_keys(self, operation):
         self._check_materialized_hook_keys(operation)
-
-    def test_hook_dict_as_python_constant(self):
-        self._check_materialized_hook_keys(sum_hook_keys)
 
     def _check_materialized_hook_keys(self, operation):
         def check(ctx):

@@ -87,14 +87,15 @@ def _nested_region_identity(
     left: VariableTracker, right: VariableTracker, a: Source | None, b: Source | None
 ) -> ConstantVariable | None:
     from ..symbolic_convert import InstructionTranslator
-    from .dicts import ConstDictVariable
-    from .lists import BaseListVariable, SliceVariable
-    from .sets import BaseSetVariable
 
     tx = InstructionTranslator.current_tx()
     tracer = tx.output.current_tracer
     if not tracer.in_nested_compile_region:
         return None
+    from .dicts import ConstDictVariable
+    from .lists import BaseListVariable, SliceVariable
+    from .sets import BaseSetVariable
+
     left, right = left.realize(), right.realize()
     kind = type(left)
     if kind is not type(right):

@@ -83,6 +83,7 @@ from ..utils import (
     check_constant_args,
     check_positional,
     cmp_name_to_op_mapping,
+    complex_methods,
     defaultdict_methods,
     deque_iterator,
     deque_methods,
@@ -131,6 +132,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import (
+    ComplexConstantVariable,
     ConstantVariable,
     FloatConstantVariable,
     IntConstantVariable,
@@ -5122,13 +5124,13 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return super().tp_getattro_impl(tx, name)
 
 
-_CONSTANT_BASE_TYPES = (int, float, str)
+_CONSTANT_BASE_TYPES = (int, float, str, complex)
 
 
 class UserDefinedConstantVariable(UserDefinedObjectVariable):
     """
     Base for user-defined objects that subclass immutable constant types
-    (int, float, str). Each builtin base has a subclass below that also
+    (int, float, str, complex). Each builtin base has a subclass below that also
     inherits the builtin's constant VT, so its slots and methods come through
     the MRO, as for UserDefinedListVariable and ListVariable.
     """
@@ -5149,6 +5151,7 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable):
             int: UserDefinedIntVariable,
             float: UserDefinedFloatVariable,
             str: UserDefinedStrVariable,
+            complex: UserDefinedComplexVariable,
         }[base]
 
 
@@ -5165,6 +5168,11 @@ class UserDefinedFloatVariable(UserDefinedConstantVariable, FloatConstantVariabl
 class UserDefinedStrVariable(UserDefinedConstantVariable, StrConstantVariable):
     _constant_base = str
     _base_methods = str_methods
+
+
+class UserDefinedComplexVariable(UserDefinedConstantVariable, ComplexConstantVariable):
+    _constant_base = complex
+    _base_methods = complex_methods
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):
