@@ -210,15 +210,18 @@ class SIMDKernelFeatures:
                 mutations.update(buf.get_mutations())
         return mutations
 
-    @cache_on_self
-    def select_index_dtype(self) -> torch.dtype:
-        # Gather all used buffer names
+    def _index_dtype_buffers(
+        self,
+    ) -> list[ir.Buffer | ir.TensorBox | ir.TorchBindObject]:
+        """Every buffer the kernel reads or writes; their sizes bound the indexing."""
         buffer_names: OrderedSet[str] = OrderedSet()
         for node in self.indexing_scheduler_nodes():
             buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
-        buffers = [V.graph.get_buffer(name) for name in buffer_names]
+        return [V.graph.get_buffer(name) for name in buffer_names]
 
+    def _index_dtype_numel(self) -> sympy.Expr:
+        """The number of elements the indexing covers."""
         # In theory we can separately check xnumel and rnumel are <= int_max
         # but some indexers do use the full linear index so we need to be
         # conservative here.
@@ -229,9 +232,15 @@ class SIMDKernelFeatures:
             total_numel = self.numel * ir.grid_split_chunk(
                 self.reduction_numel, grid_split
             )
+        return total_numel
+
+    @cache_on_self
+    def select_index_dtype(self) -> torch.dtype:
+        total_numel = self._index_dtype_numel()
 
         from .simd import SIMDScheduling
 
+        buffers = self._index_dtype_buffers()
         if SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
             # Fused address expressions can overflow int32 even when
             # numel/storage_size are within range, so check them directly.
