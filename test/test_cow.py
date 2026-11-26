@@ -273,16 +273,11 @@ class TestCOWDevice(TestCase):
                 self.assertEqual(second, inp * 3)
                 self.assertEqual(y, inp + 1 if steal else torch.full_like(inp, 99))
 
-
-@unittest.skipUnless(TEST_CUDA_GRAPH, "requires CUDA graph support")
-@unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires native allocator stream metadata")
-class TestCOWCudaOnly(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
     @deviceCountAtLeast(2)
     def test_non_current_device(self, devices):
-        with torch.cuda.device(devices[0]):
-            current = torch.cuda.current_device()
+        mod = _device_mod(devices[0])
+        with mod.device(devices[0]):
+            current = mod.current_device()
             x = torch.ones(8, device=devices[1])
             y = x._lazy_clone()
             ptr = y.const_data_ptr()
@@ -290,9 +285,87 @@ class TestCOWCudaOnly(TestCase):
             torch._C._cow_record_done(x)
             y.add_(2)
             self.assertEqual(y.const_data_ptr(), ptr)
-            self.assertEqual(torch.cuda.current_device(), current)
+            self.assertEqual(mod.current_device(), current)
             self.assertEqual(x, torch.full_like(x, 2))
             self.assertEqual(y, torch.full_like(y, 3))
+
+    @parametrize("captured", [False, True])
+    @parametrize("read_before_clone", [False, True])
+    @parametrize(
+        "complete",
+        [subtest(False, decorators=[expectedFailureXPU]), True],  # https://github.com/intel/torch-xpu-ops/issues/6411
+    )
+    def test_pointer_materialization_preserves_older_reads(
+        self, device, captured, read_before_clone, complete
+    ):
+        if captured and not (torch.device(device).type == "cuda" and TEST_CUDA_GRAPH):
+            raise unittest.SkipTest("requires CUDA graph support")
+        mod = _device_mod(device)
+        with _streams(device, 3) as (a, b, c):
+            inp = torch.ones(1024, device=device)
+            with _capture(a, captured) as graph:
+                x = inp + 0
+                if not read_before_clone:
+                    y = x._lazy_clone()
+                b.wait_stream(a)
+                with mod.stream(b):
+                    _device_sleep(device, 10_000_000)
+                    out = x * 2
+                if read_before_clone:
+                    y = x._lazy_clone()
+                ptr = y.const_data_ptr()
+                x.data_ptr()
+                if complete:
+                    with mod.stream(b):
+                        b.wait_stream(a)
+                        torch._C._cow_record_done(x)
+                c.wait_stream(a)
+                with mod.stream(c):
+                    y.add_(1)
+                self.assertEqual(y.const_data_ptr() == ptr, complete)
+                a.wait_stream(b)
+                a.wait_stream(c)
+            for _ in _replays(graph, captured, inp):
+                self.assertEqual(out, inp * 2)
+                self.assertEqual(x, inp)
+                self.assertEqual(y, inp + 1)
+
+    @parametrize("captured", [False, True])
+    def test_completed_references_allow_chained_clones(self, device, captured):
+        if captured and not (torch.device(device).type == "cuda" and TEST_CUDA_GRAPH):
+            raise unittest.SkipTest("requires CUDA graph support")
+        with _streams(device, 1) as (a,):
+            with _capture(a, captured) as graph:
+                x = torch.ones(1024, device=device)
+                snapshots = []
+                for _ in range(3):
+                    y = x._lazy_clone()
+                    z = y._lazy_clone()
+                    self.assertTrue(torch._C._is_cow_tensor(x))
+                    ptr = x.const_data_ptr()
+                    x.add_(1)
+                    torch._C._cow_record_done(x.view(-1))
+                    torch._C._cow_record_done(x)
+                    y.add_(10)
+                    # Completing x did not complete its descendants.
+                    self.assertNotEqual(y.const_data_ptr(), ptr)
+                    torch._C._cow_record_done(y)
+                    z.add_(20)
+                    self.assertEqual(z.const_data_ptr(), ptr)
+                    snapshots.append((y, z))
+            for _ in range(2 if captured else 1):
+                if captured:
+                    graph.replay()
+                self.assertEqual(x, torch.full_like(x, 4))
+                for i, (y, z) in enumerate(snapshots):
+                    self.assertEqual(y, torch.full_like(y, i + 11))
+                    self.assertEqual(z, torch.full_like(z, i + 21))
+
+
+@unittest.skipUnless(TEST_CUDA_GRAPH, "requires CUDA graph support")
+@unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires native allocator stream metadata")
+class TestCOWCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     @skipIfRocm
     @requires_cuda_python_bindings
@@ -331,41 +404,6 @@ class TestCOWCudaOnly(TestCase):
             self.assertEqual(x, torch.ones_like(x))
             self.assertEqual(y, x)
             self.assertEqual(late, torch.full_like(late, 3))
-
-    @parametrize("captured", [False, True])
-    @parametrize("read_before_clone", [False, True])
-    @parametrize("complete", [False, True])
-    def test_pointer_materialization_preserves_older_reads(
-        self, device, captured, read_before_clone, complete
-    ):
-        with _streams(device, 3) as (a, b, c):
-            inp = torch.ones(1024, device=device)
-            with _capture(a, captured) as graph:
-                x = inp + 0
-                if not read_before_clone:
-                    y = x._lazy_clone()
-                b.wait_stream(a)
-                with torch.cuda.stream(b):
-                    torch.cuda._sleep(10_000_000)
-                    out = x * 2
-                if read_before_clone:
-                    y = x._lazy_clone()
-                ptr = y.const_data_ptr()
-                x.data_ptr()
-                if complete:
-                    with torch.cuda.stream(b):
-                        b.wait_stream(a)
-                        torch._C._cow_record_done(x)
-                c.wait_stream(a)
-                with torch.cuda.stream(c):
-                    y.add_(1)
-                self.assertEqual(y.const_data_ptr() == ptr, complete)
-                a.wait_stream(b)
-                a.wait_stream(c)
-            for _ in _replays(graph, captured, inp):
-                self.assertEqual(out, inp * 2)
-                self.assertEqual(x, inp)
-                self.assertEqual(y, inp + 1)
 
     @parametrize("captured", [False, True])
     @parametrize("reuse_on_a", [False, True])
@@ -451,35 +489,6 @@ class TestCOWCudaOnly(TestCase):
             self.assertEqual(out, torch.full_like(out, 3))
             self.assertEqual(y, torch.full_like(y, 2))
             self.assertEqual(late, torch.ones_like(late))
-
-    @parametrize("captured", [False, True])
-    def test_completed_references_allow_chained_clones(self, device, captured):
-        with _streams(device, 1) as (a,):
-            with _capture(a, captured) as graph:
-                x = torch.ones(1024, device=device)
-                snapshots = []
-                for _ in range(3):
-                    y = x._lazy_clone()
-                    z = y._lazy_clone()
-                    self.assertTrue(torch._C._is_cow_tensor(x))
-                    ptr = x.const_data_ptr()
-                    x.add_(1)
-                    torch._C._cow_record_done(x.view(-1))
-                    torch._C._cow_record_done(x)
-                    y.add_(10)
-                    # Completing x did not complete its descendants.
-                    self.assertNotEqual(y.const_data_ptr(), ptr)
-                    torch._C._cow_record_done(y)
-                    z.add_(20)
-                    self.assertEqual(z.const_data_ptr(), ptr)
-                    snapshots.append((y, z))
-            for _ in range(2 if captured else 1):
-                if captured:
-                    graph.replay()
-                self.assertEqual(x, torch.full_like(x, 4))
-                for i, (y, z) in enumerate(snapshots):
-                    self.assertEqual(y, torch.full_like(y, i + 11))
-                    self.assertEqual(z, torch.full_like(z, i + 21))
 
     @parametrize("same_stream", [False, True])
     def test_lazy_clone_graph_input_uses_eager_copy(self, device, same_stream):
