@@ -4225,6 +4225,74 @@ class DictGuardTests(LoggingTestCase):
             failures[0],
         )
 
+    @parametrize("operation", ["getitem", "get", "get_default", "pop", "pop_default"])
+    def test_missing_key_recompilation_hint(self, operation):
+        failures = []
+
+        def fn(x, d):
+            try:
+                if operation == "getitem":
+                    value = d["scale"]
+                elif operation == "get":
+                    value = d.get("scale")
+                elif operation == "get_default":
+                    value = d.get("scale", 2)
+                elif operation == "pop":
+                    value = d.pop("scale")
+                else:
+                    value = d.pop("scale", 2)
+            except KeyError:
+                value = 1
+            return x + (value if value is not None else 0)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        for mapping in ({"kept": 1}, {"kept": 1, "scale": 3}):
+            expected_mapping = mapping.copy()
+            expected = fn(x, expected_mapping)
+            self.assertEqual(compiled_fn(x, mapping), expected)
+            self.assertEqual(mapping, expected_mapping)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("not ___dict_contains('scale', d)", failures[0])
+        if operation == "getitem":
+            self.assertIn("[key]` traced KeyError for an absent key", failures[0])
+        elif operation == "get":
+            self.assertIn(".get(key)` traced None for an absent key", failures[0])
+        elif operation == "get_default":
+            self.assertIn(
+                ".get(key, default)` traced the default for an absent key", failures[0]
+            )
+        elif operation == "pop":
+            self.assertIn(
+                ".pop(key)` traced KeyError without removing an entry", failures[0]
+            )
+        else:
+            self.assertIn(
+                ".pop(key, default)` traced the default without removing an entry",
+                failures[0],
+            )
+
+    def test_missing_object_key_recompilation_hint(self):
+        failures = []
+        key = object()
+
+        def fn(x, d):
+            return x + d.get(key, 2)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        self.assertEqual(compiled_fn(x, {"kept": 1}), x + 2)
+        self.assertEqual(compiled_fn(x, {"kept": 1, key: 3}), x + 3)
+        self.assertEqual(len(failures), 1)
+        self.assertIn(
+            ".get(key, default)` traced the default for an absent key", failures[0]
+        )
+
     @make_logging_test(recompiles=True)
     def test_cmp_or(self, records):
         @torch.compile(backend="eager", fullgraph=True)
