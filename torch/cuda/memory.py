@@ -1686,6 +1686,10 @@ class MemPool(_MemPool):
     r"""MemPool represents a pool of memory in a caching allocator. Currently,
     it's just the ID of the pool object maintained in the CUDACachingAllocator.
 
+    The pool belongs to the device that is current when the pool is created. A
+    pool with an :attr:`allocator` can route allocations only on that device,
+    given by :attr:`allocator_device`.
+
     Args:
         allocator(torch._C._cuda_CUDAAllocator, optional): a
             torch._C._cuda_CUDAAllocator object that can be used to
@@ -1747,6 +1751,12 @@ class MemPool(_MemPool):
     def id(self) -> tuple[int, int]:
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
+
+    @property
+    def allocator_device(self) -> int | None:
+        r"""Returns the device of the custom allocator of this pool, or ``None``
+        if the pool has no custom allocator."""
+        return super().allocator_device
 
     def use_count(self) -> int:  # pylint: disable=useless-parent-delegation
         r"""Returns the reference count of this pool."""
@@ -1868,6 +1878,16 @@ class _PinnedRoutes(threading.local):
 _pinned_routes = _PinnedRoutes()
 
 
+def _check_mem_pool_device(pool: _MemPool, device: int) -> None:
+    allocator_device = pool.allocator_device
+    if allocator_device is not None and allocator_device != device:
+        raise RuntimeError(
+            f"This memory pool has a custom allocator on device {allocator_device} and "
+            f"cannot route allocations on device {device}. Create the pool while "
+            f"device {device} is the current device."
+        )
+
+
 class use_mem_pool(contextlib.ContextDecorator):
     r"""A context manager that routes allocations to a given pool.
 
@@ -1923,6 +1943,7 @@ class use_mem_pool(contextlib.ContextDecorator):
             if device is None:
                 device = torch.cuda.current_device()
             device_index = _get_device_index(device)
+            _check_mem_pool_device(self._pool, device_index)
             _cuda_beginAllocateCurrentThreadToPool(device_index, self._pool.id)
             self._device_indices.append(device_index)
         if torch.cuda.is_current_stream_capturing():
@@ -2083,6 +2104,7 @@ def _use_uvm(device: "Device" = None):
     .. note::
         Requires the ``cuda-python`` package (``cuda.bindings``).
     """
-    pool = _make_uvm_pool()
+    with torch.cuda.device(device):
+        pool = _make_uvm_pool()
     with use_mem_pool(pool, device=device):
         yield pool
