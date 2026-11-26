@@ -314,11 +314,12 @@ class _CuspyModule:
     def metadata_put_external(blob: str, external_id: int = 0) -> None: ...
     # groups: each a tuple (ts, end, track_uuid, name_iid, int_annos, str_annos,
     #   arr_annos, json_annos, flow, gpu_corr, cat_iid) where gpu_corr is a
-    #   (int32_offsets, int64_ids) CSR of per-slice render-stage event_ids or None.
+    #   (int64_offsets, int64_ids) CSR of per-slice render-stage event_ids or None.
     # render: (gpu_specs, gfx_contexts, stage_cols, extra, launch, tables, const_extra)
     #   where stage_cols = (ts, dur, event_id, gpu_id, hw_queue_iid, stage_iid,
-    #   context, name_iid, event_wait) and event_wait is a (int32_offsets, uint64_ids)
+    #   context, name_iid, event_wait) and event_wait is a (int64_offsets, uint64_ids)
     #   CSR of per-stage event_wait_ids (graph node->node dependency arrows).
+    # CSR offsets are int64 (valid int32 inputs are converted); malformed CSR columns raise ValueError.
     @staticmethod
     def encode_pftrace(
         base_ns: int,
