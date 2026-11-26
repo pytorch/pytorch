@@ -265,12 +265,14 @@ def register_module_forward_hook(
         hook(module, input, output) -> None or modified output
 
     The input contains only the positional arguments given to the module.
-    Keyword arguments won't be passed to the hooks and only to the ``forward``.
+    With ``with_kwargs=True``, the hook also receives the keyword arguments:
+    ``hook(module, input, kwargs, output)``.
     You can optionally modify the output of the module by returning a new value
     that will replace the output from the :func:`forward` function.
 
     Parameters:
         hook (Callable): The user defined hook to be registered.
+        with_kwargs (bool): Pass keyword arguments to the hook. Default: ``False``.
         always_call (bool): If ``True`` the ``hook`` will be run regardless of
             whether an exception is raised while calling the Module.
             Default: ``False``
