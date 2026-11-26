@@ -17,7 +17,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyCPU,
     onlyCUDA,
-    skipXPU,
     skipXPUIf,
 )
 from torch.testing._internal.common_dtype import all_types_and
@@ -1181,9 +1180,7 @@ class TestLibtorchAgnostic(TestCase):
         import libtorch_agn_2_10 as libtorch_agnostic
 
         t = torch.randn(2, 3, device=devices[1])
-        self.assertEqual(
-            libtorch_agnostic.ops.test_tensor_device(t), t.device
-        )
+        self.assertEqual(libtorch_agnostic.ops.test_tensor_device(t), t.device)
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCPU
