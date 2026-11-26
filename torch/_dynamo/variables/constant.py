@@ -575,11 +575,6 @@ class StrConstantVariable(ConstantVariable):
         # that the table's constant fold declines; unpack it, then fold str.join.
         items = unpack_iterable(tx, args[0])
         if not all(item.is_python_constant() for item in items):
-            fmt = variables.StringFormatVariable
-            if self.value == "" and all(
-                type(v.realize()) in (StrConstantVariable, fmt) for v in items
-            ):
-                return fmt.create(tx, "{}" * len(items), items, {})
             return None
         return ConstantVariable._fold(
             tx, str.join, self, variables.TupleVariable(items)
