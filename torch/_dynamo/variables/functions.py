@@ -102,6 +102,7 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     store_attr_mutation,
+    unmodeled_get,
     unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
@@ -890,6 +891,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        # func_memberlist marks these READONLY; reads keep the existing path.
+        "__globals__": Member(unmodeled_get, readonly_setter),
+        "__builtins__": Member(unmodeled_get, readonly_setter),
     }
 
     tp_getset = {
@@ -2458,6 +2462,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        # func_memberlist marks these READONLY; reads keep the existing path.
+        "__globals__": Member(unmodeled_get, readonly_setter),
+        "__builtins__": Member(unmodeled_get, readonly_setter),
     }
 
     tp_getset = {
