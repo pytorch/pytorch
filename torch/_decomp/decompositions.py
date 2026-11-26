@@ -676,15 +676,7 @@ def nll_loss2d_backward(
     )
 
 
-@register_decomposition(aten.binary_cross_entropy)
-@out_wrapper()
-@pw_cast_for_opmath
-def binary_cross_entropy(
-    self: Tensor,
-    target: Tensor,
-    weight: Tensor | None = None,
-    reduction: int = Reduction.MEAN.value,
-) -> Tensor:
+def _assert_binary_cross_entropy_inputs(self: Tensor, target: Tensor) -> None:
     # The ATen kernels check the [0, 1] domain per element; a pointwise
     # decomposition has to assert on the whole tensor instead. Without this the
     # log terms below clamp to -100 and an out-of-domain value silently returns
@@ -697,6 +689,18 @@ def binary_cross_entropy(
         torch.all((target >= 0) & (target <= 1)),
         "all elements of target should be between 0 and 1",
     )
+
+
+@register_decomposition(aten.binary_cross_entropy)
+@out_wrapper()
+@pw_cast_for_opmath
+def binary_cross_entropy(
+    self: Tensor,
+    target: Tensor,
+    weight: Tensor | None = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    _assert_binary_cross_entropy_inputs(self, target)
     loss = (target - 1) * torch.maximum(
         torch.log1p(-self), self.new_full((), -100)
     ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
@@ -2688,6 +2692,7 @@ def native_batch_norm_backward(
     eps: float,
     output_mask: list[bool],
 ) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
+    r"""Decompose batch norm gradients while preserving native output metadata."""
     input_dtype = input.dtype
     if weight is not None:
         weight_dtype = weight.dtype
@@ -2718,6 +2723,39 @@ def native_batch_norm_backward(
     input_rank = input.dim()
     if input_rank < 2:
         raise AssertionError(f"rank of the input must be at least 2, got {input_rank}")
+
+    channels_last = (
+        input.device.type == "cuda"
+        and (train or any(output_mask[1:]))
+        and all(
+            (value.is_contiguous() and value.stride(1) == 1)
+            or value.is_contiguous(memory_format=torch.channels_last)
+            or value.is_contiguous(memory_format=torch.channels_last_3d)
+            for value in (input, grad_out)
+        )
+        and grad_out.numel() < 2**31
+        and sum(
+            (size - 1) * stride
+            for size, stride in zip(grad_out.shape, grad_out.stride())
+        )
+        < 2**31
+    )
+    mean_value = (
+        running_mean_cast
+        if not train and save_mean is not None and save_mean.numel() == 0
+        else save_mean
+    )
+    channels_last = (
+        channels_last
+        and mean_value is not None
+        and mean_value.is_contiguous()
+        and save_invstd is not None
+        and save_invstd.is_contiguous()
+        and (weight is None or weight.is_contiguous())
+    )
+    if channels_last:
+        # Native CUDA's channels-last reduction ignores the parameter output masks.
+        output_mask = [output_mask[0], weight is not None, weight is not None]
 
     axis = 1
     num_features = prod(list(input_shape)) / input_shape[axis]
@@ -2776,6 +2814,11 @@ def native_batch_norm_backward(
         grad_bias = grad_output_sum
     else:
         grad_bias = None  # "None" doesn't work with vjp, should use zeros for vjp
+
+    if channels_last and weight is None:
+        grad_weight = torch.empty(0, dtype=computation_dtype, device=input.device)
+        grad_bias = torch.empty_like(grad_weight)
+        weight_dtype = computation_dtype
 
     return (
         _maybe_cast(grad_input if output_mask[0] else None, input_dtype),

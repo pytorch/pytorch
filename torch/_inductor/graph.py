@@ -100,10 +100,13 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
-    _cuda_mul_mutation_destination,
     _cuda_mul_mutation_storage_nodes,
+    _cuda_native_mutation_destination,
+    _cuda_replay_view_path,
+    _cuda_view_copy_destination,
     constrain_to_fake_tensors,
     constrain_to_fx_strides,
+    copy_,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
@@ -472,6 +475,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, TensorBox | TorchBindObject | sympy.Expr] = {}
+        self.negative_buffers: OrderedSet[str] = OrderedSet()
+        self.conjugate_buffers: OrderedSet[str] = OrderedSet()
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         # InputBuffer offsets are relative to input.data_ptr(); explicit FX
         # as_strided storage offsets are relative to the input's storage.
@@ -1012,7 +1017,11 @@ class GraphLowering(torch.fx.Interpreter):
             return f"{self.name}_{name}"
         return name
 
-    def preserve_input_alignment(self, storage_names: Iterable[str]) -> None:
+    def preserve_input_alignment(
+        self,
+        storage_names: Iterable[str],
+        reason: str = "strict FP64 CUDA multiplication requires original input pointer alignment",
+    ) -> None:
         storage_names = OrderedSet(storage_names)
         input_names = OrderedSet[str]()
         # Dtype-changing views can be aliasing fallback buffers.
@@ -1036,10 +1045,39 @@ class GraphLowering(torch.fx.Interpreter):
                 self.inputs_to_check = [
                     idx
                     for idx in self.inputs_to_check
-                    if self.graph_input_names[idx] not in input_names
+                    # Later placeholders may not have registered their names yet.
+                    if idx >= len(self.graph_input_names)
+                    or self.graph_input_names[idx] not in input_names
                 ]
             # CUDA graph input copies can change the native multiplication's NaN priority.
-            self.disable_cudagraphs_reason = "strict FP64 CUDA multiplication requires original input pointer alignment"
+            self.disable_cudagraphs_reason = reason
+
+    def register_lazy_buffer(self, name: str, example: torch.Tensor) -> None:
+        if (
+            example.device.type == "cuda"
+            and torch.version.hip is None
+            and example.is_conj()
+        ):
+            self.conjugate_buffers.add(name)
+            self.never_reuse_but_free_buffers.add(name)
+        if (
+            example.device.type == "cuda"
+            and torch.version.hip is None
+            and example.is_neg()
+        ):
+            self.negative_buffers.add(name)
+            # Reusing this Tensor object retains its flag on an ordinary output.
+            self.never_reuse_but_free_buffers.add(name)
+
+    def is_negative_buffer(self, name: str) -> bool:
+        if self.scheduler is not None:
+            name = self.scheduler.mutation_real_name.get(name, name)
+        return name in self.negative_buffers
+
+    def is_conjugate_buffer(self, name: str) -> bool:
+        if self.scheduler is not None:
+            name = self.scheduler.mutation_real_name.get(name, name)
+        return name in self.conjugate_buffers
 
     def preserve_subgraph_input_alignment(
         self, subgraph: GraphLowering, operands: Sequence[ir.IRNode]
@@ -1529,6 +1567,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names.append(target)
         self.graph_input_storage_offsets[target] = storage_offset
         self.graph_inputs_original[target] = tensor.data.data  # type: ignore[union-attr]
+        self.register_lazy_buffer(target, example)
+        if self.is_negative_buffer(target) or self.is_conjugate_buffer(target):
+            self.preserve_input_alignment(
+                (target,),
+                reason="lazy tensor bits require original input storage",
+            )
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
 
@@ -2172,7 +2216,7 @@ class GraphLowering(torch.fx.Interpreter):
                 fallback_args, fallback_kwargs = self.fetch_args_kwargs_from_env(n)
                 native_destination = None
                 if n in self.cuda_mul_mutation_storage_nodes:
-                    native_destination = _cuda_mul_mutation_destination(n)
+                    native_destination = _cuda_native_mutation_destination(n)
                     if native_destination is not None:
                         from torch.fx.experimental.proxy_tensor import (
                             _is_original_aten_mutation,
@@ -2195,9 +2239,7 @@ class GraphLowering(torch.fx.Interpreter):
                     *fallback_args, **fallback_kwargs
                 )
                 if native_destination is not None and target == n.target:
-                    result = fallback_handler(
-                        aten.copy_.default, add_to_fallback_set=False
-                    )(native_destination[0], result)
+                    result = copy_(native_destination[0], result)
             elif (
                 n.op == "call_function"
                 and isinstance(
@@ -2243,6 +2285,25 @@ class GraphLowering(torch.fx.Interpreter):
                         f"Unknown layout constraint for {info.dsl} user kernels: "
                         f"{constraint}"
                     )
+            elif (
+                is_call_function
+                and isinstance(n.target, torch._ops.OpOverload)
+                and (recovered := _cuda_view_copy_destination(n)) is not None
+            ):
+                destination, view_path = recovered
+                copy_args, copy_kwargs = self.fetch_args_kwargs_from_env(n)
+                copy_destination = _cuda_replay_view_path(destination, view_path)
+                copy_source = _cuda_replay_view_path(copy_args[0], view_path)
+                if (
+                    copy_destination.get_dtype().is_complex
+                    or copy_source.get_dtype().is_complex
+                ):
+                    ir.InplaceCopyFallback.create(copy_destination, copy_source)
+                else:
+                    copy_(copy_destination, copy_source)
+                result = fallback_handler(n.target, add_to_fallback_set=False)(
+                    destination, *copy_args[1:], **copy_kwargs
+                )
             else:
                 debug("")
                 result = super().run_node(n)

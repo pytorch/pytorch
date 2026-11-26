@@ -960,6 +960,12 @@ class FakeTensorUpdater:
         """Update FakeTensors on self.graph. We will try to do the minimum amount of work.
 
         Returns the number of nodes updated, including recursive updates on subgraphs."""
+        from torch.fx.experimental.proxy_tensor import (
+            _original_aten_mutation_storages,
+            _preserve_original_aten_mutation_storage,
+        )
+
+        native_mutation_storages = _original_aten_mutation_storages(self.gm.graph)
         existing_storages: defaultdict[int, int] = defaultdict(int)
         for node in self.gm.graph.nodes:
             if storage := get_node_storage(node):
@@ -974,8 +980,20 @@ class FakeTensorUpdater:
             )
 
         def update_node_fake_tensor(node: torch.fx.Node, new_fake_tensor: Any) -> bool:
+            valid, args, kwargs = get_fake_args_kwargs(node, self.gm)
+            retained_native_allocation = (
+                valid
+                and _preserve_original_aten_mutation_storage(
+                    node,
+                    node.meta.get("val"),
+                    new_fake_tensor,
+                    native_mutation_storages,
+                    (args, kwargs),
+                )
+            )
             if (
-                "val" in node.meta
+                not retained_native_allocation
+                and "val" in node.meta
                 and self._same_fake_tensor_metadata(
                     new_fake_tensor, node.meta["val"], node=node
                 )

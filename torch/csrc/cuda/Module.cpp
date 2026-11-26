@@ -29,6 +29,9 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#if !defined(USE_ROCM)
+#include <ATen/cuda/CUDABlas.h>
+#endif
 
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
@@ -2492,6 +2495,12 @@ PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
 
 static void initCudaMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+#if !defined(USE_ROCM) && CUDART_VERSION >= 12040
+  m.def(
+      "_cuda_getGemvLaunchPlan",
+      &at::cuda::blas::getGemvLaunchPlan,
+      py::call_guard<py::gil_scoped_release>());
+#endif
   m.def(
       "_cuda_getStreamFromExternal",
       [](uintptr_t data_ptr, c10::DeviceIndex device_index) {

@@ -658,7 +658,7 @@ class CppOverrides(OpOverrides):
         return arith_promoted("-", a, b)
 
     @staticmethod
-    def mul(a, b, *, native_cuda_execution=None):
+    def mul(a, b):
         return arith_promoted("*", a, b)
 
     @staticmethod
@@ -1308,7 +1308,7 @@ class CppVecOverrides(CppOverrides):
         return f"{a} - {b}"
 
     @staticmethod
-    def mul(a, b, *, native_cuda_execution=None):
+    def mul(a, b):
         return f"{a} * {b}"
 
     @staticmethod

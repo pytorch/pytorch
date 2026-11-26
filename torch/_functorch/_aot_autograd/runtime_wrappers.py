@@ -17,7 +17,7 @@ import typing
 import warnings
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import wraps
 from typing import Any
 
@@ -57,7 +57,11 @@ from torch._subclasses.fake_tensor import (
     is_fake_tensor,
 )
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
+from torch.fx.experimental.symbolic_shapes import (
+    guarding_hint_or_throw,
+    statically_known_true,
+    sym_eq,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import IntLikeType
 from torch.utils._python_dispatch import (
@@ -83,10 +87,16 @@ from .input_output_analysis import (
     create_synthetic_base_metadata,
     remove_dupe_metadata,
 )
-from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
+from .logging_utils import (
+    describe_input,
+    format_guard_bug_msg,
+    NativeGradientInfo,
+    track_graph_compiling,
+)
 from .schemas import (
     AOTConfig,
     CompilerWrapper,
+    FakifiedFlatArgs,
     FxValue,
     InductorWrapper,
     InputAliasInfo,
@@ -202,11 +212,225 @@ def _log_args_maybe_list(arg: object, label: str) -> None:
 # This is because there are some minor differences in how we treat these cases at runtime:
 # - resize_() is currently handled in the inference case, but not fully handled in the autograd case.
 # - the autograd cases inserts TensorAlias wrapper objects for outputs that alias inputs
+@dataclass(frozen=True)
+class SymbolicViewMetaRecipe:
+    # Only Python source and pickleable native ViewMeta classes/static constants.
+    expression: str
+    bindings: dict[str, Any]
+    base_idx: int
+    requires_grad: bool
+
+
+def _make_symbolic_view_meta_recipe(
+    sequence: Sequence[Any],
+    flat_args: list[FxValue],
+    source_to_deduped_arg: dict[str, int],
+    *,
+    base_idx: int,
+    requires_grad: bool,
+) -> SymbolicViewMetaRecipe | None:
+    from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
+    from torch.fx.experimental.symbolic_shapes import ShapeGuardPythonPrinter
+
+    from .codegen import PySourceBuilder
+
+    fake_mode = detect_fake_mode(flat_args)
+    if fake_mode is None or fake_mode.shape_env is None:
+        raise AssertionError("symbolic ViewMeta requires a ShapeEnv during capture")
+    shape_env = fake_mode.shape_env
+    # Evaluate against the original deduped inputs, before synthetic-base merging.
+    prefixes = sorted(
+        source_to_deduped_arg.items(), key=lambda item: len(item[0]), reverse=True
+    )
+
+    def source_ref(source: Any) -> str:
+        name = source.name
+        for prefix, slot in prefixes:
+            if name == prefix or name.startswith((prefix + ".", prefix + "[")):
+                return f"args[{slot}]" + name[len(prefix) :]
+        raise AssertionError(f"unbound symbolic ViewMeta source: {name}")
+
+    # Prefer recorded sources that identify the original runtime inputs.
+    symbol_to_source = {
+        symbol: [
+            source
+            for source in sources
+            if any(
+                source.name == prefix
+                or source.name.startswith((prefix + ".", prefix + "["))
+                for prefix, _ in prefixes
+            )
+        ]
+        for symbol, sources in shape_env.var_to_sources.items()
+    }
+
+    # Direct AOT callers may expose a compound input dimension (e.g. 2*n)
+    # without exposing n separately. Read complete metadata expressions before
+    # decomposing them into their constituent symbols.
+    expression_to_source: dict[Any, Any] = {}
+    derived_symbols: dict[Any, tuple[Any, int, Any]] = {}
+
+    def bind_runtime_expression(value: Any, source: Any) -> None:
+        if isinstance(value, torch.SymInt) and value.node.expr.free_symbols:
+            expression_to_source.setdefault(value.node.expr, source)
+
+    class RuntimeViewMetaPrinter(ShapeGuardPythonPrinter):
+        def _print(self, expr: Any, **kwargs: Any) -> str:
+            if source := expression_to_source.get(expr):
+                return source_ref(source)
+            return typing.cast(Any, super())._print(expr, **kwargs)
+
+        def _print_Symbol(self, expr: Any) -> str:
+            if binding := derived_symbols.get(expr):
+                source, coefficient, rest = binding
+                return f"(({source_ref(source)} - ({self._print(rest)})) // ({coefficient}))"
+            return super()._print_Symbol(expr)
+
+    for slot, arg in enumerate(flat_args):
+        source = LocalSource(f"_aot_view_recipe_runtime_slot_{slot}")
+        while any(source.name == prefix for prefix, _ in prefixes):
+            source = LocalSource(source.local_name + "_")
+        prefixes.append((source.name, slot))
+        if isinstance(arg, Tensor):
+            for prop, values in (
+                (TensorProperty.SIZE, arg.size()),
+                (TensorProperty.STRIDE, arg.stride()),
+            ):
+                for idx, value in enumerate(values):
+                    bind_runtime_expression(
+                        value, TensorPropertySource(source, prop, idx)
+                    )
+            bind_runtime_expression(
+                arg.storage_offset(),
+                TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+            )
+        else:
+            bind_runtime_expression(arg, source)
+    # Recover only an exact integer affine relation with one unavailable symbol.
+    # For input size 2*n, a replay parameter n is runtime_size // 2. Dependencies
+    # must already be bound, so these substitutions cannot introduce cycles.
+    available = {symbol for symbol, sources in symbol_to_source.items() if sources}
+    available.update(expr for expr in expression_to_source if expr.is_Symbol)
+    while True:
+        previous_count = len(available)
+        for expr, source in expression_to_source.items():
+            missing = expr.free_symbols - available
+            if len(missing) != 1:
+                continue
+            symbol = next(iter(missing))
+            coefficient = expr.diff(symbol)
+            rest = expr - coefficient * symbol
+            if (
+                coefficient.is_Integer
+                and coefficient != 0
+                and symbol not in rest.free_symbols
+            ):
+                derived_symbols[symbol] = (source, int(coefficient), rest)
+                available.add(symbol)
+        if len(available) == previous_count:
+            break
+
+    def parameters_available(expr: Any) -> bool:
+        if expr in expression_to_source or expr.free_symbols <= available:
+            return True
+        return not expr.is_Symbol and all(
+            parameters_available(arg) for arg in expr.args
+        )
+
+    # Forward-produced dimensions cannot be evaluated from the original inputs.
+    # Leave those outputs on the existing runtime alias replay path.
+    if any(
+        isinstance(value, torch.SymInt) and not parameters_available(value.node.expr)
+        for vm in sequence
+        for value in tree_flatten(vm.as_tuple())[0]
+    ):
+        return None
+    printer = RuntimeViewMetaPrinter(symbol_to_source, source_ref, symbol_to_source)
+    buf = PySourceBuilder()
+
+    def emit(value: Any) -> str:
+        if isinstance(value, torch.SymInt):
+            return printer.doprint(value.node.expr)
+        if isinstance(value, tuple):
+            return (
+                "("
+                + ", ".join(emit(v) for v in value)
+                + ("," if len(value) == 1 else "")
+                + ")"
+            )
+        if isinstance(value, list):
+            return "[" + ", ".join(emit(v) for v in value) + "]"
+        if value is None or type(value) in (int, bool, float, str):
+            return repr(value)
+        if isinstance(value, (Tensor, torch.SymFloat, torch.SymBool)):
+            raise AssertionError(
+                "ViewMeta recipe cannot persist a Tensor or symbolic object"
+            )
+        return buf.bind_value("_constant", value)
+
+    expressions = []
+    for vm in sequence:
+        constructor = buf.bind_value("_view_class", type(vm))
+        expressions.append(f"{constructor}({emit(vm.as_tuple())})")
+    return SymbolicViewMetaRecipe(
+        "[" + ", ".join(expressions) + "]", dict(buf.globals), base_idx, requires_grad
+    )
+
+
+def _build_symbolic_view_meta_constructor(
+    recipes: dict[int, SymbolicViewMetaRecipe],
+) -> Callable[[list[Any]], dict[int, list[Any]]]:
+    import math
+
+    from .codegen import PySourceBuilder
+
+    all_views = PySourceBuilder(
+        "_view_sequences", args="args", artifact_name="symbolic_view_sequences"
+    )
+    constructors = []
+    for output_idx, recipe in recipes.items():
+        buf = PySourceBuilder(
+            f"_view_sequence_{output_idx}",
+            args="args",
+            artifact_name="symbolic_view_sequence",
+        )
+        buf.bind(torch=torch, math=math, **recipe.bindings)
+        with buf.indent():
+            buf.writeline(f"return {recipe.expression}")
+        name = all_views.bind_value("_construct", buf.build())
+        constructors.append(f"{output_idx}: {name}(args)")
+    # Each invocation makes a fresh dictionary and fresh native sequence objects.
+    with all_views.indent():
+        all_views.writeline("return {" + ", ".join(constructors) + "}")
+    return typing.cast(Callable[[list[Any]], dict[int, list[Any]]], all_views.build())
+
+
+def _replay_symbolic_view_meta(
+    base: Tensor, target: Tensor, requires_grad: bool, sequence: list[Any]
+) -> Tensor:
+    out = torch._C._functionalization.apply_view_meta_sequence(base, sequence)
+    if out.shape != target.shape:
+        raise AssertionError(
+            f"regenerated view size {out.shape} differs from output {target.shape}"
+        )
+    if base.requires_grad and not requires_grad:
+        out = out.detach()
+    elif not base.requires_grad and requires_grad:
+        out.requires_grad_(True)
+    if hasattr(target, "_dynamo_propagated_dynamic_indices"):
+        mark_dynamo_propagated_dynamic_indices(
+            out, target._dynamo_propagated_dynamic_indices
+        )
+    return out
+
+
 @dataclass
 class RuntimeWrapper(CompilerWrapper):
     indices_of_inps_to_detach: list[int]
     trace_joint: bool
     disable_amp: bool
+    original_view_input_indices: tuple[int, ...] = ()
+    original_view_output_info: dict[int, OutputAliasInfo] = field(default_factory=dict)
 
     def post_compile(
         self,
@@ -222,6 +446,8 @@ class RuntimeWrapper(CompilerWrapper):
             trace_joint=self.trace_joint,
             keep_input_mutations=aot_config.keep_inference_input_mutations,
             disable_amp=self.disable_amp,
+            original_view_input_indices=self.original_view_input_indices,
+            original_view_output_info=self.original_view_output_info,
         )
 
 
@@ -572,6 +798,7 @@ class _RuntimeCompiledFnInvoker:
     indices_of_inps_to_detach: list[int]
     trace_joint: bool
     disable_amp: bool
+    original_view_input_indices: tuple[int, ...] = ()
     first_invocation_ctx: _FirstInvocationContext = field(
         default_factory=_FirstInvocationContext
     )
@@ -590,6 +817,8 @@ class _RuntimeCompiledFnInvoker:
                 # See Note [Detaching inputs that never need gradients]
                 for idx in self.indices_of_inps_to_detach:
                     if isinstance(args_[idx], torch.Tensor):
+                        if idx in self.original_view_input_indices:
+                            args_[idx] = args_[idx]._base
                         args_[idx] = args_[idx].detach()
 
                 # It's possible to have trace_joint inside user specified with no_grad() region,
@@ -637,6 +866,8 @@ class _RuntimeForwardEpilogue:
     runtime_metadata: ViewAndMutationMeta
     trace_joint: bool
     keep_input_mutations: bool
+    original_view_input_indices: tuple[int, ...] = ()
+    original_view_output_info: dict[int, OutputAliasInfo] = field(default_factory=dict)
     epilogue_args_idx: tuple[int, ...] = field(init=False)
     output_handlers: tuple[
         NoopAliasHandler
@@ -669,8 +900,12 @@ class _RuntimeForwardEpilogue:
 
         if self.runtime_metadata.num_outputs_aliased > 0:
             self.output_handlers = tuple(
-                make_output_handler(info, self.runtime_metadata, self.trace_joint)
-                for info in self.runtime_metadata.output_info
+                make_output_handler(
+                    self.original_view_output_info.get(i, info),
+                    self.runtime_metadata,
+                    self.trace_joint,
+                )
+                for i, info in enumerate(self.runtime_metadata.output_info)
             )
         else:
             self.output_handlers = ()
@@ -741,6 +976,8 @@ class _RuntimeForwardEpilogue:
             if not meta.mutates_data and not meta.mutates_metadata:
                 continue
             original_inpt = orig_inputs[inpt_idx]
+            if inpt_idx in self.original_view_input_indices:
+                original_inpt = typing.cast(Tensor, original_inpt._base)
             updated_inpt = updated_inputs[i]
             if meta.mutates_storage_metadata:
                 # See Note [set_() Input Mutations in AOTAutograd]
@@ -878,6 +1115,7 @@ def _codegen_compiled_fn_invocation(
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
     disable_amp: bool,
+    original_view_input_indices: tuple[int, ...] = (),
 ) -> None:
     buf.emit("with _first_ctx_():", indent=1)
     # trace_joint is known at codegen time. Only the joint/training path needs
@@ -885,9 +1123,12 @@ def _codegen_compiled_fn_invocation(
     if trace_joint:
         buf.emit("args_ = list(args)", indent=2)
         for idx in indices_of_inps_to_detach:
+            source = f"args_[{idx}]"
+            if idx in original_view_input_indices:
+                source += "._base"
             buf.emit(
                 f"if isinstance(args_[{idx}], torch.Tensor): "
-                f"args_[{idx}] = args_[{idx}].detach()",
+                f"args_[{idx}] = {source}.detach()",
                 indent=2,
             )
         buf.emit(
@@ -997,17 +1238,22 @@ def _create_runtime_wrapper(
     trace_joint: bool,
     keep_input_mutations: bool,
     disable_amp: bool,
+    original_view_input_indices: tuple[int, ...] = (),
+    original_view_output_info: dict[int, OutputAliasInfo] | None = None,
 ) -> Callable[..., Any]:
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
         indices_of_inps_to_detach=indices_of_inps_to_detach,
         trace_joint=trace_joint,
         disable_amp=disable_amp,
+        original_view_input_indices=original_view_input_indices,
     )
     runtime_epilogue = _RuntimeForwardEpilogue(
         runtime_metadata=runtime_metadata,
         trace_joint=trace_joint,
         keep_input_mutations=keep_input_mutations,
+        original_view_input_indices=original_view_input_indices,
+        original_view_output_info=original_view_output_info or {},
     )
 
     # The orchestration closes over these two codegen'd epilogue functions directly
@@ -1117,6 +1363,8 @@ def _create_runtime_wrapper(
                     continue
                 wrote_body = True
                 oi = f"orig_inputs[{inpt_idx}]"
+                if inpt_idx in original_view_input_indices:
+                    oi += "._base"
                 ui = f"updated_inputs[{i}]"
                 if meta.mutates_storage_metadata:
                     u = buf.fresh_name("_u")
@@ -1190,7 +1438,11 @@ def _create_runtime_wrapper(
     _codegen_capture_orig_inputs(buf, epilogue_args_idx)
     _codegen_increment_mutation_versions(buf, keep_input_mutations, runtime_metadata)
     _codegen_compiled_fn_invocation(
-        buf, trace_joint, indices_of_inps_to_detach, disable_amp
+        buf,
+        trace_joint,
+        indices_of_inps_to_detach,
+        disable_amp,
+        original_view_input_indices,
     )
     _codegen_epilogue(
         buf,
@@ -1627,12 +1879,38 @@ class EffectTokensWrapper(CompilerWrapper):
 # Dynamo's guards are not enough.  In practice, this seems to cover
 # everything.
 #
+def _guard_view_base(
+    builder: Any,
+    guard: Any,
+    *,
+    size: tuple[int | None, ...],
+    stride: tuple[int | None, ...],
+) -> None:
+    graph = builder.check_fn_manager.output_graph
+    if graph is None:
+        raise AssertionError("view base guards require an output graph")
+    graph.input_source_to_sizes_strides[guard.originating_source] = {
+        "size": size,
+        "stride": stride,
+    }
+    alias_count = len(builder.no_tensor_aliasing_names)
+    builder.TENSOR_MATCH(guard)
+    # A hidden base can also be an explicit input or another view's base.
+    del builder.no_tensor_aliasing_names[alias_count:]
+    del builder.no_tensor_aliasing_sources[alias_count:]
+    del builder.no_tensor_aliasing_guard_managers[alias_count:]
+
+
 @dataclass
 class AOTDedupeWrapper(CompilerWrapper):
     keep_arg_mask: list[bool] = field(default_factory=list)
     add_dupe_map: list[int] = field(default_factory=list)
     old_input_metadata: list[InputAliasInfo] = field(default_factory=list)
     needs_post_compile: bool = True
+    trace_joint: bool = False
+    view_input_metadata: dict[
+        int, tuple[tuple[int | None, ...], tuple[int | None, ...]] | None
+    ] = field(default_factory=dict)
 
     # NB: Hot path, avoid set lookups here
     # TODO: Can avoid the zip here too, probably
@@ -1651,6 +1929,37 @@ class AOTDedupeWrapper(CompilerWrapper):
         *,
         fw_metadata: ViewAndMutationMeta,
     ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+        # Record source positions before removing duplicates or introducing bases.
+        if (
+            aot_config.preserve_tangent_layout
+            and self.trace_joint
+            and aot_config.aot_autograd_arg_pos_to_source is not None
+        ):
+            for i, (arg, info) in enumerate(zip(flat_args, fw_metadata.input_info)):
+                if (
+                    not isinstance(arg, Tensor)
+                    or not arg.requires_grad
+                    or not info.mutates_data
+                    or info.mutates_metadata
+                ):
+                    continue
+                base = arg._base
+                if base is None:
+                    self.view_input_metadata[i] = None
+                else:
+                    int(arg.storage_offset())
+                    int(base.storage_offset())
+                    self.view_input_metadata[i] = (
+                        tuple(
+                            None if isinstance(s, torch.SymInt) else s
+                            for s in base.size()
+                        ),
+                        tuple(
+                            None if isinstance(s, torch.SymInt) else s
+                            for s in base.stride()
+                        ),
+                    )
+
         # Use information about whether or not flat_fn mutates its arguments
         # or not to handle dupe args
 
@@ -1817,6 +2126,48 @@ class AOTDedupeWrapper(CompilerWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
+        if self.view_input_metadata and aot_config.aot_autograd_arg_pos_to_source:
+            from torch._dynamo.guards import GuardBuilder, install_guard
+            from torch._dynamo.source import AttrSource, CallFunctionNoArgsSource
+
+            if TracingContext.try_get() is not None:
+                for i, metadata in self.view_input_metadata.items():
+                    caller = aot_config.aot_autograd_arg_pos_to_source[i]
+                    if caller is None:
+                        continue
+                    source = AttrSource(caller, "_base")
+                    install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+                    install_guard(
+                        AttrSource(caller, "is_leaf").make_guard(
+                            GuardBuilder.EQUALS_MATCH
+                        )
+                    )
+                    if metadata is None:
+                        continue
+                    size, stride = metadata
+                    install_guard(
+                        source.make_guard(
+                            functools.partial(
+                                _guard_view_base, size=size, stride=stride
+                            )
+                        )
+                    )
+                    install_guard(
+                        AttrSource(source, "is_leaf").make_guard(
+                            GuardBuilder.EQUALS_MATCH
+                        )
+                    )
+                    for owner, attr in (
+                        (source, "is_contiguous"),
+                        (source, "storage_offset"),
+                        (caller, "storage_offset"),
+                    ):
+                        install_guard(
+                            CallFunctionNoArgsSource(
+                                AttrSource(owner, attr)
+                            ).make_guard(GuardBuilder.EQUALS_MATCH)
+                        )
+
         if not self.needs_post_compile:
             return compiled_fn
 
@@ -1896,6 +2247,15 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         default_factory=lambda: collections.defaultdict(list)
     )
     other_arg_indices: list[int] = field(default_factory=list)
+    input_output_indices: dict[int, int] = field(default_factory=dict)
+    original_view_output_info: dict[int, OutputAliasInfo] = field(default_factory=dict)
+    original_view_output_recipes: dict[int, SymbolicViewMetaRecipe] = field(
+        default_factory=dict
+    )
+
+    @property
+    def original_view_input_indices(self) -> tuple[int, ...]:
+        return tuple(idx for idx, group in self.base_groups.items() if len(group) == 1)
 
     def pre_compile(
         self,
@@ -1905,6 +2265,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
+        source_to_deduped_arg: dict[str, int] | None = None,
     ) -> tuple[Callable[..., Any], list[FxValue], list[AOTInput], ViewAndMutationMeta]:
         is_inference = not self.trace_joint
         (
@@ -1917,6 +2278,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             flat_args_descs,
             fw_metadata.input_info,
             is_inference=is_inference,
+            allow_singleton_view=not requires_subclass_dispatch(
+                typing.cast(FakifiedFlatArgs, flat_args), fw_metadata
+            ),
         )
 
         # Happy path: we don't need synthetic bases
@@ -1951,6 +2315,13 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 f"got {len(fw_metadata.input_info)} != {len(synthetic_base_info)}"
             )
 
+        # Keep returned input objects across the synthetic calling convention.
+        for output_idx, info in enumerate(fw_metadata.output_info):
+            if info.output_type == OutputType.is_input:
+                if info.base_idx is None:
+                    raise AssertionError("returned input must have an input index")
+                self.input_output_indices[output_idx] = info.base_idx
+
         # Update our forward metadata to take synthetic bases into account
         (
             fw_metadata_updated,
@@ -1981,6 +2352,34 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 self.base_groups[base_idx].append(orig_idx)
         other_arg_entries.sort()
         self.other_arg_indices = [orig_idx for _, orig_idx in other_arg_entries]
+        for output_idx, info in enumerate(fw_metadata.output_info):
+            if info.output_type not in (OutputType.is_input, OutputType.alias_of_input):
+                continue
+            if info.base_idx is None:
+                raise AssertionError("input alias must have an input index")
+            entry = synthetic_base_info[info.base_idx]
+            if not isinstance(entry, tuple) or len(self.base_groups[entry[0]]) != 1:
+                continue
+            vms = info.view_meta_sequence
+            if vms is not None and any(vm.has_symbolic_inputs for vm in vms.sequence):
+                if info.output_type != OutputType.alias_of_input:
+                    raise AssertionError(
+                        "symbolic native replay requires an input alias"
+                    )
+                recipe = _make_symbolic_view_meta_recipe(
+                    vms.sequence,
+                    flat_args,
+                    source_to_deduped_arg or {},
+                    base_idx=info.base_idx,
+                    requires_grad=info.requires_grad,
+                )
+                if recipe is not None:
+                    self.original_view_output_recipes[output_idx] = recipe
+                    continue
+                vms = None
+            self.original_view_output_info[output_idx] = replace(
+                info, base_idx=entry[0], view_meta_sequence=vms
+            )
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
@@ -2087,15 +2486,30 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             artifact_name="synthetic_base_wrapper",
         )
         buf.bind(torch=torch, _compiled_fn_=compiled_fn)
+        if self.original_view_output_recipes:
+            buf.bind(
+                _construct_view_sequences_=_build_symbolic_view_meta_constructor(
+                    self.original_view_output_recipes
+                ),
+                _replay_symbolic_view_meta_=_replay_symbolic_view_meta,
+            )
 
         with buf.indent():
+            if self.original_view_output_recipes:
+                view_inputs = ", ".join(
+                    f"{idx}: args[{recipe.base_idx}]"
+                    for idx, recipe in self.original_view_output_recipes.items()
+                )
+                buf.writeline("_view_grad_enabled = torch.is_grad_enabled()")
+                buf.writeline("_view_sequences = _construct_view_sequences_(args)")
+                buf.writeline(f"_view_inputs = {{{view_inputs}}}")
             buf.writeline(f"_bases = [None] * {num_bases}")
             for base_idx in sorted(base_groups):
                 group = base_groups[base_idx]
                 first_orig = group[0]
                 if len(group) == 1:
                     indices_check = f"args[{first_orig}]._base is not None"
-                    base_expr = f"args[{first_orig}]._base"
+                    base_expr = f"args[{first_orig}]"
                 else:
                     indices_str = ", ".join(str(i) for i in group)
                     indices_check = (
@@ -2120,6 +2534,13 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 meta_items = ", ".join(f"args[{i}]" for i in aliased_meta_mut_indices)
                 buf.writeline(f"_meta_mut = [{meta_items}]")
 
+            if self.input_output_indices:
+                input_outs = ", ".join(
+                    f"{output_idx}: args[{input_idx}]"
+                    for output_idx, input_idx in self.input_output_indices.items()
+                )
+                buf.writeline(f"_input_outs = {{{input_outs}}}")
+
             buf.writeline("args.clear()")
             buf.writeline("_outs = _compiled_fn_(_new_args)")
 
@@ -2137,13 +2558,47 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     buf.writeline(
                         "_inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())"
                     )
-                buf.writeline("return _user_outs")
-            else:
-                buf.writeline("return _outs")
+                buf.writeline("_outs = _user_outs")
+
+            if self.input_output_indices:
+                buf.writeline("_outs = list(_outs)")
+                buf.writeline("for _idx, _inp in _input_outs.items():")
+                with buf.indent():
+                    buf.writeline("_outs[_idx] = _inp")
+            if self.original_view_output_recipes:
+                buf.writeline("_outs = list(_outs)")
+                buf.writeline("with torch.set_grad_enabled(_view_grad_enabled):")
+                with buf.indent():
+                    for idx, recipe in self.original_view_output_recipes.items():
+                        buf.writeline(
+                            f"_outs[{idx}] = _replay_symbolic_view_meta_("
+                            f"_view_inputs[{idx}], _outs[{idx}], "
+                            f"{recipe.requires_grad!r}, _view_sequences[{idx}])"
+                        )
+            buf.writeline("return _outs")
 
         inner_fn = buf.build(wrapped_fn=compiled_fn)
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn
+
+
+def _can_project_input_view(view: Tensor) -> bool:
+    """Prove that gathering its base gradient inverts this view's backward."""
+    from torch._prims_common import K
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    base = view._base
+    if base is None:
+        return False
+    span = 1
+    for size, stride in sorted(map(K, view.size(), view.stride())):
+        if guard_or_false(size == 1):
+            continue
+        if not guard_or_false(size > 0) or not guard_or_false(stride >= span):
+            return False
+        span += (size - 1) * stride
+    offset = view.storage_offset() - base.storage_offset()
+    return guard_or_false(offset >= 0) and guard_or_false(offset + span <= base.numel())
 
 
 # Note [Handling mutations on an input that aliases other inputs]
@@ -2222,6 +2677,7 @@ def merge_view_inputs(
     *,
     # The autograd case currently has more restrictions than the inference case.
     is_inference: bool,
+    allow_singleton_view: bool = True,
 ) -> tuple[list[Any], list[AOTInput], list[int | tuple[int, torch.Tensor]] | None]:
     if fwd_inputs_descs is None:
         fwd_inputs_descs = [DummyAOTInput(i) for i in range(len(fwd_inputs))]
@@ -2287,7 +2743,33 @@ def merge_view_inputs(
     #   idx corresponds to which synthetic base from the outer calling context to view
     inner_calling_convention_meta: dict[int, int | tuple[int, torch.Tensor]] = {}
     for aliased_input_indices in storage_ref_to_idx.values():
-        if len(aliased_input_indices) <= 1 or not any(
+        input_view = fwd_inputs[aliased_input_indices[0]]
+        singleton_view = (
+            len(aliased_input_indices) == 1
+            and allow_singleton_view
+            and not is_inference
+            and aot_config is not None
+            and aot_config.preserve_tangent_layout
+            # The caller/base relationship must be guarded by Dynamo.
+            and aot_config.aot_autograd_arg_pos_to_source is not None
+            and input_view.requires_grad
+            and not input_view.is_leaf
+            and input_view._base is not None
+            and input_view._base.is_contiguous()
+            and input_view._base.requires_grad
+            and input_view.dtype == input_view._base.dtype
+            and not mutated_input_info[aliased_input_indices[0]].mutates_metadata
+            and (
+                mutated_input_info[
+                    aliased_input_indices[0]
+                ].mutations_under_no_grad_or_inference_mode
+                or mutated_input_info[
+                    aliased_input_indices[0]
+                ].mutations_hidden_from_autograd
+            )
+            and _can_project_input_view(input_view)
+        )
+        if (len(aliased_input_indices) <= 1 and not singleton_view) or not any(
             # We only care about mutations that affect all aliases,
             # so metadata mutations on an input doesn't require us to do synthetic base handling.
             mutated_input_info[inpt_idx].mutates_data
@@ -2310,7 +2792,7 @@ def merge_view_inputs(
         aliased_input_indices_no_false_sharing = compute_overlapping_inputs(
             aot_config, fwd_inputs, aliased_input_indices
         )
-        if len(aliased_input_indices_no_false_sharing) <= 1:
+        if len(aliased_input_indices_no_false_sharing) <= 1 and not singleton_view:
             other_args.extend(
                 fwd_inputs[curr_idx] for curr_idx in aliased_input_indices
             )
@@ -2319,8 +2801,8 @@ def merge_view_inputs(
             )
             continue
 
-        # We detected an input that was mutated, AND aliases with another input.
-        # we need to replace this set of aliased inputs with a single synthetic base.
+        # Trace against the differentiable base to retain native accumulation
+        # order; a singleton still crosses CompiledFunction.apply as its view.
         # For now, I'm banning a bunch of cases. We expect dynamo to properly detect these cases
         # and error out. We can fix them later.
         # These checks are transitive, so we don't need to check every pair.
@@ -2499,6 +2981,9 @@ class AutogradLazyBackwardCompileInfo:
     placeholder_list: list[Any]
     saved_context: TracingContext | None
     saved_compile_context: CompileContext | None
+    nullable_cotangent_plans: collections.OrderedDict[
+        tuple[int, ...], tuple[int, ...]
+    ] = field(default_factory=collections.OrderedDict)
 
 
 # On an AOT Autograd cache hit, we already have a lowered backward, so there is usually
@@ -2655,6 +3140,8 @@ class AOTDispatchAutogradCompileSpec:
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
     backward_input_signature: tuple[Any, ...] | None = None
+    original_view_input_indices: tuple[int, ...] = ()
+    original_view_output_info: dict[int, OutputAliasInfo] = field(default_factory=dict)
 
 
 @dataclass
@@ -3118,6 +3605,14 @@ class _AutogradBackwardCompiler:
             if self.bw_compiler is None:
                 raise AssertionError("bw_compiler must not be None")
             bw_module_copy = copy.deepcopy(bw_module)
+            if (
+                self.aot_config.preserve_tangent_layout
+                and isinstance(bw_module_copy, fx.GraphModule)
+                and any(arg is None for arg in placeholder_list)
+            ):
+                _specialize_nullable_gradient_accumulation(
+                    bw_module_copy, placeholder_list
+                )
             self.compiled_bw = self.bw_compiler(bw_module_copy, placeholder_list)
             self.backward_input_signature = signature
             # Maybe save cache entry
@@ -3202,6 +3697,432 @@ class _AutogradBackwardCompiler:
                 )
 
 
+def _nullable_gradient_replacements(
+    gm: fx.GraphModule, inputs: Sequence[Any]
+) -> dict[fx.Node, fx.Node | None]:
+    # Native InputBuffer skips absent gradients before addition; a Tensor of
+    # zeros is an actual contribution and must keep its floating-point behavior.
+    replacements: dict[fx.Node, fx.Node | None] = {}
+    placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+    if len(placeholders) != len(inputs):
+        raise RuntimeError("input count changed")
+    for n, value in zip(placeholders, inputs):
+        if (
+            value is None
+            and n.name.startswith("tangents_")
+            and isinstance(n.meta.get("val"), torch.Tensor)
+        ):
+            replacements[n] = None
+
+    native_info = gm.meta.get("native_gradient_info")
+    disabled: set[fx.Node] = set()
+    absent: set[int] = set()
+    if isinstance(native_info, NativeGradientInfo):
+        tangents = [
+            (n, value)
+            for n, value in zip(placeholders, inputs)
+            if n.name.startswith("tangents_")
+        ]
+        if len(tangents) != native_info.root_count:
+            raise RuntimeError("native cotangent slot count changed")
+        absent = {index for index, (_, value) in enumerate(tangents) if value is None}
+        for n in gm.graph.nodes:
+            if n.op == "output":
+                continue
+            names = n.meta.get("grad_fn_names", [])
+            entry = native_info.nodes.get(n.meta.get("seq_nr"))
+            if (
+                entry is None
+                or not names
+                or names[-1] != entry.name
+                or not set(entry.roots).issubset(absent)
+            ):
+                continue
+            val = n.meta.get("val")
+            values = tree_flatten(val)[0]
+            if not values or any(
+                not isinstance(value, Tensor) or value.layout != torch.strided
+                for value in values
+            ):
+                raise RuntimeError("opaque inactive native derivative value")
+            disabled.add(n)
+            replacements[n] = None
+
+    def resolve(node: fx.Node) -> fx.Node | None:
+        return replacements.get(node, node)
+
+    for n in gm.graph.nodes:
+        if n.op in ("placeholder", "output") or n in disabled:
+            continue
+        leaves = tree_flatten((n.args, n.kwargs))[0]
+        resolved = [resolve(a) if isinstance(a, fx.Node) else a for a in leaves]
+        undefined = [
+            a
+            for a in leaves
+            if isinstance(a, fx.Node) and a in replacements and resolve(a) is None
+        ]
+        if not undefined:
+            continue
+        if not n.meta.get("is_gradient_acc", False):
+            entry = (
+                native_info.nodes.get(n.meta.get("seq_nr"))
+                if isinstance(native_info, NativeGradientInfo)
+                else None
+            )
+            names = n.meta.get("grad_fn_names", [])
+            if (
+                entry is not None
+                and names
+                and names[-1] == entry.name
+                and not set(entry.roots).issubset(absent)
+            ):
+                continue
+            raise RuntimeError(f"undefined cotangent reaches derivative {n.name}")
+        val = n.meta.get("val")
+        if not isinstance(val, torch.Tensor) or val.layout != torch.strided:
+            raise RuntimeError("unsupported accumulation output")
+        target = n.target
+        if not isinstance(target, torch._ops.OpOverload) or target._schema.is_mutable:
+            raise RuntimeError("nonfunctional accumulation")
+        if n.meta.get("grad_fn_names"):
+            raise RuntimeError("accumulation tag appears inside a derivative")
+        is_add = (
+            target == torch.ops.aten.add.Tensor
+            and n.kwargs.get("alpha", 1) == 1
+            and len(n.args) == 2
+        )
+        is_clone = (
+            target == torch.ops.aten.clone.default
+            and len(n.args) == 1
+            and n.kwargs.get("memory_format") in (None, torch.preserve_format)
+        )
+        if not (is_add or is_clone):
+            raise RuntimeError("not native engine accumulation or generated clone")
+        if any(isinstance(a, torch.Tensor) for a in resolved):
+            raise RuntimeError("uncaptured tensor input")
+        live = [
+            a
+            for a in resolved
+            if isinstance(a, fx.Node) and isinstance(a.meta.get("val"), torch.Tensor)
+        ]
+        if not live:
+            replacements[n] = None
+        elif len(live) == 1:
+            value = live[0].meta["val"]
+            if not (
+                value.dtype == val.dtype
+                and value.device == val.device
+                and value.layout == val.layout
+                and value.is_neg() == val.is_neg()
+                and value.is_conj() == val.is_conj()
+                and statically_known_true(sym_eq(value.size(), val.size()))
+            ):
+                raise RuntimeError("accumulation coercion is required")
+            replacements[n] = live[0]
+        else:
+            raise RuntimeError("multiple live gradients with missing input")
+    if disabled and isinstance(native_info, NativeGradientInfo):
+        proven = {n.name for n, value in replacements.items() if value is None}
+        graph_names = {n.name for n in gm.graph.nodes}
+        # Native nodes can forward values whose generating derivative was folded.
+        proven.update(
+            name
+            for entry in native_info.nodes.values()
+            if set(entry.roots).issubset(absent)
+            for name, generated in entry.outputs
+            if generated and name not in graph_names
+        )
+        for entry in native_info.nodes.values():
+            if set(entry.roots).issubset(absent) and (
+                not entry.outputs_complete
+                or not all(name in proven for name, _ in entry.outputs)
+            ):
+                raise RuntimeError("native output edge is not proven absent")
+
+        # A generated clone protects a gradient during accumulation. If every
+        # original consumer became the same single live gradient, Native never
+        # executes that accumulation and preserves the incoming tensor itself.
+        for value in list(replacements.values()):
+            if not isinstance(value, fx.Node) or value in replacements:
+                continue
+            if (
+                value.meta.get("is_gradient_acc", False)
+                and not value.meta.get("grad_fn_names")
+                and value.target == torch.ops.aten.clone.default
+                and len(value.args) == 1
+                and value.kwargs.get("memory_format") in (None, torch.preserve_format)
+                and isinstance(value.args[0], fx.Node)
+                and value.users
+                and all(
+                    user in replacements and replacements[user] is value
+                    for user in value.users
+                )
+            ):
+                replacements[value] = value.args[0]
+
+        for n, value in list(replacements.items()):
+            seen = set()
+            while isinstance(value, fx.Node) and value in replacements:
+                if value in seen:
+                    raise RuntimeError("cyclic nullable gradient replacement")
+                seen.add(value)
+                value = replacements[value]
+            replacements[n] = value
+    return replacements
+
+
+def _specialize_nullable_gradient_accumulation(
+    gm: fx.GraphModule, inputs: Sequence[Any]
+) -> None:
+    from torch.utils._sympy.interp import sympy_interp
+    from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+    replacements = _nullable_gradient_replacements(gm, inputs)
+    placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+    native_info = gm.meta.get("native_gradient_info")
+    tangents = [
+        value
+        for n, value in zip(placeholders, inputs)
+        if n.name.startswith("tangents_")
+    ]
+    absent = {index for index, value in enumerate(tangents) if value is None}
+    dimensions: dict[Any, tuple[fx.Node, int | None]] = {}
+    for n, arg in zip(placeholders, inputs):
+        if arg is None:
+            continue
+        value = n.meta.get("val")
+        if isinstance(value, torch.SymInt):
+            dimensions.setdefault(value.node.expr, (n, None))
+        elif isinstance(value, Tensor):
+            for axis, dim in enumerate(value.shape):
+                if isinstance(dim, torch.SymInt):
+                    dimensions.setdefault(dim.node.expr, (n, axis))
+    lowered: dict[Any, int | fx.Node] = {}
+    zeros: dict[fx.Node, fx.Node] = {}
+
+    def lower_dimension(dim: int | torch.SymInt) -> int | fx.Node:
+        if isinstance(dim, int):
+            return dim
+        expr = dim.node.expr
+        if expr.is_Integer:
+            return int(expr)
+        if expr in lowered:
+            return lowered[expr]
+        if expr in dimensions:
+            node, axis = dimensions[expr]
+            result = (
+                node
+                if axis is None
+                else gm.graph.call_function(torch.ops.aten.sym_size.int, (node, axis))
+            )
+        else:
+            if not expr.free_symbols.issubset(dimensions):
+                raise RuntimeError("missing gradient shape has no live or saved source")
+            env = {}
+            for symbol in expr.free_symbols:
+                node, axis = dimensions[symbol]
+                env[symbol] = fx.Proxy(
+                    node
+                    if axis is None
+                    else gm.graph.call_function(
+                        torch.ops.aten.sym_size.int, (node, axis)
+                    )
+                )
+            result = sympy_interp(PythonReferenceAnalysis, env, expr)
+            if isinstance(result, fx.Proxy):
+                result = result.node
+        lowered[expr] = result
+        return result
+
+    def zero_for(node: fx.Node) -> fx.Node:
+        if node in zeros:
+            return zeros[node]
+        value = node.meta.get("val")
+        if not isinstance(value, Tensor) or value.layout != torch.strided:
+            raise RuntimeError("local zero needs a captured dense Tensor edge")
+        size = [lower_dimension(dim) for dim in value.shape]
+        zero = gm.graph.call_function(
+            torch.ops.aten.full.default,
+            (size, 0),
+            {"dtype": value.dtype, "device": value.device, "pin_memory": False},
+        )
+        zero.meta["val"] = torch.zeros_like(
+            value, memory_format=torch.contiguous_format
+        )
+        zeros[node] = zero
+        return zero
+
+    for n in list(gm.graph.nodes):
+        if n.op == "placeholder" or n in replacements:
+            continue
+        entry = (
+            native_info.nodes.get(n.meta.get("seq_nr"))
+            if isinstance(native_info, NativeGradientInfo)
+            else None
+        )
+        names = n.meta.get("grad_fn_names", [])
+        active_native = (
+            entry is not None
+            and bool(names)
+            and names[-1] == entry.name
+            and not set(entry.roots).issubset(absent)
+        )
+
+        def replacement(arg: fx.Node) -> fx.Node | None:
+            value = replacements.get(arg, arg)
+            # A missing root stays absent for inactive branches. Only an active
+            # native derivative receives its own materialized zero contribution.
+            return zero_for(arg) if value is None and active_native else value
+
+        with gm.graph.inserting_before(n):
+            n.args = fx.map_arg(n.args, replacement)
+            n.kwargs = fx.map_arg(n.kwargs, replacement)
+    gm.graph.eliminate_dead_code()
+    gm.graph.lint()
+    gm.recompile()
+
+
+def _backward_surviving_gradient_indices(meta: ViewAndMutationMeta) -> list[int]:
+    inputs = [
+        i
+        for i, index in enumerate(meta.mutated_inp_runtime_indices)
+        if meta.input_info[index].mutates_data and meta.input_info[index].requires_grad
+    ]
+    outputs = [
+        meta.num_mutated_inp_runtime_indices + i
+        for i, info in enumerate(meta.output_info)
+        if info.output_type
+        in (
+            OutputType.non_alias,
+            OutputType.unsafe_view_alias,
+            OutputType.custom_function_view,
+        )
+        and issubclass(info.raw_type, torch.Tensor)
+        and info.requires_grad_for_backward
+    ]
+    start = meta.num_mutated_inp_runtime_indices + meta.num_outputs
+    return inputs + outputs + list(range(start, start + meta.num_intermediate_bases))
+
+
+def _nullable_output_cotangent_positions(
+    spec: AOTDispatchAutogradCompileSpec,
+) -> dict[tuple[int, ...], tuple[int, ...]]:
+    if (
+        not spec.aot_config.preserve_tangent_layout
+        or spec.maybe_subclass_meta is not None
+    ):
+        return {}
+    recipe = spec.lazy_backward_info
+    if not isinstance(recipe, AutogradLazyBackwardCompileInfo) or not isinstance(
+        recipe.bw_module, fx.GraphModule
+    ):
+        return {}
+    placeholders = [n for n in recipe.bw_module.graph.nodes if n.op == "placeholder"]
+    tangents = [
+        (i, n) for i, n in enumerate(placeholders) if n.name.startswith("tangents_")
+    ]
+    # Preserve ordinary autograd zero materialization for other layouts.
+    if any(
+        not isinstance(n.meta.get("val"), Tensor)
+        or n.meta["val"].layout != torch.strided
+        for _, n in tangents
+    ):
+        return {}
+    surviving = _backward_surviving_gradient_indices(spec.fw_metadata)
+    if len(tangents) != len(surviving):
+        raise AssertionError("cotangent output map mismatch")
+    masks: set[tuple[int, ...]] = {(index,) for index in range(len(tangents))}
+    native_info = recipe.bw_module.meta.get("native_gradient_info")
+    if isinstance(native_info, NativeGradientInfo):
+        masks.update(entry.roots for entry in native_info.nodes.values())
+    result: dict[tuple[int, ...], tuple[int, ...]] = {}
+    for mask in sorted(masks):
+        inputs = list(recipe.placeholder_list)
+        positions = tuple(tangents[index][0] for index in mask)
+        for position in positions:
+            inputs[position] = None
+        try:
+            _specialize_nullable_gradient_accumulation(
+                copy.deepcopy(recipe.bw_module), inputs
+            )
+        except RuntimeError:
+            continue
+        result[tuple(surviving[index] for index in mask)] = positions
+    return result
+
+
+def _nullable_cotangent_plan(
+    values: Sequence[Any],
+    meta: ViewAndMutationMeta,
+    recipe: AutogradLazyBackwardCompileInfo,
+    positions: dict[tuple[int, ...], tuple[int, ...]],
+) -> tuple[list[Any], tuple[int, ...]]:
+    surviving = _backward_surviving_gradient_indices(meta)
+    absent = tuple(index for index in surviving if values[index] is None)
+    if not absent:
+        return list(recipe.placeholder_list), ()
+    bw_module = recipe.bw_module
+    if not isinstance(bw_module, fx.GraphModule):
+        raise AssertionError("nullable gradients need the captured backward graph")
+    plans = recipe.nullable_cotangent_plans
+    materialize = plans.get(absent)
+    inputs = list(recipe.placeholder_list)
+    nullable_for_call: set[int] = set()
+    for mask, placeholder_positions in positions.items():
+        if all(values[index] is None for index in mask) and (
+            materialize is None or all(index not in materialize for index in mask)
+        ):
+            nullable_for_call.update(mask)
+            for position in placeholder_positions:
+                inputs[position] = None
+    if materialize is not None:
+        try:
+            plans.move_to_end(absent)
+        except KeyError:
+            # A concurrent call may evict this immutable decision.
+            pass
+        return inputs, materialize
+    if nullable_for_call and tuple(sorted(nullable_for_call)) not in positions:
+        try:
+            _specialize_nullable_gradient_accumulation(copy.deepcopy(bw_module), inputs)
+        except RuntimeError:
+            # Proven groups need not have a nullable joint path.
+            nullable_for_call.clear()
+            inputs = list(recipe.placeholder_list)
+    materialize = tuple(index for index in absent if index not in nullable_for_call)
+    plans[absent] = materialize
+    # Bound integer-only decisions like the compiled backward variants.
+    if len(plans) > 8:
+        try:
+            plans.popitem(last=False)
+        except KeyError:
+            # Concurrent evictions may already have emptied the cache.
+            pass
+    return inputs, materialize
+
+
+def _materialize_output_cotangents(
+    ctx: Any, values: list[Any], indices: tuple[int, ...]
+) -> list[Any]:
+    for index in indices:
+        metadata = ctx._input_metadata[index]
+        values[index] = torch.zeros(
+            metadata.shape, dtype=metadata.dtype, device=metadata.device
+        )
+    return values
+
+
+def _materialize_nonnullable_output_cotangents(
+    ctx: Any,
+    values: list[Any],
+    meta: ViewAndMutationMeta,
+    recipe: AutogradLazyBackwardCompileInfo,
+    positions: dict[tuple[int, ...], tuple[int, ...]],
+) -> None:
+    _, indices = _nullable_cotangent_plan(values, meta, recipe, positions)
+    _materialize_output_cotangents(ctx, values, indices)
+
+
 def _codegen_backward_prologue(
     fw_metadata: ViewAndMutationMeta,
     maybe_subclass_meta: SubclassMeta | None,
@@ -3222,33 +4143,8 @@ def _codegen_backward_prologue(
     has_mutations_in_bw = bool(
         fw_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw
     )
-    input_info = fw_metadata.input_info
 
-    inp_surviving: list[int] = []
-    for i, info_idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
-        if input_info[info_idx].mutates_data and input_info[info_idx].requires_grad:
-            inp_surviving.append(i)
-
-    out_surviving: list[int] = []
-    for i, info in enumerate(fw_metadata.output_info):
-        if (
-            info.output_type
-            in [
-                OutputType.non_alias,
-                OutputType.unsafe_view_alias,
-                OutputType.custom_function_view,
-            ]
-            and issubclass(info.raw_type, torch.Tensor)
-            and info.requires_grad_for_backward
-        ):
-            out_surviving.append(num_mutated_runtime_inps + i)
-
-    intermediate_start = num_mutated_runtime_inps + num_outputs
-    all_surviving = (
-        inp_surviving
-        + out_surviving
-        + list(range(intermediate_start, expected_grad_outs))
-    )
+    all_surviving = _backward_surviving_gradient_indices(fw_metadata)
     num_flat_bw_args_with_grads = len(all_surviving)
 
     buf = PySourceBuilder(
@@ -3639,11 +4535,28 @@ def _codegen_compiled_backward(
     return buf.build()
 
 
+def _project_original_view_gradients(ctx: Any, grads: Sequence[Any]) -> tuple[Any, ...]:
+    projected = list(grads)
+    for idx, view in ctx.original_input_views.items():
+        grad = projected[idx]
+        if grad is None:
+            continue
+        grad = grad.reshape(-1)[view.storage_offset() :]
+        grad = grad.as_strided(view.size(), view.stride())
+        if view.is_neg():
+            grad = grad._neg_view()
+        if view.is_conj():
+            grad = grad.conj()
+        projected[idx] = grad
+    return tuple(projected)
+
+
 @dataclass
 class _AOTDispatchAutogradFunctionFactory:
     spec: AOTDispatchAutogradCompileSpec
 
     def build(self) -> type[torch.autograd.Function]:
+        nullable_cotangent_positions = _nullable_output_cotangent_positions(self.spec)
         compile_id = CompileContext.current_compile_id()
         compile_id_str = str(compile_id) if compile_id is not None else None
         self.spec.fw_metadata.compile_id_str = compile_id_str
@@ -3816,11 +4729,35 @@ class _AOTDispatchAutogradFunctionFactory:
             if fw_outs_not_requiring_grad:
                 ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
             ctx._materialize_non_diff_grads = False
+            if nullable_cotangent_positions:
+                ctx.set_materialize_grads(False)
             _snapshot_external_objects(ctx)
 
             return tuple(raw_returns)
 
         forward_epilogue.finalize = _codegen_finalize  # type: ignore[method-assign]
+
+        def nullable_backward_graph(
+            values: Sequence[Any],
+        ) -> tuple[fx.GraphModule | None, tuple[int, ...]]:
+            if not isinstance(lazy_backward_info, AutogradLazyBackwardCompileInfo):
+                raise AssertionError(
+                    "nullable gradients need the backward compile recipe"
+                )
+            inputs, materialize = _nullable_cotangent_plan(
+                values, fw_metadata, lazy_backward_info, nullable_cotangent_positions
+            )
+            if not any(
+                values[index] is None and index not in materialize
+                for mask in nullable_cotangent_positions
+                for index in mask
+            ):
+                return None, materialize
+            bw_module = copy.deepcopy(
+                typing.cast(fx.GraphModule, lazy_backward_info.bw_module)
+            )
+            _specialize_nullable_gradient_accumulation(bw_module, inputs)
+            return bw_module, materialize
 
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
@@ -3832,10 +4769,25 @@ class _AOTDispatchAutogradFunctionFactory:
             _lazy_backward_info = lazy_backward_info
             _bw_prologue_fn = _codegen_bw_prologue
             _bw_has_input_alias_validator = input_alias_validator is not None
+            _bw_nullable_graph = (
+                staticmethod(nullable_backward_graph)
+                if nullable_cotangent_positions
+                else None
+            )
             _bw_epilogue_fn = _codegen_bw_epilogue
             _fwd_fn = _codegen_fwd
             _bwd_fn = _codegen_bwd
             boxed_grads_call = True
+            # Unused views arrive as detached bases, retaining the existing
+            # optimization without a caller-view gradient edge to project.
+            _original_view_input_indices = tuple(
+                i
+                for i in self.spec.original_view_input_indices
+                if i not in self.spec.indices_of_inps_to_detach
+            )
+            _project_original_view_gradients = staticmethod(
+                _project_original_view_gradients
+            )
 
             @staticmethod
             def _compiled_autograd_key(ctx: Any) -> tuple[Any, ...]:
@@ -3844,6 +4796,28 @@ class _AOTDispatchAutogradFunctionFactory:
             @staticmethod
             # pyrefly: ignore [bad-override]
             def forward(ctx: Any, *deduped_flat_tensor_args: Any) -> Any:
+                if CompiledFunction._original_view_input_indices:
+                    args = list(deduped_flat_tensor_args)
+                    original_input_views: dict[int, Tensor] = {}
+                    ctx.original_input_views = original_input_views
+                    for idx in CompiledFunction._original_view_input_indices:
+                        view = args[idx]
+                        base = view._base
+                        meta_base = torch.empty_strided(
+                            base.size(), base.stride(), dtype=base.dtype, device="meta"
+                        )
+                        meta_view = meta_base.as_strided(
+                            view.size(),
+                            view.stride(),
+                            view.storage_offset() - base.storage_offset(),
+                        )
+                        if view.is_neg() != base.is_neg():
+                            meta_view = meta_view._neg_view()
+                        if view.is_conj() != base.is_conj():
+                            meta_view = meta_view.conj()
+                        original_input_views[idx] = meta_view
+                        args[idx] = base
+                    deduped_flat_tensor_args = tuple(args)
                 return CompiledFunction._fwd_fn(
                     ctx,
                     deduped_flat_tensor_args,
@@ -3855,7 +4829,21 @@ class _AOTDispatchAutogradFunctionFactory:
 
             @staticmethod
             def backward(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
-                return CompiledFunction._bwd_fn(
+                if nullable_cotangent_positions:
+                    if not isinstance(
+                        lazy_backward_info, AutogradLazyBackwardCompileInfo
+                    ):
+                        raise AssertionError(
+                            "nullable gradients need the backward compile recipe"
+                        )
+                    _materialize_nonnullable_output_cotangents(
+                        ctx,
+                        flat_args[0],
+                        fw_metadata,
+                        lazy_backward_info,
+                        nullable_cotangent_positions,
+                    )
+                grads = CompiledFunction._bwd_fn(
                     flat_args,
                     ctx,
                     CompiledFunction._bw_prologue_fn,
@@ -3864,6 +4852,11 @@ class _AOTDispatchAutogradFunctionFactory:
                     CompiledFunction._bw_epilogue_fn,
                     CompiledFunction._double_backward,
                 )
+                if CompiledFunction._original_view_input_indices:
+                    grads = CompiledFunction._project_original_view_gradients(
+                        ctx, grads
+                    )
+                return grads
 
             @staticmethod
             def _double_backward(
@@ -4140,6 +5133,8 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             indices_of_inps_to_detach=spec.indices_of_inps_to_detach,
             trace_joint=True,
             disable_amp=spec.disable_amp,
+            original_view_input_indices=spec.original_view_input_indices,
+            original_view_output_info=spec.original_view_output_info,
         ).post_compile(
             compiled_function_cls.apply,
             spec.aot_config,

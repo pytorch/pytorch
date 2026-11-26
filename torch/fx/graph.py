@@ -2120,7 +2120,7 @@ class Graph:
     ) -> list[Node | int]:
         """Materialize a list of ``SymInt``/``int`` values as FX subgraphs rooted
         at existing nodes in this graph whose meta produces the referenced
-        symbols (typically SymInt placeholders or other sym ops).
+        symbols (typically SymInt placeholders, tensor input metadata, or sym ops).
 
         consider a graph with a tensor placeholder
         ``%x`` of shape ``(s32, s32)`` and we want to record this stride
@@ -2142,9 +2142,21 @@ class Graph:
           layout change to ``%x``. This is the right behavior when you want to
           *freeze* the trace-time stride into the graph.
 
+        If a symbol is available only from an input stride, recovery queries
+        that input. A composite input stride whose individual symbols cannot
+        be recovered independently can be reused as a whole expression, including
+        integer scaling, offsets, sums, products, and powers of input strides.
+        Shape producers take priority over stride producers. Input metadata queries
+        are inserted immediately after their placeholders, before graph operations can mutate
+        the input's metadata. Unbacked bindings similarly capture result
+        projections and metadata immediately after their producing node;
+        arithmetic normalization stays at the caller's insertion point.
+
         Note: like other ``Graph`` node-creation APIs (``call_function``,
         ``create_size_node``, etc.), nodes are emitted at the graph's current
-        insertion point. The default insertion point (``Graph._root.prepend``)
+        insertion point, except for metadata producer queries and projections.
+        The default
+        insertion point (``Graph._root.prepend``)
         appends new nodes to the end of the graph, which on a graph that
         already has an ``output`` node means they land *after* ``return``
         (orphaned). Callers typically scope this in
@@ -2163,6 +2175,7 @@ class Graph:
         import operator
 
         import sympy
+        from sympy.matrices.normalforms import hermite_normal_form
 
         from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
         from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -2193,43 +2206,49 @@ class Graph:
         # sub-expressions across symints get hash-consed into single subgraphs.
         tracer = torch.fx.proxy.GraphAppendingTracer(self)
         expr_to_proxy: dict[sympy.Expr, torch.fx.Proxy] = {}
+        existing_nodes = set(self.nodes)
 
         # Pass 1: walk the graph to discover producers. All backed symbols
         # must be found here -- their only safe producer is an input.
         # Populates:
         #   - ``expr_to_proxy``: SymInt placeholders -> Proxy (direct).
-        #   - ``sym_size_sources``: tensor placeholder shape symbol
-        #     -> (placeholder, dim, divisor) (lazy, used by Pass 2).
-        #     divisor=1 when the placeholder dim IS the bare ``Symbol``;
-        #     divisor>1 when the dim is ``Symbol * c`` (the ``Dim("h")*N``
-        #     derived-shape pattern). Recovery emits
-        #     ``sym_size.int(ph, dim) // divisor``.
+        #   - ``sym_size_sources``: tensor placeholder shape symbol ->
+        #     (placeholder, dim, positive divisor, integer offset).
+        #   - ``stride_expr_sources``: input stride expressions and their
+        #     primitive expressions, recovered from the same metadata query.
         #   - ``sym_to_binding``: unbacked symbol -> (producer node, keypath)
         #     from ``node.meta["unbacked_bindings"]`` (lazy, used by Pass 2).
-        sym_size_sources: dict[sympy.Symbol, tuple[Node, int, int]] = {}
+        sym_size_sources: dict[sympy.Expr, tuple[Node, int, int, int]] = {}
+        stride_expr_sources: dict[sympy.Expr, tuple[Node, int, int, int]] = {}
         sym_to_binding: dict[sympy.Symbol, tuple[Node, tuple[object, ...]]] = {}
 
-        def _record_shape_source(expr: sympy.Expr, node: Node, dim: int) -> None:
-            """Register ``(node, dim)`` as a recoverable source for ``expr``.
+        def _primitive_expression(expr: sympy.Expr) -> tuple[int, sympy.Expr, int]:
+            offset, remainder = expr.as_coeff_Add()
+            content, primitive = remainder.as_content_primitive()
+            if (
+                isinstance(offset, sympy.Integer)
+                and isinstance(content, sympy.Integer)
+                and content > 0
+            ):
+                return int(content), primitive, int(offset)
+            return 1, expr, 0
 
-            - bare ``Symbol``: divisor = 1.
-            - ``Symbol * c`` (positive integer constant): divisor = c.
-              Recovery is ``sym_size.int(ph, dim) // c``.
-            - anything else: skipped (general inverse needs sympy.solve).
-            """
-            if isinstance(expr, sympy.Symbol):
-                sym_size_sources.setdefault(expr, (node, dim, 1))
-                return
-            if isinstance(expr, sympy.Mul) and len(expr.args) == 2:
-                a, b = expr.args
-                if isinstance(b, sympy.Symbol) and isinstance(a, sympy.Integer):
-                    a, b = b, a  # normalize to (Symbol, Integer) order
-                if (
-                    isinstance(a, sympy.Symbol)
-                    and isinstance(b, sympy.Integer)
-                    and int(b) > 0
-                ):
-                    sym_size_sources.setdefault(a, (node, dim, int(b)))
+        def _record_tensor_source(
+            expr: sympy.Expr,
+            node: Node,
+            dim: int,
+            sources: dict[sympy.Expr, tuple[Node, int, int, int]],
+            *,
+            stride: bool = False,
+        ) -> None:
+            # Recover a primitive expression from c * primitive + offset.
+            # Composite stride primitives remain opaque: their individual
+            # symbols need not be invertible or available in this graph.
+            divisor, primitive, offset = _primitive_expression(expr)
+            if stride:
+                sources.setdefault(expr, (node, dim, 1, 0))
+            if isinstance(primitive, sympy.Symbol) or stride:
+                sources.setdefault(primitive, (node, dim, divisor, offset))
 
         for node in self.nodes:
             if node.op == "placeholder":
@@ -2241,7 +2260,19 @@ class Graph:
                 elif isinstance(val, torch.Tensor):
                     for dim, s in enumerate(val.shape):
                         if isinstance(s, torch.SymInt):
-                            _record_shape_source(s.node.expr, node, dim)
+                            _record_tensor_source(
+                                s.node.expr, node, dim, sym_size_sources
+                            )
+                    if val.layout == torch.strided:
+                        for dim, s in enumerate(val.stride()):
+                            if isinstance(s, torch.SymInt):
+                                _record_tensor_source(
+                                    s.node.expr,
+                                    node,
+                                    dim,
+                                    stride_expr_sources,
+                                    stride=True,
+                                )
             else:
                 bindings = node.meta.get("unbacked_bindings")
                 if bindings:
@@ -2251,22 +2282,240 @@ class Graph:
         from sympy.logic.boolalg import BooleanAtom
 
         from torch.fx.experimental.symbolic_shapes import (
+            ConvertIntKey,
             DivideByKey,
             free_unbacked_symbols,
         )
 
         def _arg_meta_val(a: Any) -> Any:
             if isinstance(a, torch.fx.Node):
-                return _node_val(a)
+                value = _node_val(a)
+                if (
+                    value is None
+                    and a not in existing_nodes
+                    and a.op == "call_function"
+                    and callable(a.target)
+                ):
+                    # N-ary handlers can emit intermediate nodes before returning
+                    # their final proxy. Populate their metadata recursively too.
+                    args = map_arg(a.args, _arg_meta_val)
+                    kwargs = map_arg(a.kwargs, _arg_meta_val)
+                    if all(_node_val(n) is not None for n in a.all_input_nodes):
+                        value = a.target(*args, **kwargs)
+                        _set_node_val(a, value)
+                return value
             return a
 
+        def _tensor_source(
+            source: tuple[Node, int, int, int], *, stride: bool
+        ) -> torch.fx.Proxy:
+            ph, dim, divisor, offset = source
+            target = (
+                torch.ops.aten.sym_stride.int if stride else torch.ops.aten.sym_size.int
+            )
+            with self.inserting_after(ph):
+                node = self.call_function(target, (ph, dim))
+            tensor = _node_val(ph)
+            if isinstance(tensor, torch.Tensor):
+                _set_node_val(node, tensor.stride(dim) if stride else tensor.shape[dim])
+            if offset:
+                node = self.call_function(operator.sub, (node, offset))
+                _arg_meta_val(node)
+            if divisor != 1:
+                node = self.call_function(operator.floordiv, (node, divisor))
+                _arg_meta_val(node)
+            return torch.fx.Proxy(node, tracer=tracer)
+
         def _sympy_interp_cached(expr: sympy.Expr) -> Any:
-            # Common expressions cached in expr_to_proxy
+            # Scalar and shape producers retain priority over input strides.
             if expr in expr_to_proxy:
                 return expr_to_proxy[expr]
-            if isinstance(
-                expr, (sympy.Integer, sympy.Number, sympy.Symbol, BooleanAtom)
+            if isinstance(expr, sympy.Expr) and not expr.free_symbols.issubset(
+                expr_to_proxy.keys()
+                | sym_size_sources.keys()
+                | stride_expr_sources.keys()
+                | sym_to_binding.keys()
             ):
+                if expr in stride_expr_sources:
+                    result = _tensor_source(stride_expr_sources[expr], stride=True)
+                    expr_to_proxy[expr] = result
+                    return result
+                content, primitive, offset = _primitive_expression(expr)
+                if primitive in stride_expr_sources:
+                    result = _sympy_interp_cached(primitive) * content + offset
+                    if isinstance(result, torch.fx.Proxy):
+                        _arg_meta_val(result.node)
+                        expr_to_proxy[expr] = result
+                    return result
+                # Match coefficients of unavailable terms (functions stay opaque),
+                # keeping each input stride as a whole producer. This recognizes
+                # overlapping/overcomplete producers without solving components.
+                available = (
+                    expr_to_proxy.keys()
+                    | sym_size_sources.keys()
+                    | stride_expr_sources.keys()
+                    | sym_to_binding.keys()
+                )
+                symbols = sorted(
+                    expr.free_symbols.union(
+                        *(source.free_symbols for source in stride_expr_sources)
+                    )
+                    - available,
+                    key=sympy.default_sort_key,
+                )
+
+                sources = list(stride_expr_sources)
+                if sources:
+
+                    def known_factors(expression: sympy.Expr) -> set[sympy.Expr]:
+                        factors = set()
+                        for term in sympy.Add.make_args(sympy.expand(expression)):
+                            coefficient, _ = term.as_independent(*symbols, as_Add=False)
+                            _, factor = coefficient.as_coeff_Mul()
+                            if factor.is_integer is True:
+                                factors.add(factor)
+                        return factors
+
+                    target_factors = known_factors(expr)
+                    source_factors = set().union(
+                        *(known_factors(source) for source in sources)
+                    )
+                    multipliers = {sympy.S.One} | target_factors
+                    for numerator in target_factors:
+                        for denominator in source_factors:
+                            if denominator:
+                                factor = sympy.cancel(numerator / denominator)
+                                if (
+                                    factor.is_integer is True
+                                    and factor.free_symbols.issubset(available)
+                                ):
+                                    multipliers.add(factor)
+                    # Known weights are expanded into integer coefficient columns.
+                    # Functions involving unavailable symbols remain opaque atoms.
+                    # This also handles symbolic/overcomplete input producers
+                    # without choosing free weights over a rational function field.
+                    combinations = [
+                        (source, multiplier)
+                        for source in sources
+                        for multiplier in sorted(
+                            multipliers, key=sympy.default_sort_key
+                        )
+                    ]
+                    vectors = [
+                        sympy.expand(source * multiplier).as_coefficients_dict()
+                        for source, multiplier in combinations
+                    ]
+                    target = sympy.expand(expr).as_coefficients_dict()
+                    # Known terms remain in the exactly checked remainder.
+                    atoms = sorted(
+                        (
+                            atom
+                            for atom in set(target).union(
+                                *(vector.keys() for vector in vectors)
+                            )
+                            if not atom.free_symbols.issubset(available)
+                        ),
+                        key=sympy.default_sort_key,
+                    )
+                    matrix = sympy.Matrix(
+                        [[vector.get(atom, 0) for vector in vectors] for atom in atoms]
+                    )
+                    values = sympy.Matrix([target.get(atom, 0) for atom in atoms])
+                    # Clear numeric row denominators; these are compile-time
+                    # operations and introduce no runtime inverse or guards.
+                    for i in range(matrix.rows):
+                        denominator = sympy.ilcm(
+                            *(entry.q for entry in (*matrix.row(i), values[i]))
+                        )
+                        matrix.row_op(i, lambda value, j: value * denominator)
+                        values[i] *= denominator
+                    # The top identity tracks the unimodular column changes.
+                    # Free coordinates in the resulting integer lattice basis
+                    # can be zero without losing integral producer combinations.
+                    normal = hermite_normal_form(
+                        sympy.eye(matrix.cols).col_join(matrix)
+                    )
+                    transform = normal[: matrix.cols, :]
+                    basis = normal[matrix.cols :, :]
+                    weights = [sympy.Dummy() for _ in combinations]
+                    solutions = sympy.linsolve((basis, values), weights)
+                    coordinates = next(iter(solutions), None)
+                    coefficients = None
+                    if coordinates is not None:
+                        coordinates = sympy.Matrix(
+                            [c.subs(dict.fromkeys(weights, 0)) for c in coordinates]
+                        )
+                        columns = transform * coordinates
+                        if all(c.is_integer is True for c in columns):
+                            coefficients = [
+                                sympy.expand(
+                                    sum(
+                                        columns[j] * multiplier
+                                        for j, (candidate, multiplier) in enumerate(
+                                            combinations
+                                        )
+                                        if candidate == source
+                                    )
+                                )
+                                for source in sources
+                            ]
+                    if coefficients is not None:
+                        remainder = sympy.expand(
+                            expr
+                            - sum(
+                                c * source for c, source in zip(coefficients, sources)
+                            )
+                        )
+                        if all(
+                            term.is_integer is True
+                            and term.free_symbols.issubset(available)
+                            for term in (*coefficients, remainder)
+                        ):
+                            result = _sympy_interp_cached(remainder)
+                            for coefficient, source in zip(coefficients, sources):
+                                if coefficient:
+                                    result += _sympy_interp_cached(
+                                        coefficient
+                                    ) * _sympy_interp_cached(source)
+                            if isinstance(result, torch.fx.Proxy):
+                                _arg_meta_val(result.node)
+                                expr_to_proxy[expr] = result
+                            return result
+                # Sympy canonicalizes powers/products of whole input strides.
+                # Treat those producers as opaque integers; a polynomial in them
+                # needs no inverse or access to their unavailable components.
+                opaque = {
+                    source: sympy.Dummy(integer=True)
+                    for source in stride_expr_sources
+                    if not source.free_symbols.issubset(available)
+                }
+                if opaque:
+                    reconstructed = expr.subs(opaque, simultaneous=True)
+                    atoms = set(opaque.values())
+                    restored = reconstructed.xreplace({v: k for k, v in opaque.items()})
+                    if (
+                        reconstructed.free_symbols.issubset(available | atoms)
+                        and reconstructed.is_polynomial(*opaque.values())
+                        and all(
+                            c.is_integer is True
+                            for c in sympy.Poly(
+                                reconstructed, *opaque.values()
+                            ).coeffs()
+                        )
+                        and sympy.expand(restored - expr) == 0
+                    ):
+                        for source, atom in opaque.items():
+                            if atom in reconstructed.free_symbols:
+                                expr_to_proxy[atom] = _sympy_interp_cached(source)
+                        result = _sympy_interp_cached(reconstructed)
+                        if isinstance(result, torch.fx.Proxy):
+                            _arg_meta_val(result.node)
+                            expr_to_proxy[expr] = result
+                        return result
+            if isinstance(expr, sympy.Symbol):
+                _ensure_produced(expr)
+                return expr_to_proxy[expr]
+            if isinstance(expr, (sympy.Integer, sympy.Number, BooleanAtom)):
                 # handle leaf terms.
                 return sympy_interp(PythonReferenceAnalysis, expr_to_proxy, expr)
             # handle composite expressions.
@@ -2283,9 +2532,7 @@ class Graph:
             if not callable(target):
                 return result
             try:
-                fake_args = tuple(_arg_meta_val(a) for a in node.args)
-                fake_kwargs = {k: _arg_meta_val(v) for k, v in node.kwargs.items()}
-                _set_node_val(node, target(*fake_args, **fake_kwargs))
+                _arg_meta_val(node)
             except (TypeError, ValueError, AttributeError) as e:
                 log.debug(
                     "materialize_symints: skipping meta annotation for %s: %s",
@@ -2299,10 +2546,12 @@ class Graph:
             return r.node if isinstance(r, torch.fx.Proxy) else r
 
         # Pass 2 (lazy, recursive): materialize a producer for each needed
-        # symbol. Three cases:
+        # symbol:
         #   - already in expr_to_proxy: nothing to do.
         #   - in sym_size_sources: emit sym_size.int for shape symbols
         #     recoverable from a tensor placeholder shape.
+        #   - in stride_expr_sources: emit sym_stride.int for symbols available
+        #     only from a tensor input stride (e.g. a nested graph input).
         #   - in sym_to_binding: fallback for missing unbacked symbols. Use
         #     the node.meta["unbacked_bindings"] map -- the authoritative
         #     source for "this node produces these unbacked symbols". The
@@ -2311,24 +2560,10 @@ class Graph:
         def _ensure_produced(sym: sympy.Symbol) -> None:
             if sym in expr_to_proxy:
                 return
-            if sym in sym_size_sources:
-                ph, dim, divisor = sym_size_sources[sym]
-                sym_node = self.call_function(torch.ops.aten.sym_size.int, (ph, dim))
-                tensor = _node_val(ph)
-                if isinstance(tensor, torch.Tensor):
-                    _set_node_val(sym_node, tensor.shape[dim])
-                if divisor != 1:
-                    # Placeholder dim was ``sym * divisor`` (e.g. from
-                    # ``Dim("h") * N``); recover the underlying symbol as
-                    # ``sym_size.int(ph, dim) // divisor``.
-                    div_node = self.call_function(
-                        operator.floordiv, (sym_node, divisor)
-                    )
-                    if isinstance(tensor, torch.Tensor):
-                        _set_node_val(div_node, tensor.shape[dim] // divisor)
-                    expr_to_proxy[sym] = torch.fx.Proxy(div_node, tracer=tracer)
-                else:
-                    expr_to_proxy[sym] = torch.fx.Proxy(sym_node, tracer=tracer)
+            if sym in sym_size_sources or sym in stride_expr_sources:
+                stride = sym not in sym_size_sources
+                sources = stride_expr_sources if stride else sym_size_sources
+                expr_to_proxy[sym] = _tensor_source(sources[sym], stride=stride)
                 return
             if sym in sym_to_binding:
                 if not free_unbacked_symbols(sym):
@@ -2344,8 +2579,25 @@ class Graph:
                     ):
                         for s2 in k.divisor.node.expr.free_symbols:
                             _ensure_produced(s2)
+                # Freeze producer metadata before later mutations. Keep arithmetic
+                # at the caller point, where symbolic divisors are available.
+                split = next(
+                    (
+                        i
+                        for i, key in enumerate(keypath)
+                        if isinstance(key, (ConvertIntKey, DivideByKey))
+                    ),
+                    len(keypath),
+                )
+                with self.inserting_before(producer_node.next):
+                    producer = self._resolve_unbacked_binding(
+                        producer_node,
+                        keypath[:split],
+                        lower_symint=_lower_symint_divisor,
+                    )
+                _arg_meta_val(producer)
                 producer = self._resolve_unbacked_binding(
-                    producer_node, keypath, lower_symint=_lower_symint_divisor
+                    producer, keypath[split:], lower_symint=_lower_symint_divisor
                 )
                 expr_to_proxy[sym] = torch.fx.Proxy(producer, tracer=tracer)
                 return
@@ -2367,8 +2619,6 @@ class Graph:
             if target_expr.is_number:
                 out.append(int(s))
                 continue
-            for sym in target_expr.free_symbols:
-                _ensure_produced(sym)
             result = _sympy_interp_cached(target_expr)
             if not isinstance(result, torch.fx.Proxy):
                 # ``target_expr`` was non-constant per sympy but our interpreter

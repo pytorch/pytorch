@@ -3394,6 +3394,9 @@ def gaussian_nll_loss(
         if var < 0:
             raise ValueError("var has negative entry/entries")
         var = var * torch.ones_like(input)
+    elif torch.compiler.is_compiling():
+        with torch.no_grad():
+            torch.ops.prims._assert_nonnegative(var, "var has negative entry/entries")
     elif torch.any(var < 0):
         raise ValueError("var has negative entry/entries")
 

@@ -40,6 +40,7 @@
 #include <ATen/ops/_embedding_bag.h>
 #include <ATen/ops/_fft_c2c.h>
 #include <ATen/ops/_foreach_copy.h>
+#include <ATen/ops/_neg_view.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
@@ -897,6 +898,15 @@ AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     *ret = new_tensor_handle(self_tensor->clone());
+  });
+}
+
+AOTITorchError aoti_torch_neg_view(
+    AtenTensorHandle self,
+    AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret = new_tensor_handle(
+        at::_neg_view(*tensor_handle_to_tensor_pointer(self)));
   });
 }
 

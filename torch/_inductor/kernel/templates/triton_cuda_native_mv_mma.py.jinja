@@ -1,0 +1,19 @@
+{{def_kernel("X", "VECTOR")}}
+    row = tl.program_id(0) * 16 + tl.arange(0, 16)
+    column = tl.arange(0, 16)
+    cta = tl.program_id(1)
+    inner = tl.arange(0, 64)
+    total = tl.full((16, 16), 0, tl.float32)
+    for chunk in range(triton.cdiv(K_SLICE, 64)):
+        index = cta * K_SLICE + chunk * 64 + inner
+        valid = (index < K) & (chunk * 64 + inner < K_SLICE)
+        matrix = tl.load(X + row[:, None].to(tl.int64) * S0 + index[None, :].to(tl.int64) * S1,
+                         (row[:, None] < M) & valid[None, :], 0)
+        vector = tl.load(VECTOR + index[:, None].to(tl.int64) * VS + tl.zeros((1, 16), tl.int64), valid[:, None], 0)
+        total = tl.dot(matrix, vector, total)
+    value = tl.sum(tl.where(column[None, :] == 0, total, 0), 1)
+    {% if FINAL %}
+    {{store_output(("row",), "value", "row < M", val_shape=("16",))}}
+    {% else %}
+    {{store_output(("row", "cta"), "value", "row < M", val_shape=("16",))}}
+    {% endif %}

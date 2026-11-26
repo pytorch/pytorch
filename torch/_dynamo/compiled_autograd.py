@@ -122,7 +122,12 @@ class _AOTCompiledFunction(Protocol):
     _aot_id: int
     _bw_prologue_fn: Callable[..., Any]
     _bw_has_input_alias_validator: bool
+    _bw_nullable_graph: (
+        Callable[[Sequence[Any]], tuple[GraphModule | None, tuple[int, ...]]] | None
+    )
     _bw_epilogue_fn: Callable[..., Any]
+    _original_view_input_indices: tuple[int, ...]
+    _project_original_view_gradients: Callable[..., Any]
 
 
 def extract_bw_module(CompiledFunction: _AOTCompiledFunction) -> GraphModule:
@@ -532,12 +537,36 @@ class AutogradCompilerInstance:
 
         # NOTE: we should only close over constants
         CompiledFunction: _AOTCompiledFunction = ctx._forward_cls  # type: ignore[attr-defined]
-        bw_module = extract_bw_module(CompiledFunction)
+        nullable_graph = CompiledFunction._bw_nullable_graph
+        bw_module = None
+        materialize = ()
+        if nullable_graph is not None:
+            with disable_proxy_modes_tracing():
+                bw_module, materialize = nullable_graph(pinputs)
+        if bw_module is None:
+            bw_module = extract_bw_module(CompiledFunction)
+        if materialize:
+            from torch._functorch._aot_autograd.runtime_wrappers import (
+                _materialize_output_cotangents,
+            )
+
+            materialized_inputs = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=_materialize_output_cotangents,
+                args=(pctx, list(pinputs), materialize),
+                kwargs={},
+            )
+            pinputs = tuple(materialized_inputs[i] for i in range(len(pinputs)))
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
         bw_prologue_fn = CompiledFunction._bw_prologue_fn
         has_input_alias_validator = CompiledFunction._bw_has_input_alias_validator
+        input_projection_fn = (
+            CompiledFunction._project_original_view_gradients
+            if CompiledFunction._original_view_input_indices
+            else None
+        )
         bw_epilogue_fn = CompiledFunction._bw_epilogue_fn
         del CompiledFunction
 
@@ -734,6 +763,17 @@ class AutogradCompilerInstance:
             results = bw_epilogue_fn(outputs)
 
         presults = pytree.tree_map(self.to_proxy, results)
+        if input_projection_fn is not None:
+            projected = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=input_projection_fn,
+                args=(pctx, tuple(presults)),
+                kwargs={},
+            )
+            presults = [
+                None if result is None else projected[i]
+                for i, result in enumerate(presults)
+            ]
         return presults
 
     def proxy_call_backward(

@@ -17,7 +17,11 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
 #include <ATen/OpMathType.h>
+#include <array>
 #include <optional>
+#include <string>
+#include <tuple>
+#include <vector>
 
 namespace at::cuda::blas {
 
@@ -370,6 +374,25 @@ template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half));
 template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
+
+#if !defined(USE_ROCM) && CUDART_VERSION >= 12040
+using GemvLaunch = std::tuple<
+    std::string,
+    std::array<int64_t, 3>,
+    std::array<int64_t, 3>,
+    int64_t,
+    std::array<int64_t, 3>>;
+
+TORCH_CUDA_CU_API std::vector<GemvLaunch> getGemvLaunchPlan(
+    at::ScalarType dtype,
+    int64_t rows,
+    int64_t columns,
+    int64_t lda,
+    int64_t incx,
+    bool transposed,
+    int64_t matrix_alignment,
+    int64_t vector_alignment);
+#endif
 
 /* LEVEL 1 BLAS FUNCTIONS */
 

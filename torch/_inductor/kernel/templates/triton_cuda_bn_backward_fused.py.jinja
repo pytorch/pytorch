@@ -1,0 +1,6 @@
+{{def_kernel("X", "G", "MEAN")}}
+    channel = tl.program_id(0)
+    dy, dot = triton_helpers.cuda_bn_backward_fused_statistics(X, G, MEAN, channel, N, C, S, BW, BH, True)
+    component = tl.arange(0, 2)
+    value = tl.where(component == 0, dy, dot)
+    {{store_output(("component", "channel"), "value", "True", val_shape=("2",))}}
