@@ -12737,8 +12737,9 @@ class TestSDPA(TestCaseMPS):
             "5d": ((q5, q5, q5), {}),
             "mT": ((q, rand(2, 4, 16, 8).mT, q), {}),
             "dv_ne_d": ((q, q, rand(2, 4, 8, 32)), {}),
+            # Head dims past the widest decode tile (512) and one past a multiple of 4; strided K and V rows
             "wide_value_decode": (
-                (rand(2, 4, 8, 577), rand(2, 2, 8, 577), rand(2, 2, 8, 769)),
+                (rand(2, 4, 8, 577), rand(2, 2, 16, 577)[:, :, ::2], rand(2, 2, 16, 769)[:, :, ::2]),
                 {"attn_mask": masked_row, "enable_gqa": True},
             ),
             "gqa": ((rand(2, 8, 8, 16), q, q), {"enable_gqa": True}),

@@ -231,6 +231,11 @@ static constexpr int64_t kMppMaxSimdTile = 192;
 // Prefill: flash attention on simdgroup matrices (PrefillAttention.h) or, on
 // macOS 26.2+, Metal 4 cooperative tensors (MppAttention.h) for half and
 // bfloat. One threadgroup per (Q block, head, batch, V/O slab).
+// Past the widest tile both kernels recompute the scores for every 128-wide
+// V/O slab, so up to kDecodeMaxQueries rows by kWideDecodeMaxKeys keys take
+// sdpa_vector_wide (DecodeAttention.h) instead: one threadgroup per (query row,
+// head, batch) and a single launch for all V/O columns (M5 Pro, d = dv = 2304,
+// 8 x 16: 560 us -> 8 us fp32, 60 us -> 6 us bfloat).
 static void sdpa_prefill_mps(const Tensor& q,
                              const Tensor& k,
                              const Tensor& v,
@@ -251,8 +256,8 @@ static void sdpa_prefill_mps(const Tensor& q,
   const bool exact_simd_tile = widest > kMppTiles.back() && widest <= kMppMaxSimdTile && dv > kMppTiles.back();
   const bool use_mpp = at::mps::has_mpp() && q.scalar_type() != kFloat && k.size(2) > 0 &&
       (exact_mpp_tile || (is_apple10_or_newer && !exact_simd_tile));
-  const bool wide_decode = !use_mpp && dv > kPrefillTiles.back() && k.size(2) > 0 && q.size(2) <= kDecodeMaxQueries &&
-      k.size(2) <= kWideDecodeMaxKeys;
+  const bool wide_decode =
+      dv > kPrefillTiles.back() && k.size(2) > 0 && q.size(2) <= kDecodeMaxQueries && k.size(2) <= kWideDecodeMaxKeys;
   const c10::ArrayRef<int> tiles = use_mpp ? c10::ArrayRef<int>(kMppTiles) : c10::ArrayRef<int>(kPrefillTiles);
   const int64_t bd = use_mpp && exact_mpp_tile ? d
       : widest > tiles.back()                  ? kChunkTile
