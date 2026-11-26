@@ -382,12 +382,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         "quantized::qconv_prepack: ONEDNN only supports symmetric quantization of weight,"
         " whose zero point must be 0.");
     wgt_zero_points = std::vector<int32_t>(1, weight.q_zero_point());
-#if IDEEP_PREREQ(3, 1, 0, 1)
+#if DNNL_PREREQ(3, 1, 0)
     wgt_scales = std::vector<float>(1, weight.q_scale());
-#elif IDEEP_PREREQ(3, 1, 0, 0)
-    wgt_scales = std::vector<float>(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
 #else
-    TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
+    TORCH_CHECK(false, "Unexpected oneDNN version to do qconv weight prepack.");
 #endif
   } else if (qtype == c10::kPerChannelAffine) {
     TORCH_CHECK(
@@ -401,12 +399,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
           wgt_zero_points[i]==0,
           "quantized::qconv_prepack: ONEDNN only supports symmetric quantization of weight,"
           " whose zero point must be 0.");
-#if IDEEP_PREREQ(3, 1, 0, 1)
+#if DNNL_PREREQ(3, 1, 0)
       wgt_scales[i] = weight.q_per_channel_scales()[i].item<float>();
-#elif IDEEP_PREREQ(3, 1, 0, 0)
-      wgt_scales[i] = 1.0f / weight.q_per_channel_scales()[i].item<float>(); // Scales of ONEDNN and PyTorch are reciprocal
 #else
-      TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
+      TORCH_CHECK(false, "Unexpected oneDNN version to do qconv weight prepack.");
 #endif
     }
   } else {
@@ -416,7 +412,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   // Set runtime src zero point
   op_attr.set_zero_points_mask(DNNL_ARG_SRC, /* zero_points_mask= */0);
   at::Tensor weight_copy;
-  ideep::tensor::desc w_desc;
+  at::native::mkldnn::MkldnnMemory::desc w_desc;
   dnnl::memory::dims dims_iohw, dims_giohw;
   dnnl::memory::format_tag w_tag = dnnl::memory::format_tag::any;
   const bool with_groups = groups > 1;
@@ -430,7 +426,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
     // convolution_transpose_forward::expected_weights_desc() gives format [i, o, ...],
     // but ONEDNN requires [o, i, ...] for computation
     dims_iohw = w_desc.get_dims();
-    dims_giohw = with_groups ? ideep::utils::group_dims(dims_iohw, groups) : dims_iohw;
+    dims_giohw = with_groups ? at::native::mkldnn::utils::group_dims(dims_iohw, groups) : dims_iohw;
     std::vector<int64_t> perms(dims_giohw.size(), 0); // for permutation of weight
     std::iota(perms.begin(), perms.end(), 0);
     std::swap(perms[with_groups], perms[with_groups + 1]);
@@ -448,32 +444,32 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   } else {
     w_tag = kSpatialDim == 2 ? dnnl::memory::format_tag::oihw : dnnl::memory::format_tag::oidhw;
   }
-  dnnl::memory::dims w_dims = with_groups ? ideep::utils::group_dims(w_desc.get_dims(), groups)
+  dnnl::memory::dims w_dims = with_groups ? at::native::mkldnn::utils::group_dims(w_desc.get_dims(), groups)
                                    : w_desc.get_dims();
-  ideep::tensor wgt = ideep::tensor(
-      ideep::tensor::desc({w_dims, dnnl::memory::data_type::s8, w_tag}, groups),
+  at::native::mkldnn::MkldnnMemory wgt = at::native::mkldnn::MkldnnMemory(
+      at::native::mkldnn::MkldnnMemory::desc({w_dims, dnnl::memory::data_type::s8, w_tag}, groups),
       weight_copy.data_ptr());
   wgt.set_scale(wgt_scales); // Scales are needed for feed_from().
-  ideep::tensor exp_wgt;
+  at::native::mkldnn::MkldnnMemory exp_wgt;
   exp_wgt.init(w_desc);
   exp_wgt.set_scale(wgt_scales); // Also for feed_from()
   exp_wgt.feed_from(wgt, transpose); // expect wgt to be in [OC IC KH KW] format
-  ideep::tensor * packed_weight_p = new ideep::tensor(std::move(exp_wgt));
+  at::native::mkldnn::MkldnnMemory * packed_weight_p = new at::native::mkldnn::MkldnnMemory(std::move(exp_wgt));
   packed_weight_p->set_scale(wgt_scales);
   packed_weight_p->set_zero_point(wgt_zero_points);
-  std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
+  std::unique_ptr<at::native::mkldnn::MkldnnMemory> weight_ptr(packed_weight_p);
   // Bias
-  std::optional<ideep::tensor> onednn_bias{std::nullopt};
+  std::optional<at::native::mkldnn::MkldnnMemory> onednn_bias{std::nullopt};
   if (bias.has_value()) {
     at::Tensor bias_vec = bias.value();
     TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
     TORCH_CHECK(
         bias_vec.size(0) == output_channels,
         "bias should have K elements: " + std::to_string(output_channels));
-    auto bias_desc = ideep::tensor::desc(bias.value().sizes().vec(), dnnl::memory::data_type::f32);
-    ideep::tensor packed_bias;
+    auto bias_desc = at::native::mkldnn::MkldnnMemory::desc(bias.value().sizes().vec(), dnnl::memory::data_type::f32);
+    at::native::mkldnn::MkldnnMemory packed_bias;
     packed_bias.init(bias_desc, bias.value().data_ptr());
-    onednn_bias = std::optional<ideep::tensor>(packed_bias);
+    onednn_bias = std::optional<at::native::mkldnn::MkldnnMemory>(packed_bias);
   }
   auto ret_ptr = c10::make_intrusive<PackedConvWeightsOnednn<kSpatialDim>>(
       PackedConvWeightsOnednn<kSpatialDim>{
@@ -565,22 +561,18 @@ at::Tensor _qconv_prepack_onednn(
     TORCH_CHECK(
         weight_scales.numel() == 1,
         "Weight is quant per tensor, weight scale expects 1 element but got ", weight_scales.numel(), " elements.");
-#if IDEEP_PREREQ(3, 1, 0, 1)
+#if DNNL_PREREQ(3, 1, 0)
     weights_scales[0] = weight_scales.item().toDouble();
-#elif IDEEP_PREREQ(3, 1, 0, 0)
-    weights_scales[0] = 1.0 / weight_scales.item().toDouble(); // Scales of ONEDNN and PyTorch are reciprocal
 #else
-    TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
+    TORCH_CHECK(false, "Unexpected oneDNN version to do qconv weight prepack.");
 #endif
   } else {
     // Weight is quant per channel
     for (int i = 0; i < weight_scales.numel(); ++i) {
-#if IDEEP_PREREQ(3, 1, 0, 1)
+#if DNNL_PREREQ(3, 1, 0)
       weights_scales[i] = weight_scales[i].item().toDouble();
-#elif IDEEP_PREREQ(3, 1, 0, 0)
-      weights_scales[i] = 1.0 / weight_scales[i].item().toDouble();
 #else
-      TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
+      TORCH_CHECK(false, "Unexpected oneDNN version to do qconv weight prepack.");
 #endif
     }
   }
@@ -593,7 +585,7 @@ at::Tensor _qconv_prepack_onednn(
   }
 
   at::Tensor weight_copy;
-  ideep::tensor::desc w_desc;
+  at::native::mkldnn::MkldnnMemory::desc w_desc;
   dnnl::memory::dims dims_iohw, dims_giohw;
   dnnl::memory::format_tag w_tag = dnnl::memory::format_tag::any;
   const bool with_groups = groups > 1;
@@ -613,20 +605,20 @@ at::Tensor _qconv_prepack_onednn(
   } else {
     w_tag = kSpatialDim == 2 ? dnnl::memory::format_tag::oihw : dnnl::memory::format_tag::oidhw;
   }
-  dnnl::memory::dims wei_dims = with_groups ? ideep::utils::group_dims(w_desc.get_dims(), groups)
+  dnnl::memory::dims wei_dims = with_groups ? at::native::mkldnn::utils::group_dims(w_desc.get_dims(), groups)
                                   : w_desc.get_dims();
-  ideep::tensor wgt = ideep::tensor(
-      ideep::tensor::desc({wei_dims, w_dnnl_dtype, w_tag}, groups),
+  at::native::mkldnn::MkldnnMemory wgt = at::native::mkldnn::MkldnnMemory(
+      at::native::mkldnn::MkldnnMemory::desc({wei_dims, w_dnnl_dtype, w_tag}, groups),
       weight_copy.data_ptr());
 
   wgt.set_scale(weights_scales); // Scales are needed for feed_from().
 
-  ideep::tensor exp_wgt;
+  at::native::mkldnn::MkldnnMemory exp_wgt;
   exp_wgt.init(w_desc);
   exp_wgt.set_scale(weights_scales); // Also for feed_from()
   exp_wgt.feed_from(wgt, /*transposed*/false); // expect wgt to be in [OC IC KH KW] format
 
-  auto packed_weight = at::native::new_with_itensor_mkldnn(
+  auto packed_weight = at::native::new_with_mkldnn_memory(
       std::move(exp_wgt),
       c10::optTypeMetaToScalarType(weight_copy.options().dtype_opt()),
       weight_copy.options().device_opt());
