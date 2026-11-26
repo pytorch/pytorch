@@ -17588,7 +17588,7 @@ op_db: list[OpInfo] = [
         if not SM80OrLater
         else custom_types(torch.float16, torch.bfloat16),
         dtypesIfXPU=custom_types(torch.float16, torch.bfloat16),
-        backward_dtypesIfXPU=custom_types(torch.float16, torch.bfloat16),
+        backward_dtypesIfXPU=custom_types(torch.float16),
         supports_out=False,
         has_nondeterministic_output=True,
         supports_autograd=True,
@@ -24997,8 +24997,6 @@ python_ref_db = [
             # NotImplementedError: The operator 'aten::_pdist_forward' is not
             # currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
-            DecorateInfo(unittest.skip("Driver issue"), 'TestCommon',
-                         'test_dtypes', device_type='xpu'),
         )),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",

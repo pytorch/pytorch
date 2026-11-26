@@ -4287,6 +4287,10 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    # https://github.com/intel/torch-xpu-ops/issues/5376
+    @decorateIf(unittest.expectedFailure,
+                lambda params: torch.device(params["device"]).type == "xpu"  # issues/5376
+                and params["dtype"] == torch.bool)  # issues/5376
     def test_scatter_reduce_operations_to_large_input(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
@@ -4319,6 +4323,10 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    # https://github.com/intel/torch-xpu-ops/issues/5376
+    @decorateIf(unittest.expectedFailure,
+                lambda params: torch.device(params["device"]).type == "xpu"  # issues/5376
+                and params["dtype"] == torch.bool)  # issues/5376
     def test_scatter_reduce_scalar(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
@@ -4362,6 +4370,10 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    # https://github.com/intel/torch-xpu-ops/issues/5376
+    @decorateIf(unittest.expectedFailure,
+                lambda params: torch.device(params["device"]).type == "xpu"  # issues/5376
+                and params["dtype"] == torch.bool)  # issues/5376
     def test_scatter_reduce_non_unique_index(self, device, dtype):
         height = 2
         width = 2
