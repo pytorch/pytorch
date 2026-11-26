@@ -1806,10 +1806,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     def test_int8_woq_avx2_prefetch_address(self):
         if not torch.cpu._is_avx2_supported():
             self.skipTest("requires AVX2")
-        self.assertIsInstance(
+        if not isinstance(
             torch._inductor.cpu_vec_isa.pick_vec_isa(),
             torch._inductor.cpu_vec_isa.VecAVX2,
-        )
+        ):
+            self.skipTest("requires usable AVX2 code generation")
 
         class Linear(torch.nn.Module):
             def __init__(self):

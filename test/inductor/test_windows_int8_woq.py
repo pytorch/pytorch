@@ -8,10 +8,12 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS
 
 
 class TestWindowsInt8WeightOnlyGemm(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @unittest.skipUnless(IS_WINDOWS, "requires Windows CPU Inductor")
     @config.patch(
         freezing=True,
