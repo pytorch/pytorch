@@ -1083,15 +1083,10 @@ class OutputGraph(OutputGraphCommon):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
-    @property
-    def deleted_globals_by_dict(self) -> dict[int, tuple[Any, set[str]]]:
-        # Owned by SideEffects so clone()-based HOP snapshots include it.
-        return self.side_effects.deleted_globals_by_dict
-
     def check_deleted_global_access(self, globals_dict: Any, name: str | None) -> None:
         """Graph-break if this trace deleted `name` from `globals_dict`; with
         name=None (a view of the whole dict), if it deleted any name."""
-        entry = self.deleted_globals_by_dict.get(id(globals_dict))
+        entry = self.side_effects.deleted_globals_by_dict.get(id(globals_dict))
         if entry is not None and (name is None or name in entry[1]):
             self.deleted_global_access_unsupported(f"name: {name}")
 
