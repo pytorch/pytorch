@@ -55,8 +55,12 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfRocm,
     TEST_WITH_ROCM,
@@ -104,7 +108,53 @@ class SDPAWrapper(torch.nn.Module):
             return self.sdpa(*args, **kwargs)
 
 
+class RingAttentionCPBehaviorTest(TestCase):
+    """Device-independent unit tests for the CP causal-behavior decision logic."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_is_causal_behavior(self) -> None:
+        old_load_balance = _cp_options.enable_load_balance
+        try:
+            _cp_options.enable_load_balance = False
+            self.assertEqual(
+                _is_causal_behavior(rank=0, world_size=4, i=0, is_causal=False),
+                _CausalBehavior.NOT_IS_CAUSAL,
+            )
+
+            ranks = [
+                [_CausalBehavior.IS_CAUSAL, _CausalBehavior.SKIP],
+                [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+            ]
+            for rank, iters in enumerate(ranks):
+                for i, behavior in enumerate(iters):
+                    self.assertEqual(
+                        _is_causal_behavior(
+                            rank=rank, world_size=2, i=i, is_causal=True
+                        ),
+                        behavior,
+                    )
+
+            _cp_options.enable_load_balance = True
+            ranks = [
+                [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+                [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+            ]
+            for rank, iters in enumerate(ranks):
+                for i, behavior in enumerate(iters):
+                    self.assertEqual(
+                        _is_causal_behavior(
+                            rank=rank, world_size=2, i=i, is_causal=True
+                        ),
+                        behavior,
+                    )
+        finally:
+            _cp_options.enable_load_balance = old_load_balance
+
+
 class RingAttentionTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return torch.accelerator.device_count()
@@ -119,7 +169,8 @@ class RingAttentionTest(DTensorTestBase):
         "Does not support flash nor efficient attention",
     )
     @with_comms
-    def test_ring_attention_sdpa(self) -> None:
+    def test_ring_attention_sdpa(self, device=None) -> None:
+        device = torch.device(device).type if device else self.device_type
         self.run_subtests(
             {
                 "is_causal": [True, False],
@@ -131,6 +182,7 @@ class RingAttentionTest(DTensorTestBase):
                 "use_context": [True, False],
             },
             self._test_ring_attention_sdpa,
+            device,
         )
 
     def _ring_attention_sdpa(
@@ -230,6 +282,7 @@ class RingAttentionTest(DTensorTestBase):
 
     def _test_ring_attention_sdpa(
         self,
+        device: str,
         is_causal: bool,
         compiled: bool,
         backend: SDPBackend,
@@ -260,7 +313,7 @@ class RingAttentionTest(DTensorTestBase):
 
         set_rotate_method(rotater_enum_to_str[rotater])
         self.assertEqual(_cp_options.rotate_method, rotater)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+        device_mesh = DeviceMesh(device, torch.arange(0, self.world_size))
         bs = 8
         seq_length = 1024
         seq_dim = 2
@@ -277,7 +330,7 @@ class RingAttentionTest(DTensorTestBase):
         q, k, v = [
             torch.rand(
                 (bs, nheads, seq_length * self.world_size, dim),
-                device=self.device_type,
+                device=device,
                 dtype=dtype,
                 requires_grad=True,
             )
@@ -295,6 +348,7 @@ class RingAttentionTest(DTensorTestBase):
 
         cp_q, cp_k, cp_v = [target.detach().clone() for target in [q, k, v]]
         cp_out, cp_dq, cp_dk, cp_dv = self._ring_attention_sdpa(
+            device,
             cp_q,
             cp_k,
             cp_v,
@@ -343,54 +397,25 @@ class RingAttentionTest(DTensorTestBase):
         torch.testing.assert_close(k.grad, cp_dk, atol=atol, rtol=rtol)
         torch.testing.assert_close(v.grad, cp_dv, atol=atol, rtol=rtol)
 
-    def test_is_causal_behavior(self) -> None:
-        _cp_options.enable_load_balance = False
-        self.assertEqual(
-            _is_causal_behavior(rank=0, world_size=4, i=0, is_causal=False),
-            _CausalBehavior.NOT_IS_CAUSAL,
-        )
-
-        ranks = [
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.SKIP],
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
-        ]
-        for rank, iters in enumerate(ranks):
-            for i, behavior in enumerate(iters):
-                self.assertEqual(
-                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
-                    behavior,
-                )
-
-        _cp_options.enable_load_balance = True
-        ranks = [
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
-        ]
-        for rank, iters in enumerate(ranks):
-            for i, behavior in enumerate(iters):
-                self.assertEqual(
-                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
-                    behavior,
-                )
-
     @skip_if_lt_x_gpu(2)
     @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
     @with_comms
-    def test_context_parallel_sdpa_short_sequence(self) -> None:
+    def test_context_parallel_sdpa_short_sequence(self, device=None) -> None:
+        device = torch.device(device).type if device else self.device_type
         old_load_balance = _cp_options.enable_load_balance
         try:
             _cp_options.enable_load_balance = True
-            device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+            device_mesh = DeviceMesh(device, torch.arange(0, self.world_size))
             qkv_len = self.world_size
             for dim in [1, 2, 4, 8]:
                 with self.subTest(dim=dim):
                     qkv = [
                         torch.rand(
                             (1, 1, qkv_len, dim),
-                            device=self.device_type,
+                            device=device,
                             dtype=torch.bfloat16,
                         )
                         for _ in range(3)
@@ -517,20 +542,30 @@ class FlexAttentionWrapper(torch.nn.Module):
 
 
 class CPFlexAttentionTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     def _test_cp_flex_attention(
         self,
+        device=None,
         *,
         qkv_size: int,
         B: int = 1,
         block_mask,
         lb_types: list[str],
     ) -> None:
+        device = torch.device(device).type if device else self.device_type
         torch.use_deterministic_algorithms(True)
         torch.manual_seed(1234)
+        device_module = torch.get_device_module(device)
+        if hasattr(device_module, "manual_seed"):
+            # torch.manual_seed only seeds the CPU RNG (plus devices registered
+            # with it); seed the device RNG explicitly so the run is
+            # reproducible on every accelerator backend.
+            device_module.manual_seed(1234)
 
         dtype = torch.float32
         bs = B if B > 1 else 2
@@ -541,7 +576,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         qkv = [
             torch.rand(
                 (bs, nheads, qkv_size, dim),
-                device=self.device_type,
+                device=device,
                 dtype=dtype,
                 requires_grad=True,
             )
@@ -555,7 +590,7 @@ class CPFlexAttentionTest(DTensorTestBase):
 
         # Prepare the required global vars for CP+Flex:
         device_mesh = init_device_mesh(
-            device_type=self.device_type,
+            device_type=device,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
@@ -575,7 +610,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         rtol = 1e-05
         for lb_type in lb_types:
             with self.subTest(lb_type=lb_type):
-                lb = self._get_load_balancer(lb_type, qkv_size, block_mask)
+                lb = self._get_load_balancer(device, lb_type, qkv_size, block_mask)
                 *cp_qkv, cp_block_mask = _context_parallel_shard(
                     device_mesh,
                     [t.detach().clone() for t in qkv] + [block_mask],
@@ -611,13 +646,13 @@ class CPFlexAttentionTest(DTensorTestBase):
                     torch.testing.assert_close(grad, cp_grad, atol=atol, rtol=rtol)
 
     def _get_load_balancer(
-        self, lb_type: str, qkv_size: int, block_mask: BlockMask
+        self, device, lb_type: str, qkv_size: int, block_mask: BlockMask
     ) -> _LoadBalancer | None:
         if lb_type == "None":
             return None
         if lb_type == "_HeadTailLoadBalancer":
             return _HeadTailLoadBalancer(
-                qkv_size, self.world_size, torch.device(self.device_type)
+                qkv_size, self.world_size, torch.device(device)
             )
         if lb_type == "_PTRRLoadBalancer":
             return _PTRRLoadBalancer(
@@ -628,10 +663,11 @@ class CPFlexAttentionTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_cp_flex_attention_preserves_block_size(self) -> None:
+    def test_cp_flex_attention_preserves_block_size(self, device=None) -> None:
+        device = torch.device(device).type if device else self.device_type
         qkv_size = 256 * self.world_size
         device_mesh = init_device_mesh(
-            device_type=self.device_type,
+            device_type=device,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
@@ -641,7 +677,7 @@ class CPFlexAttentionTest(DTensorTestBase):
             H=1,
             Q_LEN=qkv_size,
             KV_LEN=qkv_size,
-            device=self.device_type,
+            device=device,
             BLOCK_SIZE=(256, 128),
         )
 
@@ -659,7 +695,8 @@ class CPFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    def test_cp_flex_attention_document_mask(self) -> None:
+    def test_cp_flex_attention_document_mask(self, device=None) -> None:
+        device = torch.device(device).type if device else self.device_type
         random.seed(10)
 
         doc_count = 28
@@ -673,7 +710,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         lengths = [
             generate_random_lengths(max_seq_len, doc_count) for _ in range(batch_size)
         ]
-        offsets = length_to_offsets(lengths, self.device_type)
+        offsets = length_to_offsets(lengths, device)
         document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
         block_mask = create_block_mask(
             document_causal_mask,
@@ -681,10 +718,11 @@ class CPFlexAttentionTest(DTensorTestBase):
             H=1,
             Q_LEN=max_seq_len,
             KV_LEN=max_seq_len,
-            device=self.device_type,
+            device=device,
         )
 
         self._test_cp_flex_attention(
+            device,
             qkv_size=max_seq_len,
             B=batch_size,
             lb_types=lb_types,
@@ -698,13 +736,11 @@ class CPFlexAttentionTest(DTensorTestBase):
             H=1,
             Q_LEN=qkv_size,
             KV_LEN=qkv_size,
-            device=self.device_type,
+            device=device,
         )
-        qkv = [
-            torch.rand((2, 2, qkv_size, 32), device=self.device_type) for _ in range(3)
-        ]
+        qkv = [torch.rand((2, 2, qkv_size, 32), device=device) for _ in range(3)]
         device_mesh = init_device_mesh(
-            device_type=self.device_type,
+            device_type=device,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
@@ -715,7 +751,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         ]
         for lb_type, error in error_cases:
             with self.subTest(lb_type=lb_type):
-                lb = self._get_load_balancer(lb_type, qkv_size, block_mask)
+                lb = self._get_load_balancer(device, lb_type, qkv_size, block_mask)
                 with self.assertRaisesRegex(NotImplementedError, error):
                     _context_parallel_shard(
                         device_mesh,
@@ -726,28 +762,31 @@ class CPFlexAttentionTest(DTensorTestBase):
 
 
 class TestCPCustomOps(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_flex_cp_custom_op(self) -> None:
+    def test_flex_cp_custom_op(self, device=None) -> None:
+        device = torch.device(device).type if device else self.device_type
         mesh = init_device_mesh(
-            device_type=self.device_type,
+            device_type=device,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
         examples_k_v = [
             (
-                torch.randn(8, 8, 8, 8, device=self.device_type),
-                torch.randn(8, 8, 8, 8, device=self.device_type),
+                torch.randn(8, 8, 8, 8, device=device),
+                torch.randn(8, 8, 8, 8, device=device),
                 2,
                 c10d._get_process_group_name(mesh.get_group()),
             ),
             (
-                torch.randn(8, 8, 8, 8, device=self.device_type, requires_grad=True),
-                torch.randn(8, 8, 8, 8, device=self.device_type, requires_grad=True),
+                torch.randn(8, 8, 8, 8, device=device, requires_grad=True),
+                torch.randn(8, 8, 8, 8, device=device, requires_grad=True),
                 2,
                 c10d._get_process_group_name(mesh.get_group()),
             ),
@@ -757,26 +796,29 @@ class TestCPCustomOps(DTensorTestBase):
 
 
 class TestSharding(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_context_parallel_shard(self) -> None:
+    def test_context_parallel_shard(self, device=None) -> None:
+        device = torch.device(device).type if device else self.device_type
         B = 4
         seq_len = 32
 
         device_mesh = init_device_mesh(
-            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=device
         )
-        freqs_cis = torch.arange(0, seq_len, device=self.device_type)
-        q = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
-        k = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
-        v = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        freqs_cis = torch.arange(0, seq_len, device=device)
+        q = torch.ones(B * seq_len, device=device).reshape(B, seq_len)
+        k = torch.ones(B * seq_len, device=device).reshape(B, seq_len)
+        v = torch.ones(B * seq_len, device=device).reshape(B, seq_len)
 
         load_balancer = _HeadTailLoadBalancer(
-            seq_len, self.world_size, torch.device(self.device_type)
+            seq_len, self.world_size, torch.device(device)
         )
         freqs_cis_shard, q_shard, k_shard, v_shard = _context_parallel_shard(
             device_mesh, [freqs_cis, q, k, v], [0, 1, 1, 1], load_balancer=load_balancer
@@ -797,7 +839,8 @@ class TestSharding(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_context_parallel_shard_per_document_balance(self) -> None:
+    def test_context_parallel_shard_per_document_balance(self, device=None) -> None:
+        device = torch.device(device).type if device else self.device_type
         # End-to-end regression through the real _context_parallel_shard path:
         # rearrange + shard randomized mixed-length documents and confirm each
         # rank receives an equal share of causal attention work.
@@ -814,18 +857,18 @@ class TestSharding(DTensorTestBase):
         device_mesh = init_device_mesh(
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
-            device_type=self.device_type,
+            device_type=device,
         )
         # cost[t] = causal work of the query at original position t (1..L per doc).
         cost = []
         for length in doc_lengths:
             cost.extend(range(1, length + 1))
-        cost = torch.tensor(cost, device=self.device_type)
+        cost = torch.tensor(cost, device=device)
 
         # A token-id buffer so each sharded position maps back to its origin.
-        buffer = torch.arange(seq_len, device=self.device_type).view(1, seq_len)
+        buffer = torch.arange(seq_len, device=device).view(1, seq_len)
         load_balancer = _PerDocumentHeadTailLoadBalancer(
-            [doc_lengths], self.world_size, torch.device(self.device_type)
+            [doc_lengths], self.world_size, torch.device(device)
         )
         (sharded,) = _context_parallel_shard(
             device_mesh, [buffer], [1], load_balancer=load_balancer
@@ -836,7 +879,8 @@ class TestSharding(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_context_parallel_shard_with_positions(self) -> None:
+    def test_context_parallel_shard_with_positions(self, device=None) -> None:
+        device = torch.device(device).type if device else self.device_type
         """Test context parallel sharding with expanded batch dimensions.
 
         This test validates the fix for buffer sharding when the batch dimension
@@ -847,19 +891,19 @@ class TestSharding(DTensorTestBase):
         seq_len = 32
 
         device_mesh = init_device_mesh(
-            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=device
         )
 
         # Create positions tensor and expand to add batch dimension
-        positions = torch.arange(0, seq_len, device=self.device_type)
+        positions = torch.arange(0, seq_len, device=device)
         positions = positions.expand(B, seq_len)
 
-        q = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
-        k = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
-        v = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        q = torch.ones(B * seq_len, device=device).reshape(B, seq_len)
+        k = torch.ones(B * seq_len, device=device).reshape(B, seq_len)
+        v = torch.ones(B * seq_len, device=device).reshape(B, seq_len)
 
         load_balancer = _HeadTailLoadBalancer(
-            seq_len, self.world_size, torch.device(self.device_type)
+            seq_len, self.world_size, torch.device(device)
         )
 
         # positions has seq_dim=1 (same as q, k, v) after expansion
@@ -889,7 +933,8 @@ class TestSharding(DTensorTestBase):
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
     )
-    def test_attention_shard_without_cp(self) -> None:
+    def test_attention_shard_without_cp(self, device=None) -> None:
+        device = torch.device(device).type if device else self.device_type
         """Test that sharding on sequence dimension without CP enabled is not supported."""
         from torch.distributed.tensor import distribute_tensor, Replicate, Shard
 
@@ -899,7 +944,7 @@ class TestSharding(DTensorTestBase):
         dim = 32
 
         device_mesh = init_device_mesh(
-            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=device
         )
 
         for backend in backends:
@@ -908,15 +953,9 @@ class TestSharding(DTensorTestBase):
                 if backend == SDPBackend.EFFICIENT_ATTENTION:
                     dtype = torch.float32
                 # Create q, k, v tensors with shape (B, nheads, seq_len, dim)
-                q = torch.randn(
-                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
-                )
-                k = torch.randn(
-                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
-                )
-                v = torch.randn(
-                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
-                )
+                q = torch.randn(B, nheads, seq_len, dim, device=device, dtype=dtype)
+                k = torch.randn(B, nheads, seq_len, dim, device=device, dtype=dtype)
+                v = torch.randn(B, nheads, seq_len, dim, device=device, dtype=dtype)
                 q_dt = distribute_tensor(q, device_mesh, [Shard(2)])
                 k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
                 v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
@@ -943,16 +982,21 @@ class TestSharding(DTensorTestBase):
 class TestContextParallelStyle(DTensorContinuousTestBase):
     """Test suite for _ContextParallel.flex_input_fn argument handling"""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = 2
 
-    def _create_test_tensors(self):
+    def _create_test_tensors(self, device=None):
+        device = torch.device(device).type if device else self.device_type
         """Helper to create test query, key, value tensors"""
-        query = torch.randn(2, 4, 128, 64, device=self.device_type)
-        key = torch.randn(2, 4, 128, 64, device=self.device_type)
-        value = torch.randn(2, 4, 128, 64, device=self.device_type)
+        query = torch.randn(2, 4, 128, 64, device=device)
+        key = torch.randn(2, 4, 128, 64, device=device)
+        value = torch.randn(2, 4, 128, 64, device=device)
         return query, key, value
 
-    def _setup_mock_and_context(self, mock_allgather, key, value):
+    def _setup_mock_and_context(
+        self, device=None, mock_allgather=None, key=None, value=None
+    ):
         """Helper to setup mock and create CP instance + device mesh"""
         # Setup mock with transformed tensors
         mock_key = key * 2
@@ -963,7 +1007,7 @@ class TestContextParallelStyle(DTensorContinuousTestBase):
         cp_style = _ContextParallel(
             seq_dim=2, attention_type=_ContextParallel.AttentionType.FLEX
         )
-        device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+        device_mesh = DeviceMesh(device, torch.arange(0, self.world_size))
 
         return cp_style, device_mesh, mock_key, mock_value
 
@@ -971,11 +1015,12 @@ class TestContextParallelStyle(DTensorContinuousTestBase):
     @unittest.mock.patch(
         "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
     )
-    def test_flex_input_fn_all_positional(self, mock_allgather):
+    def test_flex_input_fn_all_positional(self, mock_allgather, device=None):
+        device = torch.device(device).type if device else self.device_type
         """Test flex_input_fn with all positional arguments"""
-        query, key, value = self._create_test_tensors()
+        query, key, value = self._create_test_tensors(device)
         cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
-            mock_allgather, key, value
+            device, mock_allgather, key, value
         )
 
         # Call with all positional args
@@ -997,11 +1042,12 @@ class TestContextParallelStyle(DTensorContinuousTestBase):
     @unittest.mock.patch(
         "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
     )
-    def test_flex_input_fn_all_keyword(self, mock_allgather):
+    def test_flex_input_fn_all_keyword(self, mock_allgather, device=None):
+        device = torch.device(device).type if device else self.device_type
         """Test flex_input_fn with all keyword arguments"""
-        query, key, value = self._create_test_tensors()
+        query, key, value = self._create_test_tensors(device)
         cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
-            mock_allgather, key, value
+            device, mock_allgather, key, value
         )
 
         # Call with all keyword args
@@ -1025,11 +1071,14 @@ class TestContextParallelStyle(DTensorContinuousTestBase):
     @unittest.mock.patch(
         "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
     )
-    def test_flex_input_fn_query_positional_kv_keyword(self, mock_allgather):
+    def test_flex_input_fn_query_positional_kv_keyword(
+        self, mock_allgather, device=None
+    ):
+        device = torch.device(device).type if device else self.device_type
         """Test with query positional, key/value keyword"""
-        query, key, value = self._create_test_tensors()
+        query, key, value = self._create_test_tensors(device)
         cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
-            mock_allgather, key, value
+            device, mock_allgather, key, value
         )
 
         # Query positional, key/value keyword
@@ -1052,11 +1101,12 @@ class TestContextParallelStyle(DTensorContinuousTestBase):
     @unittest.mock.patch(
         "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
     )
-    def test_flex_input_fn_qk_positional_v_keyword(self, mock_allgather):
+    def test_flex_input_fn_qk_positional_v_keyword(self, mock_allgather, device=None):
+        device = torch.device(device).type if device else self.device_type
         """Test with query/key positional, value keyword"""
-        query, key, value = self._create_test_tensors()
+        query, key, value = self._create_test_tensors(device)
         cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
-            mock_allgather, key, value
+            device, mock_allgather, key, value
         )
 
         # Query/key positional, value keyword
@@ -1078,11 +1128,12 @@ class TestContextParallelStyle(DTensorContinuousTestBase):
     @unittest.mock.patch(
         "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
     )
-    def test_flex_input_fn_with_extra_args(self, mock_allgather):
+    def test_flex_input_fn_with_extra_args(self, mock_allgather, device=None):
+        device = torch.device(device).type if device else self.device_type
         """Test with mixed positional/keyword and extra arguments"""
-        query, key, value = self._create_test_tensors()
+        query, key, value = self._create_test_tensors(device)
         cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
-            mock_allgather, key, value
+            device, mock_allgather, key, value
         )
 
         # Mix of positional and keyword with extra args
@@ -1110,28 +1161,32 @@ class TestContextParallelStyle(DTensorContinuousTestBase):
 class TestContextParallelStyleSDPA(DTensorContinuousTestBase):
     """Test suite for _ContextParallel.sdpa_input_fn argument handling"""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = 2
 
-    def _create_test_tensors(self):
+    def _create_test_tensors(self, device=None):
         """Helper to create test query, key, value tensors"""
-        query = torch.randn(2, 4, 128, 64, device=self.device_type)
-        key = torch.randn(2, 4, 128, 64, device=self.device_type)
-        value = torch.randn(2, 4, 128, 64, device=self.device_type)
+        query = torch.randn(2, 4, 128, 64, device=device)
+        key = torch.randn(2, 4, 128, 64, device=device)
+        value = torch.randn(2, 4, 128, 64, device=device)
         return query, key, value
 
-    def _setup_context(self):
+    def _setup_context(self, device=None):
+        device = torch.device(device).type if device else self.device_type
         """Helper to create CP instance and device mesh"""
         cp_style = _ContextParallel(
             seq_dim=2, attention_type=_ContextParallel.AttentionType.SDPA
         )
-        device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+        device_mesh = DeviceMesh(device, torch.arange(0, self.world_size))
         return cp_style, device_mesh
 
     @with_comms
-    def test_sdpa_input_fn_all_positional(self):
+    def test_sdpa_input_fn_all_positional(self, device=None):
+        device = torch.device(device).type if device else self.device_type
         """Test sdpa_input_fn with all positional arguments"""
-        query, key, value = self._create_test_tensors()
-        cp_style, device_mesh = self._setup_context()
+        query, key, value = self._create_test_tensors(device)
+        cp_style, device_mesh = self._setup_context(device)
 
         # Call with all positional args
         args = (query, key, value)
@@ -1155,10 +1210,11 @@ class TestContextParallelStyleSDPA(DTensorContinuousTestBase):
         self.assertEqual(out_args[2].placements, [Shard(2)])
 
     @with_comms
-    def test_sdpa_input_fn_all_keyword(self):
+    def test_sdpa_input_fn_all_keyword(self, device=None):
+        device = torch.device(device).type if device else self.device_type
         """Test sdpa_input_fn with all keyword arguments"""
-        query, key, value = self._create_test_tensors()
-        cp_style, device_mesh = self._setup_context()
+        query, key, value = self._create_test_tensors(device)
+        cp_style, device_mesh = self._setup_context(device)
 
         # Call with all keyword args
         args = ()
@@ -1184,10 +1240,11 @@ class TestContextParallelStyleSDPA(DTensorContinuousTestBase):
         self.assertEqual(out_kwargs["value"].placements, [Shard(2)])
 
     @with_comms
-    def test_sdpa_input_fn_query_positional_kv_keyword(self):
+    def test_sdpa_input_fn_query_positional_kv_keyword(self, device=None):
+        device = torch.device(device).type if device else self.device_type
         """Test sdpa_input_fn with query positional, key/value keyword"""
-        query, key, value = self._create_test_tensors()
-        cp_style, device_mesh = self._setup_context()
+        query, key, value = self._create_test_tensors(device)
+        cp_style, device_mesh = self._setup_context(device)
 
         # Query positional, key/value keyword
         args = (query,)
@@ -1256,6 +1313,8 @@ class PerDocumentHeadTailLoadBalancerTest(TestCase):
     its indices rank-major (each rank's head+tail chunks of *every* document
     grouped together) for the contiguous cut to land on rank boundaries."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _causal_cost(doc_lengths: list[int]) -> list[int]:
         # Under a document-causal mask, the query at within-document position p
@@ -1312,6 +1371,24 @@ class PerDocumentHeadTailLoadBalancerTest(TestCase):
         rearranged = lb._generate_indices()[0]
         restore = lb._generate_indices(restore=True)[0]
         self.assertEqual(rearranged[restore].tolist(), list(range(16)))
+
+
+instantiate_device_type_tests(
+    RingAttentionTest, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    CPFlexAttentionTest, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestCPCustomOps, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(TestSharding, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestContextParallelStyle, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestContextParallelStyleSDPA, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
