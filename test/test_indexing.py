@@ -22,8 +22,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCUDA,
-    onlyNativeDeviceTypes,
     skipCUDAIf,
     skipXLA,
     skipXPUIf,
@@ -44,6 +42,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     skipIfTorchDynamo,
+    subtest,
     TEST_ACCELERATOR,
     TestCase,
     xfailIfTorchDynamo,
@@ -231,7 +230,6 @@ class TestIndexingDevice(TestCase):
 
         self.assertRaises(TypeError, delitem)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.double)
     def test_advancedindex(self, device, dtype):
         # Tests for Integer Array Indexing, Part I - Purely integer array
@@ -1090,7 +1088,6 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(a[-1, -1], 14)
         self.assertEqual(a[0, -1], 1)
 
-    @onlyNativeDeviceTypes
     def test_index_put_accumulate_expanded_values(self, device):
         # Checks the issue (originally found on cuda) on gpu:
         # https://github.com/pytorch/pytorch/issues/39227, and verifies
@@ -1202,8 +1199,8 @@ class TestIndexingDevice(TestCase):
 
         self.assertEqual(out_gpu.cpu(), out_cpu)
 
-    @onlyCUDA
-    @parametrize("accumulate", [False, True])
+    @onlyAccelerator
+    @parametrize("accumulate", [False, subtest(True, decorators=[expectedFailureMPS])])
     def test_index_put_sorted_contiguous_size_one_stride(self, device, accumulate):
         # A size-1 dim may carry any stride and the tensor is still contiguous.
         # The sort-based kernel (used for accumulate=True and in deterministic
@@ -1276,7 +1273,6 @@ class TestIndexingDevice(TestCase):
         out_cpu = func1(t, ind, val)
         self.assertEqual(out_gpu.cpu(), out_cpu)
 
-    @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
         dtype = highest_precision_float(device)
         for i in range(1, 512):
@@ -1297,7 +1293,6 @@ class TestIndexingDevice(TestCase):
 
             self.assertEqual(output, input_list)
 
-    @onlyNativeDeviceTypes
     def test_index_ind_dtype(self, device):
         x = torch.randn(4, 4, device=device)
         ind_long = torch.randint(4, (4,), dtype=torch.long, device=device)
@@ -1575,7 +1570,6 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(9.9, r)
 
     # https://github.com/pytorch/pytorch/issues/191458
-    @onlyNativeDeviceTypes
     def test_setitem_uint64_above_int64_max(self, device):
         x = torch.zeros((1,), dtype=torch.uint64, device=device)
         x[0] = 1 << 63
@@ -2021,9 +2015,9 @@ class TestIndexingDevice(TestCase):
                     ref_index_copy(dest2, dim, idx, src)
                     self.assertEqual(dest, dest2)
 
-    # onlyNativeDeviceTypes due to an XLA error:
+    # skipXLA due to an XLA error:
     # https://github.com/pytorch/pytorch/issues/53256
-    @onlyNativeDeviceTypes
+    @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_index_copy_scalars(self, device, dtype):
         # Create the 8 possible combinations of scalar sizes for target / index / source
@@ -2054,7 +2048,6 @@ class TestIndexingDevice(TestCase):
         index = torch.randint(a[dim], (elems,), device=device)
         return (x, index, src)
 
-    @onlyNativeDeviceTypes
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
     def test_index_copy_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
@@ -2076,7 +2069,6 @@ class TestIndexingDevice(TestCase):
 
             self.assertEqual(x0, y0, atol=0, rtol=0)
 
-    @onlyNativeDeviceTypes
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
     def test_index_add_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
@@ -2096,7 +2088,6 @@ class TestIndexingDevice(TestCase):
                     y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
-    @onlyNativeDeviceTypes
     def test_index_put_non_accumulate_deterministic(self, device) -> None:
         with DeterministicGuard(True):
             for i in range(3):
@@ -2132,7 +2123,6 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(0, x.index_fill_(0, index, -1).dim())
 
     # The test fails for zero-dimensional tensors on XLA
-    @onlyNativeDeviceTypes
     @dtypes(
         *all_types_complex_float8_and(
             torch.half,
@@ -2380,6 +2370,31 @@ class TestIndexingDevice(TestCase):
         out.index_add_(0, idx, src)
         self.assertEqual(out.cpu(), expected)
 
+    @serialTest()
+    @onlyAccelerator
+    @dtypes(torch.complex64, torch.complex128, torch.bool)
+    def test_index_add_excluded_dtypes(self, device, dtype):
+        # Originally test added for CUDA implementation:
+        # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
+        # fast-path delegation in index_add_cuda_impl excludes these dtypes
+        # and lets them fall through to indexFunc{Small,Large}Index. Regression
+        # test that an eligible-shape (dim=0, alpha=1, contiguous, aligned)
+        # call still produces correct results for these dtypes.
+        m, n, D = 1024, 512, 128
+        if dtype == torch.bool:
+            src = torch.randint(0, 2, (n, D), device=device, dtype=dtype)
+        else:
+            src = make_tensor((n, D), device=device, dtype=dtype)
+        out = torch.zeros(m, D, device=device, dtype=dtype)
+        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
+        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
+        out.index_add_(0, idx, src)
+        self.assertEqual(out.cpu(), expected)
+
+
+class TestIndexingCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _skip_unless_sorted_index_add_arch(self):
         if not evaluate_gfx_arch_within(["gfx942", "gfx950"]):
             self.skipTest("requires the MI300x/MI350x sorted index_add path")
@@ -2496,7 +2511,6 @@ class TestIndexingDevice(TestCase):
         return storage[1:].view_as(tensor).copy_(tensor)
 
     @serialTest()
-    @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float32, torch.float64)
     @parametrize(
         "pattern",
@@ -2517,7 +2531,6 @@ class TestIndexingDevice(TestCase):
         )
 
     @serialTest()
-    @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("layout", ["dim1", "inner256"])
     def test_index_add_sorted_layouts(self, device, dtype, layout):
@@ -2527,7 +2540,6 @@ class TestIndexingDevice(TestCase):
         )
 
     @serialTest()
-    @onlyCUDA
     @parametrize(
         "case",
         [
@@ -2587,7 +2599,6 @@ class TestIndexingDevice(TestCase):
             )
 
     @serialTest()
-    @onlyCUDA
     @parametrize("reduction_kind", ["compact", "long"])
     def test_index_select_backward_sorted_accumulates_in_half(
         self, device, reduction_kind
@@ -2643,7 +2654,6 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(source.grad.cpu(), expected, atol=0, rtol=0)
 
     @serialTest()
-    @onlyCUDA
     @parametrize("reduction_kind", ["compact", "long"])
     @parametrize("grad_alignment", ["aligned", "misaligned"])
     def test_index_select_backward_sorted_accumulates_bfloat16_in_float(
@@ -2680,27 +2690,6 @@ class TestIndexingDevice(TestCase):
 
         self.assertTrue(ran_sorted)
         self.assertEqual(source.grad, expected, atol=0, rtol=0)
-
-    @serialTest()
-    @onlyAccelerator
-    @dtypes(torch.complex64, torch.complex128, torch.bool)
-    def test_index_add_excluded_dtypes(self, device, dtype):
-        # Originally test added for CUDA implementation:
-        # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
-        # fast-path delegation in index_add_cuda_impl excludes these dtypes
-        # and lets them fall through to indexFunc{Small,Large}Index. Regression
-        # test that an eligible-shape (dim=0, alpha=1, contiguous, aligned)
-        # call still produces correct results for these dtypes.
-        m, n, D = 1024, 512, 128
-        if dtype == torch.bool:
-            src = torch.randint(0, 2, (n, D), device=device, dtype=dtype)
-        else:
-            src = make_tensor((n, D), device=device, dtype=dtype)
-        out = torch.zeros(m, D, device=device, dtype=dtype)
-        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
-        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
-        out.index_add_(0, idx, src)
-        self.assertEqual(out.cpu(), expected)
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to
@@ -2978,6 +2967,7 @@ class NumpyTestsDevice(TestCase):
 instantiate_device_type_tests(
     TestIndexingDevice, globals(), except_for="meta", allow_mps=True, allow_xpu=True
 )
+instantiate_device_type_tests(TestIndexingCUDA, globals(), only_for="cuda")
 
 instantiate_device_type_tests(
     NumpyTestsDevice, globals(), except_for="meta", allow_xpu=True

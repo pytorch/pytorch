@@ -4,6 +4,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <memory>
+#include <optional>
 
 namespace at::cuda {
 
@@ -33,6 +34,9 @@ struct TORCH_CUDA_CPP_API MemPool {
   MempoolId_t id();
   int use_count();
   c10::DeviceIndex device();
+  // The caching allocator keeps a custom allocator only on the device of the
+  // pool. Returns this device, or nullopt if the pool has no custom allocator.
+  std::optional<c10::DeviceIndex> allocator_device();
   static MempoolId_t graph_pool_handle(bool is_user_created = true);
 
  private:
@@ -41,6 +45,7 @@ struct TORCH_CUDA_CPP_API MemPool {
   bool is_user_created_;
   MempoolId_t id_;
   c10::DeviceIndex device_;
+  bool has_allocator_;
 };
 
 // HostMemPool is a pool of pinned host memory in the CUDA host caching
