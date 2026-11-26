@@ -23,7 +23,10 @@ from typing import Any, cast
 import sympy
 
 import torch
-from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+from torch.fx.experimental.symbolic_shapes import (
+    GuardOnDataDependentSymNode,
+    has_free_symbols,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from ...ir import Buffer, ComputedBuffer, Pointwise, Reduction
@@ -412,29 +415,28 @@ class NVGemmEpilogueLowering:
     ) -> GemmReductionGeometry | None:
         if not isinstance(buffer.data, Pointwise):
             return None
-        try:
-            m, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
-            output_size = tuple(
-                map(V.graph.sizevars.optimization_hint, buffer.data.ranges)
-            )
-        except (GuardOnDataDependentSymNode, TypeError, ValueError):
-            return None
-        compressed_size = _compressed_output_size(output_size)
+        m, n = gemm_node.get_size()
+        compressed_size = _compressed_output_size(buffer.data.ranges)
         if compressed_size is None:
             return None
         out_m, out_n = compressed_size
-        if m == out_m and out_n > 0 and n % out_n == 0:
-            geometry = GemmReductionGeometry(group=n // out_n, axis=1)
-        elif n == out_n and out_m > 0 and m % out_m == 0:
-            geometry = GemmReductionGeometry(group=m // out_m, axis=0)
+        reads = list(scheduler_node.read_writes.reads)
+        group = len(reads)
+        if group <= 1:
+            return None
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_equals(
+            m, out_m
+        ) and sizevars.statically_known_equals(n, out_n * group):
+            geometry = GemmReductionGeometry(group=group, axis=1)
+        elif sizevars.statically_known_equals(
+            n, out_n
+        ) and sizevars.statically_known_equals(m, out_m * group):
+            geometry = GemmReductionGeometry(group=group, axis=0)
         else:
             return None
-        if geometry.group <= 1:
-            return None
-
-        reads = list(scheduler_node.read_writes.reads)
         range_vars = scheduler_node.read_writes.range_vars
-        if len(reads) != geometry.group or range_vars is None:
+        if range_vars is None:
             return None
         if not range_vars:
             range_vars = tuple(
@@ -525,6 +527,8 @@ class NVGemmEpilogueLowering:
             if len(reduction.reduction_ranges) != 1:
                 return None
             group_extent = reduction.reduction_ranges[0]
+            if has_free_symbols(group_extent):
+                return None
             try:
                 group = V.graph.sizevars.optimization_hint(group_extent)
             except (GuardOnDataDependentSymNode, TypeError, ValueError):
