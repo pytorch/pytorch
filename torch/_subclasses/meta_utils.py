@@ -95,14 +95,21 @@ _TensorT_cov = TypeVar("_TensorT_cov", bound=torch.Tensor, covariant=True)
 
 def safe_is_leaf(t: MetaTensorDesc[Any] | torch.Tensor) -> bool:
     try:
-        return t.is_leaf
+        with torch._C.DisableTorchFunctionSubclass():
+            return t.is_leaf
     except RuntimeError:
         # inference mode can trigger this
         return False
 
 
 def safe_grad(t: _TensorLikeT) -> _TensorLikeT | None:
-    with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
+    with (
+        # Read without __torch_function__ dispatch: a subclass that returns
+        # NotImplemented for unhandled attributes must not turn this probe
+        # into a dispatch failure.
+        torch._C.DisableTorchFunctionSubclass(),
+        torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter),
+    ):
         # pyrefly: ignore [bad-return]
         return t.grad
 
@@ -198,7 +205,6 @@ def assert_metadata_eq(
     return go(m1, m2)
 
 
-# TypeGuard (not TypeIs): False does not imply !torch.Tensor
 def is_sparse_coo(t: object) -> TypeGuard[torch.Tensor]:
     return isinstance(t, torch.Tensor) and t.layout is torch.sparse_coo
 

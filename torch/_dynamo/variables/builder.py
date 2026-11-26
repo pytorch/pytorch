@@ -414,7 +414,13 @@ DimList = list
 
 
 def safe_has_grad(t: object) -> bool:
-    with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
+    # Read with the __torch_function__ protocol disabled so that a Tensor
+    # subclass returning NotImplemented for unhandled attributes does not
+    # turn this bookkeeping probe into a dispatch failure.
+    with (
+        torch._C.DisableTorchFunctionSubclass(),
+        torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter),
+    ):
         return hasattr(t, "grad")
 
 
@@ -3536,10 +3542,58 @@ class VariableBuilder:
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
 
+        # A Tensor subclass whose __torch_function__ returns NotImplemented for
+        # attributes it does not handle is legal, but Dynamo's wrapping phase
+        # reads many introspection attributes (is_nested, shape, _is_view, ...)
+        # on the example tensor. Probe once instead of crashing deep inside the
+        # wrapper: if basic introspection cannot be dispatched, graph break with
+        # a named limitation rather than raising InternalTorchDynamoError.
         if (
             isinstance(value, torch.Tensor)
-            and value.is_nested
-            and not isinstance(value, torch.nested._internal.nested_tensor.NestedTensor)
+            and hasattr(type(value), "__torch_function__")
+        ):
+            try:
+                value.is_nested
+            except TypeError:
+                unimplemented(
+                    gb_type="Tensor subclass blocks attribute introspection",
+                    context="",
+                    explanation=(
+                        "This Tensor subclass's __torch_function__ returns "
+                        "NotImplemented for attributes Dynamo must read while "
+                        "wrapping inputs (e.g. is_nested), so it cannot be "
+                        "compiled; the call falls back to eager."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+        # NB: Dynamo reads these introspection attributes for its own
+        # bookkeeping, not as a traced operation. Run them with the
+        # __torch_function__ protocol disabled: a Tensor subclass whose
+        # __torch_function__ returns NotImplemented for attributes it does not
+        # handle would otherwise fail with "Multiple dispatch failed for
+        # 'torch.Tensor.<attr>.__get__'" merely for being passed as an input.
+        with torch._C.DisableTorchFunctionSubclass():
+            _is_nested = (
+                isinstance(value, torch.Tensor) and value.is_nested
+            )
+            _is_sparse = (
+                isinstance(value, torch.Tensor)
+                and is_sparse_any(value)
+                and (not self.tx.export or not config.capture_sparse_compute)
+            )
+            _dual_tangent = None
+            if (
+                isinstance(value, torch.Tensor)
+                and torch._C._functorch.peek_interpreter_stack() is None
+            ):
+                try:
+                    _dual_tangent = torch.autograd.forward_ad.unpack_dual(value).tangent
+                except RuntimeError:
+                    _dual_tangent = None
+
+        if _is_nested and not isinstance(
+            value, torch.nested._internal.nested_tensor.NestedTensor
         ):
             unimplemented(
                 gb_type="Attempted to wrap strided NestedTensor",
@@ -3549,11 +3603,7 @@ class VariableBuilder:
             )
 
         # TODO(pearu,sparse-team) - Add the corresponding SPARSE_TENSOR_MATCH guards
-        if (
-            isinstance(value, torch.Tensor)
-            and is_sparse_any(value)
-            and (not self.tx.export or not config.capture_sparse_compute)
-        ):
+        if _is_sparse:
             # A hot fix for sparse tensors + torch.compile. Support for
             # export + sparsity is being added but we need to create
             # SPARSE_TENSOR_GUARDS for guards to work properly.
@@ -3564,23 +3614,15 @@ class VariableBuilder:
                 hints=[*graph_break_hints.SPARSE_TENSOR],
             )
 
-        if (
-            isinstance(value, torch.Tensor)
-            and torch._C._functorch.peek_interpreter_stack() is None
-        ):
-            try:
-                tangent = torch.autograd.forward_ad.unpack_dual(value).tangent
-            except RuntimeError:
-                tangent = None
-            if tangent is not None:
-                unimplemented(
-                    gb_type="Attempted to wrap a dual tensor input",
-                    context="",
-                    explanation="torch.compile does not support input tensors that "
-                    "carry a forward-mode AD tangent; compiled code would silently "
-                    "drop the tangent.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+        if _dual_tangent is not None:
+            unimplemented(
+                gb_type="Attempted to wrap a dual tensor input",
+                context="",
+                explanation="torch.compile does not support input tensors that "
+                "carry a forward-mode AD tangent; compiled code would silently "
+                "drop the tangent.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         if (
             safe_has_grad(value)
@@ -4293,7 +4335,7 @@ def _clone_input(
                 torch._is_functional_tensor(value)
                 and maybe_get_fake_mode(value) is fake_mode
             )
-            or value.is_nested
+            or _read_attr_no_tf(value, "is_nested")
         ):
             # NB: ensure strides are preserved
             with unset_fake_temporarily():
@@ -5177,7 +5219,37 @@ def is_dynamic_value(value: int) -> bool:
 
 # Performs automatic dynamic dim determination.
 # Returns a SymbolicContext
+def _read_attr_no_tf(t: Any, attr: str) -> Any:
+    """Read a Tensor introspection attribute without __torch_function__ dispatch.
+
+    Dynamo reads attributes such as ``is_nested`` for its own bookkeeping; a
+    subclass that returns ``NotImplemented`` for unhandled attributes must not
+    turn that read into a dispatch failure.
+    """
+    with torch._C.DisableTorchFunctionSubclass():
+        return getattr(t, attr)
+
+
 def _automatic_dynamic(
+    e: Any,
+    tx: "InstructionTranslatorBase",
+    source: Source,
+    static_shapes: bool,
+    outer_only: bool = False,
+    tensor_spec: TensorSpec | None = None,
+) -> SymbolicContext:
+    # This is Dynamo's own introspection of the example tensor (is_nested,
+    # _is_view, _base, sizes, ...), not a traced operation. A Tensor subclass
+    # whose __torch_function__ returns NotImplemented for unhandled
+    # attributes/methods would otherwise fail with "Multiple dispatch
+    # failed" merely for being compiled, so run it with the protocol off.
+    with torch._C.DisableTorchFunctionSubclass():
+        return _automatic_dynamic_impl(
+            e, tx, source, static_shapes, outer_only, tensor_spec
+        )
+
+
+def _automatic_dynamic_impl(
     e: Any,
     tx: "InstructionTranslatorBase",
     source: Source,
