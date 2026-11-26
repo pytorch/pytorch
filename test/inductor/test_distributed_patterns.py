@@ -1,14 +1,16 @@
 # Owner(s): ["oncall: pt2"]
 import dataclasses
 import functools
-import unittest
 
 import torch
 from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 from torch.testing._internal.common_utils import HardwareClassification, IS_MACOS
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_MPS, HAS_TRITON
 
@@ -447,6 +449,7 @@ class DistributedPatternTestsGeneric(TestCase):
 class DistributedPatternTestsAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
     @torch.no_grad()
     def test_storage_resize_zero(self, device):
         @torch.compile(fullgraph=True)
@@ -461,6 +464,7 @@ class DistributedPatternTestsAccelerator(TestCase):
         self.assertEqual(y, expected)
         self.assertEqual(x.untyped_storage().size(), 0)
 
+    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
     @torch.no_grad()
     def test_storage_resize_nonzero(self, device):
         @torch.compile(fullgraph=True)
@@ -482,7 +486,7 @@ class DistributedPatternTestsAccelerator(TestCase):
 class DistributedPatternTestsInductor(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires gpu")
+    @skipIf(not (HAS_MPS or HAS_TRITON), "requires gpu")
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_inductor(self, device):
         m1, inp1 = init_fake_distributed(device)
