@@ -30,6 +30,7 @@
 
 #ifdef USE_ROCM
 #include <ATen/cuda/detail/ROCmMacros.cuh>
+#include <ATen/native/cuda/LayerNormROCm.h>
 #endif
 
 
@@ -1187,6 +1188,20 @@ void LayerNormKernelImplInternal(
   bool can_vec_gamma = gamma.defined() ? can_vectorize(gamma_data, alignment) : true;
   bool can_vec_beta = beta.defined() ? can_vectorize(beta_data, alignment) : true;
 
+#ifdef USE_ROCM
+  // Cached-row kernels for wave64 (CDNA) devices; they decline (return false) for shapes or pointers they do not
+  // handle, and the kernels below take over.
+  if constexpr (std::is_same_v<T, float> || std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) {
+    if (at::cuda::warp_size() == 64) {
+      rocm_ln::FwdArgs args{X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data, M, N,
+                            static_cast<float>(eps), rms_norm, at::cuda::getCurrentCUDAStream()};
+      if (rocm_ln::forward<T>(args)) {
+        return;
+      }
+    }
+  }
+#endif
+
   if ((std::is_same_v<T, float> || std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) &&
   N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && N % num_vec_elems == 0 &&
   can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
@@ -1718,6 +1733,44 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();
+
+#ifdef USE_ROCM
+  // Fused persistent kernel: dX plus register-resident dgamma/dbeta partials and a small second stage. Declines
+  // (returns false, launches nothing) when dX or gamma is missing, for unaligned or odd shapes, or when no
+  // configuration fits in registers; the kernels below then run as before.
+  if constexpr (std::is_same_v<T, float> || std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) {
+    if (dX_data != nullptr && gamma_data != nullptr && warp_size == 64 && (dgamma->defined() || dbeta->defined())) {
+      struct Workspace {
+        Tensor buf;
+        const Tensor* like;
+      } ws{Tensor(), &dY};
+      rocm_ln::WsAlloc alloc{
+          [](void* ctx, int64_t n) -> float* {
+            auto* w = static_cast<Workspace*>(ctx);
+            w->buf = at::empty({n}, w->like->options().dtype(at::kFloat));
+            return w->buf.template data_ptr<float>();
+          },
+          &ws};
+      rocm_ln::BwdArgs args{
+          dY_data,
+          X_data,
+          rms_norm ? nullptr : mean_data,
+          rstd_data,
+          gamma_data,
+          dX_data,
+          dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr,
+          (!rms_norm && dbeta->defined()) ? dbeta->template data_ptr<T>() : nullptr,
+          M,
+          N,
+          rms_norm,
+          at::cuda::getCurrentDeviceProperties()->multiProcessorCount,
+          cuda_stream};
+      if (rocm_ln::backward<T>(args, alloc)) {
+        return;
+      }
+    }
+  }
+#endif
   if (dX_data != nullptr) {
     // One thread per vec_size elements, rounded up to whole warps because BlockReduceSum reduces warp by warp; the
     // extra threads in the last warp add zeros. Keep nshared sized for num_threads(), not threads_per_row: after the
