@@ -465,8 +465,8 @@ def _skip_tracer_frames() -> None:
     function). Those listed here run on CPython with everything they call:
     the float subclass, the handlers of the dispatch modes, the stand-in
     for ``autograd.Function.apply``, whose forward the graph calls anew on
-    every run, and what the trace does for itself (the broadcast of a
-    call's sizes, the node for a scalar's value, a refusal): a traced body runs only
+    every run, and what the trace does for itself (the judgment of a
+    call's operator, the node for a scalar's value, a refusal): a traced body runs only
     code the optimizer judged, and that is none of the body's."""
     global _tracer_frames_skipped
     if _tracer_frames_skipped:
@@ -482,7 +482,7 @@ def _skip_tracer_frames() -> None:
         _tracing_apply,
         _refusing_init,
         _opaque_call,
-        _sized_by_its_tensors,
+        _scalars_decide_no_size,
         _item_node,
         _refuse,
     ]
@@ -552,44 +552,48 @@ def _floats_in(x, out):
 _VALUES_OUT = (torch.Tensor.tolist, torch.Tensor.numpy, torch.Tensor.__array__)
 
 
-def _sized_by_its_tensors(out, args, kwargs) -> bool:
-    """Whether no size of what a torch call returned (``out``) can depend on
-    a float the call was handed: each tensor it returned is one the call was
-    given by position, or has no dimensions, or the broadcast size of the
-    call's tensor arguments, or a size the call was given as a sequence of
-    ints. A region takes every size inside it for what its trace saw, so
-    only a float handed to such a call may be an input of the graph: `x *
-    t`, `torch.clamp(x, min=t)`, `torch.full((3,), t)`, and not
-    `torch.arange(0, t)` or an interpolation by the scale t, whose result
-    has another size for another t. A call that hands back a tensor it was
-    given wrote it in place, which leaves its size (the call raises where
-    the result does not fit): `x.mul_(t)`, and the foreach operators, which
-    are judged tensor by tensor because the tensors of their lists have
-    sizes of their own and no broadcast size (`torch._foreach_div_(xs,
-    ts)`). A tensor given as ``out=`` is no such operand: it is resized to
-    the result."""
-    given = [*args, *kwargs.values()]
-    flat = [x for a in given for x in (a if type(a) in (list, tuple) else (a,))]
-    operands = [x for a in args for x in (a if type(a) in (list, tuple) else (a,))]
-    outs = out if type(out) in (list, tuple) else (out,)
-    outs = [o for o in outs if isinstance(o, torch.Tensor)]
-    made = [o for o in outs if not any(o is x for x in operands)]
-    if outs and not made:
-        return True
-    try:
-        whole = torch.broadcast_shapes(
-            *(x.shape for x in flat if isinstance(x, torch.Tensor))
-        )
-    except RuntimeError:
+def _scalars_decide_no_size(node: torch.fx.Node, args, kwargs) -> bool:
+    """Whether it is established of the operator of ``node`` (the one node a
+    torch call traced with the floats it was handed; the call's ``args`` and
+    ``kwargs``) that no scalar it is given decides a size of its result. A
+    region takes every size inside it for what its trace saw, so only a
+    float handed to such an operator may be an input of the graph. What
+    establishes it is the operator's own declaration, never the sizes of
+    the traced call, which can agree by chance (an interpolation by the
+    scale 1.0, a range written to ``out=``): the tag ``pointwise`` of
+    native_functions.yaml (the result has the broadcast size of the tensor
+    inputs: `x * t`, `torch.clamp(x, min=t)`); the tag ``inplace`` without
+    ``inplace_view`` (the operator writes its first argument and leaves
+    that tensor's sizes: `x.mul_(t)`, `torch._foreach_div_(xs, ts)`); a
+    result whose size is an argument (``size``, as the call was given it in
+    ints: `torch.full((3,), t)`; or the tensor a ``_like`` operator is
+    given); and ``scalar_tensor``, whose result has no dimensions (what
+    `torch.where(c, x, t)` makes of t). Under any other operator the region
+    is checked on the float's value: `torch.arange(0, t)`, an
+    interpolation by the scale t, an operator without those tags."""
+    op = node.target
+    if not isinstance(op, torch._ops.OpOverload):
         return False
-    sizes = [
-        tuple(a)
-        for a in given
-        if isinstance(a, (list, tuple)) and all(type(i) is int for i in a)
-    ]
-    return all(
-        o.dim() == 0 or o.shape == whole or tuple(o.shape) in sizes for o in made
-    )
+    if torch.Tag.pointwise in op.tags:
+        return True
+    if torch.Tag.inplace in op.tags:
+        return torch.Tag.inplace_view not in op.tags
+    schema = op._schema
+    if not schema.name.startswith("aten::"):
+        return False
+    if schema.name == "aten::scalar_tensor" or schema.name.endswith("_like"):
+        return True
+    params = [(a.name, str(a.type)) for a in schema.arguments]
+    if ("size", "List[int]") not in params:
+        return False
+    k = params.index(("size", "List[int]"))
+    size = node.args[k] if k < len(node.args) else node.kwargs.get("size")
+    ints = [tuple(a) for a in (*args, *kwargs.values()) if _int_sequence(a)]
+    return _int_sequence(size) and tuple(size) in ints
+
+
+def _int_sequence(x) -> bool:
+    return isinstance(x, (list, tuple)) and all(type(i) is int for i in x)
 
 
 def _item_node(t: torch.Tensor):
@@ -612,9 +616,10 @@ class _ScalarArgs(TorchFunctionMode):
     """Puts the _Scalars a torch call is given back into the node the call
     traced: the dispatcher hands make_fx new Python floats. The node's float
     args are matched to the call's, in order; when they don't line up (the
-    call traced several nodes, or made a scalar a tensor), or when the size
-    of what the call returned may depend on them (_sized_by_its_tensors),
-    the region is specialized on those _Scalars instead."""
+    call traced several nodes, or made a scalar a tensor), or when it is not
+    established of the node's operator that no scalar decides a size
+    (_scalars_decide_no_size), the region is specialized on those _Scalars
+    instead."""
 
     def __init__(self, graph: torch.fx.Graph) -> None:
         super().__init__()
@@ -671,7 +676,7 @@ class _ScalarArgs(TorchFunctionMode):
                 for x in _floats_in([list(traced[0].args), dict(traced[0].kwargs)], [])
             ]
             == [float.__float__(x) for x in given]
-            and _sized_by_its_tensors(out, args, kwargs)
+            and _scalars_decide_no_size(traced[0], args, kwargs)
         ):
             it = iter(given)
 

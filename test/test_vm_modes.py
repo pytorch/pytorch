@@ -22,7 +22,9 @@ not check ends the region also where it is taken from the class. And of a
 nested tensor, which the executor's record of the operators that run does
 not ask for sizes. And of a list or a dict a region's run makes: it is made
 anew by every run, also when the run read it, and one that was there before
-is handed back as the object it is.
+is handed back as the object it is. And of a float handed to a torch call:
+it is an input of a region's graph only under an operator that is declared
+to take no size from a scalar.
 """
 
 import array
@@ -32,6 +34,7 @@ import ctypes
 import functools
 import gc
 import itertools
+import math
 import operator
 import os
 import subprocess
@@ -43,6 +46,7 @@ import unittest
 import weakref
 
 import torch
+import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -2630,6 +2634,259 @@ class TestVmKinds(TestCase):
 
 
 instantiate_device_type_tests(TestVmKinds, globals())
+
+
+def sizes_range_into_out(x, t):
+    steps = torch.arange(0, t * 10, 1.0, out=torch.empty(0, device=x.device))
+    return modes_work(x).sum() * steps.shape[0]
+
+
+def sizes_range_into_an_argument(x, t, out):
+    steps = torch.arange(0, t * 10, 1.0, out=out)
+    return modes_work(x).sum() * steps.shape[0]
+
+
+def sizes_interpolated(x, t):
+    up = F.interpolate(modes_work(x)[None, None], scale_factor=t)
+    return up.sum() * up.shape[-1]
+
+
+def sizes_range(x, t):
+    steps = torch.arange(0, t * 10, 1.0, device=x.device)
+    return modes_work(x).sum() * steps.shape[0]
+
+
+def sizes_linspace(x, t):
+    return modes_work(x)[:3] + torch.linspace(0, t, 3, device=x.device)
+
+
+def sizes_full_of_an_int(x, t):
+    ones = torch.full((int(t * 4),), 1.0, device=x.device)
+    return modes_work(x).sum() + ones.sum()
+
+
+def sizes_new_full_of_a_ceiling(x, t):
+    return modes_work(x).sum() + x.new_full((math.ceil(t * 3), 2), t).sum()
+
+
+def sizes_scale_read_from_a_tensor(x, s):
+    up = F.interpolate(modes_work(x)[None, None], scale_factor=s.item())
+    return up.sum() * up.shape[-1]
+
+
+def sizes_range_read_from_a_tensor(x, s):
+    steps = torch.arange(0, s.item() * 10, 1.0, out=torch.empty(0, device=x.device))
+    return modes_work(x).sum() * steps.shape[0]
+
+
+def sizes_inputs(x, t):
+    filled = torch.full((3,), t, device=x.device) + x.new_full((1,), t)
+    y = torch.where(x > 0.5, modes_work(x), t) + torch.full_like(x, t)[:3] + filled
+    return torch.add(y, t, out=torch.empty(0, device=x.device)).mul_(t) - t
+
+
+# How a schema writes a scalar parameter, and a list of them.
+SIZES_SCALAR = {"number", "float", "Optional[number]", "Optional[float]"}
+SIZES_SCALARS = {"List[number]", "List[float]", "Optional[List[float]]"}
+
+
+def sizes_of_a_call(op, scalar):
+    """Calls the overload ``op`` on small tensors with multiples of
+    ``scalar`` for its scalar parameters (the second gets twice the first,
+    as the end of a range would): the sizes of what it returned, and those
+    of its first argument before and after the call."""
+    whole, scalars = type(scalar) is int, 0
+
+    def tensor(*shape):
+        t = torch.rand(shape) + 0.5
+        return (t * 4).long() if whole else t
+
+    args, kwargs = [], {}
+    for a in op._schema.arguments:
+        kind = str(a.type)
+        if a.is_out:
+            value = tensor(0)
+        elif kind == "Tensor":
+            value = tensor(2, 3)
+            if a.name == "mask":
+                value = tensor(2, 3) > 2
+            if a.name == "index":
+                value = torch.zeros(2, dtype=torch.long)
+        elif kind == "List[Tensor]":
+            value = [tensor(2, 3), tensor(3)]
+        elif kind in SIZES_SCALAR:
+            scalars += 1
+            value = scalar * scalars
+        elif kind in SIZES_SCALARS:
+            value = [scalar, scalar]
+        elif a.has_default_value():
+            continue
+        elif kind.startswith("Optional["):
+            value = None
+        elif kind in ("int", "bool"):
+            value = {"int": 0, "bool": True}[kind]
+        else:
+            raise NotImplementedError(kind)
+        if a.kwarg_only:
+            kwargs[a.name] = value
+        else:
+            args.append(value)
+
+    def sizes(x):
+        xs = x if isinstance(x, (list, tuple)) else (x,)
+        return [tuple(t.shape) for t in xs if isinstance(t, torch.Tensor)]
+
+    before = sizes(args[0]) if args else []
+    return sizes(op(*args, **kwargs)), before, sizes(args[0]) if args else []
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmScalarSizes(TestCase):
+    """A float handed to a torch call is an input of a region's graph only
+    where the operator the call ran is declared to take no size from a
+    scalar; under any other operator the region is checked on the float's
+    value, whatever the sizes of the traced call were."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # The value of the traced (fourth) call, by where the first value comes.
+    ORDERS = {
+        "traced": lambda a, b, c: [a] * 4 + [b, c] * 4,
+        "later": lambda a, b, c: [b] * 4 + [a, c] * 4,
+        "in_turn": lambda a, b, c: [a, b, c] * 4,
+    }
+
+    def rows(self, fn, device, values, order, argument=lambda t: (t,), size=6):
+        g = vm(fn, passes=EARLY)
+        for call, t in enumerate(self.ORDERS[order](*values)):
+            x = torch.rand(size, device=device) + 0.25
+            got, want = g(x, *argument(t)), fn(x, *argument(t))
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}, {t}")
+        return [r for r in vm.regions(g) if r["function"] == fn.__name__]
+
+    def by_value(self, fn, device, values, order, **kwargs):
+        # Every call equals eager's, and a region that ran is checked on
+        # the float: one variant per value.
+        rows = self.rows(fn, device, values, order, **kwargs)
+        ran = [r for r in rows if r["state"] == "region" and r["runs"]]
+        for r in ran:
+            checked = sorted(v.split(" (float) == ")[1] for v in r["values"])
+            self.assertEqual(checked, sorted(map(repr, values)), msg=str(r))
+            self.assertEqual(r["variants"], 3, msg=str(r))
+        return ran
+
+    @parametrize("order", tuple(ORDERS))
+    @isolated
+    def test_range_written_to_out(self, device, order):
+        # The tensor given as out= has the result's size after the call.
+        ran = self.by_value(sizes_range_into_out, device, (0.5, 0.75, 1.0), order)
+        self.assertEqual(len(ran), 1)
+
+    @isolated
+    def test_range_written_to_an_argument(self, device):
+        def out(t):
+            return t, torch.empty(0, device=device)
+
+        fn, values = sizes_range_into_an_argument, (0.5, 0.75, 1.0)
+        self.by_value(fn, device, values, "in_turn", argument=out)
+
+    @parametrize("order", tuple(ORDERS))
+    @isolated
+    def test_interpolation_by_the_scale_one(self, device, order):
+        # At the scale 1.0 the result has the size of the input.
+        ran = self.by_value(sizes_interpolated, device, (1.0, 0.5, 2.0), order)
+        self.assertEqual(len(ran), 1)
+
+    @parametrize("call", ("range", "linspace"))
+    @isolated
+    def test_scalar_of(self, device, call):
+        fn = {"range": sizes_range, "linspace": sizes_linspace}[call]
+        ran = self.by_value(fn, device, (0.5, 0.75, 1.0), "in_turn")
+        self.assertEqual(len(ran), 1)
+
+    @parametrize("made", ("int", "ceil"))
+    @parametrize("order", tuple(ORDERS))
+    @isolated
+    def test_size_computed_from_the_float(self, device, made, order):
+        # The size is given as ints, which the function made of the float.
+        fn = {"int": sizes_full_of_an_int, "ceil": sizes_new_full_of_a_ceiling}[made]
+        ran = self.by_value(fn, device, (0.5, 0.75, 1.0), order)
+        self.assertEqual(len(ran), 1)
+
+    @parametrize("call", ("interpolate", "range"))
+    @isolated
+    def test_value_read_from_a_tensor(self, device, call):
+        # Nothing to check the region on: no region holds the call.
+        def scalar(t):
+            return (torch.tensor(t),)
+
+        fns = (sizes_scale_read_from_a_tensor, sizes_range_read_from_a_tensor)
+        fn = dict(zip(("interpolate", "range"), fns))[call]
+        rows = self.rows(fn, device, (1.0, 0.5, 2.0), "traced", argument=scalar)
+        refused = [r["why"] for r in rows if r["state"] == "refused"]
+        self.assertIn("it branches on a value it reads from a tensor", refused)
+
+    @isolated
+    def test_scalars_that_stay_inputs(self, device):
+        # full and new_full (a size given as ints), full_like, where (its
+        # scalar made a tensor), add with out=, an in-place operator and a
+        # pointwise one: one region for every value, no check.
+        rows = self.rows(sizes_inputs, device, (0.5, 0.75, 1.0), "in_turn", size=3)
+        (row,) = (r for r in rows if r["state"] == "region")
+        found = (row["variants"], row["values"], row["runs"], row["misses"])
+        self.assertEqual(found, (1, [], 8, {}), msg=str(row))
+
+
+instantiate_device_type_tests(TestVmScalarSizes, globals())
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmScalarOperators(TestCase):
+    """What the operators whose scalars a region takes as inputs are declared
+    to be, they are: none of them takes a size from a scalar."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_no_declared_operator_takes_a_size_from_a_scalar(self):
+        # Every overload the rule takes by its tag (pointwise; in place and
+        # no view) or by name, and that takes a scalar: the sizes it returns
+        # are the same for every scalar (and, in place, its operand's). A
+        # tag that is wrong, or that comes to mean something else, fails here.
+        import torch._rust_inductor as ri
+
+        covered, skipped = 0, []
+        for schema in torch._C._jit_get_all_schemas():
+            kinds = {str(a.type) for a in schema.arguments}
+            if not schema.name.startswith("aten::"):
+                continue
+            if kinds.isdisjoint(SIZES_SCALAR | SIZES_SCALARS):
+                continue
+            packet = getattr(torch.ops.aten, schema.name[6:])
+            op = getattr(packet, schema.overload_name or "default", None)
+            if not isinstance(op, torch._ops.OpOverload):
+                continue
+            node = torch.fx.Graph().create_node("call_function", op)
+            if not ri._scalars_decide_no_size(node, (), {}):
+                continue
+            # Floats, and whole numbers for the operators of integers.
+            for values in ((0.25, 0.75, 3.0), (1, 2, 3)):
+                found = []
+                for scalar in values:
+                    with contextlib.suppress(Exception):
+                        found.append(sizes_of_a_call(op, scalar))
+                if len(found) > 1:
+                    break
+            if len(found) < 2:
+                skipped.append(str(op))
+                continue
+            covered += 1
+            made = {str(sizes) for sizes, _, _ in found}
+            self.assertEqual(len(made), 1, msg=f"{op}: {made}")
+            if torch.Tag.inplace in op.tags:
+                kept = [after == before for _, before, after in found]
+                self.assertEqual(kept, [True] * len(found), msg=str(op))
+        print(f"operators covered: {covered}; not called: {len(skipped)}")
+        self.assertGreater(covered, 200, msg=str(skipped))
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
