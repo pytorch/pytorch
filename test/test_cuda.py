@@ -12172,6 +12172,66 @@ for args in ((a, b), (a, b, False)):
         self.assertEqual(current_free_streams, [current_stream.cuda_stream])
         self.assertEqual(callback_errors, [])
 
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple GPUs")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    def test_python_mempool_on_other_device(self):
+        # The allocator of a pool exists only on the device that was current when
+        # the pool was created. On another device, allocations would bypass it.
+        def alloc(size, device, stream):
+            return None
+
+        def free(ptr, size, device, stream):
+            pass
+
+        with torch.cuda.device(0):
+            pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
+            plain_pool = torch.cuda.MemPool()
+        with torch.cuda.device(1):
+            pool_on_1 = torch.cuda.MemPool.from_py_allocator(alloc, free)
+        self.assertEqual(pool.allocator_device, 0)
+        self.assertEqual(pool_on_1.allocator_device, 1)
+        self.assertIsNone(plain_pool.allocator_device)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def compiled_use_mem_pool(pool):
+            with torch.cuda.use_mem_pool(pool, device=1):
+                return torch.empty(1, device="cuda:1")
+
+        msg = "custom allocator on device 0 and cannot route allocations on device 1"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.cuda.use_mem_pool(pool, device=1):
+                pass
+        with self.assertRaisesRegex(RuntimeError, msg):
+            compiled_use_mem_pool(pool)
+        with torch.cuda.device(1):
+            with self.assertRaisesRegex(RuntimeError, msg):
+                with torch.cuda.use_mem_pool(pool):
+                    pass
+            g = torch.cuda.CUDAGraph()
+            stream = torch.cuda.Stream()
+            # The outer context also restores the stream that torch.cuda.graph
+            # leaves set when capture_begin raises.
+            with torch.cuda.stream(stream):
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    g.capture_begin(pool=pool)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    with torch.cuda.graph(g, pool=pool, stream=stream):
+                        pass
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    torch.cuda.make_graphed_callables(
+                        torch.nn.Linear(1, 1, device="cuda:1"),
+                        (torch.ones(1, 1, device="cuda:1"),),
+                        pool=pool,
+                    )
+
+        # Pools on the device of their allocator, and pools without an
+        # allocator, still route allocations.
+        with torch.cuda.use_mem_pool(pool_on_1, device=1):
+            pass
+        with torch.cuda.use_mem_pool(plain_pool, device=1):
+            x = torch.empty(1, device="cuda:1")
+        self.assertEqual(x.device, torch.device("cuda:1"))
+
     @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
     @requires_cuda_python_bindings
@@ -13963,6 +14023,18 @@ print(json.dumps([
             z = x @ y
         self.assertEqual(z.shape, (256, 256))
         self.assertTrue(z.is_cuda)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple GPUs")
+    @requires_cuda_python_bindings
+    def test_use_uvm_on_other_device(self):
+        from cuda.bindings import runtime
+
+        from torch.cuda._utils import _check_cuda_bindings
+
+        with torch.cuda.device(0), torch.cuda._use_uvm(device=1):
+            x = torch.empty(1024, device="cuda:1")
+        attrs = _check_cuda_bindings(runtime.cudaPointerGetAttributes(x.data_ptr()))
+        self.assertEqual(attrs.type, runtime.cudaMemoryType.cudaMemoryTypeManaged)
 
     @requires_cuda_python_bindings
     def test_use_uvm_numerics(self):

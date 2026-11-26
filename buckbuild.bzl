@@ -621,9 +621,18 @@ def pt_operator_query_codegen(
         enforce_traced_op_list = False,
         pt_allow_forced_schema_registration = True,
         compatible_with = [],
-        apple_sdks = None):
+        apple_sdks = None,
+        # Subset of USED_PT_BACKENDS that includes "CPU". Under static dispatch the static
+        # backends are generated instead, and they must all be in this list.
+        enabled_backends = USED_PT_BACKENDS):
     if get_fbsource_cell() == "fbcode":
         return
+
+    if not is_list(enabled_backends) or "CPU" not in enabled_backends:
+        fail("enabled_backends must be a list that includes \"CPU\", got {}".format(enabled_backends))
+    for backend in enabled_backends:
+        if backend not in USED_PT_BACKENDS:
+            fail("enabled_backends: {} is not one of {}".format(backend, USED_PT_BACKENDS))
 
     oplist_dir_name = name + "_pt_oplist"
 
@@ -642,7 +651,7 @@ def pt_operator_query_codegen(
     # Aten files
     aten_genrule = name + "_aten"
     extra_flags = {
-        "enabled_backends": USED_PT_BACKENDS,
+        "enabled_backends": enabled_backends,
         "op_selection_yaml_path": "$(location :{}[selected_operators.yaml])".format(oplist_dir_name),
     }
 
@@ -658,6 +667,9 @@ def pt_operator_query_codegen(
 
     static_dispatch_backend = get_static_dispatch_backend()
     if static_dispatch_backend:
+        for backend in static_dispatch_backend:
+            if backend not in enabled_backends:
+                fail("static dispatch backend {} is not in enabled_backends {}".format(backend, enabled_backends))
         extra_flags["static_dispatch_backend"] = static_dispatch_backend
 
     gen_aten_files(
@@ -691,7 +703,7 @@ def pt_operator_query_codegen(
 
     srcs = get_aten_selective_cpp_rules(
         aten_genrule,
-        static_dispatch_backend if static_dispatch_backend else USED_PT_BACKENDS,
+        static_dispatch_backend if static_dispatch_backend else enabled_backends,
     ) + get_template_registration_file_rules(template_registration_genrule, IS_OSS) + ([
         ":{}[autograd/generated/VariableType_0.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_1.cpp]".format(unboxing_and_autograd_genrule),
@@ -855,6 +867,7 @@ def get_pt_operator_registry_dict(
         enforce_traced_op_list = False,
         pt_allow_forced_schema_registration = True,
         enable_flatbuffer = False,
+        enabled_backends = USED_PT_BACKENDS,
         **kwargs):
     code_gen_files = pt_operator_query_codegen(
         name,
@@ -864,6 +877,7 @@ def get_pt_operator_registry_dict(
         pt_allow_forced_schema_registration = pt_allow_forced_schema_registration,
         compatible_with = kwargs.get("compatible_with", []),
         apple_sdks = kwargs.get("apple_sdks"),
+        enabled_backends = enabled_backends,
     )
 
     # Extract existing linker_flags from kwargs and combine with default flags
