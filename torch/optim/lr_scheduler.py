@@ -851,19 +851,18 @@ class ConstantLR(LRScheduler):
         """
         _warn_get_lr_called_within_step(self)
 
-        # Multiply the LR by factor at initialization.
         if self.last_epoch == 0:
+            # Compute the initial scaled LR.
             return [group["lr"] * self.factor for group in self.optimizer.param_groups]
 
-        # Keep the current LR before and after the undo boundary.
         if self.last_epoch != self.total_iters:
+            # Preserve the current LR, including adjustments made elsewhere.
             return _param_groups_val_list(self.optimizer, "lr")
 
-        # Undoing multiplication by zero is undefined.
+        # At total_iters, undo the initial scaling.
         if self.factor == 0:
             raise ValueError("undoing multiplying by a factor of 0 is undefined")
 
-        # We reached total_iters; undo the scaling.
         return [
             group["lr"] * (1.0 / self.factor) for group in self.optimizer.param_groups
         ]
