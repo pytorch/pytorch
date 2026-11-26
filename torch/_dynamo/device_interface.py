@@ -67,6 +67,12 @@ class DeviceInterface:
         return None
 
     class device:
+        """Device guard contract: a backend that can switch the current device
+        overrides this slot with a context manager taking a ``torch.device`` of
+        the interface's type, entering it sets that device, exiting restores the
+        previous one, like ``torch.cuda.device``. ``exposes_device_guard()``
+        reports whether this slot is such a guard."""
+
         def __new__(cls, device: torch.types.Device) -> Any:
             raise NotImplementedError
 
@@ -227,13 +233,19 @@ class DeviceInterface:
         attribute directly.
 
         Overriding the device slot is the contract for guard support, the way
-        overriding Stream is the contract for stream support. The base
-        ``device`` is a raising sentinel, so compare against it rather than
-        None; ``torch.device`` is also rejected: its context-manager protocol
-        enters a default-device TorchFunctionMode, which does not switch the
-        current device and so is not a device guard.
+        overriding Stream is the contract for stream support. Three shapes are
+        rejected: the base ``device`` is a raising sentinel, so compare against
+        it rather than None; ``torch.device`` is also rejected, as its
+        context-manager protocol enters a default-device TorchFunctionMode
+        rather than switching the current device; and an override lacking the
+        ``__enter__``/``__exit__`` protocol is not enterable, so advertising it
+        as a guard would turn a no-op into an error at compile time.
         """
-        return cls.device not in (DeviceInterface.device, torch.device)
+        if cls.device in (DeviceInterface.device, torch.device):
+            return False
+        enter = getattr(cls.device, "__enter__", None)
+        exit_ = getattr(cls.device, "__exit__", None)
+        return callable(enter) and callable(exit_)
 
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:

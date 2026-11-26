@@ -19,9 +19,11 @@ import torch
 from torch._dynamo.device_interface import (
     CpuInterface,
     CudaInterface,
-    DeviceInterface,
     device_interfaces,
+    DeviceInterface,
+    MtiaInterface,
     register_interface_for_device,
+    XpuInterface,
 )
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch._inductor.compile_fx import get_cuda_device_context, get_device_context
@@ -163,8 +165,8 @@ class TestGetDeviceContext(TestCase):
             def is_available() -> bool:
                 return True
 
-        self._register("privateuseone", TorchDeviceInterface)
-        gm = _make_graph("privateuseone:0")
+        self._register("xpu", TorchDeviceInterface)
+        gm = _make_graph("xpu:0")
         ctx = get_device_context(gm)
         self.assertIs(type(ctx), type(contextlib.nullcontext()))
 
@@ -177,16 +179,19 @@ class TestGetDeviceContext(TestCase):
             def is_available() -> bool:
                 return True
 
-        self._register("privateuseone", StubInterface)
-        gm = _make_graph("privateuseone:0")
+        self._register("xpu", StubInterface)
+        gm = _make_graph("xpu:0")
         ctx = get_device_context(gm)
         self.assertIs(type(ctx), type(contextlib.nullcontext()))
 
     def test_exposes_device_guard_matches_in_tree_interfaces(self) -> None:
         # The opt-in hook follows the same identity-sentinel contract as
         # exposes_streams: real guards (torch.<dev>.device classes) opt in,
-        # leaving the base stub (cpu) out.
+        # leaving the base stub (cpu) out.  The context-manager requirement
+        # must accept every in-tree guard, not just CUDA's.
         self.assertTrue(CudaInterface.exposes_device_guard())
+        self.assertTrue(XpuInterface.exposes_device_guard())
+        self.assertTrue(MtiaInterface.exposes_device_guard())
         self.assertFalse(CpuInterface.exposes_device_guard())
         self.assertFalse(DeviceInterface.exposes_device_guard())
 
@@ -234,6 +239,12 @@ class TestGetDeviceContext(TestCase):
                 def __init__(self, dev: torch.device) -> None:
                     raise AssertionError("guard must not be constructed")
 
+                def __enter__(self):
+                    raise AssertionError("guard must not be entered")
+
+                def __exit__(self, *exc_info) -> bool | None:
+                    raise AssertionError("guard must not be exited")
+
         self._register("xpu", UnavailableInterface)
         gm = _make_graph("xpu:0")
         ctx = get_device_context(gm)
@@ -249,10 +260,48 @@ class TestGetDeviceContext(TestCase):
                 def __init__(self, dev: torch.device) -> None:
                     raise AssertionError("guard must not be constructed")
 
-        self._register("privateuseone", PartialInterface)
-        gm = _make_graph("privateuseone:0")
+                def __enter__(self):
+                    raise AssertionError("guard must not be entered")
+
+                def __exit__(self, *exc_info) -> bool | None:
+                    raise AssertionError("guard must not be exited")
+
+        self._register("xpu", PartialInterface)
+        gm = _make_graph("xpu:0")
         ctx = get_device_context(gm)
         self.assertIs(type(ctx), type(contextlib.nullcontext()))
+
+    def test_non_context_manager_device_returns_nullcontext(self) -> None:
+        # A device override without the context-manager protocol is not
+        # enterable, so it must not be reported as a guard.  This is the shape
+        # of the in-tree triton extension test backend (its plain device class
+        # is registered for privateuseone and compiles through compile_fx).
+
+        class NonGuardInterface(DeviceInterface):
+            class device:
+                def __init__(self, dev: torch.device) -> None:
+                    self.dev = dev
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+        self.assertFalse(NonGuardInterface.exposes_device_guard())
+        self._register("xpu", NonGuardInterface)
+        gm = _make_graph("xpu:0")
+        ctx = get_device_context(gm)
+        self.assertIs(type(ctx), type(contextlib.nullcontext()))
+
+    def test_multiple_indices_of_one_type_returns_nullcontext(self) -> None:
+        # The single-index rule must be reached on every host: with an
+        # available guard interface registered, a graph spanning two indices of
+        # one type has no unambiguous current device, so the guard is returned
+        # as a null context and never entered.
+        self._register("xpu", _RecordingInterface)
+        gm = _make_graph("xpu:0", "xpu:1")
+        ctx = get_device_context(gm)
+        self.assertIs(type(ctx), type(contextlib.nullcontext()))
+        self.assertEqual(_RecordingInterface.entered, [])
 
 
 class TestGetDeviceContextCuda(TestCase):
