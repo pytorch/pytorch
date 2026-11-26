@@ -823,6 +823,152 @@ class TestVmDictKeys(TestCase):
 instantiate_device_type_tests(TestVmDictKeys, globals())
 
 
+def facts_work(x):
+    return ((x.sin() * 2).cos() + 1).tanh().exp()
+
+
+def facts_version(x, t):
+    return facts_work(x) + t, t._version
+
+
+def facts_data_ptr(x, t):
+    return facts_work(x) + t, t.data_ptr() == x.data_ptr()
+
+
+def facts_offset(x, t):
+    return facts_work(x) + t, t.storage_offset()
+
+
+def facts_is_view(x, t):
+    return facts_work(x) + t, t._is_view()
+
+
+def facts_is_inference(x, t):
+    return facts_work(x) + t, t.is_inference()
+
+
+def facts_output_nr(x, t):
+    return facts_work(x) + t.detach(), t.output_nr
+
+
+def facts_retains_grad(x, t):
+    return facts_work(x) + t.detach(), t.retains_grad
+
+
+def facts_of_the_program(x, t):
+    return facts_work(x) + t * t.note
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmTensorFacts(TestCase):
+    """A region finds a tensor by its class, dtype, device, sizes, strides
+    and requires_grad, and computes its values. A block that asks a tensor
+    anything else (which memory it is, how often it was written, what
+    autograd or the program keeps on it) is no region."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def no_region(self, fn, device, arg, what):
+        # Ten calls; `arg(x, call)` is the tensor that is asked: one for the
+        # first six calls, another, alike for a region, for the last four.
+        g = vm_early(fn)
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            t = arg(x, call >= 6)
+            got, want = g(x, t), fn(x, t)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        rows = [
+            r
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["kind"] == "block"
+        ]
+        self.assertEqual([r["state"] for r in rows[:1]], ["refused"], msg=str(rows))
+        self.assertIn(f"it reads a tensor's .{what} ", rows[0]["why"])
+
+    @isolated
+    def test_version(self, device):
+        kept = torch.ones(8, device=device)
+        self.no_region(
+            facts_version,
+            device,
+            lambda x, late: kept.add_(0) if late else kept,
+            "_version",
+        )
+
+    @isolated
+    def test_data_ptr(self, device):
+        self.no_region(
+            facts_data_ptr,
+            device,
+            lambda x, late: x.view(-1)[8:16] if late else x.view(-1)[:8],
+            "data_ptr",
+        )
+
+    @isolated
+    def test_storage_offset(self, device):
+        base = torch.arange(32.0, device=device)
+        self.no_region(
+            facts_offset,
+            device,
+            lambda x, late: base[8:16] if late else base[:8],
+            "storage_offset",
+        )
+
+    @isolated
+    def test_is_view(self, device):
+        base = torch.ones(16, device=device)
+        self.no_region(
+            facts_is_view,
+            device,
+            lambda x, late: base[:8] if late else torch.ones(8, device=device),
+            "_is_view",
+        )
+
+    @isolated
+    def test_is_inference(self, device):
+        with torch.inference_mode():
+            made = torch.ones(8, device=device)
+        self.no_region(
+            facts_is_inference,
+            device,
+            lambda x, late: made if late else torch.ones(8, device=device),
+            "is_inference",
+        )
+
+    @isolated
+    def test_output_nr(self, device):
+        both = torch.ones(2, 8, device=device, requires_grad=True).unbind(0)
+        self.no_region(facts_output_nr, device, lambda x, late: both[late], "output_nr")
+
+    @isolated
+    def test_retains_grad(self, device):
+        leaf = torch.ones(8, device=device, requires_grad=True)
+        plain, kept = leaf * 1, leaf * 1
+        kept.retain_grad()
+        self.no_region(
+            facts_retains_grad,
+            device,
+            lambda x, late: kept if late else plain,
+            "retains_grad",
+        )
+
+    @isolated
+    def test_attribute_the_program_put_on_a_tensor(self, device):
+        first, second = torch.ones(8, device=device), torch.ones(8, device=device)
+        first.note, second.note = 2.0, 3.0
+        self.no_region(
+            facts_of_the_program,
+            device,
+            lambda x, late: second if late else first,
+            "note",
+        )
+
+
+instantiate_device_type_tests(TestVmTensorFacts, globals())
+
+
 def given_up_count(y):
     try:
         return int((y > 0).sum())
@@ -863,6 +1009,59 @@ def given_up_own_generator(x, gen):
     y = x.sin() * 2 + r
     n = int((y > 0).sum())
     return (y * n + 1).cos().tanh().exp()
+
+
+def caught_quantized(y):
+    try:
+        return torch.quantize_per_tensor(y, 0.1, 0, torch.quint8).dequantize()
+    except RuntimeError:
+        return y * 0
+
+
+def caught_trace_error(x, idx):
+    y = ((x.sin() * 2).cos() + 1).tanh().exp()
+    return caught_quantized(y).sum()
+
+
+def caught_pick(y, idx):
+    try:
+        return torch.index_select(y, 0, idx)
+    except IndexError:
+        return y * 0
+
+
+def caught_index(x, idx):
+    y = ((x.sin() * 2).cos() + 1).tanh().exp()
+    return caught_pick(y, idx).sum()
+
+
+def caught_factor(m):
+    try:
+        return torch.linalg.cholesky(m)
+    except RuntimeError:
+        return torch.eye(2, device=m.device)
+
+
+def caught_cholesky(x, m):
+    y = ((x.sin() * 2).cos() + 1).tanh().exp()
+    return y.sum() * caught_factor(m)
+
+
+def uncaught_cholesky(x, m):
+    y = ((x.sin() * 2).cos() + 1).tanh().exp()
+    return y.sum() * torch.linalg.cholesky(m)
+
+
+def given_up_in_a_loop(x):
+    y = ((x.sin() * 2).cos() + 1).tanh().exp()
+    total = y
+    for _ in range(3):
+        try:
+            n = int((y > 0).sum())
+        except Exception:
+            n = -1
+        total = (total + y * n).cos().tanh()
+    return total
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
@@ -953,6 +1152,101 @@ class TestVmGivenUpTraces(TestCase):
         if self.gives_up(device):
             self.assertEqual(rows, ["refused"])
 
+    def against_eager(self, fn, device, arg):
+        # Ten calls; `arg(call)` is the second argument. An error is compared
+        # by its class.
+        g = vm_early(fn)
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            sides = []
+            for side in (fn, g):
+                try:
+                    sides.append(side(x, arg(call).to(device)))
+                except RuntimeError as e:
+                    sides.append(type(e))
+            self.assertEqual(sides[1], sides[0], atol=0, rtol=0, msg=f"call {call}")
+        return [
+            r
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["kind"] == "block"
+        ]
+
+    @isolated
+    def test_error_of_the_trace_caught_by_a_function_the_block_calls(self, device):
+        # Eager quantizes; the trace cannot, and its error is not the
+        # program's to handle.
+        rows = self.against_eager(
+            caught_trace_error, device, lambda call: torch.zeros(1)
+        )
+        self.assertEqual([r["state"] for r in rows[:1]], ["refused"], msg=str(rows))
+        self.assertIn("raised NotImplementedError", rows[0]["why"])
+
+    @isolated
+    def test_error_that_depends_on_the_data_caught_while_traced(self, device):
+        # Six calls with an index out of range, then four with one in range.
+        if torch.device(device).type != "cpu":
+            self.skipTest(
+                "an index out of range is an assertion on the device there, no IndexError"
+            )
+        rows = self.against_eager(
+            caught_index,
+            device,
+            lambda call: torch.tensor([0, 9] if call < 6 else [0, 1]),
+        )
+        self.assertEqual([r["state"] for r in rows[:1]], ["refused"], msg=str(rows))
+        self.assertIn("raised IndexError", rows[0]["why"])
+
+    @isolated
+    def test_error_that_depends_on_the_data_caught_after_the_trace(self, device):
+        # Six calls that factor, then four that cannot: the region's graph
+        # raises, and the block runs as written, into its handler.
+        good, bad = (
+            torch.tensor([[2.0, 0.5], [0.5, 1.0]]),
+            torch.tensor([[1.0, 2.0], [2.0, 1.0]]),
+        )
+        rows = self.against_eager(
+            caught_cholesky, device, lambda call: good if call < 6 else bad
+        )
+        self.assertEqual(rows[0]["state"], "region", msg=str(rows))
+        self.assertEqual(rows[0]["misses"].get("its graph raised"), 4, msg=str(rows))
+
+    @isolated
+    def test_error_nothing_catches_is_the_one_eager_raises(self, device):
+        good, bad = (
+            torch.tensor([[2.0, 0.5], [0.5, 1.0]]),
+            torch.tensor([[1.0, 2.0], [2.0, 1.0]]),
+        )
+        self.against_eager(
+            uncaught_cholesky, device, lambda call: good if call < 6 else bad
+        )
+
+    @isolated
+    def test_refusal_caught_by_a_handler_in_a_loop(self, device):
+        rows = [
+            r
+            for r in vm.regions(self.loop_calls(device))
+            if r["function"] == "given_up_in_a_loop"
+        ]
+        if self.gives_up(device):
+            self.assertIn(
+                ("span", "refused"),
+                [(r["kind"], r["state"]) for r in rows],
+                msg=str(rows),
+            )
+
+    def loop_calls(self, device):
+        g = vm_early(given_up_in_a_loop)
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            self.assertEqual(
+                g(x), given_up_in_a_loop(x), atol=0, rtol=0, msg=f"call {call}"
+            )
+        return g
+
 
 instantiate_device_type_tests(TestVmGivenUpTraces, globals())
 
@@ -1035,6 +1329,36 @@ def sized_mask_fill(x):
     y = x.sin() * 2
     z = y.masked_fill(y > 0, 0.5)
     return (z * 2 + 1).cos().tanh().exp().sum(), z.shape[0]
+
+
+def sized_split_by_a_tensor(x, idx):
+    y = x.sin() * 2
+    a, b = torch.tensor_split(y, idx)
+    return sized_tail(a, a.shape[0]) + sized_tail(b, b.shape[0])
+
+
+def sized_split_method(x, idx):
+    y = x.sin() * 2
+    parts = y.tensor_split(idx, dim=1)
+    return sized_tail(parts[0], len(parts)) + sized_tail(parts[-1], parts[-1].shape[1])
+
+
+def sized_split_by_ints(x, idx):
+    y = x.sin() * 2
+    a, b = torch.tensor_split(y, (3,))
+    return sized_tail(a, a.shape[0]) + sized_tail(b, b.shape[0])
+
+
+def sized_packed(x, lengths):
+    y = x.sin() * 2
+    data, sizes = torch._VF._pack_padded_sequence(y, lengths, True)
+    return sized_tail(data, data.shape[0])
+
+
+def sized_padded(x, sizes):
+    y = (x.sin() * 2).reshape(-1, 2)[:8]
+    out, lengths = torch._VF._pad_packed_sequence(y, sizes, True, 0.0, 8)
+    return sized_tail(out, out.shape[1])
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
@@ -1135,6 +1459,51 @@ class TestVmDataSizes(TestCase):
         # The result has the size of the tensor that is filled.
         (row,) = self.rows(sized_mask_fill, device)
         self.assertEqual((row["state"], row["runs"]), ("region", 6), msg=str(row))
+
+    def cut_calls(self, fn, device, first, second):
+        # Six calls with one tensor of cuts (always on the CPU), four with another of its size.
+        g = vm_early(fn)
+        for call in range(10):
+            x = torch.randn(8, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            cuts = torch.tensor(second if call >= 6 else first)
+            self.assertEqual(
+                g(x, cuts), fn(x, cuts), atol=0, rtol=0, msg=f"call {call}"
+            )
+        return [
+            r
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["kind"] == "block"
+        ]
+
+    def no_region_for_cuts(self, fn, device, first, second):
+        rows = self.cut_calls(fn, device, first, second)
+        self.assertEqual([r["state"] for r in rows[:1]], ["refused"], msg=str(rows))
+        self.assertIn("whose size depends on the data", rows[0]["why"])
+
+    @isolated
+    def test_tensor_split_by_a_tensor_of_indices(self, device):
+        self.no_region_for_cuts(sized_split_by_a_tensor, device, [3], [5])
+
+    @isolated
+    def test_tensor_split_method_by_a_tensor_of_indices(self, device):
+        self.no_region_for_cuts(sized_split_method, device, [2, 6], [1, 3])
+
+    @isolated
+    def test_tensor_split_by_ints_is_a_region(self, device):
+        rows = self.cut_calls(sized_split_by_ints, device, [3], [5])
+        self.assertEqual([r["state"] for r in rows[:1]], ["region"], msg=str(rows))
+
+    @isolated
+    def test_packed_sequence_by_a_tensor_of_lengths(self, device):
+        self.no_region_for_cuts(
+            sized_packed, device, [8, 5, 3, 1, 1, 1, 1, 1], [8, 8, 2, 1, 1, 1, 1, 1]
+        )
+
+    @isolated
+    def test_padded_sequence_by_a_tensor_of_batch_sizes(self, device):
+        self.no_region_for_cuts(sized_padded, device, [4, 3, 1], [4, 2, 2])
 
 
 instantiate_device_type_tests(TestVmDataSizes, globals())

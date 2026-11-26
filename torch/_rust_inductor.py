@@ -522,6 +522,12 @@ class _ScalarArgs(TorchFunctionMode):
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
+        if func in _DATA_SIZED_CALLS and any(
+            isinstance(a, torch.Tensor) for a in (*args[1:], *kwargs.values())
+        ):
+            raise _refuse(
+                f"it runs {func.__name__} on a tensor of cuts, which makes tensors whose size depends on the data"
+            )
         if func in _VALUES_OUT and _scalar_state is not None:
             # The tensor's values, handed to Python as they are: nothing a
             # graph gives back on a later call.
@@ -1089,8 +1095,17 @@ def _put_back(backups: dict[int, tuple[Any, torch.Tensor]]) -> None:
 
 
 # Operators whose result's size depends on the data and whose schema does
-# not say so (no ``dynamic_output_shape`` tag), by name.
-_DATA_SIZED = frozenset({"torchvision::nms"})
+# not say so (no ``dynamic_output_shape`` tag), by name. Packing a padded
+# sequence reads the lengths from the tensor's memory.
+_DATA_SIZED = frozenset({"torchvision::nms", "aten::_pack_padded_sequence"})
+# Calls that read where to cut from a tensor's memory (the indices, a packed
+# sequence's batch sizes) and run no operator of their own (the dispatcher
+# shows only the cuts): seen where they are called, with a tensor to read.
+_DATA_SIZED_CALLS = (
+    torch.tensor_split,
+    torch.Tensor.tensor_split,
+    torch._VF._pad_packed_sequence,  # type: ignore[attr-defined]
+)
 
 
 def _data_sized(func, args, kwargs) -> str | None:
@@ -1126,7 +1141,8 @@ def _data_sized(func, args, kwargs) -> str | None:
 class _RefuseImpure(TorchDispatchMode):
     """Raises before an op a region can't hold runs: a collective, one
     reading a tensor's value, or one whose result's size depends on the data
-    (see _data_sized; and after one that made a tensor that is not strided).
+    (see _data_sized; and after one that made a tensor that is not strided),
+    and gives the trace up when an op raises an error of its own.
     The executor then runs the block as usual,
     which is only sound if nothing it did under tracing had an effect: so
     each tensor an op writes in place is copied into `backups` first, and
@@ -1162,10 +1178,43 @@ class _RefuseImpure(TorchDispatchMode):
                     if isinstance(t, torch.Tensor) and id(t) not in self.backups:
                         with torch.utils._python_dispatch._disable_current_modes():
                             self.backups[id(t)] = (t, t.detach().clone())
-        out = func(*args, **kwargs)
+        try:
+            out = func(*args, **kwargs)
+        except _Refused:
+            raise
+        except Exception as e:
+            # The program may catch it and go another way, which is then the
+            # way of this call alone: the error may be the trace's own, or
+            # depend on the data (an index out of range). No region.
+            _refuse(f"{func} raised {type(e).__name__}")
+            raise
         if self.refuse and isinstance(out, torch.Tensor) and out.layout is not torch.strided:
             raise _refuse(f"it runs {func}, which makes a tensor that is not strided")
         return out
+
+
+def _run_graph(record: Trace, repeatable: bool, call, *args):
+    """A region's run on a call that passed its checks: what its graph
+    returns. A graph that raises (an operator's error on this call's data)
+    stands for code that may catch that error; if the graph is the trace's
+    own operations and leaves nothing behind (`repeatable`: no pass made
+    something else of it, its trace wrote to no tensor in place and drew no
+    random number), the call is a miss instead, so the block runs as it is
+    written and raises there what eager raises, into the handlers eager
+    runs. Any other graph raises to the block's caller, as before: running
+    its block again would write or draw twice, and the error of what a pass
+    made (a kernel it swapped in, a lowering) is the pass's to show."""
+    if not repeatable:
+        record.runs += 1
+        return call(*args)
+    try:
+        out = call(*args)
+    except Exception:
+        stats["misses"] += 1
+        record.misses["its graph raised"] = record.misses.get("its graph raised", 0) + 1
+        return None
+    record.runs += 1
+    return out
 
 
 def _meta(t: torch.Tensor):
@@ -2460,6 +2509,7 @@ def trace_region(
                     _trace_backups = None
             # The executor goes on from where the body left off: what it did
             # stands even if no region comes of it.
+            result["repeatable"] = not backups
             backups.clear()
             # A comprehension's loop body adds to a container it was given
             # (which purity doesn't see): a region would skip that.
@@ -2627,6 +2677,9 @@ def trace_region(
         name = f"{name} {n_ops}ops"
 
     arithmetic = result.get("arithmetic")
+    # The graph as traced: what a pass made of it raises errors of its own.
+    as_traced = block_pipeline is not None and block_pipeline.as_traced
+    repeatable = as_traced and result.get("repeatable", False)
 
     def func(region_args):
         if own_checks and not _span_holds(own_checks, region_args):
@@ -2655,12 +2708,11 @@ def trace_region(
             if DEBUG:
                 print(f"region {name}: miss on {what}")
             return None
-        record.runs += 1
         call, rest = (compiled, consts) if bound is None else (bound.call, ())
         if not below_autocast:
-            return call(*inputs, *rest)
+            return _run_graph(record, repeatable, call, *inputs, *rest)
         with torch._C._ExcludeDispatchKeyGuard(autocast):
-            return call(*inputs, *rest)
+            return _run_graph(record, repeatable, call, *inputs, *rest)
 
     # For _dropped.
     func.record = record  # type: ignore[attr-defined]

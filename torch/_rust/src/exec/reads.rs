@@ -57,6 +57,34 @@ use super::overlap::Overlap;
 use crate::bindings::ffi as tffi;
 use crate::cfg::ir::TensorSpec;
 
+// What a tensor answers about itself that a region neither checks nor
+// computes, so that a trace that asks is refused: what autograd keeps on it,
+// which memory and which object it is, how often it was written. A region
+// finds a tensor argument by its class, dtype, device, sizes, strides and
+// requires_grad alone, and makes the tensors of its block anew.
+const UNCHECKED_OF_A_TENSOR: &[&str] = &[
+    "grad",
+    "grad_fn",
+    "_grad",
+    "_grad_fn",
+    "_base",
+    "is_leaf",
+    "output_nr",
+    "retains_grad",
+    "_version",
+    "_cdata",
+    "data_ptr",
+    "storage_offset",
+    "untyped_storage",
+    "storage",
+    "is_set_to",
+    "is_shared",
+    "is_pinned",
+    "is_inference",
+    "_is_view",
+    "__dict__",
+];
+
 // Entries a region may have, and items a container read whole may have.
 const MAX_ENTRIES: usize = 1 << 15;
 const MAX_ITEMS: usize = 1 << 12;
@@ -593,10 +621,15 @@ impl Trace {
             return;
         }
         if tensor(obj) {
-            // A tensor's dtype, device, sizes and requires_grad are the
-            // guard's or the graph's. What autograd keeps on it is not.
+            // A tensor's class, dtype, device, sizes, strides and
+            // requires_grad are the guard's, its values the graph's. Nothing
+            // else it can be asked is: an attribute the program put on the
+            // object, or one of UNCHECKED_OF_A_TENSOR.
             let n = text(name);
-            if matches!(n.as_str(), "grad" | "grad_fn" | "_grad" | "_base") {
+            let mut dict = std::ptr::null_mut();
+            let own_attr = tr_attr_home(obj, name, &mut dict, 1) == 2;
+            ffi::Py_XDECREF(dict);
+            if own_attr || UNCHECKED_OF_A_TENSOR.contains(&n.as_str()) {
                 self.refused = Some(format!("it reads a tensor's .{n}"));
             }
             return;
