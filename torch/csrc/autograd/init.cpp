@@ -472,6 +472,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       "_toggle_python_collection_dynamic",
       togglePythonCollectionDynamic,
       py::call_guard<py::gil_scoped_release>());
+  m.def(
+      "_stop_profiler_collection",
+      stopProfilerCollection,
+      py::call_guard<py::gil_scoped_release>());
   m.def("_is_kineto_stopped", isKinetoStopped);
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
