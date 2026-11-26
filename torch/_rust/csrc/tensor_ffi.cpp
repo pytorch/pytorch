@@ -5,9 +5,14 @@
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/grad_mode.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/AutogradState.h>
 #include <c10/core/DefaultDtype.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/core/impl/COW.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -172,6 +177,46 @@ bool grad_mode_enabled() {
   return at::GradMode::is_enabled();
 }
 
+namespace {
+
+// The global `name` of the Python module `module`, borrowed, or nullptr:
+// a module that was never imported has none. No Python code runs.
+PyObject* module_global(const char* module, const char* name) {
+  PyObject* modules = PyImport_GetModuleDict();
+  PyObject* m = modules ? PyDict_GetItemString(modules, module) : nullptr;
+  PyObject* dict = m && PyModule_Check(m) ? PyModule_GetDict(m) : nullptr;
+  return dict ? PyDict_GetItemString(dict, name) : nullptr;
+}
+
+// The CUDA device new tensors of `device="cuda"` go to. A thread starts on
+// device 0, and asking the runtime before torch.cuda is initialized would
+// initialize it.
+std::uint64_t current_cuda_device() {
+  if (module_global("torch.cuda", "_initialized") != Py_True) {
+    return 0;
+  }
+  return static_cast<std::uint64_t>(
+             at::detail::getCUDAHooks().current_device()) &
+      0xffu;
+}
+
+// Whether torch.fx is tracing on this thread (a thread-local of its module).
+bool fx_tracing() {
+  PyObject* tls = module_global("torch.fx._symbolic_trace", "_is_fx_tracing_tls");
+  if (!tls) {
+    return false;
+  }
+  PyObject* flag = PyObject_GetAttrString(tls, "flag");
+  if (!flag) {
+    PyErr_Clear();
+    return false;
+  }
+  Py_DECREF(flag);
+  return flag == Py_True;
+}
+
+} // namespace
+
 std::uint64_t region_thread_state() {
   std::uint64_t s = 0;
   for (auto d : {at::kCPU, at::kCUDA, at::kXPU, at::kMPS}) {
@@ -184,16 +229,69 @@ std::uint64_t region_thread_state() {
   s = (s << 3) | (ctx.deterministicAlgorithms() ? 4u : 0u) |
       (ctx.deterministicAlgorithmsWarnOnly() ? 2u : 0u) |
       (ctx.deterministicFillUninitializedMemory() ? 1u : 0u);
-  // What a program reads through torch.backends and torch.autograd and a
-  // kernel is picked by: a region is for the flags of its trace.
-  s = (s << 6) | (ctx.userEnabledCuDNN() ? 32u : 0u) |
-      (ctx.benchmarkCuDNN() ? 16u : 0u) | (ctx.deterministicCuDNN() ? 8u : 0u) |
-      (ctx.userEnabledMkldnn() ? 4u : 0u) |
-      (torch::autograd::AnomalyMode::is_enabled() ? 2u : 0u) |
-      (torch::autograd::AnomalyMode::should_check_nan() ? 1u : 0u);
+  // What a program reads through torch.backends and a kernel is picked by:
+  // a region is for the flags of its trace.
+  s = (s << 4) | (ctx.userEnabledCuDNN() ? 8u : 0u) |
+      (ctx.benchmarkCuDNN() ? 4u : 0u) | (ctx.deterministicCuDNN() ? 2u : 0u) |
+      (ctx.userEnabledMkldnn() ? 1u : 0u);
   s = (s << 2) |
       (static_cast<std::uint64_t>(ctx.float32MatmulPrecision()) & 0x3u);
+  // What decides whether a result is recorded for autograd and which kind
+  // of tensor it is, and where a tensor of `device="cuda"` is made.
+  s = (s << 2) | (at::GradMode::is_enabled() ? 2u : 0u) |
+      (c10::InferenceMode::is_enabled() ? 1u : 0u);
+  s = (s << 8) | current_cuda_device();
   return s;
+}
+
+void region_modes(AmbientModes& out) {
+  out.dispatch_modes = c10::impl::TorchDispatchModeTLS::stack_len();
+  out.function_modes = at::impl::PythonTorchFunctionTLS::stack_len();
+  out.fx_tracing = fx_tracing();
+}
+
+std::uint8_t region_not_neutral(const AmbientModes& own) {
+  AmbientModes now;
+  region_modes(now);
+  if (now.dispatch_modes != own.dispatch_modes) {
+    return 1;
+  }
+  if (now.function_modes != own.function_modes) {
+    return 2;
+  }
+  // A functorch transform keeps these two keys on while one of its levels
+  // is open (its own header needs more than this file can include).
+  if (c10::impl::tls_is_dispatch_key_included(
+          c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
+      c10::impl::tls_is_dispatch_key_included(
+          c10::DispatchKey::FuncTorchDynamicLayerBackMode)) {
+    return 3;
+  }
+  if (torch::autograd::ForwardADLevel::has_any_level()) {
+    return 4;
+  }
+  if (saved_tensor_hooks_active()) {
+    return 5;
+  }
+  if (torch::jit::tracer::isTracing()) {
+    return 6;
+  }
+  if (now.fx_tracing != own.fx_tracing) {
+    return 7;
+  }
+  if (torch::autograd::AnomalyMode::is_enabled()) {
+    return 8;
+  }
+  // Autocast for a device type the word does not name.
+  for (auto k :
+       {c10::DispatchKey::AutocastIPU, c10::DispatchKey::AutocastHPU,
+        c10::DispatchKey::AutocastXLA, c10::DispatchKey::AutocastPrivateUse1,
+        c10::DispatchKey::AutocastMTIA, c10::DispatchKey::AutocastMAIA}) {
+    if (!c10::impl::tls_is_dispatch_key_excluded(k)) {
+      return 9;
+    }
+  }
+  return 0;
 }
 
 bool set_grad_mode(bool on) {

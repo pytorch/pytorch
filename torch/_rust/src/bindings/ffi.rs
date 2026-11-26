@@ -28,6 +28,14 @@ pub mod ffi {
         bits: u8,
     }
 
+    // See region_modes in tensor_ffi.h.
+    #[derive(Default, Clone, Copy)]
+    struct AmbientModes {
+        dispatch_modes: i64,
+        function_modes: i64,
+        fx_tracing: bool,
+    }
+
     // See tensor_span in tensor_ffi.h.
     #[derive(Default)]
     struct TensorSpan {
@@ -49,6 +57,8 @@ pub mod ffi {
         fn torch_function_mode_active() -> bool;
         fn grad_mode_enabled() -> bool;
         fn region_thread_state() -> u64;
+        fn region_modes(out: &mut AmbientModes);
+        fn region_not_neutral(own: &AmbientModes) -> u8;
         fn set_grad_mode(on: bool) -> bool;
         fn tensor_version(t: &Tensor) -> i64;
         fn tensor_data_address(t: &Tensor) -> usize;

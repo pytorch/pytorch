@@ -293,6 +293,7 @@ pub fn _region_body<'py>(py: Python<'py>, args: &Bound<'py, PyTuple>) -> PyResul
     let outs = {
         let _exec = super::ExecGuard::new();
         let _recording = super::reads::Recording::start();
+        let _own = super::ambient::Own::start();
         unsafe { (*body)(&objs) }
     };
     match outs {
@@ -813,6 +814,14 @@ fn parse_out(o: &Bound<'_, PyAny>) -> PyResult<RegionOut> {
 // exception set.
 pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
     let py = Python::assume_attached();
+    // Under a mode, a transform or a tracer of the program the code runs
+    // as written: its calls are to be seen one by one.
+    if let Some(why) = super::ambient::not_neutral() {
+        if std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some() {
+            eprintln!("region {}: not entered: {why}", spec.name);
+        }
+        return Ok(None);
+    }
     // The region of another state of its place (another input size) is
     // passed over here, for next to nothing.
     if !spec.quick.iter().all(|q| q.holds(py, args)) {

@@ -35,10 +35,27 @@ const Tensor* TORCH_RUST_NULLABLE tensor_by_type(std::uintptr_t py_obj) noexcept
 bool torch_function_mode_active();
 
 bool grad_mode_enabled();
-// The thread state a traced graph is specialized on beyond grad mode, packed:
-// autocast (on, and its dtype) for cpu, cuda, xpu and mps, the default dtype,
-// and the three deterministic-algorithms flags.
+// The ambient word: the state of the thread and the process a region is for,
+// packed. A region is entered only under the word of its trace. Autocast (on,
+// and its dtype) for cpu, cuda, xpu and mps, the default dtype, the three
+// deterministic-algorithms flags, cuDNN enabled / benchmark / deterministic,
+// mkldnn enabled, the float32 matmul precision, grad mode, inference mode,
+// and the current CUDA device. Needs the GIL.
 std::uint64_t region_thread_state();
+
+// Defined by the cxx bridge (src/bindings/ffi.rs).
+struct AmbientModes;
+
+// What an own trace of the engine has on while the traced body runs: how
+// many dispatch modes and torch function modes there are, and whether
+// torch.fx is tracing. Needs the GIL.
+void region_modes(AmbientModes& out);
+// 0 if the state outside the word is neutral, else which item is not (see
+// src/exec/ambient.rs): a dispatch mode or a torch function mode beyond
+// `own`'s, a functorch transform, a forward-AD level, saved-tensor hooks,
+// JIT tracing, fx tracing other than `own`'s, anomaly mode, autocast for a
+// device type the word does not name. Needs the GIL.
+std::uint8_t region_not_neutral(const AmbientModes& own);
 // Sets grad mode; returns what it was.
 bool set_grad_mode(bool on);
 // The version counter in-place ops bump (Tensor._version).

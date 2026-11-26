@@ -3,6 +3,7 @@
 // of CPython's bytecode loop. Anything it can't run faithfully fails hard with
 // an exception rather than falling back to CPython.
 
+pub mod ambient;
 mod asked;
 pub mod autograd;
 mod backward;

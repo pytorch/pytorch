@@ -2981,12 +2981,13 @@ def _trace_region(
     allow = os.environ.get("TORCH_RUST_REGION_ALLOW")
     if allow is not None and not re.search(allow, name):
         return None
-    # A torch function mode is to see the program's own calls: a trace under
-    # one would keep what the mode did, and a region makes no calls (see
-    # exec/reads.rs, which enters no region under one either).
-    if torch._C._len_torch_function_stack() > 0:
+    # A mode, a transform or a tracer of the program is to see the program's
+    # own calls: a trace under one would keep what it did, and a region makes
+    # no calls (see exec/ambient.rs: no region is entered under one either).
+    not_neutral = _rust()._not_neutral()
+    if not_neutral is not None:
         stats["refused"] += 1
-        _traced(name, "refused", "a torch function mode is on")
+        _traced(name, "refused", not_neutral)
         return None
     try:
         checks, plan = _plan(

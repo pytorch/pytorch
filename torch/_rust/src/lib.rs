@@ -104,6 +104,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::_cfg_opaque_site, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_set_cfg_scalar_reads, m)?)?;
     m.add_function(wrap_pyfunction!(exec::exact::_same, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::ambient::_not_neutral, m)?)?;
     m.add_class::<exec::TreeChecks>()?;
     m.add_class::<exec::tensor_key::TensorKey>()?;
     m.add_function(wrap_pyfunction!(exec::region::_region_given_up, m)?)?;

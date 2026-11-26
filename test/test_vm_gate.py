@@ -10,6 +10,7 @@ every instruction the engine knows), not over the cases somebody thought of.
 
 import ast
 import collections
+import contextlib
 import enum
 import functools
 import glob
@@ -21,17 +22,23 @@ import subprocess
 import sys
 import traceback
 import unittest
+import warnings
 
 import numpy
 
 import torch
+from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
+    DeterministicGuard,
     HardwareClassification,
     parametrize,
     run_tests,
     TestCase,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -846,6 +853,290 @@ class TestVmExactChecks(TestCase):
 
 
 instantiate_device_type_tests(TestVmExactChecks, globals())
+
+
+# The state around a call: the word a region is for, and what must be neutral.
+
+
+def ambient_body(x):
+    y = x.sin() * 2 + torch.ones(8, device=x.device)
+    return (y @ y.t()).cos().tanh().exp()
+
+
+def ambient_body_from_the_start(x):
+    y = x.sin() * 2 + torch.ones(8, device=x.device)
+    return (y @ y.t()).cos().tanh().exp()
+
+
+def ambient_plainly(fn, x):
+    return fn(x)
+
+
+@contextlib.contextmanager
+def ambient_set(get, put, value):
+    old = get()
+    put(value)
+    try:
+        yield
+    finally:
+        put(old)
+
+
+def ambient_fill_uninitialized_memory(value):
+    def get():
+        return torch.utils.deterministic.fill_uninitialized_memory
+
+    def put(v):
+        torch.utils.deterministic.fill_uninitialized_memory = v
+
+    return ambient_set(get, put, value)
+
+
+@contextlib.contextmanager
+def ambient_float32_matmul_precision(value):
+    # Setting it writes the matmul entries of two backends too: all go back.
+    snapshot = _snapshot_fp32_precision()
+    torch.set_float32_matmul_precision(value)
+    try:
+        yield
+    finally:
+        _restore_fp32_precision(snapshot)
+
+
+# The items of the word: the state of the traced call, and another. Each is
+# a context manager the call runs under (None: as the process starts).
+AMBIENT_WORD = {
+    "autocast": (None, lambda: torch.autocast("cpu", dtype=torch.bfloat16)),
+    "autocast_dtype": (
+        lambda: torch.autocast("cpu", dtype=torch.bfloat16),
+        lambda: torch.autocast("cpu", dtype=torch.float16),
+    ),
+    "default_dtype": (
+        None,
+        lambda: ambient_set(
+            torch.get_default_dtype, torch.set_default_dtype, torch.float64
+        ),
+    ),
+    "deterministic_algorithms": (None, lambda: DeterministicGuard(True)),
+    "deterministic_algorithms_warn_only": (
+        lambda: DeterministicGuard(True),
+        lambda: DeterministicGuard(True, warn_only=True),
+    ),
+    "deterministic_fill_uninitialized_memory": (
+        None,
+        lambda: ambient_fill_uninitialized_memory(False),
+    ),
+    "cudnn_enabled": (None, lambda: torch.backends.cudnn.flags(enabled=False)),
+    "cudnn_benchmark": (None, lambda: torch.backends.cudnn.flags(benchmark=True)),
+    "cudnn_deterministic": (
+        None,
+        lambda: torch.backends.cudnn.flags(deterministic=True),
+    ),
+    "mkldnn_enabled": (None, lambda: torch.backends.mkldnn.flags(enabled=False)),
+    "float32_matmul_precision": (
+        None,
+        lambda: ambient_float32_matmul_precision("high"),
+    ),
+    "grad_mode": (None, torch.no_grad),
+    "inference_mode": (torch.no_grad, torch.inference_mode),
+}
+
+# What the word has and the sweep cannot set, and why.
+AMBIENT_NOT_SWEPT = {
+    "autocast for cuda, xpu and mps": "as for the CPU, on a device of that type",
+    "the current CUDA device": "needs two CUDA devices: see "
+    "test_the_current_cuda_device_is_in_the_word",
+}
+
+
+def ambient_under_a_dispatch_mode(fn, x):
+    seen = []
+
+    class SeesOperators(TorchDispatchMode):
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            seen.append(func.name())
+            return func(*args, **(kwargs or {}))
+
+    with SeesOperators():
+        return fn(x), seen
+
+
+def ambient_under_a_function_mode(fn, x):
+    seen = []
+
+    class SeesFunctions(TorchFunctionMode):
+        def __torch_function__(self, func, types, args=(), kwargs=None):
+            seen.append(getattr(func, "__name__", repr(func)))
+            return func(*args, **(kwargs or {}))
+
+    with SeesFunctions():
+        return fn(x), seen
+
+
+def ambient_under_vmap(fn, x):
+    return torch.func.vmap(fn)(x.expand(2, *x.shape))
+
+
+def ambient_under_a_forward_ad_level(fn, x):
+    with torch.autograd.forward_ad.dual_level():
+        return fn(x)
+
+
+def ambient_under_saved_tensor_hooks(fn, x):
+    packed = []
+
+    def pack(t):
+        packed.append(tuple(t.shape))
+        return t
+
+    with torch.autograd.graph.saved_tensors_hooks(pack, lambda t: t):
+        return fn(x), packed
+
+
+def ambient_under_fx_tracing(fn, x):
+    traced = torch.fx.symbolic_trace(fn)
+    return traced(x), traced.code
+
+
+def ambient_under_anomaly_mode(fn, x):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with torch.autograd.detect_anomaly(check_nan=False):
+            return fn(x)
+
+
+# What must be neutral: how a call runs under each item, giving what the
+# program computes and what the item saw of it.
+AMBIENT_NEUTRAL = {
+    "a_dispatch_mode": ambient_under_a_dispatch_mode,
+    "a_torch_function_mode": ambient_under_a_function_mode,
+    "a_functorch_transform": ambient_under_vmap,
+    "a_forward_ad_level": ambient_under_a_forward_ad_level,
+    "saved_tensor_hooks": ambient_under_saved_tensor_hooks,
+    "fx_tracing": ambient_under_fx_tracing,
+    "anomaly_mode": ambient_under_anomaly_mode,
+}
+
+AMBIENT_NEUTRAL_NOT_SWEPT = {
+    "JIT tracing": "this build has no torch.jit.trace to start it",
+    "autocast for a device type the word does not name": "torch.autocast "
+    "takes it only where a backend of that type is registered",
+}
+
+
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmAmbient(TestCase):
+    """A region is entered only under the ambient word of its trace
+    (autocast, the default dtype, the determinism and backend flags, grad
+    mode, inference mode, the current CUDA device), and only while
+    everything else is neutral: under a dispatch mode, a torch function
+    mode, a functorch transform, a forward-AD level, saved-tensor hooks, JIT
+    or fx tracing or anomaly mode no trace starts and no region is entered,
+    and the code runs as written."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def same(self, got, want, msg):
+        if isinstance(want, torch.Tensor):
+            self.assertIsInstance(got, torch.Tensor, msg=msg)
+            self.assertEqual(got.dtype, want.dtype, msg=msg)
+            self.assertEqual(got.requires_grad, want.requires_grad, msg=msg)
+            self.assertEqual(got.is_inference(), want.is_inference(), msg=msg)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=msg)
+        elif isinstance(want, tuple):
+            self.assertEqual(len(got), len(want), msg=msg)
+            for g, w in zip(got, want):
+                self.same(g, w, msg)
+        else:
+            self.assertEqual(got, want, msg=msg)
+
+    def calls(self, device, fn, how):
+        """Ten calls of ``fn`` on the VM and in eager, each made by
+        ``how(call)(function, x)``: how many regions each of the VM's ran."""
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        runs = []
+        for call in range(10):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device, requires_grad=True)
+            before = checks_region_runs(compiled, fn)
+            got = how(call)(compiled, x)
+            runs.append(checks_region_runs(compiled, fn) - before)
+            self.same(got, how(call)(fn, x), f"call {call}")
+        return runs, compiled
+
+    @parametrize("item", list(AMBIENT_WORD))
+    @checks_isolated
+    def test_a_call_under_another_word_is_a_miss(self, device, item):
+        first, other = AMBIENT_WORD[item]
+
+        def how(call):
+            def run(fn, x):
+                enter = other if call in (6, 7) else first
+                with contextlib.ExitStack() if enter is None else enter():
+                    return fn(x)
+
+            return run
+
+        runs, _ = self.calls(device, ambient_body, how)
+        self.assertEqual(runs[5:7], [1, 0], msg=str(runs))
+        self.assertEqual(runs[8:], [1, 1], msg=str(runs))
+
+    @parametrize("item", list(AMBIENT_NEUTRAL))
+    @checks_isolated
+    def test_no_region_is_entered_under(self, device, item):
+        def how(call):
+            return AMBIENT_NEUTRAL[item] if call in (6, 7) else ambient_plainly
+
+        runs, _ = self.calls(device, ambient_body, how)
+        self.assertEqual(runs[5:8], [1, 0, 0], msg=str(runs))
+        self.assertEqual(runs[8:], [1, 1], msg=str(runs))
+
+    @parametrize("item", list(AMBIENT_NEUTRAL))
+    @checks_isolated
+    def test_no_trace_starts_under(self, device, item):
+        fn = ambient_body_from_the_start
+        runs, compiled = self.calls(device, fn, lambda call: AMBIENT_NEUTRAL[item])
+        self.assertEqual(runs, [0] * 10)
+        rows = [r for r in vm.regions(compiled) if r["function"] == fn.__name__]
+        self.assertNotIn("region", {r["state"] for r in rows}, msg=str(rows))
+
+    @checks_isolated
+    def test_a_default_device_keeps_every_region_away(self, device):
+        # The known cost: torch.set_default_device puts a torch function
+        # mode on for good, so a program that sets one is never traced.
+        torch.set_default_device(device)
+        try:
+            fn = ambient_body_from_the_start
+            runs, _ = self.calls(device, fn, lambda call: ambient_plainly)
+        finally:
+            torch.set_default_device(None)
+        self.assertEqual(runs, [0] * 10)
+
+    @unittest.skipUnless(
+        torch.cuda.device_count() > 1, "needs two CUDA devices; this machine has one"
+    )
+    @checks_isolated
+    def test_the_current_cuda_device_is_in_the_word(self, device):
+        if torch.device(device).type != "cuda":
+            self.skipTest("the current CUDA device is a CUDA matter")
+
+        def ambient_made_on_the_current_device(x):
+            y = x.sin() * 2 + torch.ones(8, device="cuda").to(x.device)
+            return (y @ y.t()).cos().tanh().exp(), torch.ones(2, device="cuda").device
+
+        def how(call):
+            def run(fn, x):
+                with torch.cuda.device(1 if call in (6, 7) else 0):
+                    return fn(x)
+
+            return run
+
+        runs, _ = self.calls(device, ambient_made_on_the_current_device, how)
+        self.assertEqual(runs[5:7], [1, 0], msg=str(runs))
+        self.assertEqual(runs[8:], [1, 1], msg=str(runs))
+
+
+instantiate_device_type_tests(TestVmAmbient, globals())
 
 
 if __name__ == "__main__":
