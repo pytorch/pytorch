@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     precisionOverride,
+    skipCPUIf,
     skipCUDAIfNotRocm,
     skipIf,
     skipMeta,
@@ -1043,6 +1044,129 @@ class TestBinaryUfuncsDevice(TestCase):
                 f"{broadcasted_shape}, although they are not broadcastable."
             )
             raise AssertionError(msg)
+
+    @skipCPUIf(True, "compares against CPU")
+    @dtypes(torch.float32, torch.bfloat16, torch.half)
+    def test_inner_dim_broadcast_special_values(self, device, dtype):
+        # Inner-dim broadcasts whose operands hold NaN, +-inf, -0, +-max and, for
+        # fp16, subnormals must match the CPU bit for bit. On ROCm, for bf16 and
+        # fp32 the GPU may instead return the result with subnormal inputs and
+        # results flushed to signed zero: on gfx1250 the packed float math of the
+        # vectorized kernels flushes fp32-range subnormals, as trunk's contiguous
+        # kernel already does.
+        fi = torch.finfo(dtype)
+        extremes = [fi.max, -fi.max, fi.tiny, -fi.tiny]
+        normal = [0.0, -0.0, nan, inf, -inf, *extremes, 1.0, -2.25, 0.5]
+        subnormal = [fi.tiny / 4, -fi.tiny / 8] if dtype != torch.float32 else []
+
+        def fill(shape, seed):
+            gen = torch.Generator().manual_seed(seed)
+            t = torch.randn(shape, generator=gen).to(dtype)
+            s = torch.tensor(normal + subnormal, dtype=torch.float64).to(dtype)
+            flat = t.view(-1)
+            flat[::3] = s.repeat(flat.numel() // s.numel() + 1)[: flat[::3].numel()]
+            return t
+
+        int_dtype = torch.int32 if dtype == torch.float32 else torch.int16
+        fp32_tiny = torch.finfo(torch.float32).tiny
+
+        def bits(t):
+            return t.contiguous().view(int_dtype)
+
+        for rows, cols in ((7, 16), (5, 24), (300, 1536)):
+            x, row, col = fill((rows, cols), 0), fill((cols,), 1), fill((rows, 1), 2)
+            for name, op, args in (
+                ("x + row", torch.add, (x, row)),
+                ("x - col", torch.sub, (x, col)),
+                ("x * row", torch.mul, (x, row)),
+                ("col * x", torch.mul, (col, x)),
+            ):
+                expected = op(*args)
+                actual = op(*(a.to(device) for a in args)).cpu()
+                both_nan = actual.isnan() & expected.isnan()
+                same = (bits(actual) == bits(expected)) | both_nan
+                if torch.version.hip and dtype != torch.half:
+                    # Same op computed in fp32 with subnormal inputs and fp32
+                    # results flushed to signed zero, then rounded to dtype.
+                    def flush(t):
+                        signed_zero = torch.copysign(torch.zeros_like(t), t)
+                        return torch.where(t.abs() < fp32_tiny, signed_zero, t)
+
+                    ftz = flush(op(*(flush(a.float()) for a in args))).to(dtype)
+                    same |= (bits(actual) == bits(ftz)) | (actual.isnan() & ftz.isnan())
+                n_diff = (~same).sum().item()
+                msg = f"{name} [{rows},{cols}]: {n_diff} elements differ from CPU"
+                self.assertTrue(same.all(), msg=msg)
+
+    @skipCPUIf(True, "compares against CPU")
+    @dtypes(torch.float32, torch.bfloat16, torch.half, torch.uint8)
+    def test_inner_dim_broadcast_2d(self, device, dtype):
+        # 2-D iterations whose operands are contiguous or broadcast along the
+        # inner dim, with shapes, row strides and offsets that do and do not
+        # allow vectorized access.
+        for rows, cols, layout in product(
+            (1, 7, 300), (8, 15, 64, 1536), ("contiguous", "strided_rows", "misaligned")
+        ):
+            if layout == "contiguous":
+                x = make_tensor((rows, cols), dtype=dtype, device=device)
+            elif layout == "strided_rows":
+                x = make_tensor((rows, 2 * cols), dtype=dtype, device=device)[:, :cols]
+            else:
+                x = make_tensor((rows, cols + 1), dtype=dtype, device=device)[:, 1:]
+            row = make_tensor((cols,), dtype=dtype, device=device)
+            col = make_tensor((rows, 1), dtype=dtype, device=device)
+            cond = make_tensor((rows, 1), dtype=torch.bool, device=device)
+            x_cpu, row_cpu, col_cpu, cond_cpu = (t.cpu() for t in (x, row, col, cond))
+            msg = f"{rows=} {cols=} {layout=}"
+            self.assertEqual(x + row, x_cpu + row_cpu, msg=msg)
+            self.assertEqual(row + x, row_cpu + x_cpu, msg=msg)
+            self.assertEqual(x * col, x_cpu * col_cpu, msg=msg)
+            expected = torch.where(cond_cpu, x_cpu, row_cpu)
+            self.assertEqual(torch.where(cond, x, row), expected, msg=msg)
+
+    @dtypes(torch.float32, torch.bfloat16, torch.half)
+    def test_inner_dim_broadcast_nd(self, device, dtype):
+        # N-D iterations whose operands are contiguous or broadcast along the
+        # inner dim, plus layouts that must fall back (rows or base pointers that
+        # are not vector-aligned, inner sizes that are not a vector multiple).
+        # Each result must match the same op on dense operands bit for bit (same
+        # functor per element) and the CPU result.
+        def check(op, *args, msg):
+            out = op(*args)
+            dense = [a.expand(out.shape).contiguous() for a in args]
+            self.assertEqual(out, op(*dense), msg=msg, atol=0, rtol=0)
+            self.assertEqual(out, op(*[a.cpu() for a in args]), msg=msg)
+
+        for b, r, c in product((1, 3), (7, 50), (8, 40, 64, 15)):
+            msg = f"{b=} {r=} {c=}"
+            x = make_tensor((b, 2, r, c), dtype=dtype, device=device)
+            cond = make_tensor((b, 1, r, c), dtype=torch.bool, device=device)
+            check(lambda m, t: torch.where(m, t, 0.0), cond, x, msg="where " + msg)
+            col = make_tensor((b, 2, r, 1), dtype=dtype, device=device)
+            check(torch.sub, x, col, msg="sub " + msg)
+            # [M, 4, 4, 1] x [M, 1, 4, C]: both operands broadcast in different dims.
+            gate = make_tensor((b, 4, 4, 1), dtype=dtype, device=device)
+            rows = make_tensor((b, 1, 4, c), dtype=dtype, device=device)
+            check(torch.mul, gate, rows, msg="mul " + msg)
+            # The same N-D shape with rows c + 3 elements apart and with a
+            # misaligned base pointer, which must fall back.
+            padded = make_tensor((b, 1, 4, c + 3), dtype=dtype, device=device)
+            check(torch.mul, gate, padded[..., :c], msg="mul strided rows " + msg)
+            flat = make_tensor((b * 4 * c + 1,), dtype=dtype, device=device)
+            misaligned = flat[1:].view(b, 1, 4, c)
+            check(torch.mul, gate, misaligned, msg="mul misaligned " + msg)
+            # Outer-product broadcast of two bool vectors.
+            u = make_tensor((b, r, 1), dtype=torch.bool, device=device)
+            v = make_tensor((b, 1, c), dtype=torch.bool, device=device)
+            check(torch.logical_and, u, v, msg="logical_and " + msg)
+            # Rows c + 3 elements apart (not vector-aligned) divided by a column.
+            num = make_tensor((b, r, c + 3), dtype=dtype, device=device)[..., :c]
+            den = make_tensor((b, r, 1), dtype=dtype, device=device, low=1, high=4)
+            check(torch.div, num, den, msg="div strided rows " + msg)
+            # Misaligned base pointer.
+            flat = make_tensor((b * r * c + 1,), dtype=dtype, device=device)
+            num = flat[1:].view(b, r, c)
+            check(torch.div, num, den, msg="div misaligned " + msg)
 
     def test_add_broadcast_empty(self, device):
         # empty + empty
@@ -4866,6 +4990,43 @@ class TestChebyshevNanPropagationDevice(TestCase):
 
 class TestBinaryUfuncsCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    @skipCUDAIfNotRocm
+    def test_inner_dim_broadcast_kernel_selection(self, device):
+        # Which kernel gpu_kernel_impl_nocast launches for inner-dim broadcasts
+        # on gfx1250; results alone cannot tell the kernels apart.
+        if "gfx1250" not in torch.cuda.get_device_properties(device).gcnArchName:
+            self.skipTest("the inner-broadcast kernels are gfx1250-only")
+
+        def kernels(op, *args):
+            activities = [torch.profiler.ProfilerActivity.CUDA]
+            with torch.profiler.profile(activities=activities) as prof:
+                op(*args)
+                torch.cuda.synchronize()
+            cuda = torch.autograd.DeviceType.CUDA
+            names = [e.name for e in prof.events() if e.device_type == cuda]
+            if not names:
+                self.skipTest("the profiler recorded no kernels")
+            return " ".join(names)
+
+        def make(*shape, dtype=torch.bfloat16):
+            return make_tensor(shape, dtype=dtype, device=device)
+
+        two_d = "inner_broadcast_vectorized_elementwise_kernel"
+        n_d = "inner_broadcast_vectorized_nd_elementwise_kernel"
+        x, row = make(300, 1536), make(1536)
+        u, v = make(3, 40, 1, dtype=torch.bool), make(3, 1, 40, dtype=torch.bool)
+        cases = (
+            ("2-D add", (torch.add, x, row), two_d),
+            ("2-D where", (torch.where, make(300, 1, dtype=torch.bool), x, row), two_d),
+            ("N-D mul", (torch.mul, make(8, 4, 4, 1), make(8, 1, 4, 64)), n_d),
+            ("N-D logical_and, 8-byte vectors", (torch.logical_and, u, v), n_d),
+        )
+        for name, (op, *args), kernel in cases:
+            self.assertIn(kernel, kernels(op, *args), msg=name)
+        misaligned = make(300 * 1536 + 1)[1:].view(300, 1536)
+        names = kernels(torch.add, misaligned, row)
+        self.assertNotIn("inner_broadcast_vectorized", names)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_copysign_nan_sign(self, device, dtype):
