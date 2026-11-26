@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import datetime
 import functools
+import time
 import unittest
 from collections import Counter
 from unittest import mock
@@ -822,6 +823,57 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @parametrize("source", ["mm", "shared"])
+    @parametrize("p2p", ["irecv", "batch_p2p_ops"])
+    @parametrize("into", ["copy", "source"])
+    # reorder_for_locality would move add_t, whose result only the output uses, after
+    # the receive.
+    @torch._inductor.config.patch(reorder_for_locality=False, force_disable_caches=True)
+    def test_receive_keeps_a_copy_apart(self, source, p2p, into):
+        # The receive writes buf in place although its schema is functional, and buf
+        # is either w, a copy of z, or z itself, which w must keep a copy of. With
+        # source="shared", add_t reads z twice, so z is realized before the receive
+        # (Note [Constrain shared storage inputs first]).
+        with (
+            _dynamo_dist_per_rank_init(
+                self.rank, self.world_size, rdvz_file=self.file_name
+            ),
+            torch.library._scoped_library("mylib", "FRAGMENT") as lib,
+        ):
+            lib.define(
+                "add_t(Tensor a, Tensor b) -> Tensor",
+                tags=(torch.Tag.needs_fixed_stride_order,),
+            )
+            lib.impl("add_t", lambda a, b: a + b.T, "CompositeExplicitAutograd")
+            group = c10d.group.WORLD.group_name
+            peer = 1 - self.rank
+            funcol = torch.ops._c10d_functional
+
+            def f(x, y):
+                z = torch.mm(x, y) if source == "mm" else (x * 2).relu()
+                a = torch.ops.mylib.add_t(z, z.T)
+                w = z.clone()
+                buf, kept = (w, z) if into == "copy" else (z, w)
+                send = torch.full_like(z, 100.0 + self.rank)
+                if p2p == "batch_p2p_ops":
+                    out = funcol.batch_p2p_ops(
+                        ["isend", "irecv"], [peer] * 2, [0, 0], [send, buf], group
+                    )
+                    received = funcol.wait_tensor(out[1])
+                elif self.rank == 0:
+                    funcol.wait_tensor(funcol.isend(send, peer, 0, group))
+                    received = send
+                else:
+                    received = funcol.wait_tensor(funcol.irecv(buf, peer, 0, group))
+                return a, received + kept
+
+            x = torch.randn(8, 8, device=self.device)
+            y = torch.randn(8, 8, device=self.device)
+            expected = f(x, y)
+            self.assertEqual(torch.compile(f, fullgraph=True)(x, y), expected)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     def test_allreduce_inductor(self):
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.
@@ -1053,10 +1105,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             x = torch.ones(12800, 12800, device=self.device) + self.rank
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
-            # NOTE: We run for 10 iterations each, to ensure that the GPU execution is way behind CPU
-            # and that `y * y` on CPU side will be issued before `all_reduce(y)` on GPU side is done,
-            # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
-            # thus will produce the wrong result that fails the unit test.
+            # NOTE: The cases that use _run_loop_collective_wait run 10 iterations each, so that GPU execution
+            # falls well behind the CPU: if `wait_tensor()` did not wait, `y * y` would run in parallel with
+            # `all_reduce(y)` and the result would not match eager. The failure case at the end orders the ranks
+            # through the store instead and does not depend on this timing.
 
             def _run_loop_collective_wait(x, wait_fn, expected_registry_size):
                 for _ in range(10):
@@ -1102,12 +1154,27 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
             # Failure Case: Issue comm in eager -> wait for comm in compile. Doesn't use the context manager.
-            _, _, out_compiled = _run_loop_collective_wait(
-                x, wait_fn=all_reduce_wait_compiled, expected_registry_size=0
-            )
             # In this case `.wait_tensor(y)` in compiled region will not be able to find the corresponding work object
             # to invoke the wait, thus the result will not match eager.
-            self.assertNotEqual(out_ref, out_compiled)
+            # The other ranks join the all_reduce only after rank 0's `y * y` has executed, so rank 0 reads the
+            # unreduced `y` regardless of CPU/GPU timing.
+            store = dist.distributed_c10d._get_default_store()
+            if self.rank != 0:
+                store.wait(["y_squared"])
+            work, y = all_reduce_non_functional_eager(x)
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+            out_compiled = all_reduce_wait_compiled(work, y)
+            if self.rank == 0:
+                y_squared = torch.Event(device=self.device)
+                y_squared.record()
+                # Bounded so that a wait_tensor() that does wait fails the assert below instead of deadlocking.
+                deadline = time.monotonic() + 30
+                while not y_squared.query() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                store.set("y_squared", "1")
+            work.wait()
+            if self.rank == 0:
+                self.assertNotEqual(out_ref, out_compiled)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -2279,7 +2346,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             message,
         )
         self.assertIn("set async_op=False", message)
-        self.assertIn("torch.distributed._functional_collectives", message)
+        self.assertIn("torch.distributed.functional_collectives", message)
         self.assertIn("https://github.com/pytorch/pytorch/issues/119890", message)
 
         compiled = torch.compile(func, backend=counter)
@@ -4458,6 +4525,45 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             compiled(x, w, group_size, group_name)
 
 
+@unittest.skipIf(not c10d.is_gloo_available(), "Gloo is not available")
+class TestCollectiveReinplacementCPU(MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self):
+        return 2
+
+    @torch._inductor.config.patch(
+        {"_collective.auto_select": False, "compile_threads": 1}
+    )
+    def test_all_reduce_non_contiguous_intermediate(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            "gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        try:
+
+            def f(a, b):
+                intermediate = torch.mm(a, b).t()
+                return (
+                    _functional_collectives.all_reduce(
+                        intermediate, "sum", c10d.group.WORLD
+                    )
+                    + 1
+                )
+
+            a = torch.arange(16, dtype=torch.float32).reshape(4, 4) + self.rank + 1
+            b = torch.eye(4)
+            expected = f(a.clone(), b.clone())
+            with fresh_inductor_cache():
+                actual = torch.compile(f, fullgraph=True)(a.clone(), b.clone())
+            self.assertEqual(actual, expected)
+        finally:
+            c10d.destroy_process_group()
+
+
 class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
     """
     The compile time sync runs on a gloo process group over CPU, so unlike the rest of
@@ -4591,7 +4697,7 @@ class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
         self._init_process_group()
 
         with mock.patch.object(c10d, "is_gloo_available", return_value=False):
-            with self.assertRaisesRegex(RuntimeError, "requires the gloo backend"):
+            with self.assertRaisesRegex(RuntimeError, "a build of PyTorch with gloo"):
                 get_compile_sync_pg()
 
     def test_compile_sync_pg_inherits_default_timeout(self):
@@ -4645,7 +4751,7 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
             args=(input_node, 2, pg_node),
         )
         ag_node.meta["val"] = torch.empty(8, dtype=torch.float32)
-        self.assertEqual(_ag_group_key(ag_node), ("pg0", torch.float32))
+        self.assertEqual(_ag_group_key(ag_node), ("pg0", torch.float32, None))
 
     def test_rs_group_key_with_node_group_name(self):
         from torch._inductor.fx_passes.bucketing import _rs_group_key
@@ -4656,7 +4762,7 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
             args=(input_node, "sum", 2, pg_node),
         )
         rs_node.meta["val"] = torch.empty(2, dtype=torch.float32)
-        self.assertEqual(_rs_group_key(rs_node), ("pg0", "sum", torch.float32))
+        self.assertEqual(_rs_group_key(rs_node), ("pg0", "sum", torch.float32, None))
 
     def test_ar_group_key_with_node_group_name(self):
         from torch._inductor.fx_passes.bucketing import _ar_group_key
@@ -4667,7 +4773,7 @@ class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
             args=(input_node, "sum", pg_node),
         )
         ar_node.meta["val"] = torch.empty(4, dtype=torch.float32)
-        self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32))
+        self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32, None))
 
 
 def _build_graph_with_duplicate_rs(

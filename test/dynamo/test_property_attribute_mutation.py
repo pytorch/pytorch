@@ -1,7 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
+import sys
+import unittest
+
 import torch
 import torch._dynamo.test_case
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -84,6 +88,64 @@ class PropertyAttributeMutationTests(torch._dynamo.test_case.TestCase):
         actual = torch.compile(fn, backend="eager", fullgraph=True)(p)
         self.assertEqual(actual, (None, True, None))
         self.assertIsNone(p.__doc__)
+
+    @unittest.skipIf(sys.version_info < (3, 13), "property.__name__ requires 3.13")
+    def test_name_write_and_descriptor_read(self):
+        def fn(p):
+            p.__name__ = "updated"
+            return property.__dict__["__name__"].__get__(p, property)
+
+        p = property(lambda obj: 1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(p), "updated")
+        self.assertEqual(p.__name__, "updated")
+
+    @unittest.skipIf(sys.version_info < (3, 13), "property.__name__ requires 3.13")
+    def test_name_none_is_present(self):
+        def fn(p):
+            return hasattr(p, "__name__"), getattr(p, "__name__", "missing")
+
+        p = property(lambda obj: 1)
+        p.__name__ = None
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(p), (True, None))
+
+    @unittest.skipIf(sys.version_info >= (3, 13), "property.__name__ is writable")
+    @parametrize("delete", [False, True])
+    def test_name_mutation_before_313(self, delete):
+        def fn(p):
+            try:
+                if delete:
+                    del p.__name__
+                else:
+                    p.__name__ = "updated"
+            except AttributeError as error:
+                return str(error), hasattr(p, "__name__")
+            return "not raised", True
+
+        p = property(lambda obj: 1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(p), fn(p))
+        self.assertFalse(hasattr(p, "__name__"))
+
+    @parametrize("attr", ["__doc__", "__name__"])
+    def test_cached_write_replays(self, attr):
+        if attr == "__name__" and sys.version_info < (3, 13):
+            self.skipTest("property.__name__ requires 3.13")
+
+        def fn(x, p):
+            setattr(p, attr, "updated")
+            return x + 1, getattr(p, attr)
+
+        p = property(lambda obj: 1)
+        x = torch.ones(2)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for value in ("before first call", "before cached call"):
+            setattr(p, attr, value)
+            self.assertEqual(compiled(x, p), (x + 1, "updated"))
+            self.assertEqual(getattr(p, attr), "updated")
+        self.assertEqual(counter.frame_count, 1)
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_local_property_doc_write(self):

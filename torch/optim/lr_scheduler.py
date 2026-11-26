@@ -9,8 +9,8 @@ import warnings
 from bisect import bisect_right
 from collections import Counter
 from functools import partial, wraps
-from typing import Any, cast, Literal, SupportsFloat, TYPE_CHECKING, TypedDict
-from typing_extensions import override, Self
+from typing import Any, cast, Literal, Self, SupportsFloat, TYPE_CHECKING, TypedDict
+from typing_extensions import override
 from weakref import ref
 
 from torch import inf, Tensor
@@ -597,7 +597,7 @@ class StepLR(LRScheduler):
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
-        step_size (int): Period of learning rate decay.
+        step_size (int): Period of learning rate decay. Must be a positive integer.
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
@@ -625,6 +625,11 @@ class StepLR(LRScheduler):
         gamma: float = 0.1,
         last_epoch: int = -1,
     ) -> None:
+        if not isinstance(step_size, int) or step_size <= 0:
+            raise ValueError(
+                f"Expected positive integer step_size, but got {step_size}"
+            )
+
         self.step_size = step_size
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
@@ -780,7 +785,8 @@ class ConstantLR(LRScheduler):
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
-        factor (float): The number we multiply learning rate until the milestone. Default: 1./3.
+        factor (float): Multiplicative factor in the range [0, 1], applied until
+            the milestone. Default: 1./3.
         total_iters (int): The number of steps that the scheduler multiplies the learning rate by the factor.
             Default: 5.
         last_epoch (int): The index of the last epoch. Default: -1.
@@ -810,9 +816,9 @@ class ConstantLR(LRScheduler):
         total_iters: int = 5,
         last_epoch: int = -1,
     ) -> None:
-        if factor > 1.0 or factor < 0:
+        if not 0.0 <= factor <= 1.0:
             raise ValueError(
-                "Constant multiplicative factor expected to be between 0 and 1."
+                f"Constant multiplicative factor expected to be in [0, 1], but got {factor}"
             )
 
         self.factor = factor
@@ -827,7 +833,8 @@ class ConstantLR(LRScheduler):
         When :attr:`last_epoch` is 0, this method scales the ``group["lr"]``\s
         in each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`
         by :attr:`factor`. Once :attr:`total_iters` is reached, it undoes this,
-        scaling by ``1 / factor``.
+        scaling by ``1 / factor``. Undoing a zero factor is undefined and raises
+        :class:`ValueError`.
 
         Returns:
             list[float | Tensor]: A :class:`list` of learning rates for each of
@@ -845,10 +852,16 @@ class ConstantLR(LRScheduler):
         _warn_get_lr_called_within_step(self)
 
         if self.last_epoch == 0:
+            # Compute the initial scaled LR.
             return [group["lr"] * self.factor for group in self.optimizer.param_groups]
 
         if self.last_epoch != self.total_iters:
+            # Preserve the current LR, including adjustments made elsewhere.
             return _param_groups_val_list(self.optimizer, "lr")
+
+        # At total_iters, undo the initial scaling.
+        if self.factor == 0:
+            raise ValueError("undoing multiplying by a factor of 0 is undefined")
 
         return [
             group["lr"] * (1.0 / self.factor) for group in self.optimizer.param_groups
@@ -918,12 +931,12 @@ class LinearLR(LRScheduler):
         total_iters: int = 5,
         last_epoch: int = -1,
     ) -> None:
-        if start_factor > 1.0 or start_factor <= 0:
+        if not 0.0 < start_factor <= 1.0:
             raise ValueError(
                 "Starting multiplicative factor expected to be greater than 0 and less or equal to 1."
             )
 
-        if end_factor > 1.0 or end_factor < 0:
+        if not 0.0 <= end_factor <= 1.0:
             raise ValueError(
                 "Ending multiplicative factor expected to be between 0 and 1."
             )

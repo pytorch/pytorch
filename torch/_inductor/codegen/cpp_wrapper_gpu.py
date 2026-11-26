@@ -6,8 +6,7 @@ import os
 import re
 import sys
 from itertools import count, zip_longest
-from typing import Any, cast
-from typing_extensions import Self
+from typing import Any, cast, Self, TYPE_CHECKING
 
 import sympy
 
@@ -32,6 +31,7 @@ from ..runtime.hints import (
     TRITON_DEFAULT_RSPLIT_SIZE,
     TritonMeta,
 )
+from ..runtime.tiling import get_z_blocks
 from ..stream_utils import (
     AOTI_SUPPORTED_STREAM_OP_NAMES,
     AOTI_UNSUPPORTED_STREAM_OP_REASONS,
@@ -49,7 +49,7 @@ from ..utils import (
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, TritonScratchWorkspace
-from .cpp_utils import cexpr
+from .cpp_utils import cexpr, device_to_aten
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .multi_kernel import MultiKernelCall
 from .triton_utils import should_unwrap_unspec_arg
@@ -60,6 +60,10 @@ from .wrapper import (
     PythonWrapperCodegen,
     SymbolicCallArg,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 _cpp_string_literal_escapes = {
@@ -187,14 +191,15 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         config_index: int | None = None
         grid_type = inductor_meta.get("grid_type")
         if grid_type == "PrecomputedGrid":
-            precomputed_grids = inductor_meta.get("precomputed_grids", [])
-            for idx, entry in enumerate(precomputed_grids):
-                entry_config = entry.get("config", {})
-                if all(config_dict.get(k) == v for k, v in entry_config.items()):
-                    config_index = idx
-                    break
+            from ..runtime.triton_heuristics import PrecomputedGrid
 
-        # Per-subkernel block sizes for combo kernels, or single-element lists.
+            config_index = PrecomputedGrid.find_candidate_index(
+                cast("InductorMeta", inductor_meta), config_dict
+            )
+
+        # Combo kernels store one block size per subkernel.
+        # Single kernels store one X/Y/R0 block, but Z blocks are per-axis,
+        # ordered from Z0 (innermost) outward.
         num_kernels = combo_grid_meta.get("num_kernels", 1) if combo_grid_meta else 1
         if num_kernels > 1 and "XBLOCK_0" in config_dict:
             xblocks = [
@@ -206,7 +211,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
                 for i in range(num_kernels)
             ]
             zblocks = [
-                config_dict.get(f"ZBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])
+                config_dict.get(f"Z0_BLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])
                 for i in range(num_kernels)
             ]
             r0blocks = [
@@ -216,7 +221,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         else:
             xblocks = [config_dict.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
             yblocks = [config_dict.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
-            zblocks = [config_dict.get("ZBLOCK", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])]
+            zblocks = get_z_blocks(config_dict)
             r0blocks = [
                 config_dict.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])
             ]
@@ -294,6 +299,41 @@ def _unpack_tma_descriptor_args(var_name: str, sig_type: str) -> list[str]:
 def _tma_dtype_device_to_host(elem_type: int) -> int:
     """Map Triton's device TMA dtype enum to CUtensorMapDataType."""
     return {8: 10, 9: 8, 10: 9}.get(elem_type, elem_type)
+
+
+def _host_tma_cpp_dim(
+    dim: int | str,
+    launch_args: list[str],
+    arg_names: OrderedSet[str],
+    constants: dict[str, Any],
+) -> str:
+    """C++ source for one host-side TMA descriptor dim.
+
+    A dim is an int, or the cexpr of an integer expression over the kernel's size
+    args (launch_args, such as ks0). The kernel wrapper takes those args as
+    parameters, except ones Triton specialized to constants.
+    """
+    if isinstance(dim, int):
+        return str(dim)
+    values: dict[str, str] = {}
+    for name in launch_args:
+        if name in constants:
+            value = constants[name]
+            if not isinstance(value, int):
+                raise NotImplementedError(
+                    f"host-side TMA descriptor dim {dim!r} names {name}, "
+                    f"a non-integer constant {value!r}"
+                )
+            values[name] = str(int(value))
+        elif name not in arg_names:
+            raise NotImplementedError(
+                f"host-side TMA descriptor dim {dim!r} names {name}, "
+                "which is not a kernel arg"
+            )
+    if not values:
+        return dim
+    names = "|".join(map(re.escape, values))
+    return re.sub(rf"\b(?:{names})\b", lambda m: values[m.group(0)], dim)
 
 
 class _LazyTritonCompileKickoffLine(DeferredLineBase):
@@ -410,6 +450,70 @@ class DeferredTritonCallWrapper:
             )
             prefix.writeline(f"initTMADescriptorWithMetadata({args});")
 
+    def _host_tma_template_args(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Template TMA formals the caller passes as tensors, by name.
+
+        A template's host-side TMA operand (host_tma_descriptor_args) reaches
+        this wrapper as its tensor; the wrapper builds the StableTMADescriptor.
+        User-defined kernels pass a StableTMADescriptor instead.
+        """
+        signature = (params.get("triton_meta") or self.triton_meta or {}).get(
+            "signature", {}
+        )
+        host_args = (params.get("inductor_meta") or {}).get(
+            "host_tma_descriptor_args"
+        ) or {}
+        return {
+            name: desc
+            for name, desc in host_args.items()
+            if isinstance(desc, dict)
+            and isinstance(signature.get(name), str)
+            and signature[name].startswith("tensordesc<")
+        }
+
+    def _generate_host_tma_template_descriptors(
+        self,
+        prefix: IndentedBuffer,
+        wrapper: CppWrapperGpu,
+        def_args: list[str],
+        params: dict[str, Any],
+    ) -> None:
+        """Build each template TMA formal's StableTMADescriptor from its tensor.
+
+        Shapes and strides may be dynamic sizes the kernel takes as args (ks0),
+        which are parameters of this wrapper, so they are read at launch.
+        _generate_tma_descriptor_initializers then encodes the CUtensorMap.
+        """
+        arg_names = OrderedSet(def_args)
+        constants = (params.get("triton_meta") or {}).get("constants", {})
+        device_ptr_type = wrapper.device_codegen.cpp_device_ptr()
+        for name, desc in self._host_tma_template_args(params).items():
+            launch_args = desc.get("launch_args", [])
+            # cpp_shape/cpp_strides are set whenever a dim is symbolic.
+            shape, strides = (
+                [
+                    _host_tma_cpp_dim(d, launch_args, arg_names, constants)
+                    for d in desc.get(f"cpp_{key}", desc[key])
+                ]
+                for key in ("shape", "strides")
+            )
+            prefix.writeline(f"StableTMADescriptor {name}{{}};")
+            prefix.writeline(
+                f"{name}.global_address = reinterpret_cast<void*>("
+                f"reinterpret_cast<{device_ptr_type}>({name}_tma_tensor_.data_ptr()));"
+            )
+            for i, (dim, stride) in enumerate(zip(shape, strides)):
+                prefix.writeline(
+                    f"{name}.global_shape[{i}] = static_cast<uint64_t>({dim});"
+                )
+                prefix.writeline(
+                    f"{name}.kernel_shape[{i}] = "
+                    f"static_cast<int32_t>({name}.global_shape[{i}]);"
+                )
+                prefix.writeline(
+                    f"{name}.strides[{i}] = static_cast<int64_t>({stride});"
+                )
+
     def _generate_lazy_tma_descriptor_initializers(
         self,
         prefix: IndentedBuffer,
@@ -477,10 +581,16 @@ class DeferredTritonCallWrapper:
         arg_names: list[str],
         arg_types: list[Any] | None = None,
         signature: dict[str, str] | None = None,
+        tma_tensor_formals: OrderedSet[str] | None = None,
     ) -> None:
-        """Write the wrapper function signature including template and parameters."""
+        """Write the wrapper function signature including template and parameters.
+
+        tma_tensor_formals are TMA formals the caller passes as tensors; the
+        wrapper builds their descriptors (_generate_host_tma_template_descriptors).
+        """
         if arg_types is None:
             arg_types = self.arg_types
+        tma_tensor_formals = tma_tensor_formals or OrderedSet()
 
         template_types = [
             f"typename {name}_type_"
@@ -497,7 +607,9 @@ class DeferredTritonCallWrapper:
         kernels_param = "kernels_type_& kernels_"
 
         shared_params = [
-            self._get_cpp_param_type(name, arg_type, signature)
+            f"const {name}_type_& {name}_tma_tensor_"
+            if name in tma_tensor_formals
+            else self._get_cpp_param_type(name, arg_type, signature)
             for name, arg_type in zip(arg_names, arg_types)
         ]
         shared_params.append("int32_t device_idx_")
@@ -568,8 +680,18 @@ class DeferredTritonCallWrapper:
         signature = (params.get("triton_meta") or self.triton_meta or {}).get(
             "signature", {}
         )
+        tma_tensor_formals = OrderedSet(self._host_tma_template_args(params))
+        if tma_tensor_formals:
+            # Call wrappers are generated after the header is emitted, so the
+            # first one that builds a descriptor brings the helpers along.
+            wrapper.write_tma_descriptor_helpers_once(prefix)
         self._write_wrapper_signature(
-            prefix, wrapper, def_args, arg_types, signature=signature
+            prefix,
+            wrapper,
+            def_args,
+            arg_types,
+            signature=signature,
+            tma_tensor_formals=tma_tensor_formals,
         )
 
         with prefix.indent():
@@ -580,6 +702,9 @@ class DeferredTritonCallWrapper:
                 prefix.writeline("*/")
             self.generate_grid(prefix, inductor_meta, params)
             self.generate_load_kernel(prefix, kernel_var_name, params)
+            self._generate_host_tma_template_descriptors(
+                prefix, wrapper, def_args, params
+            )
             self._generate_tma_descriptor_initializers(prefix, def_args, params)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
         prefix.writeline("}")
@@ -677,7 +802,12 @@ class DeferredTritonCallWrapper:
                 switch_cases.append(
                     f"case {idx}: grid_0 = {g0}; grid_1 = {g1}; grid_2 = {g2}; break;"
                 )
-            switch_cases.append("default: grid_0 = 1; grid_1 = 1; grid_2 = 1; break;")
+            # Unreachable: both Python producers raise on no match.
+            switch_cases.append(
+                f'default: throw std::runtime_error("Invalid config_index " '
+                f"+ std::to_string({kernel_name}_result.config_index) "
+                f'+ " for kernel {kernel_name}");'
+            )
             switch_body = "\n                        ".join(switch_cases)
 
             prefix.splice(
@@ -716,7 +846,7 @@ class DeferredTritonCallWrapper:
         """Generate scratch space allocations with runtime-known sizes."""
         kernel_name = self.kernel_name
         dtype_str = wrapper.codegen_dtype(torch.uint8)
-        device_type, _ = wrapper.codegen_device(torch.device(get_gpu_type())).split(
+        device_type, _ = wrapper.codegen_device(torch.device(wrapper.device)).split(
             ", "
         )
         device_ptr_type = wrapper.device_codegen.cpp_device_ptr()
@@ -1279,10 +1409,18 @@ class DeferredTritonCallWrapper:
 class CppWrapperGpu(CppWrapperCpu):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
+
+    A subclass that declares its own ``device`` (class attribute, or set before
+    ``__init__`` runs) keeps it -- the CppWrapperCpu hasattr pattern -- and the
+    value must name a device with registered op overrides, or
+    ``get_device_op_overrides`` below raises KeyError. ``create()`` returns
+    ``cls()``, so a subclass that inherits it must have an argument-free
+    ``__init__``.
     """
 
     def __init__(self) -> None:
-        self.device = get_gpu_type()
+        if not hasattr(self, "device"):
+            self.device = get_gpu_type()
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
@@ -1293,6 +1431,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self._declared_aux_stream_slots: OrderedSet[int] = OrderedSet()
         self._aoti_current_stream_guard_declared = False
         self._aoti_stream_helpers_emitted = False
+        self._tma_descriptor_helpers_written = False
 
     def generate_debug_sync(self, buffer):
         if self.device == "cuda":
@@ -1316,16 +1455,22 @@ class CppWrapperGpu(CppWrapperCpu):
             f"triton debug sync is not supported with {self.device} cpp_wrapper"
         )
 
-    @staticmethod
+    def _codegen_cached_device_type(self) -> str:
+        device_str = device_to_aten(self.device)[5:].lower()
+        self.used_cached_devices.add(device_str)
+        return f"cached_torch_device_type_{device_str}"
+
+    @classmethod
     def create(
+        cls,
         is_subgraph: bool,
         subgraph_name: str | None,
         parent_wrapper: PythonWrapperCodegen | None,
         partition_signatures: GraphPartitionSignature | None = None,
-    ):
+    ) -> Self:
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
-        return CppWrapperGpu()
+        return cls()
 
     def write_header(self):
         if V.graph.is_const_graph and not V.graph.is_dual_wrapper_mode:
@@ -1359,9 +1504,14 @@ class CppWrapperGpu(CppWrapperCpu):
         self._aoti_current_stream_guard_declared = False
         return super()._generate(is_inference)
 
-    @cache_on_self
-    def write_tma_descriptor_helpers_once(self):
-        self.header.splice(self.device_codegen.tma_descriptor_helpers())
+    def write_tma_descriptor_helpers_once(
+        self, buffer: IndentedBuffer | None = None
+    ) -> None:
+        if self._tma_descriptor_helpers_written:
+            return
+        self._tma_descriptor_helpers_written = True
+        target = self.header if buffer is None else buffer
+        target.splice(self.device_codegen.tma_descriptor_helpers())
 
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         # Pure AOTI receives the stream as a function parameter. JIT and
@@ -1515,6 +1665,62 @@ class CppWrapperGpu(CppWrapperCpu):
             return
         super()._generate_extern_kernel_alloc_helper(extern_kernel, args)
 
+    @staticmethod
+    def _tunableop_dynamic_dims_mask_bits(
+        mask: tuple[bool, bool, bool, bool] | None,
+    ) -> int:
+        if mask is None:
+            return 0
+        return sum(1 << index for index, dynamic in enumerate(mask) if dynamic)
+
+    def _begin_tunableop_dynamic_dims_guard(
+        self,
+        mask: tuple[bool, bool, bool, bool] | None,
+        device_type: str,
+    ) -> bool:
+        if (
+            device_type != "cuda"
+            or not config.cuda.autotune_tunableop_dynamic_dims_wildcard
+        ):
+            return False
+        bits = self._tunableop_dynamic_dims_mask_bits(mask)
+        if bits == 0:
+            return False
+        self.writeline("{")
+        self.writeline(
+            f"AOTICudaTunableOpDynamicDimsGuard tunable_dynamic_dims_guard({bits});"
+        )
+        return True
+
+    def generate_c_shim_extern_kernel_call(
+        self,
+        kernel: str,
+        args: list[str],
+        device: str,
+        *,
+        debug_args: list[str] | None = None,
+        stack_traces: OrderedSet[str] | None = None,
+        profiling_args: Sequence[str | None] | None = None,
+        output_handle: str | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
+    ) -> None:
+        guarded = self._begin_tunableop_dynamic_dims_guard(
+            tunable_dyn_dims_mask, device
+        )
+        try:
+            super().generate_c_shim_extern_kernel_call(
+                kernel,
+                args,
+                device,
+                debug_args=debug_args,
+                stack_traces=stack_traces,
+                profiling_args=profiling_args,
+                output_handle=output_handle,
+            )
+        finally:
+            if guarded:
+                self.writeline("}")
+
     def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name,
@@ -1524,7 +1730,12 @@ class CppWrapperGpu(CppWrapperCpu):
         raw_args,
         outputs,
     ):
-        if self._emit_stream_op_inline(python_kernel_name, list(get_args())):
+        # get_args() emits temporary tensor handle declarations as a side effect, so
+        # only call it for stream ops; handles from a discarded call are never freed.
+        if (
+            python_kernel_name in AOTI_SUPPORTED_STREAM_OP_NAMES
+            or python_kernel_name in AOTI_UNSUPPORTED_STREAM_OP_REASONS
+        ) and self._emit_stream_op_inline(python_kernel_name, list(get_args())):
             if V.extern_kernel_nodes:
                 V.extern_kernel_nodes.pop()
             return
@@ -1585,6 +1796,11 @@ class CppWrapperGpu(CppWrapperCpu):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        # Ignored: a C++ wrapper compiles each Triton kernel from its source string, not
+        # from a module-level def (see defines_triton_kernels_as_code). Accepted to keep
+        # one signature across _define_kernel_helper implementations.
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         if gpu:
             self._kernel_name_to_body[kernel_name] = kernel_body
@@ -1708,7 +1924,9 @@ static inline void ensure_triton_kernel_compiles_started() {{
         )
 
         desc_name = desc.name
-        self.writeline(f"alignas(64) CUtensorMap {desc_name};")
+        # No alignas: CUtensorMap carries its own (64 B on CUDA 12, 128 B on
+        # CUDA 13), and requesting less than that is ill-formed C++.
+        self.writeline(f"CUtensorMap {desc_name};")
 
         # `source` is in the form of `&var_x`, where `var_x` is the data pointer
         # (CUdeviceptr); we dereference `source` and cast to `void*` to pass to
@@ -1723,6 +1941,13 @@ static inline void ensure_triton_kernel_compiles_started() {{
         self.writeline(f"{fn}({args});")
 
     def _generate_stable_tma_descriptor(self, desc):
+        descriptor_path = f"{desc.descriptor_module}.{desc.descriptor_class}"
+        if descriptor_path != "triton.tools.tensor_descriptor.TensorDescriptor":
+            raise NotImplementedError(
+                "GPU cpp_wrapper does not support backend-specific stable "
+                f"TMA descriptors, got {descriptor_path}"
+            )
+
         source = self.generate_args_decl(
             code=self,
             call_args=[self.val_to_arg_str(desc.tensor)],
@@ -1735,7 +1960,8 @@ static inline void ensure_triton_kernel_compiles_started() {{
         desc_name = desc.name
         # Pack the relevant information into a StableTMADescriptor struct.
         # See [Note: AOTI TMA Stable handling] for more details.
-        self.writeline(f"alignas(64) StableTMADescriptor {desc_name}{{}};")
+        # Aligned by its CUtensorMap member; see _generate_experimental_tma_descriptor.
+        self.writeline(f"StableTMADescriptor {desc_name}{{}};")
 
         def fill_array(name, values):
             for i, val in enumerate(values):
@@ -1864,6 +2090,9 @@ static inline void ensure_triton_kernel_compiles_started() {{
                             size=workspace_size,
                             generate_dtype_str=(
                                 lambda: self.codegen_dtype(torch.uint8)
+                            ),
+                            generate_device_type_str=(
+                                lambda: self._codegen_cached_device_type()
                             ),
                         ),
                         prefix=scratch_name,

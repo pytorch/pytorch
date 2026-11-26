@@ -1,10 +1,10 @@
 from collections.abc import Callable
-from typing import Any, overload, TypeAlias
-from typing_extensions import Never, ParamSpec, TypeIs, TypeVar
+from typing import Any, Never, overload, TypeAlias
+from typing_extensions import ParamSpec, TypeIs, TypeVar
 
 import torch
 from torch import Tensor
-from torch._decomp import get_decompositions
+from torch._decomp import decomposition_table
 from torch._ops import OpOverload, OpOverloadPacket
 from torch._refs import is_complex as _is_complex
 from torch.types import Number
@@ -13,6 +13,8 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 from .._core import ComplexTensor
 
+
+aten = torch.ops.aten
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -124,7 +126,65 @@ def register_force_test(
     return register_complex(op, func_impl)
 
 
-DECOMPOSITIONS = get_decompositions(list(torch.ops.aten))  # type: ignore[no-matching-overload]
+REAL_TO_COMPLEX_OPS: set[OpOverload] = set()
+
+
+def register_real_to_complex(
+    op: OpOverload, func_impl: Callable[..., Any] | None = None
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+    """Register a real-input op that constructs a ComplexTensor under WrapComplexMode."""
+    REAL_TO_COMPLEX_OPS.add(op)
+    return register_complex(op, func_impl)
+
+
+# Only decompositions verified by `test_decompositions` in `test/complex_tensor`.
+DECOMPOSED_OPS: set[OpType] = {
+    aten.addcdiv,
+    aten.addcmul,
+    aten.alias_copy,
+    aten.arange,
+    aten.block_diag,
+    aten.count_nonzero,
+    aten.diagonal_copy,
+    aten.empty_strided,
+    aten.expand_copy,
+    aten.eye,
+    aten.full,
+    aten.index_copy,
+    aten.index_fill,
+    aten.item,
+    aten.ldexp,
+    aten.lerp,
+    aten.logaddexp,
+    aten.logsumexp,
+    aten.meshgrid,
+    aten.mv,
+    aten.norm,
+    aten.ones,
+    aten.permute_copy,
+    aten.randn,
+    aten.renorm,
+    aten.roll,
+    aten.rot90,
+    aten.sinc,
+    aten.split_with_sizes_copy,
+    aten.squeeze_copy,
+    aten.std,
+    aten.t_copy,
+    aten.transpose_copy,
+    aten.tril,
+    aten.triu,
+    aten.unsafe_split,
+    aten.unsqueeze_copy,
+    aten.vdot,
+    aten.zeros,
+}
+
+DECOMPOSITIONS = {
+    op: fn
+    for op, fn in decomposition_table.items()
+    if isinstance(op, OpOverload) and op.overloadpacket in DECOMPOSED_OPS
+}
 
 
 def lookup_complex(
@@ -293,6 +353,68 @@ def register_simple(
     return register_complex(op, impl)
 
 
+def _inductor_impl(
+    op: OpOverload, backward_unsupported: Callable[..., bool] | None
+) -> Callable[..., Any]:
+    out_names = [arg.name for arg in op._schema.arguments if arg.is_out]
+
+    def impl(*args: Any, **kwargs: Any) -> Any:
+        if (
+            backward_unsupported is not None
+            and torch.is_grad_enabled()
+            and any(
+                isinstance(t, ComplexTensor) and t.requires_grad
+                for t in tree_flatten((args, kwargs))[0]
+            )
+            and backward_unsupported(*args, **kwargs)
+        ):
+            raise NotImplementedError(
+                f"The backward of `{op}` writes in-place through views, which don't "
+                f"alias for `{ComplexTensor.__name__}`, so it isn't supported."
+            )
+        outs = [kwargs[name] for name in out_names]
+        args, kwargs = tree_map(_as_interleaved, (args, kwargs))
+        # `__torch_dispatch__` runs with the Conjugate/Negative fallbacks excluded, but
+        # native kernels may create conj/neg views internally and rely on them.
+        with (
+            torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.Conjugate, False),
+            torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.Negative, False),
+        ):
+            ret = op(*args, **kwargs)
+        if not out_names:
+            return tree_map(_as_complex_tensor, ret)
+
+        # `ComplexTensor` destinations were replaced by interleaved temporaries above.
+        for out, name in zip(outs, out_names, strict=True):
+            if out is not (ret := kwargs[name]):
+                if out.shape != ret.shape:
+                    out.resize_(ret.shape)
+                out.copy_(ret)
+        return outs[0] if len(outs) == 1 else tuple(outs)
+
+    func_name = _get_func_name(op)
+    impl.__name__ = func_name
+    impl.__qualname__ = func_name
+
+    return impl
+
+
+def register_inductor(
+    op: OpOverloadPacket, backward_unsupported: Callable[..., bool] | None = None
+) -> Callable[..., Any]:
+    """Run every overload of `op` on interleaved inputs, writing `out=` results back.
+
+    If `backward_unsupported(*args, **kwargs)` is true, raise when grad is needed.
+    """
+    impls = {
+        name: register_force_test(
+            getattr(op, name), _inductor_impl(getattr(op, name), backward_unsupported)
+        )
+        for name in op.overloads()
+    }
+    return impls["default"]
+
+
 def _as_complex_tensor(arg: Tensor | Any) -> Tensor | ComplexTensor | Any:
     """Convert a Tensor with complex dtypes to a ComplexTensor. Pass along other args as-is."""
     if (
@@ -323,6 +445,10 @@ class WrapComplexMode(TorchDispatchMode):
             kwargs = {}
         args = tree_map(_as_complex_tensor, args)
         kwargs = tree_map(_as_complex_tensor, kwargs)
+        if func in REAL_TO_COMPLEX_OPS:
+            impl = lookup_complex(func, *args, **kwargs)
+            if impl is not None:
+                return tree_map(_as_complex_tensor, impl(*args, **kwargs))
         return tree_map(_as_complex_tensor, func(*args, **kwargs))
 
 

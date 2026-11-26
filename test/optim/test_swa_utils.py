@@ -6,15 +6,20 @@ import pickle
 import torch
 from torch.optim.swa_utils import (
     AveragedModel,
+    get_ema_avg_fn,
     get_ema_multi_avg_fn,
     get_swa_multi_avg_fn,
     update_bn,
 )
-from torch.testing._internal.common_device_type import onlyAccelerator
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
     TestCase,
 )
 
@@ -55,6 +60,12 @@ class SWATestCNN(torch.nn.Module):
 
 class TestSWAUtilsGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("avg_fn", [get_ema_avg_fn, get_ema_multi_avg_fn])
+    @parametrize("decay", [-0.1, 1.5, float("nan")])
+    def test_ema_invalid_decay(self, avg_fn, decay):
+        with self.assertRaisesRegex(ValueError, "Invalid decay value"):
+            avg_fn(decay)
 
     def test_averaged_model_state_dict(self):
         dnn = torch.nn.Sequential(
@@ -316,5 +327,8 @@ class TestSWAUtils(TestCase):
         self.assertTrue(cnn.training)
 
 
+instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
+
+
 if __name__ == "__main__":
-    print("These tests should be run through test/test_optim.py instead")
+    run_tests()

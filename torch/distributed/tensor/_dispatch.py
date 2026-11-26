@@ -15,7 +15,10 @@ from torch._prims.rng_prims import run_dtensor_rng_op
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._nonlinear_redux import argminmax_handler
+from torch.distributed.tensor._nonlinear_redux import (
+    argminmax_handler,
+    bool_reduction_handler,
+)
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -223,6 +226,10 @@ class OpDispatcher:
             aten.uniform_.default,
             aten.bernoulli.default,
             aten.bernoulli_.float,
+            aten.exponential_.default,
+            aten.geometric_.default,
+            aten.log_normal_.default,
+            aten.multinomial.default,
         }
         self._custom_op_handlers = {
             aten.is_same_size.default: is_same_size_handler,
@@ -233,6 +240,12 @@ class OpDispatcher:
             aten.as_strided.default: as_strided_handler,
             aten.argmin.default: argminmax_handler,
             aten.argmax.default: argminmax_handler,
+            aten.any.default: bool_reduction_handler,
+            aten.any.dim: bool_reduction_handler,
+            aten.any.dims: bool_reduction_handler,
+            aten.all.default: bool_reduction_handler,
+            aten.all.dim: bool_reduction_handler,
+            aten.all.dims: bool_reduction_handler,
         }
 
     # ********************************************************************************************
@@ -283,8 +296,8 @@ class OpDispatcher:
         try_cache: bool,
     ) -> object:
         # NOTE: schema should always be populated when calling this function,
-        # as it's only called from C++ after unwrap_to_op_info (create_schema=True).
-        # See dispatchDTensorOp in python_variable.cpp line 1453-1460.
+        # as it's only called after unwrap_to_op_info (create_schema=True): from
+        # C++ (dispatchDTensorOp in python_variable.cpp) or from a custom op handler.
         if op_info.schema is None:
             raise AssertionError(
                 "op_info.schema should not be None in sharding propagation. "
@@ -389,10 +402,16 @@ class OpDispatcher:
                         mesh, run_state_sync
                     )
 
-                first_arg, first_local_arg = (
-                    cast(dtensor.DTensor, args[0]),
-                    cast(torch.Tensor, local_tensor_args[0]),
-                )
+                # Offsets must follow the spec the local op runs on: e.g. multinomial
+                # redistributes a Shard(-1) input to Replicate before sampling.
+                if (
+                    output_sharding.needs_redistribute
+                    and output_sharding.redistribute_schema is not None
+                ):
+                    first_spec = output_sharding.redistribute_schema.args_spec[0]
+                else:
+                    first_spec = cast(dtensor.DTensor, args[0])._spec
+                first_local_arg = cast(torch.Tensor, local_tensor_args[0])
 
                 # If the user provided a generator, we hook it up to our RNG manager, but we also pop it from kwargs
                 # so the op_call does not directly use it (we want op_call to fall back to the 'default' which is
@@ -420,7 +439,7 @@ class OpDispatcher:
                         )
                     ):
                         with random._rng_tracker._distribute_region(
-                            first_arg._spec, generator=maybe_user_generator
+                            first_spec, generator=maybe_user_generator
                         ):
                             with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                                 output_sharding.output_spec
@@ -435,7 +454,7 @@ class OpDispatcher:
                         ):
                             raise AssertionError
                         start_offset_incr, end_offset_incr = (
-                            random._rng_tracker._compute_rng_offsets(first_arg._spec)
+                            random._rng_tracker._compute_rng_offsets(first_spec)
                         )
                         with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                             output_sharding.output_spec

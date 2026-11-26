@@ -1,7 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
+import io
+import os
 import sys
 import tempfile
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any, IO
 
 import torch
@@ -23,6 +27,8 @@ from torch.distributed.checkpoint import (
     save_state_dict,
 )
 from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.checkpoint.api import CheckpointException
+from torch.distributed.checkpoint.filesystem import FileSystem
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
@@ -226,7 +232,7 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "gloo"
 
     @parametrize("thread_count", _THREAD_COUNTS)
@@ -280,7 +286,7 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "gloo"
 
     def get_file_path(self) -> str:
@@ -426,14 +432,18 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
             ],
         )
 
-        model_to_save = MyShardedModel3(src_spec).cuda(dist.get_rank())
+        device_type = (
+            acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+        )
+        device = f"{device_type}:{dist.get_rank()}"
+        model_to_save = MyShardedModel3(src_spec).to(device)
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
         fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
-        model_to_load = MyShardedModel3(dst_spec).cuda(dist.get_rank())
+        model_to_load = MyShardedModel3(dst_spec).to(device)
         model_to_load._register_state_dict_hook(state_dict_hook)
         state_dict_to_load_to = model_to_load.state_dict()
 
@@ -552,6 +562,45 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
                     )
 
 
+class _FailingFileSystem(FileSystem):
+    """A FileSystem that raises OSError on write streams."""
+
+    @contextmanager
+    def create_stream(
+        self, path: str | os.PathLike, mode: str
+    ) -> Generator[io.IOBase, None, None]:
+        if "w" in mode:
+            raise OSError("Injected write failure")
+        with super().create_stream(path, mode) as stream:
+            yield stream
+
+
+class TestFileSystemWriterErrorPropagation(TestCase):
+    @parametrize("thread_count", _THREAD_COUNTS)
+    def test_write_data_propagates_thread_errors(self, thread_count) -> None:
+        """Regression test for gh-191391: writer thread exceptions must propagate
+        through the returned future, not be silently swallowed. thread_count=1
+        exercises the calling-thread path; thread_count=2 also exercises a spawned
+        writer thread."""
+        with tempfile.TemporaryDirectory() as path:
+            state_dict = {"weight": torch.randn(10, 10)}
+            fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+            fs_writer.fs = _FailingFileSystem()
+            with self.assertRaises(CheckpointException) as cm:
+                save_state_dict(
+                    state_dict=state_dict,
+                    storage_writer=fs_writer,
+                    no_dist=True,
+                )
+            rank_0_exc = cm.exception.failures[0][0]
+            self.assertIsInstance(rank_0_exc, OSError)
+            self.assertIn("Injected write failure", str(rank_0_exc))
+            # finish() must not run on a failed write, so no metadata is published
+            # for the partial checkpoint.
+            self.assertFalse(os.path.exists(os.path.join(path, ".metadata")))
+
+
+instantiate_parametrized_tests(TestFileSystemWriterErrorPropagation)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadRot13)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
