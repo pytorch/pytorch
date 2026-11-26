@@ -16,12 +16,13 @@ import unittest.mock as mock
 import torch
 from torch._native import aot_manifest
 from torch.testing._internal.common_utils import (
-    add_skip_condition,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyAccelerator
 
 
 # A minimal declaration module (contract: tools/native_aot/decl.py). covered_axes()
@@ -389,11 +390,17 @@ class TestEmbedDetection(TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("OPT_OUT_OK", proc.stdout)
 
-    def test_import_does_not_initialize_cuda(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA required")
+
+class TestEmbedDetectionDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_import_does_not_initialize(self, device):
+        device_type = torch.device(device).type
         code = (
-            "import torch\nassert not torch.cuda.is_initialized()\nprint('LAZY_OK')\n"
+            "import torch\n"
+            f"assert not torch.{device_type}.is_initialized()\n"
+            "print('LAZY_OK')\n"
         )
         proc = subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
@@ -401,12 +408,10 @@ class TestEmbedDetection(TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("LAZY_OK", proc.stdout)
 
-    add_skip_condition(
-        test_import_does_not_initialize_cuda,
-        lambda cls: not torch.cuda.is_available(),
-        "CUDA required",
-    )
 
+instantiate_device_type_tests(
+    TestEmbedDetectionDevice, globals(), allow_xpu=True
+)
 
 instantiate_parametrized_tests(TestEmbeddedCoverage)
 
