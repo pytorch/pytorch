@@ -9627,7 +9627,8 @@ class NegativeView(ExternKernelAlloc):
         x.freeze_layout()
         layout = x.get_layout()
         device = x.get_device()
-        assert device is not None
+        if device is None:
+            raise AssertionError(f"Expected non-None values, got {device=}")
         super().__init__(
             FixedLayout(device, x.get_dtype(), x.get_size(), layout.stride),
             [x],
