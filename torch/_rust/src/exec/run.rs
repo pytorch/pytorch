@@ -1851,7 +1851,20 @@ impl Act<'_> {
         if let Some(cl) = clone {
             super::NEXT_CLONE.set((cl.code.as_ptr() as usize, self.f as usize, Arc::as_ptr(&cl.compiled) as usize));
         }
-        let done = self.exec(*v, ins);
+        // A backward is nothing a region does again: a traced body that
+        // comes to one is refused before the engine runs, and anywhere else
+        // the engine runs outside the executor (see backward.rs).
+        let done = match callee {
+            Some(f) if super::backward::is(f) => {
+                if self.reading {
+                    super::backward::refuse();
+                    Err(Exc::Error)
+                } else {
+                    super::outside_executor(|| self.exec(*v, ins))
+                }
+            }
+            _ => self.exec(*v, ins),
+        };
         if clone.is_some() {
             super::NEXT_CLONE.set((0, 0, 0));
         }

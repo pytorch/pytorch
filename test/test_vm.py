@@ -1064,6 +1064,40 @@ def given_up_in_a_loop(x):
     return total
 
 
+def backward_hook_counts(g):
+    # A hook on a tensor: nonzero is nothing a region holds.
+    return g * (torch.nonzero(g > 0).shape[0] / g.numel() + 1)
+
+
+def backward_with_hook(w, v, x, on):
+    w.grad = v.grad = None
+    h = w * x
+    h.register_hook(backward_hook_counts)
+    loss = (h * h).sum() + (v * x).sum()
+    loss.backward()
+    return loss.detach(), w.grad.clone(), v.grad.clone()
+
+
+def backward_kept_with_hook(w, v, x, on):
+    w.grad = v.grad = None
+    h = w * x
+    h.register_hook(backward_hook_counts)
+    loss = (h * h).sum() + (v * x).sum()
+    loss.backward(retain_graph=True)
+    return loss.detach(), w.grad.clone(), v.grad.clone()
+
+
+def backward_in_a_branch(y, on):
+    if on:
+        y.sum().backward()
+    return y * 2
+
+
+def backward_first_at_the_trace(w, v, x, on):
+    y = (w * x).sin() + v
+    return backward_in_a_branch(y, on).cos().tanh().exp()
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmGivenUpTraces(TestCase):
     """A trace that comes to something a region cannot hold is given up and
@@ -1246,6 +1280,59 @@ class TestVmGivenUpTraces(TestCase):
                 g(x), given_up_in_a_loop(x), atol=0, rtol=0, msg=f"call {call}"
             )
         return g
+
+    def backwards(self, fn, device):
+        # Ten calls, each side on leaves of its own: what the call returns
+        # and the gradients it leaves. `on` from the fourth call, the first
+        # that is traced.
+        g = vm_early(fn)
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            sides = []
+            for side in (fn, g):
+                w = torch.full((8,), 0.5, device=device, requires_grad=True)
+                v = torch.full((8,), 0.25, device=device, requires_grad=True)
+                sides.append((side(w, v, x, call >= 3), w.grad, v.grad))
+            self.assertEqual(sides[1], sides[0], atol=0, rtol=0, msg=f"call {call}")
+        return vm.regions(g)
+
+    def engine_is_not_movable(self, rows):
+        calls = [
+            r
+            for r in rows
+            if r["kind"] == "call" and "runs a backward" in (r["why"] or "")
+        ]
+        self.assertEqual({r["state"] for r in calls}, {"not movable"}, msg=str(calls))
+        blocks = [
+            r
+            for r in rows
+            if r["function"] == "_engine_run_backward" and r["kind"] == "block"
+        ]
+        self.assertEqual([r for r in blocks if r["state"] != "too small"], [])
+
+    @isolated
+    def test_backward_whose_hook_a_trace_would_refuse_runs_once(self, device):
+        # Run twice, the second backward finds its graph freed.
+        self.engine_is_not_movable(self.backwards(backward_with_hook, device))
+
+    @isolated
+    def test_backward_that_keeps_its_graph_adds_to_the_gradients_once(self, device):
+        self.engine_is_not_movable(self.backwards(backward_kept_with_hook, device))
+
+    @isolated
+    def test_backward_in_a_branch_first_taken_by_the_traced_call(self, device):
+        # No call before ran the branch: the trace is the first to come to
+        # the engine, and a region of its operations would leave no .grad.
+        rows = [
+            r
+            for r in self.backwards(backward_first_at_the_trace, device)
+            if r["kind"] == "block"
+        ]
+        rows = [r for r in rows if r["function"] == "backward_first_at_the_trace"]
+        self.assertEqual([r["state"] for r in rows], ["refused"], msg=str(rows))
+        self.assertIn("it runs a backward", rows[0]["why"])
 
 
 instantiate_device_type_tests(TestVmGivenUpTraces, globals())

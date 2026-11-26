@@ -953,6 +953,20 @@ class TestVmGradients(TestCase):
             self.assertEqual(got, want, msg=f"call {call}", **tolerance)
         self.assertGreater(region_runs(compiled), 0)
 
+    @parametrize("passes", ("autograd", "inductor", "fast"))
+    @isolated
+    def test_backward_of_a_region_for_a_second_size(self, device, passes):
+        # A backward graph is compiled when the backward first runs: for the
+        # second size, in a call of the program's that traces nothing.
+        eager = modes_detaching(device)
+        compiled = vm(modes_detaching(device), passes=MODES_LISTS[passes])
+        for call in range(10):
+            torch.manual_seed(call)
+            x = torch.randn(5 if call >= 6 else 4, 8, device=device)
+            want, got = eager(x), compiled(x)
+            self.assertEqual(got, want, msg=f"call {call}", atol=1e-05, rtol=1e-04)
+        self.assertGreater(region_runs(compiled), 0)
+
     @isolated
     def test_pattern_with_a_detach_matches(self, device):
         found = []

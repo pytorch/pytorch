@@ -4,6 +4,7 @@
 // an exception rather than falling back to CPython.
 
 pub mod autograd;
+mod backward;
 pub mod effects;
 pub mod ffi;
 pub mod graph;
@@ -2994,6 +2995,10 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
         return Ok(());
     }
     let callees = unsafe { &*prep.callees.get() };
+    // The autograd engine, whatever its runs did (see backward.rs).
+    if is_call(&ins.op) && callees.get(&v).and_then(|c| c.get(py)).is_some_and(|f| unsafe { backward::is(f.as_ptr()) }) {
+        return Err(format!("{} runs a backward, which writes .grad and frees the graph it went through", here()));
+    }
     if is_call(&ins.op) && callees.get(&v).and_then(|c| c.get(py)).is_some_and(|f| user_pure(f.as_ptr())) {
         return Ok(());
     }

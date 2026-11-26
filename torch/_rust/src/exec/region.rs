@@ -184,6 +184,16 @@ pub fn _region_refuse(why: Py<PyAny>) {
     });
 }
 
+// Refuses the trace running on this thread from the executor, in place of
+// what its body was about to do: the refusal (`why`: "it ...", as any) is
+// the error raised there.
+pub fn refuse(py: Python<'_>, why: &str) {
+    match py.import("torch._rust_inductor").and_then(|m| m.call_method1("_refuse", (why,))) {
+        Ok(e) => PyErr::from_value(e).restore(py),
+        Err(e) => e.restore(py),
+    }
+}
+
 // Whether the trace that runs (or the last that ran) on this thread was
 // refused while its body ran.
 pub fn refused() -> bool {
@@ -620,6 +630,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     TRACING.set(true);
     REFUSAL.set(None);
     super::reads::begin();
+    super::backward::ready();
     let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span, types, asked)));
     super::reads::end();
     TRACING.set(false);
