@@ -11275,7 +11275,10 @@ def signbit(x):
         torch.float16,
         torch.bfloat16,
     ):
-        x = to_dtype(x, torch.float32)
+        return make_pointwise(
+            lambda bits: ops.lt(bits, ops.constant(0, torch.int16)),
+            override_return_dtype=torch.bool,
+        )(to_dtype_bitcast(x, torch.int16))
     fn = ops_wrapper("signbit")
     return make_pointwise(fn, override_return_dtype=torch.bool)(x)
 

@@ -6322,6 +6322,7 @@ class Scheduler:
         # mutation_real_name = {"buf1" : "buf0"}
         # in codegen we only use buf0, never buf1
         self.mutation_real_name: dict[str, str] = {}
+        self.buffer_alias_roots: dict[str, str] = {}
 
         # We handle mutation by renaming modified versions of the same
         # buffer in the dependency graph to prevent cycles.
@@ -6817,6 +6818,12 @@ class Scheduler:
             node for node in self.nodes if node.get_name() not in removed_node_names
         ] + list(fe_nodes)
 
+    def get_buffer_alias_root(self, name: str) -> str:
+        name = self.mutation_real_name.get(name, name)
+        while (root := self.buffer_alias_roots.get(name, name)) != name:
+            name = root
+        return name
+
     def compute_dependencies(self) -> None:
         """
         Create dependency edges between nodes, handling aliasing and
@@ -6893,6 +6900,23 @@ class Scheduler:
                     else:
                         name_to_users[buf1_name] = name_to_users[buf2_name]
 
+        alias_roots: dict[object, str] = {}
+        self.buffer_alias_roots = {
+            name: alias_roots.setdefault(users, name)
+            for name, users in name_to_users.items()
+        }
+
+        # Mutation versions retain the readers of their physical alias group.
+        # pyrefly: ignore [not-a-type]
+        mutation_users: dict[str, DedupList[NodeUser]] = {}
+
+        # pyrefly: ignore [not-a-type]
+        def get_users(name: str) -> DedupList[NodeUser]:
+            root = self.get_buffer_alias_root(name)
+            if root in mutation_users:
+                return mutation_users[root]
+            return name_to_users[name]
+
         # pyrefly: ignore [not-a-type]
         def rename(n: str) -> str:
             if n in self.mutation_renames:
@@ -6906,7 +6930,7 @@ class Scheduler:
             can_inplace: bool = False,
             is_weak: bool = False,
         ) -> None:
-            name_to_users[rename(used_by_name)].append(
+            get_users(rename(used_by_name)).append(
                 NodeUser(user_node, can_inplace, is_weak)
             )
 
@@ -6996,7 +7020,7 @@ class Scheduler:
                     # this node must run after the prior writer
                     add_user(alt_name, node)
                     node.add_fake_dep(StarDep(alt_name, mode=node_mode))
-                    for user in name_to_users[alt_name].items:
+                    for user in get_users(alt_name).items:
                         if user.get_name() == node.get_name():
                             continue
 
@@ -7033,7 +7057,7 @@ class Scheduler:
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
                 if not isinstance(read, WeakDep):
-                    writer = last_alias_mutation.get(name_to_users[read.name])
+                    writer = last_alias_mutation.get(get_users(read.name))
                     if writer is not None and writer != node.get_name():
                         node.add_fake_dep(StarDep(writer))
                     add_user(read.name, node, node.can_inplace(read))
@@ -7044,7 +7068,14 @@ class Scheduler:
             for buf in node.get_outputs():
                 for alt_name in buf.get_mutations():
                     if not buf.is_ordering_only():
-                        last_alias_mutation[name_to_users[alt_name]] = buf.get_name()
+                        users = get_users(rename(alt_name))
+                        root = self.buffer_alias_roots.get(
+                            buf.get_name(), buf.get_name()
+                        )
+                        physical_root = self.get_buffer_alias_root(alt_name)
+                        self.buffer_alias_roots[root] = physical_root
+                        mutation_users[physical_root] = users
+                        last_alias_mutation[users] = buf.get_name()
                     self.mutation_renames[rename(alt_name)] = buf.get_name()
                     self.mutation_renames[alt_name] = buf.get_name()
                     self.mutation_real_name[buf.get_name()] = (
@@ -7090,12 +7121,21 @@ class Scheduler:
         ]
 
         # copy users information onto the nodes
+        node_order = {node.get_name(): index for index, node in enumerate(self.nodes)}
         for node in self.nodes:
             for buf in node.get_outputs():
-                buf.set_users(name_to_users[buf.get_name()].items)
+                users = get_users(buf.get_name()).items
+                if buf.get_mutations():
+                    users = [
+                        user
+                        for user in users
+                        if isinstance(user.node, OutputNode)
+                        or node_order[user.get_name()] > node_order[node.get_name()]
+                    ]
+                buf.set_users(users)
 
         for name in self.name_to_donated_buffer:
-            self.name_to_donated_buffer[name].set_users(name_to_users[name].items)
+            self.name_to_donated_buffer[name].set_users(get_users(name).items)
 
         # For debug logging
         logbuf = IndentedBuffer()
@@ -7105,9 +7145,9 @@ class Scheduler:
                 users = [v.get_name() for v in value.items]
                 logbuf.splice(f"'{key}': {users},")
         logbuf.splice("}")
-        str = logbuf.getrawvalue().rstrip()
+        users_log = logbuf.getrawvalue().rstrip()
         compute_dependencies_log.debug("BUFFER USER LIST\n")
-        compute_dependencies_log.debug("===== AFTER SCHEDULING =====\n%s", str)
+        compute_dependencies_log.debug("===== AFTER SCHEDULING =====\n%s", users_log)
 
     def insert_memory_check_nodes(self) -> None:
         from .memory import (
@@ -11575,6 +11615,7 @@ class Scheduler:
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
+
         relevant_reading_nodes = [node1]
         if isinstance(node1, ForeachKernelSchedulerNode):
             relevant_reading_nodes = node1.snodes
@@ -11585,10 +11626,17 @@ class Scheduler:
             relevant_reads = [
                 read
                 for read in reading_node.read_writes.reads
-                if self.mutation_real_name.get(read.name, read.name) == real_name
+                if self.get_buffer_alias_root(read.name)
+                == self.get_buffer_alias_root(real_name)
             ]
             if not relevant_reads:
                 continue
+            # Distinct view pointers can use equal indices for different storage locations.
+            if any(
+                self.mutation_real_name.get(read.name, read.name) != real_name
+                for read in relevant_reads
+            ):
+                return False
             device = node2.get_device()
             if device is not None and (
                 (device.type == "cpu" and config.cpu_backend == "halide")

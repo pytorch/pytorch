@@ -5219,12 +5219,33 @@ class StrictNumericsCompileTest(TestCase):
                 del actual
         self.assertEqual(counter.frame_count, 1)
 
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("default", "strict_pointwise", "strict"))
+    def test_dead_local_mutation(self, device, dtype, numerics):
+        from torch._inductor.compile_fx import compile_fx_inner
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x):
+            y = x @ x
+            y.add_(1)
+            return (x * 2,)
+
+        x = torch.randn(8, 8, device=device, dtype=dtype)
+        gm = make_fx(fn)(x)
+        with config.patch(numerics=numerics):
+            compiled, codes = run_and_get_code(compile_fx_inner, gm, [x])
+        self._assert_bitwise_equal(compiled([x]), fn(x))
+        self.assertNotIn("extern_kernels.mm(", "\n".join(codes))
+
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize(
         "hop", ("cond", "nested_cond", "invoke", "while_loop", "aliased_clone")
     )
-    def test_mul_subgraph_input_provenance(self, device, dtype, numerics, hop):
+    @parametrize("partition", (False, True))
+    def test_mul_subgraph_input_provenance(
+        self, device, dtype, numerics, hop, partition
+    ):
         values = _min_max_specials(dtype, device)
         skips_before = counters["inductor"]["cudagraph_skips"]
 
@@ -5266,7 +5287,13 @@ class StrictNumericsCompileTest(TestCase):
 
         counter = CompileCounterWithBackend("inductor")
         p = torch.tensor(True, device=device)
-        with config.patch({"numerics": numerics, "triton.cudagraphs": True}):
+        with config.patch(
+            {
+                "numerics": numerics,
+                "triton.cudagraphs": True,
+                "graph_partition": partition,
+            }
+        ):
             compiled = torch.compile(fn, fullgraph=True, backend=counter)
             for offset in (0, 1, 0):
                 a = values[4:5].repeat(1025 + offset)[offset:]
@@ -5283,7 +5310,7 @@ class StrictNumericsCompileTest(TestCase):
                 del actual
         self.assertEqual(counter.frame_count, 1)
 
-        if hop in ("while_loop", "aliased_clone"):
+        if hop in ("while_loop", "aliased_clone") and not partition:
             self.assertGreater(counters["inductor"]["cudagraph_skips"], skips_before)
 
     @dtypes(torch.float64)
