@@ -172,6 +172,7 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["last_level_cache_size"] > 0)
         self.assertTrue(device_capability["memory_clock_rate"] > 0)
         self.assertTrue(device_capability["memory_bus_width"] > 0)
+        self.assertTrue(device_capability["xe_core_count"] > 0)
         self.assertEqual(
             device_properties.driver_version, device_capability["driver_version"]
         )
