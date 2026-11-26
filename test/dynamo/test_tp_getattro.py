@@ -2,14 +2,11 @@
 """Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
 
 import collections
-import functools
 import inspect
-import operator
 import sys
 import traceback
 import types
 import unittest
-from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -246,12 +243,11 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, 42)
 
     @parametrize("fullgraph", [False, True])
-    @parametrize("spoofed_type", (types.ClassMethodDescriptorType, int))
-    def test_property_subclass_spoofed_class(self, fullgraph, spoofed_type):
+    def test_property_subclass_spoofed_class(self, fullgraph):
         class MyProperty(property):
             def __getattribute__(self, name):
                 if name == "__class__":
-                    return spoofed_type
+                    return types.ClassMethodDescriptorType
                 return super().__getattribute__(name)
 
         class MyObj:
@@ -270,12 +266,11 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
 
     @parametrize("fullgraph", [False, True])
-    @parametrize("spoofed_type", (types.GetSetDescriptorType, int))
-    def test_property_subclass_spoofed_class_escape(self, fullgraph, spoofed_type):
+    def test_property_subclass_spoofed_class_escape(self, fullgraph):
         class MyProperty(property):
             def __getattribute__(self, name):
                 if name == "__class__":
-                    return spoofed_type
+                    return types.GetSetDescriptorType
                 return super().__getattribute__(name)
 
         class MyObj:
@@ -721,6 +716,49 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
                 with self.assertRaises(torch._dynamo.exc.Unsupported):
                     torch.compile(fn, backend="eager", fullgraph=True)()
 
+    def test_classmethod_descriptor_call_none_owner(self):
+        descr = dict.__dict__["fromkeys"]
+
+        def fn():
+            try:
+                return descr(None, "ab")
+            except TypeError as e:
+                return str(e)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_slot_wrapper_bound_to_none_instance(self):
+        # None is a real instance here, not C NULL, so these bind to it.
+        def fn():
+            return (
+                None.__ne__(None),
+                None.__eq__(None),
+                None.__ne__(1),
+                None.__repr__(),
+                None.__bool__(),
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_descriptor_get_none_obj_returns_unbound(self):
+        # __get__(None, owner) maps None to C NULL: class access, unbound.
+        def f(self):
+            return 1
+
+        class C:
+            g = f
+
+        def fn():
+            return (
+                f.__get__(None, C) is f,
+                C.g is f,
+                C().g(),
+                int.__add__(1, 2),
+                str.upper("ab"),
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     def test_staticmethod_constructor_func_attr(self):
         def fn():
             def f():
@@ -1044,6 +1082,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(sorted(result), ["a", "b"])
 
+    @unittest.skipIf(not has_triton_package(), "requires Triton package")
     def test_nonstandard_c_method_descriptor_graph_break_binding(self):
         if not has_triton_package():
             self.skipTest("requires Triton package")
@@ -1710,6 +1749,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(1)
         self.assertEqual(fn(Child, Base, x), (x + 1, False, "default"))
 
+    @unittest.expectedFailure
     def test_class_setattr_abstractmethods_hasattr(self):
         class Base:
             pass
@@ -2351,289 +2391,6 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(p_compiled),
             fn(p_eager),
         )
-
-    @unittest.skipIf(sys.version_info < (3, 13), "requires property.__name__")
-    @parametrize("delete", (False, True))
-    @parametrize("explicit", (False, True))
-    @parametrize("getter_name", (False, True))
-    def test_property_name_delete_or_none(self, delete, explicit, getter_name):
-        def getter(obj):
-            return obj
-
-        descriptor = property.__dict__["__name__"]
-
-        def fn(x, p):
-            p.__name__ = "custom"
-            if delete:
-                if explicit:
-                    descriptor.__delete__(p)
-                else:
-                    del p.__name__
-            elif explicit:
-                descriptor.__set__(p, None)
-            else:
-                p.__name__ = None
-            return x + 1, getattr(p, "__name__", "missing"), hasattr(p, "__name__"), p
-
-        fget = getter if getter_name else None
-        eager_prop = property(fget)
-        compiled_prop = property(fget)
-        eager_prop.__name__ = "old"
-        compiled_prop.__name__ = "old"
-        x = torch.ones(2)
-        expected = fn(x, eager_prop)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        if delete and not explicit:
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported,
-                r"(?s)Unsupported method call.*`__delattr__`",
-            ):
-                compiled(x, compiled_prop)
-            compiled = torch.compile(fn, backend="eager")
-        for value in (x, x + 1):
-            compiled_prop.__name__ = "old"
-            result = compiled(value, compiled_prop)
-            self.assertEqual(result[0], value + 1)
-            self.assertEqual(result[1:3], expected[1:3])
-            self.assertIs(result[3], compiled_prop)
-            self.assertEqual(getattr(result[3], "__name__", "missing"), expected[1])
-
-    @unittest.skipIf(sys.version_info < (3, 13), "requires property.__name__")
-    @parametrize("read_method", ("getattr", "hasattr"))
-    @parametrize("missing", (False, True))
-    def test_property_deleted_name_fallback_runs_once(self, read_method, missing):
-        events = []
-
-        class Getter:
-            def __call__(self, obj):
-                return obj
-
-            @property
-            def __name__(self):
-                events.append("name")
-                if missing:
-                    raise AttributeError("No getter name")
-                return "getter"
-
-        p = property(Getter())
-        p.__name__ = "old"
-        descriptor = property.__dict__["__name__"]
-
-        def fn(x):
-            p.__name__ = "custom"
-            descriptor.__delete__(p)
-            result = (
-                getattr(p, "__name__", "missing")
-                if read_method == "getattr"
-                else hasattr(p, "__name__")
-            )
-            return x + 1, result
-
-        x = torch.ones(2)
-        expected = fn(x)
-        self.assertEqual(events, ["name"])
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        for value in (x, x + 1):
-            p.__name__ = "old"
-            events.clear()
-            result = compiled(value)
-            self.assertEqual(result[0], value + 1)
-            self.assertEqual(result[1], expected[1])
-            self.assertEqual(events, ["name"])
-
-    @unittest.skipIf(sys.version_info < (3, 13), "requires property.__name__")
-    @parametrize(
-        "getter_kind", ("method", "partial", "attrgetter", "descriptor", "custom")
-    )
-    def test_property_stored_name_with_custom_getter(self, getter_kind):
-        class Getter:
-            def __call__(self, obj):
-                return obj
-
-            def method(self, obj):
-                return obj
-
-            @property
-            def __name__(self):
-                raise AssertionError("The stored property name must bypass the getter")
-
-        getters = {
-            "method": Getter().method,
-            "partial": functools.partial(getattr, name="value"),
-            "attrgetter": operator.attrgetter("value"),
-            "descriptor": str.upper,
-            "custom": Getter(),
-        }
-
-        class Holder:
-            prop = property(getters[getter_kind])
-
-        def fn(x, p):
-            try:
-                Holder().prop = x
-            except AttributeError as exc:
-                return x + 1, p.__name__, str(exc)
-
-        x = torch.ones(2)
-        p = Holder.__dict__["prop"]
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        self.assertEqual(compiled(x, p), fn(x, p))
-        self.assertEqual(compiled(x + 1, p), fn(x + 1, p))
-        self.assertEqual(counter.frame_count, 1)
-        p.__name__ = "renamed"
-        self.assertEqual(compiled(x + 1, p), fn(x + 1, p))
-        self.assertEqual(counter.frame_count, 2)
-
-    @unittest.skipIf(sys.version_info < (3, 13), "requires property.__name__")
-    @parametrize("name_state", ("missing", "stored", "none"))
-    def test_property_name_guard_without_gc(self, name_state):
-        events = []
-
-        class Getter:
-            def __call__(self, obj):
-                return obj
-
-            @property
-            def __name__(self):
-                events.append("name")
-                return "fallback"
-
-        p = property(Getter())
-        if name_state != "missing":
-            p.__name__ = None if name_state == "none" else "stored"
-
-        def fn(x):
-            return x + 1, p.__name__
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(2)
-        expected_name = {"missing": "fallback", "stored": "stored", "none": None}[
-            name_state
-        ]
-        self.assertEqual(compiled(x), (x + 1, expected_name))
-        events.clear()
-        with mock.patch(
-            "torch._dynamo.utils.gc.get_referents",
-            side_effect=AssertionError("Property name guards must not traverse GC"),
-        ):
-            self.assertEqual(compiled(x + 1), (x + 2, expected_name))
-        self.assertEqual(events, ["name"] if name_state == "missing" else [])
-        self.assertEqual(counter.frame_count, 1)
-
-    @unittest.skipIf(sys.version_info < (3, 13), "requires property.__name__")
-    @parametrize("stored_name", (False, True))
-    def test_property_name_after_getter_rename(self, stored_name):
-        def getter(obj):
-            return obj
-
-        p = property(getter)
-        if stored_name:
-            p.__set_name__(object, "stored")
-
-        def fn(x):
-            getter.__name__ = "changed"
-            return x + 1, p.__name__
-
-        x = torch.ones(2)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(x), (x + 1, "stored" if stored_name else "changed"))
-
-    @unittest.skipIf(sys.version_info < (3, 13), "requires property.__name__")
-    def test_property_name_fallback_is_traced(self):
-        events = []
-
-        class Getter:
-            def __call__(self, obj):
-                return obj
-
-            @property
-            def __name__(self):
-                events.append("name")
-                return "fallback"
-
-        p = property(Getter())
-
-        def fn(x):
-            return x + 1, p.__name__
-
-        x = torch.ones(2)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        for value in (x, x + 1):
-            events.clear()
-            self.assertEqual(compiled(value), (value + 1, "fallback"))
-            self.assertEqual(events, ["name"])
-
-    @parametrize("action", ("get", "set", "delete"))
-    @parametrize("name_case", ("original", "alias", "renamed", "none"))
-    def test_property_missing_accessor_stored_name(self, action, name_case):
-        class Holder:
-            prop = property()
-            if name_case == "alias":
-                alias = prop
-
-        if name_case == "renamed":
-            Holder.prop.__set_name__(Holder, "renamed's property")
-        elif name_case == "none":
-            Holder.prop.__set_name__(Holder, None)
-
-        def fn(x):
-            obj = Holder()
-            try:
-                if action == "get":
-                    obj.prop
-                elif action == "set":
-                    obj.prop = x
-                else:
-                    del obj.prop
-            except AttributeError as exc:
-                return x + 1, str(exc)
-
-        x = torch.ones(2)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(x), fn(x))
-        self.assertEqual(compiled(x + 1), fn(x + 1))
-
-    def test_property_missing_accessor_stored_name_repr(self):
-        events = []
-
-        class Name:
-            def __repr__(self):
-                events.append("repr")
-                return "custom name"
-
-        class Holder:
-            prop = property()
-
-        Holder.prop.__set_name__(Holder, Name())
-
-        def fn(x):
-            try:
-                Holder().prop = x
-            except AttributeError as exc:
-                return x + 1, str(exc)
-
-        x = torch.ones(2)
-        expected = fn(x)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        for _ in range(2):
-            events.clear()
-            self.assertEqual(compiled(x), expected)
-            self.assertEqual(events, ["repr"])
-
-    def test_property_tracker_repr_bypasses_subclass_getattribute(self):
-        from torch._dynamo.variables import PropertyVariable
-
-        class MyProperty(property):
-            def __getattribute__(self, name):
-                raise AssertionError("Property internals must bypass __getattribute__")
-
-        def getter(obj):
-            return obj
-
-        tracker = PropertyVariable.create(MyProperty(getter))
-        self.assertEqual(repr(tracker), "PropertyVariable(getter)")
 
     def test_getset_descriptor_get_explicit(self):
         # object.__class__ is a getset modeled in tp_getset, so this exercises

@@ -119,13 +119,18 @@ if typing.TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
-    from torch._subclasses import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 
 
 try:
     import numpy as np
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
+
+try:
+    import tabulate as _tabulate
+except ImportError:
+    _tabulate = None  # type: ignore[assignment]
 
 try:
     import torch._logging
@@ -196,7 +201,6 @@ cumulative_time_spent_ns: dict[str, float] = collections.defaultdict(float)
 timer_counter = itertools.count()
 
 
-# Abstraction on top of counters.
 class ReinplaceCounters:
     _values: collections.defaultdict[str, int] = collections.defaultdict(int)
 
@@ -241,14 +245,11 @@ def tabulate(
     rows: list[tuple[str, Any]] | list[list[Any]],
     headers: tuple[str, ...] | list[str],
 ) -> str:
-    try:
-        import tabulate
-
-        return tabulate.tabulate(rows, headers=headers)
-    except ImportError:
-        return "\n".join(
-            ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
-        )
+    if _tabulate is not None:
+        return _tabulate.tabulate(rows, headers=headers)
+    return "\n".join(
+        ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
+    )
 
 
 curr_frame = 0
@@ -2016,7 +2017,9 @@ def _scrubbed_inductor_config_for_logging() -> str | None:
 
     if torch._inductor.config:
         try:
-            inductor_config_copy = torch._inductor.config.get_config_copy()
+            # Skips entries excluded from saved configs, such as custom passes,
+            # which can hold arbitrary objects.
+            inductor_config_copy = torch._inductor.config.get_serializable_config_copy()
         except (TypeError, AttributeError, RuntimeError, AssertionError):
             inductor_conf_str = "Inductor Config cannot be pickled"
 
@@ -2050,7 +2053,7 @@ def _functorch_config_for_logging() -> str | None:
         return None
 
     try:
-        functorch_config_copy = torch._functorch.config.get_config_copy()
+        functorch_config_copy = torch._functorch.config.get_serializable_config_copy()
     except (TypeError, AttributeError, RuntimeError, AssertionError):
         return None
 
@@ -2819,25 +2822,50 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
 
 
 @contextmanager
-def preserve_rng_state() -> Generator[None, None, None]:
+def preserve_rng_state(
+    device_type: str | None = None, device_index: int | None = None
+) -> Generator[None, None, None]:
+    """Preserve CPU and accelerator RNG state across the context.
+
+    With no device type, retain the existing CUDA/XPU behavior. When a device
+    type is provided, preserve only that accelerator's RNG state.
+    The device module must accept ``device_index`` in ``get_rng_state`` and
+    ``set_rng_state``.
+    """
     disable_functorch = torch._C._DisableFuncTorch
     disable_current_modes = torch.utils._python_dispatch._disable_current_modes
+    device_module = None
+    device_rng_state = None
+    device: str | int | None = None
     with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        if torch.xpu.is_available():
-            xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
+        if device_type is None:
+            if torch.cuda.is_available():
+                cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+            if torch.xpu.is_available():
+                xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
+        else:
+            device_module = torch.get_device_module(device_type)
+            if device_module.is_available():
+                device = device_type if device_index is None else device_index
+                device_rng_state = torch.clone(device_module.get_rng_state(device))
     try:
         yield
     finally:
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
-            if torch.xpu.is_available():
-                torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
+            if device_type is None:
+                if torch.cuda.is_available():
+                    torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+                if torch.xpu.is_available():
+                    torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
+            elif (
+                device_module is not None
+                and device_rng_state is not None
+                and device is not None
+            ):
+                device_module.set_rng_state(device_rng_state, device)
 
 
 def is_jit_model(
@@ -2865,10 +2893,10 @@ def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
         return model
 
     try:
-        return torch.jit.trace(model, example_inputs)
+        return torch.jit._trace.trace(model, example_inputs)
     except Exception:
         try:
-            return torch.jit.script(model)
+            return torch.jit._script.script(model)
         except Exception:
             if verbose:
                 log.exception("jit error")
@@ -3235,6 +3263,9 @@ deque_methods = {
 }
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
+int_methods = {method for method in int.__dict__.values() if callable(method)}
+float_methods = {method for method in float.__dict__.values() if callable(method)}
+complex_methods = {method for method in complex.__dict__.values() if callable(method)}
 
 # EnumType is the metaclass for Enum classes
 enum_type_methods = {
@@ -3264,10 +3295,14 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         # GC time) on that same dict mid-iteration, which a live view would turn
         # into "dictionary changed size during iteration".
         return list(obj.items())
-    elif isinstance(obj, OrderedDict):
+    elif issubclass(type(obj), OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
+
+
+class InvalidOrderedDict(ValueError):
+    """An OrderedDict's storage and linked keys cannot form one snapshot."""
 
 
 def enumerate_items_with_dict_position(
@@ -3281,10 +3316,19 @@ def enumerate_items_with_dict_position(
     dict.keys() position so that ConstDictKeySource indices stay consistent
     with PyDict_Next / C++ DictGuardManager.
     """
+    if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
+        items = list(dict.items(obj))
+        keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
+        positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
+        if (
+            keys is None
+            or len(positions) != len(items)
+            or len(keys) != len(items)
+            or {id(key) for key in keys} != positions.keys()
+        ):
+            raise InvalidOrderedDict("OrderedDict storage differs from linked keys")
+        return (positions[id(key)] for key in keys)
     items = get_items_from_dict(obj)
-    if isinstance(obj, OrderedDict):
-        key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
-        return ((key_to_pos[k], k, v) for k, v in items)
     return ((i, k, v) for i, (k, v) in enumerate(items))
 
 
@@ -3487,6 +3531,18 @@ def check_positional(
         )
 
 
+def check_num_args(
+    tx: InstructionTranslatorBase, args: list[VariableTracker], n: int
+) -> None:
+    # Mirrors CPython check_num_args (Objects/typeobject.c), used by the
+    # slot wrappers (wrap_binaryfunc, wrap_delitem, ...).
+    from torch._dynamo.exc import raise_type_error
+
+    if len(args) != n:
+        s = "" if n == 1 else "s"
+        raise_type_error(tx, f"expected {n} argument{s}, got {len(args)}")
+
+
 def no_positional(
     tx: InstructionTranslatorBase, funcname: str, args: list[VariableTracker]
 ) -> None:
@@ -3659,7 +3715,7 @@ def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
 
 
 def deepcopy_to_fake_tensor(
-    obj: Any, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    obj: Any, fake_mode: FakeTensorMode | CppFakeTensorMode
 ) -> Any:
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
@@ -4140,7 +4196,9 @@ def get_fake_values_from_nodes(
     return torch.fx.node.map_arg(nodes, visit)
 
 
-def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) -> str:
+def get_concrete_sizes_from_symints(
+    msg: str, fake_mode: FakeTensorMode | CppFakeTensorMode | None
+) -> str:
     """
     Replace symbolic size expressions (like 's0', 's94') in error messages
     with their concrete runtime values for better readability.
@@ -4744,17 +4802,6 @@ def get_property_accessor(obj: property, name: str) -> Any:
 
 
 def get_property_name(obj: property) -> tuple[Any, ...]:
-    if type(obj) is property:
-        # property_copy preserves prop_name without looking up the old getter.
-        obj = property.getter(obj, object())
-        if sys.version_info < (3, 13):
-            obj.__doc__ = None
-            # property_traverse visits get/set/del/doc/name, omitting NULL fields.
-            # The replacement getter and explicit doc are always non-NULL.
-            # https://github.com/python/cpython/blob/3.11/Objects/descrobject.c
-            # https://github.com/python/cpython/blob/3.12/Objects/descrobject.c
-            offset = 2 + (obj.fset is not None) + (obj.fdel is not None)
-            return tuple(gc.get_referents(obj)[offset:])
     # Distinguish a missing name from a name explicitly set to None.
     try:
         return (property.__dict__["__name__"].__get__(obj),)
@@ -4882,9 +4929,7 @@ def tensor_always_has_static_shape(
 
 def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
     def inner() -> str:
-        try:
-            from tabulate import tabulate  # TODO: Check that this is installed
-        except ImportError:
+        if _tabulate is None:
             return (
                 "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
                 + str(lazy_format_graph_code(fn_name, gm))
@@ -4893,7 +4938,7 @@ def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
         node_specs = [
             [n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes
         ]
-        graph_str = tabulate(
+        graph_str = _tabulate.tabulate(
             node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
         )
         return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
@@ -5692,6 +5737,18 @@ def iter_mro_static_attrs(cls: type, name: str) -> Iterator[object]:
             yield namespace[name]
 
 
+def has_custom_metaclass_accessor(klass: type, name: str) -> bool:
+    """Whether class metadata has a non-wrapper getter or a replaced descriptor."""
+    metacls = type(klass)
+    if metacls is type:
+        return False
+    getattribute = next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
+    return (
+        type(getattribute) is not types.WrapperDescriptorType
+        or next(iter_mro_static_attrs(metacls, name), None) is not type.__dict__[name]
+    )
+
+
 def find_bound_builtin_method_descriptor(value: object) -> object | None:
     if not isinstance(value, types.BuiltinMethodType):
         return None
@@ -5774,7 +5831,7 @@ def has_torch_function(vt: VariableTracker) -> bool:
 
 # see note [Tensor Fakification and Symbol Caching]
 def to_fake_tensor(
-    t: torch.Tensor, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    t: torch.Tensor, fake_mode: FakeTensorMode | CppFakeTensorMode
 ) -> Any:
     symbolic_context = None
     source = None
@@ -6086,12 +6143,18 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     return tensor_dict
 
 
-def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
-    return torch._C.Stream(*args, **kwargs)
+def build_stream(
+    args: tuple[Any],
+    kwargs: dict[Any, Any],
+    stream_cls: type[torch.Stream] = torch.Stream,
+) -> torch.Stream:
+    return stream_cls(*args, **kwargs)
 
 
-def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
-    return torch._C.Event(*args, **kwargs)
+def build_event(
+    args: tuple[Any], kwargs: dict[Any, Any], event_cls: type[torch.Event] = torch.Event
+) -> torch.Event:
+    return event_cls(*args, **kwargs)
 
 
 class FrameState(enum.Enum):

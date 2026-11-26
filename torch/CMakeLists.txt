@@ -297,12 +297,6 @@ if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
 endif()
 
-# coreml
-if(USE_COREML_DELEGATE)
-  list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/backend.cpp)
-  list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/preprocess.cpp)
-endif()
-
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
@@ -483,7 +477,7 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
 
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
-  # by torch/distributed/_token_switch.py so libtorch_cuda never references
+  # by torch/distributed/_token_switch/__init__.py so libtorch_cuda never references
   # ncclEp*. How it links libnccl_ep follows how torch links NCCL:
   #  - USE_SYSTEM_NCCL=OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked
   #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT
@@ -547,6 +541,7 @@ add_custom_target(
     --hip-version=${HIP_VERSION_CLEAN}
     --rocm-version=${ROCM_VERSION_DEV}
     --xpu-version=${SYCL_COMPILER_VERSION}
+    --xpu-ops-commit=${TORCH_XPU_OPS_RESOLVED_COMMIT}
   BYPRODUCTS ${TORCH_SRC_DIR}/version.py
   COMMENT "Regenerating version file..."
   WORKING_DIRECTORY ${TORCH_ROOT}
@@ -574,18 +569,13 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   # Add Android Nnapi delegate library
   add_library(nnapi_backend SHARED
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
-          ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
           )
-  # Pybind11 requires explicit linking of the torch_python library
   if(BUILD_LIBTORCHLESS)
     target_link_libraries(nnapi_backend PRIVATE ${TORCH_LIB})
   else()
     target_link_libraries(nnapi_backend PRIVATE torch)
   endif()
-  target_link_libraries(nnapi_backend PRIVATE torch_python pybind::pybind11 fmt::fmt-header-only)
-  if(MSVC AND TORCH_PYTHON_LINK_OPTIONS)
-    target_link_options(nnapi_backend PRIVATE ${TORCH_PYTHON_LINK_OPTIONS})
-  endif()
+  target_link_libraries(nnapi_backend PRIVATE fmt::fmt-header-only)
 endif()
 
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)

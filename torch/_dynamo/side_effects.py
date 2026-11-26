@@ -39,6 +39,7 @@ import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 from torch._library.utils import RegistrationHandle
+from torch._logging._internal import trace_log
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import is_structseq_class
 
@@ -205,6 +206,8 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     set.__getattribute__,
     frozenset.__getattribute__,
     int.__getattribute__,
+    float.__getattribute__,
+    complex.__getattribute__,
     str.__getattribute__,
     list.__getattribute__,
     tuple.__getattribute__,
@@ -246,6 +249,7 @@ class SideEffects:
     keepalive: list[object]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
+    _capture_user_stacks: bool
 
     def __init__(
         self,
@@ -279,12 +283,15 @@ class SideEffects:
         self.store_attr_mutations = store_attr_mutations or {}
         self.attr_mutation_kinds = attr_mutation_kinds or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
+        # Snapshot per compile (policy must not change mid-compilation): stacks
+        # are only read when formatting messages for the side_effects log or
+        # the dynamo_side_effects structured-trace artifact.
+        self._capture_user_stacks = config.side_effect_replay_policy != "silent" and (
+            side_effects_log.isEnabledFor(logging.DEBUG) or bool(trace_log.handlers)
+        )
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
-        # Used by MappingProxyVariable to graph break in case of any mutated
-        # dict
-        self._has_existing_dict_mutation = False
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var: ListVariable | None = None
@@ -389,7 +396,7 @@ class SideEffects:
 
     def _capture_user_stack(self, key: VariableTracker) -> None:
         """Capture the current user stack from the instruction translator."""
-        if config.side_effect_replay_policy == "silent":
+        if not self._capture_user_stacks:
             return
         if key not in self.mutation_user_stacks:
             self.mutation_user_stacks[key] = []
@@ -547,6 +554,18 @@ class SideEffects:
         mutation_kind: AttrMutationKind = AttrMutationKind.GENERIC_SETATTR,
         mutated_source: Source | None = None,
     ) -> None:
+        output_graph = self.output_graph_weakref()
+        if (
+            output_graph is not None
+            and output_graph.deleted_globals_by_dict
+            and not isinstance(value, variables.DeletedVariable)
+            and isinstance(item, variables.PythonModuleVariable)
+            and not self.has_pending_mutation_of_attr(item, name)
+        ):
+            # No pending on the module VT: the replayed delete races this
+            # write. With one (e.g. an inlined delete), the setattr chain
+            # orders them.
+            output_graph.check_deleted_global_access(item.value.__dict__, name)
         if not self.is_attribute_mutation(item):
             if isinstance(item, variables.UserDefinedPropertyVariable):
                 unimplemented(
@@ -575,22 +594,6 @@ class SideEffects:
             deferred = self.snapshot_attr_mutation(item, name, value)
         if not deferred:
             self.check_allowed_side_effect(item)
-        if (
-            isinstance(item, variables.UserDefinedPropertyVariable)
-            and item.is_property_name_slot(name)
-            and name in self.store_attr_mutations.get(item, {})
-            and self.get_attr_mutation_kind(item, name) is not mutation_kind
-        ):
-            unimplemented(
-                gb_type="Mixed property name and instance dictionary mutations",
-                context="property.__name__ and instance __dict__ share a pending mutation key",
-                explanation="Dynamo cannot track both the property name field and an instance dictionary entry with the same name in one frame.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-                # A partial graph can reconstruct a pending __dict__ on the
-                # stack as a copy, losing the dictionary store after resuming.
-                skip_frame=True,
-                preserve_skip_frame_after_inline=True,
-            )
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
         if item not in self.attr_mutation_kinds:
@@ -617,26 +620,13 @@ class SideEffects:
         # re-inserts at the end.
         if not isinstance(value, variables.DeletedVariable):
             existing = self.store_attr_mutations.get(item, {}).get(name)
-            if isinstance(existing, variables.DeletedVariable) and (
-                self.has_pending_mutation_of_attr(
-                    item, name, AttrMutationKind.INSTANCE_DICT
-                )
-                or not (
-                    isinstance(item, variables.UserDefinedPropertyVariable)
-                    and item.is_property_name_slot(name)
-                )
-            ):
+            if isinstance(existing, variables.DeletedVariable):
                 # store_attr always writes both maps together, so the
                 # attr_mutation_kinds entry is guaranteed present here; use del
                 # for both to surface any invariant violation.
                 del self.store_attr_mutations[item][name]
                 del self.attr_mutation_kinds[item][name]
         self.store_attr(item, name, value, AttrMutationKind.INSTANCE_DICT)
-
-    def remove_attr_mutation(self, item: VariableTracker, name: str) -> None:
-        if name in self.store_attr_mutations.get(item, ()):
-            del self.store_attr_mutations[item][name]
-            del self.attr_mutation_kinds[item][name]
 
     def get_attr_mutation_kind(
         self, item: VariableTracker, name: str
@@ -906,7 +896,7 @@ class SideEffects:
             user_cls,
             variables.user_defined._CONSTANT_BASE_TYPES,
         ):
-            variable_cls = variables.UserDefinedConstantVariable
+            variable_cls = variables.UserDefinedConstantVariable.cls_for(user_cls)
         elif variables.InspectVariable.is_matching_class(user_cls):
             variable_cls = variables.InspectVariable
         elif variables.SimpleNamespaceVariable.is_matching_cls(user_cls):
@@ -928,12 +918,11 @@ class SideEffects:
             # TODO(anijain2305) - Is it possible to remove this specialization?
             obj = nn_module_new(user_cls)
         else:
+            base_cls: Any
             if isinstance(base_cls_vt, variables.BuiltinVariable):
                 base_cls = base_cls_vt.fn
-            elif isinstance(base_cls_vt, variables.DictBuiltinVariable):
-                base_cls = dict
-            elif isinstance(base_cls_vt, variables.ListBuiltinVariable):
-                base_cls = list
+            elif isinstance(base_cls_vt, variables.TypeVariable):
+                base_cls = base_cls_vt._fn
             elif isinstance(base_cls_vt, variables.UserDefinedClassVariable):
                 base_cls = base_cls_vt.value
             else:
@@ -1042,6 +1031,10 @@ class SideEffects:
         return variable
 
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
+        # Re-tracks are keyed by object identity and return the vt the first
+        # call built; the source of a later call is not honored.
+        if id(item) in self.id_to_variable:
+            return self.id_to_variable[id(item)]
         variable = variables.NewGlobalVariable.create(source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
@@ -1188,11 +1181,6 @@ class SideEffects:
             var.mutation_type.is_modified = True
         if var.source is not None:
             self.mutated_sources.add(var.source)
-        if var.source and isinstance(var, variables.ConstDictVariable):
-            self._has_existing_dict_mutation = True
-
-    def has_existing_dict_mutation(self) -> bool:
-        return self._has_existing_dict_mutation
 
     def _get_modified_vars(self) -> list[VariableTracker]:
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
@@ -1567,7 +1555,7 @@ class SideEffects:
 
         # NOTE: should only be called once per VT - only if a side effect actually gets codegen'd!
         def _maybe_log_side_effect(var: VariableTracker) -> None:
-            if config.side_effect_replay_policy != "silent" and log_side_effects:
+            if log_side_effects and self._capture_user_stacks:
                 msg = self._format_side_effect_message(var)
                 side_effect_messages.append(msg)
 
@@ -1600,7 +1588,7 @@ class SideEffects:
             self._emit_side_effect_messages(side_effect_messages)
 
     def log_side_effects_summary(self) -> None:
-        if config.side_effect_replay_policy == "silent":
+        if not self._capture_user_stacks:
             return
         if not side_effects_log.isEnabledFor(logging.DEBUG):
             return
@@ -2072,15 +2060,28 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     for name, value in reversed(side_effects.store_attr_mutations.get(var, {}).items()):
         mutation_kind = side_effects.get_attr_mutation_kind(var, name)
         if isinstance(var, variables.NewGlobalVariable):
-            cg.tx.output.update_co_names(name)
-            cg(value)
             if not isinstance(var.source, GlobalSource):  # type: ignore[attr-defined]
                 raise AssertionError(
                     f"Expected GlobalSource for NewGlobalVariable, "
                     f"got {type(var.source)}"  # type: ignore[attr-defined]
                 )
-            ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
-            side_effect_occurred = True
+            if isinstance(value, variables.DeletedVariable):
+                # TODO(3.16): CPython 3.16 compiles `del name` to PUSH_NULL;
+                # STORE_GLOBAL, so emit that pair once 3.16 is supported.
+                # Through 3.15, STORE_GLOBAL would write the null as an
+                # ordinary value into the dict, so DELETE_GLOBAL must be
+                # emitted.
+                if name in cg.tx.output.global_scope:
+                    cg.tx.output.update_co_names(name)
+                    ctx.suffixes.append(
+                        [create_instruction("DELETE_GLOBAL", argval=name)]
+                    )
+                    side_effect_occurred = True
+            else:
+                cg.tx.output.update_co_names(name)
+                cg(value)
+                ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
+                side_effect_occurred = True
         elif isinstance(value, variables.DeletedVariable):
             if isinstance(var, variables.CellVariable):
                 # Cells created during inlining (no local_name) are rebuilt via
@@ -2121,9 +2122,11 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             # GENERIC_SETATTR deletions on UDOV fall through to the normal
             # DELETE_ATTR path below so descriptor semantics are preserved
             # during replay.
-            elif isinstance(var.mutation_type, AttributeMutationExisting) and (
-                (type(var) is variables.PropertyVariable and name == "__name__")
-                or hasattr(getattr(var, "value", None), name)
+            elif isinstance(var.mutation_type, AttributeMutationExisting) and hasattr(
+                var.value
+                if hasattr(var, "value")
+                else var.get_real_python_backed_value(),
+                name,
             ):
                 cg.tx.output.update_co_names(name)
                 cg(var.source)

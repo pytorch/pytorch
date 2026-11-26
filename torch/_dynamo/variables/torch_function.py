@@ -60,8 +60,6 @@ from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
-from .object_protocol import mro_attr_source
-from .properties import PropertyVariable
 from .tensor import TensorVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -719,15 +717,12 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     )
 
                 elif isinstance(attr, property):
-                    descriptor_source = mro_attr_source(
-                        tx, self.class_type, cls_source, name
+                    getter_source = AttrSource(attr_source, "fget")
+                    getter = attr.fget
+                    getter_var = VariableTracker.build(
+                        tx, getter, source=getter_source, realize=True
                     )
-                    descriptor = PropertyVariable.from_descriptor(
-                        tx, attr, source=descriptor_source
-                    )
-                    return descriptor.tp_descr_get_impl(
-                        tx, self, self.class_type_var(tx)
-                    )
+                    return getter_var.call_function(tx, [self], {})
 
                 elif isinstance(attr, classmethod):
                     return UserMethodVariable(
@@ -804,7 +799,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
             # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
             # We've established with the above check that the method is not overridden, so we guard that the method is the same
             # as the impl defined on tensor and retrieve it
-            if self.source:
+            if self.source and self.source.subguards_allowed():
                 source = AttrSource(AttrSource(self.source, "__class__"), name)
                 value = inspect.getattr_static(self.python_type(), name)
             else:

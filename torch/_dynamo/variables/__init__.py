@@ -18,15 +18,24 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 
 from .base import VariableTracker
 from .builtin import (
-    BaseBuiltinVariable,
+    BoolBuiltinVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
+    BytesBuiltinVariable,
+    ComplexBuiltinVariable,
     DictBuiltinVariable,
+    FloatBuiltinVariable,
+    FrozenSetBuiltinVariable,
     GetAttrBuiltinVariable,
     HasAttrBuiltinVariable,
+    IntBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
     SetAttrBuiltinVariable,
+    SetBuiltinVariable,
+    StrBuiltinVariable,
+    TupleBuiltinVariable,
+    TypeVariable,
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
@@ -65,8 +74,10 @@ from .descriptors import (
     MemberDescriptorVariable,
     MethodDescriptorVariable,
     MethodWrapperVariable,
+    PropertyVariable,
     StaticMethodVariable,
     TupleGetterVariable,
+    UserDefinedPropertyVariable,
     WrapperDescriptorVariable,
 )
 from .dicts import (
@@ -177,7 +188,6 @@ from .nn_module import (
     UnspecializedNNModuleVariable,
 )
 from .optimizer import OptimizerVariable
-from .properties import PropertyVariable
 from .sdpa import SDPAParamsVariable
 from .sets import (
     DictKeySetVariable,
@@ -223,7 +233,6 @@ from .user_defined import (
     UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedOrderedDictVariable,
-    UserDefinedPropertyVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
     UserDefinedVariable,
@@ -236,8 +245,17 @@ __all__ = [
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",
-    "BaseBuiltinVariable",
     "BaseListVariable",
+    "TypeVariable",
+    "IntBuiltinVariable",
+    "FloatBuiltinVariable",
+    "ComplexBuiltinVariable",
+    "BoolBuiltinVariable",
+    "StrBuiltinVariable",
+    "BytesBuiltinVariable",
+    "TupleBuiltinVariable",
+    "SetBuiltinVariable",
+    "FrozenSetBuiltinVariable",
     "BuiltinVariable",
     "ByteArrayBuiltinVariable",
     "ByteArrayIteratorVariable",

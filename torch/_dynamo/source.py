@@ -464,6 +464,11 @@ class TypeMROSource(ChainedSource):
     def _name_template(self) -> str:
         return "type.__dict__['__mro__'].__get__({0})"
 
+    @functools.cached_property
+    def name(self) -> str:
+        # Tag-safety checks recognize the immutable __mro__ accessor by name.
+        return f"{self.base.name}.__mro__"
+
 
 @dataclass_with_cached_hash(frozen=True)
 class LocalCellSource(Source):
@@ -1427,6 +1432,9 @@ class ShapeEnvSource(Source):
 @dataclass_with_cached_hash(frozen=True)
 class CurrentStreamSource(Source):
     device: device_type
+    # Distinguishes separate queries of one device; guards and
+    # reconstruction use only `device`.
+    query_id: int | None = None
 
     @functools.cached_property
     def _name_template(self) -> str:
