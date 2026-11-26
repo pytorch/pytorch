@@ -4717,13 +4717,14 @@ def forward(self, arg0_1, arg1_1):
 
 
 @requires_triton()
+@unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
 class KernelTestsInlineAsm(_KernelTestsBase):
     hw_classification = HardwareClassification.CUDA
 
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     @parametrize("cpp_wrapper", [False, True])
-    def test_kernel_inline_asm(self, device, quotes, cpp_wrapper):
+    def test_kernel_inline_asm(self, quotes, cpp_wrapper):
         if torch.version.cuda:
             kernel = (
                 kernel_inline_asm_single_quotes
@@ -4740,13 +4741,13 @@ class KernelTestsInlineAsm(_KernelTestsBase):
         # https://github.com/pytorch/pytorch/issues/155006
         def fn(inp):
             sz = inp.size(0)
-            x = torch.empty(sz, device=device)
+            x = torch.empty(sz, device="cuda")
             BLOCK_SIZE = 32
             grid = (triton.cdiv(sz, BLOCK_SIZE),)
             kernel[grid](inp, x, sz, BLOCK_SIZE)
             return x
 
-        inp = torch.randn(345, device=device)
+        inp = torch.randn(345, device="cuda")
         actual = fn(inp)
         with inductor_config.patch(cpp_wrapper=cpp_wrapper):
             compiled = torch.compile(fn, fullgraph=True)
@@ -9907,11 +9908,7 @@ instantiate_device_type_tests(
     except_for=("cpu",),
     allow_xpu=True,
 )
-instantiate_device_type_tests(
-    KernelTestsInlineAsm,
-    globals(),
-    only_for=("cuda",),
-)
+common_utils.instantiate_parametrized_tests(KernelTestsInlineAsm)
 instantiate_device_type_tests(
     KernelTestsImportedSymbols,
     globals(),
