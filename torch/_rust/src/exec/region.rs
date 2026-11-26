@@ -38,6 +38,10 @@
 // SETTLED calls of the program to run again, MIN_SETTLED or more exist and
 // more than three in four never ran, takes no further variant at all and
 // drops those that never ran.
+//
+// A variant keeps no object of the program alive that it is found or checked
+// by (see pin.rs): one whose object died can never run again, and the place
+// drops it when it is next entered (see Table::reap).
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -51,6 +55,7 @@ use pyo3::types::{PyList, PyTuple};
 
 use crate::cfg::ir::{Check, RegionOut, RegionSpec};
 use crate::exec::ffi::GilCell;
+use crate::exec::pin::Pin;
 use crate::exec::types::Slot;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -312,7 +317,7 @@ pub fn _region_body<'py>(py: Python<'py>, args: &Bound<'py, PyTuple>) -> PyResul
 // the guard its block's region version has.
 pub enum Own {
     // The arg is this object.
-    Is(u32, Py<PyAny>),
+    Is(u32, Pin),
     // On the arg, or on global state (None).
     Check(Option<u32>, Check),
 }
@@ -334,8 +339,9 @@ pub struct Variant {
     // whenever they hold. A call whose atom there is another is not for this
     // variant.
     facts: Vec<(Pos, u64)>,
-    // The objects of the facts: an atom that is an address stays theirs.
-    _held: Vec<Py<PyAny>>,
+    // The objects of the facts, each for as long as the program keeps it:
+    // an atom that is an address is compared only while they all live.
+    pins: Vec<Pin>,
     // Whether it ever ran.
     ran: AtomicBool,
     // The call of the program it was traced in.
@@ -348,7 +354,13 @@ impl Variant {
     // passed over whichever of its checks the fact comes from (func's, for a
     // str or a bound method).
     pub unsafe fn facts_hold(&self, args: &[*mut PyObject]) -> bool {
-        self.facts.iter().all(|(p, a)| atom_at(args, *p) == *a)
+        !self.pins.iter().any(Pin::dead) && self.facts.iter().all(|(p, a)| atom_at(args, *p) == *a)
+    }
+
+    // Whether it can never run again: an object it is found by died, or one
+    // its reads expect to find (see reads.rs).
+    fn dead(&self) -> bool {
+        self.pins.iter().any(Pin::dead) || self.spec.reads.as_ref().is_some_and(|r| r.get().dead())
     }
 }
 
@@ -427,13 +439,33 @@ impl Table {
     // that had the time never ran again; otherwise because every call brought
     // a key the place didn't have.
     unsafe fn drop_unrun(&mut self, settled: bool) {
-        let (kept, dropped): (Vec<_>, Vec<_>) = std::mem::take(&mut self.all).into_iter().partition(|v| v.ran.load(Ordering::Relaxed));
+        let why = if settled { "settled" } else { "barren" };
+        self.drop_where(|v| !v.ran.load(Ordering::Relaxed), |_| why);
+    }
+
+    // Drops the variants that can never run again because an object they
+    // were traced for died. Asked when the place is entered: a pin per fact
+    // of each variant, and what the reads of the variants asked since found.
+    unsafe fn reap(&mut self) {
+        if self.all.iter().any(|v| v.dead()) {
+            // One that never ran, after MAX_BARREN calls in a row that each
+            // brought a new key: the object is another on every call, and
+            // the place is about to close (see room).
+            let barren = self.barren >= MAX_BARREN;
+            self.drop_where(Variant::dead, |v| if barren && !v.ran.load(Ordering::Relaxed) { "barren" } else { "gone" });
+        }
+    }
+
+    unsafe fn drop_where(&mut self, gone: impl Fn(&Variant) -> bool, why: impl Fn(&Variant) -> &'static str) {
+        let (dropped, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.all).into_iter().partition(|v| gone(v));
         self.all = kept;
         self.index();
         let py = Python::assume_attached();
         for v in dropped {
-            // The record of its trace lets go of what the trace read.
-            if let Err(e) = py.import("torch._rust_inductor").and_then(|m| m.call_method1("_dropped", (v.spec.func.clone_ref(py), settled))) {
+            // The record of its trace lets go of what the trace read. (The
+            // engine's own code: no frame of the program's.)
+            let told = super::outside_executor(|| py.import("torch._rust_inductor").and_then(|m| m.call_method1("_dropped", (v.spec.func.clone_ref(py), why(&v)))));
+            if let Err(e) = told {
                 e.write_unraisable(py, None);
             }
         }
@@ -499,6 +531,7 @@ impl Variants {
         let t = &mut *self.0.get();
         if i == 0 {
             t.enter();
+            t.reap();
         }
         let n = t.all.len();
         let j = if n <= 1 || t.at.is_empty() {
@@ -545,6 +578,12 @@ impl Variants {
             (t.shut, t.closed) = (true, true);
             t.drop_unrun(true);
             return false;
+        }
+        // A place whose variants each died with the object they were traced
+        // for (see reap) has none left to tell a key by: its calls each
+        // brought a new key all the same.
+        if t.all.is_empty() && t.barren >= MAX_BARREN {
+            t.closed = true;
         }
         if t.at.is_empty() {
             // (A closed place whose variants were all dropped has no key
@@ -612,7 +651,7 @@ pub struct Traced {
 fn parse_own(t: &Bound<'_, PyTuple>, n_args: usize) -> PyResult<Own> {
     let bad = || pyo3::exceptions::PyValueError::new_err(format!("bad check {t}"));
     Ok(match super::parse_check_tuple(t)? {
-        super::Parsed::Is(i, o) if i < n_args => Own::Is(i as u32, o),
+        super::Parsed::Is(i, o) if i < n_args => Own::Is(i as u32, unsafe { Pin::weak(o.as_ptr()) }),
         super::Parsed::Check(None, c) => Own::Check(None, c),
         super::Parsed::Check(Some(i), c) if i < n_args => Own::Check(Some(i as u32), c),
         _ => return Err(bad()),
@@ -621,7 +660,7 @@ fn parse_own(t: &Bound<'_, PyTuple>, n_args: usize) -> PyResult<Own> {
 
 // (arg, item or None, the object or value the checks pin it to): see
 // torch._rust_inductor._keys.
-unsafe fn parse_facts(keys: &[Bound<'_, PyTuple>]) -> PyResult<(Vec<(Pos, u64)>, Vec<Py<PyAny>>)> {
+unsafe fn parse_facts(keys: &[Bound<'_, PyTuple>]) -> PyResult<(Vec<(Pos, u64)>, Vec<Pin>)> {
     let mut facts: Vec<(Pos, u64)> = vec![];
     let mut held = vec![];
     for k in keys {
@@ -631,7 +670,10 @@ unsafe fn parse_facts(keys: &[Bound<'_, PyTuple>]) -> PyResult<(Vec<(Pos, u64)>,
         let pos = (i, j.unwrap_or(WHOLE));
         if facts.iter().all(|f| f.0 != pos) {
             facts.push((pos, atom(want.as_ptr())));
-            held.push(want.unbind());
+            // What the atom is the address of: a bound method is another
+            // object on every read, what it is bound to is not.
+            let bound_to = super::ffi::tr_bound_self(want.as_ptr());
+            held.push(Pin::weak(if bound_to.is_null() { want.as_ptr() } else { bound_to }));
         }
     }
     facts.sort_by_key(|f| f.0);
@@ -713,7 +755,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
                 quick,
             },
             facts,
-            _held: held,
+            pins: held,
             ran: AtomicBool::new(false),
             born: CALL.load(Ordering::Relaxed),
         },
@@ -724,9 +766,9 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
 // torch._rust_inductor._quick).
 pub enum Quick {
     // Arg i is this object (true), or the same value by exact::same.
-    Arg(u32, bool, Py<PyAny>),
+    Arg(u32, bool, Pin),
     // Arg i is an exact tuple or list whose item j is this (likewise).
-    Item(u32, u32, bool, Py<PyAny>),
+    Item(u32, u32, bool, Pin),
     // These args, as a tuple, pass the TreeChecks.
     Tensors(Vec<u32>, Py<super::TreeChecks>),
     // Arg i (a container of tensors and plain values) passes the TreeChecks.
@@ -736,8 +778,8 @@ pub enum Quick {
 fn parse_quick(q: &Bound<'_, PyTuple>) -> PyResult<Quick> {
     let kind: String = q.get_item(0)?.extract()?;
     Ok(match kind.as_str() {
-        "arg" => Quick::Arg(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?, q.get_item(3)?.unbind()),
-        "item" => Quick::Item(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?, q.get_item(3)?.extract()?, q.get_item(4)?.unbind()),
+        "arg" => Quick::Arg(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?, unsafe { Pin::weak(q.get_item(3)?.as_ptr()) }),
+        "item" => Quick::Item(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?, q.get_item(3)?.extract()?, unsafe { Pin::weak(q.get_item(4)?.as_ptr()) }),
         "tensors" => Quick::Tensors(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?),
         "tree" => Quick::Tree(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?),
         _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("bad quick check {q}"))),
@@ -748,7 +790,9 @@ impl Quick {
     // No Python code runs: a value is compared by exact::same (a Tree's
     // TreeChecks is one that is `quick`).
     unsafe fn holds(&self, py: Python<'_>, args: &[*mut PyObject]) -> bool {
-        let is = |x: *mut PyObject, same: bool, want: &Py<PyAny>| if same { x == want.as_ptr() } else { super::exact::same(x, want.as_ptr()) };
+        // A value compared by exact::same is of a class that takes no weak
+        // reference (an int, a str, None): its pin never dies.
+        let is = |x: *mut PyObject, same: bool, want: &Pin| if same { want.is(x) } else { want.live().is_some_and(|w| super::exact::same(x, w)) };
         let arg = |i: u32| args.get(i as usize).copied().unwrap_or(std::ptr::null_mut());
         match self {
             Quick::Arg(i, same, want) => is(arg(*i), *same, want),

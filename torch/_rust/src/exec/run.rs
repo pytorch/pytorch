@@ -1293,7 +1293,7 @@ impl Act<'_> {
             i += 1;
             let own = v.facts_hold(args)
                 && v.checks.iter().all(|c| match c {
-                    super::region::Own::Is(k, o) => args[*k as usize] == o.as_ptr(),
+                    super::region::Own::Is(k, o) => o.is(args[*k as usize]),
                     super::region::Own::Check(k, c) => self.check(c, k.map_or(std::ptr::null_mut(), |k| args[k as usize])),
                 });
             if !own {
@@ -1301,6 +1301,8 @@ impl Act<'_> {
                 continue;
             }
             match super::region::call(&v.spec, args) {
+                // (One whose reads found an object gone is dropped when
+                // the place is next entered.)
                 Ok(None) => {}
                 r => {
                     if matches!(r, Ok(Some(_))) {

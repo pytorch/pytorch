@@ -21,6 +21,7 @@ mod kinds;
 mod live;
 mod made;
 pub mod overlap;
+pub mod pin;
 mod raises;
 pub mod reads;
 pub mod region;

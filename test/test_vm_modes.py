@@ -6797,6 +6797,299 @@ class TestVmAskedTensors(TestCase):
 instantiate_device_type_tests(TestVmAskedTensors, globals())
 
 
+# The domain of "a tensor a call finds in the program's state and asks
+# about": where the call finds it, how it hands it on, what it asks. Every
+# member of each of the three lists runs with every member of the other two.
+
+
+@dataclasses.dataclass
+class ModesLedFields:
+    t: torch.Tensor
+
+
+class ModesLedSlots:
+    __slots__ = ("t",)
+
+    def __init__(self, t):
+        self.t = t
+
+
+ModesLedPair = collections.namedtuple("ModesLedPair", "t u")
+
+
+class ModesLedProperty:
+    def __init__(self, t):
+        self._t = t
+
+    @property
+    def t(self):
+        return self._t
+
+
+class ModesLedHook:
+    def __init__(self, t):
+        self.store = {"t": t}
+
+    def __getattr__(self, name):
+        return self.__dict__["store"][name]
+
+
+def modes_led_default(t):
+    def helper(found=t):
+        return found
+
+    return helper
+
+
+def modes_led_keyword_default(t):
+    def helper(*, found=t):
+        return found
+
+    return helper
+
+
+def modes_led_module(t):
+    module = types.ModuleType("modes_led")
+    module.t = t
+    return module
+
+
+def modes_led_first(t):
+    return t
+
+
+def modes_led_net(t):
+    net = torch.nn.Module()
+    if isinstance(t, torch.nn.Parameter):
+        net.t = t
+    else:
+        net.register_buffer("t", t)
+    return net
+
+
+# Where the call finds the tensor: what holds it (made of the tensor, and
+# bound to the global HELD of the program), how the call reads it there, and
+# whether the tensor is an nn.Parameter.
+MODES_LED_HOMES = {
+    "global": (lambda t: t, "HELD", False),
+    "list": (lambda t: [t], "HELD[0]", False),
+    "list_from_the_end": (lambda t: [None, t], "HELD[-1]", False),
+    "dict": (lambda t: {"t": t}, 'HELD["t"]', False),
+    "dict_get": (lambda t: {"t": t}, 'HELD.get("t")', False),
+    "tuple": (lambda t: (t, None), "HELD[0]", False),
+    "tuple_five_deep": (lambda t: (((((t,),),),),), "HELD[0][0][0][0][0]", False),
+    "tuple_in_a_list": (lambda t: [((t,),)], "HELD[0][0][0]", False),
+    "frozenset": (lambda t: frozenset([t]), "list(HELD)[0]", False),
+    "dataclass": (ModesLedFields, "HELD.t", False),
+    "slot": (ModesLedSlots, "HELD.t", False),
+    "namedtuple": (lambda t: ModesLedPair(t, 1), "HELD.t", False),
+    "class_attribute": (
+        lambda t: type("ModesLedClass", (), {"t": t})(),
+        "HELD.t",
+        False,
+    ),
+    "namespace": (lambda t: types.SimpleNamespace(t=t), "HELD.t", False),
+    "module_global": (modes_led_module, "HELD.t", False),
+    "partial": (lambda t: functools.partial(modes_led_first, t), "HELD()", False),
+    "property": (ModesLedProperty, "HELD.t", False),
+    "getattr_hook": (ModesLedHook, "HELD.t", False),
+    "default": (modes_led_default, "HELD()", False),
+    "keyword_default": (modes_led_keyword_default, "HELD()", False),
+    "cell": (lambda t: lambda: t, "HELD()", False),
+    "parameter": (modes_led_net, "HELD.t", True),
+    "buffer": (modes_led_net, "HELD.t", False),
+    "parameter_list": (lambda t: torch.nn.ParameterList([t]), "HELD[0]", True),
+    "parameters_dict": (modes_led_net, 'HELD._parameters["t"]', True),
+}
+
+# What the call does with the tensor it found before it asks: the expression
+# is what the question is asked of. Some hand on what is itself in state
+# (made of the tensor, and bound to the global KEPT of the program).
+MODES_LED_HANDS = {
+    "directly": (None, "{found}"),
+    "positional": (None, "torch.clone({found})"),
+    "keyword": (None, "torch.clone(input={found})"),
+    "star_tuple": (None, "torch.clone(*({found},))"),
+    "star_tuple_in_state": (lambda t: (t,), "torch.clone(*KEPT)"),
+    "star_frozenset_in_state": (lambda t: frozenset([t]), "torch.clone(*KEPT)"),
+    "keyword_dict": (None, 'torch.clone(**{{"input": {found}}})'),
+    "keyword_dict_in_state": (lambda t: {"input": t}, "torch.clone(**KEPT)"),
+    "list": (None, "torch.cat([{found}, {found}])"),
+    "tuple": (None, "torch.cat(({found}, {found}))"),
+    "list_in_state": (lambda t: [t, t], "torch.cat(KEPT)"),
+    "list_in_a_star_tuple": (None, "torch.cat(*([{found}, {found}],))"),
+    "tuple_in_a_keyword_dict": (
+        None,
+        'torch.cat(**{{"tensors": ({found}, {found})}})',
+    ),
+    "stacked_list": (None, "torch.stack([{found}], dim=1)"),
+    "bound_method_in_state": (lambda t: t.clone, "KEPT()"),
+    "view": (None, "{found}[0:]"),
+    "product": (None, "({found} * 2)"),
+}
+
+
+def modes_led_rows(r):
+    rows = 0.0
+    for _ in r:
+        rows += 1.0
+    return rows
+
+
+def modes_led_other_data(**other):
+    def change(t, device):
+        was = t.data
+        size, dtype = other.get("size", 8), other.get("dtype")
+        t.data = torch.ones(size, device=device, dtype=dtype)
+        return lambda: setattr(t, "data", was)
+
+    return change
+
+
+def modes_led_other_grad(t, device):
+    was = t.requires_grad
+    t.requires_grad_(not was)
+    return lambda: t.requires_grad_(was)
+
+
+def modes_led_other_class(t, device):
+    was = type(t)
+    t.__class__ = ModesTensor
+    return lambda: setattr(t, "__class__", was)
+
+
+MODES_LED_SIZE = modes_led_other_data(size=5)
+MODES_LED_DTYPE = modes_led_other_data(dtype=torch.float64)
+
+# What is asked (the answer is a number of the result, computed without a
+# branch: the question stays between the operators of one block), and a
+# change to the same object that gives another answer; it returns what puts
+# the tensor back.
+MODES_LED_ASKS = {
+    "shape": ("float({r}.shape[0])", MODES_LED_SIZE),
+    "size": ("float({r}.size(0))", MODES_LED_SIZE),
+    "function_numel": ("float(torch.numel({r}))", MODES_LED_SIZE),
+    "len": ("float(len({r}))", MODES_LED_SIZE),
+    "unbound_method": ("float(torch.Tensor.size({r}, 0))", MODES_LED_SIZE),
+    "getattr": ('float(getattr({r}, "shape")[0])', MODES_LED_SIZE),
+    "iteration": ("modes_led_rows({r})", MODES_LED_SIZE),
+    "dtype": ("2.0 + float({r}.dtype == torch.float32)", MODES_LED_DTYPE),
+    "element_size": ("float({r}.element_size())", MODES_LED_DTYPE),
+    "requires_grad": ("2.0 + float({r}.requires_grad)", modes_led_other_grad),
+    "isinstance": (
+        "2.0 + float(isinstance({r}, ModesTensor))",
+        modes_led_other_class,
+    ),
+}
+
+MODES_LED_PROGRAM = """
+def program(x):
+    y = modes_work(x)
+    k = {asked}
+    return modes_work(y * k)
+
+
+def answer():
+    return {asked}
+"""
+
+
+MODES_LED_CHANGED = None
+
+
+def modes_led_changed_and_asked(x):
+    y = modes_work(x)
+    MODES_LED_CHANGED.resize_(5)
+    k = float(MODES_LED_CHANGED.shape[0])
+    MODES_LED_CHANGED.resize_(8)
+    return modes_work(y * k)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmAskedDomain(TestCase):
+    """A tensor a call finds in the program's state and asks about is
+    compared before a region with the answer is entered, by whatever way the
+    call came by it (an item, a tuple at any depth, a frozenset, an attribute,
+    a default, what a bound method is bound to), however it handed it on
+    (itself, or in a list, a tuple, a starred tuple or frozenset or a keyword
+    dict given to C code) and whatever it asked."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def phases(self, device, home, hand, ask):
+        # The schedule A, B, A: the tensor as it is, changed, and put back.
+        hold, found, parameter = MODES_LED_HOMES[home]
+        keep, handed = MODES_LED_HANDS[hand]
+        question, change = MODES_LED_ASKS[ask]
+        t = torch.ones(8, device=device)
+        t = torch.nn.Parameter(t) if parameter else t
+        names = {
+            "torch": torch,
+            "modes_work": modes_work,
+            "modes_led_rows": modes_led_rows,
+            "ModesTensor": ModesTensor,
+            "HELD": hold(t),
+            "KEPT": None if keep is None else keep(t),
+        }
+        asked = question.format(r=handed.format(found=found))
+        exec(MODES_LED_PROGRAM.format(asked=asked), names)
+        fn = names["program"]
+        compiled = vm(fn, passes=EARLY)
+        answers, runs, misses = [], [], []
+        back = None
+        for phase, calls in enumerate((6, 3, 3)):
+            if phase == 1:
+                back = change(t, device)
+            elif phase == 2:
+                back()
+            answers.append(names["answer"]())
+            for call in range(calls):
+                torch.manual_seed(10 * phase + call)
+                x = torch.randn(4, 8, device=device)
+                msg = f"{asked}: phase {phase}, call {call}"
+                self.assertEqual(compiled(x), fn(x), atol=0, rtol=0, msg=msg)
+            runs.append(region_runs(compiled))
+            misses.append(torch._rust._region_read_misses())
+        return answers, runs, misses
+
+    @parametrize("home", list(MODES_LED_HOMES))
+    @isolated
+    def test_answer_is_the_call_s_own_wherever_found_and_however_handed(
+        self, device, home
+    ):
+        for hand, ask in itertools.product(MODES_LED_HANDS, MODES_LED_ASKS):
+            with self.subTest(hand=hand, ask=ask):
+                answers, runs, misses = self.phases(device, home, hand, ask)
+                # A region ran over the first phase: the calls compared were
+                # not all the interpreter's.
+                self.assertGreater(runs[0], 0)
+                if answers[1] != answers[0]:
+                    # The regions formed with the first answer were not
+                    # entered with the other, and ran again with the first.
+                    self.assertGreater(misses[1], misses[0])
+                    self.assertGreater(runs[2], runs[1])
+
+    @isolated
+    def test_tensor_the_call_itself_changes_around_the_question(self, device):
+        # The key of an asked tensor is taken when it is first asked: here
+        # that is not how a call finds the tensor. No region is entered on
+        # one state and formed for another, call after call.
+        global MODES_LED_CHANGED
+        MODES_LED_CHANGED = torch.ones(8, device=device)
+        compiled = vm(modes_led_changed_and_asked, passes=EARLY)
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            want = modes_led_changed_and_asked(x)
+            self.assertEqual(compiled(x), want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(MODES_LED_CHANGED.shape, (8,))
+        self.assertGreater(region_runs(compiled), 0)
+        self.assertEqual(torch._rust._region_read_misses(), 0)
+
+
+instantiate_device_type_tests(TestVmAskedDomain, globals())
+
+
 class ModesDropped:
     """An object whose finalizer changes state: the change is made inside the
     call that drops the object, and by no instruction of that call."""

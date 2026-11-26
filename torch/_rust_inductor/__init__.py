@@ -1508,6 +1508,30 @@ def _has_number(kind) -> bool:
 _TENSOR, _VALUE, _IS, _FLOAT = 0, 1, 2, 3
 
 
+class _Pinned:
+    """An object a region's own check compares by identity, held as
+    exec/pin.rs holds one: by a weak reference where its class takes one, so
+    that the region does not keep it alive (a region whose object died is
+    dropped by its place). An object of a class that takes none (an instance
+    of a class with ``__slots__``) is kept."""
+
+    __slots__ = ("ref", "kept")
+
+    def __init__(self, o):
+        try:
+            self.ref, self.kept = weakref.ref(o), None
+        except TypeError:
+            self.ref, self.kept = None, o
+
+    def holds(self, now) -> bool:
+        if self.ref is None:
+            return now is self.kept
+        # (A dead reference gives None, which no pinned object is: None is
+        # compared by value.)
+        was = self.ref()
+        return was is not None and now is was
+
+
 def _leaf_check(leaf, where, scalars=False):
     if scalars and _is_float(leaf):
         return (_FLOAT, None)
@@ -1517,7 +1541,7 @@ def _leaf_check(leaf, where, scalars=False):
         return (_VALUE, (type(leaf), leaf))
     if isinstance(leaf, (list, dict, set)):
         raise _Refused(f"{where} holds a {type(leaf).__name__}")
-    return (_IS, leaf)
+    return (_IS, _Pinned(leaf))
 
 
 def _plan(args, unused, span=False, scalars=False):
@@ -1641,7 +1665,7 @@ def _inputs(args, plan, why=None):
                 if ok:
                     floats.append(float.__float__(leaf))
             else:
-                ok = leaf is want
+                ok = want.holds(leaf)
             if not ok:
                 if why is not None:
                     why.append(
@@ -2673,7 +2697,9 @@ def _span_checks(checks):
             out.append((kind, c[1], (type(c[2]), c[2])))
         elif kind == "ints":
             out.append((kind, c[1], tuple(c[3])))
-        elif kind in ("is", "set"):
+        elif kind == "is":
+            out.append((kind, c[1], _Pinned(c[2])))
+        elif kind == "set":
             out.append((kind, c[1], c[2]))
         else:
             raise _Refused(f"a span can't check {kind}")
@@ -2704,7 +2730,7 @@ def _quick(args, plan, own_checks):
     out: list[tuple[Any, ...]] = []
     for kind, i, want in own_checks:
         if kind == "is":
-            out.append(("arg", i, True, want))
+            out.append(("arg", i, True, args[i]))
         elif kind == "value" and want[0] in simple:
             out.append(("arg", i, False, want[1]))
         elif kind == "tensors":
@@ -2776,20 +2802,24 @@ def _keys(args, plan, checks):
     return out
 
 
-def _dropped(func, settled: bool = False) -> None:
+_DROPPED = {
+    "settled": "most regions traced at its place never ran again (each call differs in what a region is traced for: a size, an object, a value), so those that never ran were dropped and the place takes no new one",
+    "barren": "it is found by which object (or value) an argument is, and that was another on every call: its regions never ran, so they were dropped and the place takes no new one",
+    "gone": "an object it was traced for (an argument it is found by, or something its trace read by identity) no longer exists, so it can never run again and was dropped",
+}
+
+
+def _dropped(func, why: str) -> None:
     """The region whose function is ``func`` was dropped by its place (see
-    exec/region.rs's Variants::room): it never ran, and neither did the
-    regions traced after it, each for another object or value where the
-    place tells its regions apart; or (``settled``) it never ran again, like
-    most regions of its place that had the time to. Its trace is no region
+    exec/region.rs's Variants::room and Table::reap). "barren": it never
+    ran, and neither did the regions traced after it, each for another
+    object or value where the place tells its regions apart; "settled": it
+    never ran again, like most regions of its place that had the time to;
+    "gone": an object it is found or checked by died. Its trace is no region
     any more, and what the trace read is let go."""
     record = func.record
     record.state = "refused"
-    record.why = (
-        "most regions traced at its place never ran again (each call differs in what a region is traced for: a size, an object, a value), so those that never ran were dropped and the place takes no new one"
-        if settled
-        else "it is found by which object (or value) an argument is, and that was another on every call: its regions never ran, so they were dropped and the place takes no new one"
-    )
+    record.why = _DROPPED[why]
     record.reads = None
     stats["refused"] += 1
 
@@ -2815,7 +2845,7 @@ def _span_holds(checks, args) -> bool:
                 and all(any(same(x, y) for y in want) for x in args[i])
             )
         else:
-            ok = args[i] is want
+            ok = want.holds(args[i])
         if not ok:
             return False
     return True
@@ -3155,7 +3185,9 @@ def _trace_region(
         finally:
             # While the stand-ins are still where the body found them: what
             # the run read that is no longer as it was read (exec/reads.rs).
-            _rust()._region_settled()
+            # And which tensors are the trace's own, while it still knows:
+            # its inputs and the results of the operators it recorded.
+            _rust()._region_settled(list(fx_tracers[-1].tensor_tracker.keys()))
             _scalar_state = None
             for container, k, v, stand_in in reversed(restore):
                 # Only where the stand-in still is: a slot the body wrote to
@@ -3289,8 +3321,12 @@ def _trace_region(
         # structure, on every call. What the run read of an object it made
         # is no check: every run of the region makes its own.
         its_dicts = [vars(o) for o in rebuilt if hasattr(o, "__dict__")]
-        reads.forget([*_tree_holders(args, plan), *rebuilt, *its_dicts])
+        unled = reads.forget([*_tree_holders(args, plan), *rebuilt, *its_dicts])
         rebuilt.clear()
+        if unled is not None:
+            stats["refused"] += 1
+            _traced(name, "refused", unled)
+            return None
         stats["reads"] += len(reads)
         # The graph is for the constants' shapes and dtypes as well: checked
         # with the reads. Where every constant is checked, a lowering that

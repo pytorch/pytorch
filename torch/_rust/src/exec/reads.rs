@@ -22,9 +22,9 @@
 //     key because it was asked for it: the item it stored);
 //   - a cell read: the cell's content;
 //   - a tensor found by one of these reads that the run then asks something
-//     of (an attribute, a method, its length, its class) or hands to C code:
-//     the tensor's class, dtype, device, sizes, strides and requires_grad as
-//     they were when it was first asked (see Keyed);
+//     of (an attribute, a method, its length, its class) or hands to C code,
+//     itself or inside a tuple, a list, a set or a dict: the tensor's key
+//     (exec/tensor_key.rs) as it was when it was first asked (see Keyed);
 //   - a frame of a Python function: which code the function has, and the
 //     defaults a call fills its arguments from (the tuple by identity, the
 //     keyword-only ones also item by item);
@@ -49,11 +49,11 @@
 //     the rows of a nested list made into a tensor): the lists, dicts, sets
 //     and tuples inside a container or a tuple are read whole too, and what
 //     those hold.
-// A tuple itself isn't recorded (its items can't be bound anew); the
-// containers it holds are.
+// A tuple or a frozenset itself isn't recorded (its items can't be bound
+// anew); the containers it holds are.
 //
 // Values are compared by exact type and value if they are an int, a float
-// (by bits) or a str, and by identity otherwise. The entries are grouped by
+// (by bits) or a str (exec/exact.rs), and by identity otherwise. The entries are grouped by
 // holder; a dict or a class whose CPython version tag is the one it had when
 // it last passed is skipped whole, so a check that passes costs one
 // comparison per dict and per class. A class is compared by what its names
@@ -69,7 +69,17 @@
 // nothing else refers to: nothing can change it. And one whose holder is a
 // list, dict or set the traced run made (made.rs), whoever still refers to
 // it: a region's run makes its own. They keep the traced call's temporaries
-// and results from being kept alive, and from failing every check. An entry
+// and results from being kept alive, and from failing every check.
+//
+// While the trace runs the entries count a reference to each object (an
+// entry is found again by the object's address). Once it is over they hold
+// by pin.rs: weakly where the object's class takes a weak reference, and an
+// instance's __dict__ through the instance, so that a region keeps nothing
+// alive that the program dropped. An entry whose holder then died is
+// nothing to check and is dropped (no later call can come by the holder,
+// as above); an object an entry expects to FIND that died can never be
+// found again, and the region is dead (see Reads::dead). What is still
+// counted: see the list at `weaken`. An entry
 // of anything else is never dropped: one that is not as it was read when the
 // traced body is over refuses the trace, unless a write the run recorded
 // explains it (see _region_settled), because what changed it is something
@@ -94,8 +104,10 @@ use pyo3::ffi::PyObject;
 use pyo3::prelude::*;
 
 use super::asked;
+use super::exact;
 use super::ffi::*;
 use super::overlap::Overlap;
+use super::pin::{self, Pin};
 use super::special;
 use crate::bindings::ffi as tffi;
 use super::tensor_key::TensorKey;
@@ -157,12 +169,12 @@ enum Want {
 struct Item {
     key: Py<PyAny>,
     want: Want,
-    value: Option<Py<PyAny>>,
+    value: Option<Pin>,
 }
 
 struct Whole {
     // A dict's keys then values pairwise; a list's or a set's items.
-    items: Vec<Py<PyAny>>,
+    items: Vec<Pin>,
     // Where it was read (for describe).
     at: String,
 }
@@ -175,7 +187,7 @@ enum Holder {
 }
 
 struct Group {
-    holder: Py<PyAny>,
+    holder: Pin,
     kind: Holder,
     // The dict's version tag when the group last held.
     version: Cell<u64>,
@@ -190,31 +202,31 @@ struct Group {
 }
 
 struct Typed {
-    obj: Py<PyAny>,
-    class: Py<PyAny>,
+    obj: Pin,
+    class: Pin,
 }
 
 // A class and the tuple it resolves its bases in.
 struct Mro {
-    class: Py<PyAny>,
+    class: Pin,
     mro: Py<PyAny>,
 }
 
 struct Class {
-    class: Py<PyAny>,
+    class: Pin,
     // The class's version tag when it last held.
     tag: Cell<u32>,
     // What the class has under each name looked up (None: nothing), found
     // when the trace is over.
-    names: Vec<(Py<PyAny>, Option<Py<PyAny>>)>,
+    names: Vec<(Py<PyAny>, Option<Pin>)>,
 }
 
 struct Read {
     // A cell (name None) or an object and the attribute a C descriptor gives.
-    obj: Py<PyAny>,
+    obj: Pin,
     name: Option<Py<PyAny>>,
     want: Want,
-    value: Option<Py<PyAny>>,
+    value: Option<Pin>,
     // Where an attribute was read, for the refusal if it can't be checked.
     at: String,
 }
@@ -223,17 +235,17 @@ struct Read {
 // that ran, and the defaults its call was filled from, are the function's
 // for as long as it has them (`f.__code__ = ...`, `f.__defaults__ = ...`).
 struct Function {
-    func: Py<PyAny>,
-    code: Py<PyAny>,
-    defaults: Option<Py<PyAny>>,
-    kwdefaults: Option<Py<PyAny>>,
+    func: Pin,
+    code: Pin,
+    defaults: Option<Pin>,
+    kwdefaults: Option<Pin>,
 }
 
 // An object and the __dict__ its attributes were read from: the items read
 // are the object's for as long as it has that dict (`obj.__dict__ = {...}`).
 struct Dicted {
-    obj: Py<PyAny>,
-    dict: Py<PyAny>,
+    obj: Pin,
+    dict: Pin,
 }
 
 // A tensor the traced run found by a read (an item, a cell, an attribute:
@@ -245,8 +257,10 @@ struct Dicted {
 // leads to the tensor (see led): the read that found it says it is still
 // the one.
 struct Keyed {
-    obj: Py<PyAny>,
+    obj: Pin,
     key: TensorKey,
+    // See Asked.
+    ours: bool,
 }
 
 // A tensor the run asked something of, while the trace runs: most are the
@@ -256,6 +270,9 @@ struct Asked {
     weak: Py<PyAny>,
     // None: it has no key (see exec/tensor_key.rs).
     key: Option<TensorKey>,
+    // An input of the trace or the result of an operator it recorded (see
+    // _region_settled): the guard's to compare, or the graph's to make.
+    ours: bool,
 }
 
 #[derive(Default)]
@@ -309,6 +326,9 @@ struct Trace {
     // What was no longer as it was read when the body was over, by the
     // address of what it was read from (see _region_settled).
     stale: Vec<(Stale, usize, String)>,
+    // The tuples and containers one handing to C code has walked (see
+    // through).
+    walked: HashSet<usize>,
 }
 
 // What a stale read was read from: a cell, a function (its code and
@@ -454,29 +474,34 @@ pub(super) unsafe fn own(o: *mut PyObject) -> Py<PyAny> {
     Py::from_borrowed_ptr(Python::assume_attached(), o)
 }
 
-unsafe fn equal(a: *mut PyObject, b: *mut PyObject) -> bool {
-    let tp = ffi::Py_TYPE(a);
-    if tp != ffi::Py_TYPE(b) {
-        return false;
-    }
-    if tp == &raw mut ffi::PyFloat_Type {
-        ffi::PyFloat_AS_DOUBLE(a).to_bits() == ffi::PyFloat_AS_DOUBLE(b).to_bits()
-    } else if tp == &raw mut ffi::PyLong_Type {
-        ffi::PyObject_RichCompareBool(a, b, ffi::Py_EQ) == 1
-    } else if tp == &raw mut ffi::PyUnicode_Type {
-        ffi::PyUnicode_Compare(a, b) == 0
-    } else {
-        false
-    }
+// As an entry holds an object while the trace runs.
+unsafe fn counted(o: *mut PyObject) -> Pin {
+    Pin::counted(o)
 }
 
-// Whether `now` (borrowed, NULL: nothing there) is what was read.
-unsafe fn same(now: *mut PyObject, want: Want, value: Option<&Py<PyAny>>) -> bool {
+// Whether `now` (borrowed, NULL: nothing there) is what was read. What is
+// wanted Equal is an exact int, float or str (want_of): the one value it is
+// to every reader (exec/exact.rs).
+unsafe fn same(now: *mut PyObject, want: Want, value: Option<&Pin>) -> bool {
     match want {
         Want::Absent => now.is_null(),
         Want::Present => !now.is_null(),
-        Want::Is => value.is_some_and(|v| v.as_ptr() == now),
-        Want::Equal => value.is_some_and(|v| v.as_ptr() == now || (!now.is_null() && equal(now, v.as_ptr()))),
+        Want::Is => value.is_some_and(|v| v.is(now)),
+        // (Its pin stays counted. Nothing there is not what was read.)
+        Want::Equal => !now.is_null() && value.and_then(Pin::live).is_some_and(|v| exact::same(now, v)),
+    }
+}
+
+// What a tuple or a frozenset holds (borrowed), or None for anything else:
+// the two builtin containers whose items cannot be bound anew, so that what
+// leads to one leads to what it holds, and no entry is of one.
+unsafe fn fixed(o: *mut PyObject) -> Option<Vec<*mut PyObject>> {
+    if ffi::PyTuple_Check(o) != 0 {
+        Some((0..ffi::PyTuple_GET_SIZE(o)).map(|i| ffi::PyTuple_GET_ITEM(o, i)).collect())
+    } else if ffi::PyAnySet_Check(o) != 0 && ffi::PySet_Check(o) == 0 {
+        Some(snapshot(o, Holder::Set))
+    } else {
+        None
     }
 }
 
@@ -616,7 +641,7 @@ impl Whole {
             return false;
         }
         let now = snapshot(holder, kind);
-        now.len() == self.items.len() && now.iter().zip(&self.items).all(|(a, b)| *a == b.as_ptr() || (exact_scalar(*a) && equal(*a, b.as_ptr())))
+        now.len() == self.items.len() && now.iter().zip(&self.items).all(|(a, b)| b.live().is_some_and(|b| *a == b || (exact_scalar(*a) && exact::same(*a, b))))
     }
 }
 
@@ -635,7 +660,7 @@ impl Class {
     // Whether the class still has what it had under each name.
     unsafe fn holds(&self) -> bool {
         let tp = self.class.as_ptr() as *mut ffi::PyTypeObject;
-        self.names.iter().all(|(name, had)| tr_type_lookup(tp, name.as_ptr()) == had.as_ref().map_or(std::ptr::null_mut(), |h| h.as_ptr()))
+        self.names.iter().all(|(name, had)| pin::was(had, tr_type_lookup(tp, name.as_ptr())))
     }
 }
 
@@ -653,8 +678,7 @@ impl Function {
     // Three fields of the function object: no attribute is looked up.
     unsafe fn holds(&self) -> bool {
         let f = self.func.as_ptr() as *mut ffi::PyFunctionObject;
-        let is = |now: *mut PyObject, was: &Option<Py<PyAny>>| now == was.as_ref().map_or(std::ptr::null_mut(), |w| w.as_ptr());
-        (*f).func_code == self.code.as_ptr() && is((*f).func_defaults, &self.defaults) && is((*f).func_kwdefaults, &self.kwdefaults)
+        self.code.is((*f).func_code) && pin::was(&self.defaults, (*f).func_defaults) && pin::was(&self.kwdefaults, (*f).func_kwdefaults)
     }
 }
 
@@ -690,7 +714,7 @@ impl Trace {
         let i = match self.group_of.get(&(holder as usize)) {
             Some(i) => *i,
             None => {
-                self.entries.groups.push(Group { holder: own(holder), kind, version: Cell::new(0), items: vec![], whole: None, len: None, late: false, late_at: String::new(), root: false });
+                self.entries.groups.push(Group { holder: counted(holder), kind, version: Cell::new(0), items: vec![], whole: None, len: None, late: false, late_at: String::new(), root: false });
                 self.group_of.insert(holder as usize, self.entries.groups.len() - 1);
                 self.entries.groups.len() - 1
             }
@@ -705,7 +729,7 @@ impl Trace {
         if self.written.contains(&(holder as usize, key as usize)) || self.own.contains(&(holder as usize)) {
             return;
         }
-        let value = (!value.is_null() && matches!(want, Want::Is | Want::Equal)).then(|| own(value));
+        let value = (!value.is_null() && matches!(want, Want::Is | Want::Equal)).then(|| counted(value));
         if !self.seen.insert((holder as usize, key as usize)) {
             // `key in d` and then `d[key]`: the value is what is checked.
             if value.is_some()
@@ -751,7 +775,7 @@ impl Trace {
             return;
         }
         self.count += items.len() + 1;
-        let items = items.into_iter().map(|x| own(x)).collect();
+        let items = items.into_iter().map(|x| counted(x)).collect();
         self.group(holder, kind).whole = Some(Whole { items, at: place() });
     }
 
@@ -789,7 +813,7 @@ impl Trace {
             return;
         }
         self.asked_at.insert(o as usize, self.asked_of.len());
-        self.asked_of.push(Asked { weak: Py::from_owned_ptr(Python::assume_attached(), weak), key: TensorKey::of(o) });
+        self.asked_of.push(Asked { weak: Py::from_owned_ptr(Python::assume_attached(), weak), key: TensorKey::of(o), ours: false });
     }
 
     unsafe fn container(o: *mut PyObject) -> Option<(*mut PyObject, Holder)> {
@@ -807,14 +831,19 @@ impl Trace {
         }
     }
 
+    // `bound`: `o` is what C code came by through something it was handed
+    // (an item, the self of a builtin method), not an operand itself.
     unsafe fn used(&mut self, o: *mut PyObject, bound: bool) {
         if o.is_null() {
             return;
         }
+        if !bound {
+            self.walked.clear();
+        }
         if let Some((h, kind)) = Self::container(o) {
             self.whole(h, kind);
             self.through(h, Some(kind));
-        } else if ffi::PyTuple_Check(o) != 0 {
+        } else if fixed(o).is_some() {
             self.through(o, None);
         } else if ffi::Py_TYPE(o) == &raw mut ffi::PyDictProxy_Type {
             self.refused = Some("it reads the namespace of something that isn't a class".into());
@@ -824,24 +853,31 @@ impl Trace {
         self.handed(o);
     }
 
-    // C code that is handed a tuple (`kind` None) or a container reads
-    // through it: the list inside the tuple of a subscript, the rows of a
-    // nested list that is made into a tensor. The tuples, lists, dicts and
-    // sets that `o` holds are read whole as well, and what those hold. Each
-    // is walked once (one may hold itself), and no further once the trace
-    // has more entries than a region may have.
+    // C code that is handed a tuple or a frozenset (`kind` None) or a
+    // container reads through it: the list inside the tuple of a subscript,
+    // the rows of a nested list that is made into a tensor, the tensors of
+    // the list that torch.cat is handed, of a starred tuple, of a `**` dict. The tuples,
+    // lists, dicts and sets that `o` holds are read whole as well, and what
+    // those hold; a tensor `o` holds is handed as one handed directly is.
+    // Each is walked once per handing (one may hold itself; by address, so
+    // not once per trace: a tuple that died leaves its address to the
+    // next), and no further once the trace has more entries than a region
+    // may have. Anything else `o` holds is not looked at: an object of a
+    // Python class answers C code by frames, which record what they read.
     unsafe fn through(&mut self, o: *mut PyObject, kind: Option<Holder>) {
-        if self.count > MAX_ENTRIES || self.own.contains(&(o as usize)) || !self.seen.insert((o as usize, usize::MAX - 2)) {
+        if self.count > MAX_ENTRIES || self.own.contains(&(o as usize)) || !self.walked.insert(o as usize) {
             return;
         }
         let items = match kind {
-            None => (0..ffi::PyTuple_GET_SIZE(o)).map(|i| ffi::PyTuple_GET_ITEM(o, i)).collect(),
+            None => fixed(o).unwrap_or_default(),
             // One that cannot be walked is refused by whole(), now or when the trace is over.
             Some(kind) if ordered_ok(o, kind) && size(o, kind) <= MAX_ITEMS as isize => snapshot(o, kind),
             Some(_) => vec![],
         };
         for x in items {
-            if ffi::PyTuple_Check(x) != 0 || ffi::PyList_Check(x) != 0 || ffi::PyDict_Check(x) != 0 || ffi::PySet_Check(x) != 0 {
+            if tensor(x) {
+                self.keyed(x);
+            } else if ffi::PyTuple_Check(x) != 0 || ffi::PyList_Check(x) != 0 || ffi::PyDict_Check(x) != 0 || ffi::PyAnySet_Check(x) != 0 {
                 self.used(x, true);
             }
         }
@@ -850,7 +886,8 @@ impl Trace {
     // C code was handed `o`: what it does with an object of a Python class
     // is what the class says (see special.rs). The object's class by
     // identity, and what the class has under each name C code resolves. A
-    // tensor's class is the guard's; a class that cannot change needs none.
+    // tensor is asked (see keyed): its class is in its key, or the guard's;
+    // a class that cannot change needs none.
     unsafe fn handed(&mut self, o: *mut PyObject) {
         let tp = ffi::Py_TYPE(o);
         if tensor(o) {
@@ -862,7 +899,7 @@ impl Trace {
         }
         if self.seen.insert((o as usize, 0)) {
             self.count += 1;
-            self.entries.typed.push(Typed { obj: own(o), class: own(tp as *mut PyObject) });
+            self.entries.typed.push(Typed { obj: counted(o), class: counted(tp as *mut PyObject) });
         }
         if self.seen.insert((tp as usize, usize::MAX - 1)) {
             for name in special::names() {
@@ -880,7 +917,7 @@ impl Trace {
         }
         if self.seen.insert((obj as usize, 0)) {
             self.count += 1;
-            self.entries.typed.push(Typed { obj: own(obj), class: own(tp as *mut PyObject) });
+            self.entries.typed.push(Typed { obj: counted(obj), class: counted(tp as *mut PyObject) });
         }
         self.looked(tp, name);
     }
@@ -904,7 +941,7 @@ impl Trace {
         let i = match self.class_of.get(&(tp as usize)) {
             Some(i) => *i,
             None => {
-                self.entries.classes.push(Class { class: own(tp as *mut PyObject), tag: Cell::new(0), names: vec![] });
+                self.entries.classes.push(Class { class: counted(tp as *mut PyObject), tag: Cell::new(0), names: vec![] });
                 self.class_of.insert(tp as usize, self.entries.classes.len() - 1);
                 self.entries.classes.len() - 1
             }
@@ -927,7 +964,7 @@ impl Trace {
         if !q.instance && ffi::PyType_Check(q.subject) == 0 {
             self.refused = Some(format!("it asks issubclass of a {}, which is no class", type_name(q.subject)));
         } else if q.instance && tensor(q.subject) {
-            // Which class a tensor is of, the guard says, or its key.
+            // Which class a tensor is of is in its key.
             self.keyed(q.subject);
             self.looked(of, class_name);
             self.looked(of, getattribute);
@@ -944,7 +981,7 @@ impl Trace {
         }
         if tr_type_immutable(of) == 0 && self.seen.insert((of as usize, usize::MAX)) {
             self.count += 1;
-            self.entries.mros.push(Mro { class: own(of as *mut PyObject), mro: own((*of).tp_mro) });
+            self.entries.mros.push(Mro { class: counted(of as *mut PyObject), mro: own((*of).tp_mro) });
         }
         let special = if q.instance { c"__instancecheck__" } else { c"__subclasscheck__" };
         let mut against = vec![];
@@ -980,9 +1017,9 @@ impl Trace {
         }
         let o = f as *mut ffi::PyFunctionObject;
         let (code, defaults, kwdefaults) = ((*o).func_code, (*o).func_defaults, (*o).func_kwdefaults);
-        let held = |p: *mut PyObject| (!p.is_null()).then(|| own(p));
+        let held = |p: *mut PyObject| (!p.is_null()).then(|| counted(p));
         self.count += 1;
-        self.entries.functions.push(Function { func: own(f), code: own(code), defaults: held(defaults), kwdefaults: held(kwdefaults) });
+        self.entries.functions.push(Function { func: counted(f), code: counted(code), defaults: held(defaults), kwdefaults: held(kwdefaults) });
         if !kwdefaults.is_null() && ffi::PyDict_Check(kwdefaults) != 0 {
             self.whole(kwdefaults, Holder::Dict);
         }
@@ -992,7 +1029,7 @@ impl Trace {
     unsafe fn dicted(&mut self, obj: *mut PyObject, dict: *mut PyObject) {
         if !dict.is_null() && self.seen.insert((obj as usize, 2)) {
             self.count += 1;
-            self.entries.dicted.push(Dicted { obj: own(obj), dict: own(dict) });
+            self.entries.dicted.push(Dicted { obj: counted(obj), dict: counted(dict) });
         }
     }
 
@@ -1014,7 +1051,7 @@ impl Trace {
                 } else {
                     if self.seen.insert((obj as usize, n as usize)) {
                         self.count += 1;
-                        self.entries.reads.push(Read { obj: own(obj), name: Some(own(n)), want: Want::Is, value: Some(own(v)), at: place() });
+                        self.entries.reads.push(Read { obj: counted(obj), name: Some(own(n)), want: Want::Is, value: Some(counted(v)), at: place() });
                     }
                     if ffi::PyDict_Check(v) != 0 {
                         self.whole(v, Holder::Dict);
@@ -1054,11 +1091,11 @@ impl Trace {
             return;
         }
         if tensor(obj) {
-            // A tensor's class, dtype, device, sizes, strides and
-            // requires_grad are the guard's (or, of a tensor the run read
-            // from state, its key's), its values the graph's. Nothing else
-            // it can be asked is: an attribute the program put on the
-            // object, or one of UNCHECKED_OF_A_TENSOR.
+            // What a tensor's key names (exec/tensor_key.rs) is the guard's
+            // to compare for an argument and the key's of a tensor the run
+            // read from state (see Keyed); its values are the graph's.
+            // Nothing else it can be asked is: an attribute the program put
+            // on the object, or one of UNCHECKED_OF_A_TENSOR.
             self.keyed(obj);
             let n = text(name);
             let mut dict = std::ptr::null_mut();
@@ -1068,7 +1105,7 @@ impl Trace {
                 self.refused = Some(format!("it reads a tensor's .{n}"));
             } else {
                 // What the class has under the name (a method the program
-                // put on torch.Tensor); which class it is, the guard says.
+                // put on torch.Tensor); which class it is, its key says.
                 self.looked(ffi::Py_TYPE(obj), name);
             }
             return;
@@ -1102,7 +1139,7 @@ impl Trace {
                 let written = self.written.contains(&(obj as usize, name as usize));
                 if !ran && !written && !value.is_null() && n != "__class__" && self.seen.insert((obj as usize, name as usize)) {
                     self.count += 1;
-                    self.entries.reads.push(Read { obj: own(obj), name: Some(own(name)), want: want_of(value), value: Some(own(value)), at: place() });
+                    self.entries.reads.push(Read { obj: counted(obj), name: Some(own(name)), want: want_of(value), value: Some(counted(value)), at: place() });
                 }
             }
             4 => {
@@ -1353,7 +1390,7 @@ pub unsafe fn cell(cell: *mut PyObject, value: *mut PyObject) {
     with(|t| {
         if t.seen.insert((cell as usize, 0)) {
             t.count += 1;
-            t.entries.reads.push(Read { obj: own(cell), name: None, want: want_of(value), value: Some(own(value)), at: String::new() });
+            t.entries.reads.push(Read { obj: counted(cell), name: None, want: want_of(value), value: Some(counted(value)), at: String::new() });
         }
     });
 }
@@ -1483,8 +1520,11 @@ pub struct Reads {
     // How the region's tensors share memory, which is told when a constant's
     // data moved (see exec/overlap.rs).
     overlap: GilCell<Option<Py<Overlap>>>,
-    // Checks left that also drop the entries nothing can change any more.
-    sweeps: Cell<u8>,
+    // An entry's holder was found dead at the last check: such entries are
+    // dropped at the next.
+    lost: Cell<bool>,
+    // An object the entries expect to find died: no check passes again.
+    dead: Cell<bool>,
     misses: Cell<u64>,
     last: Cell<&'static str>,
     // The group the last failed check failed on, looked at first: a region
@@ -1512,7 +1552,7 @@ unsafe fn sweep(e: &mut Entries) {
         // (an object with as many other owners as entries dropped before it
         // would pass for gone, and the checks on it would be lost).
         let gone: HashSet<usize> = mine.iter().filter(|(o, n)| ffi::Py_REFCNT(**o as *mut PyObject) == **n).map(|(o, _)| *o).collect();
-        let gone = |o: &Py<PyAny>| gone.contains(&(o.as_ptr() as usize));
+        let gone = |o: &Pin| gone.contains(&(o.as_ptr() as usize));
         let before = (e.typed.len(), e.reads.len(), e.groups.len(), e.functions.len() + e.dicted.len());
         e.typed.retain(|t| !gone(&t.obj));
         e.reads.retain(|r| !gone(&r.obj));
@@ -1526,79 +1566,249 @@ unsafe fn sweep(e: &mut Entries) {
     unfound(e);
 }
 
-// The objects the entries expect to find, by address: the value of an item,
-// of a cell or of a slot, what a container read whole holds, what a class
-// has under a name. Tuples aren't recorded: what one holds is found with it.
-unsafe fn led(e: &Entries) -> HashSet<usize> {
-    unsafe fn reach(o: *mut PyObject, out: &mut HashSet<usize>, depth: u8) {
-        out.insert(o as usize);
-        if depth < 4 && ffi::PyTuple_Check(o) != 0 {
-            for k in 0..ffi::PyTuple_GET_SIZE(o) {
-                reach(ffi::PyTuple_GET_ITEM(o, k), out, depth + 1);
+// Where a walk of the reads starts (see led).
+#[derive(Clone, Copy)]
+enum Start<'a> {
+    // From what was there before the traced run: the namespaces globals
+    // were loaded from, the cells the run read and neither made nor stored
+    // into, and these (the region's arguments). That an entry was read FROM
+    // an object leads nowhere: a run reads what it made too (made.rs).
+    Before(&'a [*mut PyObject]),
+    // From every entry, whatever it was read from: what the entries hold
+    // the program to, for as long as they are entries.
+    Entries,
+}
+
+// The objects the reads `e` lead to, by address: the one answer to "do the
+// reads lead to this object", for a container a region hands back
+// (Reads.knows, _region_known), a tensor the run asked about (Keyed) and an
+// input the run also read (Reads.values). An object is led to from where
+// the walk starts by what the entries expect by identity, and only by that:
+//   - an item of a namespace or of a container that is led to, read alone
+//     or with the whole content;
+//   - an attribute of an object that is led to: an item of its __dict__, a
+//     slot or another attribute C code gives, what its class or a base has
+//     under a name;
+//   - the items of a tuple or a frozenset, at any depth; what a bound
+//     method (of a Python function or of C code) is bound to: none of them
+//     can be bound anew;
+//   - the defaults and the keyword-only defaults of a function a frame of
+//     which ran (its Function entry says they are still the ones).
+// Nothing else leads anywhere: an object some C code handed out, an item of
+// a container no entry is of, a default of a function that did not run.
+unsafe fn led(e: &Entries, start: Start) -> HashSet<usize> {
+    let mut known: HashSet<usize> = HashSet::new();
+    let (mut fresh, all) = match start {
+        Start::Before(given) => (given.to_vec(), false),
+        Start::Entries => (vec![], true),
+    };
+    // (NULL for an object that died: the walk passes over it.)
+    let is = |v: &Option<Pin>| v.as_ref().map(|v| v.as_ptr());
+    loop {
+        // What an object that is led to brings with it.
+        while let Some(o) = fresh.pop() {
+            if o.is_null() || !known.insert(o as usize) {
+                continue;
+            }
+            if let Some(items) = fixed(o) {
+                fresh.extend(items);
+            } else if !tr_bound_self(o).is_null() {
+                fresh.push(tr_bound_self(o));
+            } else if !tr_builtin_self(o).is_null() {
+                fresh.push(tr_builtin_self(o));
+            } else if !all && ffi::PyFunction_Check(o) == 0 && ffi::PyList_Check(o) == 0 && ffi::PyDict_Check(o) == 0 && ffi::PyAnySet_Check(o) == 0 {
+                // Its __dict__, whose items are entries of their own (from
+                // every entry, those start the walk already).
+                fresh.push(instance_dict(o));
+            }
+            // Its class and the bases were there before it.
+            let class = if ffi::PyType_Check(o) != 0 { o as *mut ffi::PyTypeObject } else { ffi::Py_TYPE(o) };
+            let mro = (*class).tp_mro;
+            if !mro.is_null() && known.insert(class as usize) {
+                known.extend((0..ffi::PyTuple_GET_SIZE(mro)).map(|i| ffi::PyTuple_GET_ITEM(mro, i) as usize));
             }
         }
+        // What was read from an object that died (or from the __dict__ of
+        // an owner that has none now) leads nowhere, wherever the walk
+        // starts: no later call comes by it, and the entry is dropped at the
+        // next check.
+        let alive = |o: &Pin| o.live().filter(|o| !o.is_null());
+        let led = |o: &Pin| alive(o).is_some_and(|o| all || known.contains(&(o as usize)));
+        for g in e.groups.iter().filter(|g| g.root || led(&g.holder)) {
+            fresh.extend(g.items.iter().filter(|i| i.want == Want::Is).filter_map(|i| is(&i.value)));
+            fresh.extend(g.whole.iter().flat_map(|w| w.items.iter().map(|x| x.as_ptr())));
+        }
+        for r in e.reads.iter().filter(|r| r.want == Want::Is) {
+            let from = if r.name.is_none() { alive(&r.obj).is_some_and(|c| all || !super::made::own_cell(c)) } else { led(&r.obj) };
+            fresh.extend(is(&r.value).filter(|_| from));
+        }
+        for c in e.classes.iter().filter(|c| led(&c.class)) {
+            fresh.extend(c.names.iter().filter_map(|(_, had)| is(had)));
+        }
+        for f in e.functions.iter().filter(|f| led(&f.func)) {
+            fresh.extend(is(&f.defaults).into_iter().chain(is(&f.kwdefaults)));
+        }
+        fresh.retain(|o| !o.is_null() && !known.contains(&(*o as usize)));
+        if fresh.is_empty() {
+            return known;
+        }
     }
-    let mut out: HashSet<usize> = HashSet::new();
-    let mut add = |o: &Py<PyAny>| reach(o.as_ptr(), &mut out, 0);
-    for g in &e.groups {
-        g.items.iter().filter_map(|i| i.value.as_ref()).for_each(&mut add);
-        g.whole.iter().flat_map(|w| &w.items).for_each(&mut add);
-    }
-    e.reads.iter().filter_map(|r| r.value.as_ref()).for_each(&mut add);
-    e.classes.iter().flat_map(|c| &c.names).filter_map(|(_, had)| had.as_ref()).for_each(&mut add);
-    out
 }
 
 // Drops the key of a tensor no entry leads to any more: the read that found
 // it is gone (its holder died, or is the region's own to check), and with it
-// the way a later call would come by the tensor.
-unsafe fn unfound(e: &mut Entries) {
-    if !e.keyed.is_empty() {
-        let led = led(e);
-        e.keyed.retain(|k| led.contains(&(k.obj.as_ptr() as usize)));
+// the way a later call would come by the tensor. Returns whether one of the
+// tensors dropped is neither an input of the trace nor a result of it.
+unsafe fn unfound(e: &mut Entries) -> bool {
+    if e.keyed.is_empty() {
+        return false;
+    }
+    let led = led(e, Start::Entries);
+    let before = e.keyed.iter().filter(|k| !k.ours).count();
+    e.keyed.retain(|k| led.contains(&(k.obj.as_ptr() as usize)));
+    e.keyed.iter().filter(|k| !k.ours).count() != before
+}
+
+// Every reference the entries count, reported to `hold`.
+fn held(e: &Entries, hold: &mut impl FnMut(&Py<PyAny>)) {
+    let mut pin = |p: &Pin| p.counts().into_iter().for_each(&mut *hold);
+    for t in &e.typed {
+        pin(&t.obj);
+        pin(&t.class);
+    }
+    for c in &e.classes {
+        pin(&c.class);
+        c.names.iter().filter_map(|(_, had)| had.as_ref()).for_each(&mut pin);
+    }
+    for r in &e.reads {
+        pin(&r.obj);
+        r.value.iter().for_each(&mut pin);
+    }
+    for f in &e.functions {
+        pin(&f.func);
+        pin(&f.code);
+        f.defaults.iter().chain(&f.kwdefaults).for_each(&mut pin);
+    }
+    for d in &e.dicted {
+        pin(&d.obj);
+        pin(&d.dict);
+    }
+    e.mros.iter().for_each(|m| pin(&m.class));
+    e.keyed.iter().for_each(|k| pin(&k.obj));
+    for g in &e.groups {
+        pin(&g.holder);
+        g.items.iter().filter_map(|i| i.value.as_ref()).for_each(&mut pin);
+        g.whole.iter().flat_map(|w| &w.items).for_each(&mut pin);
+    }
+    for c in &e.classes {
+        c.names.iter().for_each(|(n, _)| hold(n));
+    }
+    e.reads.iter().filter_map(|r| r.name.as_ref()).for_each(&mut *hold);
+    e.mros.iter().for_each(|m| hold(&m.mro));
+    e.groups.iter().flat_map(|g| &g.items).for_each(|i| hold(&i.key));
+}
+
+// The trace is over: from now on the entries hold by pin.rs, so that the
+// region keeps alive nothing the program drops. By a weak reference: an
+// instance, a module, a function, a code object, a class, a tensor, a set, a
+// bound method, an instance of a subclass of dict or list. An instance's (or
+// a module's) __dict__: through the instance, and the items read are then
+// compared in the dict the instance has when the region is entered. Only
+// where the instance is the one way the trace came by the dict: a dict that
+// outlives its instance and is found some other way must stay checked when
+// the instance died. Still counted, for as long as the region lives,
+// because the class takes no weak reference and nothing here knows an owner
+// to find it through:
+//   - an int, a float, a str, a tuple, None: nothing mutable the program
+//     could see live on, except what a tuple holds;
+//   - an exact dict or list that is no instance's __dict__ (a dict found as
+//     a value: nn.Module's _parameters, _modules and _buffers; a function's
+//     keyword defaults), and with it what it holds;
+//   - a __dict__ that is also a namespace a global was loaded from, that
+//     two instances have, or that an entry expects to find as a value (what
+//     `obj.__dict__` gave);
+//   - a cell;
+//   - an instance of a class with __slots__ and no __weakref__, and the
+//     __dict__ of such an instance;
+//   - a property, a staticmethod, a slot descriptor and the like a class
+//     has under a name (dropped with the entry when the class died).
+unsafe fn weaken(e: &mut Entries) {
+    for t in &mut e.typed {
+        t.obj.weaken();
+        t.class.weaken();
+    }
+    // (Before anything is weakened: every pin is of a live object.)
+    let found = led(e, Start::Entries);
+    let dicts: Vec<usize> = e.dicted.iter().map(|d| d.dict.as_ptr() as usize).collect();
+    let alone = |dict: usize| !found.contains(&dict) && dicts.iter().filter(|d| **d == dict).count() == 1;
+    for d in &mut e.dicted {
+        d.obj.weaken();
+    }
+    let groups = &mut e.groups;
+    // Kept: the entry that says which dict the instance has, where the
+    // dict stays counted.
+    e.dicted.retain_mut(|d| {
+        let dict = d.dict.as_ptr();
+        if !alone(dict as usize) {
+            return true;
+        }
+        match groups.iter_mut().find(|g| g.holder.is(dict)) {
+            Some(g) if g.root => true,
+            Some(g) => !g.holder.through(&d.obj),
+            None => !d.dict.through(&d.obj),
+        }
+    });
+    for g in groups.iter_mut() {
+        g.holder.weaken();
+        g.items.iter_mut().filter(|i| i.want == Want::Is).filter_map(|i| i.value.as_mut()).for_each(Pin::weaken);
+        g.whole.iter_mut().flat_map(|w| &mut w.items).for_each(Pin::weaken);
+    }
+    for c in &mut e.classes {
+        c.class.weaken();
+        c.names.iter_mut().filter_map(|(_, had)| had.as_mut()).for_each(Pin::weaken);
+    }
+    for r in &mut e.reads {
+        r.obj.weaken();
+        r.value.iter_mut().filter(|_| r.want == Want::Is).for_each(Pin::weaken);
+    }
+    for f in &mut e.functions {
+        f.func.weaken();
+        f.code.weaken();
+        f.defaults.iter_mut().chain(&mut f.kwdefaults).for_each(Pin::weaken);
+    }
+    e.mros.iter_mut().for_each(|m| m.class.weaken());
+    e.keyed.iter_mut().for_each(|k| k.obj.weaken());
+}
+
+// Takes out the entries whose holder died, for the caller to drop.
+fn lost(e: &mut Entries) -> Entries {
+    fn take<T>(all: &mut Vec<T>, dead: impl Fn(&T) -> bool) -> Vec<T> {
+        let (gone, kept) = std::mem::take(all).into_iter().partition(|x| dead(x));
+        *all = kept;
+        gone
+    }
+    Entries {
+        groups: take(&mut e.groups, |g| g.holder.dead()),
+        typed: take(&mut e.typed, |t| t.obj.dead()),
+        classes: take(&mut e.classes, |c| c.class.dead()),
+        reads: take(&mut e.reads, |r| r.obj.dead()),
+        functions: take(&mut e.functions, |f| f.func.dead()),
+        dicted: take(&mut e.dicted, |d| d.obj.dead()),
+        mros: take(&mut e.mros, |m| m.class.dead()),
+        abc: None,
+        keyed: take(&mut e.keyed, |k| k.obj.dead()),
     }
 }
 
-// Every reference the entries hold, reported to `hold`.
-fn held(e: &Entries, hold: &mut impl FnMut(&Py<PyAny>)) {
-    for t in &e.typed {
-        hold(&t.obj);
-        hold(&t.class);
-    }
-    for c in &e.classes {
-        hold(&c.class);
-        c.names.iter().for_each(|(n, had)| {
-            hold(n);
-            had.iter().for_each(&mut *hold);
-        });
-    }
-    for r in &e.reads {
-        hold(&r.obj);
-        r.name.iter().for_each(&mut *hold);
-        r.value.iter().for_each(&mut *hold);
-    }
-    for f in &e.functions {
-        hold(&f.func);
-        hold(&f.code);
-        f.defaults.iter().chain(&f.kwdefaults).for_each(&mut *hold);
-    }
-    for d in &e.dicted {
-        hold(&d.obj);
-        hold(&d.dict);
-    }
-    for m in &e.mros {
-        hold(&m.class);
-        hold(&m.mro);
-    }
-    e.keyed.iter().for_each(|k| hold(&k.obj));
-    for g in &e.groups {
-        hold(&g.holder);
-        for i in &g.items {
-            hold(&i.key);
-            i.value.iter().for_each(&mut *hold);
-        }
-        g.whole.iter().flat_map(|w| &w.items).for_each(&mut *hold);
-    }
+// Whether an object the entries expect to find, in a holder that lives,
+// died: it is found nowhere again.
+fn expects_dead(e: &Entries) -> bool {
+    let gone = |v: &Option<Pin>| v.as_ref().is_some_and(Pin::dead);
+    e.groups.iter().any(|g| !g.holder.dead() && (g.items.iter().any(|i| gone(&i.value)) || g.whole.iter().flat_map(|w| &w.items).any(Pin::dead)))
+        || e.typed.iter().any(|t| !t.obj.dead() && t.class.dead())
+        || e.classes.iter().any(|c| !c.class.dead() && c.names.iter().any(|(_, had)| gone(had)))
+        || e.reads.iter().any(|r| !r.obj.dead() && gone(&r.value))
+        || e.functions.iter().any(|f| !f.func.dead() && (f.code.dead() || gone(&f.defaults) || gone(&f.kwdefaults)))
 }
 
 impl Reads {
@@ -1607,17 +1817,40 @@ impl Reads {
         self.last.get()
     }
 
-    // Whether everything the trace read is as it was. No Python code runs.
+    // Whether an object the entries expect to find died (found at a check
+    // that failed): the region can never be entered again.
+    pub fn dead(&self) -> bool {
+        self.dead.get()
+    }
+
+    // Whether everything the trace read is as it was. No Python code runs
+    // while the entries are compared (dropping the entries of a holder that
+    // died, first, lets go of what they still count).
     pub unsafe fn check(&self) -> bool {
-        let e = &mut *self.entries.get();
-        if self.sweeps.get() > 0 {
-            self.sweeps.set(self.sweeps.get() - 1);
-            sweep(e);
+        if self.lost.replace(false) {
+            let gone = lost(&mut *self.entries.get());
+            self.hot.set(0);
+            drop(gone);
         }
+        let e = &*self.entries.get();
+        // None: the holder died. No later call comes by it, so what was
+        // read from it is nothing to check.
+        let live = |p: &Pin| {
+            let o = p.live();
+            if o.is_none() {
+                self.lost.set(true);
+            }
+            o
+        };
         let passes = |g: &Group| {
+            let Some(h) = live(&g.holder) else { return true };
+            // (The owner of a __dict__ has none now.)
+            if h.is_null() {
+                return false;
+            }
             // The order of an OrderedDict changes under the same version tag.
-            let tagged = g.kind == Holder::Dict && !(g.whole.is_some() && tr_ordered(g.holder.as_ptr()) != 0);
-            let v = if tagged { tr_dict_version(g.holder.as_ptr()) } else { 0 };
+            let tagged = g.kind == Holder::Dict && !(g.whole.is_some() && tr_ordered(h) != 0);
+            let v = if tagged { tr_dict_version(h) } else { 0 };
             if v != 0 && v == g.version.get() {
                 return true;
             }
@@ -1634,10 +1867,11 @@ impl Reads {
             "a torch function mode"
         } else if e.groups.get(self.hot.get()).is_some_and(|g| !passes(g)) {
             "a namespace or a container"
-        } else if e.typed.iter().any(|t| ffi::Py_TYPE(t.obj.as_ptr()) as *mut PyObject != t.class.as_ptr()) {
+        } else if e.typed.iter().any(|t| live(&t.obj).is_some_and(|o| !t.class.is(ffi::Py_TYPE(o) as *mut PyObject))) {
             "the class of an object"
         } else if !e.classes.iter().all(|c| {
-            let tp = c.class.as_ptr() as *mut ffi::PyTypeObject;
+            let Some(class) = live(&c.class) else { return true };
+            let tp = class as *mut ffi::PyTypeObject;
             if tr_type_version_is(tp, c.tag.get()) != 0 {
                 return true;
             }
@@ -1648,22 +1882,22 @@ impl Reads {
             ok
         }) {
             "a class"
-        } else if !e.mros.iter().all(|m| m.holds()) {
+        } else if !e.mros.iter().all(|m| live(&m.class).is_none() || m.holds()) {
             "the bases of a class"
         } else if e.abc.is_some_and(|was| asked::token() != was) {
             "a class registered with an ABC"
         } else if let Some(i) = e.groups.iter().position(|g| !passes(g)) {
             self.hot.set(i);
             "a namespace or a container"
-        } else if !e.reads.iter().all(|r| r.holds()) {
+        } else if !e.reads.iter().all(|r| live(&r.obj).is_none() || r.holds()) {
             "a cell or a slot"
-        } else if !e.functions.iter().all(|f| f.holds()) {
+        } else if !e.functions.iter().all(|f| live(&f.func).is_none() || f.holds()) {
             "the code or the defaults of a function"
-        } else if e.dicted.iter().any(|d| tr_instance_dict(d.obj.as_ptr()) != d.dict.as_ptr()) {
+        } else if e.dicted.iter().any(|d| live(&d.obj).is_some_and(|o| !d.dict.is(tr_instance_dict(o)))) {
             "the __dict__ of an object"
         } else if let Some(why) = self.constants_fail() {
             why
-        } else if !e.keyed.iter().all(|k| k.key.holds(k.obj.as_ptr())) {
+        } else if !e.keyed.iter().all(|k| live(&k.obj).is_none_or(|o| k.key.holds(o))) {
             // Behind the constants: a tensor that is both is a constant's miss.
             "the class, shape, dtype, device or requires_grad of a tensor read from state"
         } else {
@@ -1672,6 +1906,9 @@ impl Reads {
         self.misses.set(self.misses.get() + 1);
         MISSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.last.set(why);
+        if expects_dead(e) {
+            self.dead.set(true);
+        }
         false
     }
 
@@ -1737,20 +1974,20 @@ impl Reads {
         if unsafe { ffi::PyDict_Check(holder.as_ptr()) == 0 || !key_ok(key.as_ptr()) } {
             return false;
         }
-        let i = match e.groups.iter().position(|g| g.holder.is(holder)) {
+        let i = match e.groups.iter().position(|g| g.holder.is(holder.as_ptr())) {
             Some(i) => i,
             None => {
-                e.groups.push(Group { holder: holder.clone().unbind(), kind: Holder::Dict, version: Cell::new(0), items: vec![], whole: None, len: None, late: false, late_at: String::new(), root: false });
+                e.groups.push(Group { holder: unsafe { Pin::weak(holder.as_ptr()) }, kind: Holder::Dict, version: Cell::new(0), items: vec![], whole: None, len: None, late: false, late_at: String::new(), root: false });
                 e.groups.len() - 1
             }
         };
         let g = &mut e.groups[i];
-        let has = g.items.iter().any(|it| it.key.is(key) || unsafe { equal(it.key.as_ptr(), key.as_ptr()) });
-        let whole = g.whole.as_ref().is_some_and(|w| w.items.iter().any(|x| x.is(value)));
+        let has = g.items.iter().any(|it| unsafe { exact::same(it.key.as_ptr(), key.as_ptr()) });
+        let whole = g.whole.as_ref().is_some_and(|w| w.items.iter().any(|x| x.is(value.as_ptr())));
         if has || whole {
             return false;
         }
-        g.items.push(Item { key: key.clone().unbind(), want: Want::Is, value: Some(value.clone().unbind()) });
+        g.items.push(Item { key: key.clone().unbind(), want: Want::Is, value: Some(unsafe { Pin::weak(value.as_ptr()) }) });
         g.version.set(0);
         true
     }
@@ -1789,7 +2026,7 @@ impl Reads {
     /// (After ``forget``: what was read from the region's own arguments is
     /// no such read.)
     fn values(&self, objects: Vec<Bound<'_, PyAny>>) -> Vec<usize> {
-        let read = unsafe { led(&*self.entries.get()) };
+        let read = unsafe { led(&*self.entries.get(), Start::Entries) };
         (0..objects.len()).filter(|&i| read.contains(&(objects[i].as_ptr() as usize))).collect()
     }
 
@@ -1800,41 +2037,45 @@ impl Reads {
         unsafe { *self.overlap.get() = Some(overlap) };
     }
 
-    /// Whether what the trace read leads to ``obj`` (see leads_to;
-    /// ``given``: the region's arguments): a region that holds an object
-    /// itself (a list it hands back, which was there before it ran) has the
-    /// right one for as long as its reads hold.
+    /// Whether what the trace read leads to ``obj`` from what was there
+    /// before the traced run (see led; ``given``: the region's arguments): a
+    /// region that holds an object itself (a list it hands back, which was
+    /// there before it ran) has the right one for as long as its reads hold.
     fn knows(&self, obj: &Bound<'_, PyAny>, given: Vec<Bound<'_, PyAny>>) -> bool {
         let given: Vec<*mut PyObject> = given.iter().map(|g| g.as_ptr()).collect();
-        unsafe { leads_to(&*self.entries.get(), &given, obj.as_ptr()) }
+        unsafe { led(&*self.entries.get(), Start::Before(&given)).contains(&(obj.as_ptr() as usize)) }
     }
 
     /// Drops what was read from these containers and objects: the region
-    /// checks them itself (its arguments, by structure).
-    fn forget(&self, holders: Vec<Bound<'_, PyAny>>) {
+    /// checks them itself (its arguments, by structure), or makes them anew.
+    /// Returns why the region cannot be, if it can't: a tensor the run asked
+    /// about was found only by what is dropped, and is neither an input of
+    /// the trace (the guard's to compare) nor a result of it.
+    fn forget(&self, holders: Vec<Bound<'_, PyAny>>) -> Option<&'static str> {
         let e = unsafe { &mut *self.entries.get() };
-        let given = |o: &Py<PyAny>| holders.iter().any(|h| o.is(h));
+        let given = |o: &Pin| holders.iter().any(|h| o.is(h.as_ptr()));
         e.groups.retain(|g| !given(&g.holder));
         e.typed.retain(|t| !given(&t.obj));
         e.reads.retain(|r| !given(&r.obj));
         e.dicted.retain(|d| !given(&d.obj));
-        unsafe { unfound(e) };
+        unsafe { unfound(e) }.then_some(UNLED)
     }
 
     /// The entries as text, for debugging.
     fn describe(&self, py: Python<'_>) -> Vec<String> {
         let e = unsafe { &*self.entries.get() };
-        let show = |o: &Py<PyAny>| {
+        let shown = |o: &Py<PyAny>| {
             let o = o.bind(py);
             let tp = o.get_type().name().map_or("?".into(), |n| n.to_string());
             if unsafe { exact_scalar(o.as_ptr()) } || o.is_none() || o.is_instance_of::<pyo3::types::PyBool>() { format!("{}", o.repr().map_or("?".into(), |r| r.to_string())) } else { format!("<{tp} at {:p}>", o.as_ptr()) }
         };
+        let show = |p: &Pin| unsafe { Bound::from_borrowed_ptr_or_opt(py, p.as_ptr()) }.map_or("<an object that died>".into(), |o| shown(&o.unbind()));
         let mut out = vec![format!("thread state {:#x}", self.thread)];
-        out.extend(unsafe { &*self.consts.get() }.iter().map(|c| format!("{} stays a {}", show(&c.obj), c.key)));
+        out.extend(unsafe { &*self.consts.get() }.iter().map(|c| format!("{} stays a {}", shown(&c.obj), c.key)));
         out.extend(e.keyed.iter().map(|k| format!("{}, which was asked about, stays a {}", show(&k.obj), k.key)));
         out.extend(e.typed.iter().map(|t| format!("type({}) is {}", show(&t.obj), show(&t.class))));
         for c in &e.classes {
-            let class = c.class.bind(py).getattr("__qualname__").map_or("?".into(), |n| n.to_string());
+            let class = show(&c.class);
             out.extend(c.names.iter().map(|(n, had)| format!("class {class} has {} for {}", had.as_ref().map_or("nothing".into(), &show), n.bind(py))));
         }
         for g in &e.groups {
@@ -1846,9 +2087,9 @@ impl Reads {
                 out.push(format!("{h} holds the same {} objects{}", w.items.len(), w.at));
             }
             out.extend(g.items.iter().map(|i| match i.want {
-                Want::Absent => format!("{} not in {h}", show(&i.key)),
-                Want::Present => format!("{} in {h}", show(&i.key)),
-                _ => format!("{h}[{}] {} {}", show(&i.key), if i.want == Want::Is { "is" } else { "==" }, i.value.as_ref().map_or("?".into(), &show)),
+                Want::Absent => format!("{} not in {h}", shown(&i.key)),
+                Want::Present => format!("{} in {h}", shown(&i.key)),
+                _ => format!("{h}[{}] {} {}", shown(&i.key), if i.want == Want::Is { "is" } else { "==" }, i.value.as_ref().map_or("?".into(), &show)),
             }));
         }
         out.extend(e.functions.iter().map(|f| format!("{} keeps its code and its defaults", show(&f.func))));
@@ -1873,64 +2114,6 @@ pub(super) unsafe fn instance_dict(obj: *mut PyObject) -> *mut PyObject {
     d
 }
 
-// Whether what was read (`e`) leads to the container `p` from something
-// that was there before the traced run. What was there before: the
-// namespaces globals were loaded from, the cells the run read and neither
-// made nor stored into, and `given` (the region's arguments). From those, by
-// what the entries expect by identity: an item of a namespace or of a
-// container that is led to (read alone, or with the whole content), an
-// attribute of an object that is led to (an item of its __dict__, a slot,
-// what its class or a base has under a name), the items of a tuple, the
-// self of a bound method, the defaults of a function. That an entry was
-// read FROM `p` leads nowhere: a run reads what it made too (made.rs).
-unsafe fn leads_to(e: &Entries, given: &[*mut PyObject], p: *mut PyObject) -> bool {
-    let mut known: HashSet<usize> = HashSet::new();
-    let mut fresh: Vec<*mut PyObject> = given.to_vec();
-    let is = |v: &Option<Py<PyAny>>| v.as_ref().map(|v| v.as_ptr());
-    loop {
-        // What an object that is led to brings with it.
-        while let Some(o) = fresh.pop() {
-            if o.is_null() || !known.insert(o as usize) {
-                continue;
-            }
-            if ffi::PyTuple_Check(o) != 0 {
-                fresh.extend((0..ffi::PyTuple_GET_SIZE(o)).map(|i| ffi::PyTuple_GET_ITEM(o, i)));
-            } else if !tr_bound_self(o).is_null() {
-                fresh.push(tr_bound_self(o));
-            } else if ffi::PyFunction_Check(o) != 0 {
-                fresh.push(ffi::PyFunction_GetDefaults(o));
-            } else if ffi::PyList_Check(o) == 0 && ffi::PyDict_Check(o) == 0 && ffi::PyAnySet_Check(o) == 0 {
-                fresh.push(instance_dict(o));
-            }
-            // Its class and the bases were there before it.
-            let class = if ffi::PyType_Check(o) != 0 { o as *mut ffi::PyTypeObject } else { ffi::Py_TYPE(o) };
-            let mro = (*class).tp_mro;
-            if !mro.is_null() && known.insert(class as usize) {
-                known.extend((0..ffi::PyTuple_GET_SIZE(mro)).map(|i| ffi::PyTuple_GET_ITEM(mro, i) as usize));
-            }
-        }
-        if known.contains(&(p as usize)) {
-            return true;
-        }
-        let led = |o: &Py<PyAny>| known.contains(&(o.as_ptr() as usize));
-        for g in e.groups.iter().filter(|g| g.root || led(&g.holder)) {
-            fresh.extend(g.items.iter().filter(|i| i.want == Want::Is).filter_map(|i| is(&i.value)));
-            fresh.extend(g.whole.iter().flat_map(|w| w.items.iter().map(|x| x.as_ptr())));
-        }
-        for r in e.reads.iter().filter(|r| r.want == Want::Is) {
-            let from = if r.name.is_none() { !super::made::own_cell(r.obj.as_ptr()) } else { led(&r.obj) };
-            fresh.extend(is(&r.value).filter(|_| from));
-        }
-        for c in e.classes.iter().filter(|c| led(&c.class)) {
-            fresh.extend(c.names.iter().filter_map(|(_, had)| is(had)));
-        }
-        fresh.retain(|o| !o.is_null() && !known.contains(&(*o as usize)));
-        if fresh.is_empty() {
-            return false;
-        }
-    }
-}
-
 /// Whether the run of the trace on this thread made the list, dict or set
 /// ``obj`` (see made.rs): a region builds it anew on every call.
 #[pyfunction]
@@ -1940,12 +2123,12 @@ pub fn _region_made(obj: &Bound<'_, PyAny>) -> bool {
 
 /// Whether the trace running on this thread came by the container ``obj``
 /// through what it read, as far as it has run, from something that was
-/// there before it (see leads_to; ``given``: the region's arguments): then
+/// there before it (see led; ``given``: the region's arguments): then
 /// ``obj`` was there before the traced run.
 #[pyfunction]
 pub fn _region_known(obj: &Bound<'_, PyAny>, given: Vec<Bound<'_, PyAny>>) -> bool {
     let given: Vec<*mut PyObject> = given.iter().map(|g| g.as_ptr()).collect();
-    TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| unsafe { leads_to(&t.entries, &given, obj.as_ptr()) }))
+    TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| unsafe { led(&t.entries, Start::Before(&given)).contains(&(obj.as_ptr() as usize)) }))
 }
 
 /// The body of the trace on this thread is over, and everything is still as
@@ -1954,10 +2137,20 @@ pub fn _region_known(obj: &Bound<'_, PyAny>, given: Vec<Bound<'_, PyAny>>) -> bo
 /// was read, unless a write the run recorded explains it (the holder is one
 /// the run wrote to, the cell one it made or stored into). `_region_reads`
 /// refuses the trace for each of them whose holder outlives the run.
+/// ``ours``: the tensors that are the trace's inputs or the results of the
+/// operators it recorded, as far as they are alive; of the tensors the run
+/// asked about, those are the guard's to compare or the graph's to make.
 #[pyfunction]
-pub fn _region_settled() {
+pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
     TRACE.with_borrow_mut(|t| {
         let Some(t) = t else { return };
+        for o in &ours {
+            if let Some(i) = t.asked_at.get(&(o.as_ptr() as usize))
+                && unsafe { ffi::PyWeakref_GetObject(t.asked_of[*i].weak.as_ptr()) } == o.as_ptr()
+            {
+                t.asked_of[*i].ours = true;
+            }
+        }
         let e = &t.entries;
         let wrote: HashSet<usize> = t.written.iter().map(|(h, _)| *h).chain(t.changed.iter().copied()).collect();
         let mut stale = vec![];
@@ -1994,6 +2187,9 @@ pub fn _region_settled() {
         t.stale = stale;
     });
 }
+
+// Why a trace that asked about such a tensor is no region (see _region_reads).
+const UNLED: &str = "it asks about a tensor that is none of its inputs, that no operator of its run made and that none of its reads leads to";
 
 static MISSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -2036,7 +2232,7 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
             let tp = c.class.as_ptr() as *mut ffi::PyTypeObject;
             for (name, had) in &mut c.names {
                 let found = tr_type_lookup(tp, name.as_ptr());
-                *had = (!found.is_null()).then(|| own(found));
+                *had = (!found.is_null()).then(|| counted(found));
             }
         }
         // What the run read from a container it made is no entry: every
@@ -2063,7 +2259,7 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
         // _region_settled), in something that outlives the run: a region
         // without that check would run on a state its trace did not see.
         let stale = |what: &str| -> PyResult<(Option<Py<Reads>>, Option<String>)> { Ok((None, Some(format!("it read {what} when the traced run ends, and no write the run recorded explains it")))) };
-        let at = |o: &Py<PyAny>| o.as_ptr() as usize;
+        let at = |o: &Pin| o.as_ptr() as usize;
         if let Some((_, _, what)) = t.stale.iter().find(|(kind, a, _)| match kind {
             Stale::Cell => e.reads.iter().any(|r| r.name.is_none() && at(&r.obj) == *a),
             Stale::Function => e.functions.iter().any(|f| at(&f.func) == *a),
@@ -2082,13 +2278,19 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
         e.reads.retain(|r| r.name.is_some() || r.holds() || !super::made::own_cell(r.obj.as_ptr()));
         sweep(&mut e);
         // The tensors asked about that a read found: each with the key it
-        // had when it was first asked.
-        let found = led(&e);
+        // had when it was first asked. One that no read leads to is the
+        // guard's or the graph's if it is the trace's own; any other came
+        // from somewhere no entry stands for, and nothing would say on a
+        // later call that it is the one, or as it was.
+        let found = led(&e, Start::Entries);
         for a in t.asked_of {
             // None: it died with the run.
             let o = ffi::PyWeakref_GetObject(a.weak.as_ptr());
-            if o == ffi::Py_None() || !found.contains(&(o as usize)) {
+            if o == ffi::Py_None() || (a.ours && !found.contains(&(o as usize))) {
                 continue;
+            }
+            if !found.contains(&(o as usize)) {
+                return Ok((None, Some(UNLED.into())));
             }
             let Some(key) = a.key else {
                 return Ok((None, Some(format!("it asks about a {} it read from state that has no key (no plain dense tensor of exactly torch.Tensor or nn.Parameter), which it cannot check", type_name(o)))));
@@ -2096,8 +2298,9 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
             if !key.holds(o) {
                 return stale(&format!("the class, dtype, device, shape or requires_grad of a {}, which is another", type_name(o)));
             }
-            e.keyed.push(Keyed { obj: own(o), key });
+            e.keyed.push(Keyed { obj: counted(o), key, ours: a.ours });
         }
+        weaken(&mut e);
     }
     let reads = Reads {
         thread: t.thread,
@@ -2106,7 +2309,8 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
         rebind: GilCell::new(None),
         moved: Cell::new(false),
         overlap: GilCell::new(None),
-        sweeps: Cell::new(2),
+        lost: Cell::new(false),
+        dead: Cell::new(false),
         misses: Cell::new(0),
         last: Cell::new(""),
         hot: Cell::new(0),

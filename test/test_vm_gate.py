@@ -14,6 +14,7 @@ import contextlib
 import dis
 import enum
 import functools
+import gc
 import glob
 import json
 import math
@@ -27,6 +28,7 @@ import sys
 import traceback
 import types
 import unittest
+import unittest.mock
 import warnings
 import weakref
 
@@ -3298,6 +3300,399 @@ class TestVmRulesOps(TestCase):
             met = sum(traces for _, what, _, traces, _, _ in rows if what == stop)
             named = sum(f"no row for: {stop} " in why for why in refusals)
             self.assertEqual(met, named, msg=f"{stop}: {refusals}")
+
+
+# How a program comes to hand a region an object the region then knows by
+# identity, one entry per class of object and per way it is held: the
+# function, and what makes a fresh object where the program keeps it (the
+# arguments that follow the tensor, and the objects to watch by name).
+class PinCfg:
+    def __init__(self):
+        self.k = 2.0
+
+    def scale(self, x):
+        return x * self.k
+
+
+class PinSlots:
+    __slots__ = ("k", "content")
+
+    def __init__(self):
+        self.k = 2.0
+        self.content = PinCfg()
+
+
+class PinModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.full((8,), 2.0))
+
+    def forward(self, x):
+        return x * self.weight
+
+
+class PinBox:
+    pass
+
+
+PIN_STATE = {}
+PIN_LIST = [None]
+PIN_BOX = PinBox()
+# Where the test's tensors are.
+PIN_DEVICE = ["cpu"]
+
+
+def pin_module():
+    return PinModule().to(PIN_DEVICE[0])
+
+
+def pin_helper():
+    def helper(y):
+        return y * 2.0
+
+    return helper
+
+
+def pin_argument(x, cfg):
+    return ((x.sin() * cfg.k).cos() + 1).tanh().exp()
+
+
+def pin_argument_in_a_tuple(x, pair):
+    return ((x.sin() * pair[0].k).cos() + 1).tanh().exp()
+
+
+def pin_called(x, call):
+    return (call(x.sin()).cos() + 1).tanh().exp()
+
+
+def pin_from_a_dict(x):
+    return ((x.sin() * PIN_STATE["cfg"].k).cos() + 1).tanh().exp()
+
+
+def pin_from_a_global(x):
+    return ((x.sin() * PIN_GLOBAL.k).cos() + 1).tanh().exp()
+
+
+def pin_from_an_attribute(x):
+    return ((x.sin() * PIN_BOX.cfg.k).cos() + 1).tanh().exp()
+
+
+def pin_from_a_list(x):
+    return ((x.sin() * PIN_LIST[0].k).cos() + 1).tanh().exp()
+
+
+def pin_called_from_a_global(x):
+    return (PIN_CALLED(x.sin()).cos() + 1).tanh().exp()
+
+
+def pin_tensor_from_a_global(x):
+    return ((x.sin() * PIN_TENSOR).cos() + 1).tanh().exp()
+
+
+def pin_tensor_also_handed(x, t):
+    return ((x.sin() * t + PIN_TENSOR).cos() + 1).tanh().exp()
+
+
+def pin_dict_from_a_global(x):
+    return ((x.sin() * PIN_DICT["k"]).cos() + 1).tanh().exp()
+
+
+def pin_tuple_from_a_global(x):
+    return ((x.sin() * PIN_TUPLE[0]).cos() + 1).tanh().exp()
+
+
+def pin_set_from_a_global(x):
+    return ((x.sin() * len(PIN_SET)).cos() + 1).tanh().exp()
+
+
+def pin_class_from_a_global(x):
+    return ((x.sin() * PIN_CLASS.k).cos() + 1).tanh().exp()
+
+
+def pin_cell():
+    cfg = PinCfg()
+
+    def pin_from_a_cell(x):
+        return ((x.sin() * cfg.k).cos() + 1).tanh().exp()
+
+    return pin_from_a_cell
+
+
+def pin_as_argument(make, watch=None):
+    def fresh():
+        o = make()
+        return (o,), {"object": o} if watch is None else watch(o)
+
+    return fresh
+
+
+def pin_as_global(name, make, watch=None):
+    def fresh():
+        o = globals()[name] = make()
+        return (), {"object": o} if watch is None else watch(o)
+
+    return fresh
+
+
+def pin_as_global_and_argument(name, make):
+    def fresh():
+        o = globals()[name] = make()
+        return (o,), {"object": o}
+
+    return fresh
+
+
+def pin_put(put, make):
+    def fresh():
+        o = make()
+        put(o)
+        return (), {"object": o}
+
+    return fresh
+
+
+def pin_module_parts(m):
+    return {"object": m, "weight": m.weight}
+
+
+def pin_method_parts(method):
+    return {"object": method.__self__}
+
+
+def pin_content(holder):
+    if type(holder) is PinSlots:
+        return {"content": holder.content}
+    if type(holder) is set:
+        return {"object": holder, "content": next(iter(holder))}
+    return {"content": holder["s"] if type(holder) is dict else holder[1]}
+
+
+def pin_runs(compiled):
+    """How many times the regions of a function have run."""
+    return sum(r["runs"] for r in vm.regions(compiled) if r["state"] == "region")
+
+
+PIN_FROM_A_CELL = pin_cell()
+PIN_WAYS = {
+    "argument": (pin_argument, pin_as_argument(PinCfg)),
+    "argument_with_slots": (pin_argument, pin_as_argument(PinSlots, pin_content)),
+    "argument_in_a_tuple": (
+        pin_argument_in_a_tuple,
+        pin_as_argument(lambda: (PinCfg(), 1), lambda pair: {"object": pair[0]}),
+    ),
+    "bound_method_argument": (
+        pin_called,
+        pin_as_argument(lambda: PinCfg().scale, pin_method_parts),
+    ),
+    "module_argument": (pin_called, pin_as_argument(pin_module, pin_module_parts)),
+    "function_argument": (pin_called, pin_as_argument(pin_helper)),
+    "item_of_a_dict": (
+        pin_from_a_dict,
+        pin_put(lambda o: PIN_STATE.update(cfg=o), PinCfg),
+    ),
+    "global": (pin_from_a_global, pin_as_global("PIN_GLOBAL", PinCfg)),
+    "attribute": (
+        pin_from_an_attribute,
+        pin_put(lambda o: setattr(PIN_BOX, "cfg", o), PinCfg),
+    ),
+    "item_of_a_list": (
+        pin_from_a_list,
+        pin_put(lambda o: PIN_LIST.__setitem__(0, o), PinCfg),
+    ),
+    "content_of_a_cell": (
+        PIN_FROM_A_CELL,
+        pin_put(
+            lambda o: setattr(PIN_FROM_A_CELL.__closure__[0], "cell_contents", o),
+            PinCfg,
+        ),
+    ),
+    "global_function": (
+        pin_called_from_a_global,
+        pin_as_global("PIN_CALLED", pin_helper),
+    ),
+    "global_module": (
+        pin_called_from_a_global,
+        pin_as_global("PIN_CALLED", pin_module, pin_module_parts),
+    ),
+    "global_tensor": (
+        pin_tensor_from_a_global,
+        pin_as_global(
+            "PIN_TENSOR", lambda: torch.full((8,), 2.0, device=PIN_DEVICE[0])
+        ),
+    ),
+    "global_tensor_also_an_argument": (
+        pin_tensor_also_handed,
+        pin_as_global_and_argument(
+            "PIN_TENSOR", lambda: torch.full((8,), 2.0, device=PIN_DEVICE[0])
+        ),
+    ),
+    "global_dict": (
+        pin_dict_from_a_global,
+        pin_as_global("PIN_DICT", lambda: {"k": 2.0, "s": PinCfg()}, pin_content),
+    ),
+    "global_tuple": (
+        pin_tuple_from_a_global,
+        pin_as_global("PIN_TUPLE", lambda: (2.0, PinCfg()), pin_content),
+    ),
+    "global_set": (
+        pin_set_from_a_global,
+        pin_as_global("PIN_SET", lambda: {PinCfg()}, pin_content),
+    ),
+    "global_class": (
+        pin_class_from_a_global,
+        pin_as_global("PIN_CLASS", lambda: type("PinMade", (), {"k": 2.0})),
+    ),
+}
+# What a region still keeps alive after the program dropped it, by way and
+# watched object, with the reason: for as long as the place keeps the region
+# (or, for a constant, the record of its trace). Everything else is gone the
+# moment the program lets go of it.
+PIN_CONSTANT = (
+    "a tensor the region's graph reads as a constant is an argument of the "
+    "compiled graph and is kept by the type the trace's record has for it"
+)
+PIN_KEPT = {
+    ("argument_with_slots", "content"): (
+        "an instance of a class with __slots__ and no __weakref__ takes no "
+        "weak reference: the region counts it, with what it holds"
+    ),
+    ("global_dict", "content"): (
+        "an exact dict that is no instance's __dict__ takes no weak reference "
+        "and has no owner to find it through: counted, with what it holds"
+    ),
+    ("global_tuple", "content"): (
+        "a tuple takes no weak reference: counted, with what it holds"
+    ),
+    ("global_tensor", "object"): PIN_CONSTANT,
+    ("global_tensor_also_an_argument", "object"): (
+        "an input the trace also read from state is counted by the check of "
+        "how the region's tensors share memory"
+    ),
+    ("global_module", "weight"): PIN_CONSTANT,
+    ("module_argument", "weight"): PIN_CONSTANT,
+}
+
+
+class TestVmPins(TestCase):
+    """A region keeps no object of the program alive. What it compares by
+    identity or reads from when it is entered (an argument, a module, a
+    function, what a namespace, an attribute, an item or a cell holds) it
+    holds by a weak reference, so the object dies when the program drops it;
+    a region whose object died can never run again and is dropped when its
+    place is next entered, and no check compares the address of an object
+    that died. PIN_KEPT names what is still kept, and why."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, compiled, fn, extra, first, n):
+        for call in range(first, first + n):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=PIN_DEVICE[0])
+            self.assertEqual(compiled(x, *extra), fn(x, *extra), atol=0, rtol=0)
+
+    @parametrize("way", list(PIN_WAYS))
+    @checks_isolated
+    def test_an_object_the_program_drops_is_gone(self, device, way):
+        PIN_DEVICE[0] = device
+        fn, fresh = PIN_WAYS[way]
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        extra, watched = fresh()
+        watched = {name: weakref.ref(o) for name, o in watched.items()}
+        self.calls(compiled, fn, extra, 0, 6)
+        ran = pin_runs(compiled)
+        self.assertGreater(ran, 0, msg="no region ran on the object")
+        # The program's last references to the first object go here.
+        extra, _ = fresh()
+        gc.collect()
+        kept = {name for name, ref in watched.items() if ref() is not None}
+        listed = {name for name in watched if (way, name) in PIN_KEPT}
+        self.assertEqual(kept, listed, msg=f"{way}: kept alive {sorted(kept)}")
+        self.calls(compiled, fn, extra, 6, 8)
+        states = [r["state"] for r in vm.regions(compiled)]
+        self.assertGreater(pin_runs(compiled), 0, msg=f"none on the second: {states}")
+
+    def test_what_is_kept_names_a_way(self, device):
+        self.assertLessEqual({way for way, _ in PIN_KEPT}, set(PIN_WAYS))
+
+    @checks_isolated
+    def test_a_new_object_on_every_call_is_not_traced_for_ever(self, device):
+        """Each call's object dies with the call, and its region with it.
+        The place gives up after a few calls in a row that each brought an
+        object it had no region for, as it does for objects that live on."""
+        import torch._rust_inductor as tracer
+
+        PIN_DEVICE[0] = device
+        fn, fresh = PIN_WAYS["argument"]
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        before = tracer.stats["traced"]
+        for call in range(16):
+            extra, _ = fresh()
+            self.calls(compiled, fn, extra, call, 1)
+        self.assertLessEqual(tracer.stats["traced"] - before, 4)
+
+    @checks_isolated
+    def test_dropping_a_region_runs_no_code_as_the_program(self, device):
+        """A place tells the tracer of a region it dropped by calling a
+        Python function of the engine's: no frame of the program's, so
+        nothing of it is among the program's calls in vm.regions."""
+        import torch._rust_inductor as tracer
+
+        PIN_DEVICE[0] = device
+        fn, fresh = PIN_WAYS["argument"]
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        extra, _ = fresh()
+        self.calls(compiled, fn, extra, 0, 6)
+        told, dropped = [], tracer._dropped
+
+        def noting(func, why):
+            told.append(why)
+            dropped(func, why)
+
+        with unittest.mock.patch.object(tracer, "_dropped", noting):
+            extra, _ = fresh()
+            self.calls(compiled, fn, extra, 6, 2)
+        self.assertEqual(told, ["gone"])
+        where = [r["where"] for r in vm.regions(compiled)]
+        mine = [w for w in where if "_dropped" in w or "noting" in w]
+        self.assertEqual(mine, [], msg=str(where))
+
+    @parametrize("way", ["argument", "item_of_a_dict"])
+    @checks_isolated
+    def test_an_object_at_the_address_of_one_that_died_enters_no_region(
+        self, device, way
+    ):
+        PIN_DEVICE[0] = device
+        fn, fresh = PIN_WAYS[way]
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        # Among objects of its class that live on, so that the memory of the
+        # one that dies is the next to be handed out for another. Which
+        # memory an object gets is the allocator's to say: tried again, with
+        # the next object, when it was another.
+        around = [PinCfg() for _ in range(1024)]
+        for attempt in range(8):
+            extra, watched = fresh()
+            around += [PinCfg() for _ in range(1024)]
+            address = id(watched["object"])
+            self.calls(compiled, fn, extra, 0, 6)
+            self.assertGreater(pin_runs(compiled), 0, msg=f"attempt {attempt}")
+            del watched
+            extra = None
+            PIN_STATE.clear()
+            extra, watched = fresh()
+            if id(watched["object"]) != address:
+                around.append(extra)
+                continue
+            # A region entered for it would compute with the 2.0 of the
+            # object that died.
+            watched["object"].k = 3.0
+            ran = pin_runs(compiled)
+            self.calls(compiled, fn, extra, 6, 1)
+            self.assertLessEqual(pin_runs(compiled), ran)
+            return
+        self.fail("no object was made at the address of one that died")
+
+
+instantiate_device_type_tests(TestVmPins, globals())
 
 
 if __name__ == "__main__":
