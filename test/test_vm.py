@@ -905,15 +905,19 @@ def facts_of_the_program(x, t):
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmTensorFacts(TestCase):
     """A region finds a tensor by its class, dtype, device, sizes, strides
-    and requires_grad, and computes its values. A block that asks a tensor
-    anything else (which memory it is, how often it was written, what
-    autograd or the program keeps on it) is no region."""
+    and requires_grad, and computes its values. What else a block asks a
+    tensor (which memory it is, how often it was written, what autograd or
+    the program keeps on it) is asked on every call: a region ends in front
+    of a question the engine knows by name, and a trace that asks any other
+    is refused."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def no_region(self, fn, device, arg, what):
+    def no_region(self, fn, device, arg, what, ops=7):
         # Ten calls; `arg(x, call)` is the tensor that is asked: one for the
         # first six calls, another, alike for a region, for the last four.
+        # `ops`: the operations in front of the question, which are a region
+        # (None: the name is the program's own, and the trace is refused).
         g = vm_early(fn)
         for call in range(10):
             x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
@@ -927,6 +931,11 @@ class TestVmTensorFacts(TestCase):
             for r in vm.regions(g)
             if r["function"] == fn.__name__ and r["kind"] == "block"
         ]
+        if ops is not None:
+            found = [(r["state"], r["ops"]) for r in rows[:1]]
+            self.assertEqual(found, [("region", ops)], msg=str(rows))
+            self.assertGreater(rows[0]["runs"], 0, msg=str(rows))
+            return
         self.assertEqual([r["state"] for r in rows[:1]], ["refused"], msg=str(rows))
         self.assertIn(f"it reads a tensor's .{what} ", rows[0]["why"])
 
@@ -983,7 +992,9 @@ class TestVmTensorFacts(TestCase):
     @isolated
     def test_output_nr(self, device):
         both = torch.ones(2, 8, device=device, requires_grad=True).unbind(0)
-        self.no_region(facts_output_nr, device, lambda x, late: both[late], "output_nr")
+        self.no_region(
+            facts_output_nr, device, lambda x, late: both[late], "output_nr", ops=8
+        )
 
     @isolated
     def test_retains_grad(self, device):
@@ -995,6 +1006,7 @@ class TestVmTensorFacts(TestCase):
             device,
             lambda x, late: kept if late else plain,
             "retains_grad",
+            ops=8,
         )
 
     @isolated
@@ -1006,6 +1018,7 @@ class TestVmTensorFacts(TestCase):
             device,
             lambda x, late: second if late else first,
             "note",
+            ops=None,
         )
 
 
@@ -3277,11 +3290,13 @@ class TestVmRegionReasons(TestCase):
 
     @isolated
     def test_trace_that_reads_what_no_check_covers(self):
-        weight = torch.randn(8, requires_grad=True)
-        weight.grad = torch.randn(8)
-        rows = self.rows(reads_through(lambda y: y * weight.grad), torch.randn(4, 8))
+        # What the program put on the tensor itself. (A name the engine
+        # lists, such as .grad, ends the region in front of the load.)
+        weight = torch.randn(8)
+        weight.scale = 2.0
+        rows = self.rows(reads_through(lambda y: y * weight.scale), torch.randn(4, 8))
         (row,) = (r for r in rows if r["state"] == "refused")
-        self.assertIn("it reads a tensor's .grad", row["why"])
+        self.assertIn("it reads a tensor's .scale", row["why"])
         self.assertEqual(row["kind"], "block")
 
     @isolated

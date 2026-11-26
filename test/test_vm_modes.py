@@ -1607,6 +1607,28 @@ def modes_under_a_mode(x):
     return modes_around(x, 2.0)
 
 
+# A tensor is asked what no region checks, behind operations and in front
+# of others, in the block and in a callee.
+def modes_asks_grad(x, t):
+    y = ((x.sin() * 2).cos() + 1).tanh() + t
+    if t.grad is not None:
+        y = y + t.grad
+    return (y * 2).sin().cos().tanh()
+
+
+def modes_has_grad(t):
+    return t.grad is not None
+
+
+def modes_asks_in_a_callee(x, t):
+    y = ((x.sin() * 2).cos() + 1).tanh() + t
+    if modes_has_grad(t):
+        y = y + 1
+    return (y * 2).sin().cos().tanh()
+
+
+MODES_ASKS = [modes_asks_grad, modes_asks_in_a_callee]
+
 MODES_READS = [
     modes_reads_flag,
     modes_reads_deterministic,
@@ -1690,6 +1712,26 @@ class TestVmStateRead(TestCase):
             self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
         # The operations in front of the read are still a region.
         self.assertGreater(region_runs(compiled), 0)
+
+    @parametrize("fn", MODES_ASKS, name_fn=lambda fn: fn.__name__[6:])
+    @isolated
+    def test_question_no_region_checks_ends_the_region_in_front_of_it(self, device, fn):
+        # The six operations in front of the question are a region and so are
+        # the four behind it; the answer is the call's own.
+        plain = torch.ones(8, device=device, requires_grad=True)
+        graded = torch.ones(8, device=device, requires_grad=True)
+        graded.grad = torch.full((8,), 0.5, device=device)
+        compiled = vm(fn, passes=EARLY)
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            t = graded if 6 <= call < 9 else plain
+            got, want = compiled(x, t), fn(x, t)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        rows = [r for r in vm.regions(compiled) if r["function"] == fn.__name__]
+        blocks = sorted((r["state"], r["ops"]) for r in rows if r["kind"] == "block")
+        self.assertEqual(blocks[:2], [("region", 4), ("region", 6)], msg=str(rows))
+        self.assertNotIn("refused", [state for state, _ in blocks], msg=str(rows))
 
 
 instantiate_device_type_tests(TestVmStateRead, globals())

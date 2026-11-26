@@ -459,6 +459,18 @@ fn handed(prep: &Prepared, call: ValueId) -> &[ValueId] {
     args.get(from..).unwrap_or(&[])
 }
 
+// The name an attribute or method load asks a tensor for, if it is one that
+// a region neither checks nor computes (exec/reads.rs): a trace that makes
+// the load is refused, so the load is made where the code makes it, behind
+// the region of what is in front of it.
+pub fn asks_unchecked(prep: &Prepared, v: ValueId) -> Option<&str> {
+    let cfg = &prep.cfg;
+    let (Op::LoadAttr(n) | Op::LoadMethod(n)) = cfg[v].op else { return None };
+    let name = cfg.names[n as usize].as_str();
+    let tensor = kinds(prep, cfg[v].args[0]).is_some_and(|ks| ks.iter().any(|k| matches!(k, Kind::Tensor(_))));
+    (tensor && super::reads::UNCHECKED_OF_A_TENSOR.contains(&name)).then_some(name)
+}
+
 // An instruction that is no call and entered no frame: what C code of its
 // operands' types did.
 pub fn instr(py: Python<'_>, prep: &Prepared, v: ValueId, own: &Own) -> Result<(), String> {
@@ -489,7 +501,10 @@ pub fn instr(py: Python<'_>, prep: &Prepared, v: ValueId, own: &Own) -> Result<(
                 Err("a defaultdict and a key the region is not found by: a key it lacks is put in".into())
             }
         }
-        Op::LoadAttr(_) | Op::LoadMethod(_) | Op::ToBool => ins.args.iter().try_for_each(|a| operand(py, prep, *a, Use::Ask, own)),
+        Op::LoadAttr(_) | Op::LoadMethod(_) | Op::ToBool => match asks_unchecked(prep, v) {
+            Some(name) => Err(format!("a tensor asked for its .{name}, which no region checks")),
+            None => ins.args.iter().try_for_each(|a| operand(py, prep, *a, Use::Ask, own)),
+        },
         Op::Binary(_) | Op::Compare(_) => reads(&ins.args),
         Op::GetIter | Op::IterNext => takes(&ins.args),
         Op::Bytecode { opcode, .. } => match opcode {

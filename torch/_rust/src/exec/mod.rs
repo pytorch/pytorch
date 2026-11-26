@@ -2138,7 +2138,7 @@ fn observed_ops(
                     false
                 }
                 op if !op.can_raise() => true,
-                Op::LoadAttr(_) | Op::LoadMethod(_) => no_frames() && plain(&ins.args[0], true),
+                Op::LoadAttr(_) | Op::LoadMethod(_) => no_frames() && plain(&ins.args[0], true) && shown::asks_unchecked(prep, *v).is_none(),
                 // On plain objects, running no Python code.
                 Op::StoreAttr(_) => {
                     let objects = matches!(types[ins.args[1].idx()].ty.as_ref().and_then(Ty::kinds), Some(ks) if ks.iter().all(|k| matches!(k, Kind::Object(_))));
