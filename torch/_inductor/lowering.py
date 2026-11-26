@@ -8,7 +8,6 @@ import logging
 import math
 import operator
 import os
-import struct
 import sys
 import warnings
 from collections import Counter, defaultdict
@@ -581,7 +580,7 @@ def _register_lowering(
             and V.graph.current_node in V.graph.cuda_mul_mutation_storage_nodes
         ):
             # Native mutations must retain their storage for saved activations too.
-            native_destination = _cuda_mul_mutation_destination(V.graph.current_node)
+            native_destination = _cuda_native_mutation_destination(V.graph.current_node)
             if native_destination is not None:
                 destination, metadata = native_destination
                 if (
@@ -3554,6 +3553,22 @@ def inductor_random(
 
 make_fallback(inductor_prims.rand_eager_offset)
 make_fallback(inductor_prims.rand_eager_offsets)
+fallback_masked_sum = fallback_handler(inductor_prims.masked_sum)
+
+
+@register_lowering(inductor_prims.masked_sum, type_promotion_kind=None)
+def masked_sum(input, mask):
+    if is_strict_cuda_triton(input.get_device()) and (
+        is_float_dtype(input.get_dtype())
+        or input.get_dtype() in (torch.complex32, torch.complex64, torch.complex128)
+    ):
+        from .kernel.cuda_masked_sum import cuda_masked_sum
+
+        return cuda_masked_sum(input, mask)
+    return fallback_masked_sum(input, mask)
+
+
+make_fallback(torch.ops.prims._assert_nonnegative.default)
 
 
 @register_lowering(inductor_prims.randint, type_promotion_kind=None)
@@ -3975,19 +3990,208 @@ def constrain_to_fx_exact_strides(fx_node, *args, **kwargs):
     )
 
 
-# The mv decomposition retains native CUDA reduction order under strict numerics.
-make_fallback(
-    aten.mv.default,
-    layout_constraint=constrain_to_fx_exact_strides,
-    override_decomp=True,
+fallback_mv = fallback_handler(aten.mv.default)
+_maybe_layout_constraints[aten.mv.default] = constrain_to_fx_exact_strides
+
+
+@register_lowering(aten.mv.default, type_promotion_kind=None)
+def mv(input, vector):
+    if is_strict_cuda_triton(input.get_device()) and input.get_dtype() in (
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.complex64,
+        torch.complex128,
+    ):
+        from .kernel.cuda_native_mv import cuda_native_mv
+
+        return cuda_native_mv(input, vector)
+    return fallback_mv(input, vector)
+
+
+fallback_batch_norm_update_stats = fallback_handler(
+    aten.batch_norm_update_stats.default
 )
 
 
 for _batch_norm_op in NATIVE_BATCH_NORM_OPS:
+    if not isinstance(_batch_norm_op, torch._ops.OpOverload):
+        raise AssertionError(
+            f"Expected torch._ops.OpOverload, got {type(_batch_norm_op)!r}"
+        )
     make_fallback(
         _batch_norm_op,
         layout_constraint=constrain_to_fx_exact_strides,
         override_decomp=True,
+    )
+
+
+fallback_native_batch_norm_backward = fallback_handler(
+    aten.native_batch_norm_backward.default
+)
+
+
+@register_lowering(aten.native_batch_norm_backward.default, type_promotion_kind=None)
+def native_batch_norm_backward(
+    grad_out,
+    input,
+    weight,
+    running_mean,
+    running_var,
+    save_mean,
+    save_invstd,
+    train,
+    eps,
+    output_mask,
+):
+    r"""Generate CUDA batch norm gradients with native reduction order."""
+    if config.strict_reduction and is_strict_cuda_triton(input.get_device()):
+        from .kernel.cuda_batch_norm import (
+            cuda_bn_backward_eval_input,
+            cuda_bn_backward_fused,
+        )
+
+        if not any(output_mask) and not train:
+            return None, None, None
+        if not train and not output_mask[1] and not output_mask[2]:
+            return cuda_bn_backward_eval_input(
+                grad_out, input, weight, running_var, save_invstd, eps
+            )
+        node = V.graph.current_node
+        grad_node, input_node = node.args[:2]
+        if not isinstance(grad_node, torch.fx.Node) or not isinstance(
+            input_node, torch.fx.Node
+        ):
+            raise AssertionError(
+                f"Expected non-None values, got {isinstance=}, {grad_node=}, {input_node=}, {torch=}"
+            )
+        value = input_node.meta["val"]
+        grad_value = grad_node.meta["val"]
+        input_channels_last = (
+            value.is_contiguous()
+            and value.stride(1) == 1
+            or value.is_contiguous(memory_format=torch.channels_last)
+            or value.is_contiguous(memory_format=torch.channels_last_3d)
+        )
+        grad_channels_last = (
+            grad_value.is_contiguous()
+            and grad_value.stride(1) == 1
+            or grad_value.is_contiguous(memory_format=torch.channels_last)
+            or grad_value.is_contiguous(memory_format=torch.channels_last_3d)
+        )
+        can_index = all(
+            tensor.numel() < 2**31
+            and sum(
+                (size - 1) * stride
+                for size, stride in zip(tensor.shape, tensor.stride())
+            )
+            < 2**31
+            for tensor in (value, grad_value)
+        )
+        fused = bool(output_mask[0] and not input_channels_last and can_index)
+        channels_last = False
+        if not fused and input_channels_last and grad_channels_last and can_index:
+            dtype = torch.float64 if value.dtype == torch.float64 else torch.float32
+            mean_node, invstd_node = node.args[5:7]
+            mean = (
+                mean_node.meta["val"] if isinstance(mean_node, torch.fx.Node) else None
+            )
+            invstd = (
+                invstd_node.meta["val"]
+                if isinstance(invstd_node, torch.fx.Node)
+                else None
+            )
+            if not train and (mean is None or mean.numel() == 0):
+                running_mean_node = node.args[3]
+                if not isinstance(running_mean_node, torch.fx.Node):
+                    raise AssertionError(
+                        f"Expected torch.fx.Node, got {type(running_mean_node)!r}"
+                    )
+                mean = running_mean_node.meta["val"].to(dtype)
+            weight_node = node.args[2]
+            weight_contiguous = weight is None or (
+                isinstance(weight_node, torch.fx.Node)
+                and weight_node.meta["val"].is_contiguous()
+            )
+            channels_last = (
+                weight_contiguous
+                and mean is not None
+                and mean.is_contiguous()
+                and (invstd is None or invstd.is_contiguous())
+            )
+        return cuda_bn_backward_fused(
+            grad_out,
+            input,
+            weight,
+            running_mean,
+            running_var,
+            save_mean,
+            save_invstd,
+            train,
+            eps,
+            output_mask,
+            channels_last=channels_last,
+            value=value,
+            grad_value=grad_value,
+            fused=fused,
+        )
+    return fallback_native_batch_norm_backward(
+        grad_out,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_invstd,
+        train,
+        eps,
+        output_mask,
+    )
+
+
+fallback_batch_norm_backward = fallback_handler(aten.batch_norm_backward.default)
+
+
+@register_lowering(aten.batch_norm_backward.default, type_promotion_kind=None)
+def batch_norm_backward(
+    grad_out,
+    input,
+    weight,
+    running_mean,
+    running_var,
+    save_mean,
+    save_invstd,
+    train,
+    eps,
+    output_mask,
+    reserve,
+):
+    if config.strict_reduction and is_strict_cuda_triton(input.get_device()):
+        return native_batch_norm_backward(
+            grad_out,
+            input,
+            weight,
+            running_mean,
+            running_var,
+            save_mean,
+            save_invstd,
+            train,
+            eps,
+            output_mask,
+        )
+    return fallback_batch_norm_backward(
+        grad_out,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_invstd,
+        train,
+        eps,
+        output_mask,
+        reserve,
     )
 
 
@@ -4223,6 +4427,7 @@ make_fallback(aten.histc)
 make_fallback(aten.histogram.bin_ct)
 make_fallback(aten._histogramdd_bin_edges.default)
 make_fallback(aten._histogramdd_from_bin_cts.default)
+
 
 # Need templated kernel
 make_fallback(aten.addbmm)
@@ -8581,7 +8786,95 @@ def _original_aten_reference_value(node):
     return mutation[1] if isinstance(mutation, tuple) else node.meta.get("val")
 
 
-def _cuda_mul_mutation_destination(node, native_destination=None, input_node=None):
+def _cuda_native_typed_destinations(native, source_value, view_path=()):
+    from torch.fx.experimental.proxy_tensor import (
+        _replay_original_aten_view,
+        disable_proxy_modes_tracing,
+    )
+    from torch.fx.experimental.symbolic_shapes import (
+        _ignore_fresh_unbacked_symbols_tls_context,
+        statically_known_true,
+        sym_eq,
+    )
+    from torch.utils._python_dispatch import _disable_current_modes
+
+    from .fx_utils import get_storage
+
+    # A native dtype view can outlive its FX value in the interpreter env.
+    typed_sources = (
+        (buffer.fx_node, TensorBox.create(buffer))
+        for buffer in V.graph.buffers
+        if isinstance(buffer, ir.ExternKernel)
+        and buffer.fx_node is not None
+        and isinstance(buffer.layout, ir.Layout)
+    )
+    exact = []
+    for source, destination in itertools.chain(V.graph.env.items(), typed_sources):
+        value = _original_aten_reference_value(source)
+        if not (
+            isinstance(value, torch.Tensor)
+            and isinstance(destination, TensorBox)
+            and value.dtype == native.dtype == destination.get_dtype()
+            and value.device == native.device
+            and get_storage(value) == get_storage(native)
+            and statically_known_true(sym_eq(value.size(), source_value.size()))
+        ):
+            continue
+        with (
+            disable_proxy_modes_tracing(),
+            _disable_current_modes(),
+            _ignore_fresh_unbacked_symbols_tls_context(),
+        ):
+            for view_op, args, kwargs in view_path:
+                value = _replay_original_aten_view(value, view_op, args, kwargs, None)
+        if (
+            value.dtype == native.dtype
+            and value.device == native.device
+            and value.is_neg() == native.is_neg()
+            and value.is_conj() == native.is_conj()
+            and get_storage(value) == get_storage(native)
+            and statically_known_true(sym_eq(value.size(), native.size()))
+            and statically_known_true(sym_eq(value.stride(), native.stride()))
+            and statically_known_true(value.storage_offset() == native.storage_offset())
+        ):
+            destination.realize()
+            exact.append(destination)
+    return exact
+
+
+def _cuda_consistent_alias_destination(destinations):
+    def alias_root(destination):
+        name = destination.get_name()
+        seen = OrderedSet()
+        while name not in seen:
+            seen.add(name)
+            buffer = V.graph.try_get_buffer(name)
+            if buffer is None:
+                return None
+            if not isinstance(buffer, ir.Buffer):
+                return name
+            aliases = buffer.get_inputs_that_alias_output()
+            if not aliases:
+                return name
+            if len(aliases) != 1:
+                return None
+            name = aliases[0]
+        return None
+
+    if not destinations:
+        return None
+    first = destinations[0]
+    root = alias_root(first)
+    if root is None or any(
+        alias_root(destination) != root
+        or destination.get_layout() != first.get_layout()
+        for destination in destinations[1:]
+    ):
+        return None
+    return first
+
+
+def _cuda_native_mutation_destination(node, native_destination=None, input_node=None):
     from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
     from .fx_utils import get_storage
@@ -8600,6 +8893,11 @@ def _cuda_mul_mutation_destination(node, native_destination=None, input_node=Non
         sympy.prod(convert_symint_to_expr(s) for s in native_destination.size()), 0
     ):
         return None
+    exact = _cuda_native_typed_destinations(native_destination, native_destination)
+    if exact:
+        typed = _cuda_consistent_alias_destination(exact)
+        return (typed, native_destination) if typed is not None else None
+
     destinations = []
     sources = V.graph.env.items()
     if input_node is not None:
@@ -8671,6 +8969,133 @@ def _cuda_mul_mutation_destination(node, native_destination=None, input_node=Non
     return destination, native_destination
 
 
+def _cuda_view_copy_destination(node):
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+    from torch.fx.passes.reinplace import _is_view_op, _VIEW_INVERSE_MAP
+
+    from .fx_utils import get_node_storage
+
+    mutation = node.meta.get("original_aten_mutation")
+    value = node.meta.get("val")
+    if not (
+        config.strict_pointwise
+        and isinstance(
+            original := node.meta.get("original_aten"), torch._ops.OpOverload
+        )
+        and original._schema.is_mutable
+        and isinstance(node.target, torch._ops.OpOverload)
+        and _is_view_op(node.target)
+        and isinstance(mutation, tuple)
+        and isinstance(native := mutation[0], torch.Tensor)
+        and is_strict_cuda_triton(native.device)
+        and isinstance(value, torch.Tensor)
+        and value.dtype != native.dtype
+        and node.args
+        and isinstance(source := node.args[0], torch.fx.Node)
+        and isinstance(source_value := source.meta.get("val"), torch.Tensor)
+        and source_value.dtype == native.dtype
+    ):
+        return None
+    view_path = []
+    leaf = source
+    while isinstance(leaf, torch.fx.Node) and leaf.target in _VIEW_INVERSE_MAP:
+        args, kwargs = pytree.tree_map(
+            lambda arg: arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg,
+            (leaf.args[2:], leaf.kwargs),
+        )
+        view_path.append((_VIEW_INVERSE_MAP[leaf.target], args, kwargs))
+        leaf = leaf.args[1]
+    from torch.fx.experimental.proxy_tensor import _is_original_aten_mutation
+
+    producer = leaf
+    while isinstance(producer, torch.fx.Node):
+        if _is_original_aten_mutation(producer):
+            break
+        if (
+            _is_view_op(producer.target)
+            or producer.meta.get("original_aten") != original
+            or not producer.args
+            or not isinstance(producer.args[0], torch.fx.Node)
+        ):
+            break
+        producer = producer.args[0]
+    if not isinstance(producer, torch.fx.Node) or not _is_original_aten_mutation(
+        producer
+    ):
+        # A decomposed inverse writes through schema views of a fresh clone.
+        writes = []
+        for writer in node.graph.find_nodes(
+            op="call_function", target=aten.copy_.default
+        ):
+            if len(writer.args) < 2:
+                continue
+            destination = writer.args[0]
+            path = []
+            while (
+                destination is not source
+                and isinstance(destination, torch.fx.Node)
+                and isinstance(destination.target, torch._ops.OpOverload)
+                and _is_view_op(destination.target)
+                and destination.args
+                and get_node_storage(destination) == get_node_storage(source)
+            ):
+                args, kwargs = pytree.tree_map(
+                    lambda arg: arg.meta["val"]
+                    if isinstance(arg, torch.fx.Node)
+                    else arg,
+                    (destination.args[1:], destination.kwargs),
+                )
+                path.append((destination.target, args, kwargs))
+                destination = destination.args[0]
+            if destination is source:
+                writes.append((writer.args[1], path[::-1]))
+        if len(writes) != 1 or view_path:
+            return None
+        producer, view_path = writes[0]
+        producer_mutation = (
+            producer.meta.get("original_aten_mutation")
+            if isinstance(producer, torch.fx.Node)
+            else None
+        )
+        if not (
+            isinstance(producer, torch.fx.Node)
+            and _is_original_aten_mutation(producer)
+            and producer.meta.get("original_aten") == original
+            and isinstance(producer_mutation, tuple)
+            and isinstance(partial := producer_mutation[0], torch.Tensor)
+            and partial.dtype == native.dtype
+            and partial.device == native.device
+            and get_node_storage(source) is not None
+            and partial.untyped_storage() == native.untyped_storage()
+        ):
+            return None
+        native = partial
+    if view_path:
+        destination = _cuda_consistent_alias_destination(
+            _cuda_native_typed_destinations(native, source_value, view_path)
+        )
+    else:
+        if not statically_known_true(
+            sym_eq(source_value.size(), native.size())
+        ) or get_node_storage(node) != get_node_storage(source):
+            return None
+        recovered = _cuda_native_mutation_destination(source, native)
+        destination = recovered[0] if recovered is not None else None
+    return (destination, view_path) if destination is not None else None
+
+
+def _cuda_replay_view_path(value, view_path):
+    for view_op, args, kwargs in view_path:
+        args, kwargs = pytree.tree_map(
+            lambda arg: convert_symint_to_expr(arg)
+            if isinstance(arg, torch.SymInt)
+            else arg,
+            (args, kwargs),
+        )
+        value = lowerings[view_op](value, *args, **kwargs)
+    return value
+
+
 def _cuda_mul_mutation_storage_nodes(graph):
     from torch.fx.experimental.proxy_tensor import _original_aten_view_mutation_base
 
@@ -8738,146 +9163,13 @@ def _cuda_mul_mutation_storage_nodes(graph):
     )
 
 
-def _cuda_mul_original_mutation_operand(node):
-    from torch._functorch._aot_autograd.descriptors import InputMutationAOTOutput
-    from torch.fx.experimental.proxy_tensor import (
-        _replay_original_aten_view,
-        disable_proxy_modes_tracing,
-    )
-    from torch.fx.experimental.symbolic_shapes import (
-        _ignore_fresh_unbacked_symbols_tls_context,
-    )
-    from torch.fx.passes.reinplace import _is_view_op
+def _cuda_pointwise_execution(inputs, values, *, native_output=None, with_chunks=False):
+    from torch._tensor_iterator import binary_op, TensorIterator
     from torch.utils._python_dispatch import _disable_current_modes
 
-    from .fx_utils import get_node_storage, get_storage
-
-    mutation = node.meta.get("original_aten_mutation")
-    context = torch._guards.TracingContext.try_get()
-    if V.graph.is_backward or not isinstance(mutation, tuple) or context is None:
-        return None
-    metadata = context.fw_metadata
-    if metadata is None:
-        return None
-    graph_module = cast(torch.fx.GraphModule, V.graph.module)
-    output_node = next(n for n in graph_module.graph.nodes if n.op == "output")
-    for output, desc in zip(output_node.args[0], output_node.meta.get("desc", ())):
-        if not isinstance(output, torch.fx.Node):
-            continue
-        output_mutation = output.meta.get("original_aten_mutation")
-        if not isinstance(desc, InputMutationAOTOutput) or (
-            isinstance(output_mutation, tuple)
-            and get_storage(output_mutation[0]) != get_storage(mutation[0])
-        ):
-            continue
-        for primal in graph_module.graph.nodes:
-            if (
-                primal.op != "placeholder"
-                or primal.meta.get("desc") != desc.mutated_input
-            ):
-                continue
-            index = V.graph.graph_input_names.index(primal.target)
-            if metadata.input_info[index].mutates_metadata:
-                return None
-
-            def replay(arg):
-                if arg is primal:
-                    return primal.meta["val"]
-                if (
-                    _is_view_op(arg.target)
-                    and get_node_storage(arg) is not None
-                    and get_node_storage(arg) == get_node_storage(arg.args[0])
-                ):
-                    args, kwargs = pytree.tree_map(
-                        lambda x: x.meta["val"] if isinstance(x, torch.fx.Node) else x,
-                        (arg.args[1:], arg.kwargs),
-                    )
-                    base = replay(arg.args[0])
-                    if base is None:
-                        return None
-                    with (
-                        disable_proxy_modes_tracing(),
-                        _disable_current_modes(),
-                        _ignore_fresh_unbacked_symbols_tls_context(),
-                    ):
-                        return _replay_original_aten_view(
-                            base, arg.target, args, kwargs, arg
-                        )
-                previous = arg.meta.get("original_aten_mutation")
-                if (
-                    isinstance(previous, tuple)
-                    and get_storage(previous[0]) == get_storage(mutation[0])
-                    and _cuda_mul_native_mutation(arg)
-                ):
-                    if torch.Tag.out not in arg.meta["original_aten"].tags:
-                        return replay(arg.args[0])
-                    return None
-                if arg.target == aten.clone.default:
-                    if arg.args[0].meta.get(
-                        "aot_runtime_epilogue_input_mutation", False
-                    ):
-                        return replay(arg.args[0])
-                    return None
-                return None
-
-            native = replay(node.args[0])
-            if native is not None:
-                # Autograd may create the final view scatter without original
-                # mutation metadata. Its AOT output descriptor and the operand's
-                # exact replay to this primal still prove the caller geometry.
-                return _cuda_mul_mutation_destination(node, native, primal)
-    return None
-
-
-def _cuda_mul_execution(a, b):
-    node = V.graph.current_node
-    if not (
-        node.target == aten.mul.Tensor
-        # Decompositions of fused native kernels retain their own operand order.
-        and node.meta.get("original_aten", node.target)
-        in (aten.mul.Tensor, aten.mul_.Tensor)
-        and all(
-            isinstance(x, TensorBox)
-            and x.get_dtype() == torch.float64
-            and x.get_device_or_error().type == "cuda"
-            for x in (a, b)
-        )
-        and is_strict_cuda_triton(a.get_device())
-    ):
-        return None
-    local_destination = None
-    if node.meta.get("original_aten") == aten.mul_.Tensor:
-        # Autograd saves a clone before functionalizing mul_; native execution
-        # still uses the destination's original geometry and pointer alignment.
-        destination = _cuda_mul_original_mutation_operand(node)
-        if destination is None:
-            destination = _cuda_mul_mutation_destination(node)
-        if destination is not None:
-            a = destination[0]
-        else:
-            mutation = node.meta.get("original_aten_mutation")
-            if not (
-                isinstance(mutation, tuple)
-                and len(mutation) == 3
-                and mutation[2] is False
-            ):
-                return None
-            # Clone elimination can expose a caller input as the loader, while
-            # native mul_ still observes the local destination's fresh storage.
-            local_destination = mutation[0]
-    from torch._tensor_iterator import binary_op
-    from torch.utils._python_dispatch import _disable_current_modes
-
-    values = []
-    for arg in node.args[:2]:
-        if not isinstance(arg, torch.fx.Node):
-            raise AssertionError("strict CUDA mul requires tensor node operands")
-        values.append(arg.meta["val"])
+    chunks = None
     geometry = []
-    for index, (inp, value) in enumerate(zip((a, b), values)):
-        if index == 0 and local_destination is not None:
-            geometry.append((local_destination.shape, local_destination.stride()))
-            continue
+    for inp, value in zip(inputs, values):
         data = inp
         while isinstance(data, (MutableBox, BaseView)):
             data = data.data
@@ -8886,6 +9178,20 @@ def _cuda_mul_execution(a, b):
             geometry.append((inp.get_size(), layout.stride))
         else:
             geometry.append((value.shape, value.stride()))
+    if with_chunks:
+        # Native's recursive split decisions require concrete byte extents.
+        # Guard backed symbolic geometry so a different shape recompiles.
+        geometry = [
+            (
+                V.graph.sizevars.guard_int_seq(
+                    [convert_symint_to_expr(s) for s in size]
+                ),
+                V.graph.sizevars.guard_int_seq(
+                    [convert_symint_to_expr(s) for s in stride]
+                ),
+            )
+            for size, stride in geometry
+        ]
     if any(
         isinstance(s, torch.SymInt)
         or (isinstance(s, sympy.Expr) and bool(s.free_symbols))
@@ -8894,7 +9200,11 @@ def _cuda_mul_execution(a, b):
     ):
         # For symbolic geometry, match TensorIterator's byte strides to the fresh
         # dense output. Singleton dimensions do not constrain coalescing.
-        output = node.meta["val"]
+        output = (
+            native_output
+            if native_output is not None
+            else V.graph.current_node.meta["val"]
+        )
         strides = tuple(convert_symint_to_expr(s) for s in output.stride())
         shape = tuple(convert_symint_to_expr(s) for s in output.shape)
         conditions = []
@@ -8918,29 +9228,50 @@ def _cuda_mul_execution(a, b):
         contiguous = sympy.And(*conditions)
     else:
         with _disable_current_modes():
-            iterator = binary_op(
-                None,
-                *[
-                    torch.empty_strided(
-                        tuple(int(s) for s in size),
-                        tuple(int(s) for s in stride),
-                        dtype=value.dtype,
-                        device="meta",
+            meta_inputs = [
+                torch.empty_strided(
+                    tuple(int(s) for s in size),
+                    tuple(int(s) for s in stride),
+                    dtype=value.dtype,
+                    device="meta",
+                )
+                for value, (size, stride) in zip(values, geometry)
+            ]
+            if native_output is None:
+                iterator = binary_op(None, *meta_inputs)
+            else:
+                output = torch.empty_strided(
+                    V.graph.sizevars.guard_int_seq(
+                        [convert_symint_to_expr(s) for s in native_output.shape]
                     )
-                    for value, (size, stride) in zip(values, geometry)
-                ],
-            )
-        if not iterator.is_contiguous:
+                    if with_chunks
+                    else native_output.shape,
+                    V.graph.sizevars.guard_int_seq(
+                        [convert_symint_to_expr(s) for s in native_output.stride()]
+                    )
+                    if with_chunks
+                    else native_output.stride(),
+                    dtype=values[0].dtype,
+                    device="meta",
+                )
+                iterator = TensorIterator(
+                    outputs=[output],
+                    const_inputs=meta_inputs,
+                    promote_inputs_to_common_dtype=True,
+                    cast_common_dtype_to_outputs=True,
+                    enforce_safe_casting_to_output=True,
+                )
+        if not iterator.is_contiguous and not with_chunks:
             return None
         strides = tuple(iterator.output().stride())
-        contiguous = sympy.true
-    alignments: list[tuple[str | None, sympy.Expr]] = []
-    for index, (inp, value) in enumerate(zip((a, b), values)):
-        if index == 0 and local_destination is not None:
-            alignments.append(
-                (None, convert_symint_to_expr(local_destination.storage_offset()))
+        contiguous = sympy.true if iterator.is_contiguous else sympy.false
+        if with_chunks:
+            chunks = inductor_prims._cuda_pointwise_chunks(
+                tuple(iterator.shape),
+                [tuple(iterator.strides(i)) for i in range(iterator.ntensors)],
             )
-            continue
+    alignments: list[tuple[str | None, sympy.Expr]] = []
+    for inp, value in zip(inputs, values):
         data = inp
         while isinstance(data, (MutableBox, BaseView)):
             data = data.data
@@ -8953,19 +9284,20 @@ def _cuda_mul_execution(a, b):
             alignments.append((storage.get_name(), layout.offset))
         else:
             raise NotImplementedError(
-                "strict CUDA mul requires original operand pointer provenance"
+                "strict CUDA pointwise execution requires original operand pointer provenance"
             )
     V.graph.preserve_input_alignment(name for name, _ in alignments if name is not None)
+    if with_chunks:
+        if chunks is None:
+            raise AssertionError("native pointwise chunks require concrete geometry")
+        return strides, alignments, contiguous, chunks
     return strides, alignments, contiguous
 
 
-def _cuda_mul_pointwise(a, b, execution):
+def _cuda_pointwise_iteration(index, ranges, execution):
     strides, alignments, contiguous = execution
-    loaders = (a.make_loader(), b.make_loader())
-    ranges = a.get_size()
-    numel = sympy_product(ranges)
 
-    def native_contiguous(expr=contiguous):
+    def native_contiguous(expr):
         if expr in (sympy.true, sympy.false):
             return ops.constant(bool(expr), torch.bool)
         if isinstance(expr, sympy.Equality):
@@ -8976,96 +9308,219 @@ def _cuda_mul_pointwise(a, b, execution):
             result = operation(result, native_contiguous(arg))
         return result
 
-    def inner_fn(index):
-        for name, _ in alignments:
-            if name is not None:
-                # Alignment reads the backing pointer even when values come
-                # from an autograd clone. Record its lifetime before scheduling.
-                ops.load(name, sympy.Integer(0))
-        native_index = ops.index_expr(
-            sum(i * s for i, s in zip(index, strides)), torch.int64
-        )
-        native_numel = ops.index_expr(numel, torch.int64)
-        native_alignments = tuple(
+    for name, _ in alignments:
+        if name is not None:
+            # Alignment observes the backing pointer even when values come from
+            # a clone. Retain its lifetime before scheduling.
+            ops.load(name, sympy.Integer(0))
+    return (
+        ops.index_expr(sum(i * s for i, s in zip(index, strides)), torch.int64),
+        ops.index_expr(sympy_product(ranges), torch.int64),
+        tuple(
             (name, ops.index_expr(offset, torch.int64)) for name, offset in alignments
+        ),
+        native_contiguous(contiguous),
+    )
+
+
+@register_lowering(inductor_prims.cuda_pointwise_iteration, type_promotion_kind=None)
+def cuda_pointwise_iteration(
+    inputs, contiguous_output=True, *, vectorized_tail=False, unroll_prefix=0
+):
+    if not all(
+        inp.get_dtype() == inputs[0].get_dtype()
+        and inp.get_dtype() in (torch.float64, torch.complex64, torch.complex128)
+        and is_strict_cuda_triton(inp.get_device())
+        for inp in inputs
+    ):
+        raise NotImplementedError(
+            "native CUDA pointwise geometry requires matching strict float64 or complex inputs"
         )
-        return ops.mul(
-            *(load(index) for load in loaders),
-            native_cuda_execution=(
-                native_index,
-                native_numel,
-                native_alignments,
-                native_contiguous(),
-            ),
+    node = V.graph.current_node
+    values = [arg.meta["val"] for arg in cast(list[torch.fx.Node], node.args[0])]
+    output = node.meta["val"][0]
+    if vectorized_tail or unroll_prefix or inputs[0].get_dtype().is_complex:
+        return _cuda_pointwise_prefix_masks(
+            inputs, values, output, vectorized_tail, unroll_prefix
+        )
+    execution = _cuda_pointwise_execution(inputs, values, native_output=output)
+    ranges = [convert_symint_to_expr(size) for size in output.shape]
+
+    def mask(vectorized):
+        def inner_fn(index):
+            if execution is None:
+                return ops.constant(False, torch.bool)
+            native_index, numel, alignments, contiguous = _cuda_pointwise_iteration(
+                index, ranges, execution
+            )
+            operation = (
+                ops.cuda_pointwise_vectorized
+                if vectorized
+                else ops.cuda_pointwise_unrolled
+            )
+            return operation(native_index, numel, contiguous, alignments=alignments)
+
+        return Pointwise.create(
+            device=inputs[0].get_device(),
+            dtype=torch.bool,
+            ranges=ranges,
+            inner_fn=inner_fn,
         )
 
-    return Pointwise.create(
-        device=a.get_device(), dtype=a.get_dtype(), ranges=ranges, inner_fn=inner_fn
+    return mask(False), mask(True)
+
+
+def _cuda_pointwise_prefix_masks(
+    inputs, values, output, vectorized_tail, unroll_prefix
+):
+    strides, alignments, contiguous, chunks = _cuda_pointwise_execution(
+        inputs, values, native_output=output, with_chunks=True
     )
+    itemsize = inputs[0].get_dtype().itemsize
+    # A complex pointer cannot be loaded by Triton. Bind the same storage through
+    # a supported real view while keeping geometry in original complex bytes.
+    if inputs[0].get_dtype().is_complex:
+        for i, (name, offset) in enumerate(alignments):
+            if name is not None:
+                components = TensorBox.create(
+                    ir.ComplexView.create(aten.view_as_real.default, inputs[i])
+                )
+                storage, _ = ir.as_storage_and_layout(components, freeze=False)
+                alignments[i] = (storage.get_name(), sympy.Integer(0))
+    ranges = [convert_symint_to_expr(size) for size in output.shape]
+
+    def mask(vectorized):
+        def inner_fn(index):
+            result = ops.constant(False, torch.bool)
+            physical = sum(i * s for i, s in zip(index, strides)) * itemsize
+            for chunk in chunks:
+                coordinates, remainder, local, count = (
+                    inductor_prims._cuda_pointwise_chunk_index(
+                        physical, chunk, floor_div=FloorDiv, mod=sympy.Mod
+                    )
+                )
+                active = ops.ge(
+                    ops.index_expr(physical, torch.int64),
+                    ops.constant(chunk.offsets[0], torch.int64),
+                )
+                active = ops.logical_and(
+                    active,
+                    ops.eq(
+                        ops.index_expr(remainder, torch.int64),
+                        ops.constant(0, torch.int64),
+                    ),
+                )
+                for coord, size in zip(coordinates, chunk.shape):
+                    active = ops.logical_and(
+                        active,
+                        ops.lt(
+                            ops.index_expr(coord, torch.int64),
+                            ops.constant(size, torch.int64),
+                        ),
+                    )
+                dense = (
+                    count == 1
+                    or len(chunk.shape) == 1
+                    and all(s[0] == itemsize for s in chunk.strides)
+                )
+                chunk_alignments = [
+                    (name, ops.index_expr(offset + advance // itemsize, torch.int64))
+                    for (name, offset), advance in zip(alignments, chunk.offsets[1:])
+                ]
+                chunk_alignments.append(
+                    (None, ops.constant(chunk.offsets[0] // itemsize, torch.int64))
+                )
+                for name, _ in alignments:
+                    if name is not None:
+                        ops.load(name, sympy.Integer(0))
+                operation = (
+                    ops.cuda_pointwise_vectorized
+                    if vectorized
+                    else ops.cuda_pointwise_unrolled
+                )
+                selected = operation(
+                    ops.index_expr(local, torch.int64),
+                    ops.constant(count, torch.int64),
+                    ops.constant(dense, torch.bool),
+                    alignments=tuple(chunk_alignments),
+                    itemsize=itemsize,
+                    vectorized_tail=vectorized_tail,
+                    unroll_prefix=unroll_prefix,
+                )
+                result = ops.logical_or(result, ops.logical_and(active, selected))
+            return result
+
+        return Pointwise.create(
+            device=inputs[0].get_device(),
+            dtype=torch.bool,
+            ranges=ranges,
+            inner_fn=inner_fn,
+        )
+
+    return mask(False), mask(True)
 
 
 @register_lowering([aten.mul], type_promotion_kind=None)
 def mul(a, b):
-    execution = _cuda_mul_execution(a, b)
-    for tensor, scalar in ((a, b), (b, a)):
-        if (
-            isinstance(tensor, TensorBox)
-            and isinstance(scalar, TensorBox)
-            and scalar.get_device_or_error().type == "cpu"
-            and not scalar.get_size()
-            and is_strict_cuda_triton(tensor.get_device())
-            and get_promoted_dtype(
-                a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-            )
-            == torch.float64
-        ):
-            # CUDA puts CPU scalars first in its symmetric multiplication kernel.
-            a, b = scalar, tensor
-            break
     (a, b), _ = transform_args(
         [a, b], {}, True, ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, False
     )
     for tensor, scalar in ((a, b), (b, a)):
         if (
             isinstance(tensor, TensorBox)
-            and isinstance(scalar, float)
-            and math.isnan(scalar)
-            and is_strict_cuda_triton(tensor.get_device())
-            and tensor.get_dtype()
-            in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-        ):
-            # CUDA gives a CPU scalar NaN priority on either side of multiplication.
-            dtype = tensor.get_dtype()
-            int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[dtype.itemsize]
-            if dtype == torch.float64:
-                bits = (
-                    struct.unpack("q", struct.pack("d", scalar))[0] | 0x0008000000000000
-                )
-            else:
-                bits = (1 << (dtype.itemsize * 8 - 1)) - 1
-            return to_dtype_bitcast(full_like(tensor, bits, dtype=int_dtype), dtype)
-        if (
-            isinstance(tensor, TensorBox)
             and isinstance(scalar, (int, float))
             and is_strict_cuda_triton(tensor.get_device())
             and tensor.get_dtype() in (torch.float16, torch.bfloat16)
         ):
-            # CUDA keeps CPU scalars at opmath precision, unlike tensor inputs.
-            def scalar_mul(x):
-                return ops.mul(
-                    ops.to_dtype(x, torch.float32),
-                    ops.constant(scalar, torch.float32),
+            return make_pointwise(ops.mul, round_scalars_to_tensor_dtype=True)(
+                tensor, scalar
+            )
+    for tensor, scalar in ((a, b), (b, a)):
+        if (
+            isinstance(tensor, TensorBox)
+            and isinstance(scalar, (int, float, complex))
+            and tensor.get_dtype() in (torch.complex64, torch.complex128)
+            and is_strict_cuda_triton(tensor.get_device())
+        ):
+            real, imag = complex_components(tensor)
+            dtype = real.get_dtype()
+            scale = complex(scalar)
+
+            def real_product(x, y):
+                return ops.fma(
+                    x,
+                    ops.constant(scale.real, dtype),
+                    ops.neg(ops.mul(y, ops.constant(scale.imag, dtype))),
                 )
 
-            return make_pointwise(scalar_mul)(tensor)
-    both_bool = is_boolean_type(a) and is_boolean_type(b)
-    if both_bool:
+            def imag_product(x, y):
+                return ops.fma(
+                    ops.constant(scale.real, dtype),
+                    y,
+                    ops.mul(ops.constant(scale.imag, dtype), x),
+                )
+
+            parts = cat(
+                (
+                    unsqueeze(make_pointwise(real_product)(real, imag), -1),
+                    unsqueeze(make_pointwise(imag_product)(real, imag), -1),
+                ),
+                -1,
+            )
+            node = V.graph.current_node
+            fake = node.meta.get("val") if node is not None else None
+            strides = (
+                [s * 2 for s in fake.stride()] + [1]
+                if fake is not None
+                else ir.FlexibleLayout.contiguous_strides(parts.get_size())
+            )
+            parts = ir.ExternKernel.require_exact_strides(parts, strides)
+            return TensorBox.create(
+                ir.ComplexView.create(aten.view_as_complex.default, parts)
+            )
+    if is_boolean_type(a) and is_boolean_type(b):
         return logical_and(a, b)
-    else:
-        if execution is not None:
-            return _cuda_mul_pointwise(a, b, execution)
-        fn = ops_wrapper(aten.mul.__name__)
-        return make_pointwise(fn)(a, b)
+    return make_pointwise(ops_wrapper(aten.mul.__name__))(a, b)
 
 
 register_pointwise_op("mul")

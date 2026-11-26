@@ -100,10 +100,13 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
-    _cuda_mul_mutation_destination,
     _cuda_mul_mutation_storage_nodes,
+    _cuda_native_mutation_destination,
+    _cuda_replay_view_path,
+    _cuda_view_copy_destination,
     constrain_to_fake_tensors,
     constrain_to_fx_strides,
+    copy_,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
@@ -2213,7 +2216,7 @@ class GraphLowering(torch.fx.Interpreter):
                 fallback_args, fallback_kwargs = self.fetch_args_kwargs_from_env(n)
                 native_destination = None
                 if n in self.cuda_mul_mutation_storage_nodes:
-                    native_destination = _cuda_mul_mutation_destination(n)
+                    native_destination = _cuda_native_mutation_destination(n)
                     if native_destination is not None:
                         from torch.fx.experimental.proxy_tensor import (
                             _is_original_aten_mutation,
@@ -2236,9 +2239,7 @@ class GraphLowering(torch.fx.Interpreter):
                     *fallback_args, **fallback_kwargs
                 )
                 if native_destination is not None and target == n.target:
-                    result = fallback_handler(
-                        aten.copy_.default, add_to_fallback_set=False
-                    )(native_destination[0], result)
+                    result = copy_(native_destination[0], result)
             elif (
                 n.op == "call_function"
                 and isinstance(
@@ -2284,6 +2285,25 @@ class GraphLowering(torch.fx.Interpreter):
                         f"Unknown layout constraint for {info.dsl} user kernels: "
                         f"{constraint}"
                     )
+            elif (
+                is_call_function
+                and isinstance(n.target, torch._ops.OpOverload)
+                and (recovered := _cuda_view_copy_destination(n)) is not None
+            ):
+                destination, view_path = recovered
+                copy_args, copy_kwargs = self.fetch_args_kwargs_from_env(n)
+                copy_destination = _cuda_replay_view_path(destination, view_path)
+                copy_source = _cuda_replay_view_path(copy_args[0], view_path)
+                if (
+                    copy_destination.get_dtype().is_complex
+                    or copy_source.get_dtype().is_complex
+                ):
+                    ir.InplaceCopyFallback.create(copy_destination, copy_source)
+                else:
+                    copy_(copy_destination, copy_source)
+                result = fallback_handler(n.target, add_to_fallback_set=False)(
+                    destination, *copy_args[1:], **copy_kwargs
+                )
             else:
                 debug("")
                 result = super().run_node(n)
