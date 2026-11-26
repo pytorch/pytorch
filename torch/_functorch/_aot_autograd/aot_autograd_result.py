@@ -42,6 +42,7 @@ from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
     AOTDispatchSubclassWrapper,
+    AOTSyntheticBaseWrapper,
     CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
@@ -311,20 +312,45 @@ class BundledCompiledBackward(
 
 @dataclass
 class SerializedGraphModule:
-    fn: Callable[[dict[Any, Any], str], torch.nn.Module]
+    fn: Callable[[dict[Any, Any], str], torch.nn.Module] | None
     args: tuple[Any, ...]
+    graph_bytes: bytes | None = None
 
-    def __init__(self, gm: torch.fx.GraphModule) -> None:
-        self.fn, self.args = gm.__reduce__()
+    def __init__(
+        self, gm: torch.fx.GraphModule, *, preserve_metadata: bool = False
+    ) -> None:
+        self.graph_bytes = None
+        if preserve_metadata:
+            from torch.fx._graph_pickler import GraphPickler, Options
+
+            self.graph_bytes = GraphPickler.dumps(gm, Options(ops_filter=None))
+            self.fn, self.args = None, ()
+        else:
+            self.fn, self.args = gm.__reduce__()
 
     def deserialize(self) -> torch.fx.GraphModule:
-        gm = self.fn(*self.args)
+        if self.graph_bytes is not None:
+            from torch._guards import TracingContext
+            from torch.fx._graph_pickler import GraphPickler
+
+            context = TracingContext.get()
+            if context.fake_mode is None:
+                raise AssertionError("metadata-preserving graphs need a fake mode")
+            gm = GraphPickler.loads(self.graph_bytes, context.fake_mode)
+        else:
+            if self.fn is None:
+                raise AssertionError("serialized graph has no reconstruction function")
+            gm = self.fn(*self.args)
         if not isinstance(gm, torch.fx.GraphModule):
             raise AssertionError(f"expected fx.GraphModule, got {type(gm)}")
         return gm
 
 
-def serialize_graph_module(gm: torch.fx.GraphModule) -> SerializedGraphModule:
+def serialize_graph_module(
+    gm: torch.fx.GraphModule, *, preserve_metadata: bool = False
+) -> SerializedGraphModule:
+    if preserve_metadata:
+        return SerializedGraphModule(gm, preserve_metadata=True)
     # NOTE: mutates the graph module
     gm.meta = {}
     for node in gm.graph.nodes:
@@ -563,11 +589,21 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
 
                     from .runtime_wrappers import AutogradLazyBackwardCompileInfo
 
+                    bw_module = self.serialized_bw_module.deserialize()
                     cached_lazy_backward = AutogradLazyBackwardCompileInfo(
-                        self.serialized_bw_module.deserialize(),
-                        [],
+                        bw_module,
+                        [
+                            node.meta.get("val")
+                            for node in bw_module.graph.nodes
+                            if node.op == "placeholder"
+                        ],
                         TracingContext.try_get(),
                         CompileContext.try_get(),
+                    )
+                elif self.serialized_bw_module.graph_bytes is not None:
+                    bw_module = self.serialized_bw_module.deserialize()
+                    cached_lazy_backward = CachedAutogradLazyBackwardCompileInfo(
+                        lambda: bw_module
                     )
             # This function is run on both cache miss and cache hit, either here
             # or in aot_dispatch_autograd. On a cache hit,
@@ -588,6 +624,18 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
                 backward_input_signature=self.backward_input_signature,
+                original_view_input_indices=tuple(
+                    idx
+                    for wrapper in self.dispatch_wrappers
+                    if isinstance(wrapper, AOTSyntheticBaseWrapper)
+                    for idx in wrapper.original_view_input_indices
+                ),
+                original_view_output_info={
+                    idx: info
+                    for wrapper in self.dispatch_wrappers
+                    if isinstance(wrapper, AOTSyntheticBaseWrapper)
+                    for idx, info in wrapper.original_view_output_info.items()
+                },
             )
             compiled_function = AOTDispatchAutograd.post_compile(compile_spec)
 

@@ -71,7 +71,11 @@ from .functional_utils import (
     to_fun,
     was_inductor_storage_resized,
 )
-from .logging_utils import setup_stacktrace_preservation_hooks
+from .logging_utils import (
+    capture_native_gradient_info,
+    NativeGradientInfo,
+    setup_stacktrace_preservation_hooks,
+)
 from .schemas import (
     AOTConfig,
     FxValue,
@@ -280,6 +284,7 @@ def fn_prepped_for_autograd(
 @dataclass
 class JointFnHandle:
     post_forward: Callable[..., Any] | None = None
+    native_gradient_info: NativeGradientInfo | None = None
 
 
 # Given a fn, computes the joint.
@@ -386,6 +391,9 @@ def create_joint(
                 )
                 needed_tangents.append(tangent)
 
+        if aot_config.preserve_tangent_layout:
+            joint_fn_handle.native_gradient_info = NativeGradientInfo(len(needed_outs))
+
         setup_stacktrace_preservation_hooks(
             [out.grad_fn for out in needed_outs if out.grad_fn is not None]
         )
@@ -417,6 +425,12 @@ def create_joint(
                 fx_traceback.preserve_node_meta(),
                 ExitStack() as stack,
             ):
+                if joint_fn_handle.native_gradient_info is not None:
+                    stack.enter_context(
+                        capture_native_gradient_info(
+                            needed_outs, joint_fn_handle.native_gradient_info
+                        )
+                    )
                 backward_pass_autocast = torch._functorch.config.backward_pass_autocast
                 if backward_pass_autocast == "same_as_forward":
                     # Use the ambient autocast mode(s)
