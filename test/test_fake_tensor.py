@@ -2602,12 +2602,50 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
     @onlyAccelerator
     def test_accelerator_initialized(self, device):
-        # doesn't error
+        # Exercises autograd through an accelerator FakeTensor on an already
+        # initialized runtime (the device test base initializes it in
+        # setUpClass). For the cold-runtime case, see
+        # test_cold_runtime_fake_tensor_backward below.
         with FakeTensorMode():
             p = torch.randn(4, 2, requires_grad=True, device=device)
             x = torch.randn(8, 4, device=device)
             y = torch.mm(x, p).square().sum()
             y.backward()
+
+    @onlyAccelerator
+    def test_cold_runtime_fake_tensor_backward(self, device):
+        # Regression guard for the deleted init_gpu_context warm-up:
+        # #92627 claimed autograd through an accelerator FakeTensor fails
+        # unless the backend runtime was initialized first. In this process
+        # the device test base already initialized it, so rerun the
+        # scenario in a fresh interpreter where the runtime starts
+        # genuinely cold: it must work without any warm-up.
+        script = f"""
+import torch
+from torch._subclasses import FakeTensorMode
+
+dev = {device!r}
+iface = getattr(torch, dev, None)
+isinit = getattr(iface, "is_initialized", None)
+if isinit is not None:
+    assert not isinit(), "runtime pre-initialized"
+
+with FakeTensorMode():
+    p = torch.randn(4, 2, requires_grad=True, device=dev)
+    x = torch.randn(8, 4, device=dev)
+    y = torch.mm(x, p).square().sum()
+y.backward()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, timeout=600
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=lambda msg: (
+                f"{msg}\ncold-runtime subprocess failed:\n{result.stderr.decode()}"
+            ),
+        )
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
@@ -5975,7 +6013,10 @@ class TestFakeTensorPreferDeviceType(TestCase):
     def test_fake_tensor_prefer_device_type_fallback(
         self, reverse, devices, preference, expected_device
     ):
-        # Synthetic accelerator indices must not initialize GPU contexts.
+        # _avoid_device_init keeps this synthetic-index test free of runtime
+        # probes on any build; it originally guarded the init_gpu_context
+        # warm-up removed in this PR and stays as a cheap defense-in-depth
+        # patch around the converter path exercised below.
         with (
             patch(
                 "torch._subclasses.fake_tensor._avoid_device_init", return_value=True

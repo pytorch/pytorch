@@ -2038,7 +2038,12 @@ class FakeTensor(Tensor):
 
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
-        """Normalize device by setting the device index."""
+        """Normalize device by setting the device index.
+
+        Kept as the Python counterpart of C++ normalizeFakeDevice
+        (aten/src/ATen/FakeTensor.cpp), which serves the same role for
+        FakeTensorImpl construction.
+        """
         return _pin_device_index(device)
 
     @staticmethod
