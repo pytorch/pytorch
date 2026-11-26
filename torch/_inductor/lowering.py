@@ -4785,12 +4785,38 @@ def _assert_tensor_metadata(
     return None
 
 
+def _check_fill_scalar_range(value, dtype):
+    # Eager converts a scalar fill through c10::Scalar::to<scalar_t>, which
+    # rejects finite values outside the dtype range. Mirror that here (same
+    # bounds as _meta_registrations.full): lowering an overflowing
+    # ops.constant instead would silently write inf or wrap the value.
+    if dtype == torch.bool or dtype in (torch.complex64, torch.complex128):
+        return
+    if dtype.is_floating_point:
+        limit = torch.finfo(dtype).max
+        out_of_range = math.isfinite(value) and abs(value) > limit
+    else:
+        info = torch.iinfo(dtype)
+        # an integral fill keeps the sign of an unsigned overflow window,
+        # a fractional one must stay inside [0, max] for unsigned dtypes
+        if isinstance(value, int):
+            lower = info.min if dtype.is_signed else -info.max
+        else:
+            lower = info.min
+        out_of_range = math.isnan(value) or not (lower <= value <= info.max)
+    torch._check(
+        not out_of_range,
+        lambda: f"value cannot be converted to type {dtype} without overflow",
+    )
+
+
 def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
 
     if isinstance(value, (int, float)):
+        _check_fill_scalar_range(value, dtype)
 
         def inner_fn(index):
             return ops.constant(value, dtype)

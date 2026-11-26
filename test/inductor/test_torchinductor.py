@@ -9321,6 +9321,53 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([16, 16]),),
         )
 
+    def test_full_scalar_checked_conversion(self):
+        # eager converts scalar fills through c10::Scalar::to<scalar_t> and
+        # rejects out-of-range values; the inductor constant path used to
+        # lower them unchecked, silently writing inf or wrapped values.
+        out_of_range = [
+            (torch.float16, 70000.0),
+            (torch.float16, -70000.0),
+            (torch.float32, 1e39),
+            (torch.int8, 128),
+            (torch.int8, float("nan")),
+            (torch.uint8, 256),
+            (torch.uint8, -256),
+            (torch.uint8, -1.0),
+        ]
+        for dtype, value in out_of_range:
+
+            def fn(dtype=dtype, value=value):
+                return torch.full((4,), value, dtype=dtype, device=self.device)
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                fn()
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(Exception, "without overflow"):
+                torch.compile(fn)()
+
+        in_range = [
+            (torch.float16, 65504.0),
+            (torch.float16, float("inf")),
+            (torch.float16, float("nan")),
+            (torch.int8, 1.5),
+            (torch.uint8, -1),
+            (torch.uint8, -255),
+            (torch.bool, 2),
+        ]
+        for dtype, value in in_range:
+
+            def fn(dtype=dtype, value=value):
+                t = torch.zeros(4, dtype=dtype, device=self.device)
+                return t.fill_(value)
+
+            torch._dynamo.reset()
+            ref = fn()
+            torch._dynamo.reset()
+            out = torch.compile(fn)()
+            self.assertEqual(ref, out)
+
     def test_pow1(self):
         def fn(x):
             return [aten.pow(x, e) for e in range(-8, 9)]
