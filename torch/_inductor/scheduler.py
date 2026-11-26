@@ -6859,8 +6859,6 @@ class Scheduler:
             DedupList
         )
 
-        last_alias_mutation = {}
-
         # handle aliasing by using python aliasing in name_to_users
         # if foo aliases bar then we will make name_to_users["foo"] point
         # to the same python list as name_to_users["bar"]
@@ -7033,9 +7031,6 @@ class Scheduler:
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
                 if not isinstance(read, WeakDep):
-                    writer = last_alias_mutation.get(name_to_users[read.name])
-                    if writer is not None and writer != node.get_name():
-                        node.add_fake_dep(StarDep(writer))
                     add_user(read.name, node, node.can_inplace(read))
 
             node.update_mutated_names(self.mutation_renames)
@@ -7043,8 +7038,6 @@ class Scheduler:
             # update our renaming scheme for the next iteration
             for buf in node.get_outputs():
                 for alt_name in buf.get_mutations():
-                    if not buf.is_ordering_only():
-                        last_alias_mutation[name_to_users[alt_name]] = buf.get_name()
                     self.mutation_renames[rename(alt_name)] = buf.get_name()
                     self.mutation_renames[alt_name] = buf.get_name()
                     self.mutation_real_name[buf.get_name()] = (

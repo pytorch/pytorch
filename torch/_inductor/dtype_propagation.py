@@ -297,33 +297,7 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
-    def cuda_pointwise_unrolled(
-        index,
-        numel,
-        contiguous,
-        *,
-        alignments,
-        itemsize=8,
-        vectorized_tail=False,
-        unroll_prefix=0,
-    ) -> torch.dtype:
-        return torch.bool
-
-    @staticmethod
-    def cuda_pointwise_vectorized(
-        index,
-        numel,
-        contiguous,
-        *,
-        alignments,
-        itemsize=8,
-        vectorized_tail=False,
-        unroll_prefix=0,
-    ) -> torch.dtype:
-        return torch.bool
-
-    @staticmethod
-    def mul(a: DTypeArg, b: DTypeArg) -> torch.dtype:
+    def mul(a: DTypeArg, b: DTypeArg, *, native_cuda_execution=None) -> torch.dtype:
         return promote_types([a, b])
 
     @staticmethod

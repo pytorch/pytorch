@@ -308,7 +308,6 @@ class TritonMeta(typing.TypedDict, total=False):
     enable_fp_fusion: bool
     launch_pdl: bool
     disable_ftz: bool
-    strict_pointwise: bool
     matrix_instr_nonkdim: int
     waves_per_eu: int
     kpack: int

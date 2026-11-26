@@ -20,36 +20,23 @@ from torch._decomp import (
     remove_decompositions,
 )
 from torch._decomp.decompositions import (
-    _assert_binary_cross_entropy_inputs,
     _grid_sampler_2d as decomp_grid_sampler_2d,
     _index_add,
     adaptive_max_pool3d as decomp_adaptive_max_pool3d,
-    binary_cross_entropy as decomp_binary_cross_entropy,
-    binary_cross_entropy_backward as decomp_binary_cross_entropy_backward,
-    binary_cross_entropy_with_logits as decomp_binary_cross_entropy_with_logits,
     embedding_dense_backward as decomp_embedding_dense_backward,
     gelu_backward as decomp_gelu_backward,
-    glu_backward as decomp_glu_backward,
     hardsigmoid as decomp_hardsigmoid,
     hardsigmoid_backward as decomp_hardsigmoid_backward,
     hardswish as decomp_hardswish,
     hardswish_backward as decomp_hardswish_backward,
-    huber_loss_backward as decomp_huber_loss_backward,
-    log_sigmoid_backward as decomp_log_sigmoid_backward,
     logit_backward as decomp_logit_backward,
     mish_backward as decomp_mish_backward,
-    mse_loss as decomp_mse_loss,
-    mse_loss_backward as decomp_mse_loss_backward,
     mv as decomp_mv,
     pw_cast_for_int_to_real,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
     sigmoid_backward as decomp_sigmoid_backward,
     silu_backward as decomp_silu_backward,
-    smooth_l1_loss as decomp_smooth_l1_loss,
-    smooth_l1_loss_backward as decomp_smooth_l1_loss_backward,
-    soft_margin_loss as decomp_soft_margin_loss,
-    soft_margin_loss_backward as decomp_soft_margin_loss_backward,
     softplus_backward as decomp_softplus_backward,
     tanh_backward as decomp_tanh_backward,
 )
@@ -69,21 +56,16 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import (
     addr as decomp_addr,
-    heaviside as decomp_heaviside,
-    logaddexp as decomp_logaddexp,
     logaddexp2 as decomp_logaddexp2,
     native_layer_norm as decomp_native_layer_norm,
     roll as decomp_roll,
     sgn as decomp_sgn,
-    sinc as decomp_sinc,
     xlogy as decomp_xlogy,
 )
 from torch._refs.nn.functional import (
     _aten_hardtanh as decomp_hardtanh,
     gelu as decomp_gelu,
-    huber_loss as decomp_huber_loss,
     softplus as decomp_softplus,
-    threshold as decomp_threshold,
 )
 from torch._refs.special import (
     logit as decomp_logit,
@@ -97,11 +79,9 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
     sym_eq,
 )
-from torch.fx.traceback import annotate
 
 from . import config, inductor_prims
 from .utils import (
-    cudnn_batch_norm_use_single_read,
     is_bf16x9_matmul,
     is_gpu,
     is_strict_cuda_triton,
@@ -176,7 +156,6 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
 decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = [
-    aten.sinc,
     aten.xlogy,
     aten.special_xlog1py,
     aten._unsafe_index,
@@ -188,28 +167,12 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.clamp_min,
     aten.gelu.default,
     aten.gelu_backward.default,
-    aten.glu_backward.default,
-    aten.threshold.default,
-    aten.heaviside.default,
-    aten.hardtanh.default,  # strict numerics preserves input NaNs and signed zeros
+    aten.hardtanh.default,  # inductor preserves NaN payloads under strict numerics
     aten.hardswish_backward.default,
     aten.hardswish.default,
     aten.hardsigmoid.default,
     aten.hardsigmoid_backward.default,
     aten.mish_backward.default,
-    aten.log_sigmoid_backward.default,
-    aten.huber_loss.default,
-    aten.huber_loss_backward.default,
-    aten.smooth_l1_loss.default,
-    aten.smooth_l1_loss_backward.default,
-    aten.soft_margin_loss.default,
-    aten.soft_margin_loss_backward.default,
-    aten.binary_cross_entropy.default,
-    aten.binary_cross_entropy_backward.default,
-    aten.binary_cross_entropy_with_logits.default,
-    aten.mse_loss.default,
-    aten.mse_loss_backward.default,
-    aten.logaddexp.default,
     aten.logaddexp2.default,
     aten.logit_backward.default,
     aten.logit.default,
@@ -346,8 +309,8 @@ def mv(self, vec):
 
 @register_decomposition(aten.addr.default)
 def addr(self, vec1, vec2, *, beta=1, alpha=1):
-    if is_strict_cuda_triton(self.device) and any(
-        t.is_floating_point() or t.is_complex() for t in (self, vec1, vec2)
+    if is_strict_cuda_triton(self.device) and (
+        self.is_complex() or vec1.is_complex() or vec2.is_complex()
     ):
         return NotImplemented
     return decomp_addr(self, vec1, vec2, beta=beta, alpha=alpha)
@@ -397,10 +360,6 @@ def roll(a: torch.Tensor, shifts: DimsType, dims: DimsType = ()) -> torch.Tensor
 
 @register_decomposition([aten.special_log_ndtr])
 def special_log_ndtr(a: torch.Tensor) -> torch.Tensor | NotImplementedType:
-    if is_strict_cuda_triton(a.device) and not (
-        a.is_floating_point() or a.is_complex()
-    ):
-        return aten.special_log_ndtr(a.to(torch.get_default_dtype()))
     if is_strict_cuda_triton(a.device) and a.dtype in (torch.float32, torch.float64):
         return NotImplemented
     # Inductor's C++ codegen compiles with -fno-signed-zeros, which causes the
@@ -466,7 +425,8 @@ def mvlgamma(self: torch.Tensor, p: int) -> torch.Tensor:
         not is_strict_cuda_triton(self.device)
         or self.is_complex()
         or not isinstance(p, int)
-        or p < 1
+        or not 1 <= p <= 16
+        or has_free_unbacked_symbols((self.shape, self.stride()))
     ):
         return decomp_multigammaln(self, p)
     if not self.dtype.is_floating_point:
@@ -486,11 +446,6 @@ def mvlgamma(self: torch.Tensor, p: int) -> torch.Tensor:
 
     x = self.to(acc) if narrow else self
     offsets = 0.5 * torch.arange(1 - p, 1, 1, dtype=dtype, device=self.device)
-    if p > 16 or has_free_unbacked_symbols((self.shape, self.stride())):
-        terms = materialize(torch.lgamma(materialize(x.unsqueeze(-1) + offsets)))
-        total = terms.to(dtype).sum(-1).to(acc)
-        out = total + p * (p - 1) * math.log(math.pi) * 0.25
-        return out.to(dtype) if narrow else out
     terms = [
         materialize(torch.lgamma(materialize(x + offset)))
         for offset in offsets.unbind(0)
@@ -583,11 +538,7 @@ if torch.distributed.is_available():
 
 
 @register_decomposition([aten.lerp.Scalar])
-def _lerp_scalar(
-    start: torch.Tensor, end: torch.Tensor, weight: torch.types.Number
-) -> torch.Tensor:
-    if is_strict_cuda_triton(start.device) and start.is_complex():
-        return NotImplemented
+def _lerp_scalar(start: torch.Tensor, end: torch.Tensor, weight: float) -> torch.Tensor:
     # Decompose into sub + add(alpha=weight) so that the add lowering emits FMA,
     # matching eager CUDA's dual-formula (see aten/src/ATen/native/Lerp.h).
     # Convert end to start's memory format so the output preserves start's layout,
@@ -596,7 +547,7 @@ def _lerp_scalar(
     if fmt != torch.contiguous_format:
         end = end.contiguous(memory_format=fmt)
     diff = end - start
-    if abs(weight) >= 0.5:
+    if weight >= 0.5 or weight <= -0.5:
         return torch.add(end, diff, alpha=-(1.0 - weight))
     return torch.add(start, diff, alpha=weight)
 
@@ -605,8 +556,6 @@ def _lerp_scalar(
 def _lerp_tensor(
     start: torch.Tensor, end: torch.Tensor, weight: torch.Tensor
 ) -> torch.Tensor:
-    if is_strict_cuda_triton(start.device) and start.is_complex():
-        return NotImplemented
     # Same dual-formula as foreach_lerp polyfill: decompose into sub + addcmul.
     # Convert end to start's memory format so the output preserves start's layout.
     fmt = suggest_memory_format(start)
@@ -614,8 +563,6 @@ def _lerp_tensor(
         end = end.contiguous(memory_format=fmt)
     diff = end - start
     mask = weight.abs() >= 0.5
-    if start.is_complex():
-        return torch.where(mask, end - diff * (1.0 - weight), start + weight * diff)
     neg_omw = -(1.0 - weight)
     w = torch.where(mask, neg_omw, weight)
     base = torch.where(mask, end, start)
@@ -670,56 +617,12 @@ def _use_strict_clamp(a: torch.Tensor, dtype: torch.dtype | None = None) -> bool
     ) in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 
 
-@register_decomposition(aten.threshold.default)
-def threshold(
-    a: torch.Tensor, threshold: torch.types.Number, value: torch.types.Number
-) -> torch.Tensor:
-    if not _use_strict_clamp(a):
-        return cast(torch.Tensor, decomp_threshold(a, threshold, value))
-    bound = torch.scalar_tensor(threshold, dtype=a.dtype, device=a.device)
-    return torch.where(a <= bound, torch.full_like(a, value), a)
-
-
-@register_decomposition(aten.heaviside.default)
-def heaviside(a: torch.Tensor, values: torch.Tensor) -> torch.Tensor:
-    if not _use_strict_clamp(a) or values.dtype != a.dtype:
-        return cast(torch.Tensor, decomp_heaviside(a, values))
-    int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[a.element_size()]
-    positive = (a > 0).to(a.dtype)
-    return torch.where(a == 0, values.view(int_dtype), positive.view(int_dtype)).view(
-        a.dtype
-    )
-
-
 @register_decomposition(aten.hardtanh.default)
 def hardtanh(
     a: torch.Tensor,
     min_val: torch.types.Number = -1,
     max_val: torch.types.Number = 1,
 ) -> torch.Tensor:
-    if (
-        is_strict_cuda_triton(a.device)
-        and a.dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-        and isinstance(min_val, (int, float))
-        and isinstance(max_val, (int, float))
-    ):
-        # Native hardtanh truncates scalar bounds before integral clamp.
-        lo, hi = int(min_val), int(max_val)
-        scalar_limits = torch.iinfo(torch.int64)
-        limits = torch.iinfo(a.dtype)
-        if (
-            scalar_limits.min <= lo <= scalar_limits.max
-            and scalar_limits.min <= hi <= scalar_limits.max
-            and lo <= limits.max
-            and hi >= limits.min
-        ):
-            lower = torch.scalar_tensor(
-                max(lo, limits.min), dtype=a.dtype, device=a.device
-            )
-            upper = torch.scalar_tensor(
-                min(hi, limits.max), dtype=a.dtype, device=a.device
-            )
-            return torch.clamp(a, lower, upper)
     if _use_strict_clamp(a):
         # Preserve the original input bits before the reference's opmath casts.
         return clamp(a, min_val, max_val)
@@ -743,13 +646,40 @@ def _cuda_tensor_iterator_cast(x: torch.Tensor, dtype: torch.dtype) -> torch.Ten
     # TensorIterator narrows CUDA doubles through float32.
     if x.dtype == torch.float64 and dtype in (torch.float16, torch.bfloat16):
         x = x.float()
-    return x.to(dtype)
+    result = x.to(dtype)
+    if x.dtype == torch.float16 and dtype == torch.float64:
+        # CUDA's half-to-double path canonicalizes NaNs before widening.
+        bits = torch.where(torch.isnan(x), 0x7FFFFFFFE0000000, result.view(torch.int64))
+        result = bits.view(dtype)
+    return result
+
+
+def _clamp_nan_fill(x: torch.Tensor, value: torch.types.Number | None) -> torch.Tensor:
+    if value is None or x.dtype == torch.bfloat16:
+        return torch.full_like(x, float("nan"))
+    if isinstance(value, torch.SymFloat):
+        bits = torch.scalar_tensor(value, dtype=torch.float64, device=x.device).view(
+            torch.int64
+        )
+    else:
+        value_bits = int.from_bytes(struct.pack("<d", value), "little", signed=True)
+        bits = torch.scalar_tensor(value_bits, dtype=torch.int64, device=x.device)
+    # Match the host Scalar conversion, including NaN sign and payload.
+    if x.dtype == torch.float16:
+        bits = ((bits >> 48) & 0x8000) | 0x7E00
+    elif x.dtype == torch.float32:
+        bits = ((bits >> 32) & 0x80000000) | ((bits >> 29) & 0x7FFFFF) | 0x7FC00000
+    int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[x.element_size()]
+    shape, permutation = _get_shape_permutation_like(x)
+    return bits.to(int_dtype).expand(shape).clone().permute(permutation).view(x.dtype)
 
 
 def _strict_clamp(
     x: torch.Tensor,
     min: torch.types.Number | torch.Tensor | None = None,
     max: torch.types.Number | torch.Tensor | None = None,
+    *,
+    nan_fill_value: torch.types.Number | None = None,
 ) -> torch.Tensor:
     tensor_bounds = isinstance(min, torch.Tensor) or isinstance(max, torch.Tensor)
     dtype = x.dtype
@@ -780,7 +710,7 @@ def _strict_clamp(
         if (isinstance(min, (int, float)) and math.isnan(min)) or (
             isinstance(max, (int, float)) and math.isnan(max)
         ):
-            return torch.full_like(x, float("nan"))
+            return _clamp_nan_fill(x, nan_fill_value)
         min = -float("inf") if min is None else min
         max = float("inf") if max is None else max
         if any(isinstance(v, torch.SymFloat) for v in (min, max)):
@@ -805,14 +735,19 @@ def _strict_clamp(
             else torch.where(hi < result, hi, result)
         )
     result = result.to(dtype)
-    nan = torch.isnan(x)
+    # Preserve input NaN bits through opmath casts and min/max optimizations.
+    int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[x.element_size()]
+    bits = result.view(int_dtype)
     if tensor_bounds:
-        for bound in (lo, hi):
+        # Eager's NaN precedence is input, lower bound, then upper bound.
+        for bound in (hi, lo):
             if bound is not None:
-                nan = nan | torch.isnan(bound)
+                bits = torch.where(torch.isnan(bound), bound.view(int_dtype), bits)
+    bits = torch.where(torch.isnan(x), x.view(int_dtype), bits)
     if nan_bounds is not None:
-        nan = nan | nan_bounds
-    return torch.where(nan, float("nan"), result)
+        nan = _clamp_nan_fill(x, nan_fill_value).view(int_dtype)
+        bits = torch.where(nan_bounds, nan, bits)
+    return bits.view(dtype)
 
 
 @register_decomposition(aten.clamp)
@@ -827,12 +762,14 @@ def clamp(
 
 @register_decomposition(aten.clamp_min)
 def clamp_min(x: torch.Tensor, min: torch.types.Number | torch.Tensor) -> torch.Tensor:
-    return _strict_clamp(x, min=min)
+    nan_fill = None if isinstance(min, torch.Tensor) else min
+    return _strict_clamp(x, min=min, nan_fill_value=nan_fill)
 
 
 @register_decomposition(aten.clamp_max)
 def clamp_max(x: torch.Tensor, max: torch.types.Number | torch.Tensor) -> torch.Tensor:
-    return _strict_clamp(x, max=max)
+    nan_fill = None if isinstance(max, torch.Tensor) else max
+    return _strict_clamp(x, max=max, nan_fill_value=nan_fill)
 
 
 # Inductor-specific SiLU decomposition for exact eager matching.
@@ -841,64 +778,15 @@ def clamp_max(x: torch.Tensor, max: torch.types.Number | torch.Tensor) -> torch.
 @register_decomposition([aten.silu])
 @pw_cast_for_opmath
 def silu(x: torch.Tensor) -> torch.Tensor:
-    if is_strict_cuda_triton(x.device) and x.dtype in (
-        torch.complex64,
-        torch.complex128,
-    ):
-        x = x.resolve_conj().resolve_neg()
-        er, ei = _cuda_complex_exp_neg_parts(x)
-        return torch.complex(*_cuda_complex_c10_divide(x.real, x.imag, 1 + er, 0 + ei))
     return x / (1 + x.neg().exp())
-
-
-def _cuda_complex_exp_neg_parts(x):
-    """Thrust's complex exp(-x), including its scaled overflow interval."""
-    xr, yi = -x.real, -x.imag
-    exp_x, cos_y, sin_y = torch.exp(xr), torch.cos(yi), torch.sin(yi)
-    if xr.dtype == torch.float64:
-        int_dtype, mantissa, bias = torch.int64, 52, 1023
-        k, kln2, lower, upper = 1799, 1246.97177782734161156, 0x40862E42, 0x4096B8E4
-        word = (xr.view(int_dtype) >> 32) & 0xFFFFFFFF
-    else:
-        int_dtype, mantissa, bias = torch.int32, 23, 127
-        k, kln2, lower, upper = 235, 162.88958740, 0x42B17218, 0x43400074
-        word = xr.view(int_dtype).to(torch.int64) & 0xFFFFFFFF
-    scale_region = (word >= lower) & (word <= upper)
-    reduced_bits = torch.exp(xr - kln2).view(int_dtype)
-    shift = (reduced_bits >> mantissa) - 2 * bias + k
-    scaled = ((reduced_bits & ((1 << mantissa) - 1)) | (2 * bias << mantissa)).view(
-        xr.dtype
-    )
-    half = torch.div(shift, 2, rounding_mode="trunc")
-    scale1 = ((bias + half) << mantissa).to(int_dtype).view(xr.dtype)
-    scale2 = ((bias + shift - half) << mantissa).to(int_dtype).view(xr.dtype)
-    er = torch.where(scale_region, cos_y * scaled * scale1 * scale2, exp_x * cos_y)
-    ei = torch.where(scale_region, sin_y * scaled * scale1 * scale2, exp_x * sin_y)
-    # nvcc cancels the input negation in Thrust's y - y expression.
-    ynan = x.imag - x.imag
-    nonfinite_y = ~torch.isfinite(yi)
-    er = torch.where(
-        nonfinite_y,
-        torch.where(torch.isinf(xr), torch.where(xr < 0, 0.0, xr), ynan),
-        er,
-    )
-    ei = torch.where(nonfinite_y, torch.where(torch.isneginf(xr), 0.0, ynan), ei)
-    er, ei = torch.where(xr == 0, cos_y, er), torch.where(xr == 0, sin_y, ei)
-    return torch.where(yi == 0, exp_x, er), torch.where(yi == 0, yi, ei)
 
 
 @register_decomposition(aten.gelu.default)
 @pw_cast_for_opmath
 def gelu(a: torch.Tensor, approximate: str = "none") -> torch.Tensor:
     if (
-        is_strict_cuda_triton(a.device)
-        and a.dtype == torch.float64
-        and approximate == "none"
-    ):
-        return (1 + torch.erf(a * math.sqrt(0.5))) * (a * 0.5)
-    if (
         not is_strict_cuda_triton(a.device)
-        or a.dtype not in (torch.float32, torch.float64)
+        or a.dtype != torch.float32
         or approximate != "tanh"
     ):
         return cast(torch.Tensor, decomp_gelu(a, approximate))
@@ -936,6 +824,7 @@ def softplus_backward(
     grad_output, self, dtype = inputs
     scaled = self * beta
     z = torch.exp(scaled)
+    # The native fused float64 kernel gives z priority when both factors are NaN.
     result = z * grad_output / (z + 1.0)
     return torch.where(scaled > threshold, grad_output, result).to(dtype)
 
@@ -955,454 +844,6 @@ def _strict_pointwise_inputs(
         _cuda_tensor_iterator_cast(self, dtype).to(compute_dtype),
         dtype,
     )
-
-
-def _round_pointwise_intermediate(
-    value: torch.Tensor, dtype: torch.dtype
-) -> torch.Tensor:
-    return value.to(dtype).to(utils.get_computation_dtype(dtype))
-
-
-@register_decomposition(aten.log_sigmoid_backward.default)
-def log_sigmoid_backward(
-    grad_output: torch.Tensor, self: torch.Tensor, buffer: torch.Tensor
-) -> torch.Tensor:
-    if not (
-        is_strict_cuda_triton(self.device)
-        and self.dtype == grad_output.dtype == torch.float64
-    ):
-        return decomp_log_sigmoid_backward(grad_output, self, buffer)
-    negative = self < 0
-    maximum = torch.where(negative, 1, 0)
-    sign = torch.where(negative, 1, -1)
-    z = torch.exp(-torch.abs(self))
-    derivative = maximum - sign * (z / (1 + z))
-    return grad_output * derivative
-
-
-@register_decomposition(aten.huber_loss.default)
-def huber_loss(
-    self: torch.Tensor, target: torch.Tensor, reduction: int = 1, delta: float = 1.0
-) -> torch.Tensor:
-    if not (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16)
-        and self.dtype == target.dtype
-        and delta > 0
-    ):
-        return decomp_huber_loss(self, target, reduction, delta)
-    dtype = self.dtype
-    difference = _round_pointwise_intermediate(
-        self.float() - target.float(), dtype
-    ).abs()
-    delta_value = _round_pointwise_intermediate(
-        torch.scalar_tensor(delta, dtype=torch.float64, device=self.device).float(),
-        dtype,
-    )
-    half_delta = _round_pointwise_intermediate(0.5 * delta_value, dtype)
-    return torch.where(
-        difference < delta_value,
-        (0.5 * difference) * difference,
-        delta_value * (difference - half_delta),
-    ).to(dtype)
-
-
-@register_decomposition(aten.huber_loss_backward.default)
-def huber_loss_backward(
-    grad_output: torch.Tensor,
-    self: torch.Tensor,
-    target: torch.Tensor,
-    reduction: int,
-    delta: float,
-) -> torch.Tensor:
-    if not (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16)
-        and grad_output.dtype == self.dtype == target.dtype
-        and delta > 0
-    ):
-        return decomp_huber_loss_backward(grad_output, self, target, reduction, delta)
-    dtype = self.dtype
-    difference = _round_pointwise_intermediate(self.float() - target.float(), dtype)
-    grad = grad_output.float()
-    delta_value = _round_pointwise_intermediate(
-        torch.scalar_tensor(delta, dtype=torch.float64, device=self.device).float(),
-        dtype,
-    )
-    negative = _round_pointwise_intermediate(grad * -1.0, dtype)
-    positive = _round_pointwise_intermediate(grad * 1.0, dtype)
-    inner = _round_pointwise_intermediate(difference * 1.0, dtype)
-    inner = _round_pointwise_intermediate(inner * grad, dtype)
-    return torch.where(
-        difference < -delta_value,
-        _round_pointwise_intermediate(negative * delta_value, dtype),
-        torch.where(
-            difference > delta_value,
-            _round_pointwise_intermediate(positive * delta_value, dtype),
-            inner,
-        ),
-    ).to(dtype)
-
-
-@register_decomposition(aten.smooth_l1_loss.default)
-def smooth_l1_loss(
-    self: torch.Tensor, target: torch.Tensor, reduction: int = 1, beta: float = 1.0
-) -> torch.Tensor:
-    if not (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-        and self.dtype == target.dtype
-        and beta > 0
-    ):
-        return decomp_smooth_l1_loss(self, target, reduction, beta)
-    dtype = self.dtype
-    compute_dtype = utils.get_computation_dtype(dtype)
-    x, target = (v.to(compute_dtype) for v in (self, target))
-    difference = _round_pointwise_intermediate(x - target, dtype).abs()
-    beta_value = _round_pointwise_intermediate(
-        torch.scalar_tensor(beta, dtype=torch.float64, device=self.device).to(
-            compute_dtype
-        ),
-        dtype,
-    )
-    half_beta = _round_pointwise_intermediate(0.5 * beta_value, dtype)
-    # Native abs promotes narrow inputs after the subtraction has rounded.
-    result = torch.where(
-        difference < beta_value,
-        (0.5 * difference) * difference / beta_value,
-        difference - half_beta,
-    )
-    return result.to(dtype)
-
-
-@register_decomposition(aten.smooth_l1_loss_backward.default)
-def smooth_l1_loss_backward(
-    grad_output: torch.Tensor,
-    self: torch.Tensor,
-    target: torch.Tensor,
-    reduction: int,
-    beta: float,
-) -> torch.Tensor:
-    if not (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-        and grad_output.dtype == self.dtype == target.dtype
-        and beta > 0
-    ):
-        return decomp_smooth_l1_loss_backward(
-            grad_output, self, target, reduction, beta
-        )
-    dtype = self.dtype
-    compute_dtype = utils.get_computation_dtype(dtype)
-    x, target, grad = (v.to(compute_dtype) for v in (self, target, grad_output))
-    difference = _round_pointwise_intermediate(x - target, dtype)
-    beta_value = _round_pointwise_intermediate(
-        torch.scalar_tensor(beta, dtype=torch.float64, device=self.device).to(
-            compute_dtype
-        ),
-        dtype,
-    )
-    if dtype == torch.float64:
-        inner = difference * grad
-    else:
-        inner = _round_pointwise_intermediate(difference * 1.0, dtype)
-        inner = _round_pointwise_intermediate(inner * grad, dtype)
-    inner = _round_pointwise_intermediate(inner / beta_value, dtype)
-    negative = _round_pointwise_intermediate(grad * -1.0, dtype)
-    positive = _round_pointwise_intermediate(grad * 1.0, dtype)
-    return torch.where(
-        difference < -beta_value,
-        negative,
-        torch.where(difference > beta_value, positive, inner),
-    ).to(dtype)
-
-
-@register_decomposition(aten.soft_margin_loss.default)
-def soft_margin_loss(
-    self: torch.Tensor, target: torch.Tensor, reduction: int = 1
-) -> torch.Tensor:
-    if not (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16)
-        and self.dtype == target.dtype
-    ):
-        return decomp_soft_margin_loss(self, target, reduction)
-    dtype = self.dtype
-    x, target = self.float(), target.float()
-    result = _round_pointwise_intermediate(-x, dtype)
-    result = _round_pointwise_intermediate(result * target, dtype)
-    result = _round_pointwise_intermediate(torch.exp(result), dtype)
-    return torch.log1p(result).to(dtype)
-
-
-@register_decomposition(aten.soft_margin_loss_backward.default)
-def soft_margin_loss_backward(
-    grad_output: torch.Tensor,
-    self: torch.Tensor,
-    target: torch.Tensor,
-    reduction: int = 1,
-) -> torch.Tensor:
-    if not (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-        and grad_output.dtype == self.dtype == target.dtype
-    ):
-        return decomp_soft_margin_loss_backward(grad_output, self, target, reduction)
-    dtype = self.dtype
-    compute_dtype = utils.get_computation_dtype(dtype)
-    x, target, grad_output = (v.to(compute_dtype) for v in (self, target, grad_output))
-    with annotate({"native_tensor_iterator": True}):
-        scaled = _round_pointwise_intermediate(-target, dtype)
-        scaled = _round_pointwise_intermediate(scaled * x, dtype)
-        z = _round_pointwise_intermediate(torch.exp(scaled), dtype)
-        result = _round_pointwise_intermediate(target * z, dtype)
-        result = _round_pointwise_intermediate(result * -1.0, dtype)
-        denominator = _round_pointwise_intermediate(z + 1.0, dtype)
-        result = _round_pointwise_intermediate(result / denominator, dtype)
-        return (result * grad_output).to(dtype)
-
-
-@register_decomposition(aten.binary_cross_entropy_with_logits.default)
-def binary_cross_entropy_with_logits(
-    self: torch.Tensor,
-    target: torch.Tensor,
-    weight: torch.Tensor | None = None,
-    pos_weight: torch.Tensor | None = None,
-    reduction: int = 1,
-) -> torch.Tensor:
-    if not (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16)
-        and all(
-            value is None or value.dtype == self.dtype
-            for value in (target, weight, pos_weight)
-        )
-    ):
-        return decomp_binary_cross_entropy_with_logits(
-            self, target, weight, pos_weight, reduction
-        )
-    dtype = self.dtype
-    log_sigmoid = torch.ops.aten.log_sigmoid.default(self).float()
-    if pos_weight is not None:
-        log_weight = _round_pointwise_intermediate(pos_weight.float() - 1.0, dtype)
-        log_weight = _round_pointwise_intermediate(log_weight * target.float(), dtype)
-        log_weight = _round_pointwise_intermediate(log_weight + 1.0, dtype)
-        log_sigmoid = _round_pointwise_intermediate(log_sigmoid * log_weight, dtype)
-    result = _round_pointwise_intermediate(1.0 - target.float(), dtype)
-    result = _round_pointwise_intermediate(result * self.float(), dtype)
-    result = _round_pointwise_intermediate(result - log_sigmoid, dtype)
-    if weight is not None:
-        result = _round_pointwise_intermediate(result * weight.float(), dtype)
-    return result.to(dtype)
-
-
-_CUDA_BCE_EPSILON = struct.unpack("f", struct.pack("f", 1e-12))[0]
-
-
-@register_decomposition(aten.binary_cross_entropy.default)
-def binary_cross_entropy(
-    self: torch.Tensor,
-    target: torch.Tensor,
-    weight: torch.Tensor | None = None,
-    reduction: int = 1,
-) -> torch.Tensor:
-    if not (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-        and self.dtype == target.dtype
-        and (weight is None or weight.dtype == self.dtype)
-    ):
-        return decomp_binary_cross_entropy(self, target, weight, reduction)
-    _assert_binary_cross_entropy_inputs(self, target)
-    dtype = self.dtype
-    compute_dtype = utils.get_computation_dtype(dtype)
-    x, target = (v.to(compute_dtype) for v in (self, target))
-    log_input = torch.clamp_min(
-        _round_pointwise_intermediate(torch.log(x), dtype), -100
-    )
-    log_complement = torch.clamp_min(
-        _round_pointwise_intermediate(torch.log1p(-x), dtype), -100
-    )
-    complement = _round_pointwise_intermediate(target - 1.0, dtype)
-    if dtype in (torch.float16, torch.bfloat16):
-        left = _round_pointwise_intermediate(complement * log_complement, dtype)
-        right = _round_pointwise_intermediate(target * log_input, dtype)
-        result = _round_pointwise_intermediate(left - right, dtype)
-    else:
-        result = inductor_prims.fma(complement, log_complement, -(target * log_input))
-    result = result.to(dtype)
-    return result if weight is None else result * weight
-
-
-@register_decomposition(aten.binary_cross_entropy_backward.default)
-def binary_cross_entropy_backward(
-    grad_output: torch.Tensor,
-    self: torch.Tensor,
-    target: torch.Tensor,
-    weight: torch.Tensor | None = None,
-    reduction: int = 1,
-) -> torch.Tensor:
-    if not (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-        and grad_output.dtype == self.dtype == target.dtype
-        and (weight is None or weight.dtype == self.dtype)
-    ):
-        return decomp_binary_cross_entropy_backward(
-            grad_output, self, target, weight, reduction
-        )
-    dtype = self.dtype
-    compute_dtype = utils.get_computation_dtype(dtype)
-    x, t, grad = (v.to(compute_dtype) for v in (self, target, grad_output))
-    # Each native scalar_t arithmetic result rounds before the next operation.
-    difference = (x - t).to(dtype).to(compute_dtype)
-    complement = (1.0 - x).to(dtype).to(compute_dtype)
-    product = (complement * x).to(dtype).to(compute_dtype)
-    epsilon = (
-        torch.scalar_tensor(_CUDA_BCE_EPSILON, dtype=compute_dtype, device=self.device)
-        .to(dtype)
-        .to(compute_dtype)
-    )
-    denominator = torch.clamp_min(product, epsilon)
-    numerator = (grad * difference).to(dtype).to(compute_dtype)
-    result = (numerator / denominator).to(dtype)
-    if weight is not None:
-        result = result * weight
-    return result
-
-
-@register_decomposition(aten.mse_loss.default)
-def mse_loss(
-    self: torch.Tensor, target: torch.Tensor, reduction: int = 1
-) -> torch.Tensor:
-    if (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16)
-        and target.dtype == self.dtype
-    ):
-        difference = self - target
-        return difference * difference
-    return decomp_mse_loss(self, target, reduction)
-
-
-@register_decomposition(aten.mse_loss_backward.default)
-def mse_loss_backward(
-    grad_output: torch.Tensor,
-    self: torch.Tensor,
-    target: torch.Tensor,
-    reduction: int,
-) -> torch.Tensor:
-    if (
-        reduction == 0
-        and is_strict_cuda_triton(self.device)
-        and self.dtype in (torch.float16, torch.bfloat16, torch.float64)
-        and grad_output.dtype == self.dtype == target.dtype
-    ):
-        return (2.0 * (self - target)) * grad_output
-    return decomp_mse_loss_backward(grad_output, self, target, reduction)
-
-
-@register_decomposition(aten.glu_backward.default)
-def glu_backward(
-    grad_output: torch.Tensor, self: torch.Tensor, dim: int
-) -> torch.Tensor:
-    inputs = _strict_pointwise_inputs(grad_output, self)
-    if inputs is None or self.dim() == 0:
-        return decomp_glu_backward(grad_output, self, dim)
-    dim = utils.canonicalize_dim(self.dim(), dim)
-    if self.size(dim) % 2:
-        return decomp_glu_backward(grad_output, self, dim)
-    grad_output, self, dtype = inputs
-    first, second = torch.chunk(self, 2, dim=dim)
-    sigmoid = torch.sigmoid(second)
-    grad_first = sigmoid * grad_output
-    grad_second = (1.0 - sigmoid) * sigmoid * grad_output * first
-    return torch.cat((grad_first, grad_second), dim=dim).to(dtype)
-
-
-@register_decomposition(aten.logaddexp.default)
-def logaddexp(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """Match the CUDA complex kernel's real-component arithmetic and branches."""
-    if not is_strict_cuda_triton(a.device) or not (a.is_complex() or b.is_complex()):
-        return decomp_logaddexp(a, b)
-    compute, dtype = elementwise_dtypes(
-        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    same_dtype = a.dtype == b.dtype
-    a = a.resolve_conj().resolve_neg().to(dtype).to(compute)
-    b = b.resolve_conj().resolve_neg().to(dtype).to(compute)
-    ar, ai, br, bi = a.real, a.imag, b.real, b.imag
-    vectorized = None
-    if dtype == torch.complex64 and same_dtype:
-        # Complex64 and float64 have the same eight-byte TensorIterator layout.
-        # Reuse the existing masks for full blocks, tails and pointer alignment.
-        _, vectorized = inductor_prims.cuda_pointwise_iteration(
-            [a.view(torch.float64), b.view(torch.float64)], False
-        )
-    # Jiterator's NAN is a float32 NaN promoted to the component dtype.
-    cuda_nan = (
-        torch.tensor(0x7FFFFFFF, dtype=torch.int32, device=a.device)
-        .view(torch.float32)
-        .to(ar.dtype)
-    )
-
-    def log1p_parts(x, y):
-        theta = torch.atan2(y, x + 1)
-        zabs = torch.hypot(x, y)
-        r = inductor_prims.fma(x, 2 + x, y * y)
-        if vectorized is not None:
-            r = torch.where(vectorized, inductor_prims.fma(y, y, x * (2 + x)), r)
-        real = torch.where(
-            zabs < 0.5,
-            torch.where(r == 0, x, 0.5 * torch.log1p(r)),
-            torch.log(torch.hypot(x + 1, y)),
-        )
-        return real, theta
-
-    def exp_parts(r, i):
-        magnitude = torch.exp(r)
-        sine, cosine = torch.sin(i), torch.cos(i)
-        real, imag = magnitude * cosine, magnitude * sine
-        infinite = torch.isposinf(r)
-        real = torch.where(infinite & (cosine == 0), 0, real)
-        imag = torch.where(infinite & (sine == 0), 0, imag)
-        real = torch.where(infinite & ~torch.isfinite(i), float("inf"), real)
-        imag = torch.where(infinite & ~torch.isfinite(i), cuda_nan, imag)
-        return real, imag
-
-    choose = ar >= br
-    minr, mini = torch.where(choose, br, ar), torch.where(choose, bi, ai)
-    maxr, maxi = torch.where(choose, ar, br), torch.where(choose, ai, bi)
-    dr, di = minr - maxr, mini - maxi
-    er, ei = exp_parts(dr, di)
-    negative_infinite = torch.isneginf(dr)
-    er, ei = (
-        torch.where(negative_infinite, 0, er),
-        torch.where(negative_infinite, 0, ei),
-    )
-    lr, li = log1p_parts(er, ei)
-    real, imag = lr + maxr, li + maxi
-
-    e1r, e1i = exp_parts(minr, mini)
-    e2r, e2i = exp_parts(maxr, maxi)
-    pr, pi = log1p_parts(e1r + e2r - 1, e1i + e2i)
-    sameinf = ~torch.isfinite(minr) & (minr == maxr)
-    real = torch.where(sameinf, torch.where(minr < 0, minr, pr), real)
-    imag = torch.where(sameinf, torch.where(minr < 0, mini, pi), imag)
-    nan = torch.isnan(ar) | torch.isnan(ai) | torch.isnan(br) | torch.isnan(bi)
-    return torch.complex(
-        torch.where(nan, cuda_nan, real), torch.where(nan, cuda_nan, imag)
-    ).to(dtype)
 
 
 @register_decomposition(aten.logaddexp2.default)
@@ -1474,20 +915,11 @@ def gelu_backward(
     grad_output: torch.Tensor, self: torch.Tensor, approximate: str = "none"
 ) -> torch.Tensor:
     inputs = (
-        _strict_pointwise_inputs(grad_output, self)
-        if approximate == "tanh" or grad_output.dtype == self.dtype == torch.float64
-        else None
+        _strict_pointwise_inputs(grad_output, self) if approximate == "tanh" else None
     )
     if inputs is None:
         return decomp_gelu_backward(grad_output, self, approximate)
     grad_output, self, dtype = inputs
-    if approximate != "tanh":
-        k_alpha = math.sqrt(0.5)
-        k_beta = (2 / math.sqrt(math.pi)) * k_alpha * 0.5
-        cdf = 0.5 * (1 + torch.erf(self * k_alpha))
-        pdf = k_beta * torch.exp(self * self * -0.5)
-        derivative = self * pdf + cdf
-        return (grad_output * derivative).to(dtype)
     k_beta = math.sqrt(2) * (2 / math.sqrt(math.pi)) * 0.5
     x_sq = self * self
     t = torch.tanh(k_beta * torch.add(self, x_sq * self, alpha=0.044715))
@@ -1497,8 +929,7 @@ def gelu_backward(
     alpha = 3 * 0.044715 if self.dtype == torch.float64 else 0.13414499163627625
     inner_derivative = k_beta * torch.add(one, x_sq, alpha=alpha)
     right_derivative = (0.5 * self) * tanh_derivative * inner_derivative
-    derivative = 0.5 * (1 + t) + right_derivative
-    return (grad_output * derivative).to(dtype)
+    return (grad_output * (0.5 * (1 + t) + right_derivative)).to(dtype)
 
 
 @register_decomposition(aten.hardswish_backward.default)
@@ -1540,218 +971,12 @@ def silu_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor
     one = torch.ones((), dtype=self.dtype, device=self.device)
     factor = torch.addcmul(one, self, 1 - s)
     product = grad_output * s
-    return (product * factor).to(dtype)
-
-
-def _cuda_complex_c10_divide(a, b, c, d):
-    """c10::complex division used by CUDA SiLU (distinct from LLVM division)."""
-    abs_c, abs_d = c.abs(), d.abs()
-    ratio_c, ratio_d = d / c, c / d
-    scale_c = 1 / inductor_prims.fma(ratio_c, d, c)
-    scale_d = 1 / inductor_prims.fma(ratio_d, c, d)
-    real_c = inductor_prims.fma(ratio_c, b, a) * scale_c
-    imag_c = inductor_prims.fma(ratio_c, -a, b) * scale_c
-    real_d = inductor_prims.fma(ratio_d, a, b) * scale_d
-    imag_d = inductor_prims.fma(ratio_d, b, -a) * scale_d
-    real = torch.where(abs_c >= abs_d, real_c, real_d)
-    imag = torch.where(abs_c >= abs_d, imag_c, imag_d)
-    both_zero = (abs_c == 0) & (abs_d == 0)
-    return torch.where(both_zero, a / abs_c, real), torch.where(
-        both_zero, b / abs_d, imag
-    )
-
-
-def _cuda_complex_mul_recovery(ar, ai, br, bi, real, imag):
-    """Apply the IEEE recovery in ATen's cuda/llvm_complex.cpp multiplication."""
-    ac, bd, ad, bc = ar * br, ai * bi, ar * bi, ai * br
-    both_nan = torch.isnan(real) & torch.isnan(imag)
-    left_inf = torch.isinf(ar) | torch.isinf(ai)
-    right_inf = torch.isinf(br) | torch.isinf(bi)
-    overflow = torch.isinf(ac) | torch.isinf(bd) | torch.isinf(ad) | torch.isinf(bc)
-    zero, one = torch.zeros_like(ar), torch.ones_like(ar)
-    a = torch.where(
-        left_inf, torch.copysign(torch.where(torch.isinf(ar), one, zero), ar), ar
-    )
-    b = torch.where(
-        left_inf, torch.copysign(torch.where(torch.isinf(ai), one, zero), ai), ai
-    )
-    c = torch.where(left_inf & torch.isnan(br), torch.copysign(zero, br), br)
-    d = torch.where(left_inf & torch.isnan(bi), torch.copysign(zero, bi), bi)
-    c = torch.where(
-        right_inf, torch.copysign(torch.where(torch.isinf(c), one, zero), c), c
-    )
-    d = torch.where(
-        right_inf, torch.copysign(torch.where(torch.isinf(d), one, zero), d), d
-    )
-    a = torch.where(right_inf & torch.isnan(a), torch.copysign(zero, a), a)
-    b = torch.where(right_inf & torch.isnan(b), torch.copysign(zero, b), b)
-    finite_overflow = ~(left_inf | right_inf) & overflow
-    a = torch.where(finite_overflow & torch.isnan(a), torch.copysign(zero, a), a)
-    b = torch.where(finite_overflow & torch.isnan(b), torch.copysign(zero, b), b)
-    c = torch.where(finite_overflow & torch.isnan(c), torch.copysign(zero, c), c)
-    d = torch.where(finite_overflow & torch.isnan(d), torch.copysign(zero, d), d)
-    recalculate = both_nan & (left_inf | right_inf | overflow)
-    infinity = torch.full_like(ar, float("inf"))
-    return (
-        torch.where(recalculate, infinity * (a * c - b * d), real),
-        torch.where(recalculate, infinity * (a * d + b * c), imag),
-    )
-
-
-def _cuda_complex_divide(ar, ai, br, bi):
-    """Scaled division and IEEE recovery from ATen's cuda/llvm_complex.cpp."""
-    magnitude = torch.fmax(br.abs(), bi.abs())
-    _, exponent = torch.frexp(magnitude)
-    shift = torch.where(torch.isfinite(magnitude) & (magnitude != 0), exponent - 1, 0)
-    br, bi = torch.ldexp(br, -shift), torch.ldexp(bi, -shift)
-    denominator = inductor_prims.fma(br, br, bi * bi)
-    real = torch.ldexp(inductor_prims.fma(ar, br, ai * bi) / denominator, -shift)
-    imag = torch.ldexp(inductor_prims.fma(ai, br, -ar * bi) / denominator, -shift)
-    both_nan = torch.isnan(real) & torch.isnan(imag)
-    zero_divisor = both_nan & (denominator == 0) & (~torch.isnan(ar) | ~torch.isnan(ai))
-    infinite_numerator = (
-        both_nan
-        & ~zero_divisor
-        & (torch.isinf(ar) | torch.isinf(ai))
-        & torch.isfinite(br)
-        & torch.isfinite(bi)
-    )
-    infinite_divisor = (
-        both_nan
-        & ~zero_divisor
-        & ~infinite_numerator
-        & torch.isinf(magnitude)
-        & torch.isfinite(ar)
-        & torch.isfinite(ai)
-    )
-    zero, one, infinity = (
-        torch.zeros_like(ar),
-        torch.ones_like(ar),
-        torch.full_like(ar, float("inf")),
-    )
-    a = torch.copysign(torch.where(torch.isinf(ar), one, zero), ar)
-    b = torch.copysign(torch.where(torch.isinf(ai), one, zero), ai)
-    c = torch.copysign(torch.where(torch.isinf(br), one, zero), br)
-    d = torch.copysign(torch.where(torch.isinf(bi), one, zero), bi)
-    real = torch.where(zero_divisor, torch.copysign(infinity, br) * ar, real)
-    imag = torch.where(zero_divisor, torch.copysign(infinity, br) * ai, imag)
-    real = torch.where(infinite_numerator, infinity * (a * br + b * bi), real)
-    imag = torch.where(infinite_numerator, infinity * (b * br - a * bi), imag)
-    return (
-        torch.where(infinite_divisor, zero * (ar * c + ai * d), real),
-        torch.where(infinite_divisor, zero * (ai * c - ar * d), imag),
-    )
-
-
-@register_decomposition(aten.sinc)
-def sinc(x):
-    if not (
-        is_strict_cuda_triton(x.device)
-        and x.dtype in (torch.complex64, torch.complex128)
-    ):
-        return decomp_sinc(x)
-    x = x.resolve_conj().resolve_neg()
-    real, imag = x.real, x.imag
-    pi, zero = torch.full_like(real, math.pi), torch.zeros_like(real)
-    product_real, product_imag = _cuda_complex_mul_recovery(
-        pi,
-        zero,
-        real,
-        imag,
-        inductor_prims.fma(pi, real, -zero * imag),
-        inductor_prims.fma(pi, imag, zero * real),
-    )
-    # Native complex sin rotates sinh(-imag, real), including its nonfinite cases.
-    sinh_real = torch.sinh(-product_imag) * torch.cos(product_real)
-    sinh_imag = torch.cosh(-product_imag) * torch.sin(product_real)
-    special = (torch.isinf(product_imag) | (product_imag == 0)) & ~torch.isfinite(
-        product_real
-    )
-    # ATen's NAN macro is float32 0x7fffffff, widened for complex128.
-    integer_dtype = torch.int64 if real.dtype == torch.float64 else torch.int32
-    nan_bits = 0x7FFFFFFFE0000000 if real.dtype == torch.float64 else 0x7FFFFFFF
-    native_nan = torch.full_like(real, nan_bits, dtype=integer_dtype).view(real.dtype)
-    sinh_real = torch.where(special, -product_imag, sinh_real)
-    sinh_imag = torch.where(special, native_nan, sinh_imag)
-    preserve_zero = (product_real == 0) & ~torch.isfinite(product_imag) & ~special
-    sinh_real = torch.where(preserve_zero, -product_imag, sinh_real)
-    sinh_imag = torch.where(preserve_zero, product_real, sinh_imag)
-    result_real, result_imag = _cuda_complex_divide(
-        sinh_imag, -sinh_real, product_real, product_imag
-    )
-    is_zero = (real == 0) & (imag == 0)
-    return torch.complex(
-        torch.where(is_zero, 1, result_real), torch.where(is_zero, 0, result_imag)
-    )
-
-
-def _cuda_complex_activation_backward_math(
-    grad, output, fused, derivative_fused, *, sigmoid
-):
-    """Native complex activation arithmetic; masks describe its iteration schedule."""
-    gr, gi, yr, yi = grad.real, grad.imag, output.real, output.imag
-
-    def multiply(ar, ai, br, bi, mask, *, gradient=False):
-        ac, bd, ad, bc = ar * br, ai * bi, ar * bi, ai * br
-        square = not sigmoid and not gradient
-        fr = (
-            inductor_prims.fma(ar, br, -bd)
-            if gradient
-            else inductor_prims.fma(br, ar, -bd)
-        )
-        fi = (
-            inductor_prims.fma(ai, br, ad)
-            if gradient
-            else inductor_prims.fma(bi, ar, bc)
-        )
-        tail_real, tail_imag = ac - bd, ad + bc
-        real = torch.where(mask, fr, tail_real)
-        imag = tail_imag if square else torch.where(mask, fi, tail_imag)
-        return _cuda_complex_mul_recovery(ar, ai, br, bi, real, imag)
-
-    if sigmoid:
-        dr, di = multiply(1 - yr, 0 - yi, yr, yi, derivative_fused)
-    else:
-        sr, si = multiply(yr, yi, yr, yi, derivative_fused)
-        dr, di = 1 - sr, 0 - si
-    real, imag = multiply(gr, gi, dr, -di, fused, gradient=True)
-    return torch.complex(real, imag)
-
-
-def _strict_complex_activation_backward(grad, output, *, sigmoid):
-    if not (
-        is_strict_cuda_triton(output.device)
-        and grad.device == output.device
-        and grad.dtype == output.dtype
-        and output.dtype in (torch.complex64, torch.complex128)
-    ):
-        return None
-    if has_free_unbacked_symbols(
-        (grad.shape, grad.stride(), output.shape, output.stride())
-    ):
-        return NotImplemented
-    grad = grad.resolve_conj().resolve_neg()
-    output = output.resolve_conj().resolve_neg()
-    fused, _ = inductor_prims.cuda_pointwise_iteration(
-        [grad, output], False, vectorized_tail=True, unroll_prefix=128
-    )
-    derivative_fused = fused
-    if output.dtype == torch.complex64:
-        derivative_fused, _ = inductor_prims.cuda_pointwise_iteration(
-            [grad, output], False, vectorized_tail=True, unroll_prefix=256
-        )
-    return _cuda_complex_activation_backward_math(
-        grad, output, fused, derivative_fused, sigmoid=sigmoid
-    )
+    # CUDA float64 gives the final derivative factor priority over an upstream NaN.
+    return (factor * product if dtype == torch.float64 else product * factor).to(dtype)
 
 
 @register_decomposition(aten.tanh_backward.default)
 def tanh_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
-    complex_result = _strict_complex_activation_backward(
-        grad_output, output, sigmoid=False
-    )
-    if complex_result is not None:
-        return complex_result
     inputs = _strict_pointwise_inputs(grad_output, output)
     if inputs is None:
         return decomp_tanh_backward(grad_output, output)
@@ -1767,11 +992,6 @@ def tanh_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tens
 
 @register_decomposition(aten.sigmoid_backward.default)
 def sigmoid_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
-    complex_result = _strict_complex_activation_backward(
-        grad_output, output, sigmoid=True
-    )
-    if complex_result is not None:
-        return complex_result
     inputs = _strict_pointwise_inputs(grad_output, output)
     if inputs is None:
         return decomp_sigmoid_backward(grad_output, output)
@@ -1910,14 +1130,28 @@ def hardsigmoid_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch
     )
 
 
+def _strict_xlogy_nan(result, a, b):
+    if not is_strict_cuda_triton(result.device):
+        return result
+    if result.dtype in (torch.float16, torch.bfloat16):
+        # Eager narrows every NaN result on device, producing the all-ones payload.
+        bits = (result.view(torch.int16) | -1) & 0x7FFF
+        return torch.where(torch.isnan(result), bits.view(result.dtype), result)
+    if result.dtype == torch.float32 and isinstance(a, float) and math.isnan(a):
+        bits = torch.full((), 0x7FFFFFFF, dtype=torch.int32, device=result.device)
+        # A scalar NaN product executes in eager; the compiler can fold its payload.
+        return torch.where(torch.isnan(b), result, bits.view(result.dtype))
+    return result
+
+
 @register_decomposition(aten.xlogy)
 def xlogy(a, b):
-    return decomp_xlogy(a, b)
+    return _strict_xlogy_nan(decomp_xlogy(a, b), a, b)
 
 
 @register_decomposition(aten.special_xlog1py)
 def special_xlog1py(a, b):
-    return decomp_xlog1py(a, b)
+    return _strict_xlogy_nan(decomp_xlog1py(a, b), a, b)
 
 
 @register_decomposition([aten.round.decimals])
@@ -2071,19 +1305,6 @@ def mm(
             and guard_or_false((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             counters["inductor"]["decompose_mm"] += 1
-            if is_strict_cuda_triton(self.device) and self.dtype == torch.float32:
-                # cuBLAS starts the dot product with a positive-zero accumulator.
-                return self * input2 + 0.0
-            if is_strict_cuda_triton(self.device) and self.is_complex():
-                ar, ai = self.real, self.imag
-                br, bi = input2.real, input2.imag
-                one, zero = torch.ones_like(br), torch.zeros_like(br)
-                fma = inductor_prims.fma
-                # cuBLAS scales the right operand by complex alpha, even when it is one.
-                br, bi = fma(one, br, -zero * bi), fma(one, bi, zero * br)
-                real = fma(ar, br, -ai * bi)
-                imag = fma(ai, br, ar * bi)
-                return torch.view_as_complex(torch.stack((real, imag), dim=-1))
             return self * input2
     if self.device.type == "cpu":
         if statically_known_true(self.size(0) == 1) and statically_known_true(
@@ -2165,10 +1386,9 @@ def cat(
 @register_decomposition([aten.angle])
 def angle(x: torch.Tensor) -> torch.Tensor:
     if x.is_complex():
-        result = torch.atan2(x.imag, x.real)
-        if is_strict_cuda_triton(x.device):
-            return result
-        return torch.where(torch.isnan(x.real), float("nan"), result)
+        return torch.where(
+            torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real)
+        )
 
     # when x is real number
     #   if x >= 0, return 0
@@ -2200,44 +1420,53 @@ def add(
     if not x_is_complex_tensor or not y_is_complex_tensor:
         return NotImplemented
 
+    def _requires_fallback(tensor: torch.Tensor) -> bool:
+        if tensor.ndim == 0:
+            return False
+        # Viewing complex tensors as their real dtype requires the last stride to be 1.
+        return tensor.stride()[-1] != 1
+
+    output_size_zero = False
+    if x.ndim == 0 and y.ndim == 0:
+        output_size_zero = True
+
+    if x.ndim == 0:
+        x = x.reshape(1)
+    if y.ndim == 0:
+        y = y.reshape(1)
+
     complex_type = torch.promote_types(x.dtype, y.dtype)
     strict_complex = is_strict_cuda_triton(x.device)
-    if strict_complex and (alpha is None or alpha == 1):
-        from torch.fx.experimental.proxy_tensor import get_proxy_mode
-        from torch.fx.traceback import get_current_meta, GRADIENT_ACC_SPECIAL_STACK
-
-        proxy_mode = get_proxy_mode()
-        meta = get_current_meta()
-        if (
-            proxy_mode is not None
-            and proxy_mode.decomp_layers == 1
-            and meta.get("original_aten") == aten.add.Tensor
-            and GRADIENT_ACC_SPECIAL_STACK in meta.get("stack_trace", "")
-            and not meta.get("grad_fn_names")
-        ):
-            # Keep the native engine addition so absent cotangents can bypass
-            # it before complex arithmetic resolves lazy bits and signed zeros.
-            return NotImplemented
-    output_strides = (
-        utils.compute_elementwise_output_strides(
-            *torch.broadcast_tensors(x, y), allow_fast_path=False
-        )
-        if strict_complex
-        else ()
-    )
-    compute_type = (
-        utils.get_computation_dtype(complex_type) if strict_complex else complex_type
-    )
     if strict_complex:
-        # CUDA uses complex64 opmath for complex32 alpha arithmetic.
-        x = x.to(compute_type)
-        y = y.to(compute_type)
+        # TensorIterator promotes both operands before complex alpha arithmetic.
+        x = x.to(complex_type)
+        y = y.to(complex_type)
     z = y
     if strict_complex or alpha is not None:
         # CUDA multiplies by complex alpha even when it is one.
         z = (1 if alpha is None else alpha) * y
-    if not strict_complex and any(t.ndim and t.stride(-1) != 1 for t in (x, z)):
+    if _requires_fallback(x) or _requires_fallback(z):
         return NotImplemented
+
+    # For complex typed `x`, `x.view(x.real.dtype)` doubles the last dimension and can cause problem
+    # when broadcasting the add.
+    def reshape_tensor_complex(tensor: torch.Tensor) -> torch.Tensor:
+        """Reshape tensor from [*initial_dims, last_dim] to *initial_dims, last_dim/2, 2]"""
+        # Get the current shape of the tensor
+        *initial_dims, last_dim = tensor.shape
+
+        # Check if the last dimension is even. We should never reach here since `x.view(x.real.dtype)`
+        # doubles the last dimension for complex numbers.
+        if last_dim % 2 != 0:
+            raise AssertionError(
+                "The size of the last dimension must be even to reshape it to [..., last_dim/2, 2]"
+            )
+
+        # Reshape the tensor
+        new_shape = (*initial_dims, last_dim // 2, 2)
+        reshaped_tensor = tensor.view(new_shape)
+        return reshaped_tensor
+
     # Resolve conjugated values before viewing their real storage.
     if strict_complex:
         # Cloning resolves conjugation without changing signed zeros.
@@ -2247,12 +1476,12 @@ def add(
         x = x + 0
         z = z + 0
 
-    result = torch.view_as_complex(torch.view_as_real(x) + torch.view_as_real(z))
-    result = result.to(complex_type)
-    if strict_complex:
-        # Native consumers such as mv observe the complex addition's layout.
-        result = inductor_prims.force_stride_order(result, output_strides)
+    x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
+    z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
+    result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
 
+    if output_size_zero:
+        return result[0]
     return result
 
 
@@ -2266,21 +1495,18 @@ def conj_physical(self: torch.Tensor) -> torch.Tensor:
 @register_decomposition(aten.sgn)
 @out_wrapper(exact_dtype=True)
 def sgn(self: torch.Tensor) -> torch.Tensor:
-    dtype = self.dtype
-    if not is_strict_cuda_triton(self.device) or dtype not in (
-        torch.complex32,
+    if not is_strict_cuda_triton(self.device) or self.dtype not in (
         torch.complex64,
         torch.complex128,
     ):
         return decomp_sgn(self)
-    self = self.to(utils.get_computation_dtype(dtype))
     real, imag = self.real, self.imag
     magnitude = self.abs()
     zero = (real == 0) & (imag == 0)
     # CUDA sgn divides by a real scalar, rather than using complex division.
     real = torch.where(zero, 0, real / magnitude)
     imag = torch.where(zero, 0, imag / magnitude)
-    return torch.view_as_complex(torch.stack((real, imag), dim=-1)).to(dtype)
+    return torch.view_as_complex(torch.stack((real, imag), dim=-1))
 
 
 @register_decomposition([aten.lift, aten.detach_])
@@ -2726,224 +1952,14 @@ NATIVE_BATCH_NORM_OPS = tuple(
 )
 
 
-def _strict_native_batch_norm(decomp_fn, op, *, force_cudnn=False):
+def _strict_native_batch_norm(decomp_fn):
     @functools.wraps(decomp_fn)
     def decomposition(*args, **kwargs):
         if config.strict_reduction and any(
             isinstance(arg, torch.Tensor) and is_strict_cuda_triton(arg.device)
             for arg in (*args, *kwargs.values())
         ):
-            values = dict(zip((arg.name for arg in op._schema.arguments), args))
-            values.update(kwargs)
-            input = values.get("input")
-            training = values.get(
-                "training",
-                op._schema.name
-                not in (
-                    "aten::_native_batch_norm_legit_no_training",
-                    "aten::_batch_norm_no_update",
-                ),
-            )
-            if input is None or "grad_out" in values:
-                return NotImplemented
-            if input.is_neg():
-                input = input.clone()
-            cudnn = force_cudnn
-            if not force_cudnn and op._schema.name in (
-                "aten::_batch_norm_with_update",
-                "aten::_batch_norm_with_update_functional",
-                "aten::_batch_norm_no_update",
-            ):
-                backend = torch._C._select_batch_norm_backend(
-                    input,
-                    values.get("weight"),
-                    values.get("bias"),
-                    values.get("running_mean"),
-                    values.get("running_var"),
-                    training,
-                    values["eps"],
-                )
-                cudnn = backend == torch._C._BatchNormBackend.Cudnn
-            dtype = utils.get_computation_dtype(input.dtype)
-            shape = [1, input.shape[1], *([1] * (input.ndim - 2))]
-            new_running_mean = new_running_var = None
-            save_mean = saved_invstd = var = None
-            if training:
-                if cudnn:
-                    save_mean, saved_invstd, new_running_mean, new_running_var = (
-                        inductor_prims.cudnn_batch_norm_statistics(
-                            input,
-                            values.get("running_mean"),
-                            values.get("running_var"),
-                            values["momentum"],
-                            values["eps"],
-                        )
-                    )
-                    variance = None
-                elif input.numel() == 0:
-                    save_mean = torch.zeros(
-                        input.shape[1], dtype=dtype, device=input.device
-                    )
-                    variance = torch.full_like(save_mean, math.nan)
-                else:
-                    save_mean, variance = aten.batch_norm_update_stats.default(
-                        input, None, None, 0.0
-                    )
-                assert save_mean is not None  # noqa: S101
-                mean = save_mean.reshape(shape)
-                if not cudnn:
-                    assert variance is not None  # noqa: S101
-                    var = variance.reshape(shape)
-                running_mean, running_var = (
-                    values.get("running_mean"),
-                    values.get("running_var"),
-                )
-                if running_mean is not None and not cudnn:
-                    assert running_var is not None and variance is not None  # noqa: S101
-                    momentum = torch.scalar_tensor(
-                        values["momentum"], dtype=dtype, device=input.device
-                    )
-                    factor = 1 - momentum
-                    n = input.numel() / input.shape[1]
-                    correction = torch.scalar_tensor(
-                        math.inf if n == 1 else n / (n - 1),
-                        dtype=dtype,
-                        device=input.device,
-                    )
-                    new_running_mean = inductor_prims.fma(
-                        save_mean, momentum, factor * running_mean.to(dtype)
-                    ).to(running_mean.dtype)
-                    new_running_var = inductor_prims.fma(
-                        variance * correction, momentum, factor * running_var.to(dtype)
-                    ).to(running_var.dtype)
-                    if "functional" not in op._schema.name:
-                        running_mean.copy_(new_running_mean)
-                        running_var.copy_(new_running_var)
-            else:
-                running_mean, running_var = (
-                    values["running_mean"],
-                    values["running_var"],
-                )
-                assert running_mean is not None and running_var is not None  # noqa: S101
-                mean = running_mean.to(dtype).reshape(shape)
-                var = running_var.to(dtype).reshape(shape)
-            if training and cudnn:
-                assert saved_invstd is not None  # noqa: S101
-                invstd = saved_invstd.reshape(shape)
-                if (
-                    "functional" not in op._schema.name
-                    and values.get("running_mean") is not None
-                ):
-                    values["running_mean"].copy_(new_running_mean)
-                    values["running_var"].copy_(new_running_var)
-            else:
-                assert var is not None  # noqa: S101
-                invstd = torch.rsqrt(var + values["eps"])
-            weight = values.get("weight")
-            bias = values.get("bias")
-            weight = (
-                torch.ones_like(mean)
-                if weight is None
-                else weight.to(dtype).reshape(shape)
-            )
-            bias = (
-                torch.zeros_like(mean)
-                if bias is None
-                else bias.to(dtype).reshape(shape)
-            )
-            from torch._prims_common import suggest_memory_format
-
-            channels_last = (
-                input.dtype != torch.float64 or not training
-            ) and suggest_memory_format(input) in (
-                torch.channels_last,
-                torch.channels_last_3d,
-            )
-            if cudnn and channels_last:
-                factor = invstd * weight
-                offset = (
-                    bias
-                    if training
-                    else inductor_prims.fma(-(weight * mean), invstd, bias)
-                )
-                centered = input.to(dtype) - mean if training else input.to(dtype)
-                output = inductor_prims.fma(centered, factor, offset).to(input.dtype)
-            elif (
-                cudnn
-                and training
-                and cudnn_batch_norm_use_single_read(
-                    input.dtype,
-                    input.shape[0],
-                    math.prod(input.shape[2:]),
-                    input.device,
-                )
-            ):
-                factor = invstd * weight
-                output = inductor_prims.fma(
-                    input.to(dtype), factor, bias - mean * factor
-                ).to(input.dtype)
-            else:
-                scaled = (input.to(dtype) - mean) * weight
-                output = inductor_prims.fma(scaled, invstd, bias).to(input.dtype)
-            if training:
-                assert save_mean is not None  # noqa: S101
-                result = (output, save_mean, invstd.reshape(-1))
-                if op._schema.name in (
-                    "aten::_batch_norm_with_update",
-                    "aten::_batch_norm_with_update_functional",
-                ):
-                    from torch._decomp.decompositions import (
-                        _get_batch_norm_reserve_tensor,
-                    )
-
-                    result += (
-                        _get_batch_norm_reserve_tensor(
-                            input,
-                            values.get("weight"),
-                            values.get("bias"),
-                            values["running_mean"],
-                            values["running_var"],
-                            values["eps"],
-                            True,
-                        ),
-                    )
-                if "functional" in op._schema.name:
-                    result += (new_running_mean, new_running_var)
-            elif cudnn:
-                from torch._decomp.decompositions import _get_batch_norm_reserve_tensor
-
-                empty_stats = torch.empty(0, dtype=dtype, device=input.device)
-                result = (
-                    output,
-                    empty_stats,
-                    empty_stats.clone(),
-                    _get_batch_norm_reserve_tensor(
-                        input,
-                        values.get("weight"),
-                        values.get("bias"),
-                        values["running_mean"],
-                        values["running_var"],
-                        values["eps"],
-                        False,
-                    ),
-                )
-            else:
-                original = decomp_fn(*args, **kwargs)
-                result = (output, *original[1:])
-            result = list(result)
-            for index, key in enumerate(("out", "save_mean", "save_invstd")):
-                destination = values.get(key)
-                if destination is not None:
-                    result[index] = destination.copy_(result[index])
-            if "functional" in op._schema.name:
-                for index, key in (
-                    (len(result) - 2, "running_mean_out"),
-                    (len(result) - 1, "running_var_out"),
-                ):
-                    destination = values.get(key)
-                    if destination is not None:
-                        result[index] = destination.copy_(result[index])
-            return tuple(result)
+            return NotImplemented
         return decomp_fn(*args, **kwargs)
 
     return decomposition
@@ -2951,27 +1967,8 @@ def _strict_native_batch_norm(decomp_fn, op, *, force_cudnn=False):
 
 for _batch_norm_op in NATIVE_BATCH_NORM_OPS:
     decompositions[_batch_norm_op] = _strict_native_batch_norm(
-        decompositions[_batch_norm_op], _batch_norm_op
+        decompositions[_batch_norm_op]
     )
-
-
-@register_decomposition(inductor_prims.cudnn_batch_norm)
-def cudnn_batch_norm(
-    input, weight, bias, running_mean, running_var, training, momentum, eps
-):
-    bias = torch.zeros_like(weight) if bias is None else bias
-    mean = torch.zeros_like(weight) if running_mean is None else running_mean
-    var = torch.ones_like(weight) if running_var is None else running_var
-    op = (
-        aten._batch_norm_with_update_functional.default
-        if training
-        else aten._batch_norm_no_update.default
-    )
-    forward = _strict_native_batch_norm(
-        get_decompositions([op])[op], op, force_cudnn=True
-    )
-    result = forward(input, weight, bias, mean, var, momentum, eps)
-    return result if training else (*result, mean.clone(), var.clone())
 
 
 @functools.cache

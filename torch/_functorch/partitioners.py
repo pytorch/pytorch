@@ -82,7 +82,7 @@ from ._aot_autograd.descriptors import (
 )
 from ._aot_autograd.functional_utils import _is_functional_graph
 from ._aot_autograd.graph_compile import is_opaque_node
-from ._aot_autograd.logging_utils import get_aot_graph_name, NativeGradientInfo
+from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import (
     _is_bwd_seed_offset,
     _is_fwd_seed_offset,
@@ -4253,9 +4253,7 @@ def min_cut_rematerialization_partition(
             backward_dependencies.add(node)
             backward_dependency_stack.extend(node.all_input_nodes)
 
-        native_info = joint_module.meta.get("native_gradient_info")
-
-        def partition_key(node: fx.Node) -> tuple[bool, fx.Node | None, int | None]:
+        def partition_key(node: fx.Node) -> tuple[bool, fx.Node | None]:
             # Observable native mutations must retain their destination identity.
             native_mutation = (
                 node
@@ -4263,21 +4261,7 @@ def min_cut_rematerialization_partition(
                 and isinstance(node.meta.get("original_aten_mutation"), tuple)
                 else None
             )
-            seq_nr = node.meta.get("seq_nr")
-            entry = (
-                native_info.nodes.get(seq_nr)
-                if isinstance(native_info, NativeGradientInfo)
-                and isinstance(seq_nr, int)
-                else None
-            )
-            names = node.meta.get("grad_fn_names", [])
-            # Absent-gradient pruning needs each native derivative's ownership.
-            native_gradient = (
-                seq_nr
-                if entry is not None and names and names[-1] == entry.name
-                else None
-            )
-            return node in backward_dependencies, native_mutation, native_gradient
+            return node in backward_dependencies, native_mutation
 
         cse_graph = fx_graph_cse(fx_g, extra_node_key=partition_key)
         joint_module.graph = cse_graph

@@ -118,9 +118,6 @@ class CoverageRecord:
     matched: int = 0
     generated_kernels: int = 0
     generated_fallbacks: int = 0
-    numerical_fallbacks: int = 0
-    metadata_views: int = 0
-    native_baseline_verified: bool = False
     kernel_required: bool = True
     mismatches: Counter = field(default_factory=Counter)
     filters: Counter = field(default_factory=Counter)
@@ -140,9 +137,6 @@ class CoverageRecord:
             "matched": self.matched,
             "generated_kernels": self.generated_kernels,
             "generated_fallbacks": self.generated_fallbacks,
-            "numerical_fallbacks": self.numerical_fallbacks,
-            "metadata_views": self.metadata_views,
-            "native_baseline_verified": self.native_baseline_verified,
             "kernel_required": self.kernel_required,
             "mismatches": dict(self.mismatches),
             "filters": dict(self.filters),
@@ -197,12 +191,7 @@ def record_result(record, result, test):
                             ):
                                 record.status = (
                                     "matched_with_fallback"
-                                    if (
-                                        record.numerical_fallbacks
-                                        if record.native_baseline_verified
-                                        else record.generated_fallbacks
-                                    )
-                                    > 0
+                                    if record.generated_fallbacks > 0
                                     else (
                                         "matched"
                                         if record.generated_kernels > 0
@@ -320,12 +309,8 @@ def main():
         f"Selected OpInfos without generated tests: {len(summary['opinfos_without_generated_tests'])}"
     )
     return int(
-        any(
-            summary["counts"].get(status, 0) > 0
-            for status in ("failed", "unverified", "not_run")
-        )
+        summary["counts"].get("failed", 0) > 0
         or summary["class_fixture_counts"].get("failed", 0) > 0
-        or bool(summary["opinfos_without_generated_tests"])
     )
 
 

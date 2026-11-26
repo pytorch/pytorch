@@ -366,7 +366,7 @@ class CutlassEVTOpsMixIn:
         return f"(0.0 - {x0})"
 
     @staticmethod
-    def mul(x0: str, x1: str) -> str:
+    def mul(x0: str, x1: str, *, native_cuda_execution=None) -> str:
         return CutlassEVTOpsMixIn._infix_bin_op("*", x0, x1)
 
     @staticmethod

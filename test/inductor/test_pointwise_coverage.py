@@ -63,8 +63,6 @@ class TestPointwiseCoverage(TestCase):
             "matched",
             "matched_without_kernel",
             "matched_with_fallback",
-            "matched_metadata_views",
-            "matched_existing_fallback",
             "unverified",
             "known_mismatch",
             "skipped",
@@ -79,7 +77,7 @@ class TestPointwiseCoverage(TestCase):
     )
     def test_runner_outcomes(self, outcome):
         record = CoverageRecord(
-            coverage_case("test_pointwise_bitwise_relu_cuda_float32"),
+            {"test": "example"},
             expected_mismatch=outcome
             in ("known_mismatch", "incomplete_known_mismatch"),
             kernel_required=outcome != "matched_without_kernel",
@@ -112,20 +110,7 @@ class TestPointwiseCoverage(TestCase):
                 record.generated_kernels = int(
                     outcome not in ("matched_without_kernel", "unverified")
                 )
-                record.generated_fallbacks = int(
-                    outcome
-                    in (
-                        "matched_with_fallback",
-                        "matched_metadata_views",
-                        "matched_existing_fallback",
-                    )
-                )
-                record.native_baseline_verified = outcome in (
-                    "matched_metadata_views",
-                    "matched_existing_fallback",
-                )
-                record.numerical_fallbacks = int(outcome == "matched_existing_fallback")
-                record.metadata_views = int(outcome == "matched_metadata_views")
+                record.generated_fallbacks = int(outcome == "matched_with_fallback")
                 if record.expected_mismatch:
                     record.mismatches["nan-payload"] += 1
                 else:
@@ -145,8 +130,6 @@ class TestPointwiseCoverage(TestCase):
             "setup_error": "failed",
             "class_skip": "skipped",
             "matched_both_samples": "matched",
-            "matched_metadata_views": "matched",
-            "matched_existing_fallback": "matched_with_fallback",
             "incomplete_samples": "unverified",
             "incomplete_known_mismatch": "unverified",
         }.get(outcome, outcome)
@@ -156,17 +139,6 @@ class TestPointwiseCoverage(TestCase):
             len(result.failures) + len(result.errors), int(expected == "failed")
         )
         self.assertEqual(len(result.skipped), int(expected == "skipped"))
-        with tempfile.TemporaryDirectory() as directory:
-            write_event(
-                directory,
-                {"kind": "manifest", "configuration": {}, "cases": [record.case]},
-            )
-            write_event(directory, record.event())
-            with (
-                mock.patch.object(sys, "argv", ["coverage", directory]),
-                mock.patch("builtins.print"),
-            ):
-                self.assertEqual(main(), int(expected in ("failed", "unverified")))
 
     def test_failed_subtest(self):
         record = CoverageRecord({"test": "example"})
@@ -232,7 +204,7 @@ class TestPointwiseCoverage(TestCase):
                 mock.patch("sys.argv", ["coverage", directory]),
                 mock.patch("builtins.print"),
             ):
-                self.assertEqual(main(), 1)
+                self.assertEqual(main(), int(not skip))
         expected = "skipped" if skip else "failed"
         self.assertEqual(summary["class_fixture_counts"], {expected: 1})
         self.assertEqual(
@@ -346,22 +318,6 @@ class TestPointwiseCoverage(TestCase):
             write_event(directory, CoverageRecord({"test": "example"}).event())
             with self.assertRaisesRegex(ValueError, "manifest"):
                 summarize(directory)
-
-    def test_selected_opinfo_without_generated_tests_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            write_event(
-                directory,
-                {
-                    "kind": "manifest",
-                    "configuration": {"selected_opinfo_ids": ["relu"]},
-                    "cases": [],
-                },
-            )
-            with mock.patch.object(sys, "argv", ["coverage", directory]):
-                self.assertEqual(main(), 1)
-            self.assertEqual(
-                summarize(directory)["opinfos_without_generated_tests"], ["relu"]
-            )
 
     @parametrize(
         "method,family,sample_kind",

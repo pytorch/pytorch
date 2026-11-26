@@ -198,7 +198,6 @@ manual_torch_name_rule_map: dict[
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch._utils._chunk_or_narrow_cat": UserFunctionVariable,
     "torch._utils._maybe_view_chunk_cat": UserFunctionVariable,
-    "torch.cuda.jiterator._JittedFunction#__call__": UserFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_symbolic_tracing": TorchInGraphFunctionVariable,
     "torch.mps.is_available": TorchInGraphFunctionVariable,
@@ -305,8 +304,6 @@ manual_torch_name_rule_map: dict[
     "torch.get_default_device": TorchInGraphFunctionVariable,
     # functorch/vmap
     "torch._functorch.vmap._check_int_or_none": UserFunctionVariable,
-    "torch._functorch._aot_autograd.runtime_wrappers._project_original_view_gradients": UserFunctionVariable,
-    "torch._functorch._aot_autograd.runtime_wrappers._materialize_output_cotangents": UserFunctionVariable,
     "torch._functorch.vmap._check_out_dims_is_int_or_int_pytree": UserFunctionVariable,
     "torch._functorch.vmap._check_randomness_arg": UserFunctionVariable,
     "torch._functorch.vmap._chunked_vmap": UserFunctionVariable,

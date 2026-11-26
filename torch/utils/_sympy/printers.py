@@ -141,10 +141,6 @@ class ExprPrinter(StrPrinter):
 
 
 class PythonPrinter(ExprPrinter):
-    def _print_Where(self, expr: sympy.Expr) -> str:
-        condition, positive, negative = (self.doprint(arg) for arg in expr.args)
-        return f"({positive} if {condition} else {negative})"
-
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError("ToFloat expects exactly one argument")
