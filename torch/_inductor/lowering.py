@@ -2053,11 +2053,21 @@ def _cat_inputs_share_read(inputs: Sequence[TensorBox]) -> bool:
     ):
         return False
     fx_inputs = V.current_node.args[0]
+    # Padding can call cat while the current FX node still has a single tensor input.
+    if not isinstance(fx_inputs, (list, tuple)):
+        return False
     if not all(
         len(node.users) == 1
         and V.current_node in node.users
         and isinstance(node.meta.get("val"), torch.Tensor)
         and node.meta["val"].is_contiguous()
+        for node in fx_inputs
+    ):
+        return False
+    # ConcatKernel prefers channels-last even for ambiguous contiguous inputs.
+    if any(
+        node.meta["val"].is_contiguous(memory_format=torch.channels_last)
+        or node.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
         for node in fx_inputs
     ):
         return False
@@ -2083,13 +2093,20 @@ def _cat_inputs_share_read(inputs: Sequence[TensorBox]) -> bool:
     # Compare full dependencies (buffers, indices and iteration domains), not just buffer names.
     # Shared scalar or broadcast reads alone do not justify horizontal fusion.
     common_reads = producers[0].get_reads() & producers[1].get_reads()
-    return any(
+    if not any(
         isinstance(dep, MemoryDep)
         and not dep.is_indirect()
         and not dep.is_scalar()
         and dep.stride1_for_last_dim(result_for_complex_expression=False)
         and V.graph.sizevars.statically_known_equals(dep.get_numel(), sympy_product(size))
         for dep in common_reads
+    ):
+        return False
+    # Use the scheduler's byte score and threshold before committing to two producers.
+    shared_data_score = sum(V.graph.get_dep_size_hint(dep) for dep in common_reads)
+    return (
+        shared_data_score > 0
+        and shared_data_score >= config.score_fusion_memory_threshold
     )
 
 

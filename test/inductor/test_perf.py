@@ -379,6 +379,97 @@ class SharedReadCatTests(TestCase):
             )
         return result, "\n".join(code), metrics.generated_kernel_count
 
+    def test_non_cat_fx_inputs(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        node = graph.call_function(aten.constant_pad_nd.default, (x, [0, 1], 0))
+        graph.output(node)
+        with (
+            lowering.V.set_current_node(node),
+            patch.object(lowering, "is_triton", return_value=True),
+        ):
+            self.assertFalse(lowering._cat_inputs_share_read([object(), object()]))
+
+    @requires_gpu_and_triton
+    def test_ambiguous_channels_last(self):
+        for shape, admitted in [
+            ((2, 1, 3, 5), False),
+            ((2, 1, 3, 5, 7), False),
+            ((2, 2, 3, 5), True),
+            ((2, 2, 3, 5, 7), True),
+        ]:
+            for cast in (False, True):
+                with self.subTest(shape=shape, cast=cast):
+                    x = T(*shape)
+                    self.assertTrue(x.is_contiguous())
+                    self.assertEqual(
+                        x.is_contiguous(memory_format=torch.channels_last)
+                        or x.is_contiguous(memory_format=torch.channels_last_3d),
+                        not admitted,
+                    )
+
+                    def fn(x):
+                        result = torch.cat((x + 1, x * 2), 1)
+                        return result.to(torch.bfloat16) if cast else result
+
+                    original = lowering._cat_inputs_share_read
+                    decisions = []
+
+                    def record(inputs):
+                        decision = original(inputs)
+                        decisions.append(decision)
+                        return decision
+
+                    with patch.object(lowering, "_cat_inputs_share_read", record):
+                        actual, code, kernels = self.compile_cat(fn, (x,))
+                    self.assertTrue(decisions)
+                    self.assertEqual(decisions, [admitted] * len(decisions))
+                    self.assertEqual(actual.stride(), fn(x).stride())
+                    self.assertEqual(kernels, 1)
+                    self.assertEqual(code.count("tl.store("), 2 if admitted else 1)
+                    with patch.object(lowering, "_cat_inputs_share_read", return_value=False):
+                        expected, _, _ = self.compile_cat(fn, (x,))
+                    self.assert_same_bits(actual, expected)
+
+    @requires_gpu_and_triton
+    def test_shared_read_memory_threshold(self):
+        for dtype, numel, threshold, two_inputs, admitted in [
+            (torch.float32, 2, 10, False, False),
+            (torch.float32, 2, 8, False, True),
+            (torch.float32, 2, 9, False, False),
+            (torch.float32, 3, 10, False, True),
+            (torch.float16, 4, 10, False, False),
+            (torch.float16, 5, 10, False, True),
+            (torch.float32, 2, 16, True, True),
+            (torch.float32, 2, 17, True, False),
+        ]:
+            with self.subTest(dtype=dtype, numel=numel, threshold=threshold, two_inputs=two_inputs):
+                x, y = T(numel, dtype=dtype), T(numel, dtype=dtype)
+
+                def fn(x, y):
+                    if two_inputs:
+                        return torch.cat((x + y, x * y), 0).to(torch.bfloat16)
+                    return torch.cat((x + 1, x * 2), 0).to(torch.bfloat16)
+
+                original = lowering._cat_inputs_share_read
+                decisions = []
+
+                def record(inputs):
+                    decision = original(inputs)
+                    decisions.append(decision)
+                    return decision
+
+                with config.patch(score_fusion_memory_threshold=threshold):
+                    with patch.object(lowering, "_cat_inputs_share_read", record):
+                        actual, code, kernels = self.compile_cat(fn, (x, y))
+                    self.assertTrue(decisions)
+                    self.assertEqual(decisions, [admitted] * len(decisions))
+                    self.assertEqual(kernels, 1)
+                    self.assertEqual(code.count("tl.store("), 2 if admitted else 1)
+                    with patch.object(lowering, "_cat_inputs_share_read", return_value=False):
+                        expected, _, _ = self.compile_cat(fn, (x, y))
+                    self.assert_same_bits(actual, expected)
+
     @requires_gpu_and_triton
     def test_shared_reads(self):
         for shape, dim in [
