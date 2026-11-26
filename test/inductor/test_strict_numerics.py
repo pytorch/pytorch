@@ -7927,6 +7927,153 @@ _LEDGER_ARCH = LazyVal(lambda: bool(IS_SM89 or IS_SM90 or IS_SM100))
     "requires CUDA and Triton on sm_89, sm_90 or sm_100 (the ledger's measured arches)",
 )
 class PointwiseStrictNumericsTest(TestCase):
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize("other_kind", ("tensor", "scalar"))
+    def test_scalar_input_reference_samples(self, device, dtype, other_kind):
+        self._coverage = CoverageRecord({"test": self._testMethodName})
+        condition = torch.tensor([True, False], device=device)
+        value = complex(2, 1) if dtype.is_complex else 2.0
+        other = complex(3, 2) if dtype.is_complex else 3.0
+        if other_kind == "tensor":
+            other = torch.full(
+                (2,), other, dtype=dtype, device=device, requires_grad=True
+            )
+        sample = SampleInput(value, args=(condition, other))
+        calls = self._build_calls([sample])
+        self.assertEqual(len(calls), 1)
+        op = next(op for op in op_db if op.name == "where")
+        mismatches = self._sweep_backward(
+            device, op, dtype, POINTWISE_STRICT_CFG, calls=[("ref", *calls[0])]
+        )
+        self.assertEqual(mismatches, [])
+        self.assertGreater(self._coverage.compared, 0)
+        self.assertEqual(self._coverage.filters["no_input_gradients"], 0)
+
+    @dtypes(torch.complex32)
+    @parametrize("activation", ("sigmoid", "tanh"))
+    @parametrize("shape", ((128, 128), (1024, 1024)))
+    def test_complex_half_transposed_activation_backward(
+        self, device, dtype, activation, shape
+    ):
+        torch.manual_seed(0)
+        x = (torch.randn(shape, device=device, dtype=torch.complex64) * 5).to(dtype).t()
+        grad = torch.randn(x.shape, device=device, dtype=dtype)
+        x[0, 0] = complex(2.55859375, 8.640625)
+        grad[0, 0] = complex(-0.31005859375, 0.250244140625)
+        output = getattr(torch, activation)(x)
+        fn = getattr(torch.ops.aten, activation + "_backward").default
+        expected = fn(grad, output)
+        with config.patch(POINTWISE_STRICT_CFG):
+            actual = torch.compile(fn, fullgraph=True)(grad, output)
+        self.assertEqual(
+            _pointwise_comparison_bits(actual), _pointwise_comparison_bits(expected)
+        )
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @parametrize("offset", (0, 1))
+    @parametrize("shape", ((), (8,), (1024,)))
+    def test_jiterator_input_alignment(self, device, dtype, offset, shape):
+        value = (
+            complex(2.6924262046813965, 6.4225850105285645)
+            if dtype.is_complex
+            else 2.6924262046813965
+        )
+        length = math.prod(shape)
+        base = torch.full((length + 1,), value, device=device, dtype=dtype)
+        x = base.narrow(0, offset, length).reshape(shape)
+        fn = torch.cuda.jiterator._create_jit_fn(
+            "template <typename T> T unary(T x) { return x * x + x; }"
+        )
+        with config.patch(POINTWISE_STRICT_CFG), config.patch(fx_graph_cache=False):
+            compiled = torch.compile(fn, fullgraph=True)
+            for current_offset in (offset, 1 - offset):
+                x = base.narrow(0, current_offset, length).reshape(shape)
+                expected = fn(x)
+                actual = compiled(x)
+                self.assertEqual(
+                    _pointwise_comparison_bits(actual),
+                    _pointwise_comparison_bits(expected),
+                )
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_scalar_power_rounds_before_widening(self, device, dtype):
+        x = torch.tensor([3.0, 9.0], device=device, dtype=dtype)
+
+        def fn(x):
+            return torch.pow(x, -2).double()
+
+        expected = fn(x)
+        with config.patch(POINTWISE_STRICT_CFG):
+            actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(
+            _pointwise_comparison_bits(actual), _pointwise_comparison_bits(expected)
+        )
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("exponent", (4, 7, -2, -3, 31))
+    def test_scalar_power_native_specializations(self, device, dtype, exponent):
+        x = torch.tensor([-8, -2.3, -0.3, 0, 0.1, 2.3, 8], device=device, dtype=dtype)
+
+        def fn(x):
+            return torch.pow(x, exponent)
+
+        expected = fn(x)
+        with config.patch(POINTWISE_STRICT_CFG):
+            actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(
+            _pointwise_comparison_bits(actual), _pointwise_comparison_bits(expected)
+        )
+
+    @dtypes(
+        torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float64
+    )
+    @parametrize("exponent", (4, 7, -2, -3, 31))
+    def test_float_power_native_specializations(self, device, dtype, exponent):
+        x = torch.tensor([0, 1, 2, 3, 8], device=device, dtype=dtype)
+
+        def fn(x):
+            return torch.float_power(x, exponent)
+
+        expected = fn(x)
+        with config.patch(POINTWISE_STRICT_CFG):
+            actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(
+            _pointwise_comparison_bits(actual), _pointwise_comparison_bits(expected)
+        )
+
+    @dtypes(torch.complex32)
+    @parametrize("activation", ("sigmoid", "tanh"))
+    @parametrize("length", (1, 8, 128, 129, 1024, 1029 * 917))
+    def test_complex_half_activation_backward(self, device, dtype, activation, length):
+        torch.manual_seed(0)
+        x = (torch.randn(length, device=device, dtype=torch.complex64) * 5).to(dtype)
+        grad = torch.randn_like(x)
+        x[0] = complex(2.55859375, 8.640625)
+        grad[0] = complex(-0.31005859375, 0.250244140625)
+        output = getattr(torch, activation)(x)
+        fn = getattr(torch.ops.aten, activation + "_backward").default
+        expected = fn(grad, output)
+        with config.patch(POINTWISE_STRICT_CFG):
+            actual = torch.compile(fn, fullgraph=True)(grad, output)
+        self.assertEqual(
+            _pointwise_comparison_bits(actual), _pointwise_comparison_bits(expected)
+        )
+
+    @dtypes(torch.float64)
+    @parametrize("op_name", ("modified_bessel_i0", "modified_bessel_i1"))
+    @parametrize("length", (1, 128, 1024))
+    def test_modified_bessel_recurrence(self, device, dtype, op_name, length):
+        torch.manual_seed(0)
+        x = torch.empty(length, device=device, dtype=dtype).uniform_(-10, 10)
+        x[0] = 8.905643855488954
+        fn = getattr(torch.special, op_name)
+        expected = fn(x)
+        with config.patch(POINTWISE_STRICT_CFG):
+            actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(
+            _pointwise_comparison_bits(actual), _pointwise_comparison_bits(expected)
+        )
+
     _coverage = None
 
     def run(self, result=None):
@@ -8221,19 +8368,12 @@ class PointwiseStrictNumericsTest(TestCase):
         outs = tree_leaves(out)
         return all(isinstance(o, torch.Tensor) and o.shape == bshape for o in outs)
 
-    def _build_calls(self, samples, dtype):
-        r"""Build calls without flattening so reference layouts exercise codegen."""
-        calls = []
-        for sample in samples:
-            tensors = tree_leaves((sample.input, sample.args, sample.kwargs))
-            if not any(isinstance(t, torch.Tensor) for t in tree_leaves(sample.input)):
-                self._coverage_filter("non_tensor_input")
-                continue
-            if any(isinstance(t, torch.Tensor) and t.dtype == dtype for t in tensors):
-                calls.append((sample.input, tuple(sample.args), dict(sample.kwargs)))
-            else:
-                self._coverage_filter("input_dtype_not_selected")
-        return calls
+    def _build_calls(self, samples):
+        r"""Preserve every sampled signature, including scalar first arguments."""
+        return [
+            (sample.input, tuple(sample.args), dict(sample.kwargs))
+            for sample in samples
+        ]
 
     def _sample_inputs(self, op, device, dtype, *, requires_grad=False):
         samples = list(op.sample_inputs(device, dtype, requires_grad=requires_grad))
@@ -8419,13 +8559,13 @@ class PointwiseStrictNumericsTest(TestCase):
                 samples = list(
                     op.reference_inputs(device, dtype, requires_grad=backward)
                 )
-                calls = [("ref", *c) for c in self._build_calls(samples, dtype)]
+                calls = [("ref", *c) for c in self._build_calls(samples)]
             calls += [("bits", *c) for c in self._bitpattern_call(op, dtype, device)]
             if not use_reference:
                 samples = self._sample_inputs(op, device, dtype, requires_grad=backward)
                 if not ALL_SAMPLES:
                     samples = _representative_samples(samples)
-                sample_calls = self._build_calls(samples, dtype)
+                sample_calls = self._build_calls(samples)
                 calls += [("sample", *c) for c in sample_calls]
         except Exception as e:
             self.fail(f"{_op_id(op)} {dtype} input generation failed: {e}")
@@ -8785,7 +8925,7 @@ class PointwiseStrictNumericsTest(TestCase):
             calls += _pointwise_edge_calls(op, device, dtype, backward=backward)
         samples = self._sample_inputs(op, device, dtype, requires_grad=backward)
         candidates = []
-        for inp, args, kwargs in self._build_calls(samples, dtype):
+        for inp, args, kwargs in self._build_calls(samples):
             if call := self._pointwise_call(op, inp, args, kwargs):
                 tensors = [
                     t for t in tree_leaves(call[0]) if isinstance(t, torch.Tensor)
@@ -9004,7 +9144,7 @@ class PointwiseStrictNumericsTest(TestCase):
                     respect_requires_grad = tag in ("ref", "sample") or tag.startswith(
                         "edge_opinfo_"
                     )
-                    _, eager_grads = self._input_grads(
+                    eager_out, eager_grads = self._input_grads(
                         fn,
                         inp,
                         args,
@@ -9012,10 +9152,7 @@ class PointwiseStrictNumericsTest(TestCase):
                         upstream,
                         respect_requires_grad=respect_requires_grad,
                     )
-                    if eager_grads is None:
-                        self._coverage_filter("no_input_gradients")
-                        continue
-                    _, comp_grads = self._input_grads(
+                    comp_out, comp_grads = self._input_grads(
                         compiled,
                         inp,
                         args,
@@ -9024,7 +9161,12 @@ class PointwiseStrictNumericsTest(TestCase):
                         respect_requires_grad=respect_requires_grad,
                     )
                     tested += 1
-                    if comp_grads is None:
+                    if eager_grads is None:
+                        equal = comp_grads is None and _outputs_equal(
+                            eager_out, comp_out
+                        )
+                        kind = "" if equal else "gradient_contract"
+                    elif comp_grads is None:
                         self._coverage_comparison(False, "shape", tag)
                         mismatches.append(
                             (
@@ -9040,8 +9182,9 @@ class PointwiseStrictNumericsTest(TestCase):
                             )
                         )
                         continue
-                    equal = _outputs_equal(eager_grads, comp_grads)
-                    kind = "" if equal else _diff_kind(eager_grads, comp_grads)
+                    else:
+                        equal = _outputs_equal(eager_grads, comp_grads)
+                        kind = "" if equal else _diff_kind(eager_grads, comp_grads)
                     self._coverage_comparison(equal, kind, tag)
                     if not equal:
                         mismatches.append(

@@ -8862,7 +8862,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
 def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_where(op, device, dtype, requires_grad, **kwargs)
 
-    make_cond = partial(make_tensor, dtype=torch.bool, device=device, requires_grad=requires_grad)
+    make_cond = partial(make_tensor, dtype=torch.bool, device=device, requires_grad=False)
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     # noncontiguous
@@ -8881,7 +8881,7 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
     # FIXME(rec): shouldn't other_dtype be used two lines below?
     other_dtype = torch.double if dtype is not torch.double else torch.long  # noqa: F841
     c = make_cond((10, 3), noncontiguous=True)
-    a = make_arg((10, 1), dtype=torch.long)
+    a = make_arg((10, 1), dtype=torch.long, requires_grad=False)
     b = make_arg((10, 1))
 
     yield SampleInput(a, args=(c, b))

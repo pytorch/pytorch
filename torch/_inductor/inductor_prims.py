@@ -399,11 +399,17 @@ def _cuda_pointwise_prefix_impl(
             or len(chunk.shape) == 1
             and all(s[0] == itemsize for s in chunk.strides)
         )
+        alignment = 2 * itemsize
         aligned = (
-            all((t.data_ptr() + o) % 16 == 0 for t, o in zip(inputs, chunk.offsets[1:]))
-            and chunk.offsets[0] % 16 == 0
+            all(
+                (t.data_ptr() + o) % alignment == 0
+                for t, o in zip(inputs, chunk.offsets[1:])
+            )
+            and chunk.offsets[0] % alignment == 0
         )
-        vectorized = torch.full_like(active, contiguous and aligned and itemsize == 8)
+        vectorized = torch.full_like(
+            active, contiguous and aligned and itemsize in (4, 8)
+        )
         if not vectorized_tail:
             vectorized &= local < scale // 1024 * 1024
         unrolled = (

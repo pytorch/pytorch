@@ -1372,15 +1372,20 @@ def pow(
             return a * a  # type: ignore[return-value]
         elif statically_known_true(b == 0.5):
             return torch.sqrt(a)  # type: ignore[arg-type]
-    elif isinstance(a, Number):
+    elif not isinstance(a, TensorLikeType):
         if statically_known_true(a == 1.0):
-            return torch.fill(b, True)
+            return prims.clone(
+                torch.fill(b, True), memory_format=torch.contiguous_format
+            )
         if statically_known_true(a == 2.0) and (
             utils.is_float_dtype(b.dtype) or utils.is_complex_dtype(b.dtype)
         ):
-            return torch.exp2(b)
+            return prims.clone(torch.exp2(b), memory_format=torch.contiguous_format)
 
-    return prims.pow(a, b)
+    result = prims.pow(a, b)
+    if not isinstance(a, TensorLikeType):
+        return prims.clone(result, memory_format=torch.contiguous_format)
+    return result
 
 
 # Float power has its own implementation because it has unique type promotion.
