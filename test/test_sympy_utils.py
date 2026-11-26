@@ -606,6 +606,8 @@ class TestValueRanges(TestCase):
         self.assertEqual(ValueRangeAnalysis.truncdiv(V(2, int_oo), V(-int_oo, -1)), V(-int_oo, 0))
         self.assertEqual(ValueRangeAnalysis.truncdiv(V(-int_oo, int_oo), V(1, int_oo)), V(-int_oo, int_oo))
         self.assertEqual(ValueRangeAnalysis.truncdiv(V(5, 9), V(0, int_oo)), V(0, int_oo))
+        self.assertEqual(ValueRangeAnalysis.truncdiv(V(-7, -7), V(2, 2)), V(-3, -3))
+        self.assertEqual(ValueRangeAnalysis.truncdiv(V(-5, -2), V(3, 3)), V(-1, 0))
 
     def test_bound_sympy_mod_subtraction(self):
         s0 = sympy.Symbol("s0", integer=True)

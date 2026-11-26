@@ -163,6 +163,15 @@ class DynamicShapesOpTests:
                 self.assertEqual(compiled_fn(x), fn(x))
         self.assertEqual(counter.frame_count, 1)
 
+    def test_truncdiv_invalid_nan_comparison(self):
+        def fn(x, y):
+            n = torch.div(x.shape[1], y.shape[1], rounding_mode="trunc")
+            return x.new_zeros(()) + n
+
+        x = torch.randn(2, 512, device=self.device)
+        y = torch.randn(2, 64, device=self.device)
+        self.assertEqual(torch.compile(fn, dynamic=True)(x, y), fn(x, y))
+
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_prod_backward_keeps_input_shape_dynamic(self):
         def fn(x):
@@ -985,15 +994,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         FileCheck().check_not("div_floor_integer").run(code)
         x = torch.randn(576, 512, device=device)
         self.assertEqual(cfn(x, 128), fn(x, 128))
-
-    def test_truncdiv_of_sizes(self, device):
-        def fn(x, y):
-            n = torch.div(x.shape[1], y.shape[1], rounding_mode="trunc")
-            return x.new_zeros(()) + n
-
-        x = torch.randn(2, 512, device=device)
-        y = torch.randn(2, 64, device=device)
-        self.assertEqual(torch.compile(fn, dynamic=True)(x, y), fn(x, y))
 
     def test_slice_scatter(self, device):
         def fn(i):
