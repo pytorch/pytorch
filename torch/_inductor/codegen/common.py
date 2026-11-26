@@ -1450,6 +1450,8 @@ def _all_in_parens(string: str) -> bool:
 
 # pyrefly: ignore [inconsistent-inheritance]
 class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
+    """Common scalar operations and explicit errors for backend-specific operations."""
+
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -1598,6 +1600,36 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     ) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: bucketize should be handled by CSEProxy"
+        )
+
+    def cuda_pointwise_unrolled(
+        self,
+        index: OpVarT,
+        numel: OpVarT,
+        contiguous: OpVarT,
+        *,
+        alignments,
+        itemsize=8,
+        vectorized_tail=False,
+        unroll_prefix=0,
+    ) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: cuda_pointwise_unrolled only implemented for Triton backend"
+        )
+
+    def cuda_pointwise_vectorized(
+        self,
+        index: OpVarT,
+        numel: OpVarT,
+        contiguous: OpVarT,
+        *,
+        alignments,
+        itemsize=8,
+        vectorized_tail=False,
+        unroll_prefix=0,
+    ) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: cuda_pointwise_vectorized only implemented for Triton backend"
         )
 
     def halide_clamp(self, value: OpVarT, size: sympy.Expr, check: bool) -> OpVarT:
