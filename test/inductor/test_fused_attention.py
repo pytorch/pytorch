@@ -2197,8 +2197,13 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(v)
             )
 
+        on_mi200 = self.device == GPU_TYPE and isRocmArchAnyOf(MI200_ARCH)
         for dtype in [torch.half, torch.float]:
             prefix = "_sfdp_pattern_31" + ("_half" if dtype == torch.half else "")
+            # MI200: the eager fp16 reference backward uses the bf16-intermediate
+            # alt implementation and is the less accurate side (see
+            # _test_sdpa_rewriter_1); measured max grad diff 2.1e-3.
+            atol = 4e-3 if on_mi200 and dtype == torch.half else 1e-3
             for bs in [2, 1]:
                 # batch_size = 1 traces without clone nodes, so it needs its own pattern
                 args = [
@@ -2209,6 +2214,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 self._check_common(
                     dot_prod_attention,
                     args1=args,
+                    atol=atol,
                     dtype=dtype,
                     check_train=bs > 1,
                     expected_fused_attention_patterns={
