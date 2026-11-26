@@ -46,9 +46,6 @@ PASSIVE_TIMELINE_EVENTS = frozenset(
         "unsubscribed",
     }
 )
-# Changing these is not maintainer engagement: `bot-retriage` starts a run, and
-# an external labeler adds `open source` to OSS PRs.
-TRIGGER_LABELS = frozenset({"bot-retriage", "open source"})
 HANDLED_LABELS = frozenset(
     {
         "triaged",
@@ -208,23 +205,15 @@ def fetch_maintainer_activity(
             )
             signal = "comment" if event_name == "commented" else "review"
         elif isinstance(event_name, str) and event_name not in PASSIVE_TIMELINE_EVENTS:
-            label = event.get("label")
-            if (
-                event_name in {"labeled", "unlabeled"}
-                and isinstance(label, dict)
-                and label.get("name") in TRIGGER_LABELS
-            ):
+            # Labels route PRs and record outcomes; they are not engagement.
+            if event_name in {"labeled", "unlabeled"}:
                 continue
             login = _human_login(
                 value=event.get("actor"),
                 context="activity actor",
                 excluded_login=author_login,
             )
-            signal = {
-                "labeled": "label_change",
-                "review_requested": "review_request",
-                "unlabeled": "label_change",
-            }.get(event_name, event_name)
+            signal = {"review_requested": "review_request"}.get(event_name, event_name)
         if login is None or signal is None:
             continue
         candidates.setdefault(login.casefold(), set()).add(signal)

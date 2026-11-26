@@ -99,6 +99,10 @@ uncoordinated race-closing reads to apply.
   label and comment on most issues during triage, so that activity would admit
   any PR that merely mentions a triaged issue. Only the PR's own timeline is
   read.
+- **Label changes are not maintainer activity.** Labeling is how PRs are
+  routed and how this workflow records its outcome, so a maintainer removing
+  `bot-triage-error` to rerun, or applying `missing actionable issue`, would
+  otherwise admit the PR it was deciding against.
 - **Deployments are passive timeline events.** GitHub attributes a deployment
   to whoever triggered the workflow run, including this workflow's own
   environment-gated job, so it says nothing about deliberate maintainer action.
