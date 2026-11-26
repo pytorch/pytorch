@@ -631,6 +631,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             list.__new__,
             int.__new__,
             float.__new__,
+            complex.__new__,
             str.__new__,
             collections.deque.__new__,
             types.SimpleNamespace.__new__,
@@ -1374,6 +1375,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         set,
         frozenset,
         list,
+        object,
     }
 
     @staticmethod
@@ -5099,7 +5101,7 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return super().tp_getattro_impl(tx, name)
 
 
-_CONSTANT_BASE_TYPES = (int, float, str)
+_CONSTANT_BASE_TYPES = (int, float, str, complex)
 
 
 class UserDefinedConstantVariable(UserDefinedObjectVariable):
