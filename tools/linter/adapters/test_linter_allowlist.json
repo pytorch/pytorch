@@ -362,7 +362,6 @@
   "test/inductor/test_cutlass_backend.py",
   "test/inductor/test_cutlass_evt.py",
   "test/inductor/test_cutlass_fallback.py",
-  "test/inductor/test_decompose_mem_bound_mm.py",
   "test/inductor/test_decompose_shard_dim_alltoall.py",
   "test/inductor/test_deterministic.py",
   "test/inductor/test_device_backend_hooks.py",
