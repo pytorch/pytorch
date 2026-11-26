@@ -586,12 +586,7 @@ class StrConstantVariable(ConstantVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # str.format with non-constant arguments (e.g. a tensor) builds a
-        # StringFormatVariable through the str.format builtin.
-        from .builder import SourcelessBuilder
-
-        fmt = SourcelessBuilder.create_internal_builtin(str.format)
-        return fmt.call_function(tx, [self, *args], kwargs)
+        return variables.StringFormatVariable.create(tx, self.value, args, kwargs)
 
     tp_methods = {
         **_tp_methods,

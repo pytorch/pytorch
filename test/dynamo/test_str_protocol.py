@@ -662,5 +662,158 @@ class FStringMutationTests(TestCase):
         self._check(fn, torch.randn(3), Obj([1, 2]))
 
 
+class _HasStr:
+    def __str__(self):
+        return "HasStr"
+
+
+class _FormatOverride(_HasStr):
+    def __format__(self, spec):
+        return "Format" + spec
+
+
+@instantiate_parametrized_tests
+class ObjectFormatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "call",
+        [
+            subtest(lambda o: o.__format__(""), name="bound"),
+            subtest(lambda o: type(o).__format__(o, ""), name="type"),
+        ],
+    )
+    def test_empty_spec_calls_str(self, call):
+        def fn(x, o):
+            return x + 1, call(o)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.randn(2), _HasStr())[1], "HasStr")
+
+    def test_user_override(self):
+        def fn(x, o):
+            return x + 1, o.__format__("x")
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x, o = torch.randn(2), _FormatOverride()
+        self.assertEqual(compiled(x, o)[1:], fn(x, o)[1:])
+
+    @parametrize("spec", ["d", 1])
+    def test_type_error(self, spec):
+        def fn(x, o):
+            try:
+                o.__format__(spec)
+            except TypeError as e:
+                return x + 1, str(e)
+            return x, ""
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x, o = torch.randn(2), _HasStr()
+        self.assertEqual(compiled(x, o)[1], fn(x, o)[1])
+
+
+class _StrSubclass(str):
+    __slots__ = ()
+
+
+@instantiate_parametrized_tests
+class BuiltinFormatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "args",
+        [
+            subtest(("abc", ">5"), name="str"),
+            subtest(("abc",), name="str_no_spec"),
+            subtest((_StrSubclass("xy"), ">4"), name="str_subclass"),
+            subtest((5,), name="int"),
+            subtest((5, "03d"), name="int_spec"),
+            subtest((2.5, ".3f"), name="float"),
+            subtest((None,), name="none"),
+            subtest((_HasStr(), ""), name="object"),
+            subtest((None, "x"), name="object_bad_spec"),
+            subtest((1, 2), name="spec_not_str"),
+            subtest((1, "", 3), name="too_many_args"),
+        ],
+    )
+    def test_format(self, args):
+        def fn(x):
+            try:
+                return x + 1, format(*args)
+            except TypeError as e:
+                return x + 1, str(e)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+    @parametrize("spec", ["", ".1f"])
+    def test_tensor_no_graph_break(self, spec):
+        def fn(x):
+            return x + 1, format(x.sum(), spec)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+    @parametrize("spec", ["", "03d"])
+    def test_symint_no_graph_break(self, spec):
+        def fn(x):
+            return x + 1, format(x.size(0), spec)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+        for n in (2, 3):
+            x = torch.randn(n)
+            self.assertEqual(compiled(x)[1], fn(x)[1])
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_str_subclass_returns_exact_str(self):
+        def fn(x):
+            return x + 1, type(format(_StrSubclass("xy")))
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertIs(compiled(torch.randn(2))[1], str)
+
+
+class _Point:
+    def __init__(self):
+        self.x = 1
+        self.items = [2, 3]
+
+    def __str__(self):
+        return f"P{self.x}"
+
+
+@instantiate_parametrized_tests
+class FStringFormatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "call",
+        [
+            subtest(lambda o, p, t: f"<{o:y}>", name="user_format"),
+            subtest(lambda o, p, t: f"{p}|{p!r:.2}|{p.x}", name="default_format"),
+            subtest(lambda o, p, t: f"{o:{p.x + 2}}", name="nested_spec"),
+            subtest(lambda o, p, t: f"a{p}b{t.sum():.2f}", name="tensor"),
+        ],
+    )
+    def test_fstring(self, call):
+        def fn(x, o, p):
+            return x + 1, call(o, p, x)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        args = (torch.randn(2), _FormatOverride(), _Point())
+        self.assertEqual(compiled(*args)[1], fn(*args)[1])
+
+    def test_fstring_sees_mutation(self):
+        def fn(x, p):
+            p.x = 5
+            return x + 1, f"{p}"
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.randn(2), _Point())[1], "P5")
+
+
 if __name__ == "__main__":
     run_tests()
