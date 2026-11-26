@@ -1023,20 +1023,23 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
 
         def fn_setitem(x):
             global _dg_a
+            d = me.__dict__
             del _dg_a
-            me.__dict__["_dg_a"] = 5
+            d["_dg_a"] = 5
             return x + 1
 
         def fn_update(x):
             global _dg_a
+            d = me.__dict__
             del _dg_a
-            me.__dict__.update(_dg_a=5)
+            d.update(_dg_a=5)
             return x + 1
 
         def fn_setdefault(x):
             global _dg_a
+            d = me.__dict__
             del _dg_a
-            me.__dict__.setdefault("_dg_a", 5)
+            d.setdefault("_dg_a", 5)
             return x + 1
 
         fn, expected, g_after = {
