@@ -28,7 +28,8 @@ cuda_masked_sum_template = TritonTemplate(
 def cuda_masked_sum(x, mask):
     r"""Compact selected values on the device and sum in eager's reduction order."""
     device = x.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError(f"Expected non-None values, got {device=}")
     complex_dtype = x.get_dtype() if x.get_dtype().is_complex else None
     x, mask = L.broadcast_tensors(x, mask)
     x.realize()
@@ -100,7 +101,8 @@ def cuda_masked_sum(x, mask):
         combine_fn=lambda a, b: (L.ops.add(a[0], b[0]),),
         can_fallback_to_aten=False,
     )
-    assert prefix is not None
+    if prefix is None:
+        raise AssertionError(f"Expected non-None values, got {prefix=}")
     prefix.realize()
     compact = generate(
         "compact",
