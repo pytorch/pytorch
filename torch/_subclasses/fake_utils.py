@@ -7,8 +7,9 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import (
-    FakeTensor,
     FakeTensorMode,
+    is_fake_tensor,
+    maybe_get_fake_mode,
     MetadataMismatchError,
     tree_flatten_only,
     UnsupportedFakeTensorException,
@@ -110,12 +111,18 @@ def is_sdpa_error(func: OpOverload, idx: int, e: Exception) -> bool:
         and "Devices" in repr(e)
     ):
         return True
+    if (
+        func is aten._scaled_dot_product_fused_attention_overrideable.default
+        and idx in (6, 7)
+        and "Devices" in repr(e)
+    ):
+        return True
     return False
 
 
 def try_convert_fake_to_real(
-    ten_list: list[FakeTensor | Any],
-) -> list[FakeTensor | torch.Tensor | Any]:
+    ten_list: list[torch.Tensor | Any],
+) -> list[torch.Tensor | Any]:
     """
     Attempt to convert fake tensors to a corresponding real tensor with the correct underlying storage by looking up
     the FakeTensorMode meta to real storage mapping. On failure to find the storage mapping, the FakeTensor will
@@ -124,13 +131,13 @@ def try_convert_fake_to_real(
     Note: this is not currently optimized (makes copies of the meta converter internal dictionaries)
     """
 
-    fake_tensor = next(
-        (item for item in ten_list if isinstance(item, FakeTensor)), None
-    )
+    fake_tensor = next((item for item in ten_list if is_fake_tensor(item)), None)
     if fake_tensor is None:
         return ten_list
 
-    fake_mode = fake_tensor.fake_mode
+    fake_mode = maybe_get_fake_mode(fake_tensor)
+    if fake_mode is None:
+        return ten_list
     meta_converter = fake_mode.fake_tensor_converter.meta_converter
     desc = meta_converter.describer
 
@@ -138,7 +145,7 @@ def try_convert_fake_to_real(
     key_to_real_storage = {v: k for k, v in desc.lookup_storage.items()}
     out = []
     for t in ten_list:
-        if not isinstance(t, FakeTensor) or t.layout != torch.strided:
+        if not is_fake_tensor(t) or t.layout != torch.strided:
             out.append(t)
             continue
 
@@ -186,7 +193,7 @@ def try_convert_fake_to_real(
 
 def _check_fake_real_tensors(
     real_out: torch.Tensor,
-    fake_out: FakeTensor,
+    fake_out: torch.Tensor,
     context: str = "",
     sizes: bool = True,
     strides: bool = False,

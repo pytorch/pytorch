@@ -15,7 +15,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, overload, Self, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
@@ -42,7 +42,8 @@ if TYPE_CHECKING:
     from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+    from torch.types import IntLikeType
 
 
 """
@@ -243,10 +244,20 @@ class SLoc:
             return f"({floc})"
 
 
-class ShapeGuard(NamedTuple):
+class _ShapeGuardFields(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
-    size_oblivious: bool
+
+
+class ShapeGuard(_ShapeGuardFields):
+    __slots__ = ()
+
+    # Pickles from older versions carry extra trailing fields (e.g. the removed
+    # size_oblivious); accept and drop them so saved ShapeEnvs still load.
+    def __new__(
+        cls, expr: sympy.logic.boolalg.Boolean, sloc: SLoc, *_legacy: object
+    ) -> Self:
+        return super().__new__(cls, expr, sloc)
 
 
 @dataclasses.dataclass(slots=True)
@@ -280,7 +291,11 @@ class Guard:
     stack: CapturedTraceback | None = None
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
-    _unserializable: bool = False
+    # The local-scope type a TYPE_MATCH or FAKE_SCRIPT_TYPE_MATCH found, if any;
+    # serialize_guards refuses it.
+    _unserializable: type | None = None
+    _force_dict_keys_match: bool = False
+    recompile_hint: str | None = dataclasses.field(default=None, compare=False)
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -698,7 +713,7 @@ class GuardsSet:
         return list(self.source_to_guards[source])
 
     def remove_guards_with_source(self, source: Source) -> None:
-        """Delete all guards that contains a given source"""
+        """Delete all guards that contain a given source"""
         from ._dynamo.source import is_from_source
 
         self.inner = OrderedSet(
@@ -821,7 +836,7 @@ class InvokeSubgraphReuseCondition:
     #   (InputTag.TENSOR, TensorMetadata)
     #   (InputTag.SYMNODE, sym_num — same object implies same symbol)
     #   (InputTag.CONSTANT, value)
-    #   (InputTag.MODULE, None)
+    #   (InputTag.OBJECT, None)
     # Tensor metadata is checked here because TENSOR_MATCH guards for
     # subgraph inputs may already exist before tracing and thus won't
     # appear in the guard delta.
@@ -1004,7 +1019,19 @@ class HopDispatchSetCache:
         return self.hop_cache_map[op]  # type: ignore[index]
 
 
-_TLS = threading.local()
+class _TLSStorage(threading.local):
+    # Default the hot-path attributes to None per thread so that
+    # TracingContext.try_get() / CompileContext.try_get() -- called on every
+    # torch.compile'd call -- hit a present attribute instead of paying for an
+    # AttributeError raise+catch inside getattr(). Without this, a thread that
+    # never ran compilation itself (e.g. a worker thread executing compiled code
+    # compiled on another thread) takes the slow getattr-miss path on every call.
+    def __init__(self) -> None:
+        self.tracing_context: TracingContext | None = None
+        self.compile_context: CompileContext | None = None
+
+
+_TLS = _TLSStorage()
 
 """
 TracingContext is the source of truth for all currently accumulated information
@@ -1072,6 +1099,35 @@ class InlinedCodeCache:
     code_options: CodeOptions
 
 
+class _CurrentFrame:
+    """Context manager behind TracingContext.current_frame. Hand-written
+    rather than @contextmanager because it is entered on every inlined call
+    and generator resume."""
+
+    __slots__ = ("frame_summary", "old", "old_positions", "tc")
+
+    def __init__(self, frame_summary: traceback.FrameSummary | None) -> None:
+        self.frame_summary = frame_summary
+
+    def __enter__(self) -> None:
+        tc = self.tc = TracingContext.get()
+        if self.frame_summary is not None:
+            tc.frame_summary_stack.append(self.frame_summary)
+        self.old = tc.loc_in_frame
+        self.old_positions = tc.loc_in_frame_positions
+        tc.loc_in_frame = None
+        tc.loc_in_frame_positions = None
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        tc = self.tc
+        if isinstance(exc, Exception) and not hasattr(exc, "real_stack"):
+            exc.real_stack = tc.extract_stack()  # pyrefly: ignore [missing-attribute]
+        if self.frame_summary is not None:
+            tc.frame_summary_stack.pop()
+        tc.loc_in_frame = self.old
+        tc.loc_in_frame_positions = self.old_positions
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -1092,7 +1148,7 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode: FakeTensorMode | None) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode | None) -> None:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
@@ -1100,7 +1156,7 @@ class TracingContext:
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
         # Combined cache for inlined code data (instructions, indexof, code_options)
         self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
-        self.fake_mode: FakeTensorMode | None = fake_mode
+        self.fake_mode: FakeTensorMode | CppFakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
@@ -1122,13 +1178,12 @@ class TracingContext:
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
-        # or None if no stride is known.  This is always the HINT, it
-        # is never a SymInt (it would be better if it was a SymInt, but
-        # I can't conveniently get this from Inductor atm.  Also, be
-        # careful not to accidentally induce guards on the SymInt if
-        # you ever do change this in aot_autograd.py; you should check
-        # on permutations preferentially.)
-        self.output_strides: list[tuple[int, ...] | None] | None = None
+        # or None if no stride is known.  An entry may be a SymInt: under
+        # dynamic shapes inductor reports strides symbolically, see
+        # set_tracing_context_output_strides.  Be careful not to induce
+        # guards on those SymInts when consuming this in aot_autograd.py;
+        # you should check on permutations preferentially.
+        self.output_strides: list[tuple[IntLikeType, ...] | None] | None = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -1189,6 +1244,7 @@ class TracingContext:
         # colno/end_colno kwargs were added to FrameSummary in 3.11
         kwargs: dict[str, Any] = {}
         if sys.version_info >= (3, 11) and self.loc_in_frame_positions is not None:
+            kwargs["end_lineno"] = self.loc_in_frame_positions.end_lineno
             kwargs["colno"] = self.loc_in_frame_positions.col_offset
             kwargs["end_colno"] = self.loc_in_frame_positions.end_col_offset
         return traceback.FrameSummary(
@@ -1215,7 +1271,7 @@ class TracingContext:
             except Exception as e:
                 # Prevent real_stack from getting attached
                 #
-                # The invariant is that if an Exception as real_stack, we've
+                # The invariant is that if an Exception has real_stack, we've
                 # appropriately attached a user stack and we no longer need to
                 # attach anything. Because we cannot conveniently interpose
                 # when an exception is thrown, we instead interpose everywhere
@@ -1235,35 +1291,17 @@ class TracingContext:
                 raise
 
     @staticmethod
-    @contextlib.contextmanager
     def current_frame(
         frame_summary: traceback.FrameSummary | None,
-    ) -> Generator[None, None, None]:
+    ) -> _CurrentFrame:
         # frame_summary can be None to solely take advantage of real_stack
         # attachment to thrown exceptions
-        tc = TracingContext.get()
-        if frame_summary is not None:
-            tc.frame_summary_stack.append(frame_summary)
-        old = tc.loc_in_frame
-        old_positions = tc.loc_in_frame_positions
-        tc.loc_in_frame = None
-        tc.loc_in_frame_positions = None
-        try:
-            yield
-        except Exception as e:
-            if not hasattr(e, "real_stack"):
-                e.real_stack = tc.extract_stack()  # type: ignore[attr-defined]
-            raise
-        finally:
-            if frame_summary is not None:
-                tc.frame_summary_stack.pop()
-            tc.loc_in_frame = old
-            tc.loc_in_frame_positions = old_positions
+        return _CurrentFrame(frame_summary)
 
     @staticmethod
     @contextlib.contextmanager
     def report_output_strides() -> Generator[
-        list[tuple[int, ...] | None] | None, None, None
+        list[tuple[IntLikeType, ...] | None] | None, None, None
     ]:
         tc = TracingContext.try_get()
         if tc is None:
@@ -1427,10 +1465,18 @@ class Source:
         globals: dict[str, Any],
         locals: dict[str, Any],
         cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
     ) -> Any:
+        """Resolve this source, reporting only errors raised by this source's operation."""
         if self in cache:
             return cache[self]
-        value = eval(self._name_template, globals, locals)
+        try:
+            value = eval(self._name_template, globals, locals)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, None, error)
+            raise
         cache[self] = value
         return value
 
@@ -1485,6 +1531,8 @@ class ChainedSource(Source):
         globals: dict[str, Any],
         locals: dict[str, Any],
         cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
     ) -> Any:
         if self in cache:
             return cache[self]
@@ -1493,9 +1541,18 @@ class ChainedSource(Source):
         while tmpvar in locals:
             tmpvar = f"tmp{counter}"
             counter += 1
-        locals[tmpvar] = self.base.get_value(globals, locals, cache)
-        value = eval(self._name_template.format(tmpvar), globals, locals)
-        del locals[tmpvar]
+        # Resolve dependencies outside the try so on_error sees the exact
+        # Source operation that failed, rather than an enclosing source.
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        locals[tmpvar] = base_value
+        try:
+            value = eval(self._name_template.format(tmpvar), globals, locals)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        finally:
+            del locals[tmpvar]
         cache[self] = value
         return value
 
@@ -1513,21 +1570,24 @@ class ChainedSource(Source):
         return result
 
 
-def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
+def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | CppFakeTensorMode | None:
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
     heuristically detect the fake mode via the following sources, in order of
     priority:
 
-        - Currently active fake mode on stack
+        - Currently active fake mode, Python or C++
         - Fake mode associated with passed in tensors (inputs does not
           have to be flattened)
+
+    The result can be a CppFakeTensorMode; see Note [Fake mode lookups and
+    CppFakeTensorMode] in torch/_subclasses/fake_tensor.py.
     """
     from torch._subclasses.fake_tensor import (
-        FakeTensor,
-        FakeTensorMode,
         get_plain_tensors,
+        is_fake_tensor,
+        maybe_get_fake_mode,
     )
 
     # If TracingContext has a fake_mode, use it authoritatively.
@@ -1540,25 +1600,20 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
     fake_modes = []
 
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
-
-    for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
-        if isinstance(m, FakeTensorMode):
-            fake_modes.append((m, "active fake mode", i))
+    if (m := active_fake_mode()) is not None:
+        fake_modes.append((m, "active fake mode", 0))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
-        if isinstance(flat_input, FakeTensor):
-            fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
+        if is_fake_tensor(flat_input):
+            fake_modes.append((maybe_get_fake_mode(flat_input), "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
-            fake_tensors: list[FakeTensor] = [
-                x for x in out if isinstance(x, FakeTensor)
-            ]
+            fake_tensors = [x for x in out if is_fake_tensor(x)]
             fake_modes.extend(
                 [
-                    (tensor.fake_mode, f"subclass input {i}", ix)
+                    (maybe_get_fake_mode(tensor), f"subclass input {i}", ix)
                     for ix, tensor in enumerate(fake_tensors)
                 ]
             )
@@ -1578,16 +1633,13 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         return None
 
 
-def active_fake_mode() -> FakeTensorMode | None:
+def active_fake_mode() -> FakeTensorMode | CppFakeTensorMode | None:
     """
-    Inspects the dispatch mode stack for an active fake mode and returns it.
-    Returns None if no fake mode is active.
+    Returns the active fake mode, or None if no fake mode is active. It can be
+    a CppFakeTensorMode; see Note [Fake mode lookups and CppFakeTensorMode] in
+    torch/_subclasses/fake_tensor.py.
     """
-    from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
-
-    for _, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
-        if isinstance(m, FakeTensorMode):
-            return m
-
-    return None
+    # A FakeTensorMode is an infra mode, so it can only be in the FAKE slot;
+    # _get_dispatch_mode(FAKE) falls back to an installed C++ mode's
+    # CppFakeTensorMode when that slot is empty.
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)

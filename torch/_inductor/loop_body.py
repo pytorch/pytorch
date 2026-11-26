@@ -19,6 +19,7 @@ from torch.utils._sympy.symbol import SymT
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
+from .optimize_loop_body import eliminate_redundant_lowp_round_trips
 from .utils import (
     cache_on_self,
     decompose_index,
@@ -124,8 +125,12 @@ class LoopBody:
         iter_vars,
         reduce_vars,
         allow_same_symbol_in_index=False,
+        device: torch.device | None = None,
     ):
         super().__init__()
+        # the device of the buffer this body computes, inherited by the bodies
+        # derived from it; None for the C++ template bodies
+        self.device = device if device is not None else getattr(fn, "device", None)
 
         _flat_sizes = tuple(var_ranges.values())
         self.sizes = (
@@ -178,6 +183,7 @@ class LoopBody:
             )
         )
         del self.indexing_exprs_name  # not used after _init_with_tracing
+        eliminate_redundant_lowp_round_trips(self)
 
     def _init_with_copy(self, other: LoopBody, args, allow_same_symbol_in_index):
         """
@@ -254,6 +260,19 @@ class LoopBody:
 
         return new_body
 
+    def with_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> LoopBody:
+        iter_vars, reduce_vars = self.vars
+        new_body = LoopBody(
+            self,
+            (iter_vars, reduce_vars),
+            self.var_ranges,
+            iter_vars,
+            reduce_vars,
+            allow_same_symbol_in_index=True,
+        )
+        new_body.indexing_exprs.update(replacements)
+        return new_body
+
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
     ) -> LoopBody:
@@ -292,7 +311,12 @@ class LoopBody:
             return old_body(new_iter_idx, reduce_idx)
 
         loop_body = LoopBody(
-            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+            new_body,
+            (iter_vars, reduce_vars),
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+            device=self.device,
         )
 
         # use the original symbol prefix so we can do multiple round of reordering
@@ -333,7 +357,12 @@ class LoopBody:
             return old_body(old_iter_idx, list(reduce_idx))
 
         loop_body = LoopBody(
-            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+            new_body,
+            (iter_vars, reduce_vars),
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+            device=self.device,
         )
 
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
@@ -394,6 +423,7 @@ class LoopBody:
             var_ranges,
             iter_vars,
             reduce_vars,
+            device=self.device,
         )
 
     @property
@@ -483,7 +513,7 @@ class LoopBody:
 
     def is_memory_copy(self) -> bool:
         """
-        True of this contains only a single loads and store.
+        True if this contains only a single loads and store.
         Note, this could involve a layout change.
         """
         return (
@@ -622,7 +652,10 @@ class LoopBodyBlock:
         )
         if config.constant_and_index_propagation:
             handler = IndexPropagation(
-                handler, self.body.var_ranges, self.body.indirect_var_ranges
+                handler,
+                self.body.var_ranges,
+                self.body.indirect_var_ranges,
+                self.body.device,
             )
 
         with V.set_ops_handler(handler):

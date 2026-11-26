@@ -66,7 +66,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
 
     std::vector<int64_t> new_shape;
     new_shape.reserve(l_diff);
-    for (size_t i = 0; i < l_diff; i ++) {
+    for (const auto i : c10::irange(l_diff)) {
         new_shape.emplace_back(input_sizes[i]);
     }
 
@@ -248,7 +248,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
   error_msg << "  - 3D or 4D input: padding size = 4 (pads last 2 dimensions)\n";
   error_msg << "  - 4D or 5D input: padding size = 6 (pads last 3 dimensions)";
 
-  C10_THROW_ERROR(NotImplementedError, error_msg.str());
+  C10_THROW_ERROR(NotImplementedError, std::move(error_msg).str());
 }
 
 Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, std::string_view mode, std::optional<double> value) {

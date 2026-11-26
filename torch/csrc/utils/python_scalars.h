@@ -16,7 +16,8 @@ inline T unpackIntegral(PyObject* obj, const char* type) {
   if (PyFloat_Check(obj)) {
     return c10::checked_convert<T>(THPUtils_unpackDouble(obj), type);
   }
-  return c10::checked_convert<T>(THPUtils_unpackLong(obj), type);
+  // Still range checked; unsigned targets retain their historical signed wrap.
+  return c10::unsafe_wrapping_convert<T>(THPUtils_unpackLong(obj), type);
 }
 
 inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
@@ -58,12 +59,12 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
       break;
     case at::kComplexHalf:
       *(c10::complex<at::Half>*)data =
-          (c10::complex<at::Half>)static_cast<c10::complex<float>>(
+          at::convert<c10::complex<at::Half>, c10::complex<double>>(
               THPUtils_unpackComplexDouble(obj));
       break;
     case at::kBComplex32:
       *(c10::complex<at::BFloat16>*)data =
-          (c10::complex<at::BFloat16>)static_cast<c10::complex<float>>(
+          at::convert<c10::complex<at::BFloat16>, c10::complex<double>>(
               THPUtils_unpackComplexDouble(obj));
       break;
     case at::kComplexFloat:
@@ -100,6 +101,10 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
     case at::kFloat8_e8m0fnu:
       *(at::Float8_e8m0fnu*)data =
           at::convert<at::Float8_e8m0fnu, double>(THPUtils_unpackDouble(obj));
+      break;
+    case at::kFloat8_e5m3fnu:
+      *(at::Float8_e5m3fnu*)data =
+          at::convert<at::Float8_e5m3fnu, double>(THPUtils_unpackDouble(obj));
       break;
     default:
       TORCH_CHECK(false, "store_scalar: invalid type");
@@ -169,6 +174,9 @@ inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
     case at::kFloat8_e8m0fnu:
       return PyFloat_FromDouble(
           at::convert<double, at::Float8_e8m0fnu>(*(at::Float8_e8m0fnu*)data));
+    case at::kFloat8_e5m3fnu:
+      return PyFloat_FromDouble(
+          at::convert<double, at::Float8_e5m3fnu>(*(at::Float8_e5m3fnu*)data));
     default:
       TORCH_CHECK(false, "load_scalar: invalid type");
   }

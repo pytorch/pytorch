@@ -72,10 +72,10 @@ CMake files where bridge code is included:
 caffe2/CMakeLists.txt
 ```
 
-CMake files where oneDNN Graph submodule are included:
+CMake files where the oneDNN Graph submodule is included:
 
 ```bash
-third_party/ideep/mkl-dnn
+third_party/oneDNN
 cmake/public/mkldnn.cmake
 cmake/Modules/FindMKLDNN.cmake
 cmake/Dependencies.cmake

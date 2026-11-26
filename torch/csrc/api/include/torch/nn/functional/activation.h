@@ -198,7 +198,7 @@ inline Tensor gumbel_softmax(
     auto y_hard = torch::zeros_like(logits).scatter_(dim, index, 1.0);
     ret = y_hard - y_soft.detach() + y_soft;
   } else {
-    ret = y_soft;
+    ret = std::move(y_soft);
   }
   return ret;
 }
@@ -672,6 +672,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   TORCH_INTERNAL_ASSERT(embed_dim == embed_dim_to_check);
   TORCH_INTERNAL_ASSERT(key.sizes() == value.sizes());
 
+  TORCH_CHECK(num_heads > 0, "num_heads must be greater than 0");
   const auto head_dim = embed_dim / num_heads;
   TORCH_CHECK(
       head_dim * num_heads == embed_dim,

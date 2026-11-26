@@ -4,16 +4,22 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/StatelessPhilox4x32.cuh>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/CanUse32BitIndexMath.h>
+#include <ATen/native/PhiloxStatelessRNG.h>
+#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/core/TransformationHelper.h>
+#include <limits>
 #include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_philox_normal_native.h>
+#include <ATen/ops/_philox_randint_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
 
@@ -22,11 +28,6 @@ namespace at::native {
 namespace {
 
 using at::cuda::philox_4x32;
-
-// Elements produced per Philox 4x32 call: 4 for float/half/bfloat16, 2 for double.
-// Note that we use a full float for each generated half/bfloat16 for better numerics.
-template <typename scalar_t>
-constexpr int elems_per_call = std::is_same_v<scalar_t, double> ? 2 : 4;
 
 // Box-Muller: convert 4 uniform uint32 values into 4 standard normal floats.
 __device__ __forceinline__ float4 box_muller_float(uint4 r) {
@@ -86,14 +87,15 @@ __global__ void philox_single_key_kernel(
   int64_t chunk = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   if (chunk < num_full_chunks) {
     auto sample = sample_func(seed, offset + static_cast<uint64_t>(chunk));
+    int64_t base = chunk * epc;
     constexpr int vec_bytes = epc * sizeof(scalar_t);
     memory::Vec<vec_bytes> v;
     auto* vals = reinterpret_cast<scalar_t*>(&v);
     #pragma unroll
     for (int j = 0; j < epc; j++) {
-      vals[j] = param_func((&sample.x)[j]);
+      vals[j] = param_func((&sample.x)[j], base + j);
     }
-    memory::st_vec<vec_bytes>(output + chunk * epc, v);
+    memory::st_vec<vec_bytes>(output + base, v);
   }
 
   // Scalar tail for remaining elements.
@@ -101,7 +103,7 @@ __global__ void philox_single_key_kernel(
     int64_t tail_start = num_full_chunks * epc;
     auto sample = sample_func(seed, offset + static_cast<uint64_t>(num_full_chunks));
     for (int j = 0; j < num_elems - tail_start; j++) {
-      output[tail_start + j] = param_func((&sample.x)[j]);
+      output[tail_start + j] = param_func((&sample.x)[j], tail_start + j);
     }
   }
 }
@@ -144,12 +146,12 @@ __global__ void philox_multi_key_kernel(
     auto* vals = reinterpret_cast<scalar_t*>(&v);
     #pragma unroll
     for (int j = 0; j < epc; j++) {
-      vals[j] = param_func((&sample.x)[j]);
+      vals[j] = param_func((&sample.x)[j], base + j);
     }
     memory::st_vec<vec_bytes>(output + base, v);
   } else {
     for (int j = 0; j < epc && chunk * epc + j < elems_per_key; j++) {
-      output[base + j] = param_func((&sample.x)[j]);
+      output[base + j] = param_func((&sample.x)[j], base + j);
     }
   }
 }
@@ -160,9 +162,6 @@ void philox_distribution_kernel(
     const char* op_name,
     Tensor& self, const Tensor& key,
     const sample_t& sample_func, const param_t& param_func) {
-  TORCH_CHECK(self.is_floating_point(),
-      op_name, ": self must be a floating point tensor, got ",
-      self.scalar_type());
   TORCH_CHECK(key.scalar_type() == kUInt64,
       op_name, ": key must have dtype uint64, got ",
       key.scalar_type());
@@ -255,43 +254,99 @@ void philox_distribution_kernel(
   }
 }
 
+// Maps a row-major output index to offsets into two bounds broadcast to the output.
+template <typename index_t>
+OffsetCalculator<2, index_t> make_bounds_offset_calculator(
+    const Tensor& a, const Tensor& b) {
+  // Empty outputs launch no kernel, and IntDivider can't take a size of 0.
+  const int64_t ndim = a.numel() == 0 ? 0 : a.dim();
+  TORCH_CHECK(ndim <= MAX_DIMS,
+      "philox: tensor bounds support at most ", MAX_DIMS, " dims, got ", ndim);
+  auto reversed = [](IntArrayRef r) {
+    return c10::SmallVector<int64_t, MAX_DIMS>(r.rbegin(), r.rend());
+  };
+  auto sizes = reversed(a.sizes());
+  auto a_strides = reversed(a.strides());
+  auto b_strides = reversed(b.strides());
+  const int64_t* strides[] = {a_strides.data(), b_strides.data()};
+  return OffsetCalculator<2, index_t>(ndim, sizes.data(), strides);
+}
+
+// double packs the four uint32 Philox outputs into two 64-bit values.
+template <typename scalar_t>
+__device__ __forceinline__ auto uniform_sample(uint64_t seed, uint64_t offset) {
+  uint4 r = philox_4x32(seed, offset);
+  if constexpr (std::is_same_v<scalar_t, double>) {
+    ulonglong2 packed;
+    packed.x = (static_cast<unsigned long long>(r.x) << 32) | r.y;
+    packed.y = (static_cast<unsigned long long>(r.z) << 32) | r.w;
+    return packed;
+  } else {
+    return r;
+  }
+}
+
 } // anonymous namespace
 
 Tensor& _philox_uniform_cuda_(
     Tensor& self, const Tensor& key, double low, double high) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_uniform_: self must be a floating point tensor, got ",
+      self.scalar_type());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
-    auto sample_func = []() {
-      if constexpr (std::is_same_v<scalar_t, double>) {
-        return [] __device__ (uint64_t seed, uint64_t offset) {
-          uint4 r = philox_4x32(seed, offset);
-          ulonglong2 packed;
-          packed.x = (static_cast<unsigned long long>(r.x) << 32) | r.y;
-          packed.y = (static_cast<unsigned long long>(r.z) << 32) | r.w;
-          return packed;
-        };
-      } else {
-        return [] __device__ (uint64_t seed, uint64_t offset) {
-          return philox_4x32(seed, offset);
-        };
-      }
-    }();
-
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      return uniform_sample<scalar_t>(seed, offset);
+    };
     auto lo = static_cast<scalar_t>(low);
     auto hi = static_cast<scalar_t>(high);
-    auto param_func = [lo, hi] __device__ (auto rand) {
+    auto param_func = [lo, hi] __device__ (auto rand, int64_t /*idx*/) {
       return static_cast<scalar_t>(
           at::transformation::uniform_real(rand, lo, hi));
     };
-
     philox_distribution_kernel<scalar_t>(
         "_philox_uniform_", self, key, sample_func, param_func);
   });
   return self;
 }
 
+Tensor& _philox_uniform_tensor_cuda_(
+    Tensor& self, const Tensor& key, const Tensor& low, const Tensor& high) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_uniform_: self must be a floating point tensor, got ",
+      self.scalar_type());
+  philox_check_bound("_philox_uniform_", "low", low, self);
+  philox_check_bound("_philox_uniform_", "high", high, self);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      return uniform_sample<scalar_t>(seed, offset);
+    };
+    auto lo = low.to(self.scalar_type()).expand(self.sizes());
+    auto hi = high.to(self.scalar_type()).expand(self.sizes());
+    const scalar_t* lo_ptr = lo.const_data_ptr<scalar_t>();
+    const scalar_t* hi_ptr = hi.const_data_ptr<scalar_t>();
+    auto index_type = canUse32BitIndexMath(lo) && canUse32BitIndexMath(hi) ? kInt : kLong;
+    AT_DISPATCH_INDEX_TYPES(index_type, "_philox_uniform_", [&] {
+      using calc_index_t = std::make_unsigned_t<index_t>;
+      auto calc = make_bounds_offset_calculator<calc_index_t>(lo, hi);
+      auto param_func = [lo_ptr, hi_ptr, calc] __device__ (auto rand, int64_t idx) {
+        auto offsets = calc.get(static_cast<calc_index_t>(idx));
+        return static_cast<scalar_t>(at::transformation::uniform_real(
+            rand, lo_ptr[offsets[0]], hi_ptr[offsets[1]]));
+      };
+      philox_distribution_kernel<scalar_t>(
+          "_philox_uniform_", self, key, sample_func, param_func);
+    });
+  });
+  return self;
+}
+
 Tensor& _philox_normal_cuda_(
     Tensor& self, const Tensor& key, double mean, double stddev) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_normal_: self must be a floating point tensor, got ",
+      self.scalar_type());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
     using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
@@ -309,13 +364,89 @@ Tensor& _philox_normal_cuda_(
 
     auto mu = static_cast<compute_t>(mean);
     auto sigma = static_cast<compute_t>(stddev);
-    auto param_func = [mu, sigma] __device__ (compute_t rand) {
+    auto param_func = [mu, sigma] __device__ (compute_t rand, int64_t /*idx*/) {
       return static_cast<scalar_t>(rand * sigma + mu);
     };
 
     philox_distribution_kernel<scalar_t>(
         "_philox_normal_", self, key, sample_func, param_func);
   });
+  return self;
+}
+
+Tensor& _philox_randint_cuda_(
+    Tensor& self,
+    const Tensor& key,
+    std::optional<int64_t> low,
+    std::optional<int64_t> high) {
+  auto st = self.scalar_type();
+  TORCH_CHECK(isIntegralType(st, /*includeBool=*/false),
+      "_philox_randint_: self must have an integer dtype, got ", st);
+  AT_DISPATCH_V2(st, "_philox_randint_", AT_WRAP([&] {
+    // 8-byte types pack the four uint32 outputs into two 64-bit values; all
+    // narrower types take one raw uint32 each.
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      uint4 r = philox_4x32(seed, offset);
+      if constexpr (sizeof(scalar_t) == 8) {
+        return make_ulonglong2(
+            (static_cast<unsigned long long>(r.x) << 32) | r.y,
+            (static_cast<unsigned long long>(r.z) << 32) | r.w);
+      } else {
+        return r;
+      }
+    };
+    // An absent high means the dtype's exclusive upper limit; callers must pass
+    // it as None since max + 1 is not representable as int64 for every dtype.
+    constexpr int64_t dtype_low = static_cast<int64_t>(std::numeric_limits<scalar_t>::min());
+    const bool spans_low = !low.has_value() || *low == dtype_low;
+    const bool spans_high = !high.has_value();
+
+    if (spans_low && spans_high) {
+      // Full range: every value of the dtype is equally likely, so the raw bits
+      // are already the answer.
+      auto param_func = [] __device__ (auto rand, int64_t /*idx*/) {
+        return static_cast<scalar_t>(rand);
+      };
+      philox_distribution_kernel<scalar_t>(
+          "_philox_randint_", self, key, sample_func, param_func);
+      return;
+    }
+
+    // Reduce in the sampled width, not the output width, so dtypes narrower
+    // than the sample keep all of their random bits.
+    using u_t = std::conditional_t<sizeof(scalar_t) == 8, uint64_t, uint32_t>;
+    // Number of values the dtype holds, which wraps to 0 when the dtype fills
+    // the sampled width. Shifting in two steps keeps this well-defined.
+    constexpr u_t dtype_count = (u_t{1} << (8 * sizeof(scalar_t) - 1)) << 1;
+    u_t lo = low.has_value() ? static_cast<u_t>(*low) : static_cast<u_t>(dtype_low);
+    u_t hi = high.has_value()
+        ? static_cast<u_t>(*high)
+        : static_cast<u_t>(static_cast<u_t>(dtype_low) + dtype_count);
+    u_t range = hi - lo;
+    TORCH_CHECK(range != 0,
+        "_philox_randint_: [low, high) must be non-empty; pass high=None for the "
+        "dtype's full range");
+    // Each element of a 32-bit sample draws 32 random bits, so reducing them
+    // modulo a large range noticeably oversamples the low end (up to 2x). A
+    // range that divides the sampled width evenly is exact at any size, so only
+    // guard the ranges that actually skew. (0 - range) is 2^32 - range, whose
+    // remainder is 2^32 % range without needing a literal that does not fit.
+    if constexpr (sizeof(u_t) == 4) {
+      u_t remainder = static_cast<u_t>(u_t{0} - range) % range;
+      TORCH_CHECK(remainder == 0 || static_cast<uint64_t>(range) < kMaxRange32,
+          "_philox_randint_: range (high - low = ", range, ") does not divide "
+          "2^32 evenly and is too large for the output dtype ", st, ". Each "
+          "element draws only 32 random bits, so a non-dividing range >= 2^28 "
+          "gives a significantly biased distribution. Use a range that divides "
+          "2^32 (a power of two), or a 64-bit dtype (torch.int64 or "
+          "torch.uint64).");
+    }
+    auto param_func = [lo, range] __device__ (auto rand, int64_t /*idx*/) {
+      return static_cast<scalar_t>(static_cast<u_t>(lo + static_cast<u_t>(rand) % range));
+    };
+    philox_distribution_kernel<scalar_t>(
+        "_philox_randint_", self, key, sample_func, param_func);
+  }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   return self;
 }
 

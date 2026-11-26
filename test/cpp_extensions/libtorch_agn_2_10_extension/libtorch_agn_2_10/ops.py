@@ -177,6 +177,228 @@ def my_empty(
     )
 
 
+def my_empty_strided(
+    size, stride, dtype=None, layout=None, device=None, pin_memory=None
+) -> Tensor:
+    """
+    Create an uninitialized tensor with the given size and stride.
+
+    Args:
+        size: list[int] - size of the tensor to create
+        stride: list[int] - stride of the tensor along each dimension
+        dtype: ScalarType or None - data type of the tensor
+        layout: Layout or None - layout of the tensor
+        device: Device or None - device on which to create the tensor
+        pin_memory: bool or None - whether to use pinned memory
+
+    Returns: Tensor - an uninitialized tensor with the specified properties
+    """
+    return torch.ops.libtorch_agn_2_10.my_empty_strided.default(
+        size, stride, dtype, layout, device, pin_memory
+    )
+
+
+def my_slice(self, dim=0, start=None, end=None, step=1) -> Tensor:
+    """
+    Return a sliced view along the specified dimension.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to slice
+        start: int or None - inclusive start index
+        end: int or None - exclusive end index
+        step: int - step between selected elements
+
+    Returns: Tensor - a sliced view of the input tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_slice.default(self, dim, start, end, step)
+
+
+def my_roll(self, shifts, dims=()) -> Tensor:
+    """
+    Roll elements along the specified dimensions.
+
+    Args:
+        self: Tensor - input tensor
+        shifts: list[int] - shifts to apply
+        dims: list[int] - dimensions to roll
+
+    Returns: Tensor - rolled tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_roll.default(self, shifts, dims)
+
+
+def my_repeat_interleave(self, repeats, dim=None, *, output_size=None) -> Tensor:
+    """
+    Repeat elements a fixed number of times.
+
+    Args:
+        self: Tensor - input tensor
+        repeats: int - repeat counts
+        dim: int or None - dimension to operate on
+        output_size: int or None - total number of repeats
+
+    Returns: Tensor - repeated elements
+    """
+    return torch.ops.libtorch_agn_2_10.my_repeat_interleave.default(
+        self, repeats, dim, output_size=output_size
+    )
+
+
+def my_repeat_interleave_tensor(repeats, *, output_size=None) -> Tensor:
+    """
+    Return indices repeated according to the supplied counts.
+
+    Args:
+        repeats: Tensor - repeat counts
+        output_size: int or None - total number of repeats
+
+    Returns: Tensor - repeated indices
+    """
+    return torch.ops.libtorch_agn_2_10.my_repeat_interleave_tensor.default(
+        repeats, output_size=output_size
+    )
+
+
+def my_repeat_interleave_self_tensor(
+    self, repeats, dim=None, *, output_size=None
+) -> Tensor:
+    """
+    Repeat tensor elements according to the supplied counts.
+
+    Args:
+        self: Tensor - input tensor
+        repeats: Tensor - repeat counts
+        dim: int or None - dimension to operate on
+        output_size: int or None - total number of repeats
+
+    Returns: Tensor - repeated elements
+    """
+    return torch.ops.libtorch_agn_2_10.my_repeat_interleave_self_tensor.default(
+        self, repeats, dim, output_size=output_size
+    )
+
+
+def my_equal(self, other) -> bool:
+    """
+    Check whether two tensors have the same shape and elements.
+
+    Args:
+        self: Tensor - input tensor
+        other: Tensor - tensor to compare against
+
+    Returns: bool - whether the tensors are equal
+    """
+    return torch.ops.libtorch_agn_2_10.my_equal.default(self, other)
+
+
+def my_nonzero(self) -> Tensor:
+    """
+    Return the indices of nonzero elements.
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: Tensor - indices of nonzero elements
+    """
+    return torch.ops.libtorch_agn_2_10.my_nonzero.default(self)
+
+
+def my_expand(self, size, *, implicit=False) -> Tensor:
+    """
+    Return a view expanded to the requested size.
+
+    Args:
+        self: Tensor - input tensor
+        size: list[int] - requested output size
+        implicit: bool - whether expansion is implicit
+
+    Returns: Tensor - expanded view
+    """
+    return torch.ops.libtorch_agn_2_10.my_expand.default(self, size, implicit=implicit)
+
+
+def my_all(self) -> Tensor:
+    """
+    Check whether all elements are true.
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: Tensor - boolean reduction result
+    """
+    return torch.ops.libtorch_agn_2_10.my_all.default(self)
+
+
+def my_all_dim(self, dim, keepdim=False) -> Tensor:
+    """
+    Check whether all elements are true along one dimension.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to reduce
+        keepdim: bool - whether to retain reduced dimensions
+
+    Returns: Tensor - boolean reduction result
+    """
+    return torch.ops.libtorch_agn_2_10.my_all_dim.default(self, dim, keepdim)
+
+
+def my_all_dims(self, dim=None, keepdim=False) -> Tensor:
+    """
+    Check whether all elements are true along the requested dimensions.
+
+    Args:
+        self: Tensor - input tensor
+        dim: list[int] or None - dimensions to reduce
+        keepdim: bool - whether to retain reduced dimensions
+
+    Returns: Tensor - boolean reduction result
+    """
+    return torch.ops.libtorch_agn_2_10.my_all_dims.default(self, dim, keepdim)
+
+
+def my_median(self, dim, keepdim=False) -> tuple[Tensor, Tensor]:
+    """
+    Return median values and their indices along a dimension.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to reduce
+        keepdim: bool - whether to retain reduced dimensions
+
+    Returns: tuple[Tensor, Tensor] - median values and indices
+    """
+    return torch.ops.libtorch_agn_2_10.my_median.default(self, dim, keepdim)
+
+
+def my_median_default(self) -> Tensor:
+    """
+    Return the median of all elements.
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: Tensor - median of all elements
+    """
+    return torch.ops.libtorch_agn_2_10.my_median_default.default(self)
+
+
+def my_index_fill_(self, dim, index, value) -> Tensor:
+    """
+    Fill indexed positions in place with the supplied value.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to fill
+        index: Tensor - indices to fill
+        value: Tensor - fill value
+
+    Returns: Tensor - the modified input tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_index_fill_.default(self, dim, index, value)
+
+
 def my_reshape(t, shape) -> Tensor:
     """
     Returns a tensor with the same data but different shape.
@@ -201,6 +423,19 @@ def my_view(t, size) -> Tensor:
     Returns: Tensor - tensor with new view
     """
     return torch.ops.libtorch_agn_2_10.my_view.default(t, size)
+
+
+def my_view_dtype(t, dtype) -> Tensor:
+    """
+    Returns a view of the input tensor with the same data reinterpreted as dtype.
+
+    Args:
+        t: Tensor - tensor to view
+        dtype: ScalarType - dtype to reinterpret the data as
+
+    Returns: Tensor - view with the specified dtype
+    """
+    return torch.ops.libtorch_agn_2_10.my_view_dtype.default(t, dtype)
 
 
 def my_shape(t) -> tuple[int]:
@@ -669,6 +904,247 @@ def my_subtract(self, other, alpha=1.0) -> Tensor:
     Returns: Tensor - result of subtraction
     """
     return torch.ops.libtorch_agn_2_10.my_subtract.default(self, other, alpha)
+
+
+def my_bitwise_and(self, other) -> Tensor:
+    """
+    Computes the element-wise bitwise AND of self and other.
+
+    Args:
+        self: Tensor - first input tensor
+        other: Tensor - second input tensor
+
+    Returns: Tensor - result of the bitwise AND
+    """
+    return torch.ops.libtorch_agn_2_10.my_bitwise_and.default(self, other)
+
+
+def my_bitwise_or(self, other) -> Tensor:
+    """
+    Computes the element-wise bitwise OR of self and other.
+
+    Args:
+        self: Tensor - first input tensor
+        other: Tensor - second input tensor
+
+    Returns: Tensor - result of the bitwise OR
+    """
+    return torch.ops.libtorch_agn_2_10.my_bitwise_or.default(self, other)
+
+
+def my_bitwise_left_shift(self, other) -> Tensor:
+    """
+    Computes the element-wise left bitwise shift of self by other.
+
+    Args:
+        self: Tensor - input tensor to shift
+        other: Tensor - tensor of shift amounts
+
+    Returns: Tensor - result of the left bitwise shift
+    """
+    return torch.ops.libtorch_agn_2_10.my_bitwise_left_shift.default(self, other)
+
+
+def my_bitwise_right_shift(self, other) -> Tensor:
+    """
+    Computes the element-wise right bitwise shift of self by other.
+
+    Args:
+        self: Tensor - input tensor to shift
+        other: Tensor - tensor of shift amounts
+
+    Returns: Tensor - result of the right bitwise shift
+    """
+    return torch.ops.libtorch_agn_2_10.my_bitwise_right_shift.default(self, other)
+
+
+def my_permute(self, dims) -> Tensor:
+    """
+    Returns a view of the input tensor with its dimensions rearranged.
+
+    Args:
+        self: Tensor - input tensor
+        dims: list[int] - desired ordering of dimensions
+
+    Returns: Tensor - permuted view of the input
+    """
+    return torch.ops.libtorch_agn_2_10.my_permute.default(self, dims)
+
+
+def my_index_select(self, dim, index) -> Tensor:
+    """
+    Indexes the input tensor along dimension dim using entries in index.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to index along
+        index: Tensor - 1-D tensor of indices to select
+
+    Returns: Tensor - values selected along dim
+    """
+    return torch.ops.libtorch_agn_2_10.my_index_select.default(self, dim, index)
+
+
+def my_floor_divide(self, other) -> Tensor:
+    """
+    Computes the element-wise floor division of self by other.
+
+    Args:
+        self: Tensor - dividend tensor
+        other: Tensor - divisor tensor
+
+    Returns: Tensor - result of floor division
+    """
+    return torch.ops.libtorch_agn_2_10.my_floor_divide.default(self, other)
+
+
+def my_is_pinned(self) -> bool:
+    """
+    Returns whether the tensor's storage is allocated in pinned memory.
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: bool - True if the tensor is pinned, False otherwise
+    """
+    return torch.ops.libtorch_agn_2_10.my_is_pinned.default(self)
+
+
+def my_sort(self, dim=-1, descending=False) -> tuple[Tensor, Tensor]:
+    """
+    Sorts the elements of the input tensor along a dimension.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to sort along
+        descending: bool - if True, sort in descending order
+
+    Returns: tuple[Tensor, Tensor] - the sorted values and their indices
+    """
+    return torch.ops.libtorch_agn_2_10.my_sort.default(self, dim, descending)
+
+
+def my_sort_stable(
+    self, stable=None, dim=-1, descending=False
+) -> tuple[Tensor, Tensor]:
+    """
+    Sorts the elements of the input tensor along a dimension.
+
+    Args:
+        self: Tensor - input tensor
+        stable: bool | None - if True, equal elements keep their relative order
+        dim: int - dimension to sort along
+        descending: bool - if True, sort in descending order
+
+    Returns: tuple[Tensor, Tensor] - the sorted values and their indices
+    """
+    return torch.ops.libtorch_agn_2_10.my_sort_stable.default(
+        self, stable, dim, descending
+    )
+
+
+def my_masked_select(self, mask) -> Tensor:
+    """
+    Selects the elements of the input tensor where the mask is True.
+
+    Args:
+        self: Tensor - input tensor
+        mask: Tensor - boolean tensor broadcastable with self
+
+    Returns: Tensor - a 1-D tensor of the selected elements
+    """
+    return torch.ops.libtorch_agn_2_10.my_masked_select.default(self, mask)
+
+
+def my_mm_out(out, self, mat2) -> Tensor:
+    """
+    Computes the matrix product of two 2-D tensors into out.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 2-D input tensor
+        mat2: Tensor - second 2-D input tensor
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_mm_out.default(out, self, mat2)
+
+
+def my_bmm_out(out, self, mat2) -> Tensor:
+    """
+    Computes the batch matrix product of two 3-D tensors into out.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 3-D input tensor of shape (b, n, m)
+        mat2: Tensor - second 3-D input tensor of shape (b, m, p)
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_bmm_out.default(out, self, mat2)
+
+
+def my_mm_out_dtype(out, self, mat2, out_dtype) -> Tensor:
+    """
+    Computes the matrix product of two 2-D tensors into out in out_dtype.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 2-D input tensor
+        mat2: Tensor - second 2-D input tensor
+        out_dtype: ScalarType - dtype of the result
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_mm_out_dtype.default(
+        out, self, mat2, out_dtype
+    )
+
+
+def my_bmm_out_dtype(out, self, mat2, out_dtype) -> Tensor:
+    """
+    Computes the batch matrix product of two 3-D tensors into out in out_dtype.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 3-D input tensor of shape (b, n, m)
+        mat2: Tensor - second 3-D input tensor of shape (b, m, p)
+        out_dtype: ScalarType - dtype of the result
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_bmm_out_dtype.default(
+        out, self, mat2, out_dtype
+    )
+
+
+def my_flip(self, dims) -> Tensor:
+    """
+    Reverses the order of elements along the given dimensions.
+
+    Args:
+        self: Tensor - input tensor
+        dims: list[int] - dimensions to flip, negative values are wrapped
+
+    Returns: Tensor - a new tensor with the given dimensions reversed
+    """
+    return torch.ops.libtorch_agn_2_10.my_flip.default(self, dims)
+
+
+def my_from_file(filename, shared=None, size=0, dtype=None) -> Tensor:
+    """
+    Creates a CPU tensor backed by the contents of a file.
+
+    Args:
+        filename: str - path of the file to read
+        shared: bool or None - whether the mapping is shared with the file
+        size: int or None - number of elements to read from the file
+        dtype: ScalarType or None - data type of the tensor elements
+
+    Returns: Tensor - a tensor holding the file contents
+    """
+    op = torch.ops.libtorch_agn_2_10.my_from_file.default
+    return op(filename, shared, size, dtype)
 
 
 # =============================================================================

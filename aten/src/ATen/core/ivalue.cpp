@@ -11,6 +11,7 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
+#include <c10/util/overflows.h>
 #include <cmath>
 #include <iostream>
 #include <utility>
@@ -272,7 +273,7 @@ bool IValue::overlaps(const IValue& rhs) const {
   rhs.getSubValues(rhsSubValues);
   getSubValues(thisSubValues);
   for (auto& sub : thisSubValues) {
-    if (rhsSubValues.count(sub)) {
+    if (rhsSubValues.contains(sub)) {
       return true;
     }
   }
@@ -798,7 +799,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
-      if (c == FP_NORMAL || c == FP_ZERO) {
+      if ((c == FP_NORMAL || c == FP_ZERO) && !c10::overflows<int64_t>(d)) {
         int64_t i = static_cast<int64_t>(d);
         if (static_cast<double>(i) == d) {
           return out << i << '.';
@@ -898,15 +899,17 @@ IValue IValue::deepcopy(std::optional<at::Device> device) const {
 IValue IValue::deepcopy(
     IValue::HashIdentityIValueMap& memo,
     std::optional<at::Device> device) const {
-  if (memo.count(*this)) {
-    return memo.at(*this);
+  if (auto it = memo.find(*this); it != memo.end()) {
+    return it->second;
   }
   IValue copy;
   switch(tag) {
     case IValue::Tag::Tensor: {
       const at::Tensor& src_tensor = toTensor();
       copy = device.has_value() && !src_tensor.device().is_meta()
-          ? IValue(src_tensor.to(*device))
+          // non_blocking must be false: deepcopy never synchronizes the copy.
+          ? IValue(
+                src_tensor.to(*device, /*non_blocking=*/false, /*copy=*/true))
           : IValue(src_tensor.clone());
     } break;
     case IValue::Tag::Tuple: {
@@ -1189,7 +1192,7 @@ std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
       devices.begin(),
       devices.end(),
       std::ostream_iterator<c10::Device>(oss, ", "));
-  return oss.str();
+  return std::move(oss).str();
 }
 #endif
 

@@ -19,7 +19,7 @@ def get_tensor_symint(tensor, *, coeff=1):
 
     # NB: Only FakeTensor is associated with a memo
     tensor = mb_unwrap_functional_tensor(tensor)
-    if isinstance(tensor, FakeTensor):
+    if isinstance(tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return tensor.get_nested_int(coeff=coeff)
 
     global _tensor_id_counter
@@ -181,12 +181,18 @@ class NestedTensor(torch.Tensor):
         self._dynamo_propagated_dynamic_indices = {self._ragged_idx}  # type: ignore[attr-defined]
         self._values._dynamo_propagated_dynamic_indices = {self._ragged_idx - 1}  # type: ignore[attr-defined]
 
-        # min / max sequence length should be dynamic if present
+        # min / max sequence length should be dynamic if present. The metadata cache is
+        # shared across constructions, so skip a tensor whose dim 0 mark_dynamic already
+        # set: re-marking would drop a min/max range declared on it.
         max_seqlen_tensor = self._metadata_cache.get("max_seqlen", None)
-        if max_seqlen_tensor is not None:
+        if max_seqlen_tensor is not None and 0 not in getattr(
+            max_seqlen_tensor, "_dynamo_dynamic_indices", ()
+        ):
             torch._dynamo.mark_dynamic(max_seqlen_tensor, 0)
         min_seqlen_tensor = self._metadata_cache.get("min_seqlen", None)
-        if min_seqlen_tensor is not None:
+        if min_seqlen_tensor is not None and 0 not in getattr(
+            min_seqlen_tensor, "_dynamo_dynamic_indices", ()
+        ):
             torch._dynamo.mark_dynamic(min_seqlen_tensor, 0)
 
     def values(self):
@@ -333,7 +339,7 @@ class NestedTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
         if not (len(inner_tensors) >= 2 and len(inner_tensors) <= 5):
@@ -356,8 +362,9 @@ class NestedTensor(torch.Tensor):
         # Alternatively, we could make it the caller's responsibility to
         # cache it. But this heuristic seems simple enough.
         ragged_source = offsets if lengths is None else lengths
-        if isinstance(ragged_source, FakeTensor):
+        if is_fake_tensor(ragged_source):
             ragged_size = outer_size[ragged_idx]
+            # pyrefly: ignore [missing-attribute]
             ragged_source.nested_int_memo = ragged_size
 
         return NestedTensor(

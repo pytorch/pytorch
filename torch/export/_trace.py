@@ -3,6 +3,7 @@
 import dataclasses
 import functools
 import inspect
+import itertools
 import logging
 import re
 import sys
@@ -11,12 +12,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager, ExitStack, nullcontext
 from itertools import chain
-from typing import Any, TYPE_CHECKING, TypeAlias
-from unittest import mock
-
-
-if TYPE_CHECKING:
-    import weakref
+from typing import Any, cast, TypeAlias
 
 import torch
 import torch._dynamo
@@ -70,19 +66,32 @@ from torch._functorch.aot_autograd import (
     _detect_attribute_assignment,
     aot_export_joint_with_descriptors,
 )
-from torch._guards import detect_fake_mode, tracing, TracingContext
+from torch._guards import (
+    compile_context,
+    CompileContext,
+    detect_fake_mode,
+    tracing,
+    TracingContext,
+)
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import is_custom_class
 from torch._logging import dtrace_structured
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    CppFakeTensorMode,
+    FakeTensorMode,
+    is_fake_tensor,
+)
 from torch._utils_internal import compile_time_strobelight_meta, log_export_usage
 from torch.export._leakage_detection_utils import find_legit_leaks_from_referrers
 from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
+    _combine_args_for_tracing,
     _DimHintType,
     _IntWrapper,
+    _normalize_dynamic_shapes,
     _process_dynamic_shapes,
 )
 from torch.export.exported_program import OutputKind
@@ -115,7 +124,11 @@ from .exported_program import (
     ModuleCallEntry,
     ModuleCallSignature,
 )
-from .graph_signature import _convert_to_export_graph_signature, ExportGraphSignature
+from .graph_signature import (
+    _convert_to_export_graph_signature,
+    ArgumentSpec,
+    ExportGraphSignature,
+)
 
 
 log = logging.getLogger(__name__)
@@ -169,7 +182,7 @@ class ExportArtifact:
     aten: ATenExportArtifact
     in_spec: TreeSpec
     out_spec: TreeSpec
-    fake_mode: FakeTensorMode
+    fake_mode: FakeTensorMode | CppFakeTensorMode
     module_call_specs: dict[str, dict[str, pytree.TreeSpec]]
 
 
@@ -189,6 +202,10 @@ DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
 
 @contextmanager
 def _ignore_backend_decomps():
+    orig_precision = torch.backends._get_fp32_precision_state(
+        *torch.backends.mkldnn._FP32_PRECISION_STATE_KEYS,
+        *torch.backends.cudnn._FP32_PRECISION_STATE_KEYS,
+    )
     orig_mkldnn_flag = torch.backends.mkldnn.set_flags(False)
     orig_nnpack_flag = torch.backends.nnpack.set_flags(False)
     orig_cudnn_flag = torch.backends.cudnn.set_flags(False)
@@ -199,6 +216,7 @@ def _ignore_backend_decomps():
         torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
         torch.backends.cudnn.set_flags(*orig_cudnn_flag)
+        torch.backends._set_fp32_precision_state(orig_precision)
 
 
 @contextmanager
@@ -335,8 +353,9 @@ def _extract_fake_inputs(gm, args, kwargs):
     # inputs, and we want to check that the shape env is consistent between
     # both. Unfortunately we can't see what fake mode is attached to the shape
     # env, then we can just compare fake modes.
-    detected_fake_mode = detect_fake_mode(fake_inps + fake_vals)
-    detected_shape_env = detect_shape_env(fake_inps + fake_vals)
+    fake_inputs = fake_inps + fake_vals
+    detected_fake_mode = detect_fake_mode(fake_inputs)
+    detected_shape_env = detect_shape_env(fake_inputs)
 
     if detected_fake_mode:
         if detected_shape_env:
@@ -648,6 +667,79 @@ def _add_input_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
             )
 
 
+def _apply_renames_to_signature(
+    signature: ExportGraphSignature,
+    renamed: dict[str, str],
+) -> None:
+    """Apply a batch of old-name-to-new-name renames to the signature."""
+    for spec in [*signature.input_specs, *signature.output_specs]:
+        arg = spec.arg
+        if isinstance(arg, ArgumentSpec) and arg.name in renamed:
+            arg.name = renamed[arg.name]
+
+
+class _ExportSafeToReorder:
+    """Barrier predicate for export canonicalization.
+
+    Wraps ``_is_safe_to_reorder`` with an additional constraint: nodes from
+    different ``nn_module_stack`` scopes are never reordered past each other,
+    because ``unflatten`` expects nodes within the same module scope to be
+    contiguous.
+    """
+
+    def __init__(self) -> None:
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        self._is_safe_to_reorder = _is_safe_to_reorder
+        self._prev_stack: tuple[str, ...] | None = None
+
+    def __call__(self, node: torch.fx.Node) -> bool:
+        if not self._is_safe_to_reorder(node):
+            self._prev_stack = tuple(node.meta.get("nn_module_stack", {}).keys())
+            return False
+        stack = tuple(node.meta.get("nn_module_stack", {}).keys())
+        if stack != self._prev_stack:
+            self._prev_stack = stack
+            return False
+        return True
+
+
+def _canonicalize_export_graph(
+    gm: torch.fx.GraphModule,
+    signature: ExportGraphSignature,
+) -> None:
+    """Canonicalize node order and names in an export graph and all subgraphs.
+
+    Reorders nodes into a deterministic topological order and renames them to
+    canonical names so that strict and non-strict export produce identical
+    graphs.  Updates ``signature`` to reflect the new node names.
+    """
+    from torch.fx.passes.canonicalize import _canonical_node_key, canonicalize_graph
+
+    for mod in gm.modules():
+        if isinstance(mod, torch.fx.GraphModule):
+            placeholder_ord = itertools.count()
+
+            def _key(
+                node: torch.fx.Node,
+                canonical_idx: dict[torch.fx.Node, int],
+                _ord: itertools.count = placeholder_ord,
+            ) -> object:
+                if node.op == "placeholder":
+                    return (0, next(_ord))
+                return _canonical_node_key(node, canonical_idx)
+
+            renamed = canonicalize_graph(
+                mod.graph,
+                _key,
+                _ExportSafeToReorder(),
+                skip_rename_ops=frozenset({"placeholder"}),
+                group_getitems=True,
+            )
+            if mod is gm and renamed:
+                _apply_renames_to_signature(signature, renamed)
+
+
 def _produce_aten_artifact(
     *,
     gm: torch.fx.GraphModule,
@@ -754,6 +846,9 @@ def _produce_aten_artifact(
     _preserve_requires_grad_pass(
         gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
     )
+
+    if torch._dynamo.config.canonicalize_output_graph_node_order:
+        _canonicalize_export_graph(gm, export_graph_signature)
 
     return ATenExportArtifact(
         gm,
@@ -923,6 +1018,7 @@ def _export_to_torch_ir(
 
     if not is_shapes_spec:
         # Dim-based dynamic shapes.
+        dynamic_shapes = _normalize_dynamic_shapes(dynamic_shapes, f, args, kwargs)
         combined_args = _combine_args(f, args, kwargs)
         _check_dynamic_shapes(combined_args, dynamic_shapes)
         constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
@@ -993,6 +1089,7 @@ def _export_to_torch_ir(
                     # Once we delete the old strict export, we can use this fake mode in the
                     # subsequent logic when lowering to aten IR.
                     del gm_torch_level.meta["fake_mode"]
+                    gm_torch_level.meta.pop("tracing_context", None)
 
                 else:
                     if is_shapes_spec:
@@ -1392,50 +1489,63 @@ _EXPORT_FLAGS: set[str] | None = None
 _EXPORT_MODULE_HIERARCHY: dict[str, str] | None = None
 
 
+@contextmanager
+def _non_strict_export_compile_context(strict: bool):
+    if strict or CompileContext.current_compile_id() is not None:
+        yield
+        return
+
+    from torch._dynamo.convert_frame import get_compile_id
+
+    with compile_context(CompileContext(get_compile_id(frame_state={}))):
+        yield
+
+
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
-        try:
-            start = time.time()
-            ep = fn(*args, **kwargs)
-            end = time.time()
-            log_export_usage(
-                event="export.time",
-                metrics=end - start,
-                flags=_EXPORT_FLAGS,
-                **get_ep_stats(ep),
-            )
-        except Exception as e:
-            t = type(e)
-            error_type = t.__module__ + "." + t.__qualname__
-            case_name = get_class_if_classified_error(e)
-            if case_name is not None:
-                log.error(exportdb_error_message(case_name))
+        with _non_strict_export_compile_context(kwargs.get("strict", True)):
+            try:
+                start = time.time()
+                ep = fn(*args, **kwargs)
+                end = time.time()
                 log_export_usage(
-                    event="export.error.classified",
-                    type=error_type,
-                    message=str(e),
+                    event="export.time",
+                    metrics=end - start,
                     flags=_EXPORT_FLAGS,
+                    **get_ep_stats(ep),
                 )
-            else:
-                log_export_usage(
-                    event="export.error.unclassified",
-                    type=error_type,
-                    message=str(e),
-                    flags=_EXPORT_FLAGS,
-                )
+            except Exception as e:
+                t = type(e)
+                error_type = t.__module__ + "." + t.__qualname__
+                case_name = get_class_if_classified_error(e)
+                if case_name is not None:
+                    log.error(exportdb_error_message(case_name))
+                    log_export_usage(
+                        event="export.error.classified",
+                        type=error_type,
+                        message=str(e),
+                        flags=_EXPORT_FLAGS,
+                    )
+                else:
+                    log_export_usage(
+                        event="export.error.unclassified",
+                        type=error_type,
+                        message=str(e),
+                        flags=_EXPORT_FLAGS,
+                    )
 
-            if hasattr(e, "partial_fx_graph"):
-                print(
-                    e.partial_fx_graph,
-                    file=sys.stderr,
-                )
+                if hasattr(e, "partial_fx_graph"):
+                    print(
+                        e.partial_fx_graph,
+                        file=sys.stderr,
+                    )
 
-            raise e
-        finally:
-            _EXPORT_FLAGS = None
-            _EXPORT_MODULE_HIERARCHY = None
+                raise e
+            finally:
+                _EXPORT_FLAGS = None
+                _EXPORT_MODULE_HIERARCHY = None
 
         return ep
 
@@ -1461,7 +1571,7 @@ def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
 
 
 def _get_original_state_dict(mod: torch.nn.Module) -> dict[str, Any]:
-    # Explicitly not calling mode.state_dict() as we do not want the module state for serialization
+    # Explicitly not calling mod.state_dict() as we do not want the module state for serialization
     # but the running module state so we can always match by id() the entries here with the graph inputs
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
@@ -1538,6 +1648,11 @@ def _process_export_inputs(
         else:
             out_dynamic_shapes = dynamic_shapes
 
+    if not isinstance(out_dynamic_shapes, (ShapesSpec, ParamsSpec)):
+        out_dynamic_shapes = _normalize_dynamic_shapes(
+            cast(_DimDynamicShapesSpec | None, out_dynamic_shapes), mod, args, kwargs
+        )
+
     return args, kwargs, original_in_spec, out_dynamic_shapes, verify_additional_inputs
 
 
@@ -1599,7 +1714,7 @@ def _get_range_constraints(
 ):
     gm: torch.fx.GraphModule = export_artifact.aten.gm
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
-    fake_mode: FakeTensorMode = export_artifact.fake_mode
+    fake_mode = export_artifact.fake_mode
     num_lifted = next(
         (
             i
@@ -1608,21 +1723,9 @@ def _get_range_constraints(
         ),
         len(export_graph_signature.input_specs),
     )
-    combined_args = _combine_args(mod, args, kwargs)
-
-    # This is because we trace based on the kwargs passed in from user
-    # not based on the signature. I feel it would be better to just enforce
-    # one ordering at the start of tracing to avoid confusions, but that is
-    # bigger refactor, so do this to unblock for now.
-    combined_args_traced_order = {}
-    for arg in combined_args:
-        if arg not in kwargs:
-            combined_args_traced_order[arg] = combined_args[arg]
-
-    for key in kwargs:
-        combined_args_traced_order[key] = kwargs[key]
-
-    combined_args = combined_args_traced_order
+    combined_args, dynamic_shapes = _combine_args_for_tracing(
+        mod, args, kwargs, dynamic_shapes
+    )
 
     range_constraints = make_constraints(
         fake_mode,
@@ -1634,7 +1737,7 @@ def _get_range_constraints(
     return range_constraints
 
 
-def _get_inline_constraints(fake_mode: FakeTensorMode):
+def _get_inline_constraints(fake_mode: FakeTensorMode | CppFakeTensorMode):
     if fake_mode.shape_env is None:
         raise AssertionError("fake_mode.shape_env must not be None")
     return {
@@ -1789,7 +1892,7 @@ def _strict_export(
     with (
         dynamo_fake_mode,
         tracing(tx),
-        mock.patch.object(dynamo_fake_mode, "allow_non_fake_inputs", True),
+        allow_non_fake_inputs_temporarily(dynamo_fake_mode),
     ):
         aten_export_artifact = _to_aten_func(
             gm_torch_level,
@@ -2417,9 +2520,7 @@ def _export_for_training(
     # see fake tensor constants.
     if not strict and not has_ambient_mode:
         for const, val in export_artifact.aten.constants.items():
-            if isinstance(
-                val, torch._subclasses.fake_tensor.FakeTensor
-            ) and _is_bogus_const_name(const):
+            if is_fake_tensor(val) and _is_bogus_const_name(const):
                 error_msg = (
                     f"We found a fake tensor in the exported program constant's list. "
                     f"This typically means our tracing system encountered an op that "
@@ -2485,7 +2586,7 @@ def _export_for_training(
         )
 
         active_fakes = fake_tensor_tls.non_strict_export_fake_tensor_tracker
-        legit_leak: weakref.WeakSet = find_legit_leaks_from_referrers(active_fakes)
+        legit_leak = find_legit_leaks_from_referrers(active_fakes)
         leak_sources: list[str] = []
         if len(legit_leak) > 0:
             for fake_val in legit_leak:

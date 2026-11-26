@@ -8,7 +8,6 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
-from functools import partial
 from typing import Any, Literal
 from typing_extensions import deprecated
 
@@ -16,7 +15,14 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
-from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
+from torch._C._distributed_c10d import (
+    _is_process_group_registered,
+    _SymmetricMemory,
+    Work as _Work,
+)
+from torch._prims_common import make_contiguous_strides_for
+from torch.nn.functional import ScalingType, SwizzleType
+from torch.utils._triton import has_triton
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -80,14 +86,22 @@ def _test_mode(group_names: set[str] | None = None) -> Generator[None, None, Non
 
 def is_symm_mem_enabled_for_group(group_name: c10d.GroupName) -> bool:
     """
-    Check if symmetric memory is enabled for a process group.
+    Check if symmetric memory can be used with a process group.
+
+    Symmetric memory no longer requires explicit enablement via
+    ``enable_symm_mem_for_group``. This returns ``True`` if the group is
+    resolvable and a symmetric memory allocator is registered for the current
+    accelerator.
 
     Args:
         group_name (str): the name of the process group.
     """
     if _is_test_mode:
         return _mocked_group_names is None or group_name in _mocked_group_names
-    return group_name in _group_name_to_store
+    device = torch.accelerator.current_accelerator(check_available=True)
+    if device is None or _SymmetricMemory.get_backend(device) is None:
+        return False
+    return _is_process_group_registered(group_name)
 
 
 _group_name_to_workspace_tensor: dict[str, torch.Tensor | None] = {}
@@ -443,6 +457,78 @@ def _pipelined_produce_and_all2all(
     symm_mem.barrier(channel=0)
 
 
+def reduce_partials(
+    partials: torch.Tensor,
+    *,
+    dim: int,
+    reduce_op: str,
+    output_dtype: torch.dtype,
+    group_size: int,
+) -> torch.Tensor:
+    if output_dtype in (torch.float16, torch.bfloat16):
+        normalized_dim = dim if dim >= 0 else dim + partials.dim()
+        # The common RS layout is [rank, local_M, N]. Fuse the final rank
+        # reduction into one kernel so low-precision partials accumulate in fp32
+        # and round only once when written to the output dtype.
+        if normalized_dim == 0:
+            reduced = triton_reduce_partials_first_dim(
+                partials,
+                reduce_op=reduce_op,
+                output_dtype=output_dtype,
+                group_size=group_size,
+            )
+            if reduced is not None:
+                return reduced
+        if reduce_op == "sum":
+            return torch.sum(partials, dim=dim)
+        if reduce_op == "avg":
+            return torch.mean(partials, dim=dim)
+    if reduce_op == "sum":
+        return torch.sum(partials, dim=dim)
+    if reduce_op == "avg":
+        return torch.mean(partials, dim=dim)
+    raise ValueError("reduce_op must be sum or avg")
+
+
+def triton_reduce_partials_first_dim(
+    partials: torch.Tensor,
+    *,
+    reduce_op: str,
+    output_dtype: torch.dtype,
+    group_size: int,
+) -> torch.Tensor | None:
+    if (
+        partials.device.type != "cuda"
+        or not has_triton()
+        or not partials.is_contiguous()
+        or partials.dim() < 2
+        or partials.shape[0] != group_size
+        or output_dtype not in (torch.float16, torch.bfloat16)
+        or partials.dtype not in (torch.float16, torch.bfloat16)
+    ):
+        return None
+
+    out = partials.new_empty(partials.shape[1:], dtype=output_dtype)
+    shard_elems = out.numel()
+    block = 1024
+    import triton
+
+    from torch.distributed._symmetric_memory._triton_kernels import (
+        reduce_partials_first_dim_kernel,
+    )
+
+    grid = (triton.cdiv(shard_elems, block),)
+    reduce_partials_first_dim_kernel[grid](
+        partials,
+        out,
+        shard_elems,
+        group_size,
+        reduce_op == "avg",
+        BLOCK=block,
+    )
+    return out
+
+
 lib = torch.library.Library("symm_mem", "DEF")
 lib.define(
     "fused_all_gather_matmul("
@@ -451,10 +537,10 @@ lib.define(
 )
 lib.define(
     "fused_all_gather_scaled_matmul("
-    "Tensor A, Tensor[] Bs, Tensor A_scale, Tensor[] B_scales, "
+    "Tensor A, Tensor[] Bs, Tensor A_scale, int scaling_type_a, int swizzle_type_a, "
+    "Tensor[] B_scales, int scaling_type_b, int swizzle_type_b, "
     "int gather_dim, str group_name, "
     "Tensor?[] biases, "
-    "Tensor?[] result_scales, "
     "ScalarType?[] out_dtypes, "
     "bool[] use_fast_accum) -> (Tensor, Tensor[])",
     tags=[torch._C.Tag.needs_fixed_stride_order],
@@ -465,10 +551,10 @@ lib.define(
 )
 lib.define(
     "fused_scaled_matmul_reduce_scatter("
-    "Tensor A, Tensor B, Tensor A_scale, Tensor B_scale, "
+    "Tensor A, Tensor B, Tensor A_scale, int scaling_type_a, int swizzle_type_a, "
+    "Tensor B_scale, int scaling_type_b, int swizzle_type_b, "
     "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, SymInt[]? output_shape, "
     "Tensor? bias = None, "
-    "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
     "bool use_fast_accum = False) -> Tensor",
     tags=[torch._C.Tag.needs_fixed_stride_order],
@@ -476,6 +562,15 @@ lib.define(
 lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
 lib.define(
     "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
+)
+# Copy-engine multicast low-contention all-gather that allocates symm_mem output.
+lib.define(
+    "_low_contention_all_gather_ce_multicast(Tensor tensor, str group_name) -> Tensor"
+)
+# Out variant for preallocated symm_mem output, including CUDA graph capture.
+lib.define(
+    "_low_contention_all_gather_ce_multicast_out("
+    "Tensor tensor, str group_name, Tensor(a!) out) -> Tensor(a!)"
 )
 
 lib.define("get_remote_tensors(Tensor x, str group_name) -> Tensor[]")
@@ -518,39 +613,133 @@ class _ScaleMode(Enum):
     TENSOR_WISE = "tensor-wise"
     ROW_WISE_SHARDED = "row-wise-sharded"
     ROW_WISE_REPLICATED = "row-wise-replicated"
+    # MXFP8: e8m0 block scales in the swizzled 32x4x4 layout, sharded like A_shard.
+    MX_SWIZZLED = "mx-swizzled"
+
+
+# The swizzled 32x4x4 layout stores scales in 128-row tiles, ordered by row tile.
+# When each rank's share of the rows is a multiple of 128, concatenating per-rank
+# scales equals swizzling the concatenated rows, and each rank's slice of the
+# scale is a valid swizzled scale for its rows. Otherwise every rank pads its own
+# tail tile, and neither holds.
+_MX_SWIZZLE_32_4_4_ROW_TILE = 128
+
+
+def _is_mx_compatible_scaling(
+    scaling_type_a: int, swizzle_type_a: int, swizzle_type_b: int
+) -> bool:
+    """Whether the scaling types select the MX path; validates the swizzles.
+
+    Operand dtypes are checked separately by ``_check_mxfp8_operand``.
+    """
+    if ScalingType(scaling_type_a) != ScalingType.BlockWise1x32:
+        return False
+    swizzles = (SwizzleType(swizzle_type_a), SwizzleType(swizzle_type_b))
+    if swizzles != (SwizzleType.SWIZZLE_32_4_4,) * 2:
+        # Gathering and slicing the scale per rank relies on its 128-row tiles.
+        # SWIZZLE_MN_K4, for one, can have the same number of elements but is
+        # ordered by K block, so slicing it by rank would silently mix rows.
+        raise ValueError(
+            f"MXFP8 requires SWIZZLE_32_4_4 scales for A and B (got {swizzles})"
+        )
+    return True
+
+
+def _check_mxfp8_operand(
+    A: torch.Tensor, scale: torch.Tensor, dim: int, num_chunks: int
+) -> None:
+    """Validate an MXFP8 operand whose rows are split into `num_chunks` along `dim`."""
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+
+    # Traced fake tensors report "meta" inside a Meta kernel; check the device
+    # they stand for. Only a genuine meta tensor skips the check.
+    device = maybe_get_fake_device(A) or A.device
+    if device.type != "meta" and (
+        device.type != "cuda" or torch.version.hip is not None
+    ):
+        raise ValueError(
+            "MXFP8 async-TP requires an NVIDIA CUDA device, as it relies on the "
+            f"swizzled 32x4x4 scale layout (got {device})"
+        )
+    if A.dtype not in (torch.float8_e4m3fn, torch.float8_e5m2):
+        raise ValueError(
+            f"MXFP8 async-TP requires float8_e4m3fn or float8_e5m2 data (got {A.dtype})"
+        )
+    if scale.dtype != torch.float8_e8m0fnu:
+        raise ValueError(f"MXFP8 requires float8_e8m0fnu scales (got {scale.dtype})")
+    if dim != 0:
+        raise ValueError(
+            f"MXFP8 requires gathering/scattering along dim 0 (got {dim}): other "
+            "dims reorder the flattened rows, which the swizzled scale can't follow"
+        )
+    rows, k = math.prod(A.shape[:-1]), A.shape[-1]
+    tile = _MX_SWIZZLE_32_4_4_ROW_TILE
+    if rows % (num_chunks * tile) != 0:
+        split = f" split over {num_chunks} ranks" if num_chunks > 1 else ""
+        raise ValueError(
+            f"MXFP8 requires each rank's rows to be a multiple of {tile}, "
+            f"since the swizzled scale pads them to {tile}-row tiles "
+            f"(got {rows} rows{split})"
+        )
+    expected = rows * (((k + 31) // 32 + 3) // 4 * 4)
+    if scale.numel() != expected:
+        raise ValueError(
+            f"MXFP8 scale has {scale.numel()} elements, expected {expected} for a "
+            f"{tuple(A.shape)} operand in the swizzled 32x4x4 layout"
+        )
 
 
 def _check_and_verify_fp8_all_gather_scale_mode(
-    shard: torch.Tensor, scale: torch.Tensor | None, gather_dim: int, group_size: int
+    shard: torch.Tensor,
+    scale: torch.Tensor | None,
+    scaling_type: ScalingType | None,
+    gather_dim: int,
+    group_size: int,
 ) -> _ScaleMode:
     full_shape = list(shard.shape)
     full_shape[gather_dim] *= group_size
 
     if scale is None:
         return _ScaleMode.UNSCALED
-    elif scale.shape[:-1] == shard.shape[:-1] and scale.shape[-1] == 1:
-        # Row-wise scaling
-        #
-        # NOTE: when the last dim of both A_shard and A_scale is one, we can't
-        # tell if A_scale is replicated tensor-wise scale or sharded row-wise
-        # scale. Treating it as row-wise scaling for safety.
-        return _ScaleMode.ROW_WISE_SHARDED
-    elif scale.numel() == 1:
+    elif scaling_type == ScalingType.TensorWise and scale.numel() == 1:
         return _ScaleMode.TENSOR_WISE
-    elif list(scale.shape[:-1]) == full_shape[:-1]:
-        return _ScaleMode.ROW_WISE_REPLICATED
-    else:
-        raise ValueError(
-            "Invalid scale shape for fp8 all-gather "
-            f"(shard shape: {shard.shape}, scale shape: {scale.shape})"
-        )
+    elif (
+        scaling_type == ScalingType.RowWise and scale.dim() > 0 and scale.shape[-1] == 1
+    ):
+        if scale.shape[:-1] == shard.shape[:-1]:
+            return _ScaleMode.ROW_WISE_SHARDED
+        if list(scale.shape[:-1]) == full_shape[:-1]:
+            return _ScaleMode.ROW_WISE_REPLICATED
+    elif scaling_type == ScalingType.BlockWise1x32:
+        _check_mxfp8_operand(shard, scale, gather_dim, num_chunks=1)
+        return _ScaleMode.MX_SWIZZLED
+    raise ValueError(
+        f"Invalid scale for fp8 all-gather with scaling type {scaling_type} "
+        f"(shard shape: {shard.shape}, scale shape: {scale.shape})"
+    )
+
+
+def _scaled_mm_v2_out(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    *,
+    scale_a: torch.Tensor,
+    scale_b: torch.Tensor,
+    out: torch.Tensor,
+    **kwargs: Any,
+) -> torch.Tensor:
+    # The fused impls pass a single scale per operand; _scaled_mm_v2 takes lists.
+    return torch.ops.aten._scaled_mm_v2.out(
+        A, B, scale_a=[scale_a], scale_b=[scale_b], out=out, **kwargs
+    )
 
 
 def _fused_all_gather_matmul_impl(
-    mm_out_op: torch._ops.OpOverload,
+    mm_out_op: Callable[..., torch.Tensor],
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     A_scale: torch.Tensor | None,
+    scaling_type_a: ScalingType | None,
     kwargs_list: list[dict[str, Any]],
     out_dtypes: list[torch.dtype | None],
     gather_dim: int,
@@ -570,6 +759,13 @@ def _fused_all_gather_matmul_impl(
         raise ValueError("Invalid gather_dim")
 
     group = c10d._resolve_process_group(group_name)
+    scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
+        shard=A_shard,
+        scale=A_scale,
+        scaling_type=scaling_type_a,
+        gather_dim=gather_dim,
+        group_size=group.size(),
+    )
 
     if gather_dim == A_shard.ndim - 1 or gather_dim == -1:
         return _fused_all_gather_matmul_last_gather_dim_impl(
@@ -607,18 +803,18 @@ def _fused_all_gather_matmul_impl(
     ]
     output_shards = [output.chunk(group.size()) for output in outputs]
 
-    scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
-        shard=A_shard, scale=A_scale, gather_dim=gather_dim, group_size=group.size()
-    )
-
     # Computing block-wise matmul along the first dim of A
-    if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
+    if scale_mode in (_ScaleMode.ROW_WISE_SHARDED, _ScaleMode.MX_SWIZZLED):
         if A_scale is None:
             raise AssertionError
-        A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
+        if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
+            A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
+        else:
+            # Gathered as an opaque flat buffer; see _MX_SWIZZLE_32_4_4_ROW_TILE.
+            A_scale_shard = A_scale.flatten()
         A_scale_flat = A_scale_shard.new_empty(
             A_scale_shard.shape[0] * group.size(),
-            A_scale_shard.shape[1],
+            *A_scale_shard.shape[1:],
         )
 
         def row_wise_sharded_consumer(shard: list[torch.Tensor], rank: int) -> None:
@@ -755,7 +951,7 @@ def _pipelined_all_gather_and_consume_last_dim(
 
 
 def _fused_all_gather_matmul_last_gather_dim_impl(
-    mm_out_op: torch._ops.OpOverload,
+    mm_out_op: Callable[..., torch.Tensor],
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     A_scale: torch.Tensor | None,
@@ -898,12 +1094,18 @@ def _fused_all_gather_matmul(
             A_shard,
             Bs,
             None,
+            None,
             [{} for B in Bs],
             [B.dtype for B in Bs],
             gather_dim,
             group_name,
             return_A,
         )
+
+
+# Each 256-row M tile of the ROCm _async_input_mm waits on one chunk's signal,
+# so each rank's chunk must be a whole number of tiles.
+_ROCM_ASYNC_MM_TILE_M = 256
 
 
 def _should_use_fused_all_gather_matmul_native(
@@ -928,6 +1130,7 @@ def _should_use_fused_all_gather_matmul_native(
         and 2048 < local_M * group.size() <= 4096
         # _async_input_mm only supports a single B.
         and len(Bs) == 1
+        and (torch.version.hip is None or local_M % _ROCM_ASYNC_MM_TILE_M == 0)
     )
 
 
@@ -936,6 +1139,9 @@ def _fused_all_gather_matmul_native(
     B: torch.Tensor,
     group_name: c10d.GroupName,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    if torch.version.hip is not None:
+        return _fused_all_gather_matmul_native_rocm(A_shard, B, group_name)
+
     symm_mem = rendezvous(A_shard, group_name)
     if symm_mem is None:
         symm_mem = get_symm_mem_workspace(
@@ -977,6 +1183,82 @@ def _fused_all_gather_matmul_native(
                 _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
             else:
                 _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
+
+    current_stream.wait_stream(backend_stream)
+    backend_stream.wait_stream(current_stream)
+
+    symm_mem.barrier()
+    return A, out
+
+
+# HIP runs peer copies of more than 1 MiB on a DMA engine and smaller ones as
+# kernels. Copying peer shards in pieces of at most 1 MiB makes the native path
+# 2-3x faster per call on MI300X and MI355X.
+_ROCM_ASYNC_MM_MAX_PEER_COPY_BYTES = 1 << 20
+
+
+def _rocm_copy_in_pieces(dst: torch.Tensor, src: torch.Tensor) -> None:
+    rows = max(
+        1, _ROCM_ASYNC_MM_MAX_PEER_COPY_BYTES // (dst.stride(0) * dst.element_size())
+    )
+    for d, s in zip(dst.split(rows), src.split(rows)):
+        d.copy_(s)
+
+
+def _fused_all_gather_matmul_native_rocm(
+    A_shard: torch.Tensor,
+    B: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    symm_mem = rendezvous(A_shard, group_name)
+    if symm_mem is None:
+        symm_mem = get_symm_mem_workspace(
+            group_name, A_shard.numel() * A_shard.element_size()
+        )
+        symm_mem.barrier()
+        buf = symm_mem.get_buffer(symm_mem.rank, A_shard.shape, A_shard.dtype)
+        buf.copy_(A_shard)
+        A_shard = buf
+
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    current_stream = torch.cuda.current_stream()
+    backend_stream = _get_backend_stream(priority=-1)
+
+    # A_signals is zeroed on current_stream and set on backend_stream, so it is
+    # allocated before backend_stream is ordered after current_stream. In a
+    # captured graph, zeroing it later would put the zeroing on the GEMM's
+    # branch, which HIP can replay after the peer signals.
+    A = A_shard.new_empty(A_shard.shape[0] * world_size, A_shard.shape[1])
+    A_signals = torch.zeros(world_size, dtype=torch.uint32, device=A_shard.device)
+    A_shards = A.chunk(world_size)
+
+    symm_mem.barrier()
+    backend_stream.wait_stream(current_stream)
+    current_stream.wait_stream(backend_stream)
+
+    # The GEMM spins on the signals the peer copies set, so the peer copies are
+    # issued first. HIP can put current_stream and backend_stream on one
+    # in-order hardware queue, and it can replay the branches of a small
+    # captured graph one after another, in capture order.
+    for step in range(1, world_size):
+        src_rank = (rank + step) % world_size
+        src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
+        with backend_stream:
+            _rocm_copy_in_pieces(A_shards[src_rank], src_buf)
+            if not torch.cuda.is_current_stream_capturing():
+                _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
+            else:
+                _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
+
+    A_shards[rank].copy_(A_shard)
+    if not torch.cuda.is_current_stream_capturing():
+        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+    else:
+        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
+
+    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
 
     current_stream.wait_stream(backend_stream)
     backend_stream.wait_stream(current_stream)
@@ -1031,15 +1313,21 @@ def _fused_all_gather_scaled_matmul_fallback(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     A_scale: torch.Tensor,
+    scaling_type_a: int,
+    swizzle_type_a: int,
     B_scales: list[torch.Tensor],
+    scaling_type_b: int,
+    swizzle_type_b: int,
     gather_dim: int,
     group_name: c10d.GroupName,
     biases: list[torch.Tensor | None],
-    result_scales: list[torch.Tensor | None],
     out_dtypes: list[torch.dtype | None],
     use_fast_accum: list[bool],
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
+    if _is_mx_compatible_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b):
+        # fp8 (the operand dtype) is not a valid block-scaled output dtype.
+        out_dtypes = [dt or torch.bfloat16 for dt in out_dtypes]
 
     group_size = c10d._get_group_size_by_name(group_name)
     A = torch.ops._c10d_functional.all_gather_into_tensor(
@@ -1049,7 +1337,11 @@ def _fused_all_gather_scaled_matmul_fallback(
     A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
 
     scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
-        shard=A_shard, scale=A_scale, gather_dim=gather_dim, group_size=group_size
+        shard=A_shard,
+        scale=A_scale,
+        scaling_type=ScalingType(scaling_type_a),
+        gather_dim=gather_dim,
+        group_size=group_size,
     )
     if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
         A_scale_shard = A_scale
@@ -1064,6 +1356,13 @@ def _fused_all_gather_scaled_matmul_fallback(
         )
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
         A_scale = A_scale.movedim(gather_dim, 0).flatten(0, -2)
+    elif scale_mode == _ScaleMode.MX_SWIZZLED:
+        # NCCL has no e8m0 dtype; the swizzled scale is opaque bytes to the gather.
+        scale_dtype = A_scale.dtype
+        A_scale = torch.ops._c10d_functional.all_gather_into_tensor(
+            A_scale.flatten().contiguous().view(torch.uint8), group_size, group_name
+        )
+        A_scale = torch.ops._c10d_functional.wait_tensor(A_scale).view(scale_dtype)
     else:
         if scale_mode != _ScaleMode.TENSOR_WISE:
             raise AssertionError
@@ -1074,29 +1373,29 @@ def _fused_all_gather_scaled_matmul_fallback(
         A_scale: torch.Tensor,
         B_scale: torch.Tensor,
         bias: torch.Tensor | None,
-        result_scale: torch.Tensor | None,
         out_dtype: torch.dtype | None,
         use_fast_accum: bool,
     ) -> torch.Tensor:
         leading_dims = A.shape[:-1]
-        res = torch.ops.aten._scaled_mm(
+        res = torch.ops.aten._scaled_mm_v2(
             A.flatten(0, -2),
             B,
-            A_scale,
-            B_scale,
+            [A_scale],
+            [scaling_type_a],
+            [swizzle_type_a],
+            [B_scale],
+            [scaling_type_b],
+            [swizzle_type_b],
             bias,
-            result_scale,
-            out_dtype=out_dtype,
+            out_dtype,
             use_fast_accum=use_fast_accum,
         )
-        return res.unflatten(0, leading_dims)
+        return res.unflatten(0, leading_dims).movedim(0, gather_dim)
 
     return A.movedim(0, gather_dim), [
-        scaled_matmul(
-            A, B, A_scale, B_scale, bias, result_scale, out_dtype, fast_accum
-        ).movedim(0, gather_dim)
-        for B, B_scale, bias, result_scale, out_dtype, fast_accum in zip(
-            Bs, B_scales, biases, result_scales, out_dtypes, use_fast_accum
+        scaled_matmul(A, B, A_scale, B_scale, bias, out_dtype, fast_accum)
+        for B, B_scale, bias, out_dtype, fast_accum in zip(
+            Bs, B_scales, biases, out_dtypes, use_fast_accum
         )
     ]
 
@@ -1107,11 +1406,14 @@ def _fused_all_gather_scaled_matmul(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     A_scale: torch.Tensor,
+    scaling_type_a: int,
+    swizzle_type_a: int,
     B_scales: list[torch.Tensor],
+    scaling_type_b: int,
+    swizzle_type_b: int,
     gather_dim: int,
     group_name: c10d.GroupName,
     biases: list[torch.Tensor | None],
-    result_scales: list[torch.Tensor | None],
     out_dtypes: list[torch.dtype | None],
     use_fast_accum: list[bool],
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
@@ -1121,22 +1423,34 @@ def _fused_all_gather_scaled_matmul(
 
         A = all_gather_single(A_shard, gather_dim, group_name)
         leading_dims = A.shape[:-1]
-        res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
+        res = torch.ops.aten._scaled_mm_v2(
+            A.flatten(0, -2), B, [A_scale], [scaling_type_a], [swizzle_type_a],
+            [B_scale], [scaling_type_b], [swizzle_type_b], ...
+        )
         res = res.unflatten(0, leading_dims)
 
-    The input `A_scale` can be tensor-wise, row-wise-sharded or
-    row-wise-replicated.
+    The scaling types must be both TensorWise, both RowWise, or both BlockWise1x32
+    (MXFP8). A row-wise `A_scale` can be sharded like `A_shard` or replicated
+    (covering the gathered `A`).
+
+    MXFP8 (NVIDIA CUDA only): pass this rank's e8m0 scales for
+    `A_shard.flatten(0, -2)` in the swizzled 32x4x4 layout, e.g. from
+    `torch.nn.functional.quantize_tensor(..., swizzle_type=SWIZZLE_32_4_4)`, with
+    both swizzles SWIZZLE_32_4_4. They are gathered alongside `A_shard`, which
+    requires gather_dim=0 and `prod(A_shard.shape[:-1])` to be a multiple of 128.
+    None entries of `out_dtypes` mean bfloat16 rather than the operand dtype.
 
     Optimal stride order for `A_shard` - if `A_shard.movedim(gather_dim, 0)` is
     contiguous, no extra copy is required for input layout transformation.
     Otherwise A_shard needs to be copied once.
     """
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
+    if _is_mx_compatible_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b):
+        # fp8 (the operand dtype) is not a valid block-scaled output dtype.
+        out_dtypes = [dt or torch.bfloat16 for dt in out_dtypes]
 
     if len(biases) != len(Bs):
         raise ValueError("len(biases) must be the same as len(Bs)")
-    if len(result_scales) != len(Bs):
-        raise ValueError("len(result_scales) must be the same as len(Bs)")
     if len(out_dtypes) != len(Bs):
         raise ValueError("len(out_dtypes) must be the same as len(Bs)")
     if len(use_fast_accum) != len(Bs):
@@ -1147,31 +1461,38 @@ def _fused_all_gather_scaled_matmul(
             A_shard,
             Bs,
             A_scale,
+            scaling_type_a,
+            swizzle_type_a,
             B_scales,
+            scaling_type_b,
+            swizzle_type_b,
             gather_dim,
             group_name,
             biases,
-            result_scales,
             out_dtypes,
             use_fast_accum,
         )
 
     with torch.profiler.record_function("fused_all_gather_scaled_matmul"):
         A, res = _fused_all_gather_matmul_impl(
-            torch.ops.aten._scaled_mm.out,
+            _scaled_mm_v2_out,
             A_shard,
             Bs,
             A_scale,
+            ScalingType(scaling_type_a),
             [
                 {
+                    "recipe_a": [scaling_type_a],
+                    "swizzle_a": [swizzle_type_a],
                     "scale_b": B_scale,
+                    "recipe_b": [scaling_type_b],
+                    "swizzle_b": [swizzle_type_b],
                     "bias": bias,
-                    "scale_result": result_scale,
                     "out_dtype": out_dtype,
                     "use_fast_accum": fast_accum,
                 }
-                for B_scale, bias, result_scale, out_dtype, fast_accum in zip(
-                    B_scales, biases, result_scales, out_dtypes, use_fast_accum
+                for B_scale, bias, out_dtype, fast_accum in zip(
+                    B_scales, biases, out_dtypes, use_fast_accum
                 )
             ],
             out_dtypes,
@@ -1276,15 +1597,12 @@ def _fused_matmul_reduce_scatter_impl(
         raise ValueError("Invalid gather_dim")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
+    if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
     group = c10d._resolve_process_group(group_name)
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
+    output_dtype = out_dtype or A.dtype
 
     if scatter_dim == A.ndim - 1:
         B_shards = B.chunk(group.size(), dim=B.ndim - 1)
@@ -1311,9 +1629,12 @@ def _fused_matmul_reduce_scatter_impl(
         stacked_partials_view = stacked_partials.reshape(
             *leading_dims, group.size(), -1
         )
-        return reduce_fn(
+        return reduce_partials(
             stacked_partials_view,
             dim=-2,
+            reduce_op=reduce_op,
+            output_dtype=output_dtype,
+            group_size=group.size(),
         )
 
     # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
@@ -1327,7 +1648,7 @@ def _fused_matmul_reduce_scatter_impl(
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
         mm_out_op(A_shards[rank], B, **kwargs, out=out)
 
-    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
+    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=output_dtype)
 
     _pipelined_produce_and_all2all(
         chunk_producer,
@@ -1337,11 +1658,14 @@ def _fused_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    return reduce_fn(
+    return reduce_partials(
         stacked_partials.view(*leading_dims, -1)
         .movedim(1, scatter_dim + 1)
         .movedim(0, scatter_dim),
         dim=scatter_dim,
+        reduce_op=reduce_op,
+        output_dtype=output_dtype,
+        group_size=group.size(),
     )
 
 
@@ -1351,43 +1675,56 @@ def _fused_scaled_matmul_reduce_scatter(
     A: torch.Tensor,
     B: torch.Tensor,
     A_scale: torch.Tensor,
+    scaling_type_a: int,
+    swizzle_type_a: int,
     B_scale: torch.Tensor,
+    scaling_type_b: int,
+    swizzle_type_b: int,
     reduce_op: str,
     orig_scatter_dim: int,
     scatter_dim_after_maybe_reshape: int,
     group_name: c10d.GroupName,
     output_shape: list[int],
     bias: torch.Tensor | None = None,
-    result_scale: torch.Tensor | None = None,
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
+    if _is_mx_compatible_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b):
+        # fp8 (the operand dtype) is not a valid block-scaled output dtype.
+        out_dtype = out_dtype or torch.bfloat16
     if _is_test_mode:
         return _fused_scaled_matmul_reduce_scatter_fallback(
             A,
             B,
             A_scale,
+            scaling_type_a,
+            swizzle_type_a,
             B_scale,
+            scaling_type_b,
+            swizzle_type_b,
             reduce_op,
             orig_scatter_dim,
             scatter_dim_after_maybe_reshape,
             group_name,
             output_shape,
             bias,
-            result_scale,
             out_dtype,
             use_fast_accum,
         )
     with torch.profiler.record_function("fused_scaled_matmul_reduce_scatter"):
         return _fused_scaled_matmul_reduce_scatter_impl(
-            mm_out_op=torch.ops.aten._scaled_mm.out,
+            mm_out_op=_scaled_mm_v2_out,
             A=A,
             B=B,
             A_scale=A_scale,
+            scaling_type_a=ScalingType(scaling_type_a),
             kwargs={
+                "recipe_a": [scaling_type_a],
+                "swizzle_a": [swizzle_type_a],
                 "scale_b": B_scale,
+                "recipe_b": [scaling_type_b],
+                "swizzle_b": [swizzle_type_b],
                 "bias": bias,
-                "scale_result": result_scale,
                 "out_dtype": out_dtype,
                 "use_fast_accum": use_fast_accum,
             },
@@ -1405,18 +1742,25 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     A: torch.Tensor,
     B: torch.Tensor,
     A_scale: torch.Tensor,
+    scaling_type_a: int,
+    swizzle_type_a: int,
     B_scale: torch.Tensor,
+    scaling_type_b: int,
+    swizzle_type_b: int,
     reduce_op: str,
     orig_scatter_dim: int,
     scatter_dim_after_maybe_reshape: int,
     group_name: c10d.GroupName,
     output_shape: list[int],
     bias: torch.Tensor | None = None,
-    result_scale: torch.Tensor | None = None,
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
-    if A_scale.numel() > 1:
+    is_mx = _is_mx_compatible_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b)
+    if is_mx:
+        # fp8 (the operand dtype) is not a valid block-scaled output dtype.
+        out_dtype = out_dtype or torch.bfloat16
+    if ScalingType(scaling_type_a) == ScalingType.RowWise:
         if A_scale.shape[:-1] != A.shape[:-1]:
             raise ValueError(
                 "For row-wise scaling, the leading dims of A_scale "
@@ -1424,21 +1768,27 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
                 f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
             )
         A_scale = A_scale.flatten(0, -2).contiguous()
+    elif is_mx:
+        group_size = c10d._get_group_size_by_name(group_name)
+        _check_mxfp8_operand(A, A_scale, scatter_dim_after_maybe_reshape, group_size)
     elif A_scale.numel() != 1:
         raise ValueError(
             "Invalid A_scale shape "
             f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
         )
 
-    C = torch._scaled_mm(
+    C = torch.ops.aten._scaled_mm_v2(
         A.flatten(0, -2).contiguous(),
         B,
-        A_scale,
-        B_scale,
+        [A_scale],
+        [scaling_type_a],
+        [swizzle_type_a],
+        [B_scale],
+        [scaling_type_b],
+        [swizzle_type_b],
         bias,
-        result_scale,
         out_dtype,
-        use_fast_accum,
+        use_fast_accum=use_fast_accum,
     )
     C = C.view(*output_shape[:-1], B.shape[1])
     res = funcol.reduce_scatter_single(
@@ -1452,10 +1802,11 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
 
 
 def _fused_scaled_matmul_reduce_scatter_impl(
-    mm_out_op: torch._ops.OpOverload,
+    mm_out_op: Callable[..., torch.Tensor],
     A: torch.Tensor,
     B: torch.Tensor,
     A_scale: torch.Tensor,
+    scaling_type_a: ScalingType,
     kwargs: dict[str, Any],
     out_dtype: torch.dtype | None,
     reduce_op: str,
@@ -1475,12 +1826,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         raise ValueError("Invalid scatter dim for 3D+ output tensor")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
+    if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
+    output_dtype = out_dtype or A.dtype
 
     group = c10d._resolve_process_group(group_name)
 
@@ -1495,18 +1843,14 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     A_shards = A_2D_with_scatter_dim_0.chunk(group.size())
 
     # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.
-    # How we do this depends on if we are using tensorwise scaling, rowwise scaling, or no scaling.
-    tensorwise_scaling = A_scale is not None and A_scale.numel() == 1
-    rowwise_scaling = A_scale is not None and A_scale.numel() > 1
-
     # For tensorwise scaling, the scale should be replicated so each shard has a copy.
-    if tensorwise_scaling:
+    if scaling_type_a == ScalingType.TensorWise:
         A_scale_shards = [A_scale] * group.size()
 
     # For rowwise scaling, we need to move the scatter dim to the first dim to match the
     # dim swap of the 'A' tensor. Then we can shard the scales along the first dim, just like
     # the 'A' tensor.
-    elif rowwise_scaling:
+    elif scaling_type_a == ScalingType.RowWise:
         if A_scale.shape[:-1] != A.shape[:-1]:
             raise ValueError(
                 "For row-wise scaling, the leading dims of A_scale "
@@ -1524,8 +1868,13 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         A_scale_shards = [
             t if t.data_ptr() % 16 == 0 else t.clone() for t in A_scale_shards
         ]
+    elif scaling_type_a == ScalingType.BlockWise1x32:
+        # Each rank's slice of the swizzled scale is the scale of its rows;
+        # see _MX_SWIZZLE_32_4_4_ROW_TILE.
+        _check_mxfp8_operand(A, A_scale, scatter_dim_after_maybe_reshape, group.size())
+        A_scale_shards = list(A_scale.flatten().chunk(group.size()))
     else:
-        raise ValueError("A_scale cannot be none for scaled_mm")
+        raise ValueError(f"Unsupported scaling_type_a: {scaling_type_a}")
 
     # Computing block-wise matmul along the first dim of A
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
@@ -1535,7 +1884,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
     # (a*b,c) @ (c,d) = (a*b,d)
     stacked_partials = A_with_scatter_dim_0.new_empty(
-        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype
+        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=output_dtype
     )
 
     # Execute the pipelined mm/scaled_mm.
@@ -1567,7 +1916,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    reduced_out = reduce_fn(
+    reduced_out = reduce_partials(
         # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
         stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
         # We originally swapped 0<=>scatter_dim_after_maybe_reshape. Now after
@@ -1576,6 +1925,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         .movedim(1, scatter_dim_after_maybe_reshape + 1),
         # Reduce along the `group_size` dim (0).
         dim=0,
+        reduce_op=reduce_op,
+        output_dtype=output_dtype,
+        group_size=group.size(),
     )
 
     # Output shape must be scattered along original scatter dim as well.
@@ -1737,6 +2089,156 @@ def _low_contention_all_gather(
         symm_mem.barrier()
         torch._C._distributed_c10d._register_work(output, Work())
         return output
+
+
+def _require_multicast(device_index: int, op_name: str) -> None:
+    if not _SymmetricMemory.has_multicast_support(DeviceType.CUDA, device_index):
+        raise RuntimeError(f"{op_name} requires multicast support (NVSwitch / NVLS).")
+
+
+# Use one dedicated signal-pad channel for CE multicast, separate from existing
+# low-contention collectives. Its two barriers are ordered on the same stream;
+# if a peer has not consumed the first signal yet, the second barrier's CAS put
+# spins until that peer slot is cleared.
+_CE_MULTICAST_BARRIER_CHANNEL = 3
+
+
+def _lc_ag_out_shape(tensor: torch.Tensor, world_size: int) -> tuple[int, ...]:
+    if tensor.dim() == 0:
+        return (world_size,)
+    return (tensor.shape[0] * world_size, *tensor.shape[1:])
+
+
+def _check_lc_ag_out(
+    tensor: torch.Tensor,
+    output: torch.Tensor,
+    world_size: int,
+    op_name: str,
+) -> None:
+    expected_shape = _lc_ag_out_shape(tensor, world_size)
+    if tuple(output.shape) != expected_shape:
+        raise RuntimeError(
+            f"{op_name}: expected out shape {expected_shape}, "
+            f"but got {tuple(output.shape)}."
+        )
+    if output.dtype != tensor.dtype:
+        raise RuntimeError(
+            f"{op_name}: expected out dtype {tensor.dtype}, but got {output.dtype}."
+        )
+    if output.device != tensor.device:
+        raise RuntimeError(
+            f"{op_name}: expected out device {tensor.device}, but got {output.device}."
+        )
+    if not output.is_contiguous():
+        raise RuntimeError(f"{op_name}: out must be contiguous.")
+
+
+def _check_lc_signal_pad_capacity(symm_mem: _SymmetricMemory) -> None:
+    required_bytes = (_CE_MULTICAST_BARRIER_CHANNEL + 1) * symm_mem.world_size * 4
+    actual_bytes = _SymmetricMemory.signal_pad_size
+    if actual_bytes < required_bytes:
+        raise RuntimeError(
+            f"low_contention all-gather requires signal_pad_size >= "
+            f"{required_bytes} bytes for world_size={symm_mem.world_size}, but "
+            f"the current size is {actual_bytes} bytes."
+        )
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast", "Meta")
+def _low_contention_all_gather_ce_multicast_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    world_size = c10d._get_group_size_by_name(group_name)
+    return tensor.new_empty(_lc_ag_out_shape(tensor, world_size))
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast", "CUDA")
+def _low_contention_all_gather_ce_multicast(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    """Direct-input copy-engine multicast all-gather into a fresh output."""
+    device_index = (
+        tensor.device.index
+        if tensor.device.index is not None
+        else torch.cuda.current_device()
+    )
+    _require_multicast(device_index, "_low_contention_all_gather_ce_multicast")
+    world_size = c10d._get_group_size_by_name(group_name)
+    out_shape = _lc_ag_out_shape(tensor, world_size)
+    if torch.cuda.is_current_stream_capturing():
+        raise RuntimeError(
+            "_low_contention_all_gather_ce_multicast cannot allocate its output "
+            "during CUDA graph capture. Use "
+            "_low_contention_all_gather_ce_multicast_out with a preallocated "
+            "symmetric-memory output."
+        )
+    device = torch.device("cuda", device_index)
+    # This op is CUDA-only; going through the device module is just so that the
+    # union returned by `get_mem_pool` type-checks.
+    mempool = get_mem_pool(device)
+    with torch.get_device_module(device).use_mem_pool(mempool, device=device):
+        output = torch.empty_strided(
+            out_shape,
+            make_contiguous_strides_for(out_shape),
+            dtype=tensor.dtype,
+            device=device,
+        )
+    return _low_contention_all_gather_ce_multicast_impl(tensor, group_name, output)
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast_out", "Meta")
+def _low_contention_all_gather_ce_multicast_out_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    world_size = c10d._get_group_size_by_name(group_name)
+    _check_lc_ag_out(tensor, out, world_size, "_low_contention_all_gather_ce_multicast")
+    return out
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast_out", "CUDA")
+def _low_contention_all_gather_ce_multicast_out(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    """Direct-input copy-engine multicast all-gather into caller-provided output."""
+    world_size = c10d._get_group_size_by_name(group_name)
+    _check_lc_ag_out(tensor, out, world_size, "_low_contention_all_gather_ce_multicast")
+    return _low_contention_all_gather_ce_multicast_impl(tensor, group_name, out)
+
+
+def _low_contention_all_gather_ce_multicast_impl(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    output: torch.Tensor,
+) -> torch.Tensor:
+    device_index = (
+        output.device.index
+        if output.device.index is not None
+        else torch.cuda.current_device()
+    )
+    _require_multicast(device_index, "_low_contention_all_gather_ce_multicast")
+    symm_mem = rendezvous(output, group_name)
+    if symm_mem is None:
+        raise RuntimeError(
+            "ce_multicast output must be allocated from symmetric memory"
+        )
+    _check_lc_signal_pad_capacity(symm_mem)
+
+    rank = symm_mem.rank
+    shard_bytes = tensor.numel() * tensor.element_size()
+
+    ag_input = tensor if tensor.is_contiguous() else tensor.contiguous()
+    symm_mem.barrier(channel=_CE_MULTICAST_BARRIER_CHANNEL)
+    torch.ops.symm_mem.memcpy_to_multicast_(
+        output, ag_input, rank * shard_bytes, group_name
+    )
+    symm_mem.barrier(channel=_CE_MULTICAST_BARRIER_CHANNEL)
+    return output
 
 
 @torch.library.impl(lib, "_low_contention_reduce_scatter", "Meta")
@@ -1904,6 +2406,10 @@ if TYPE_CHECKING:
 
 _use_implicit_mempool: bool | None = None  # type: ignore[assignment]
 
+# Device types whose accelerator module provides a SymmetricMemory-compatible
+# `MemPool` (i.e. one supporting `use_on_oom` and `no_split`).
+_MEMPOOL_DEVICE_TYPES = ("cuda", "xpu")
+
 
 def _should_use_implicit_mempool() -> bool:
     r"""
@@ -1948,6 +2454,14 @@ def empty(  # type: ignore[misc]
     :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
     symmetric memory tensor among participating processes.
 
+    .. note::
+        This is a host-synchronous allocation. Together with
+        :func:`rendezvous`, it is intended as an initialization-time
+        operation: allocate a symmetric memory tensor once and reuse it,
+        rather than allocating in hot code paths. It cannot be captured in a
+        CUDA graph; the CUDA backend raises an error if it is called while
+        the current stream is capturing. Allocate before capture instead.
+
     Args:
         size (int...): a sequence of integers defining the shape of the output tensor.
             Can be a variable number of arguments or a collection like a list or tuple.
@@ -1958,7 +2472,8 @@ def empty(  # type: ignore[misc]
         device (:class:`torch.device`, optional): the desired device of returned tensor.
             Default: if ``None``, uses the current device for the default tensor type
             (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
-            for CPU tensor types and the current CUDA device for CUDA tensor types.
+            for CPU tensor types, the current CUDA device for CUDA tensor types,
+            and the current XPU device for XPU tensor types.
     """
     if len(size) == 1 and isinstance(size[0], Sequence):
         size = tuple(size[0])
@@ -1975,12 +2490,12 @@ def empty(  # type: ignore[misc]
 
     stride = torch._prims_common.make_contiguous_strides_for(size)
 
-    if _should_use_implicit_mempool() and device.type == "cuda":
+    if _should_use_implicit_mempool() and device.type in _MEMPOOL_DEVICE_TYPES:
         # Allocate tensor from an implicit memory pool
-        mempool = get_mem_pool(device)
-        # TODO: this path can be made device-agnostic if `use_mem_pool` is
-        # elevated from torch.cuda to torch accelerator.
-        with torch.cuda.use_mem_pool(mempool):
+        device_module = torch.get_device_module(device)
+        if device.index is None:
+            device = torch.device(device.type, device_module.current_device())
+        with device_module.use_mem_pool(get_mem_pool(device), device=device):
             return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
     else:
         return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
@@ -2005,6 +2520,20 @@ def rendezvous(
     Establish a symmetric memory tensor among participating processes. This is
     a collective operation.
 
+    .. note::
+        This is a host-blocking initialization operation: the first rendezvous
+        of a tensor performs handle exchange and mapping across processes, and
+        synchronizes the host with the device. It cannot be ordered onto a
+        CUDA stream or captured in a CUDA graph; the CUDA backend raises an
+        error if the first rendezvous of a tensor happens while the current
+        stream is capturing. Rendezvous a buffer once and reuse the returned
+        handle rather than calling this in hot code paths; subsequent calls on
+        the same tensor return the cached handle and are safe to capture.
+        Symmetric memory collectives on a rendezvoused buffer can be captured
+        after they have run once eagerly. Every rank must then replay the
+        captured graph the same number of times, because each replay performs
+        the peer synchronization for that rank.
+
     Args:
         tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.
             It must be allocated via :func:`torch._distributed._symmetric_memory.empty()`. The shape,
@@ -2022,7 +2551,7 @@ def is_nvshmem_available() -> bool:
 
     Check if NVSHMEM (CUDA) or rocSHMEM (ROCm) is available in the current
     build and usable at runtime. On ROCm, rocSHMEM ``VERSION`` must be at
-    least 3.3.0 (see ``rocshmem/rocshmem.hpp``).
+    least 3.5.0 (see ``rocshmem/rocshmem.hpp``).
     """
     try:
         from torch._C._distributed_c10d import _is_nvshmem_available
@@ -2038,11 +2567,11 @@ def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
     r"""
     Set the backend for symmetric memory allocation. This is a global setting
     and affects all subsequent calls to
-    :func:`torch._distributed._symmetric_memory.empty()`.  Note that the backend
+    :func:`torch.distributed._symmetric_memory.empty()`.  Note that the backend
     cannot be changed once a symmetric memory tensor has been allocated.
 
     Args:
-        backend (str): the backend for symmetric memory allocation. Currently,
+        name (str): the backend for symmetric memory allocation. Currently,
             only `"NVSHMEM"`, `"CUDA"`, `"NCCL"` are supported.
     """
     _SymmetricMemory.set_backend(name)
@@ -2115,34 +2644,38 @@ def get_signal_pad_size() -> int:
 
 
 # An internal map from device to the symmetric memory pool for that device.
-_symm_mem_pools: dict[_device, torch.cuda.MemPool] = {}
+_symm_mem_pools: dict[_device, torch.cuda.MemPool | torch.xpu.MemPool] = {}
 
 
-def get_mem_pool(device: _device) -> torch.cuda.MemPool:
+def get_mem_pool(device: _device) -> torch.cuda.MemPool | torch.xpu.MemPool:
     """
     Get the symmetric memory pool for a given device. If not found, create a new
     pool.
 
-    The tensor allocations with this pool must be symmetric across ranks.  The
-    allocated tensors can be used with symmetric operations, for example,
+    The tensor allocations with this pool must be symmetric across ranks.
+    Do not call :meth:`torch.Tensor.record_stream` on CUDA tensors allocated
+    from this pool, since stream-dependent reuse can break that symmetry.
+    The allocated tensors can be used with symmetric operations, for example,
     operations defined under `torch.ops.symm_mem`.
 
     Args:
         device (`torch.device` or str): the device for which to get the symmetric memory pool.
 
     Returns:
-        `torch.cuda.MemPool`: the symmetric memory pool for the given device.
+        the symmetric memory pool for the given device, e.g. a
+        `torch.cuda.MemPool` for a CUDA device or a `torch.xpu.MemPool` for an
+        XPU device.
 
     Example::
 
         >>> # doctest: +SKIP
         >>> pool = torch.distributed._symmetric_memory.get_mem_pool("cuda:0")
-        >>> with torch.cuda.use_mem_pool(pool):
+        >>> with torch.cuda.use_mem_pool(pool, device="cuda:0"):
         >>>     tensor = torch.randn(1000, device="cuda:0")
         >>> tensor = torch.ops.symm_mem.one_shot_all_reduce(tensor, "sum", group_name)
 
     """
-    # This function is a wrapper around the `torch.cuda.MemPool` constructor.
+    # This function is a wrapper around the accelerator's `MemPool` constructor.
     # Due to special requirements of SymmetricMemory, we preset certain options for the pool.
     # - use_on_oom=False: we don't want to lend the space of the pool for
     # non-symmetric allocations because this could desync the allocation state
@@ -2153,14 +2686,21 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
     # undefined behaviors. We could consider relaxing this in the future if we
     # establish stream tracking and implicit synchronization around an
     # allocation.
+    device = torch.device(device)
+    device_module = torch.get_device_module(device)
+    if device.index is None:
+        device = torch.device(device.type, device_module.current_device())
     if device not in _symm_mem_pools:
         allocator = get_mempool_allocator(device)
-        # Create a new pool with the given allocator and the preset options.
-        _symm_mem_pools[device] = torch.cuda.MemPool(
-            allocator,
-            use_on_oom=False,
-            no_split=True,
-        )
+        # Create a new pool with the given allocator and the preset options. A
+        # pool routes allocations only on the device that was current when it
+        # was created, so pass this device to `use_mem_pool`.
+        with device_module.device(device):
+            _symm_mem_pools[device] = device_module.MemPool(
+                allocator,
+                use_on_oom=False,
+                no_split=True,
+            )
 
     return _symm_mem_pools[device]
 

@@ -5,7 +5,7 @@ from contextlib import contextmanager
 import torch
 from torch._C import DispatchKey  # @manual
 from torch._functorch._aot_autograd.utils import KNOWN_TYPES
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import _fake_mode_handler, autograd_not_implemented
 from torch._library.fake_class_registry import (
     _is_script_object,
     _ns_and_class_name,
@@ -148,10 +148,13 @@ def call_torchbind_fake(mode, *args, **kwargs):
         return pytree.tree_map_only(
             torch.Tensor,
             lambda x: mode.from_tensor(x, static_shapes=True)
-            if not isinstance(x, torch._subclasses.fake_tensor.FakeTensor)
+            if not torch._subclasses.fake_tensor.is_fake_tensor(x)
             else x,
             out,
         )
+
+
+call_torchbind.py_impl(DispatchKey.Fake)(_fake_mode_handler(call_torchbind_fake))
 
 
 call_torchbind.py_autograd_impl(

@@ -19,6 +19,7 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
+from torch._dynamo.graph_bytecode_inputs import install_active_registry
 from torch._dynamo.utils import (
     CompileEventLogger,
     dynamo_timed,
@@ -27,9 +28,7 @@ from torch._dynamo.utils import (
 )
 from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
-
-# Runtime annotation consumers still resolve BoxedBool from module globals.
-from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_mode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -139,6 +138,10 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
+from ._aot_autograd.to_standalone_python import (  # noqa: F401
+    compile_to_python,
+    load_from_python,
+)
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
     call_func_at_runtime_with_args,
@@ -158,12 +161,13 @@ from .partitioners import default_partition
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from torch._inductor.compile_fx import CompilerConfigExtra
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
-    from torch._ops import OpOverload
+    from torch._ops import OperatorBase, OpOverload
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 _P = ParamSpec("_P")
@@ -449,7 +453,7 @@ AOT_COUNTER = itertools.count()
 # However, Inductor does not want the concept of tokens in the final generated
 # code's input and output. Since changing the graph signature inside of inductor
 # is difficult, after generating the forward graph, we will run a pass to
-# remove the tokens from the inputgenerate the following graph for Inductor, where
+# remove the tokens from the input and generate the following graph for Inductor, where
 # the tokens are created and sunk within the graph, rather than as inputs and
 # outputs:
 #
@@ -477,7 +481,7 @@ def create_aot_state(
     fake_flat_args: FakifiedFlatArgs,
     flat_args_descs: list[AOTInput],
     aot_config: AOTConfig,
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     shape_env: ShapeEnv | None,
 ) -> AOTState:
     """
@@ -533,6 +537,10 @@ def create_aot_state(
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
+    # Tracing runs the graph's get_external_object_by_index calls, and the
+    # backend may have run other compiled functions since Dynamo traced it.
+    install_active_registry()
+
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
@@ -583,7 +591,11 @@ def create_aot_state(
                     "aot_collect_metadata", log_pt2_compile_event=True
                 )
 
-            with dynamo_timed_ctx, ctx:
+            with (
+                dynamo_timed_ctx,
+                ctx,
+                torch._dynamo.eval_frame._use_eager_on_nested_compile(),
+            ):
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     flat_args_descs=flat_args_descs,
@@ -993,8 +1005,9 @@ def prepare_aot_config(
 
     dynamic_shapes = False
     for x in full_args:
-        if isinstance(x, FakeTensor):
-            dynamic_shapes = x.fake_mode.shape_env is not None
+        fake_mode = maybe_get_fake_mode(x)
+        if fake_mode is not None:
+            dynamic_shapes = fake_mode.shape_env is not None
             break
 
     aot_config = AOTConfig(
@@ -1051,7 +1064,7 @@ def prepare_aot_module_simplified(
     FakifiedFlatArgs,
     list[Any],
     AOTConfig,
-    FakeTensorMode,
+    FakeTensorMode | CppFakeTensorMode,
     ShapeEnv | None,
     pytree.TreeSpec | None,
     PytreeThunk | None,
@@ -1247,6 +1260,12 @@ def aot_module_simplified(
             )
     if compiled_fn is None:
         raise AssertionError("compiled_fn must not be None")
+    # Skip SerializableCompiledFunction's pass-through __call__ on the hot path.
+    runtime_fn = (
+        compiled_fn.compiled_fn
+        if isinstance(compiled_fn, SerializableCompiledFunction)
+        else compiled_fn
+    )
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes
         # the inputs so that they can be freed before the end of this scope.
@@ -1254,13 +1273,9 @@ def aot_module_simplified(
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
         @simple_wraps(compiled_fn)
         def forward(runtime_args: list[Any]) -> Any:
-            flat_args = []
-            flat_args.extend(params_buffers_flat)
-            flat_args.extend(runtime_args)
+            flat_args = [*params_buffers_flat, *runtime_args]
             runtime_args.clear()
-            if compiled_fn is None:
-                raise AssertionError("compiled_fn must not be None")
-            return compiled_fn(flat_args)
+            return runtime_fn(flat_args)
 
     else:
         # TODO: There is something deeply wrong here; compiled_fn running with
@@ -1270,13 +1285,7 @@ def aot_module_simplified(
         # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
         @simple_wraps(compiled_fn)
         def forward(*runtime_args: tuple[Any]) -> Any:
-            full_args = []
-            full_args.extend(params_buffers_flat)
-            # pyrefly: ignore[bad-argument-type]
-            full_args.extend(runtime_args)
-            if compiled_fn is None:
-                raise AssertionError("compiled_fn must not be None")
-            return compiled_fn(full_args)
+            return runtime_fn([*params_buffers_flat, *runtime_args])
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad  # type: ignore[attr-defined]
@@ -1537,6 +1546,32 @@ def aot_compile_joint_with_descriptors(
     return unflattened_compiled_fn
 
 
+@contextlib.contextmanager
+def _aot_export_decomposition_context(
+    decompositions: dict[OpOverload, Callable[..., Any]] | None,
+) -> Iterator[dict[OpOverload, Callable[..., Any]] | None]:
+    if decompositions is None:
+        yield decompositions
+        return
+
+    from torch.export.decomp_utils import CustomDecompTable
+    from torch.export.exported_program import (
+        _override_composite_implicit_decomp,
+        _split_decomp_table_to_cia_and_python_decomp,
+    )
+
+    decomp_table = (
+        decompositions.materialize()
+        if isinstance(decompositions, CustomDecompTable)
+        else cast("dict[OperatorBase, Callable[..., Any]]", dict(decompositions))
+    )
+    cia_to_decomp, python_decomp_table = _split_decomp_table_to_cia_and_python_decomp(
+        decomp_table
+    )
+    with _override_composite_implicit_decomp(cia_to_decomp):
+        yield cast("dict[OpOverload, Callable[..., Any]]", python_decomp_table)
+
+
 def aot_export_module(
     mod: nn.Module,
     args: Iterable[Any],
@@ -1789,14 +1824,22 @@ def aot_export_joint_simple(
         # Run under no_grad, so our tracing machinery only traces an inference graph.
         ctx = torch.no_grad
 
-    with ctx():
-        fx_g, metadata, in_spec, out_spec = _aot_export_function(
-            func,
-            args,
-            decompositions=decompositions,
-            trace_joint=trace_joint,
-        )
-        in_spec, _kw_in_spec = in_spec.children()
+    # Preserved CIA ops only receive autograd_not_implemented kernels, so a
+    # joint graph would lose its gradients; keep raw decompositions there.
+    decomp_ctx = (
+        contextlib.nullcontext(decompositions)
+        if trace_joint
+        else _aot_export_decomposition_context(decompositions)
+    )
+    with decomp_ctx as decompositions_for_aot:
+        with ctx():
+            fx_g, metadata, in_spec, out_spec = _aot_export_function(
+                func,
+                args,
+                decompositions=decompositions_for_aot,
+                trace_joint=trace_joint,
+            )
+            in_spec, _kw_in_spec = in_spec.children()
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.

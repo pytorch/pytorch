@@ -281,7 +281,10 @@ op_bench.generate_pt_gradient_test(
     configs.remove_cpu(configs.conv_3d_configs_long), Conv3dBenchmark
 )
 op_bench.generate_pt_gradient_test(
-    configs.remove_cpu(configs.conv_3d_configs_long), ConvTranspose3dBenchmark
+    configs.remove_rocm_slow_3d_transpose(
+        configs.remove_cpu(configs.conv_3d_configs_long)
+    ),
+    ConvTranspose3dBenchmark,
 )
 
 

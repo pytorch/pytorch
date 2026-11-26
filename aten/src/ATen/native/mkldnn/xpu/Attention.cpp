@@ -1,11 +1,13 @@
 #include <ATen/Context.h>
+#include <ATen/functorch/TensorWrapper.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/native/transformers/xpu/sdp_utils.h>
-#include <c10/util/Array.h>
-#include <torch/library.h>
+#include <ATen/xpu/XPUGeneratorImpl.h>
+#include <torch/library.h> // NOLINT(misc-header-include-cycle)
+#include <array>
 #include <utility>
 
 namespace {
@@ -13,7 +15,7 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
-  if (query_size_last != key_size_last) {
+  if (!TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last))) {
     if (debug) {
       TORCH_WARN(
           "OneDNN attention requires q,k to have the same last dimension.",
@@ -26,9 +28,23 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
     return false;
   }
 
+  if (!TORCH_GUARD_OR_FALSE(query_size_last.sym_gt(0)) ||
+      !TORCH_GUARD_OR_FALSE(value_size_last.sym_gt(0))) {
+    if (debug) {
+      TORCH_WARN(
+          "OneDNN attention requires q,k,v to have a non-zero head dimension.",
+          " Got Query.size(-1): ",
+          query_size_last,
+          ", Value.size(-1): ",
+          value_size_last,
+          " instead.");
+    }
+    return false;
+  }
+
   constexpr int MAX_HEAD_DIM = 576;
   const auto max_size_last = query_size_last.max(value_size_last);
-  if (max_size_last > MAX_HEAD_DIM) {
+  if (!TORCH_GUARD_OR_FALSE(max_size_last.sym_le(MAX_HEAD_DIM))) {
     if (debug) {
       TORCH_WARN(
           "OneDNN attention requires q,k,v to have head dimension less than ",
@@ -42,32 +58,66 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   return true;
 }
 
-bool check_no_grad(sdp::sdp_params const& params, bool debug) {
-  const bool any_inputs_require_grad = params.query.requires_grad() ||
-      params.key.requires_grad() || params.value.requires_grad();
-  const bool gradmode_enabled = at::GradMode::is_enabled();
-  if (debug && any_inputs_require_grad && gradmode_enabled) {
-    TORCH_WARN("Backward or grad to be supported.");
+// The oneDNN backward cannot produce a gradient for attn_mask, so a mask that
+// requires grad has to go to another backend. Under functorch transforms a
+// mask that requires grad at an outer level (e.g. a Parameter captured by
+// torch.func.grad) reaches backend selection inside TensorWrappers that do not
+// require grad themselves, so look through them.
+bool check_mask_grad(sdp::sdp_params const& params, bool debug) {
+  if (!params.attn_mask.has_value()) {
+    return true;
   }
-  return !any_inputs_require_grad || !gradmode_enabled;
+
+  const at::Tensor* attn_mask = &params.attn_mask.value();
+  while (!attn_mask->requires_grad()) {
+    const auto* wrapper = at::functorch::maybeGetTensorWrapper(*attn_mask);
+    if (wrapper == nullptr) {
+      return true;
+    }
+    attn_mask = &wrapper->value();
+  }
+
+  if (debug) {
+    TORCH_WARN(
+        "OneDNN attention on XPU does not support attn_mask.requires_grad() == True.");
+  }
+
+  return false;
+}
+
+// OneDNN doesn't guarantee determinism for both forward and backward
+bool check_deterministic(const sdp::sdp_params& params, bool debug) {
+  auto& ctx = at::globalContext();
+  if (ctx.deterministicAlgorithms() && !ctx.deterministicAlgorithmsWarnOnly()) {
+    if (debug) {
+      TORCH_WARN("OneDNN attention on XPU is not deterministic.");
+    }
+    return false;
+  }
+  return true;
 }
 
 bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
-  constexpr auto supported_dtypes = c10::array_of<at::ScalarType>(
-      at::kFloat, at::kBFloat16, at::kHalf); // double is not supported
+  constexpr auto supported_dtypes = std::to_array<at::ScalarType>(
+      {at::kFloat, at::kBFloat16, at::kHalf}); // double is not supported
 
   // Define gate functions that determine if a flash kernel can be run
-  constexpr auto constraints = c10::array_of<bool (*)(
-      sdp::sdp_params const&, bool)>(
-      sdp::check_nested_tensor,
-      sdp::check_for_dropout,
-      sdp::check_tensor_shapes,
-      sdp::check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
-      sdp::check_attn_mask_shape,
-      sdp::check_nonzero_sequence_lengths_dense,
-      sdp::check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>,
-      check_head_dim_size_xpu,
-      check_no_grad);
+  constexpr auto constraints =
+      std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+          {sdp::check_nested_tensor,
+           sdp::check_tensor_shapes,
+           sdp::check_for_dropout,
+           sdp::check_batch_size_and_num_heads_dense<
+               true /*supports GQA*/,
+               true /*requires_same_num_heads*/,
+               true /*supports_mqa*/>,
+           check_mask_grad,
+           sdp::check_attn_mask_shape,
+           sdp::check_nonzero_sequence_lengths_dense,
+           sdp::check_last_dim_stride_equals_1_dense<
+               false /*ignore_singleton_dim*/>,
+           check_head_dim_size_xpu,
+           check_deterministic});
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -97,11 +147,16 @@ bool check_head_dim_size_mem_efficient(
     sdp::sdp_params const& params,
     bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
   const int64_t alignment = minimum_gemm_alignment(params);
-  if (!(query_size_last == params.key.sym_size(-1) &&
-        query_size_last % alignment == 0 && query_size_last > 0 &&
-        value_size_last % alignment == 0 && value_size_last > 0)) {
+  const bool valid_alignment =
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last)) &&
+      TORCH_GUARD_OR_FALSE((query_size_last % alignment).sym_eq(0)) &&
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_gt(0)) &&
+      TORCH_GUARD_OR_FALSE((value_size_last % alignment).sym_eq(0)) &&
+      TORCH_GUARD_OR_FALSE(value_size_last.sym_gt(0));
+  if (!valid_alignment) {
     if (debug) {
       TORCH_WARN(
           "Mem efficient attention requires last dimension of inputs to be divisible by ",
@@ -110,9 +165,9 @@ bool check_head_dim_size_mem_efficient(
           "Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
-          params.key.sym_size(-1),
+          key_size_last,
           ", Value.size(-1): ",
-          params.value.sym_size(-1),
+          value_size_last,
           " instead.");
     }
     return false;
@@ -125,10 +180,10 @@ bool can_use_mem_efficient_attention(
     bool debug) {
   // Define gate functions that determine if a mem efficient can be run
   constexpr auto general_constraints =
-      c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-          sdp::check_runtime_disabled_mem_efficient,
-          sdp::check_tensor_shapes,
-          check_head_dim_size_mem_efficient);
+      std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+          {sdp::check_runtime_disabled_mem_efficient,
+           sdp::check_tensor_shapes,
+           check_head_dim_size_mem_efficient});
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -136,10 +191,10 @@ bool can_use_mem_efficient_attention(
   }
   if (has_for_nested_inputs(params)) {
     constexpr auto nested_constraints =
-        c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-            sdp::check_requires_grad_and_nested,
-            sdp::check_batch_size_nested,
-            sdp::check_for_seq_len_0_nested_tensor);
+        std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+            {sdp::check_requires_grad_and_nested,
+             sdp::check_batch_size_nested,
+             sdp::check_for_seq_len_0_nested_tensor});
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -148,10 +203,10 @@ bool can_use_mem_efficient_attention(
   }
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints =
-        c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-            sdp::check_nonzero_sequence_lengths_dense,
-            sdp::check_last_dim_stride_equals_1_dense<false>,
-            sdp::check_batch_size_and_num_heads_dense<false>);
+        std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
+            {sdp::check_nonzero_sequence_lengths_dense,
+             sdp::check_last_dim_stride_equals_1_dense<false>,
+             sdp::check_batch_size_and_num_heads_dense<false>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -253,6 +308,8 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
 } // namespace
 
 namespace at::native {
+// Referenced by native_functions.yaml and REGISTER_XPU_DISPATCH below.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 int64_t _fused_sdp_choice_xpu(
     const at::Tensor& query_,
     const at::Tensor& key,
@@ -262,8 +319,15 @@ int64_t _fused_sdp_choice_xpu(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
-  sdp::sdp_params kernel_params{
-      query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
+  auto kernel_params = sdp::normalize_unbatched_input({
+      .query = query_,
+      .key = key,
+      .value = value,
+      .attn_mask = attn_mask_,
+      .dropout = dropout_p,
+      .is_causal = is_causal,
+      .enable_gqa = enable_gqa,
+  });
   auto backend = select_sdp_backend_xpu(kernel_params);
 
   if (backend == sdp::SDPBackend::error) {
@@ -285,6 +349,8 @@ std::tuple<
     at::Tensor,
     at::Tensor,
     at::Tensor>
+// Referenced by native_functions.yaml.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 _scaled_dot_product_fused_attention_overrideable_xpu(
     const at::Tensor& query,
     const at::Tensor& key,
@@ -296,7 +362,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
     std::optional<double> scale) {
   TORCH_INTERNAL_ASSERT(
       query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
-      "scaled_dot_product_fused_attention_overrideable_xpu: Accept only 4 dims inputs shape of {(B), H, T, K}");
+      "scaled_dot_product_fused_attention_overrideable_xpu: Accept only 4 dims inputs shape of {B, H, T, K}");
   TORCH_INTERNAL_ASSERT(
       (key.size(0) == value.size(0)) && (key.size(1) == value.size(1)) &&
           (key.size(2) == value.size(2)),
@@ -310,9 +376,13 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   TORCH_INTERNAL_ASSERT(
       dropout_p == 0.0,
       "scaled_dot_product_fused_attention_overrideable_xpu: Currently do not support dropout > 0");
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       !(attn_bias.has_value() && is_causal),
       "scaled_dot_product_fused_attention_overrideable_xpu: attn_bias cannot present with is_causal");
+  TORCH_INTERNAL_ASSERT(
+      !(at::GradMode::is_enabled() && attn_bias.has_value() &&
+        attn_bias.value().requires_grad()),
+      "scaled_dot_product_fused_attention_overrideable_xpu: attn_bias cannot have requires_grad=True");
 
   const int64_t batch_size = query.size(0);
   const int64_t num_head_q = query.size(1);
@@ -322,11 +392,35 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   const int64_t seq_len_q = query.size(2);
   const int64_t seq_len_kv = key.size(2);
 
-  at::Tensor output;
-  std::vector<int64_t> output_shape = {
+  at::Tensor attention;
+  std::vector<int64_t> attention_shape = {
       batch_size, num_head_q, seq_len_q, head_dim_v};
-  alloc_with_matching_layout(query, output, output_shape);
-  at::Tensor logsumexp, debug_attn_mask; // not supported
+  alloc_with_matching_layout(query, attention, attention_shape);
+
+  auto opts = query.options();
+  at::Tensor logsumexp =
+      at::empty({batch_size, num_head_q, seq_len_q}, opts.dtype(at::kFloat));
+
+  at::Tensor philox_seed, philox_offset;
+  if (dropout_p != 0.0) {
+    auto gen = at::get_generator_or_default<at::XPUGeneratorImpl>(
+        std::nullopt, at::xpu::detail::getDefaultXPUGenerator());
+    // number of times random will be generated per thread, to offset philox
+    // counter in thc random state
+    int64_t counter_offset = batch_size * num_head_q * seq_len_q * seq_len_kv;
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    at::PhiloxXpuState philox_state = gen->philox_xpu_state(counter_offset);
+    std::tuple<uint64_t, uint64_t> unpack_state =
+        xpu::philox::unpack(philox_state);
+    philox_seed = at::full(
+        {}, std::get<0>(unpack_state), at::dtype(at::kLong).device(at::kCPU));
+    philox_offset = at::full(
+        {}, std::get<1>(unpack_state), at::dtype(at::kLong).device(at::kCPU));
+  } else {
+    philox_seed = at::empty({}, at::dtype(at::kLong));
+    philox_offset = at::empty({}, at::dtype(at::kLong));
+  }
 
   at::native::onednn::sdpa(
       batch_size,
@@ -342,15 +436,15 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       attn_bias,
       is_causal,
       scale.has_value() ? scale.value() : (1.0 / std::sqrt(head_dim_qk)),
-      output,
-      false,
-      logsumexp);
+      attention,
+      true,
+      logsumexp,
+      dropout_p,
+      philox_seed,
+      philox_offset);
 
-  // rng not used
-  auto philox_seed = at::empty({}, at::dtype(at::kLong));
-  auto philox_offset = at::empty({}, at::dtype(at::kLong));
   return std::make_tuple(
-      std::move(output),
+      std::move(attention),
       std::move(logsumexp),
       /* cum_seq_q */ at::Tensor(),
       /* cum_seq_k */ at::Tensor(),
@@ -358,7 +452,103 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       seq_len_kv,
       std::move(philox_seed),
       std::move(philox_offset),
-      std::move(debug_attn_mask));
+      /*debug_attn_mask */ at::Tensor());
+}
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+_scaled_dot_product_fused_attention_overrideable_backward_xpu(
+    const at::Tensor& grad_out,
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const at::Tensor& attn_bias,
+    std::array<bool, 4> grad_input_mask,
+    const at::Tensor& out,
+    const at::Tensor& logsumexp,
+    const at::Tensor& cum_seq_q,
+    const at::Tensor& cum_seq_k,
+    int64_t max_q,
+    int64_t max_k,
+    double dropout_p,
+    bool is_causal,
+    const at::Tensor& philox_seed,
+    const at::Tensor& philox_offset,
+    std::optional<double> scale) {
+  TORCH_CHECK(
+      grad_out.dim() == 4 && out.dim() == 4 &&
+          grad_out.size(0) == out.size(0) && grad_out.size(1) == out.size(1) &&
+          grad_out.size(2) == out.size(2) && grad_out.size(3) == out.size(3),
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: grad_out and out should have the same shape of {B, H, T, K}");
+  TORCH_CHECK(
+      query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: Accept only 4 dims inputs shape of {B, H, T, K}");
+  TORCH_CHECK(
+      (key.size(0) == value.size(0)) && (key.size(1) == value.size(1)) &&
+          (key.size(2) == value.size(2)),
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: K/V should have the same batch / seq / num_head");
+  TORCH_CHECK(
+      query.size(0) == grad_out.size(0) && query.size(1) == grad_out.size(1) &&
+          query.size(2) == grad_out.size(2),
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: Q should have the same batch / num_head / seq_len as grad_out");
+  TORCH_CHECK(
+      query.size(3) == key.size(3),
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: Q/K should have the same head_dim");
+  TORCH_CHECK(
+      value.size(3) == grad_out.size(3),
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: V should have the same head_dim as grad_out");
+  TORCH_CHECK(
+      logsumexp.dim() == 3 && logsumexp.size(0) == query.size(0) &&
+          logsumexp.size(1) == query.size(1) &&
+          logsumexp.size(2) == query.size(2),
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: logsumexp should have the shape of {B, H, T}");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !grad_input_mask[3],
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: grad for attn_bias is not supported");
+
+  std::optional<Tensor> attn_bias_opt =
+      attn_bias.defined() ? std::optional<Tensor>(attn_bias) : std::nullopt;
+
+  const int64_t batch_size = query.size(0);
+  const int64_t num_head_q = query.size(1);
+  const int64_t num_head_kv = key.size(1);
+  const int64_t seq_len_q = query.size(2);
+  const int64_t seq_len_kv = key.size(2);
+  const int64_t head_dim_qk = query.size(3);
+  const int64_t head_dim_v = value.size(3);
+
+  auto grad_q = at::empty_like(query);
+  auto grad_k = at::empty_like(key);
+  auto grad_v = at::empty_like(value);
+  auto grad_attn_bias =
+      attn_bias.defined() ? at::empty_like(attn_bias) : at::Tensor();
+  at::native::onednn::sdpa_backward(
+      batch_size,
+      num_head_q,
+      num_head_kv,
+      seq_len_q,
+      seq_len_kv,
+      head_dim_qk,
+      head_dim_v,
+      grad_out,
+      query,
+      key,
+      value,
+      out,
+      logsumexp,
+      attn_bias_opt,
+      is_causal,
+      scale.has_value() ? scale.value() : (1.0 / std::sqrt(query.size(3))),
+      grad_q,
+      grad_k,
+      grad_v,
+      dropout_p,
+      philox_seed,
+      philox_offset);
+  return std::make_tuple(
+      std::move(grad_q),
+      std::move(grad_k),
+      std::move(grad_v),
+      std::move(grad_attn_bias));
 }
 
 REGISTER_XPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_xpu);

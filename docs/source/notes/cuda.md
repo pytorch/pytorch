@@ -79,9 +79,35 @@ torch.backends.cudnn.conv.fp32_precision = "tf32"
 torch.backends.cudnn.rnn.fp32_precision = "tf32"
 ```
 
-The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
-`ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
-`tf32` fp32_precision indicate that we will allow to use `TF32` as internal computation precision.
+The `fp32_precision` setting can be set to `ieee` or `tf32` for CUDA matmuls
+and cuDNN. `ieee` uses FP32 for internal computation, while `tf32` allows TF32
+for internal computation.
+
+With a CUDA 12.9 or newer build, CUDA matmuls also accept `bfx9`, which allows
+cuBLAS to use its BF16x9 algorithm:
+
+```python
+torch.backends.cuda.matmul.fp32_precision = "bfx9"
+```
+
+This mode keeps the inputs and output in FP32 while allowing cuBLAS to decompose
+each input into three BF16 values and evaluate the resulting nine BF16 products
+with FP32 accumulation. The decomposition retains all FP32 input bits, but the
+resulting arithmetic is not IEEE-754 compliant and its relative accuracy is
+workload-dependent. The BF16x9 algorithm is available on GPUs with compute
+capability 10.0 or 10.3. On other NVIDIA GPU architectures, cuBLAS accepts the
+mode but uses native FP32 because no BF16x9 implementation is available. `bfx9`
+requires a PyTorch build with CUDA 12.9 or newer and is valid only for
+`torch.backends.cuda.matmul.fp32_precision`; using it for a generic, cuDNN, or
+MKLDNN precision setting raises an error. Setting `bfx9` on an older CUDA build
+or ROCm raises an error.
+
+As with `tf32`, operations implemented using CUDA GEMM can inherit the matmul
+precision setting, including slow or naive convolution fallbacks. Under
+`torch.compile`, FP32 matmuls using `bfx9` remain ATen/cuBLAS calls because
+Triton's `bf16x3` and `bf16x6` modes do not implement the full nine-product
+algorithm. Fused Triton kernels that cannot preserve `bfx9`, such as FP32
+FlexAttention, warn once and use IEEE precision instead.
 
 We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
 
@@ -104,6 +130,17 @@ For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.ba
 is overridden to `ieee`.
 
 We suggest to use the new settings for better control. And we do not support to use mix of old and new settings.
+
+On NVIDIA GPUs, the convolution kernels that `torch.compile` generates itself (for example with
+`mode="max-autotune"`) use TF32 only if `torch.backends.cudnn.conv.fp32_precision` is `tf32`, like eager cuDNN
+convolutions. When cuDNN is turned off (`torch.backends.cudnn.enabled = False`), they use full FP32. 1x1
+convolutions that `torch.compile` turns into matrix multiplications follow `torch.backends.cuda.matmul.fp32_precision`
+instead. For example, this turns off TF32 for eager convolutions and for the generated convolution kernels:
+
+```python
+torch.backends.cudnn.conv.fp32_precision = "ieee"
+model = torch.compile(model, mode="max-autotune")
+```
 
 ```{warning}
 
@@ -344,6 +381,8 @@ As an exception, several functions such as {meth}`~torch.Tensor.to` and
 {meth}`~torch.Tensor.copy_` admit an explicit {attr}`non_blocking` argument,
 which lets the caller bypass synchronization when it is unnecessary.
 Another exception is CUDA streams, explained below.
+
+(cuda-stream-semantics)=
 
 ### CUDA streams
 
@@ -868,7 +907,6 @@ You can now define a new memory pool by passing this allocator to {class}`torch.
 pool = torch.cuda.MemPool(allocator)
 ```
 
-
 The pool can then be used with the {class}`torch.cuda.use_mem_pool` context manager to
 allocate tensors into that pool:
 
@@ -976,6 +1014,144 @@ with torch.cuda.use_mem_pool(pool):
      requirements (`CU_MULTICAST_GRANULARITY_RECOMMENDED`, `CU_MULTICAST_GRANULARITY_MINIMUM`),
      and can cause your workload to run out of memory.
 ```
+
+
+(cuda-pinned-host-memory-pools)=
+## Pinned host memory pools
+
+Given a {class}`torch.cuda.HostMemPool`, a pool of pinned host memory,
+{class}`torch.cuda.use_mem_pool` routes the current thread's pinned host allocations, such as
+`torch.empty(n, pin_memory=True)`, `tensor.pin_memory()` and the outputs of
+`tensor.to("cpu", non_blocking=True)`, to the pool:
+
+```python
+host_pool = torch.cuda.HostMemPool()
+with torch.cuda.use_mem_pool(host_pool):
+    buf = torch.empty(1024, pin_memory=True)  # pinned memory from host_pool
+```
+
+What a pool guarantees is cache isolation: a pinned block freed by any thread returns to the
+pool it came from, and is handed out again only to threads inside that pool.
+
+Routing follows the thread:
+
+* Only the thread that entered the context routes to the pool; threads it starts do not.
+* Contexts nest: the innermost one wins. Several threads can route pinned memory to one
+  HostMemPool at the same time.
+* Contexts that route pinned memory must be exited in reverse order, on the thread that
+  entered them; anything else raises an error and changes nothing. When a thread exits inside
+  a context, its pinned routes are ended.
+* CUDA graph capture follows the same rules as for a MemPool: the newest of the capture and
+  the context takes the capturing stream. Entered inside a capture, the context wins and the
+  graph keeps the pool until it is reset. A HostMemPool cannot be the `pool` of a graph. Pinned
+  blocks allocated on the capturing stream and then used by a stream are reused only once
+  every graph that uses the capture's pool is reset.
+* Use contexts from synchronous code, on threads you control. A context that stays open across
+  an `await` or a generator's `yield` also routes whatever runs on the thread in between. The
+  pin-memory thread of {class}`torch.utils.data.DataLoader` is not covered yet.
+* Pools are local to the process. Using them across `fork` is not supported.
+
+{meth}`torch.cuda.HostMemPool.use_count` is 1 for the pool object, plus 1 for each open context
+on any thread and each graph that keeps the pool.
+
+Creating a pool allocates nothing. While the pool is alive, emptying the host cache, which
+{class}`torch.cuda.graph` does on entry, leaves its cache alone. Once the pool is deleted and
+no graph keeps it, its cached pinned blocks are freed at once, by the deletion or by the reset
+of the last graph that keeps it. Deleting a HostMemPool frees them with the GIL released, since
+`cudaFreeHost` waits for the work already issued on the current device. Blocks that tensors,
+pending copies or other graphs still use are freed by a later
+{func}`torch.accelerator.empty_host_cache`.
+
+### One pool per NUMA node
+
+`cudaHostAlloc` places and pins all pages of a new block on the NUMA node of the calling
+thread, or on the node its memory policy names, and pinned pages never move. A thread inside a
+pool allocates the pool's new blocks itself. So to keep the buffers of each node on that node,
+create one pool per node and enter `pools[k]` only from threads bound to node `k`:
+
+```python
+import os
+import threading
+
+import torch
+
+# cpus_of_node[k]: the CPUs of NUMA node k, e.g. from
+# /sys/devices/system/node/node{k}/cpulist
+pools = [torch.cuda.HostMemPool() for _ in cpus_of_node]
+
+def loader(node):
+    os.sched_setaffinity(0, cpus_of_node[node])  # before entering the pool
+    with torch.cuda.use_mem_pool(pools[node]):
+        ...  # pinned buffers for the GPUs attached to this node
+
+threads = [threading.Thread(target=loader, args=(k,)) for k in range(len(pools))]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+```
+
+The allocator knows nothing about NUMA, so placement depends on the setup:
+
+* Bind the thread, or set its memory policy, before it enters the pool. A block allocated by an
+  unbound thread stays in the pool on whatever node it landed. With CPU affinity alone, the
+  kernel can fall back to another node when the local one is full; `MPOL_BIND` does not.
+* `pinned_use_cuda_host_register` with `pinned_num_register_threads` greater than 1 touches
+  the pages from a shared thread pool, which then decides where they go.
+* A pool's new blocks never come from the `pinned_reserve_segment_size_mb` segment, which the
+  first allocating thread placed for the whole process.
+* On ROCm 7.2 and later, a pool's new blocks come from `hipHostMalloc` with
+  `hipHostMallocNumaUser`, so HIP follows the thread's memory policy, but only `MPOL_BIND` and
+  `MPOL_PREFERRED`: with CPU affinity alone, or on earlier ROCm, HIP takes the pages from the
+  node nearest a GPU. With `pinned_use_cuda_host_register`, the thread that touches the pages
+  places them, as on CUDA.
+
+(cuda-memory-python-allocators)=
+## Python-defined CUDA allocators
+
+Use {meth}`torch.cuda.MemPool.from_py_allocator` to implement a pool's segment
+allocator with Python callables:
+
+```python
+from cuda.bindings import runtime
+
+
+def alloc(size: int, _device: int, _stream: int) -> int | None:
+    err, ptr = runtime.cudaMalloc(size)
+    return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
+
+
+def free(ptr: int, _size: int, _device: int, _stream: int) -> None:
+    (err,) = runtime.cudaFree(ptr)
+    if err != runtime.cudaError_t.cudaSuccess:
+        raise RuntimeError(f"cudaFree failed with error {err}")
+
+
+pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
+```
+
+The size passed to the free callback is the size of the backing segment.
+An allocator may use it when releasing the segment, as needed, or ignore it
+when the pointer alone is sufficient.
+
+Return `None` or zero when an allocation cannot be satisfied. This lets the
+caching allocator release cached blocks, retry the allocation, notify OOM
+observers, and report a normal {class}`torch.OutOfMemoryError` if recovery
+fails. Other exceptions raised by the allocation callback propagate normally.
+Exceptions raised by the free callback produce a warning and are swallowed.
+
+The ``device`` argument is the segment's CUDA device ordinal and ``stream`` is
+the raw address of its allocation stream. PyTorch does not make them current
+before entering the callback. Allocators using APIs that rely on current CUDA
+state are responsible for establishing the appropriate device and stream.
+
+Callbacks can be invoked concurrently from multiple threads, so their Python
+and native state must be thread-safe, including in a no-GIL Python build.
+
+During CUDA graph capture, the allocation callback runs in relaxed capture
+mode. It may call allocation APIs such as `cudaMalloc` or CUDA virtual-memory
+APIs, but it must not launch work on or synchronize the capturing stream,
+synchronize the device, or begin or end capture.
 
 
 ## Tuning NVLink Performance with Custom Memory Allocator on H100/H200 GPUs
@@ -1103,14 +1279,18 @@ void customCudaFree(CustomAllocInfo* info) {
 
 ## cuBLAS workspaces
 
-For each combination of cuBLAS handle and CUDA stream, a cuBLAS workspace will be allocated
-if that handle and stream combination executes a cuBLAS kernel that requires a workspace.
-In order to avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
-`torch._C._cuda_clearCublasWorkspaces()` is called. The workspace size per allocation can be
-specified via the environment variable `CUBLAS_WORKSPACE_CONFIG` with the format `:[SIZE]:[COUNT]`.
-As an example, the default workspace size per allocation is `CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8`
-which specifies a total size of `2 * 4096 + 8 * 16 KiB`. To force cuBLAS to avoid using workspaces,
-set `CUBLAS_WORKSPACE_CONFIG=:0:0`.
+By default, ATen allocates a cuBLAS workspace for each operation from the CUDA caching allocator
+and releases it when the operation returns. Set `TORCH_CUBLAS_WORKSPACE_CACHE=1` to instead retain
+one workspace for each cuBLAS handle and CUDA stream until
+`torch._C._cuda_clearCublasWorkspaces()` is called. Persistent workspaces must not be used when
+capturing multiple CUDA graphs on the same stream. Handles returned by
+`torch.cuda.current_blas_handle()` use cuBLAS's default workspace when ATen workspace caching is
+disabled.
+
+The workspace size per allocation can be specified via `CUBLAS_WORKSPACE_CONFIG` with the format
+`:[SIZE]:[COUNT]`. For example, `CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8` specifies a total size of
+`2 * 4096 + 8 * 16 KiB`. To force cuBLAS to avoid using workspaces, set
+`CUBLAS_WORKSPACE_CONFIG=:0:0`.
 
 (cufft-plan-cache)=
 
@@ -1316,6 +1496,129 @@ to overlap data transfers with computation.
 
 You can make the {class}`~torch.utils.data.DataLoader` return batches placed in
 pinned memory by passing `pin_memory=True` to its constructor.
+
+(cuda-device-to-host-copies)=
+
+### Device-to-host copies on NVLink-C2C systems
+
+On systems such as NVIDIA Grace Hopper and Grace Blackwell, NVLink-C2C
+connects the GPU to its local CPU. Transfers between the GPU and local CPU
+memory use this connection without a PyTorch configuration option. PyTorch
+delegates transfers made with {meth}`~torch.Tensor.cpu`,
+{meth}`~torch.Tensor.to`, and {meth}`~torch.Tensor.copy_` to CUDA.
+
+A fast interconnect does not eliminate the cost of preparing CPU memory.
+For a CUDA tensor, `tensor.cpu()` allocates a CPU result in pageable memory
+and waits for the copy to finish. Fresh allocations can require physical
+pages to be allocated and mapped on first access, so the first copy can be
+limited by memory allocation and page faults rather than link bandwidth.
+CUDA may stage a copy into fresh pageable memory through an intermediate
+pinned buffer, adding a CPU copy into the destination.
+Pinned memory also has allocation and registration costs, but
+they are paid upfront during allocation. For benchmarking,
+this must be taken into account, see further below. However,
+pinned memory always avoids the CPU-based staging buffer
+and copy that may be used for pageable memory.
+
+Reusing a pageable buffer can also amortize
+these costs as long as its pages remain mapped and physically allocated.
+On hardware-coherent NVLink-C2C systems, populated pageable and pinned
+buffers on the CPU NUMA node local to the source tensor's GPU can have
+similar transfer performance: either NVLink-C2C bandwidth or GPU copy-engine
+throughput limits both. This does not extend to buffers on remote CPU NUMA
+nodes, where differences in memory mapping can lead to different data paths.
+Reuse does not pin pageable memory: it remains eligible for
+swapping or migration to another CPU NUMA node. Pinned buffers remain useful
+for large, repeated transfers because they prevent these movements and help
+maintain transfer performance across hardware-coherent and non-coherent
+systems. However, excessive pinning can put pressure on available RAM
+(see {ref}`cuda-memory-pinning`).
+
+```{note}
+The term "pinning" has two meanings. In CUDA, pinned memory cannot migrate
+from the CPU to the GPU or to another CPU NUMA node. In the Linux kernel,
+pinning refers to page-locking, which makes the physical pages immovable.
+
+On non-coherent systems, both meanings apply: CUDA must page-lock host
+memory to make it accessible to the GPU, as `cudaMallocHost` does on these
+systems. On hardware-coherent systems, only the CUDA meaning applies.
+Pinned memory is automatically populated and mapped for GPU access.
+
+On hardware-coherent systems, pinned memory does not guarantee immovable
+physical pages. Operating system memory compaction can still cause page
+faults, including for memory allocated with `cudaMallocHost` or registered
+with `cudaHostRegister`. Buffer reuse reduces allocation overhead but does
+not guarantee fault-free transfers.
+```
+
+For direct {meth}`~torch.Tensor.copy_` transfers between contiguous CPU and
+CUDA tensors of the same dtype, host blocking depends on `non_blocking`
+and the CPU memory:
+
+- With `non_blocking=False`, PyTorch synchronizes the CUDA stream before
+  returning, so the call blocks the host regardless of whether the CPU
+  memory is pinned or whether the copy reads from or writes to it.
+- With `non_blocking=True` and pinned or registered CPU memory, ordinary
+  copies do not block the host in either direction. For device-to-host
+  copies, explicitly synchronize before accessing the result on the CPU.
+- With `non_blocking=True` and pageable CPU memory, the call may block the
+  host. The behavior depends on staging and other system conditions,
+  including hardware coherence, and cannot be inferred from the flag alone.
+  Blocking can occur in either direction, with additional conditions when
+  writing to CPU memory.
+
+Even with pinned memory and `non_blocking=True`, CUDA calls can block the
+host when stream queues are full or when another thread holds a driver
+lock during a memory management operation. Other exceptions include
+`CUDA_LAUNCH_BLOCKING=1` when CUDA implements the copy with a kernel, and
+special confidential computing operations such as key rotation.
+
+Copies that require temporary buffers, such as non-contiguous copies or
+dtype conversions, can involve additional allocations and copy operations.
+The behavior above describes the underlying transfer, rather than all work
+performed by such a {meth}`~torch.Tensor.copy_` call.
+
+For repeated transfers, such as activation offloading, allocate pinned CPU
+buffers once and reuse them with {meth}`~torch.Tensor.copy_`:
+
+```python
+# Allocate once for a CUDA tensor t with a fixed shape and dtype.
+cpu_buf = torch.empty(t.shape, dtype=t.dtype, device="cpu", pin_memory=True)
+copy_done = torch.cuda.Event()
+
+# Repeat for each transfer, after producing t on the current stream.
+with torch.no_grad():
+    cpu_buf.copy_(t, non_blocking=True)
+copy_done.record(torch.cuda.current_stream(t.device))
+
+# Independent CPU work can run here while the copy is in flight.
+copy_done.synchronize()
+# cpu_buf is now safe to read on the CPU.
+```
+
+Wait for the copy to complete before reading or modifying `cpu_buf` on the
+CPU, and finish consuming its contents before reusing it. Do not modify the
+source tensor while the copy is in flight. `non_blocking=True` avoids waiting
+on the host, but operations on the same CUDA stream still execute in order.
+To overlap the transfer with independent GPU computation, use a separate
+stream and establish the required dependencies and tensor lifetimes as
+described in {ref}`cuda-stream-semantics`.
+
+For a dense CUDA tensor, `tensor.to("cpu", non_blocking=True)` allocates its
+CPU output in pinned memory. Apply the same synchronization described above
+for {meth}`~torch.Tensor.copy_`: wait for the transfer to complete before
+accessing the result on the CPU.
+
+PyTorch's caching host allocator can reuse freed pinned allocations, which
+amortizes allocation costs. See the `pinned_*` options in
+{ref}`cuda-memory-envvars` for allocator configuration.
+
+When measuring bandwidth, distinguish allocation and the first transfer from
+transfers into a reused buffer, and synchronize to measure completion rather
+than enqueue time. Hardware-coherent systems can access pageable memory
+directly, so do not assume every pageable transfer requires a staging buffer.
+See NVIDIA's [Unified Memory performance tuning guidance](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#performance-tuning)
+for details on populated buffers and memory placement.
 
 (cuda-nn-ddp-instead)=
 

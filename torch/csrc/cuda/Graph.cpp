@@ -7,7 +7,6 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/cuda/CUDAGraph.h>
-#include <c10/cuda/CUDAGraphsC10Utils.h>
 
 // Cargo culted partially from csrc/distributed/c10d/init.cpp
 // and partially from csrc/cuda/Stream.cpp.
@@ -27,7 +26,10 @@ void THCPGraph_init(PyObject* module) {
   torch_C_m.def("_graph_pool_handle", &::at::cuda::graph_pool_handle);
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(torch_C_m, "_CUDAGraph")
-      .def(py::init<bool>(), py::arg("keep_graph") = false)
+      .def(
+          py::init<bool, int64_t>(),
+          py::arg("keep_graph") = false,
+          py::arg("num_rng_states") = 8)
       .def(
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
@@ -81,6 +83,10 @@ void THCPGraph_init(PyObject* module) {
           "replay",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))
       .def(
+          "_get_rng_state_buffers",
+          torch::wrap_pybind_function(
+              &at::cuda::CUDAGraph::get_rng_state_buffers))
+      .def(
           "reset",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::reset))
       .def(
@@ -118,6 +124,14 @@ void THCPGraph_init(PyObject* module) {
             return reinterpret_cast<uintptr_t>(graph_exec);
           },
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_raw_cuda_graph_exec",
+          [](::at::cuda::CUDAGraph& self, uintptr_t graph_exec) {
+            self.set_raw_cuda_graph_exec(
+                reinterpret_cast<cudaGraphExec_t>(graph_exec));
+          },
+          py::arg("graph_exec"),
+          py::call_guard<py::gil_scoped_release>())
       .def_static(
           "get_currently_capturing_graph",
           torch::wrap_pybind_function_no_gil(
@@ -129,7 +143,17 @@ void THCPGraph_init(PyObject* module) {
               &::at::cuda::CUDAGraph::begin_capture_to_if_node),
           py::arg("scalar_cuda_pred_tensor"))
       .def(
+          "begin_capture_to_while_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_while_node),
+          py::arg("scalar_cuda_pred_tensor"))
+      .def(
           "end_capture_to_conditional_node",
           torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::end_capture_to_conditional_node));
+              &::at::cuda::CUDAGraph::end_capture_to_conditional_node))
+      .def(
+          "set_conditional_handle_for_current_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::set_conditional_handle_for_current_node),
+          py::arg("scalar_cuda_pred_tensor"));
 }

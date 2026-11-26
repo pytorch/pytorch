@@ -39,11 +39,12 @@ from typing import (
     NoReturn,
     overload,
     Protocol,
+    Self,
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
 )
-from typing_extensions import deprecated, NamedTuple, Self, TypeIs
+from typing_extensions import deprecated, NamedTuple, TypeIs
 
 from torch.torch_version import TorchVersion as _TorchVersion
 
@@ -514,10 +515,12 @@ def _register_namedtuple(
     serialized.
 
     Args:
-        cls: the dataclass type to register
-        serialized_type_name: The serialized name for the dataclass. This is
+        cls: the namedtuple class to register. A tuple subclass that is built
+        as ``cls(*fields)`` also works, and its specs save and load. The key
+        path APIs, such as ``tree_flatten_with_path``, also need ``cls._fields``.
+        serialized_type_name: The serialized name for the class. This is
         required if you want to serialize the pytree TreeSpec containing this
-        namedtuple.
+        class.
     """
     _private_register_pytree_node(
         cls,
@@ -593,15 +596,34 @@ def _register_pytree_node(
 def _deregister_pytree_node(
     cls: type[Any],
 ) -> None:
-    """This is an internal function that is used to deregister a pytree node type
-    for the Python pytree only. This should be only used inside PyTorch.
+    """This is an internal function that is used to deregister a pytree node type.
+    This should be only used inside PyTorch.
     """
     with _NODE_REGISTRY_LOCK:
         del SUPPORTED_NODES[cls]
         node_def = SUPPORTED_SERIALIZED_TYPES[cls]
-        del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
+        # A type registered without a name has no entry, and a later
+        # registration may have taken the name.
+        if SERIALIZED_TYPE_TO_PYTHON_TYPE.get(node_def.serialized_type_name) is cls:
+            del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
         del SUPPORTED_SERIALIZED_TYPES[cls]
         CONSTANT_NODES.discard(cls)
+
+    if not _cxx_pytree_exists:
+        return
+
+    if _cxx_pytree_imported:
+        import optree
+
+        # not everything reaches optree, e.g. register_dataclass and structseq types
+        try:
+            optree.unregister_pytree_node(cls, namespace="torch")
+        except ValueError:
+            pass
+    else:
+        _cxx_pytree_pending_imports[:] = [
+            entry for entry in _cxx_pytree_pending_imports if entry[0][0] is not cls
+        ]
 
 
 def _private_register_pytree_node(
@@ -667,8 +689,19 @@ def _private_register_pytree_node(
             to_dumpable_context,
             from_dumpable_context,
         )
+        # Registering a type again replaces its name, unless a later
+        # registration took that name.
+        old_def = SUPPORTED_SERIALIZED_TYPES.get(cls)
+        if (
+            old_def is not None
+            and SERIALIZED_TYPE_TO_PYTHON_TYPE.get(old_def.serialized_type_name) is cls
+        ):
+            del SERIALIZED_TYPE_TO_PYTHON_TYPE[old_def.serialized_type_name]
         SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
-        SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
+        # Every type registered without a name gets the placeholder, so it
+        # cannot name one of them.
+        if serialized_type_name != NO_SERIALIZED_TYPE_NAME_FOUND:
+            SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -888,7 +921,36 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
-    return typ
+    # Best effort: the name can point to any registered type when the spec was
+    # edited, or when the class under the name changed since it was saved.
+    # A class registered with _register_namedtuple loads too. The
+    # collections.namedtuple factory shares its flatten function but is not a class.
+    node = SUPPORTED_NODES.get(typ)
+    if isinstance(typ, type) and (
+        is_namedtuple_class(typ)
+        or (node is not None and node.flatten_fn is _namedtuple_flatten)
+    ):
+        return typ
+    if (
+        not isinstance(typ, type)
+        or typ in BUILTIN_TYPES
+        or typ.__module__.split(".")[0] == "torch"
+    ):
+        hint = "The spec was edited or is corrupt."
+    else:
+        hint = (
+            "Another class in this process may also be registered under this "
+            "name; if so, give each class its own serialized_type_name. "
+            "Otherwise, regenerate the serialized artifact with the current "
+            "class. To load it as is, register the original namedtuple class "
+            "with `torch.utils._pytree._register_namedtuple(cls, "
+            f"serialized_type_name={dumpable_context!r})`, which replaces {typ} "
+            "under this name in this process."
+        )
+    raise TypeError(
+        f"Can't deserialize TreeSpec of namedtuple class {dumpable_context}: "
+        f"the name points to {typ}, which is not a namedtuple class. {hint}"
+    )
 
 
 def _ordereddict_flatten(d: OrderedDict[Any, T]) -> tuple[list[T], Context]:
@@ -1386,6 +1448,12 @@ class LeafSpec(TreeSpec):
 
     def __repr__(self, indent: int = 0) -> str:
         return "*"
+
+    def __reduce__(self) -> tuple[Callable[[], "LeafSpec"], tuple[()]]:
+        # Reconstruct via the factory rather than the deprecated LeafSpec
+        # constructor, so copy/pickle round-trips don't emit the FutureWarning
+        # and reuse the shared singleton.
+        return (treespec_leaf, ())
 
 
 # All leaves are equivalent, so represent with a single object to save on
@@ -2034,8 +2102,18 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
         return _LEAF_SPEC
 
     if json_schema["type"] not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
+        serialized_type_name = json_schema["type"]
         raise NotImplementedError(
-            f"Deserializing {json_schema['type']} in pytree is not registered.",
+            f"Deserializing {serialized_type_name} in pytree failed because the "
+            "serialized type is not registered in this process. If this type is "
+            "defined in another package, import that package before loading this "
+            "artifact so its pytree registrations run. If you control the type, "
+            "register it with "
+            "`torch.utils._pytree.register_pytree_node(..., "
+            "serialized_type_name=...)` or "
+            "`torch.export.register_dataclass(..., serialized_type_name=...)` "
+            "before deserializing. The `serialized_type_name` must match "
+            f"{serialized_type_name!r}.",
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[json_schema["type"]]

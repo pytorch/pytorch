@@ -12,8 +12,12 @@ import sympy
 import torch
 import torch.fx as fx
 from sympy.core.relational import is_ge, is_gt, is_le, is_lt
-from torch.testing._internal.common_device_type import skipIf
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -21,17 +25,23 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._sympy.functions import (
+    CeilToInt,
     FloorDiv,
+    FloorToInt,
     Identity,
+    IntTrueDiv,
     Max as TorchSymMax,
     Min as TorchSymMin,
     LShift,
     Mod,
+    ModularIndexing,
     OpaqueUnaryFn_cos,
     PythonMod,
     RShift,
     BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
+    ToFloat,
+    TruncToInt,
 )
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
@@ -228,6 +238,22 @@ class TestNumbers(TestCase):
         self.assertTrue(-int_oo > -sympy.oo)
         self.assertIs(min(-int_oo, -sympy.oo), -sympy.oo)
 
+        # oo is "bigger" than int_oo, so mixing them in +/- gives the float
+        # infinity. https://github.com/pytorch/pytorch/issues/195464
+        oo = sympy.oo
+        self.assertIs(int_oo + oo, oo)
+        self.assertIs(int_oo + -oo, -oo)
+        self.assertIs(int_oo - oo, -oo)
+        self.assertIs(int_oo - -oo, oo)
+        self.assertIs(-int_oo + oo, oo)
+        self.assertIs(-int_oo + -oo, -oo)
+        self.assertIs(-int_oo - oo, -oo)
+        self.assertIs(-int_oo - -oo, oo)
+        # and + commutes
+        for a in (int_oo, -int_oo):
+            for b in (oo, -oo):
+                self.assertIs(a + b, b + a)
+
 
 class TestCppPrinter(TestCase):
     def test_min_max_preserve_float_expressions(self):
@@ -280,6 +306,13 @@ class TestValueRanges(TestCase):
 
     def test_pow_half(self):
         ValueRangeAnalysis.pow(ValueRanges.unknown(), ValueRanges.wrap(0.5))
+
+    def test_bound_sympy_negative_pow(self):
+        x = sympy.Symbol("x", integer=True, positive=True)
+
+        self.assertEqual(
+            bound_sympy(x**-1, {x: ValueRanges(3, 4)}), ValueRanges.unknown()
+        )
 
     @parametrize("fn", BINARY_OPS)
     @parametrize("dtype", ("int", "float"))
@@ -366,6 +399,68 @@ class TestValueRanges(TestCase):
                     self.assertEqual(len(unique), 1)
                 else:
                     self.assertEqual(len(unique), 2)
+
+    def test_bool_minimum_maximum(self):
+        vals = [sympy.false, sympy.true]
+        for fn in ("minimum", "maximum"):
+            for a, b in itertools.product(generate_range(vals), repeat=2):
+                with self.subTest(fn=fn, a=a, b=b):
+                    ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
+                    self.assertTrue(ref_r.is_bool)
+                    unique = set()
+                    for a0, b0 in itertools.product(vals, repeat=2):
+                        if a0 not in a or b0 not in b:
+                            continue
+                        if fn == "minimum":
+                            expected = bool(a0) and bool(b0)
+                        else:
+                            expected = bool(a0) or bool(b0)
+                        r = sympy.true if expected else sympy.false
+                        self.assertIn(r, ref_r)
+                        unique.add(r)
+                    if ref_r.lower == ref_r.upper:
+                        self.assertEqual(len(unique), 1)
+                    else:
+                        self.assertEqual(len(unique), 2)
+
+    def test_bool_minimum_maximum_mixed_raises(self):
+        # min/max require both operands to be boolean or both non-boolean;
+        # a mixed boolean/non-boolean pair must raise.
+        bool_range = ValueRanges(sympy.false, sympy.true)
+        int_range = ValueRanges(sympy.Integer(0), sympy.Integer(4))
+        for fn in ("minimum", "maximum"):
+            for a, b in ((bool_range, int_range), (int_range, bool_range)):
+                with self.subTest(fn=fn, a=a, b=b):
+                    with self.assertRaisesRegex(
+                        AssertionError, "operands must both be boolean"
+                    ):
+                        getattr(ValueRangeAnalysis, fn)(a, b)
+
+    def test_eq_ne_bool_ranges(self):
+        # eq/ne must accept boolean ranges. sympy booleans do not support
+        # ordered comparison (bool >/< raises), which the disjoint-range test in
+        # eq would otherwise hit. Regression test for eq/ne raising TypeError on
+        # a boolean range, which test_binary_bool_ref_range does not cover (it
+        # omits COMPARE_OPS).
+        full = ValueRanges(sympy.false, sympy.true)
+        T = ValueRanges.wrap(sympy.true)
+        F = ValueRanges.wrap(sympy.false)
+        for a, b in [(full, full), (full, T), (F, full), (T, F), (T, T), (F, F)]:
+            with self.subTest(a=a, b=b):
+                for fn in ("eq", "ne"):
+                    r = getattr(ValueRangeAnalysis, fn)(a, b)
+                    self.assertTrue(r.is_bool)
+                    self.assertIn(r.lower, (sympy.true, sympy.false))
+                    self.assertIn(r.upper, (sympy.true, sympy.false))
+        # singletons resolve precisely: equal -> definitely eq, disjoint -> not
+        self.assertEqual(ValueRangeAnalysis.eq(T, T), T)
+        self.assertEqual(ValueRangeAnalysis.ne(T, T), F)
+        self.assertEqual(ValueRangeAnalysis.eq(F, F), T)
+        self.assertEqual(ValueRangeAnalysis.ne(F, F), F)
+        self.assertEqual(ValueRangeAnalysis.eq(T, F), F)
+        self.assertEqual(ValueRangeAnalysis.ne(T, F), T)
+        self.assertEqual(ValueRangeAnalysis.eq(F, T), F)
+        self.assertEqual(ValueRangeAnalysis.ne(F, T), T)
 
     @parametrize("fn", UNARY_OPS)
     def test_unary_ref_range(self, fn):
@@ -502,7 +597,7 @@ class TestValueRanges(TestCase):
                 result = x % y
                 y_range = ValueRanges(y, y)
                 r = ValueRangeAnalysis.python_mod(ValueRanges(x, x), y_range)
-                self.assertIn(result, r, f"x={x}, y={y}, result={result}, range={r}")
+                self.assertIn(result, r, lambda msg: f"{msg}\nx={x}, y={y}, result={result}, range={r}")
 
     def test_bound_sympy_mod_subtraction(self):
         s0 = sympy.Symbol("s0", integer=True)
@@ -550,6 +645,8 @@ class TestValueRanges(TestCase):
 
 
 class TestSympyInterp(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
@@ -668,10 +765,25 @@ class TestSympyInterp(TestCase):
                     gm(*args),
                 )
 
+    def test_python_interp_fx_int_truediv(self):
+        x = sympy.Symbol("x", integer=True)
+        y = sympy.Symbol("y", integer=True)
+        expr = IntTrueDiv(x, y)
+
+        def trace_f(px, py):
+            return sympy_interp(PythonReferenceAnalysis, {x: px, y: py}, expr)
+
+        gm = fx.symbolic_trace(trace_f)
+        self.assertEqual(gm(7, 2), 3.5)
+
+class TestSympyInterpDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
-    def test_tensor_interp(self, fn):
+    def test_tensor_interp(self, device, fn):
         # Skip operations not implemented or not applicable for tensors
         if fn in ("div", "truncdiv", "int_truediv", "mod", "round_decimal"):
             return
@@ -706,7 +818,9 @@ class TestSympyInterp(TestCase):
             with self.subTest(args=args):
                 tensor_args = [
                     torch.tensor(
-                        a, dtype=torch.double if isinstance(a, float) else torch.int64
+                        a,
+                        dtype=torch.double if isinstance(a, float) else torch.int64,
+                        device=device,
                     )
                     for a in args
                 ]
@@ -737,7 +851,7 @@ class TestSympyInterp(TestCase):
                         torch.allclose(
                             direct_result, interp_result, rtol=1e-5, atol=1e-8
                         ),
-                        f"Mismatch for {fn}{args}: direct={direct_result}, interp={interp_result}",
+                        lambda msg: f"{msg}\nMismatch for {fn}{args}: direct={direct_result}, interp={interp_result}",
                     )
 
                     if fn in UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS:
@@ -790,6 +904,8 @@ class TestSympySolve(TestCase):
             Eq(FloorDiv(a, b), c),
             # Result is a 'sympy.Or'.
             Ne(FloorDiv(a, b), c),
+            # Relational operation over booleans, not arithmetic expressions.
+            Eq(Eq(a, 0, evaluate=False), Eq(b, 0, evaluate=False), evaluate=False),
         ]
 
         for case in cases:
@@ -1031,6 +1147,79 @@ class TestSympySolve(TestCase):
 
 
 class TestSympyFunctions(TestCase):
+    def test_rounding_to_int_safely_canonicalizes_pytorch_integer_functions(self):
+        x, y = sympy.symbols("x y")
+        integer_exprs = (
+            CeilToInt(x),
+            FloorDiv(x, y),
+            FloorToInt(x),
+            TruncToInt(x),
+        )
+
+        for outer in (CeilToInt, FloorToInt, TruncToInt):
+            for inner in integer_exprs:
+                with self.subTest(outer=outer, inner=inner):
+                    self.assertIs(outer(inner), inner)
+
+        integer_symbol = sympy.Symbol("integer_symbol", integer=True)
+        for rounding in (CeilToInt, FloorToInt, TruncToInt):
+            with self.subTest(rounding=rounding):
+                self.assertIs(rounding(integer_symbol), integer_symbol)
+
+    def test_trunc_to_int_preserves_integer_composite_canonicalization(self):
+        integer_symbol = sympy.Symbol("integer_symbol", integer=True)
+        addition = integer_symbol + 1
+        multiplication = 2 * integer_symbol
+
+        self.assertIs(TruncToInt(addition), addition)
+        self.assertIs(TruncToInt(multiplication), multiplication)
+
+    @parametrize("modulo", (Mod, PythonMod))
+    @parametrize("rounding", (CeilToInt, FloorToInt, TruncToInt))
+    def test_rounding_to_int_canonicalizes_integer_modulo(self, modulo, rounding):
+        integer_symbol = sympy.Symbol("integer_symbol", integer=True)
+        expr = modulo(integer_symbol, sympy.Integer(3))
+
+        self.assertIs(expr.func, modulo)
+        self.assertIs(rounding(expr), expr)
+
+    @parametrize("modulo", (Mod, PythonMod))
+    @parametrize("rounding", (CeilToInt, FloorToInt))
+    def test_rounding_to_int_does_not_canonicalize_float_modulo(
+        self, modulo, rounding
+    ):
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        value = sympy.Float("0.7") * ToFloat(s0)
+        expr = modulo(value, sympy.Float(2.0))
+
+        self.assertIs(expr.func, modulo)
+        self.assertIs(rounding(expr).func, rounding)
+
+    def test_rounding_to_int_does_not_canonicalise_expressions_with_incorrect_assumptions(
+        self,
+    ):
+        s14 = sympy.Symbol("s14", integer=True, positive=True)
+        s37 = sympy.Symbol("s37", integer=True, positive=True)
+        s46 = sympy.Symbol("s46", integer=True, positive=True)
+        incorrectly_assumed_integer = sympy.Mul(
+            sympy.Rational(1, 22),
+            24 * s37 + 672,
+            FloorDiv(s14 * s46, 2016),
+        )
+
+        self.assertEqual(
+            incorrectly_assumed_integer.subs({s14: 2016, s37: 1, s46: 1}),
+            sympy.Rational(348, 11),
+        )
+        if incorrectly_assumed_integer.is_integer is not True:
+            self.skipTest("SymPy does not infer this expression to be integer-valued")
+
+        for rounding in (CeilToInt, FloorToInt):
+            with self.subTest(rounding=rounding):
+                result = rounding(incorrectly_assumed_integer)
+                self.assertIs(result.func, rounding)
+                self.assertEqual(result.args, (incorrectly_assumed_integer,))
+
     def test_shift_edges(self):
         x = sympy.Symbol("x", integer=True)
         self.assertEqual(LShift(x, 0), x)
@@ -1061,6 +1250,39 @@ class TestSympyFunctions(TestCase):
         x = sympy.Symbol("x", integer=True)
         self.assertIsInstance(TorchSymMin(128 * x, 512 * x), TorchSymMin)
         self.assertIsInstance(TorchSymMax(128 * x, 512 * x), TorchSymMax)
+
+    def test_modular_indexing_does_not_strip_unproven_nonnegative_term(self):
+        q0 = sympy.Symbol("q0", integer=True, nonnegative=True)
+        n = sympy.Symbol("n", integer=True, positive=True)
+        poisoned_base = n**2 + FloorDiv(-1 - q0, 2)
+        expr = ModularIndexing(poisoned_base, 1, n**2)
+
+        self.assertNotEqual(expr, ModularIndexing(-1 - q0, 2, n**2))
+        for nv in range(2, 9):
+            for q0v in range(4 * nv * nv):
+                actual = int(expr.subs({n: nv, q0: q0v}))
+                expected = (nv * nv + (-1 - q0v) // 2) % (nv * nv)
+                self.assertEqual(actual, expected)
+                self.assertTrue(0 <= actual < nv * nv)
+
+    def test_modular_indexing_trunc_to_int_float_zero(self):
+        # https://github.com/pytorch/pytorch/issues/203979
+        from torch.utils._sympy.functions import ToFloat, TruncToInt
+
+        c0 = sympy.Symbol("c0", integer=True, nonnegative=True)
+        s = sympy.Symbol("s", integer=True, positive=True)
+        r = TruncToInt(ToFloat(s))
+        expr = ModularIndexing(Identity(c0), r + 1, r)
+
+        const_part = expr.subs({c0: 0, s: 0})
+        self.assertFalse(const_part.atoms(sympy.Float))
+        for sv in range(1, 5):
+            for c0v in range(20):
+                actual = int(expr.subs({s: sv, c0: c0v}).expand(identity=True))
+                self.assertEqual(actual, (c0v // (sv + 1)) % sv)
+
+        self.assertIs(TruncToInt(sympy.Float(0.0)), sympy.S.Zero)
+        self.assertEqual(TruncToInt(sympy.Integer(2**60 + 1)), 2**60 + 1)
 
 
 class TestSingletonInt(TestCase):
@@ -1236,7 +1458,9 @@ class TestCCodePrinting(TestCase):
 
 instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
+instantiate_device_type_tests(TestSympyInterpDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestSympySolve)
+instantiate_parametrized_tests(TestSympyFunctions)
 
 
 if __name__ == "__main__":

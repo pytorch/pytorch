@@ -3,6 +3,8 @@
 # To run:
 # python test/distributed/test_p2p_ipc.py
 
+import ctypes
+import errno
 import os
 import unittest
 from contextlib import contextmanager
@@ -11,8 +13,10 @@ import torch
 from torch.multiprocessing.reductions import reduce_tensor
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     requires_cuda_p2p_access,
     run_tests,
+    skipIfRocmVersionLessThan,
     TEST_WITH_ROCM,
 )
 
@@ -20,6 +24,45 @@ from torch.testing._internal.common_utils import (
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
+
+# Values of Expandable_Segments_Handle_Type in c10/cuda/CUDAAllocatorConfig.h.
+_POSIX_FD_HANDLE = 1
+_FABRIC_HANDLE = 2
+
+_skip_unless_fabric_config = unittest.skipUnless(
+    os.environ.get("TEST_CONFIG", "") == "h100-fabric" or TEST_WITH_ROCM,
+    "fabric handle IPC path only exercised on the fabric-capable h100-fabric CI config "
+    "and on ROCm; unconditionally skipped elsewhere (deadlocks on B200, see "
+    "https://github.com/pytorch/pytorch/issues/189879)",
+)
+
+
+def _expandable_handle_type(tensor: torch.Tensor) -> int:
+    ptr = tensor.data_ptr()
+    for segment in torch.cuda.memory._snapshot()["segments"]:
+        if segment["address"] <= ptr < segment["address"] + segment["total_size"]:
+            if not segment["is_expandable"]:
+                raise AssertionError("tensor is not in an expandable segment")
+            return segment["expandable_segment_handle_type"]
+    raise AssertionError("tensor not found in the allocator snapshot")
+
+
+def _pidfd_getfd_errno(pid: int, fd: int) -> int:
+    """Return 0 if this process may duplicate `fd` from process `pid`, else errno."""
+    try:
+        pidfd = os.pidfd_open(pid)
+    except OSError as e:
+        return e.errno
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        # SYS_pidfd_getfd is 438 on every architecture (unified syscall table).
+        new_fd = libc.syscall(438, pidfd, fd, 0)
+        if new_fd == -1:
+            return ctypes.get_errno()
+        os.close(new_fd)
+        return 0
+    finally:
+        os.close(pidfd)
 
 
 @contextmanager
@@ -38,8 +81,10 @@ def _scoped_env(key: str, value: str):
 
 @requires_cuda_p2p_access()
 class P2PIpcTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return "gloo"
 
     def _init_device(self, *, allocate: bool = True) -> None:
@@ -62,6 +107,8 @@ class P2PIpcTest(MultiProcContinuousTest):
         tensor_size: int = 2333,
         *,
         consumer_prealloc: bool = True,
+        free_producer_segment: bool = False,
+        expected_handle_type: int | None = None,
     ) -> None:
         """
         Core P2P IPC test implementation.
@@ -81,19 +128,44 @@ class P2PIpcTest(MultiProcContinuousTest):
                         to exercise the expandable_segments IPC path where the
                         consumer has never touched the allocator (regression
                         guard for #179220).
+            free_producer_segment: After the data check, have the consumer
+                        release its import and the producer free the shared
+                        segment, running ExpandableSegment::unmapHandles on the
+                        exported handle (regression guard for #190860). Implies a
+                        single consumer so the shared IPC ref-counter (init 1)
+                        decrements to exactly 0 on release and the producer can
+                        reclaim the block (with multiple consumers it never
+                        reaches 0).
+            expected_handle_type: Require the expandable segment to be shared
+                        with this handle type. On ROCm the type follows the
+                        device (fabric needs UALink), so the test skips when
+                        the device uses the other type.
         """
         self._init_device(allocate=(self.rank == 0 or consumer_prealloc))
 
-        tensor: torch.Tensor
+        # Freeing the shared segment needs exactly one consumer (see above).
+        single_consumer = free_producer_segment
+        is_consumer = self.rank != 0 and (not single_consumer or self.rank == 1)
 
+        tensor = None
+        tensor_meta = None
         if self.rank == 0:
             tensor = torch.randn(tensor_size, device=self.device)
+        if expected_handle_type is not None:
+            # Decided on rank 0 before exporting, so all ranks skip together
+            # and a skip never exports under a lowered fd limit.
+            handle_type = [_expandable_handle_type(tensor) if self.rank == 0 else None]
+            torch.distributed.broadcast_object_list(handle_type, src=0)
+            self._require_handle_type(handle_type[0], expected_handle_type)
+        if self.rank == 0:
             tensor_meta = reduce_tensor(tensor)
             torch.distributed.broadcast_object_list([tensor_meta], src=0)
         else:
             recv_list = [None]
             torch.distributed.broadcast_object_list(recv_list, src=0)
             tensor_meta = recv_list[0]
+
+        if is_consumer:
             func, args = tensor_meta
             args = list(args)
             args[6] = self.rank
@@ -107,42 +179,151 @@ class P2PIpcTest(MultiProcContinuousTest):
         device_module.synchronize()
         torch.distributed.barrier()
 
-        expected = torch.ones_like(tensor)
-        self.assertEqual(tensor, expected, atol=0.0, rtol=0.0)
+        if self.rank == 0 or is_consumer:
+            expected = torch.ones_like(tensor)
+            self.assertEqual(tensor, expected, atol=0.0, rtol=0.0)
+            if is_consumer:
+                # assertEqual compares on the GPU. Also check a device-to-host
+                # copy out of the imported mapping, which has no host access
+                # for fabric imports on ROCm.
+                self.assertTrue(tensor.cpu().eq(1).all())
+                # Device-to-device copies of 16 MiB or more take a different
+                # runtime path than small ones.
+                self.assertTrue(tensor.clone().eq(1).all())
+            # Drop the comparison tensor so it doesn't pin the segment that the
+            # producer is about to free below.
+            del expected
+
+        if free_producer_segment:
+            # Release the consumer's import (ref-counter 1 -> 0), then free the
+            # producer's now-unreferenced segment -> unmapHandles.
+            if is_consumer:
+                del tensor
+                device_module.synchronize()
+            torch.distributed.barrier()  # consumer released before producer frees
+            if self.rank == 0:
+                del tensor_meta, tensor
+                torch.cuda.ipc_collect()
+                torch.cuda.empty_cache()
 
         torch.distributed.barrier()
+
+    def _require_pidfd_getfd(self) -> None:
+        # The POSIX fd import duplicates the exporter's fds with pidfd_getfd,
+        # which some hosts deny between sibling processes even with
+        # CAP_SYS_PTRACE. Probe it on every rank before exporting, so all
+        # ranks skip together instead of the producer waiting at a barrier.
+        fds = None
+        info = [None]
+        if self.rank == 0:
+            fds = os.pipe()
+            info = [(os.getpid(), fds[0])]
+        torch.distributed.broadcast_object_list(info, src=0)
+        err = 0 if self.rank == 0 else _pidfd_getfd_errno(*info[0])
+        errs = [None] * torch.distributed.get_world_size()
+        torch.distributed.all_gather_object(errs, err)
+        if fds is not None:
+            for fd in fds:
+                os.close(fd)
+        failed = sorted({e for e in errs if e})
+        if any(e in (errno.EPERM, errno.EACCES, errno.ENOSYS) for e in failed):
+            self.skipTest(
+                f"pidfd_getfd is denied on this host: {os.strerror(failed[0])}"
+            )
+        self.assertEqual(failed, [], "pidfd_getfd probe failed unexpectedly")
+
+    def _require_handle_type(self, handle_type: int, expected: int) -> None:
+        other = _FABRIC_HANDLE if expected == _POSIX_FD_HANDLE else _POSIX_FD_HANDLE
+        if TEST_WITH_ROCM and handle_type == other:
+            self.skipTest(f"device shares expandable segments with type {other}")
+        self.assertEqual(handle_type, expected)
 
     def test_p2p_ipc(self) -> None:
         """Test P2P IPC with regular cudaMalloc allocations."""
         self._test_p2p_ipc_impl()
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "expandable_segments mode is not supported on ROCm"
-    )
+    @_skip_unless_fabric_config
     def test_p2p_ipc_expandable_segments(self) -> None:
         """
-        Test P2P IPC with expandable segments enabled.
+        Test P2P IPC with expandable segments enabled. Exercises the
+        SHAREABLE_CUDA_EXPANDABLE_SEGMENT path in ExpandableSegment::share /
+        fromShared / unmapHandles and guards two bugs:
 
-        Exercises the SHAREABLE_CUDA_EXPANDABLE_SEGMENT path in
-        ExpandableSegment::share / fromShared. The consumer does NOT
-        pre-allocate: that's required to catch the #179220 (EBADF) bug where
-        the consumer's process-global handle_type was UNSPECIFIED and the
-        wire header did not carry the producer's handle type, causing the
-        consumer to read a 64-byte fabric handle as a 4-byte POSIX fd.
+        - #179220 (EBADF): the consumer imports without pre-allocating, so its
+          process-global handle_type stays UNSPECIFIED; if the wire header did
+          not carry the producer's handle type it would misread a fabric handle
+          as a POSIX fd. Checked by reading the producer's data through the
+          shared segment.
+        - #190860: after the consumer releases, the producer frees the shared
+          segment, running unmapHandles on the exported fabric shareable_handle.
+          Pre-fix, close(std::get<int>(*h.shareable_handle)) threw "std::get:
+          wrong index for variant" for fabric handles (fabric-only; posix-fd
+          stores an int, harmless no-op).
+
+        A single consumer keeps the IPC ref-counter exact (1 -> 0 on release)
+        so the producer can reclaim and free the segment.
         """
         # Enable IPC handles for expandable segments (disabled by default in
         # fbcode). Use a scoped env so state does not leak across tests.
         with _scoped_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC", "1"):
             torch.cuda.memory._set_allocator_settings("expandable_segments:True")
             torch.cuda.empty_cache()
-
-            # Use a larger tensor size (8MB) to ensure expandable segment
-            # allocation. Default segment size is 2MB, so this will trigger
-            # segment creation.
+            # 32 MiB: larger than the 2 MiB default segment size, forcing an
+            # expandable segment, and large enough for the consumer's
+            # device-to-device copy to take the large-copy path.
             self._test_p2p_ipc_impl(
-                tensor_size=2 * 1024 * 1024,
+                tensor_size=8 * 1024 * 1024,
                 consumer_prealloc=False,
+                free_producer_segment=True,
+                expected_handle_type=_FABRIC_HANDLE,
             )
+
+    @unittest.skipUnless(TEST_WITH_ROCM, "POSIX fd variant only runs on ROCm")
+    @skipIfRocmVersionLessThan((10, 2))
+    def test_p2p_ipc_expandable_segments_posix_fd(self) -> None:
+        """
+        test_p2p_ipc_expandable_segments on ROCm devices without fabric handle
+        support, which share expandable segments with POSIX fds.
+        """
+        self._require_pidfd_getfd()
+        with _scoped_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC", "1"):
+            torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+            torch.cuda.empty_cache()
+            self._test_p2p_ipc_impl(
+                tensor_size=8 * 1024 * 1024,
+                consumer_prealloc=False,
+                free_producer_segment=True,
+                expected_handle_type=_POSIX_FD_HANDLE,
+            )
+
+    @_skip_unless_fabric_config
+    def test_p2p_ipc_expandable_segments_many_chunks(self) -> None:
+        """
+        Share an expandable segment with more chunks than the process may open
+        file descriptors. POSIX fd handles keep one fd open per chunk; fabric
+        handles keep none.
+        """
+        import resource
+
+        num_chunks = 128
+        chunk_size = 20 * 1024 * 1024
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        with _scoped_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC", "1"):
+            torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+            torch.cuda.empty_cache()
+            self._init_device()
+            num_open = len(os.listdir("/proc/self/fd"))
+            # Below num_chunks, so sharing with one POSIX fd per chunk would fail.
+            limit = num_open + num_chunks * 3 // 4
+            resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
+            try:
+                self._test_p2p_ipc_impl(
+                    tensor_size=num_chunks * chunk_size // 4,
+                    free_producer_segment=True,
+                    expected_handle_type=_FABRIC_HANDLE,
+                )
+            finally:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
 
     @classmethod
     def tearDownClass(cls):

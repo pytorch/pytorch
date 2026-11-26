@@ -65,7 +65,7 @@ Operator LlgaGraphHelper::makeBinaryOp(Node* node, opkind kind) {
 // Map a PyTorch op to its corresponding oneDNN Graph op.
 // If mapping isn't possible, then create a wildcard op instead.
 // The mapping is done as per oneDNN Graph op schema defined in
-// third_party/ideep/mkl-dnn/src/interface/op_def.hpp.
+// third_party/oneDNN/src/graph/interface/op_def.hpp.
 Operator LlgaGraphHelper::createOperator(Node* node) {
   auto nodeKind = node->kind();
   // we're using an if-else clause instead of a switch statement
@@ -343,7 +343,7 @@ static void mayAddListConstructIntoConcatPartition(
     Node* n,
     OpPartitionMap& opToOwningPartition) {
   // Since prim::ListConstruct is not visible to the LLGA,
-  // it will not be in any partition returned from partfuseritioning results.
+  // it will not be in any partition returned from partitioning results.
   // We need rewrite opToOwningPartition to make the prim::ListConstruct to be
   // 'virtually' in the same partition with the aten::cat, so that
   // prim::ListConstruct can be fused into the fusion group by graph fuser.

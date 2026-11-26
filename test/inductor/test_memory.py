@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import functools
 import unittest
 from unittest import mock
 
@@ -7,8 +8,12 @@ from torch._C import FileCheck
 from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import run_and_get_triton_code
-from torch.testing._internal.common_utils import serialTest, skipIfXpu
+from torch._inductor.utils import contains_collective, run_and_get_triton_code
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    serialTest,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -55,6 +60,7 @@ class Foo(torch.nn.Module):
 # generate a different wrapper. Override the threshold to make these tests
 # happy.
 @config.patch("score_fusion_memory_threshold", 1)
+@instantiate_parametrized_tests
 class TestOperatorReorderForPeakMemory(TestCase):
     def setUp(self):
         super().setUp()
@@ -240,11 +246,11 @@ class TestOperatorReorderForPeakMemory(TestCase):
             outp = compiled_model(self.inputs)
             self.assertTrue(same(outp, outp_corr))
 
-    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
+    @parametrize("increase_gb", (None, 0.0))
     @mock.patch.object(config, "allow_buffer_reuse", False)
     @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
     @config.patch("test_configs.track_memory_lifecycle", "assert")
-    def test_mutation_size_propagation(self):
+    def test_mutation_size_propagation(self, increase_gb):
         """
         This tests correct size propagation in the case of mutations.
         In this example, buf1 is a mutation of buf0; we should have:
@@ -304,10 +310,13 @@ class TestOperatorReorderForPeakMemory(TestCase):
         a = [torch.randn(32, 32, device=GPU_TYPE) for _ in range(4)]
         p = torch.ones(a[0].size(), dtype=torch.bfloat16, device=GPU_TYPE)
 
-        with mock.patch.object(
-            memory,
-            "assign_memory_planning_info_for_scheduler_buffers",
-            assign_memory_planning_info_for_scheduler_buffers_with_records,
+        with (
+            mock.patch.object(
+                memory,
+                "assign_memory_planning_info_for_scheduler_buffers",
+                assign_memory_planning_info_for_scheduler_buffers_with_records,
+            ),
+            config.patch(fusion_memory_timeline_peak_memory_increase_gb=increase_gb),
         ):
             f_compiled = torch.compile(f)
             f_compiled(a, p)
@@ -554,6 +563,157 @@ class TestOperatorReorderForPeakMemory(TestCase):
                     f"because different ranks may execute collectives in different orders."
                 ),
             )
+
+
+def _hoist(nodes, target):
+    # move target and its ancestors to the front, keeping their relative order
+    need = [n for n in nodes if n is target or n.get_name() in target.ancestors]
+    return need + [n for n in nodes if n not in need]
+
+
+def _producers(nodes, kind):
+    # latest non-collective ancestor of each collective
+    return [
+        max(
+            (m for m in nodes if m.get_name() in c.ancestors and kind(m) == "-"),
+            key=nodes.index,
+        )
+        for c in nodes
+        if kind(c) == "C"
+    ]
+
+
+def compute_only(nodes, kind):
+    target = next(p for p in _producers(nodes, kind) if nodes.index(p) != 0)
+    return _hoist(nodes, target)
+
+
+def second_collective_first(nodes, kind):
+    # collectives are chained by dependencies, so no topological order swaps them; swap positions directly
+    # (not a valid order, but the guard must reject it before it is used)
+    i, j = (k for k, n in enumerate(nodes) if kind(n) == "C")
+    order = list(nodes)
+    order[i], order[j] = order[j], order[i]
+    return order
+
+
+def first_wait_last(nodes, kind):
+    # only the first wait moves, to just before the final add
+    first = next(n for n in nodes if kind(n) == "W")
+    rest = [n for n in nodes if n is not first]
+    return rest[:-1] + [first, rest[-1]]
+
+
+@unittest.skipUnless(HAS_GPU, "requires GPU")
+class TestPeakMemoryPreserveCollectiveOrder(TestCase):
+    def setUp(self):
+        super().setUp()
+        import torch.distributed as dist
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+        self.addCleanup(dist.destroy_process_group)
+        self.group = dist.group.WORLD.group_name
+
+    def compile_with(self, *candidates):
+        """Compile mm -> all_reduce -> wait twice offering the candidate orders, each estimated below the
+        input order so it is chosen unless rejected. Returns input order, chosen order, candidate orders, log."""
+        from torch._inductor.utils import contains_wait
+
+        group, seen = self.group, {}
+        orig_reorder = memory.reorder_for_peak_memory
+        orig_estimate = memory.estimate_peak_memory
+
+        def fn(x, y):
+            c10d = torch.ops._c10d_functional
+            r1 = c10d.wait_tensor(c10d.all_reduce(x @ x, "sum", group))
+            r2 = c10d.wait_tensor(c10d.all_reduce(y @ y, "sum", group))
+            return r1 + r2
+
+        def kind(n):
+            return "C" if contains_collective(n) else "W" if contains_wait(n) else "-"
+
+        def favor_candidates(order, *args):
+            peak, timeline = orig_estimate(order, *args)
+            if list(order) == seen["input"]:
+                seen["baseline_peak"] = peak
+                return peak, timeline
+            return seen["baseline_peak"] - 1, timeline
+
+        def reorder(nodes, *args, methods=None):
+            seen["input"] = list(nodes)
+            seen["kinds"] = "".join(map(kind, nodes)).replace("-", "")
+            seen["candidates"] = [c(nodes, kind) for c in candidates]
+            named = [
+                functools.update_wrapper(functools.partial(c, kind=kind), c)
+                for c in candidates
+            ]
+            seen["chosen"] = orig_reorder(nodes, *args, methods=named)
+            return seen["chosen"]
+
+        x, y = (torch.randn(64, 64, device=GPU_TYPE) for _ in range(2))
+        with (
+            mock.patch.object(memory, "reorder_for_peak_memory", reorder),
+            mock.patch.object(memory, "estimate_peak_memory", favor_candidates),
+            self.assertLogs("torch._inductor.memory", level="INFO") as logs,
+        ):
+            torch._dynamo.reset()
+            torch.compile(fn)(x, y)
+        self.assertEqual(sorted(seen["kinds"]), ["C", "C", "W", "W"])
+        return seen["input"], seen["chosen"], seen["candidates"], "\n".join(logs.output)
+
+    @config.patch(
+        reorder_for_peak_memory=True,
+        reorder_for_peak_memory_preserve_collective_order=True,
+    )
+    def test_collective_swap_rejected(self):
+        before, chosen, (candidate,), log = self.compile_with(second_collective_first)
+        first, second = (n for n in before if contains_collective(n))
+        self.assertIn(first.get_name(), second.ancestors)
+        self.assertNotEqual(memory.comm_order(candidate), memory.comm_order(before))
+        self.assertIn("second_collective_first rejected: changes collective order", log)
+        self.assertEqual(chosen, before)
+
+    @config.patch(
+        reorder_for_peak_memory=True,
+        reorder_for_peak_memory_preserve_collective_order=True,
+    )
+    def test_wait_only_move_rejected(self):
+        before, chosen, _, log = self.compile_with(first_wait_last)
+        self.assertIn("first_wait_last rejected: changes collective order", log)
+        self.assertEqual(chosen, before)
+
+    @config.patch(
+        reorder_for_peak_memory=True,
+        reorder_for_peak_memory_preserve_collective_order=True,
+    )
+    def test_all_rejected_keeps_input_order(self):
+        before, chosen, _, log = self.compile_with(
+            second_collective_first, first_wait_last
+        )
+        self.assertEqual(log.count("rejected: changes collective order"), 2)
+        self.assertEqual(chosen, before)
+
+    @config.patch(
+        reorder_for_peak_memory=True,
+        reorder_for_peak_memory_preserve_collective_order=True,
+    )
+    def test_compute_reorder_chosen(self):
+        before, chosen, (candidate,), log = self.compile_with(compute_only)
+        self.assertNotIn("rejected", log)
+        self.assertNotEqual(candidate, before)
+        self.assertEqual(chosen, candidate)
+        self.assertEqual(memory.comm_order(chosen), memory.comm_order(before))
+
+    @config.patch(
+        reorder_for_peak_memory=True,
+        reorder_for_peak_memory_preserve_collective_order=False,
+    )
+    def test_disabled_allows_collective_reorder(self):
+        before, chosen, (candidate,), log = self.compile_with(first_wait_last)
+        self.assertNotIn("rejected", log)
+        self.assertEqual(chosen, candidate)
+        self.assertNotEqual(memory.comm_order(chosen), memory.comm_order(before))
 
 
 if __name__ == "__main__":

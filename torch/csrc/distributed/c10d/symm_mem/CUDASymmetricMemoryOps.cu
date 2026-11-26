@@ -20,6 +20,8 @@
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
+#include <c10/util/irange.h>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
@@ -191,6 +193,7 @@ at::Tensor multimem_all_reduce_(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_all_reduce_: multicast support is required.");
+  GroupStreamGuard stream_guard(group_name);
 
   const size_t alignment =
       get_and_verify_alignment(input, "multimem_all_reduce_");
@@ -290,6 +293,7 @@ at::Tensor multimem_one_shot_reduce_out(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_one_shot_reduce: requires multicast support.");
+  GroupStreamGuard stream_guard(group_name);
 
   int rank = symm_mem->get_rank();
   int world_size = symm_mem->get_world_size();
@@ -411,6 +415,7 @@ at::Tensor multimem_all_gather_out(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_all_gather_out: output must have multicast support.");
+  GroupStreamGuard stream_guard(group_name);
 
   TORCH_CHECK(
       input.is_contiguous(),
@@ -469,6 +474,66 @@ at::Tensor multimem_all_gather_out(
   return out;
 }
 
+// Copy a source tensor's bytes into a symm_mem allocation's multicast address
+// at a given byte offset, using the CUDA Copy Engine on the current stream.
+//
+// Writing to the multicast pointer causes the NVSwitch to broadcast the write
+// to all peers' backing memory. Used by the copy-engine multicast all-gather.
+//
+// Precondition: `symm_mem_out` is a tensor whose storage was allocated via
+// empty_strided_p2p() and the underlying SymmetricMemory handle has multicast
+// support. `byte_offset` is in bytes and is relative to the base of the
+// multicast region (not the tensor's storage_offset).
+at::Tensor memcpy_to_multicast_(
+    at::Tensor& symm_mem_out,
+    const at::Tensor& src,
+    int64_t byte_offset,
+    std::string group_name) {
+  TORCH_CHECK(
+      src.is_contiguous(),
+      "symm_mem::memcpy_to_multicast_: src must be contiguous.");
+  TORCH_CHECK(
+      src.device().is_cuda() && symm_mem_out.device().is_cuda(),
+      "symm_mem::memcpy_to_multicast_: src and dst must be CUDA tensors.");
+  TORCH_CHECK(
+      byte_offset >= 0,
+      "symm_mem::memcpy_to_multicast_: byte_offset must be >= 0 (got ",
+      byte_offset,
+      ").");
+
+  auto symm_mem = c10d::symmetric_memory::rendezvous(symm_mem_out, group_name);
+  TORCH_CHECK(
+      symm_mem != nullptr,
+      "symm_mem::memcpy_to_multicast_: dst must be allocated with "
+      "empty_strided_p2p().");
+  TORCH_CHECK(
+      symm_mem->has_multicast_support(),
+      "symm_mem::memcpy_to_multicast_: dst must have multicast support.");
+
+  const size_t bytes = src.numel() * src.element_size();
+  const size_t buffer_bytes = symm_mem->get_buffer_size();
+  TORCH_CHECK(
+      static_cast<size_t>(byte_offset) + bytes <= buffer_bytes,
+      "symm_mem::memcpy_to_multicast_: byte_offset (",
+      byte_offset,
+      ") + src bytes (",
+      bytes,
+      ") exceeds dst buffer size (",
+      buffer_bytes,
+      ").");
+
+  c10::cuda::CUDAGuard guard(symm_mem_out.device());
+  auto* dst_ptr =
+      reinterpret_cast<char*>(symm_mem->get_multicast_ptr()) + byte_offset;
+  C10_CUDA_CHECK(cudaMemcpyAsync(
+      dst_ptr,
+      src.data_ptr(),
+      bytes,
+      cudaMemcpyDeviceToDevice,
+      at::cuda::getCurrentCUDAStream()));
+  return symm_mem_out;
+}
+
 #endif //no multi-cast support on ROCm
 
 // One-shot all-reduce is register-intensive because it stages values loaded
@@ -497,6 +562,8 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
       Vec<alignment> vec_st = at::native::memory::ld_vec<alignment>(input_ptr + i);
       at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
     }
+    // Finish staging before signaling peers.
+    __syncthreads();
   }
   // TODO make it sync with one block for no-copy case
   sync_remote_blocks<true, true>(signal_pads, rank, world_size);
@@ -561,6 +628,7 @@ at::Tensor one_shot_all_reduce_out_impl(
   TORCH_CHECK(
       symm_mem != nullptr,
       "one_shot_all_reduce: input must be allocated with empty_strided_p2p().");
+  GroupStreamGuard stream_guard(group_name);
 
   const size_t alignment =
       get_and_verify_alignment(input, "one_shot_all_reduce");
@@ -758,7 +826,8 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
-  sync_remote_blocks<false, true>(signal_pads, rank, world_size);
+  // Publish input writes before peer access.
+  sync_remote_blocks<true, true>(signal_pads, rank, world_size);
   __syncthreads();
 
   const size_t numel_per_rank =
@@ -773,7 +842,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
     }
     auto vec = load_and_reduce<T, alignment, k_world_size>(
         input_ptrs, rank, world_size, input_offset + start + i);
-    for (size_t step = 0; step < world_size; ++step) {
+    for (const auto step : c10::irange(world_size)) {
       size_t remote_rank = (rank + step) % world_size;
       at::native::memory::st_vec<alignment>(
           input_ptrs[remote_rank] + input_offset + start + i, vec);
@@ -813,6 +882,7 @@ at::Tensor two_shot_all_reduce_impl(
   TORCH_CHECK(
       symm_mem != nullptr,
       "two_shot_all_reduce: input must be allocated with empty_strided_p2p().");
+  GroupStreamGuard stream_guard(group_name);
 
   const size_t alignment =
       get_and_verify_alignment(input, "two_shot_all_reduce");
@@ -950,6 +1020,7 @@ at::Tensor reduce_scatter_out(
   TORCH_CHECK(
       symm_mem != nullptr,
       "reduce_scatter: input must be allocated with empty_strided_p2p().");
+  GroupStreamGuard stream_guard(group_name);
 
   const size_t alignment = get_and_verify_alignment(input, "reduce_scatter");
 
@@ -1110,6 +1181,15 @@ at::Tensor multimem_all_gather_out(
     at::Tensor out) {
   TORCH_CHECK(false, "multimem_all_gather_out: requires CUDA 12.3+.");
   return out;
+}
+
+at::Tensor memcpy_to_multicast_(
+    at::Tensor& symm_mem_out,
+    const at::Tensor& src,
+    int64_t byte_offset,
+    std::string group_name) {
+  TORCH_CHECK(false, "memcpy_to_multicast_: requires CUDA 12.3+.");
+  return symm_mem_out;
 }
 
 at::Tensor one_shot_all_reduce_out(
@@ -1335,6 +1415,7 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl(
       "multimem_one_shot_reduce_out", ::multimem_one_shot_reduce_out);
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
+  m.impl("memcpy_to_multicast_", ::memcpy_to_multicast_);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("memset32_", ::memset32_);

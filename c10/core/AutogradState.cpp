@@ -3,9 +3,13 @@
 namespace c10 {
 
 namespace {
-// By default, grad mode and multithreading are enabled, inference mode is
-// disabled,
+
+// MSVC has issues with constinit thread_local
+#if defined(_MSC_VER)
 thread_local AutogradState autograd_state_tls = AutogradState(
+#else
+constinit thread_local AutogradState autograd_state_tls = AutogradState(
+#endif
     /* grad_mode */ true,
     /* inference_mode */ false,
     /* fw_grad_mode */ true,

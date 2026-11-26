@@ -73,10 +73,10 @@ class C10_API SmallVectorBase {
 
  public:
   SmallVectorBase() = delete;
-  size_t size() const {
+  [[nodiscard]] size_t size() const {
     return Size;
   }
-  size_t capacity() const {
+  [[nodiscard]] size_t capacity() const {
     return Capacity;
   }
 
@@ -176,7 +176,7 @@ class SmallVectorTemplateCommon
   /// NewSize.
   bool isSafeToReferenceAfterResize(const void* Elt, size_t NewSize) {
     // Past the end.
-    if (C10_LIKELY(!isReferenceToStorage(Elt)))
+    if (!isReferenceToStorage(Elt)) [[likely]]
       return true;
 
     // Return false if Elt will be destroyed by shrinking.
@@ -237,13 +237,13 @@ class SmallVectorTemplateCommon
       const T& Elt,
       size_t N) {
     size_t NewSize = This->size() + N;
-    if (C10_LIKELY(NewSize <= This->capacity()))
+    if (NewSize <= This->capacity()) [[likely]]
       return &Elt;
 
     bool ReferencesStorage = false;
     int64_t Index = -1;
     if constexpr (!U::TakesParamByValue) {
-      if (C10_UNLIKELY(This->isReferenceToStorage(&Elt))) {
+      if (This->isReferenceToStorage(&Elt)) [[unlikely]] {
         ReferencesStorage = true;
         Index = &Elt - This->begin();
       }
@@ -272,85 +272,86 @@ class SmallVectorTemplateCommon
   using Base::size;
 
   // forward iterator creation methods.
-  iterator begin() {
+  [[nodiscard]] iterator begin() C10_LIFETIMEBOUND {
     return (iterator)this->BeginX;
   }
-  const_iterator begin() const {
+  [[nodiscard]] const_iterator begin() const C10_LIFETIMEBOUND {
     return (const_iterator)this->BeginX;
   }
-  iterator end() {
+  [[nodiscard]] iterator end() C10_LIFETIMEBOUND {
     return begin() + size();
   }
-  const_iterator end() const {
+  [[nodiscard]] const_iterator end() const C10_LIFETIMEBOUND {
     return begin() + size();
   }
 
   // reverse iterator creation methods.
-  reverse_iterator rbegin() {
+  [[nodiscard]] reverse_iterator rbegin() C10_LIFETIMEBOUND {
     return reverse_iterator(end());
   }
-  const_reverse_iterator rbegin() const {
+  [[nodiscard]] const_reverse_iterator rbegin() const C10_LIFETIMEBOUND {
     return const_reverse_iterator(end());
   }
-  reverse_iterator rend() {
+  [[nodiscard]] reverse_iterator rend() C10_LIFETIMEBOUND {
     return reverse_iterator(begin());
   }
-  const_reverse_iterator rend() const {
+  [[nodiscard]] const_reverse_iterator rend() const C10_LIFETIMEBOUND {
     return const_reverse_iterator(begin());
   }
 
-  size_type size_in_bytes() const {
+  [[nodiscard]] size_type size_in_bytes() const {
     return size() * sizeof(T);
   }
-  constexpr size_type max_size() const {
+  [[nodiscard]] constexpr size_type max_size() const {
     return std::min(this->SizeTypeMax(), size_type(-1) / sizeof(T));
   }
 
-  size_t capacity_in_bytes() const {
+  [[nodiscard]] size_t capacity_in_bytes() const {
     return capacity() * sizeof(T);
   }
 
   /// Return a pointer to the vector's buffer, even if empty().
-  pointer data() {
+  [[nodiscard]] pointer data() C10_LIFETIMEBOUND {
     return pointer(begin());
   }
   /// Return a pointer to the vector's buffer, even if empty().
-  const_pointer data() const {
+  [[nodiscard]] const_pointer data() const C10_LIFETIMEBOUND {
     return const_pointer(begin());
   }
 
   // SmallVector::at is NOT from LLVM.
-  reference at(size_type idx) {
+  [[nodiscard]] reference at(size_type idx) C10_LIFETIMEBOUND {
     assert(idx < size());
     return begin()[idx];
   }
-  const_reference at(size_type idx) const {
+  [[nodiscard]] const_reference at(size_type idx) const C10_LIFETIMEBOUND {
     assert(idx < size());
     return begin()[idx];
   }
-  reference operator[](size_type idx) {
+  [[nodiscard]] reference operator[](size_type idx) C10_LIFETIMEBOUND {
     assert(idx < size());
     return begin()[idx];
   }
-  const_reference operator[](size_type idx) const {
+  [[nodiscard]] const_reference operator[](size_type idx) const
+      C10_LIFETIMEBOUND {
     assert(idx < size());
     return begin()[idx];
   }
 
-  reference front() {
+  [[nodiscard]] reference front() C10_LIFETIMEBOUND {
     assert(!empty());
     return begin()[0];
   }
-  const_reference front() const {
+  [[nodiscard]] const_reference front() const C10_LIFETIMEBOUND {
     assert(!empty());
     return begin()[0];
   }
 
-  reference back() {
+  [[nodiscard]] reference back() C10_LIFETIMEBOUND {
     assert(!empty());
     return end()[-1];
   }
-  const_reference back() const {
+  [[nodiscard]] const_reference back() const C10_LIFETIMEBOUND {
     assert(!empty());
     return end()[-1];
   }
@@ -996,7 +997,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
 
   template <typename... ArgTypes>
   reference emplace_back(ArgTypes&&... Args) {
-    if (C10_UNLIKELY(this->size() >= this->capacity()))
+    if (this->size() >= this->capacity()) [[unlikely]]
       return this->growAndEmplaceBack(std::forward<ArgTypes>(Args)...);
 
     ::new ((void*)this->end()) T(std::forward<ArgTypes>(Args)...);
@@ -1010,16 +1011,16 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
       std::is_nothrow_move_constructible_v<T> &&
       std::is_nothrow_destructible_v<T>);
 
-  bool operator==(const SmallVectorImpl& RHS) const {
+  [[nodiscard]] bool operator==(const SmallVectorImpl& RHS) const {
     if (this->size() != RHS.size())
       return false;
     return std::equal(this->begin(), this->end(), RHS.begin());
   }
-  bool operator!=(const SmallVectorImpl& RHS) const {
+  [[nodiscard]] bool operator!=(const SmallVectorImpl& RHS) const {
     return !(*this == RHS);
   }
 
-  bool operator<(const SmallVectorImpl& RHS) const {
+  [[nodiscard]] bool operator<(const SmallVectorImpl& RHS) const {
     return std::lexicographical_compare(
         this->begin(), this->end(), RHS.begin(), RHS.end());
   }
@@ -1404,7 +1405,7 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
 };
 
 template <typename T, unsigned N>
-inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
+[[nodiscard]] inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
   return X.capacity_in_bytes();
 }
 
@@ -1430,11 +1431,12 @@ using ValueTypeFromRangeType = std::remove_const_t<
 /// when you want to iterate a range and then sort the results.
 template <unsigned Size, typename R>
 // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-SmallVector<ValueTypeFromRangeType<R>, Size> to_vector(R&& Range) {
+[[nodiscard]] SmallVector<ValueTypeFromRangeType<R>, Size> to_vector(
+    R&& Range) {
   return {std::begin(Range), std::end(Range)};
 }
 template <typename R>
-SmallVector<
+[[nodiscard]] SmallVector<
     ValueTypeFromRangeType<R>,
     CalculateSmallVectorDefaultInlinedElements<
         ValueTypeFromRangeType<R>>::value>

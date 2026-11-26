@@ -7,6 +7,8 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 
+#include <limits>
+
 #if defined(CPU_CAPABILITY_AVX512)
 #define SLEEF_STATIC_LIBS
 #include <sleef.h>
@@ -58,6 +60,28 @@ static inline __m256i cvtfp32_bf16(const __m512& src) {
   // Check NaN before converting back to bf16
   t_value = _mm512_mask_blend_epi32(mask_value, nan, t_value);
   return _mm512_cvtusepi32_epi16(t_value);
+}
+
+// Converts doubles to floats rounding to odd (truncate, then set the last bit
+// if inexact), so that converting the result to Half or BFloat16 rounds the
+// doubles once: float has enough extra precision and range.
+static inline __m256 cvtpd_ps_round_to_odd(const __m512d& x) {
+  // Like the AVX2 version, this rounds to nearest and corrects the result with
+  // integer operations, rather than truncating with embedded rounding: in
+  // flush-to-zero mode, that would flush subnormal results that rounding to
+  // nearest (or the scalar code) does not produce.
+  const __m256 f = _mm512_cvtpd_ps(x);
+  const __m512d back = _mm512_cvtps_pd(f);
+  // Ordered comparisons, so NaN lanes are left alone. Where rounding to
+  // nearest went away from zero, f is one ulp too large in magnitude.
+  const __mmask8 away =
+      _mm512_cmp_pd_mask(_mm512_abs_pd(back), _mm512_abs_pd(x), _CMP_GT_OQ);
+  const __mmask8 inexact = _mm512_cmp_pd_mask(back, x, _CMP_NEQ_OQ);
+  const __m256i one = _mm256_set1_epi32(1);
+  const __m256i bits = _mm256_castps_si256(f);
+  const __m256i stepped = _mm256_mask_sub_epi32(bits, away, bits, one);
+  return _mm256_castsi256_ps(
+      _mm256_mask_or_epi32(stepped, inexact, stepped, one));
 }
 
 static inline __m512i cvtfp32_bf16(const __m512& a, const __m512& b) {
@@ -447,7 +471,8 @@ class Vectorized16 {
     cvt_to_fp32<T>(values, lo, hi);
     auto angle_lambda = [](__m512 values) {
       const auto zero_vec = _mm512_set1_ps(0.f);
-      const auto nan_vec = _mm512_set1_ps(NAN);
+      const auto nan_vec =
+          _mm512_set1_ps(std::numeric_limits<float>::quiet_NaN());
       const auto not_nan_mask = _mm512_cmp_ps_mask(values, values, _CMP_EQ_OQ);
       const auto non_nan_mask_vec = _mm512_mask_set1_epi32(
           _mm512_castps_si512(zero_vec), not_nan_mask, 0xFFFFFFFF);
@@ -455,7 +480,7 @@ class Vectorized16 {
           _mm512_castsi512_ps(non_nan_mask_vec), zero_vec, _CMP_EQ_OQ);
       const auto pi = _mm512_set1_ps(c10::pi<float>);
 
-      const auto neg_mask = _mm512_cmp_ps_mask(values, zero_vec, _CMP_LT_OQ);
+      const auto neg_mask = _mm512_movepi32_mask(_mm512_castps_si512(values));
       auto angle = _mm512_mask_blend_ps(neg_mask, zero_vec, pi);
       angle = _mm512_mask_blend_ps(nan_mask, angle, nan_vec);
       return angle;
@@ -1052,8 +1077,8 @@ template <>
 inline void convert(const double* src, BFloat16* dst, int64_t n) {
   auto load_float = [](const double* src) -> __m512 {
     // Load one float vector from an array of doubles
-    __m256 a = _mm512_cvtpd_ps(_mm512_loadu_pd(src));
-    __m256 b = _mm512_cvtpd_ps(_mm512_loadu_pd(src + 8));
+    __m256 a = cvtpd_ps_round_to_odd(_mm512_loadu_pd(src));
+    __m256 b = cvtpd_ps_round_to_odd(_mm512_loadu_pd(src + 8));
     return _mm512_insertf32x8(_mm512_castps256_ps512(a), b, 1);
   };
 
@@ -1095,7 +1120,7 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
 #ifndef __msvc_cl__
 #pragma unroll(4)
 #endif
-  for (int i = 0; i < 4; i++) {
+  for (const auto i : c10::irange(4)) {
     r[i] = _mm512_inserti64x4(_mm512_castsi256_si512(t[i]), t[i + 4], 0x01);
     r[i + 4] =
         _mm512_inserti64x4(_mm512_castsi256_si512(t[i + 8]), t[i + 12], 0x01);
@@ -1175,7 +1200,7 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
 #ifndef __msvc_cl__
 #pragma unroll(4)
 #endif
-  for (int i = 0; i < 4; i++) {
+  for (const auto i : c10::irange(4)) {
     u[i] = _mm512_permutex2var_epi16(r[i], const1, r[i + 4]);
     u[i + 4] = _mm512_permutex2var_epi16(r[i], const2, r[i + 4]);
   }
@@ -1211,7 +1236,7 @@ inline void transpose_mxn<BFloat16, 16, 16>(
 #ifndef __msvc_cl__
 #pragma unroll(16)
 #endif
-  for (int i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     t[i] =
         _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i * ld_src));
   }
@@ -1222,7 +1247,7 @@ inline void transpose_mxn<BFloat16, 16, 16>(
 #ifndef __msvc_cl__
 #pragma unroll(8)
 #endif
-  for (int i = 0; i < 8; i++) {
+  for (const auto i : c10::irange(8)) {
     _mm256_storeu_si256(
         reinterpret_cast<__m256i*>(dst + (i * 2) * ld_dst),
         _mm512_extracti32x8_epi32(u[i], 0x0));
@@ -1246,7 +1271,7 @@ inline void transpose_mxn<Half, 16, 16>(
 #ifndef __msvc_cl__
 #pragma unroll(16)
 #endif
-  for (int i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     t[i] =
         _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i * ld_src));
   }
@@ -1257,7 +1282,7 @@ inline void transpose_mxn<Half, 16, 16>(
 #ifndef __msvc_cl__
 #pragma unroll(8)
 #endif
-  for (int i = 0; i < 8; i++) {
+  for (const auto i : c10::irange(8)) {
     _mm256_storeu_si256(
         reinterpret_cast<__m256i*>(dst + (i * 2) * ld_dst),
         _mm512_extracti32x8_epi32(u[i], 0x0));
@@ -1293,7 +1318,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
 #ifndef __msvc_cl__
 #pragma unroll(16)
 #endif
-  for (int i = 0; i < 16; ++i) {
+  for (const auto i : c10::irange(16)) {
     d[i * 2] = _mm512_unpacklo_epi16(r[i * 2], r[i * 2 + 1]);
     d[i * 2 + 1] = _mm512_unpackhi_epi16(r[i * 2], r[i * 2 + 1]);
   }
@@ -1323,7 +1348,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
 #ifndef __msvc_cl__
 #pragma unroll(8)
 #endif
-  for (int i = 0; i < 8; ++i) {
+  for (const auto i : c10::irange(8)) {
     r[i * 4] = _mm512_unpacklo_epi32(d[i * 4], d[i * 4 + 2]);
     r[i * 4 + 1] = _mm512_unpackhi_epi32(d[i * 4], d[i * 4 + 2]);
     r[i * 4 + 2] = _mm512_unpacklo_epi32(d[i * 4 + 1], d[i * 4 + 3]);
@@ -1354,7 +1379,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
 #ifndef __msvc_cl__
 #pragma unroll(4)
 #endif
-  for (int i = 0; i < 4; ++i) {
+  for (const auto i : c10::irange(4)) {
     d[i * 8] = _mm512_unpacklo_epi64(r[i * 8], r[i * 8 + 4]);
     d[i * 8 + 1] = _mm512_unpackhi_epi64(r[i * 8], r[i * 8 + 4]);
     d[i * 8 + 2] = _mm512_unpacklo_epi64(r[i * 8 + 1], r[i * 8 + 5]);
@@ -1407,7 +1432,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
 #ifndef __msvc_cl__
 #pragma unroll(8)
 #endif
-  for (int i = 0; i < 8; ++i) {
+  for (const auto i : c10::irange(8)) {
     r[i] = _mm512_permutex2var_epi64(d[i], /*idx*/ const1, d[i + 8]);
     r[i + 8] = _mm512_permutex2var_epi64(d[i], /*idx*/ const2, d[i + 8]);
     r[i + 16] = _mm512_permutex2var_epi64(d[i + 16], /*idx*/ const1, d[i + 24]);
@@ -1458,7 +1483,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
 #ifndef __msvc_cl__
 #pragma unroll(16)
 #endif
-  for (int i = 0; i < 16; ++i) {
+  for (const auto i : c10::irange(16)) {
     d[i] = _mm512_permutex2var_epi64(r[i], /*idx*/ const3, r[i + 16]);
     d[i + 16] = _mm512_permutex2var_epi64(r[i], /*idx*/ const4, r[i + 16]);
   }
@@ -1812,8 +1837,8 @@ template <>
 inline void convert(const double* src, Half* dst, int64_t n) {
   auto load_float = [](const double* src) -> __m512 {
     // Load one float vector from an array of doubles
-    __m256 a = _mm512_cvtpd_ps(_mm512_loadu_pd(src));
-    __m256 b = _mm512_cvtpd_ps(_mm512_loadu_pd(src + 8));
+    __m256 a = cvtpd_ps_round_to_odd(_mm512_loadu_pd(src));
+    __m256 b = cvtpd_ps_round_to_odd(_mm512_loadu_pd(src + 8));
     return _mm512_insertf32x8(_mm512_castps256_ps512(a), b, 1);
   };
 

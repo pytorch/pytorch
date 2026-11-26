@@ -24,6 +24,7 @@ struct ActivityTraceWrapper;
 namespace autograd::profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
+using typed_metadata_t = std::unordered_map<std::string, c10::IValue>;
 
 struct TORCH_API KinetoEvent {
   KinetoEvent(
@@ -73,6 +74,7 @@ struct TORCH_API KinetoEvent {
   int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t& /*in*/) const;
   extra_meta_t extraMeta() const;
+  const typed_metadata_t& typedMetadata() const;
   std::string metadataJson() const;
 
   const c10::ArrayRef<torch::profiler::impl::shape> structuredInputShapes()
@@ -203,14 +205,28 @@ TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 using ActivityFilter = std::unordered_map<
     torch::profiler::impl::ActivityType,
     std::unordered_set<std::string>>;
+using ProfilerExtensionMap = std::unordered_map<std::string, std::string>;
 TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities,
     const ActivityFilter& activity_filter = {});
+TORCH_API void prepareProfiler(
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities,
+    const ActivityFilter& activity_filter,
+    const ProfilerExtensionMap& profiler_extensions);
 
 TORCH_API void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities);
+
+// Stops collecting in the current Kineto profiling session and ends its trace
+// now. disableProfiler() later processes what was collected.
+TORCH_API void stopProfilerCollection();
+
+// Toggles Python stack tracing in the current Kineto profiling session. CPU and
+// device activity collection are unaffected. Only stopping is supported so far.
+TORCH_API void togglePythonCollectionDynamic(bool enable);
 
 TORCH_API void startMemoryProfile();
 TORCH_API void stopMemoryProfile();

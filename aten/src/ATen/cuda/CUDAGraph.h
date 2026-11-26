@@ -6,9 +6,9 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
-#include <c10/util/flat_hash_map.h>
 
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <stack>
 #include <vector>
@@ -23,6 +23,7 @@ typedef unsigned long long cudaGraphConditionalHandle;
 namespace at {
 
 struct Generator;
+struct CUDAGeneratorCaptureState;
 struct CUDAGeneratorImpl;
 struct CUDAGeneratorState;
 
@@ -35,7 +36,7 @@ TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 // Returns true if any CUDAGraph capture is currently active in this process.
 // Used by ProcessGroupNCCL's ROCm watchdog workaround to avoid calling
 // hipEventQuery during active capture on HIP runtimes without the
-// event-query capture-mode fix (https://github.com/ROCm/clr/pull/3176).
+// event-query capture-mode fix (https://github.com/ROCm/rocm-systems/pull/3176).
 // Not needed on CUDA/NVIDIA where cross-thread event query does not have this
 // restriction.
 #if defined(USE_ROCM)
@@ -48,6 +49,7 @@ TORCH_CUDA_CPP_API CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id);
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);
+  CUDAGraph(bool keep_graph, int64_t num_rng_states);
   ~CUDAGraph();
 
   // Copy and move constructors and assignments are disabled. These
@@ -89,6 +91,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
     return has_graph_exec_;
   }
   void replay();
+  std::vector<at::Tensor> get_rng_state_buffers() const;
+  // Native callers must wait for pending replays before reset or destruction.
   void reset();
   MempoolId_t pool();
   std::vector<MempoolId_t> pools();
@@ -96,20 +100,38 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void enable_debug_mode();
   cudaGraph_t raw_cuda_graph();
   cudaGraphExec_t raw_cuda_graph_exec();
+  // Adopt an exec instantiated from raw_cuda_graph(). The caller owns the
+  // replaced exec; reset/destruction owns the installed exec. Null clears it.
+  void set_raw_cuda_graph_exec(cudaGraphExec_t graph_exec);
 
   static CUDAGraph* get_currently_capturing_graph();
   void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor);
+  void begin_capture_to_while_node(const Tensor& scalar_cuda_pred_tensor);
   void end_capture_to_conditional_node();
+  void set_conditional_handle_for_current_node(
+      const Tensor& scalar_cuda_pred_tensor);
   static void set_conditional_handle(
       cudaGraphConditionalHandle handle,
       const Tensor& scalar_cuda_pred_tensor);
 
  private:
+  friend struct at::CUDAGeneratorState;
+
+  at::CUDAGeneratorCaptureState* get_generator_capture_state(
+      CaptureId_t capture_id,
+      at::CUDAGeneratorState& state);
+
   template <typename StreamType>
   std::function<bool(StreamType)> create_allocate_filter() const;
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
   void record_retained_pool(MempoolId_t pool);
   bool has_retained_pool(MempoolId_t pool) const;
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  void begin_capture_to_conditional_node(
+      const Tensor& scalar_cuda_pred_tensor,
+      cudaGraphConditionalNodeType conditional_type);
+  void route_pool_to_innermost_capture();
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 
  protected:
   cudaGraph_t graph_ = nullptr;
@@ -125,6 +147,18 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool capture_ended_ = false;
   // Set to true in capture_end if cudaGraphInstantiate succeeded
   bool has_graph_exec_ = false;
+
+  // Set to true in capture_begin once a private pool has been acquired
+  // (beginAllocateToPool). Tells reset() it must release the pool, even if the
+  // capture failed before capture_end() completed. Otherwise a failed capture
+  // leaks the pool: its use_count never returns to zero, so empty_cache can
+  // never reclaim its segments for the rest of the process.
+  bool allocated_pool_ = false;
+  // Set to true in capture_begin after beginAllocateToPool and cleared in
+  // capture_end after endAllocateToPool. Tells reset() whether the allocator is
+  // still routing allocations to the pool (capture abandoned before capture_end
+  // ran) and must be ended before the pool can be released.
+  bool capturing_to_pool_ = false;
 
   // the ID assigned by cuda during graph capture,
   // used to identify when a stream is participating in capture
@@ -144,14 +178,23 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // know you'll replay those graphs in the same order you captured them.
   MempoolId_t mempool_id_;
   std::vector<MempoolId_t> retained_mempool_ids_;
+  // Host pools retained by retain_pool(), released on reset.
+  std::vector<MempoolId_t> retained_host_mempool_ids_;
 
   // Stream on which capture began
   at::cuda::CUDAStream capture_stream_;
 
-  // multiple generator states and their wholegraph_increments in this graph
-  // that are managed by the CUDA Graph
-  ska::flat_hash_map<c10::intrusive_ptr<at::CUDAGeneratorState>, uint64_t>
-      captured_generator_states_;
+  struct CapturedGeneratorState {
+    c10::intrusive_ptr<at::CUDAGeneratorCaptureState> capture_state;
+    c10::intrusive_ptr<at::CUDAGeneratorState> generator_state;
+    CaptureId_t capture_id{0};
+    uint64_t wholegraph_increment{0};
+  };
+
+  // Assigned entries form a prefix; capture_end discards the unused tail.
+  std::vector<CapturedGeneratorState> captured_generator_states_;
+  std::mutex captured_generator_states_mutex_;
+  int64_t num_rng_states_;
 
   // Device where capture occurred. Right now, for simplicity, we require all ops
   // in a capture to run on the same device, but this is a limitation of CUDAGraph,
@@ -188,6 +231,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
   std::stack<CaptureId_t> conditional_graph_capture_ids_;
   std::stack<OwnedCUDAStream> conditional_node_raw_streams_;
+  std::stack<cudaGraphConditionalHandle> conditional_node_handles_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
 

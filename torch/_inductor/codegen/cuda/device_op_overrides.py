@@ -4,6 +4,7 @@ import torch
 
 from ...runtime.hints import get_warp_size
 from ..common import (
+    DeviceIdx,
     DeviceOpOverrides,
     register_device_op_overrides,
     TritonScratchWorkspace,
@@ -15,17 +16,23 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     CUDA-specific codegen functions, see DeviceOpOverrides for details
     """
 
+    def uses_gpu_cpp_wrapper(self) -> bool:
+        return True
+
     def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _cuda_getCurrentRawStream as {name}"
 
-    def set_device(self, device_idx: int) -> str:
+    def set_device(self, device_idx: DeviceIdx) -> str:
         return f"torch.cuda.set_device({device_idx})"
 
     def synchronize(self) -> str:
         return "torch.cuda.synchronize()"
 
-    def device_guard(self, device_idx: int) -> str:
+    def device_guard(self, device_idx: DeviceIdx) -> str:
         return f"torch.cuda._DeviceGuard({device_idx})"
+
+    def current_device_idx_expr(self) -> str:
+        return "torch.cuda.current_device()"
 
     def current_stream(self) -> str:
         return "torch.cuda.current_stream()"
@@ -53,9 +60,16 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         """
         return source_codes
 
+    def cpp_kernel_launch_supports_pdl(self) -> bool:
+        return torch.version.hip is None
+
     def kernel_driver(self) -> str:
         """Return C++ host-side helpers (loadKernel, launchKernel, CUDA_DRIVER_CHECK)
         embedded in AOTI-generated wrapper code."""
+        # Like Inductor's static launcher, loadKernel prefers shared memory to
+        # L1 for kernels that use more than 48 KB of it; otherwise the driver
+        # may pick a carveout that fits fewer of their blocks per SM.
+        #
         # NVIDIA devices have a warp size of 32, while AMD devices can have a
         # warp size of 32 or 64 depending on the architecture.
         source_codes = """
@@ -76,6 +90,49 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 }                                              \\
             } while (0);
 
+            static inline void setKernelSharedMemory(
+                    CUfunction func,
+                    uint32_t sharedMemBytes) {
+                if (sharedMemBytes == 0) {
+                    return;
+                }
+            #if !defined(USE_ROCM)
+                CUdevice device;
+                CUDA_DRIVER_CHECK(cuCtxGetDevice(&device));
+                int sharedOptin = 0;
+                CUDA_DRIVER_CHECK(cuDeviceGetAttribute(
+                    &sharedOptin,
+                    CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+                    device
+                ));
+                int sharedStatic = 0;
+                CUDA_DRIVER_CHECK(cuFuncGetAttribute(
+                    &sharedStatic, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func
+                ));
+                if (torch::aot_inductor::sharedMemoryLimit(
+                        sharedMemBytes + static_cast<uint32_t>(sharedStatic),
+                        sharedOptin,
+                        device,
+                        cuDeviceGetAttribute) > sharedOptin) {
+                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                        func,
+                        static_cast<CUfunction_attribute>(
+                            torch::aot_inductor::kFuncAttrSharedMemoryMode),
+                        torch::aot_inductor::kSharedMemoryModeAllowOversized
+                    ));
+                    return;
+                }
+            #endif
+                CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                    func,
+                    CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                    sharedMemBytes
+                ))
+                if (sharedMemBytes > 49152) {
+                    CUDA_DRIVER_CHECK(cuFuncSetCacheConfig(func, CU_FUNC_CACHE_PREFER_SHARED))
+                }
+            }
+
             static inline CUfunction loadKernel(
                     std::string filePath,
                     const std::string &funcName,
@@ -95,13 +152,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     loaded_modules->push_back(mod);
                 }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ))
-                }
+                setKernelSharedMemory(func, sharedMemBytes);
                 return func;
             }
 
@@ -117,16 +168,53 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     loaded_modules->push_back(mod);
                 }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ))
-                }
+                setKernelSharedMemory(func, sharedMemBytes);
                 return func;
             }
 
+            __LAUNCH_KERNEL__
+        """
+        if self.cpp_kernel_launch_supports_pdl():
+            launch_kernel = """
+            static inline void launchKernel(
+                    CUfunction func,
+                    uint32_t gridX,
+                    uint32_t gridY,
+                    uint32_t gridZ,
+                    uint32_t numWarps,
+                    uint32_t sharedMemBytes,
+                    void* args[],
+                    cudaStream_t stream,
+                    bool launchPdl) {
+                if (!launchPdl) {
+                    CUDA_DRIVER_CHECK(cuLaunchKernel(
+                        func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
+                    ));
+                    return;
+                }
+
+                CUlaunchAttribute launchAttr{};
+                launchAttr.id =
+                    CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
+                launchAttr.value.programmaticStreamSerializationAllowed = 1;
+
+                CUlaunchConfig launchConfig{};
+                launchConfig.gridDimX = gridX;
+                launchConfig.gridDimY = gridY;
+                launchConfig.gridDimZ = gridZ;
+                launchConfig.blockDimX = __WARP_SIZE__ * numWarps;
+                launchConfig.blockDimY = 1;
+                launchConfig.blockDimZ = 1;
+                launchConfig.sharedMemBytes = sharedMemBytes;
+                launchConfig.hStream = stream;
+                launchConfig.attrs = &launchAttr;
+                launchConfig.numAttrs = 1;
+                CUDA_DRIVER_CHECK(
+                    cuLaunchKernelEx(&launchConfig, func, args, nullptr));
+            }
+            """
+        else:
+            launch_kernel = """
             static inline void launchKernel(
                     CUfunction func,
                     uint32_t gridX,
@@ -140,13 +228,16 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
                 ));
             }
-        """
+            """
+
         if torch.version.hip is not None and torch.cuda.is_available():
             device = torch.device("cuda", torch.cuda.current_device())
             warp_size = get_warp_size(device)
         else:
             warp_size = 32
-        return source_codes.replace("__WARP_SIZE__", str(warp_size))
+        return source_codes.replace("__LAUNCH_KERNEL__", launch_kernel.strip()).replace(
+            "__WARP_SIZE__", str(warp_size)
+        )
 
     def tma_descriptor_helpers(self) -> str:
         """
@@ -160,8 +251,12 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         # https://github.com/triton-lang/triton/blob/6af4f88591c85de079d8a36a4d7dba67918e2b39/third_party/nvidia/backend/driver.c#L283
         # New APIs (fillTMADescriptor):
         # https://github.com/triton-lang/triton/blob/main/third_party/nvidia/backend/driver.c#L283
+        # Guarded: the constant-folding graph's code is spliced into the main
+        # graph's file, and each graph's wrapper emits these once.
         return """
-            #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+            #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000 \\
+                && !defined(AOTI_TORCH_TMA_DESCRIPTOR_HELPERS)
+            #define AOTI_TORCH_TMA_DESCRIPTOR_HELPERS
             [[maybe_unused]] static void init1DTMADescriptor(
                     CUtensorMap* m,
                     void* globalAddress,
@@ -262,7 +357,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 int rank,
                 uint32_t* blockSize,
                 uint64_t* shape,
-                uint64_t* stride
+                int64_t* stride
             ) {
                 uint32_t elementStrides[5] = {1, 1, 1, 1, 1};
                 uint32_t blockSizeInt[5];
@@ -281,7 +376,8 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
 
                 // Reorder and calculate strides
                 for (int i = 0; i + 1 < rank; ++i) {
-                    stridesLL[rank - i - 2] = elemSize * stride[i];
+                    stridesLL[rank - i - 2] =
+                        elemSize * static_cast<uint64_t>(stride[i]);
                 }
                 stridesLL[rank - 1] =
                     shapeInt[rank - 1] * (rank == 1 ? elemSize : stridesLL[rank - 2]);
@@ -327,11 +423,74 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     CU_TENSOR_MAP_L2_PROMOTION_L2_128B, CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE));
             }
 
+            [[maybe_unused]] static void initTMADescriptorWithMetadata(
+                CUtensorMap* m,
+                void* globalAddress,
+                int elemSize,
+                int elemType,
+                int rank,
+                uint32_t* blockSize,
+                uint64_t* shape,
+                int64_t* stride,
+                int swizzle,
+                int fp4Padded
+            ) {
+                if (rank < 1 || rank > 5) {
+                    throw std::runtime_error("TMA descriptor rank must be between 1 and 5");
+                }
+
+                uint32_t elementStrides[5] = {1, 1, 1, 1, 1};
+                uint32_t blockSizeInt[5] = {0, 0, 0, 0, 0};
+                uint64_t shapeInt[5] = {0, 0, 0, 0, 0};
+                uint64_t stridesLL[5] = {0, 0, 0, 0, 0};
+
+                for (int i = 0; i < rank; ++i) {
+                    blockSizeInt[rank - i - 1] = blockSize[i];
+                    uint64_t dim = shape[i];
+                    if (fp4Padded && i == rank - 1) {
+                        dim *= 2;
+                    }
+                    shapeInt[rank - i - 1] = dim;
+                }
+
+                for (int i = 0; i + 1 < rank; ++i) {
+                    stridesLL[rank - i - 2] =
+                        elemSize * static_cast<uint64_t>(stride[i]);
+                }
+                stridesLL[rank - 1] =
+                    shapeInt[rank - 1] * (rank == 1 ? elemSize : stridesLL[rank - 2]);
+
+                CUDA_DRIVER_CHECK(cuTensorMapEncodeTiled(
+                    m, static_cast<CUtensorMapDataType>(elemType), rank, globalAddress,
+                    shapeInt, stridesLL, blockSizeInt, elementStrides,
+                    CU_TENSOR_MAP_INTERLEAVE_NONE,
+                    static_cast<CUtensorMapSwizzle>(swizzle),
+                    CU_TENSOR_MAP_L2_PROMOTION_L2_128B,
+                    CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE));
+
+                int driverVersion = -1;
+                cuDriverGetVersion(&driverVersion);
+                if (driverVersion <= 13010) {
+                    int64_t maxByteIndex = 0;
+                    for (int i = 0; i < rank; ++i) {
+                        int64_t bytesStride =
+                            i == 0 ? elemSize : static_cast<int64_t>(stridesLL[i - 1]);
+                        maxByteIndex +=
+                            (static_cast<int64_t>(shapeInt[i]) - 1) * bytesStride;
+                    }
+                    if (maxByteIndex + 1 < 128 * 1024) {
+                        reinterpret_cast<uint64_t*>(m)[1] &= ~(1ULL << 21);
+                    }
+                }
+            }
+
             struct StableTMADescriptor {
                 CUtensorMap m;
+                void* global_address;
                 uint32_t block_shape[5];
+                int32_t kernel_shape[5];
                 uint64_t global_shape[5];
-                uint64_t strides[5];
+                int64_t strides[5];
             };
             #endif
         """
@@ -348,6 +507,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def cpp_device_ptr(self) -> str:
         return "CUdeviceptr"
 
+    def aten_device_type(self) -> str:
+        return "at::kCUDA"
+
     def cpp_scratch(
         self, idx: int, workspace: TritonScratchWorkspace, prefix: str | None = None
     ) -> tuple[list[str], str] | None:
@@ -359,7 +521,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             )
             size_array = f"int64_t {var_name}_size[] = {{{size_expr}}};"
             stride_array = f"int64_t {var_name}_stride[] = {{1}};"
-            device_type = "cached_torch_device_type_cuda"
+            device_type = workspace.generate_device_type_str()
             device_idx = "device_idx_"
 
             return (

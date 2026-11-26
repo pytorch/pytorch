@@ -23,7 +23,7 @@ void update_source_range_and_cs_ptr(
   for (auto& it : pattern_node_map) {
     Node* replacement_node = it.first;
     Node* pattern_node = it.second;
-    if (!input_nodes.count(pattern_node)) {
+    if (!input_nodes.contains(pattern_node)) {
       Node* orig_node = m.nodes_map.at(pattern_node);
       replacement_node->setSourceRange(orig_node->sourceRange());
       if (orig_node->callstack()) {
@@ -100,7 +100,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
   for (auto& it : vmap_replacement) {
     const auto& replacement_value_name = it.first;
     Node* replacement_value_node = it.second->node();
-    if (pattern.value_name_map.count(replacement_value_name)) {
+    if (pattern.value_name_map.contains(replacement_value_name)) {
       const auto& pattern_value_name =
           pattern.value_name_map.at(replacement_value_name);
       TORCH_CHECK(
@@ -181,7 +181,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     }
     // Record all planned deletions
     for (Node* pattern_n : pattern_graph.nodes()) {
-      if (match.nodes_map.count(pattern_n)) {
+      if (match.nodes_map.contains(pattern_n)) {
         Node* n = match.nodes_map.at(pattern_n);
         nodes_to_delete_.insert(n);
       }
@@ -205,7 +205,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
 
 bool SubgraphRewriter::overlapsWithPreviousMatches(const Match* match) {
   for (auto n : match->nodes_map) {
-    if (nodes_to_delete_.count(n.second)) {
+    if (nodes_to_delete_.contains(n.second)) {
       return true;
     }
   }

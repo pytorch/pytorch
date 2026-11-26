@@ -6,18 +6,20 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import torch
 import torch._inductor.config as inductor_config
 from torch._dynamo.utils import counters
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
     skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -35,6 +37,12 @@ class DeterministicTest(TestCase):
         super().setUp()
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(fresh_cache())
+        # Start each test with deterministic mode off and restore the state
+        # afterwards, so tests that turn it on do not leak into later ones.
+        # The guard's exit sets Inductor's flag to the deterministic-algorithms
+        # state; the config patch, exited after it, then restores the flag.
+        self._exit_stack.enter_context(inductor_config.patch(deterministic=False))
+        self._exit_stack.enter_context(DeterministicGuard(False))
 
     def tearDown(self) -> None:
         self._exit_stack.close()
@@ -49,7 +57,30 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181336")
+    @inductor_config.patch(deterministic=True)
+    def test_deterministic_flag_survives_compile(self):
+        # Dynamo restores the deterministic-algorithms state after each frame;
+        # that must not turn off Inductor's deterministic mode.
+        from torch._inductor.utils import run_and_get_code
+
+        x = torch.randn(16, device=GPU_TYPE)
+        for fn in (lambda x: x + 1, lambda x: x * 2):
+            torch._dynamo.reset()
+            _, (code,) = run_and_get_code(torch.compile(fn), x)
+            self.assertIn("'deterministic': True", code)
+        self.assertTrue(inductor_config.deterministic)
+
+    def test_compile_does_not_leak_deterministic_mode(self):
+        # Something may turn on deterministic algorithms while compiling a
+        # frame (e.g. numeric_utils); Dynamo undoes it, Inductor's flag too.
+        def backend(gm, example_inputs):
+            torch.use_deterministic_algorithms(True)
+            return gm.forward
+
+        torch.compile(lambda x: x + 1, backend=backend)(torch.randn(4))
+        self.assertFalse(torch.are_deterministic_algorithms_enabled())
+        self.assertFalse(inductor_config.deterministic)
+
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -116,6 +147,59 @@ class DeterministicTest(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
+    @parametrize("fp_fusion", [True, False])
+    @parametrize("deterministic", [False, True])
+    def test_fp_fusion(self, deterministic, fp_fusion):
+        from torch._inductor.utils import run_and_get_code
+
+        with inductor_config.patch(
+            {"deterministic": deterministic, "triton.enable_fp_fusion": fp_fusion}
+        ):
+            x = torch.randn(16, device=GPU_TYPE)
+            _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2 + 1), x)
+        # Deterministic mode also turns off Triton's contraction.
+        triton_fusion = fp_fusion and not deterministic
+        self.assertIn(f"'enable_fp_fusion': {triton_fusion}", code)
+
+    @parametrize(
+        "deterministic,fp_fusion",
+        [(True, True), (False, False)],
+        name_fn=lambda d, f: "deterministic" if d else "fp_fusion_off",
+    )
+    def test_pointwise_config_numerics(self, deterministic, fp_fusion):
+        # XBLOCK=128 and XBLOCK=256 contract different products into an FMA here.
+        def fn(x, buf):
+            return x / x.shape[0] * 0.01 + buf * 0.99
+
+        x = torch.randn(16384, device=GPU_TYPE)
+        buf = torch.randn(16384, device=GPU_TYPE)
+        xblocks, outs = [], []
+        # Force opposite timing winners (smallest vs largest XBLOCK).
+        for prefer_small in (True, False):
+            seen = set()
+
+            def bench(self, launcher, *args, **kwargs):
+                xblock = launcher.config.kwargs["XBLOCK"]
+                seen.add(xblock)
+                return float(xblock) if prefer_small else 1.0 / xblock
+
+            torch._dynamo.reset()
+            with (
+                inductor_config.patch(
+                    {
+                        "deterministic": deterministic,
+                        "triton.enable_fp_fusion": fp_fusion,
+                    }
+                ),
+                fresh_cache(),
+                unittest.mock.patch.object(CachingAutotuner, "bench", bench),
+            ):
+                outs.append(torch.compile(fn, dynamic=True)(x, buf))
+            xblocks.append(min(seen) if prefer_small else max(seen))
+
+        self.assertNotEqual(xblocks[0], xblocks[1])
+        self.assertEqual(outs[0].view(torch.int32), outs[1].view(torch.int32))
+
     @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
     @inductor_config.patch(batch_invariant=True)
     def test_persistent_reduction_batch_invariance(self):
@@ -143,9 +227,23 @@ class DeterministicTest(TestCase):
             ref = out_full[:size].contiguous()
             self.assertTrue(
                 torch.equal(ref, out),
-                f"persistent reduction diverged at size={size} (FULL={FULL})",
+                lambda msg: f"{msg}\npersistent reduction diverged at size={size} (FULL={FULL})",
             )
             size //= 2
+
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
+    def test_cumsum_deterministic(self):
+        from torch._inductor.utils import run_and_get_code
+
+        x = torch.randn(1_000_003, device=GPU_TYPE, dtype=torch.float32)
+        compiled = torch.compile(lambda v: torch.cumsum(v, dim=0))
+
+        torch.use_deterministic_algorithms(True, warn_only=False)
+        eager = torch.cumsum(x, dim=0)
+        result, (_,) = run_and_get_code(compiled, x)
+        for _ in range(5):
+            self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
+        self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
 
     def test_reorder_for_locality_preserves_randint_order(self):
         with inductor_config.patch(fallback_random=True):
@@ -192,7 +290,7 @@ class DeterministicTest(TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             saved_pkl = os.path.join(tmpdir, "saved.pkl")
             cmd = (
-                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
             )
@@ -208,7 +306,7 @@ class DeterministicTest(TestCase):
             # self.assertTrue("pass" in out.stdout.decode())
 
             cmd = (
-                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
             )
@@ -220,7 +318,7 @@ class DeterministicTest(TestCase):
             self.assertTrue(
                 "The result is bitwise equivalent to the previously saved result"
                 in out.stdout.decode(),
-                f"stdout: {out.stdout.decode()}, stderr: {out.stderr.decode()}",
+                lambda msg: f"{msg}\nstdout: {out.stdout.decode()}, stderr: {out.stderr.decode()}",
             )
 
 

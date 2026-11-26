@@ -23,6 +23,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._matrix_ops import (
+    _valid_grouped_mm_strides,
     mm_single_dim_strategy,
     scaled_dot_product_efficient_attention_single_dim_strategy,
 )
@@ -157,8 +158,8 @@ class TestExpandPlaceholder(TestCase):
                 # so there should be exactly 1 strategy (the input placement)
                 self.assertEqual(len(strategy.children[0].strategies), 1)
             elif linearity == 1:
-                # See test_expand_foreach_add_to_3d_mesh for derivation of 634.
-                self.assertEqual(len(strategy.children[0].strategies), 634)
+                # See test_expand_foreach_add_to_3d_mesh for derivation of 512.
+                self.assertEqual(len(strategy.children[0].strategies), 512)
             else:
                 self.assertGreaterAlmostEqual(
                     len(strategy.children[0].strategies), 64
@@ -275,19 +276,17 @@ class TestExpandPlaceholder(TestCase):
             return strategy
 
         # Sizes are multiples of mesh dims so every shard option is valid.
-        # Per mesh dim: 4 non-partial (S0,S1,S2,R) + 6 partial rules
-        # (1 Psum, 3 Pavg, 1 Pmax, 1 Pmin). Mixed-partial filter allows
-        # Psum+Pavg to coexist but rejects other mixes. By inclusion-exclusion
-        # on a 3D mesh (n=4 non-partial, partial rule counts by type):
+        # Per mesh dim: 4 non-partial (S0,S1,S2,R) + 4 partial rules
+        # (1 Psum, 3 Pavg). Mixed-partial filter allows Psum+Pavg to coexist.
+        # By inclusion-exclusion on a 3D mesh (n=4 non-partial, partial rule
+        # counts by type):
         #   no partials:    4^3                                    =  64
         #   Psum only:      (4+1)^3 - 4^3                         =  61
         #   Pavg only:      (4+3)^3 - 4^3                         = 279
-        #   Pmax only:      (4+1)^3 - 4^3                         =  61
-        #   Pmin only:      (4+1)^3 - 4^3                         =  61
         #   Psum+Pavg mix:  (4+1+3)^3 - (4+3)^3 - (4+1)^3 + 4^3  = 108
-        #   total: 634
-        # For scalars (no Shard), n=1 (R only): same formula gives 139.
-        expected_num_strategies = (634, 139)
+        #   total: 512
+        # For scalars (no Shard), n=1 (R only): same formula gives 125.
+        expected_num_strategies = (512, 125)
         # Test Replicate + Shard gives Shard
         inputs_a = [torch.empty((8, 8, 8))] * 2
         placements_a = [
@@ -1002,7 +1001,9 @@ class TestExpandPlaceholder(TestCase):
                 len(output_specs), 2, "Should have 2 output specs for topk"
             )
             for i, out_spec in enumerate(output_specs):
-                self.assertIsNotNone(out_spec, f"Output {i} spec should not be None")
+                self.assertIsNotNone(
+                    out_spec, lambda msg: f"{msg}\nOutput {i} spec should not be None"
+                )
                 self.assertIsInstance(out_spec, DTensorSpec)
 
             self.assertEqual(len(op_spec.input_specs), 1, "Should have 1 input tensor")
@@ -1247,7 +1248,7 @@ class TestExpandPlaceholder(TestCase):
             self.assertLessEqual(
                 len(partial_types),
                 1,
-                f"Should not mix Partial subclasses: {output_spec.placements}",
+                lambda msg: f"{msg}\nShould not mix Partial subclasses: {output_spec.placements}",
             )
 
     def test_expand_allows_sum_avg_partial_mix(self):
@@ -1314,8 +1315,15 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
             dtype=torch.float32,
         )
 
-    def _compare_pq_vs_full_expansion(self, mesh, left_placements, right_placements):
-        """Run both PQ search and full expansion, verify same min cost."""
+    def _compare_pq_vs_full_expansion(
+        self,
+        mesh,
+        left_placements,
+        right_placements,
+        *,
+        compare_full_expansion=True,
+    ):
+        """Run PQ search and validate its selected strategy cost."""
         M, K, N = 64, 32, 64
         left_meta, right_meta = _get_mm_metas(M, K, N)
         output_meta = self._get_mm_output_meta(M, K, N)
@@ -1340,6 +1348,22 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         self.assertIsInstance(pq_strategy, OpStrategy)
         self.assertEqual(len(pq_strategy.strategies), 1)
         pq_cost = sum(chain.from_iterable(pq_strategy.strategies[0].redistribute_cost))
+
+        if not compare_full_expansion:
+            from torch.distributed.tensor._collective_utils import redistribute_cost
+            from torch.distributed.tensor._redistribute import _gen_transform_infos
+
+            _gen_transform_infos.cache_clear()
+            with use_min_cost_redistribution_plan():
+                actual_cost = sum(
+                    redistribute_cost(src, dst)
+                    for src, dst in zip(
+                        (left_spec, right_spec),
+                        pq_strategy.strategies[0].input_specs,
+                    )
+                )
+            self.assertAlmostEqual(pq_cost, actual_cost, places=5)
+            return
 
         # Full expansion reference using graph-based (min-cost) redistribution
         # planning. PQ's Dijkstra search over all per-dim transition orderings
@@ -1366,7 +1390,7 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
             pq_cost,
             ref_min_cost + 1e-9,
             msg=(
-                f"PQ cost {pq_cost} > ref min cost {ref_min_cost} for "
+                lambda msg: f"{msg}\nPQ cost {pq_cost} > ref min cost {ref_min_cost} for "
                 f"left={left_placements}, right={right_placements}"
             ),
         )
@@ -1425,25 +1449,26 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         )
 
     def test_dijkstra_expand_single_dim_strategy_to_mesh_hard_4d(self):
-        """Verify PQ search matches full expansion min cost on 4D mesh."""
+        """Verify PQ search selects a strategy with an accurate cost on a 4D mesh."""
         mesh = DeviceMesh("cpu", mesh=torch.arange(16).reshape(2, 2, 2, 2))
         self._compare_pq_vs_full_expansion(
             mesh,
             left_placements=(Replicate(), Shard(0), Replicate(), Replicate()),
             right_placements=(Shard(0), Shard(1), Shard(0), Replicate()),
+            compare_full_expansion=False,
         )
 
     def test_pq_vs_full_expansion_data_driven(self):
-        """Data-driven comparison across mesh shapes, all placement types for mm.
+        """Exhaustively compare all mm placement types on 1D and 2D meshes.
 
-        Enumerates all combos of R, S(0), S(1), P(sum) for each mesh dim on
-        both inputs, across 1D/2D/3D meshes.
+        Higher-dimensional exhaustive expansion is prohibitively expensive:
+        3D checks 4096 input pairs against 512 strategies each. The dedicated
+        hard tests above cover representative 3D and 4D interactions.
         """
         placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
         mesh_configs = [
             ("1d", torch.arange(4)),
             ("2d", torch.arange(4).reshape(2, 2)),
-            ("3d", torch.arange(8).reshape(2, 2, 2)),
         ]
 
         for mesh_name, mesh_tensor in mesh_configs:
@@ -2032,8 +2057,6 @@ class TestCommonPointwiseSingleDimStrategy(TestCase):
             (Partial("sum"), Partial("sum"), Partial("sum")),
             (Partial("avg"), Partial("avg"), Partial("avg")),
             (Partial("avg"), Partial("avg"), Replicate()),
-            (Partial("max"), Partial("max"), Replicate()),
-            (Partial("min"), Partial("min"), Replicate()),
             (Partial("avg"), Replicate(), Partial("avg")),
         ]
         self.assertEqual(rules, expected)
@@ -2110,6 +2133,23 @@ class TestSingleDimStrategyRegistration(TestCase):
 
         # Verify the result is None (no tensor output)
         self.assertIsNone(result, "No-output op should return None")
+
+    def test_grouped_mm_out_keeps_stride_filter(self):
+        registry = (
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs
+        )
+        aten = torch.ops.aten
+        self.assertIs(
+            registry[aten._grouped_mm.out].full_mesh_strategy_filter,
+            _valid_grouped_mm_strides,
+        )
+
+        # Only grouped_mm.out gets its base filter. argmax.out has no filter, so x
+        # can be redistributed to Shard(1) to match out.
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        x = distribute_tensor(torch.randn(8, 16), mesh, [Shard(0)])
+        out = distribute_tensor(torch.empty(16, dtype=torch.long), mesh, [Shard(0)])
+        self.assertIs(torch.argmax(x, 0, out=out), out)
 
 
 if __name__ == "__main__":

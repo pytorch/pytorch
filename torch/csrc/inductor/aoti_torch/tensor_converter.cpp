@@ -19,13 +19,13 @@ std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
     size_t length) {
   // Find duplicates by recording the last known index for each handle.
   std::unordered_map<AtenTensorHandle, size_t> lastKnownIdx;
-  for (size_t i = 0; i < length; i++) {
+  for (const auto i : c10::irange(length)) {
     lastKnownIdx[handles[i]] = i;
   }
 
   std::vector<at::Tensor> result;
   result.reserve(length);
-  for (size_t i = 0; i < length; i++) {
+  for (const auto i : c10::irange(length)) {
     if (handles[i] == nullptr) {
       result.emplace_back();
       continue;
@@ -42,6 +42,15 @@ std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
   }
 
   return result;
+}
+
+void free_unstolen_handles(std::vector<AtenTensorHandle>& handles) {
+  for (auto& handle : handles) {
+    if (handle != nullptr) {
+      aoti_torch_delete_tensor_object(handle);
+      handle = nullptr;
+    }
+  }
 }
 
 } // namespace torch::aot_inductor

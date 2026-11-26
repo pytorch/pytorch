@@ -42,6 +42,7 @@ import torch._subclasses.meta_utils
 from torch import Tensor
 from torch._dynamo.testing import rand_strided
 from torch._inductor.cpp_builder import normalize_path_separator
+from torch._logging import warning_once
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._config_module import ConfigModule
@@ -82,7 +83,18 @@ if use_buck:
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops",
     ]
     cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")  # type: ignore[possibly-undefined]
-    extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
+    # Preload common fbcode custom-op libraries so repros that use those ops
+    # work out of the box. Best-effort: a repro whose graph doesn't use these
+    # ops (or that is run outside a buck target linking them) must not fail
+    # just because the library isn't present.
+    _extra_deps_list = "\n".join(f'    "{x}",' for x in extra_deps)
+    extra_imports = (
+        f"for _extra_dep in [\n{_extra_deps_list}\n]:\n"
+        "    try:\n"
+        "        torch.ops.load_library(_extra_dep)\n"
+        "    except OSError:\n"
+        "        pass\n"
+    )
 
 
 BUCK_CMD_PREFIX = ["buck2", "run", "@mode/dev-nosan"]
@@ -483,6 +495,98 @@ def _cuda_system_info_comment() -> str:
     return model_str
 
 
+def _probe_default_device() -> str:
+    """Default ``device`` for repros: the current accelerator.
+
+    The backend is whichever one ``torch.accelerator.current_accelerator()``
+    resolves (see that API for the resolution rules); it is called without
+    ``check_available``, so there is no runtime availability check: an
+    unavailable accelerator is still the one chosen. A CUDA build with no
+    visible GPU therefore resolves to ``cuda`` and fails loudly at input
+    creation rather than silently building CPU tensors. A build with no
+    accelerator at all resolves to ``cpu``.
+    """
+    acc = torch.accelerator.current_accelerator()
+    return acc.type if acc is not None else "cpu"
+
+
+@functools.cache  # display path runs per compiled graph; see _cuda_system_info_comment
+def _device_system_info_comment(device_type: str) -> str:
+    """Best-effort ``# <DEVICE> Info`` block for one device type.
+
+    Relies only on the de-facto backend-module API
+    (``is_available``/``device_count``/``get_device_name``/``torch.version.<dt>``)
+    so built-in and out-of-tree modules alike work. Every query failure
+    degrades to a comment line instead of raising: repro generation must not
+    break on a debug-info path.
+    """
+    if device_type == "cuda":
+        return _cuda_system_info_comment()
+
+    module = getattr(torch, device_type, None)
+    if module is None:
+        return f"# torch.{device_type} module not found, no device info collected\n"
+
+    is_available = getattr(module, "is_available", None)
+    try:
+        available = is_available is not None and bool(is_available())
+    except Exception:
+        # An availability check that raises is treated as unavailable.
+        available = False
+    if not available:
+        return (
+            f"# torch.{device_type}.is_available()==False, no device info collected\n"
+        )
+
+    model_str = f"# {device_type.upper()} Info: \n"
+    version = getattr(torch.version, device_type, None)
+    if version is not None:
+        model_str += f"# {device_type} version: {version} \n"
+    model_str += "\n"
+
+    if hasattr(module, "get_device_name"):
+        try:
+            device_names = Counter(
+                module.get_device_name(i) for i in range(module.device_count())
+            )
+        except Exception:
+            return model_str + f"# Failed to collect {device_type} hardware info\n"
+        model_str += f"# {device_type.upper()} Hardware Info: \n"
+        for name, count in device_names.items():
+            model_str += f"# {name} : {count} \n"
+        model_str += "\n"
+    return model_str
+
+
+def device_system_info_comment(args: Sequence[Any] = ()) -> str:
+    """Device-agnostic counterpart of _cuda_system_info_comment().
+
+    Target device: the most common tensor device among ``args`` after
+    filtering out ``cpu`` and ``meta`` (real tensors only, matching the repro
+    call sites), else the accelerator resolved by
+    ``torch.accelerator.current_accelerator()`` without ``check_available``
+    (so an unavailable accelerator is still the one chosen). ``cuda`` keeps
+    delegating to the cached legacy collector (byte-identical CUDA repros).
+    Probe failures degrade to a comment line.
+    """
+    device_types: Counter[str] = Counter(
+        arg.device.type
+        for arg in args
+        if isinstance(arg, Tensor) and arg.device.type not in ("cpu", "meta")
+    )
+    if device_types:
+        return _device_system_info_comment(device_types.most_common(1)[0][0])
+
+    try:
+        accelerator = torch.accelerator.current_accelerator()
+    except Exception:
+        warning_once(log, "failed to detect the default accelerator", exc_info=True)
+        return "# Accelerator probe failed, no device info collected\n"
+    if accelerator is None:
+        return "# No accelerator device detected, no device info collected\n"
+    return _device_system_info_comment(accelerator.type)
+
+
 def generate_env_vars_string(*, stable_output: bool = False) -> str:
     """
     Generate a string configuration for environment variables related to Dynamo, Inductor, and Triton.
@@ -491,7 +595,13 @@ def generate_env_vars_string(*, stable_output: bool = False) -> str:
         return "# env var omitted due to stable_output=True"
 
     allow_list = ["TORCH", "DYNAMO", "INDUCTOR", "TRITON"]
-    skip_list = ["TRITON_LIBDEVICE_PATH", "TRITON_PTXAS_PATH", "TRITON_LIBCUDA_PATH"]
+    skip_list = [
+        "TRITON_LIBDEVICE_PATH",
+        "TRITON_PTXAS_PATH",
+        "TRITON_LIBCUDA_PATH",
+        # Secret.
+        "TORCH_NCCL_ENCRYPTION_PSK",
+    ]
     repro_env_vars = ["TORCHDYNAMO_REPRO_AFTER", "TORCHDYNAMO_REPRO_LEVEL"]
 
     def filter(key: str) -> bool:
@@ -676,6 +786,12 @@ def same_two_models(
 
 
 def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    half_to_float_ops = (
+        torch.ops.aten._softmax.default,
+        torch.ops.aten._softmax.out,
+        torch.ops.aten._log_softmax.default,
+        torch.ops.aten._log_softmax.out,
+    )
     for node in model.graph.nodes:
         if (
             node.op == "call_function"
@@ -693,6 +809,14 @@ def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule
                 new_kwargs = dict(node.kwargs)
                 new_kwargs["dtype"] = torch.float64
                 node.kwargs = new_kwargs
+        if node.op == "call_function" and node.target in half_to_float_ops:
+            # FP64 inputs are incompatible with half_to_float=True.
+            if bool(node.kwargs.get("half_to_float", False)):
+                new_kwargs = dict(node.kwargs)
+                new_kwargs["half_to_float"] = False
+                node.kwargs = new_kwargs
+            elif len(node.args) >= 3 and bool(node.args[2]):
+                node.args = (*node.args[:2], False, *node.args[3:])
 
     model.graph.lint()
     model.recompile()
@@ -936,6 +1060,24 @@ class InputReader:
 #     works too" but this is delicate so we don't do it
 
 
+def _serialize_sym_expr(val: int | torch.SymInt) -> str:
+    # str()/repr() of a SymInt gives the sympy repr (e.g. CeilToInt(IntTrueDiv(s0, 32))),
+    # which is not valid Python.  SymExprPrinter emits evaluable Python instead; the
+    # repro preamble imports math so math.ceil/math.floor etc. are in scope.
+    if isinstance(val, torch.SymInt):
+        from torch.fx.experimental.symbolic_shapes import SymExprPrinter
+
+        return SymExprPrinter().doprint(val.node.expr)
+    return repr(val)
+
+
+def _serialize_sym_tuple(vals: Sequence[int | torch.SymInt]) -> str:
+    inner = ", ".join(_serialize_sym_expr(v) for v in vals)
+    if len(vals) == 1:
+        inner += ","
+    return f"({inner})"
+
+
 class InputWriter:
     def __init__(self, save_dir: str | None, *, stable_hash: bool = False) -> None:
         self._lines: list[str] = []
@@ -980,7 +1122,7 @@ class InputWriter:
         if _dtype_or_default(None) != _dtype_or_default(dtype_hint):
             maybe_dtype_hint = f", dtype_hint={dtype_hint!r}"
         # TODO: being optional on device is kind of pointless as the default
-        # is CPU but most repros we care about are CUDA
+        # is CPU but most repros we care about run on an accelerator
         maybe_device = ""
         device = untyped_storage.device
         if device.type == "meta":
@@ -988,15 +1130,24 @@ class InputWriter:
                 raise AssertionError(
                     "device_hint must be provided when storage device is 'meta'"
                 )
-            device = device_hint  # type: ignore[assignment]
+            device = torch.device(device_hint)
+        # compile-on-one-rank: drop the index when it is the current accelerator's.
+        # Every rank's inputs sit there by invariant, so an index-less device replays
+        # the same compile while making the repro identical across ranks -- and
+        # runnable on a box with fewer GPUs than the rank that produced it.
+        from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+        if _coor_device_index_is_current(device):
+            device = torch.device(device.type)
         if _device_or_default(None) != device:
             maybe_device = f", device={device!r}"
         nbytes = untyped_storage.nbytes()
+        nbytes_source = _serialize_sym_expr(nbytes)
         storage_hash = None
         if self.store is not None and untyped_storage.device.type != "meta":
             storage_hash = self.store.write_storage(untyped_storage)
         self._lines.append(
-            f"{v} = reader.storage({storage_hash!r}, {nbytes!r}{maybe_device}{maybe_dtype_hint})"
+            f"{v} = reader.storage({storage_hash!r}, {nbytes_source}{maybe_device}{maybe_dtype_hint})"
         )
         self.seen_storages[ws] = v
         return v
@@ -1012,13 +1163,13 @@ class InputWriter:
         if not statically_known_true(
             sym_eq(_stride_or_default(None, shape=t.shape), t.stride())
         ):
-            args.append(str(tuple(t.stride())))
+            args.append(_serialize_sym_tuple(t.stride()))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")
         if not statically_known_true(
             _storage_offset_or_default(None) == t.storage_offset()
         ):
-            args.append(f"storage_offset={t.storage_offset()!r}")
+            args.append(f"storage_offset={_serialize_sym_expr(t.storage_offset())}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
         if tensor_metadata:
             args.extend(f"{k}={v!r}" for k, v in tensor_metadata.items())
@@ -1029,11 +1180,11 @@ class InputWriter:
             args.append(f"is_leaf={is_leaf!r}")
         self._lines.append(
             "reader.tensor("
-            + ", ".join([storage, str(tuple(t.shape)), *args])
+            + ", ".join([storage, _serialize_sym_tuple(t.shape), *args])
             + f")  # {name}"
         )
 
-    def unsupported(self, name: str, arg: Any) -> None:
+    def unsupported(self, name: str, arg: object) -> None:
         # NB: Try hard not to /print/ a tensor, that will be very slow
         self._lines.append(
             f"reader.unsupported({name!r})  # unsupported type for dumping: {type(arg)}"
@@ -1059,7 +1210,7 @@ class InputWriter:
         )
 
     # TODO: this doesn't actually symint atm
-    def symint(self, name: str, val: Any) -> None:
+    def symint(self, name: str, val: object) -> None:
         if isinstance(val, torch.SymInt):
             expr_str = str(val.node.expr)
             hint = val.node.hint
@@ -1079,7 +1230,7 @@ class InputWriter:
 
 def aot_graph_input_parser(
     func: Callable[[list[Tensor]], list[Tensor]],
-    device: str = "cuda",
+    device: str | None = None,
     sym_shapes: dict[str, int] | None = None,
     default_sym_shape: int | None = None,
 ) -> dict[str, Any]:
@@ -1096,7 +1247,14 @@ def aot_graph_input_parser(
 
     kwargs = aot_graph_input_parser(forward)
     forward(**kwargs)
+
+    ``device`` defaults to the accelerator resolved by
+    ``torch.accelerator.current_accelerator()``, with no runtime availability
+    check, or ``cpu`` when torch has no accelerator; passing ``device``
+    explicitly is only needed to force a particular backend.
     """
+    if device is None:
+        device = _probe_default_device()
 
     from torch.utils._dtype_abbrs import dtype_abbrs
 

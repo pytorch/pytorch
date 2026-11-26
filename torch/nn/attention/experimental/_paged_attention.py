@@ -35,8 +35,11 @@ class PagedAttention:
         n_pages: int,
         page_size: int,
         max_batch_size: int,
-        device: str = "cuda",
+        device: str | torch.device | None = None,
     ) -> None:
+        if device is None:
+            device = torch.accelerator.current_accelerator() or torch.device("cpu")
+
         # number of pages
         self.n_pages = n_pages
 
@@ -215,7 +218,7 @@ class PagedAttention:
 
         if block_mask.BLOCK_SIZE[1] != self.page_size:
             raise RuntimeError(
-                f"Expect block_mask has the same column block size as page_size"
+                f"Expect block_mask has the same column block size as page_size "
                 f"but got size={block_mask.BLOCK_SIZE[1]} and size={self.page_size}"
             )
 

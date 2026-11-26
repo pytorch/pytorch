@@ -8,7 +8,8 @@ from torch.distributed.tensor import distribute_tensor, Replicate
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    LocalDTensorContinuousTestBase,
     with_comms,
 )
 
@@ -17,11 +18,8 @@ ITER_TIME = 10
 LR = 0.001
 
 
-class DistOtherOpsTest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        # hard code world size to 2
-        return 2
+class DistOtherOpsTest(DTensorContinuousTestBase):
+    world_size = 2
 
     @with_comms
     def test_slice(self):
@@ -59,19 +57,19 @@ class DistOtherOpsTest(DTensorTestBase):
 
             self.assertTrue(
                 output_mse_abs <= 1e-6,
-                f"Too large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
             )
             self.assertTrue(
                 output_mse_rel <= 1e-6,
-                f"Too large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
             )
             self.assertTrue(
                 grad_mse_abs <= 1e-6,
-                f"Too large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
             )
             self.assertTrue(
                 grad_mse_rel <= 1e-6,
-                f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
 
     @with_comms
@@ -122,19 +120,19 @@ class DistOtherOpsTest(DTensorTestBase):
 
             self.assertTrue(
                 output_mse_abs <= 1e-6,
-                f"Too large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
             )
             self.assertTrue(
                 output_mse_rel <= 1e-6,
-                f"Too large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
             )
             self.assertTrue(
                 grad_mse_abs <= 1e-6,
-                f"Too large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
             )
             self.assertTrue(
                 grad_mse_rel <= 1e-6,
-                f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
 
     @with_comms
@@ -173,24 +171,25 @@ class DistOtherOpsTest(DTensorTestBase):
 
             self.assertTrue(
                 loss_mse_abs <= 1e-6,
-                f"Too large absolute mse for loss, expected less equal 1e-6, got {loss_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for loss, expected less equal 1e-6, got {loss_mse_abs}",
             )
             self.assertTrue(
                 loss_mse_rel <= 1e-6,
-                f"Too large relative mse for loss, expected less equal 1e-6, got {loss_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for loss, expected less equal 1e-6, got {loss_mse_rel}",
             )
             self.assertTrue(
                 grad_mse_abs <= 1e-6,
-                f"Too large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
             )
             self.assertTrue(
                 grad_mse_rel <= 1e-6,
-                f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
 
 
 DistOtherOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistOtherOpsTest,
+    base_class=LocalDTensorContinuousTestBase,
     # Send / recv ops are not supported
     skipped_tests=["test_bernoulli"],
 )

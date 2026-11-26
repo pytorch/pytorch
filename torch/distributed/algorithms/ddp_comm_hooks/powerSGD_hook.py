@@ -46,7 +46,7 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
     """
     Apply Gram-Schmidt procedure to orthogonalize a batch of matrices.
 
-    If epsilon is 0, this is equivalent to `torch.qr(matrices, out=(matrices, _))`,
+    If epsilon is 0, this is equivalent to `torch.linalg.qr(matrices, out=(matrices, _))`,
     """
     num_cols = matrices.shape[2]
     for i in range(num_cols):
@@ -59,7 +59,7 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
             try:
-                col /= torch.norm(col, dim=1, keepdim=True)
+                col /= torch.linalg.vector_norm(col, dim=1, keepdim=True)
             except ZeroDivisionError:
                 logger.error(
                     "The matrices to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
@@ -68,7 +68,7 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
                 # Recover the values from NaNs to 0s.
                 col.fill_(0.0)
         else:
-            col /= torch.norm(col, dim=1, keepdim=True) + epsilon
+            col /= torch.linalg.vector_norm(col, dim=1, keepdim=True) + epsilon
         # Project it on the rest and remove it.
         if i + 1 < num_cols:
             rest = matrices[:, :, i + 1 :]
@@ -207,7 +207,7 @@ class PowerSGDState:
 
         self.process_group = process_group
         self.matrix_approximation_rank = matrix_approximation_rank
-        # Deferring PowerSGD compression util step 'start_powerSGD_iter' can have two advantages:
+        # Deferring PowerSGD compression until step 'start_powerSGD_iter' can have two advantages:
         # 1) It turns out that PowerSGD may lead to a non-trivial accuracy loss,
         # even if the matrix approximation rank is increased to a large value.
         # To mitigate the accuracy loss, a simple yet effective way is mixing vanilla allreduce

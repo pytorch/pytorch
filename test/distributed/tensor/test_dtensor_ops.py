@@ -6,6 +6,7 @@ import random
 import re
 import threading
 import warnings
+from functools import partial
 
 import torch
 import torch._dynamo
@@ -146,6 +147,7 @@ dtensor_fails = {
     xfail("nn.functional.ctc_loss"),
     # 0-dim tensor edge cases: strategies don't handle scalar tensors
     xfail("transpose"),
+    xfail("polar"),
     # conv stride+padding: TP convolution rejects stride != 1 with padding
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
@@ -212,7 +214,9 @@ dtensor_multi_threaded_fails = {
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
     skip("nn.functional.multi_head_attention_forward"),
-    xfail("multinomial"),
+    # Nondeterministic: DTensor vs reference sample from the shared RNG at
+    # different points, so an xfail is flaky (occasional "unexpected success").
+    skip("multinomial"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/167252
     skip("full_like"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/179779
@@ -232,8 +236,11 @@ dtensor_compiled_fails = {
     xfail("reshape_as"),
     xfail("view"),
     xfail("view_as"),
+    # No sharding strategy for aten.transpose_copy.int on 0-d inputs.
+    xfail("transpose_copy"),
     # View-type ops that decompose into as_strided (at autograd level).
-    # DTensor doesn't have a sharding strategy for as_strided.
+    # DTensor only answers as_strided when it is a permutation of the base
+    # dims, which these are not.
     xfail("atleast_1d"),
     xfail("atleast_2d"),
     xfail("atleast_3d"),
@@ -245,15 +252,11 @@ dtensor_compiled_fails = {
     xfail("expand_as"),
     xfail("hsplit"),
     xfail("linalg.diagonal"),
-    xfail("movedim"),
     xfail("narrow"),
-    xfail("permute"),
     xfail("select"),
     xfail("slice"),
     xfail("squeeze"),
     xfail("squeeze", "multiple"),
-    xfail("t"),
-    xfail("transpose_copy"),
     xfail("unsqueeze"),
     xfail("vsplit"),
     # Decompositions that use plain tensor constructors (e.g. arange),
@@ -276,13 +279,8 @@ dtensor_compiled_fails = {
     xfail("nonzero_static"),
     # Decompositions with .is_cuda checks that fail during sharding
     # propagation for aten.is_cuda / prim::device.
-    xfail("nn.functional.binary_cross_entropy_with_logits"),
     xfail("nn.functional.gaussian_nll_loss"),
-    xfail("nn.functional.logsigmoid"),
     xfail("scatter"),
-    # False positives: these have no sharding strategy and their
-    # eager DTensor failure is registered elsewhere.
-    xfail("nn.functional.multilabel_soft_margin_loss"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/181204
     skip("norm", "nuc"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/176973
@@ -290,6 +288,17 @@ dtensor_compiled_fails = {
     xfail("nn.functional.linear_cross_entropy", "chunked"),
     xfail("nn.functional.linear_cross_entropy", "chunked_none"),
 }
+
+if not torch._dynamo.config.use_cpp_fake_tensor:
+    dtensor_compiled_fails |= {
+        # The log_sigmoid_forward decomp checks self.is_cuda, which on a Python
+        # FakeTensor dispatches prim::device into PlacementTrackingMode, where
+        # sharding propagation fails. C++ FakeTensor answers it from the
+        # TensorImpl without dispatching.
+        xfail("nn.functional.binary_cross_entropy_with_logits"),
+        xfail("nn.functional.logsigmoid"),
+        xfail("nn.functional.multilabel_soft_margin_loss"),
+    }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
 # These are excluded from TestCompiledDTensorOps skip list since we don't check numerics.
@@ -373,7 +382,6 @@ dtensor_fails_no_strategy = {
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.unfold"),
     xfail("nonzero"),
-    xfail("polar"),
     xfail("put"),
     xfail("renorm"),
     xfail("scatter_reduce", "amax"),
@@ -409,13 +417,34 @@ OP_DB_WORLD_SIZE = 4
 DEVICE_TYPE = "cpu"
 
 
-class TestDTensorOps(TestCase):
-    __test__ = False
+def _generate_samples_under_lock(lock, make_samples):
+    """Generate OpInfo samples in one rank thread at a time, then sync all ranks.
 
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        cls.__test__ = True
+    Rank threads share the process-global torch, Python and NumPy RNGs, so rank
+    threads generating samples concurrently interleave their draws and get different
+    non-tensor args (e.g. a random scalar). ``lock`` must be shared by all ranks.
+    The fixed seed covers draws a sample function makes before returning its
+    iterator; the caller's RNG state is restored afterwards.
+    """
+    with lock:
+        python_rng_state = random.getstate()
+        numpy_rng_state = np.random.get_state() if TEST_NUMPY else None
+        try:
+            with freeze_rng_state():
+                torch.manual_seed(SEED)
+                random.seed(SEED)
+                if TEST_NUMPY:
+                    np.random.seed(SEED)
+                samples = list(make_samples())
+        finally:
+            random.setstate(python_rng_state)
+            if numpy_rng_state is not None:
+                np.random.set_state(numpy_rng_state)
+    dist.barrier()
+    return samples
 
+
+class DTensorOpsMixin:
     @property
     def world_size(self) -> int:
         return OP_DB_WORLD_SIZE
@@ -474,25 +503,7 @@ class TestDTensorOps(TestCase):
                 yield from valid_samples()
                 return
 
-            # Threaded ranks share process-global RNG state. Materialize samples
-            # with a fixed RNG state so non-tensor args match across ranks.
-            with sample_lock:
-                python_rng_state = random.getstate()
-                numpy_rng_state = np.random.get_state() if TEST_NUMPY else None
-                try:
-                    with freeze_rng_state():
-                        torch.manual_seed(SEED)
-                        random.seed(SEED)
-                        if TEST_NUMPY:
-                            np.random.seed(SEED)
-                        samples = list(valid_samples())
-                finally:
-                    random.setstate(python_rng_state)
-                    if numpy_rng_state is not None:
-                        np.random.set_state(numpy_rng_state)
-
-            dist.barrier()
-            yield from samples
+            yield from _generate_samples_under_lock(sample_lock, valid_samples)
 
         def test():
             for args, kwargs in iter_samples():
@@ -683,7 +694,7 @@ class TestDTensorOps(TestCase):
             _ = torch.ops.aten.embedding.default(weight_dtensor, input_dtensor)
 
 
-class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
+class TestMultiThreadedDTensorOps(DTensorOpTestBase, DTensorOpsMixin):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
 
@@ -702,7 +713,7 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
         self.run_one_hot()
 
 
-class TestLocalDTensorOps(TestDTensorOps):
+class TestLocalDTensorOps(DTensorOpsMixin, TestCase):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestLocalDTensorOps")
 
     def setUp(self) -> None:
@@ -771,6 +782,7 @@ ops_unbacked_dtensor_dde = {
     skip("broadcast_to"),
     xfail("bucketize"),
     xfail("cartesian_prod"),
+    xfail("combinations"),
     xfail("constant_pad_nd"),
     xfail("cumprod"),
     xfail("diagonal_scatter"),
@@ -863,7 +875,7 @@ ops_unbacked_dtensor_dde = {
 }
 
 
-class TestUnbackedDTensorOps(TestDTensorOps):
+class TestUnbackedDTensorOps(DTensorOpsMixin, TestCase):
     """
     Test suite for DTensor ops with unbacked symints.
 
@@ -983,6 +995,8 @@ class TestUnbackedDTensorOps(TestDTensorOps):
 
 
 class TestSingleDimStrategies(DTensorOpTestBase):
+    _sample_lock = threading.Lock()
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1015,12 +1029,13 @@ class TestSingleDimStrategies(DTensorOpTestBase):
         },
     )
     def test_single_dim_strategy(self, dtype, op):
-        torch.manual_seed(42)
         mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
         sharding_prop = DTensor._op_dispatcher.sharding_propagator
 
         try:
-            samples = list(op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=False))
+            lock = self.__class__._sample_lock
+            make_samples = partial(op.sample_inputs, DEVICE_TYPE, dtype)
+            samples = _generate_samples_under_lock(lock, make_samples)
         except Exception:
             self.skipTest(f"Failed to get sample inputs for {op.name}")
         if not samples:
@@ -1102,7 +1117,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
                     tuple(output_placements),
                     mesh,
                 ),
-                f"{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
+                lambda msg: f"{msg}\n{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
             )
 
             bwd = validate_sharding_rule_sample_backward(
@@ -1115,11 +1130,11 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             if bwd is not None:
                 self.assertTrue(
                     bwd,
-                    f"{op.name}: backward {input_placements} failed",
+                    lambda msg: f"{msg}\n{op.name}: backward {input_placements} failed",
                 )
 
 
-class TestCompiledDTensorOps(TestDTensorOps):
+class TestCompiledDTensorOps(DTensorOpsMixin, TestCase):
     """
     Test DTensor ops compile successfully with aot_eager backend.
     Uses fake PG for speed - focuses on compilation, not output correctness.

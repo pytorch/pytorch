@@ -630,7 +630,7 @@ def insert_deferred_runtime_asserts(
                 # refinement.  This is important, because if we are going
                 # to retrace the graph (and we typically are if we send
                 # the graph to AOTAutograd), we need to make sure we apply
-                # range refinement (ala _check_is_size) first, BEFORE we
+                # range refinement first, BEFORE we
                 # run any of the asserts.  Otherwise, we may decide to
                 # perform substitutions based on the asserts which we then
                 # can't back out, because value ranges can only be applied
@@ -645,7 +645,7 @@ def insert_deferred_runtime_asserts(
                 # https://github.com/pytorch/pytorch/pull/119043
                 # which didn't work.
                 #
-                # Another ideas for how to do this:
+                # Another idea for how to do this:
                 # - Have bound_sympy be the source of truth of the ranges of any expression
                 # - Cache intermediate results for every subexpression of bound_sympy
                 # - This cache should be possible to edit to refine ranges

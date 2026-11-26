@@ -56,6 +56,25 @@ class Weights {
   at::Tensor at(const std::string& name) const;
   at::Tensor& at(const std::string& name);
   bool contains(const std::string& name) const;
+
+  // Resolve an AOTI original FQN against the names in this weight set. Exact
+  // names always win. For compatibility with lowered models whose generated
+  // accelerator wrapper changed across snapshots, this also accepts a unique
+  // match after removing reserved `_run_on_acc_<n>`/`_run_on_gpu_<n>` path
+  // components.
+  std::optional<std::string> resolveAotiOriginalFqn(
+      const std::string& name) const;
+
+  // A packed tensor's archive path can identify it across compatible snapshots
+  // when graph transforms add or remove wrapper components from its FQN. The
+  // returned key is namespaced to distinguish state-dict entries from tensor
+  // constants.
+  std::optional<std::string> getWeightStorageKey(const std::string& name) const;
+  std::optional<std::string> resolveWeightStorageKey(
+      const std::string& storageKey) const;
+  void setWeightStorageKeys(
+      const std::unordered_map<std::string, std::string>& stateDictPaths,
+      const std::unordered_map<std::string, std::string>& constantPaths);
   c10::IValue getCustomObj(const std::string& name) const;
   c10::IValue getCustomObjByFileName(const std::string& name) const;
 
@@ -113,6 +132,17 @@ class Weights {
     return hasCachedWeights_;
   }
 
+  // AOTI constant name mapping (original FQN → AOTI constant name).
+  // Set by the parent process after reading from the AOTI model,
+  // serialized with weight export, and used by the child to create
+  // the AOTI container with external constants (zero GPU allocation).
+  const std::unordered_map<std::string, std::string>& getAotiNameMap() const {
+    return aotiNameMap_;
+  }
+  void setAotiNameMap(std::unordered_map<std::string, std::string> map) {
+    aotiNameMap_ = std::move(map);
+  }
+
   std::string toString() const;
 
   WeightVersion version() const {
@@ -125,6 +155,21 @@ class Weights {
 
   // keys are parameter/buffer/constant names, not graph input names!
   std::unordered_map<std::string, at::Tensor> allValues_;
+
+  // Maps a wrapper-normalized AOTI FQN to its unique weight name. A nullopt
+  // value records ambiguity without requiring a separate ambiguity set.
+  c10::FastMap<std::string, std::optional<std::string>>
+      canonicalAotiOriginalFqns_;
+
+  std::unordered_map<std::string, std::string> weightNameToStorageKey_;
+  std::unordered_multimap<std::string, std::string> storageKeyToWeightNames_;
+
+  void rebuildCanonicalAotiOriginalFqns();
+  void indexCanonicalAotiOriginalFqn(const std::string& name);
+  void indexWeightStorageKey(
+      const std::string& name,
+      std::string_view storageNamespace,
+      const std::string& path);
 
   std::unordered_map<std::string, c10::IValue> customObjs_;
 
@@ -148,6 +193,8 @@ class Weights {
   static WeightVersion globalVersion_;
 
   bool hasCachedWeights_ = false;
+
+  std::unordered_map<std::string, std::string> aotiNameMap_;
 
   std::function<bool(const std::string&)> skipSizeCheck_;
   std::function<bool(const std::string&)> skipDtypeCheck_;

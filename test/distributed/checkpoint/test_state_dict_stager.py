@@ -25,17 +25,26 @@ from torch.distributed.checkpoint.staging import (
     StagingOptions,
 )
 from torch.distributed.checkpoint.state_dict_saver import async_save
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
 from torch.testing._internal.common_distributed import (
     HAS_ACCELERATOR,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorContinuousTestBase,
     DTensorTestBase,
+    NUM_DEVICES,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -493,7 +502,7 @@ class TestStateDictStager(TestCase):
             )
             self.assertTrue(
                 torch.allclose(cpu_tensor, original_tensor.cpu()),
-                f"Tensor {dtype_name} has incorrect values",
+                lambda msg: f"{msg}\nTensor {dtype_name} has incorrect values",
             )
 
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
@@ -579,7 +588,9 @@ class TestStateDictStager(TestCase):
 
         # Verify that all tensors have been correctly copied to CPU
         result, error = compare_state_dicts(state_dict, cpu_state_dict)
-        self.assertTrue(result, f"State dicts are not equivalent: {error}")
+        self.assertTrue(
+            result, lambda msg: f"{msg}\nState dicts are not equivalent: {error}"
+        )
 
         # Verify storage sharing is preserved
         # All these tensors should share the same storage
@@ -873,6 +884,47 @@ class TestStateDictStager(TestCase):
         stager.close()
 
 
+class TestStagerStorageOffset(TestCase):
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    @parametrize("stager_type", ["state_dict_stager", "default_stager"])
+    @parametrize("offset", [0, 2])
+    def test_dtensor_with_storage_offset(self, stager_type, offset):
+        mesh = init_device_mesh("cpu", (1,))
+        base = torch.arange(12.0)
+        dtensor = DTensor.from_local(
+            base[offset : offset + 4], mesh, [Shard(0)], run_check=False
+        )
+        if stager_type == "state_dict_stager":
+            staged = StateDictStager().stage({"w": dtensor})
+        else:
+            options = StagingOptions(
+                use_pinned_memory=False,
+                use_shared_memory=False,
+                use_async_staging=False,
+                use_non_blocking_copy=False,
+            )
+            stager = DefaultStager(options)
+            staged = stager.stage({"w": dtensor})
+            stager.close()
+        self.assertIsInstance(staged["w"], DTensor)
+        self.assertEqual(staged["w"]._spec, dtensor._spec)
+        self.assertEqual(staged["w"].to_local(), dtensor.to_local())
+        self.assertNotEqual(
+            staged["w"].to_local().untyped_storage().data_ptr(),
+            base.untyped_storage().data_ptr(),
+        )
+
+
+instantiate_parametrized_tests(TestStagerStorageOffset)
+
+
 class TestDTensorStateDictStager(DTensorTestBase):
     @with_comms
     @requires_accelerator_dist_backend()
@@ -943,20 +995,26 @@ class TestDTensorStateDictStager(DTensorTestBase):
             self.assertLess(
                 growth,
                 max_allowed,
-                f"Memory grew {growth:.0f}MB over {num_saves} saves (baseline={baseline:.0f}MB). "
+                lambda msg: f"{msg}\nMemory grew {growth:.0f}MB over {num_saves} saves (baseline={baseline:.0f}MB). "
                 f"This indicates a memory leak. Max allowed: {max_allowed:.0f}MB",
             )
 
 
-class TestReplicationStager(DTensorTestBase):
+@unittest.skipIf(torch.accelerator.device_count() < 4, "Requires at least 4 devices")
+class TestReplicationStager(DTensorContinuousTestBase):
     """
     Test suite for _ReplicationStager functionality.
     Tests replication of state_dict across training ranks using CPU tensors only.
     """
 
-    @property
-    def backend(self) -> str:
-        return "cpu:gloo,cuda:nccl"
+    world_size = NUM_DEVICES
+
+    @classmethod
+    def backend_str(cls, device) -> str:
+        if device_type == "cpu":
+            return "gloo"
+        curr_backend = dist.get_default_backend_for_device(device_type)
+        return f"cpu:gloo,{device_type}:{curr_backend}"
 
     def _create_simple_state_dict(self, rank: int) -> dict:
         """
@@ -1027,7 +1085,8 @@ class TestReplicationStager(DTensorTestBase):
                     lambda msg: f"{msg}\nDtype mismatch at {path}",
                 )
                 self.assertTrue(
-                    torch.equal(actual, expected), f"Values mismatch at {path}"
+                    torch.equal(actual, expected),
+                    lambda msg: f"{msg}\nValues mismatch at {path}",
                 )
             else:
                 self.assertEqual(
@@ -1274,8 +1333,9 @@ class TestReplicationStager(DTensorTestBase):
         state_dict = self._create_simple_state_dict(current_rank)
 
         # Initialize replication stager
+        pg = dist.new_group(backend=dist.Backend.GLOO)
         stager = _ReplicationStager(
-            pg=dist.new_group(backend=dist.Backend.GLOO),
+            pg=pg,
             timeout=timedelta(seconds=30),
             device=torch.device("cpu"),
         )
@@ -1293,6 +1353,7 @@ class TestReplicationStager(DTensorTestBase):
 
         # Clean up
         stager.close()
+        dist.destroy_process_group(pg)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1407,7 +1468,7 @@ class TestReplicationStager(DTensorTestBase):
 
             self.assertTrue(
                 os.path.exists(expected_path),
-                f"Persisted file should exist at {expected_path}",
+                lambda msg: f"{msg}\nPersisted file should exist at {expected_path}",
             )
 
             # Verify the storage directory was created
@@ -1463,7 +1524,7 @@ class TestReplicationStager(DTensorTestBase):
 
             self.assertTrue(
                 os.path.exists(expected_path),
-                f"Persisted file should exist in custom directory at {expected_path}",
+                lambda msg: f"{msg}\nPersisted file should exist in custom directory at {expected_path}",
             )
 
             # Load and verify the persisted state_dict

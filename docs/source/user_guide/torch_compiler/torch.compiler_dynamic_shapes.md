@@ -238,12 +238,15 @@ you never specialize.
 
 #### `mark_unbacked(tensor, dim)`
 
-The {func}`torch._dynamo.decorators.mark_unbacked` function marks a tensor dimension as unbacked. It is unlikely
-to be the tool you need, but it could be useful if the specialization occurs inside
-a condition `guard_size_oblivious(x)`, and if using it removes the specialization.
-Ensure it fixes the specialization and does not introduce a data-dependent error
-that converts to a graph break at or before the specialization location
-you are trying to  avoid. It might be better to use the next option.
+The {func}`torch._dynamo.decorators.mark_unbacked` function marks a tensor dimension
+as unbacked, so its concrete value is not used for specialization. Operations on
+that dimension must support unbacked symbols. For conditions that cannot be
+resolved at compile time, use explicit handling such as `guard_or_false`,
+`guard_or_true`, or `statically_known_true` when their semantics are appropriate.
+Otherwise, attempting to guard on the dimension can cause a data-dependent error
+or a graph break. See
+{ref}`troubleshooting_guardondatadependentsymnode_errors` for guidance on diagnosing
+and resolving these errors.
 
 (dynamic_sources_allow_list)=
 #### Dynamic Allow List (`DYNAMIC_SOURCES`)
@@ -271,6 +274,35 @@ with torch.compiler.config.patch(dynamic_sources="L['x']"):
 f(torch.rand(20))
 f(torch.rand(30))
 f(torch.rand(40))
+```
+
+(static_sources_allow_list)=
+#### Static Source List (`STATIC_SOURCES`)
+
+The inverse of the dynamic source list: use the environment variable
+`TORCH_COMPILE_STATIC_SOURCES` (or `torch.compiler.config.static_sources`) to pass a
+list of source names that should stay static. This is useful when automatic dynamic
+shapes or PGO makes something dynamic and that dynamism hurts you, for example when
+it produces a worse kernel. It accepts the same exact-name,
+regex and `:N` per-dim syntax as `TORCH_COMPILE_DYNAMIC_SOURCES`, and works for both
+integers and tensor sizes.
+
+Entries override automatic dynamic shapes, PGO and `dynamic=True`. They do not override
+an explicit {func}`torch._dynamo.mark_dynamic`.
+
+Here is an example:
+
+```{code-cell}
+import torch
+
+@torch.compile()
+def g(x):
+     return x * x.size()[0]
+
+with torch.compiler.config.patch(static_sources="L['x']"):
+    g(torch.rand(10))
+    g(torch.rand(20))
+    g(torch.rand(30))
 ```
 
 (torch.compiler.set_stance_eager_then_compile)=

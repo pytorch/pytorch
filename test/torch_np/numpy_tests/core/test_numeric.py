@@ -22,6 +22,7 @@ from hypothesis.extra import numpy as hynp
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -1068,7 +1069,6 @@ class TestNonzeroAndCountNonzero(TestCase):
     def test_nonzero_onedim(self):
         x = np.array([1, 0, 2, -1, 0, 0, 8])
         assert_equal(np.count_nonzero(x), 4)
-        assert_equal(np.count_nonzero(x), 4)
         assert_equal(np.nonzero(x), ([0, 2, 3, 6],))
 
     def test_nonzero_onedim_differs(self):
@@ -1401,6 +1401,10 @@ class TestClip(TestCase):
         assert_equal(actual, expected)
 
     @parametrize("dtype", "eFD")
+    @decorateIf(
+        skip(reason="torch.clamp not implemented for complex types"),
+        lambda p: p["dtype"] in "FD",
+    )
     def test_ones_pathological_2(self, dtype):
         if dtype in "FD":
             # FIXME: make xfail

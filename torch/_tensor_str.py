@@ -159,7 +159,7 @@ class _Formatter:
                 # no valid number, do nothing
                 return
 
-            if tensor.dtype == torch.float8_e8m0fnu:  # type: ignore[attr-defined]
+            if tensor.dtype in (torch.float8_e8m0fnu, torch.float8_e5m3fnu):  # type: ignore[attr-defined]
                 # float8_e8m0fnu is special and does not define arithmetic ops,
                 # and printing code further in this file assumes the existence
                 # of various arithmetic ops to figure out what to print. We hack
@@ -461,9 +461,9 @@ def _str_intern(inp, *, tensor_contents=None):
     )
     if self.is_sparse:
         suffixes.append("size=" + str(tuple(self.shape)))
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
-        is_meta = self.is_meta or isinstance(self, FakeTensor)
+        is_meta = self.is_meta or is_fake_tensor(self)
         if not is_meta:
             suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
@@ -500,10 +500,10 @@ def _str_intern(inp, *, tensor_contents=None):
         torch.sparse_bsr,
         torch.sparse_bsc,
     }:
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         suffixes.append("size=" + str(tuple(self.shape)))
-        is_meta = self.is_meta or isinstance(self, FakeTensor)
+        is_meta = self.is_meta or is_fake_tensor(self)
         if not is_meta:
             suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
@@ -599,9 +599,9 @@ def _str_intern(inp, *, tensor_contents=None):
         tensor_str = repr(torch._from_functional_tensor(self))
     else:
         # Circular import problem, so we import it here
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
-        if self.is_meta or isinstance(self, FakeTensor):
+        if self.is_meta or is_fake_tensor(self):
             suffixes.append("size=" + str(tuple(self.shape)))
             if self.dtype != torch.get_default_dtype():
                 suffixes.append("dtype=" + str(self.dtype))

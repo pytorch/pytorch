@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import functools
 import itertools
 
 import torch
@@ -33,6 +34,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.utils._typing_utils import not_none
+from torch.utils.checkpoint import (
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 
 
 def get_generator_seed_for_device_type(device_type: str):
@@ -61,25 +66,22 @@ class DistTensorRandomInitTest(DTensorTestBase):
             dtensor = init_op(dtensor, *args, **kwargs)
             self.assertEqual(local_tensor_clone, dtensor.to_local())
         else:
-            # create DTensor from Tensor
-            _tensor = torch.empty(*input_size, device=self.device_type)
+            # create DTensor from Tensor, each rank holds an input_size shard
+            _tensor = torch.empty(
+                input_size[0], input_size[1] * self.world_size, device=self.device_type
+            )
             dtensor = distribute_tensor(_tensor, device_mesh, [Shard(1)])
 
             # DTensor random init
             dtensor = init_op(dtensor, *args, **kwargs)
-            local_tensor = dtensor.to_local()
 
-            # compare with local tensors from other ranks
-            for other_rank in range(self.world_size):
-                if self.rank != other_rank:
-                    slice_idx = (
-                        slice(input_size[0]),
-                        slice(
-                            other_rank * input_size[1], (other_rank + 1) * input_size[1]
-                        ),
-                    )
-                    # other rank should have a different local tensor
-                    self.assertNotEqual(dtensor.full_tensor()[slice_idx], local_tensor)
+            @maybe_run_for_local_tensor
+            def check_shards_differ(full_tensor):
+                shards = full_tensor.split(input_size[1], dim=1)
+                for a, b in itertools.combinations(shards, 2):
+                    self.assertNotEqual(a, b)
+
+            check_shards_differ(dtensor.full_tensor())
 
     @with_comms
     def test_init_ops(self):
@@ -590,6 +592,35 @@ class DistTensorRandomOpTest(DTensorTestBase):
             compute_rankwise_if_local_tensor(local_tensor, self.rank)
 
     @with_comms
+    @skip_unless_torch_gpu
+    def test_deterministic_multinomial_1d(self):
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        probs = torch.ones(self.world_size, 64, device=self.device_type)
+
+        @maybe_run_for_local_tensor
+        def check_chunks(tensor, equal):
+            for a, b in itertools.combinations(tensor.chunk(self.world_size), 2):
+                if equal:
+                    self.assertEqual(a, b)
+                else:
+                    self.assertNotEqual(a, b)
+
+        for replacement in (True, False):
+            # each rank samples its own row, so the rows should differ
+            dtensor = distribute_tensor(probs, device_mesh, [Shard(0)])
+            samples = torch.multinomial(dtensor, 32, replacement=replacement)
+            check_chunks(samples.full_tensor(), False)
+
+            # the categories dim is redistributed to Replicate before sampling,
+            # so every rank should draw the same samples
+            dtensor = distribute_tensor(probs, device_mesh, [Shard(1)])
+            samples = torch.multinomial(dtensor, 32, replacement=replacement)
+            local_tensor = funcol.all_gather_single(
+                samples.to_local(), gather_dim=0, group=(device_mesh, 0)
+            )
+            check_chunks(local_tensor, True)
+
+    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_deterministic_uniform_2d(self):
         mesh = torch.arange(self.world_size).reshape(2, 2)
@@ -732,23 +763,52 @@ class DistTensorRandomOpTest(DTensorTestBase):
         philox.seed = test_seed
         philox.seed = philox.seed.clone()
 
+    def test_run_dtensor_rng_op_rejects_non_accelerator(self):
+        """run_dtensor_rng_op only supports the current accelerator device."""
+        from torch._prims.rng_prims import run_dtensor_rng_op
+
+        with self.assertRaisesRegex(
+            RuntimeError, "run_dtensor_rng_op only supports the current accelerator"
+        ):
+            run_dtensor_rng_op(
+                0, 4, torch.ops.aten.rand_like.default, torch.empty(8, device="cpu")
+            )
+
+    @skip_unless_torch_gpu
+    def test_run_dtensor_rng_op_on_accelerator(self):
+        """run_dtensor_rng_op runs on the accelerator and advances the offset."""
+        from torch._prims.rng_prims import run_dtensor_rng_op
+        from torch.distributed.tensor._random import _PhiloxState
+
+        device_mod = torch.get_device_module(self.device_type)
+        device_mod.manual_seed(0)
+        x = torch.empty(8, device=self.device_type)
+        offset_before = _PhiloxState(device_mod.get_rng_state()).offset.clone()
+
+        out = run_dtensor_rng_op(0, 4, torch.ops.aten.rand_like.default, x)
+
+        offset_after = _PhiloxState(device_mod.get_rng_state()).offset
+        self.assertEqual(out.device.type, self.device_type)
+        self.assertEqual(offset_after, offset_before + 4)
+
 
 class DistTensorRandomOpCompileTest(DTensorTestBase):
     def _run_with_seed(self, fn, create_input, num_runs):
         """Run fn num_runs times after resetting RNG, returning results and states."""
+        device_mod = torch.get_device_module(self.device_type)
         torch.manual_seed(0)
         results = []
-        rng_states = [torch.cuda.get_rng_state()]
+        rng_states = [device_mod.get_rng_state()]
         for _ in range(num_runs):
             x = create_input()
             result = fn(x)
             results.append(result.to_local().clone())
-            rng_states.append(torch.cuda.get_rng_state())
+            rng_states.append(device_mod.get_rng_state())
         # verify RNG state advances after each call
         for i in range(len(rng_states) - 1):
             self.assertFalse(
                 torch.equal(rng_states[i], rng_states[i + 1]),
-                f"RNG state did not change between call {i} and {i + 1}",
+                lambda msg: f"{msg}\nRNG state did not change between call {i} and {i + 1}",
             )
         return results, rng_states
 
@@ -905,6 +965,76 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
+    def test_compile_dropout_under_checkpoint(self):
+        # The backward needs the forward's dropout mask. Rerunning the DTensor
+        # random op there would draw again from wherever the generator is by
+        # then, so the result is saved instead. A replicated result must also
+        # agree across ranks, whatever else each rank has drawn.
+        device_mesh = self.build_device_mesh()
+        p = 0.5
+
+        def dropout(y):
+            return torch.nn.functional.dropout(y, p=p, training=True)
+
+        def rand_like(y):  # returns a tensor, not a (result, mask) tuple
+            return y * (torch.rand_like(y) > p) / (1 - p)
+
+        for drop, placement, backend in itertools.product(
+            (dropout, rand_like), (Shard(0), Replicate()), ("aot_eager", "inductor")
+        ):
+            with self.subTest(drop.__name__, placement=placement, backend=backend):
+
+                def fn(x, w, drop=drop):
+                    def gn(x, w):
+                        return drop(x @ w).sin()
+
+                    return torch.utils.checkpoint.checkpoint(
+                        gn, x, w, use_reentrant=False
+                    )
+
+                torch._dynamo.reset()
+                torch.manual_seed(0)
+                x_full = torch.randn(16, 16, device=self.device_type)
+                w_full = torch.randn(16, 16, device=self.device_type)
+                x = distribute_tensor(x_full, device_mesh, [placement])
+                w = distribute_tensor(w_full, device_mesh, [Replicate()])
+                x.requires_grad_()
+                w.requires_grad_()
+                torch.rand(self.rank + 1)
+                out = torch.compile(fn, backend=backend, fullgraph=True)(x, w)
+                out.sum().backward()
+                local = out.to_local()
+                if placement == Replicate():
+                    self._assert_replicate_cross_rank_equal([local], device_mesh)
+                # Dropped entries come out as sin(0) = 0, so the output shows the mask.
+                mask = (out.full_tensor() != 0).to(x_full.dtype) / (1 - p)
+                grad = torch.cos(x_full @ w_full * mask) * mask
+                self.assertEqual(x.grad.full_tensor(), grad @ w_full.T)
+                self.assertEqual(w.grad.full_tensor(), x_full.T @ grad)
+
+        # A policy that insists on recomputing it can't be honored.
+        def must_recompute(ctx, op, *args, **kwargs):
+            return CheckpointPolicy.MUST_RECOMPUTE
+
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts, must_recompute
+        )
+
+        def fn_must_recompute(x, w):
+            def gn(x, w):
+                return torch.nn.functional.dropout(x @ w, p=p, training=True)
+
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, w, use_reentrant=False, context_fn=context_fn
+            )
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn_must_recompute, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(Exception, "does not support MUST_RECOMPUTE"):
+            compiled(x, w)
+
+    @with_comms
+    @skip_unless_torch_gpu
     def test_compile_bernoulli(self):
         device_mesh = self.build_device_mesh()
 
@@ -1042,6 +1172,9 @@ DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
     skipped_tests=[
         # cross-pp-stage seeding is not simulated in local tensor mode
         "test_pipeline_parallel_manual_seed",
+        # LocalTensorMode has no rule for the run_dtensor_rng_op HigherOrderOperator
+        "test_run_dtensor_rng_op_rejects_non_accelerator",
+        "test_run_dtensor_rng_op_on_accelerator",
     ],
 )
 

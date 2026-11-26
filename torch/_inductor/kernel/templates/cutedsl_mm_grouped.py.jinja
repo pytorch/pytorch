@@ -1,11 +1,11 @@
 import functools
 
-from torch._inductor.ir import get_stride_order
 from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 from torch._inductor.runtime.runtime_utils import ceildiv
 from cutlass.utils import TensorMapUpdateMode
 {{gen_defines()}}
-# ---- Import GroupedGemm implementation, copied on PyTorch build from Cutlass repository: cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py ----
+# ---- Import GroupedGemm implementation, copied from Cutlass during build. ----
+# Source: examples/python/CuTeDSL/cute/blackwell/kernel/grouped_gemm/grouped_gemm.py
 from torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm import (
     GroupedGemmKernel,
 )
@@ -55,12 +55,49 @@ _TORCH_TO_CUTLASS_DTYPE = {
     torch.int64: cutlass.Int64,
 }
 
+# Strides are spelled out rather than derived from a stride order: a compact
+# layout would bake the wrong leading stride for a row-padded input, and the
+# tvm-ffi call checks the compiled strides against the runtime tensor.
 def _to_fake_cute_tensor(t, assumed_align=16):
-    dyn_shape = tuple(map(int, t.shape))
-    stride_order = tuple(get_stride_order(t.stride()))
-    return cute.runtime.make_fake_compact_tensor(
-        _TORCH_TO_CUTLASS_DTYPE[t.dtype], dyn_shape,
-        stride_order=stride_order, assumed_align=assumed_align,
+    return cute.runtime.make_fake_tensor(
+        _TORCH_TO_CUTLASS_DTYPE[t.dtype],
+        tuple(map(int, t.shape)), tuple(map(int, t.stride())),
+        assumed_align=assumed_align,
+    )
+
+
+def _get_gemm_leading_dim(shape, stride):
+    for dim, (size, dim_stride) in enumerate(zip(shape, stride)):
+        if size != 1 and dim_stride == 1:
+            return dim
+    raise AssertionError("Grouped GEMM operands must have a unit-stride dimension")
+
+
+def _to_fake_gemm_tensor(dtype, leading_dim, assumed_align=16):
+    """Symbolic (rows, cols, 1) layout; only dtype and leading dim are fixed."""
+    divisibility = max(assumed_align // dtype.itemsize, 1)
+    stride = [
+        cute.sym_int64(divisibility=divisibility),
+        cute.sym_int64(divisibility=divisibility),
+        cute.sym_int64(),
+    ]
+    stride[leading_dim] = 1
+    return cute.runtime.make_fake_tensor(
+        _TORCH_TO_CUTLASS_DTYPE[dtype],
+        (cute.sym_int64(), cute.sym_int64(), 1),
+        stride=tuple(stride),
+        assumed_align=assumed_align,
+    )
+
+
+@functools.lru_cache
+def _get_gemm_seed_tensor(dtype, leading_dim, device, assumed_align=16):
+    """Uninitialized tensor the kernel's initial TMA descriptors are encoded from."""
+    seed_dim = max(assumed_align // dtype.itemsize, 1)
+    stride = [seed_dim, seed_dim, 1]
+    stride[leading_dim] = 1
+    return torch.empty_strided(
+        (seed_dim, seed_dim, 1), tuple(stride), dtype=dtype, device=device
     )
 
 
@@ -294,6 +331,15 @@ def launch_build_group_ptrs_from_bases(
     )
     gemm_executor = disk_cache_get(_gemm_fn_cache, __file__, _KERNEL_CONFIG_KEY, gemm_cache_key, dev_idx)
 
+    a_dim = _get_gemm_leading_dim(input_a.shape, input_a.stride())
+    b_dim = _get_gemm_leading_dim(input_b.shape[1:], input_b.stride()[1:])
+    c_dim = _get_gemm_leading_dim({{get_output()}}.shape, {{get_output()}}.stride())
+    # Seeds only encode the initial TMA descriptors and may alias each other; the kernel
+    # replaces address, shape and stride from ptrs_t/probs_t/strides_t before any TMA load.
+    seed_a = _get_gemm_seed_tensor(input_a.dtype, a_dim, dev)
+    seed_b = _get_gemm_seed_tensor(input_b.dtype, b_dim, dev)
+    seed_c = _get_gemm_seed_tensor({{get_output()}}.dtype, c_dim, dev)
+
     if gemm_executor is None:
         grouped_gemm = GroupedGemmKernel(
             acc_dtype=ACC_DTYPE,
@@ -303,14 +349,11 @@ def launch_build_group_ptrs_from_bases(
             tensormap_update_mode=TENSORMAP_UPDATE_MODE,
         )
 
-        a_unsq = input_a.unsqueeze(-1)
-        b_unsq = input_b[0].unsqueeze(-1)
-        c_unsq = {{get_output()}}.unsqueeze(-1)
         gemm_executor = cute.compile(
             grouped_gemm,
-            _to_fake_cute_tensor(a_unsq),
-            _to_fake_cute_tensor(b_unsq),
-            _to_fake_cute_tensor(c_unsq),
+            _to_fake_gemm_tensor(input_a.dtype, a_dim),
+            _to_fake_gemm_tensor(input_b.dtype, b_dim),
+            _to_fake_gemm_tensor({{get_output()}}.dtype, c_dim),
             G,
             _to_fake_cute_tensor(probs_t, assumed_align=4),
             _to_fake_cute_tensor(strides_t, assumed_align=4),
@@ -325,9 +368,9 @@ def launch_build_group_ptrs_from_bases(
         disk_cache_set(_gemm_fn_cache, __file__, _KERNEL_CONFIG_KEY, gemm_cache_key, gemm_executor, dev_idx)
 
     gemm_executor(
-        input_a.unsqueeze(-1),
-        input_b[0].unsqueeze(-1),
-        {{get_output()}}.unsqueeze(-1),
+        seed_a,
+        seed_b,
+        seed_c,
         probs_t,
         strides_t,
         ptrs_t,
@@ -338,7 +381,7 @@ def launch_build_group_ptrs_from_bases(
 def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile_dtypes, device_index=0, device_capability=None, hw_info=None):
     """Compile CuTe DSL kernels using fake tensors (no CUDA tensor allocation).
 
-    Called by the subprocess worker to warm the disk cache. Uses fake compact
+    Called by the subprocess worker to warm the disk cache. Uses fake
     CuTe tensors for cute.compile(), avoiding torch.cuda.* calls so this can
     run in forked subprocess workers where PyTorch CUDA is unavailable.
     """
@@ -379,14 +422,9 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
     def _cpu_proxy(shape, stride, dtype):
         return torch.empty_strided(shape, stride, dtype=dtype, device="cpu")
 
-    # _main transposes then unsqueezes: a.unsqueeze(-1), b[0].unsqueeze(-1), c.unsqueeze(-1)
-    # Replicate those stride transformations on CPU proxies.
-    proxy_a = _cpu_proxy(shape_a, stride_a, dtype_a).unsqueeze(-1)
-    proxy_b_transposed = _cpu_proxy(
-        trans_shape_b, trans_stride_b, dtype_b,
-    )
-    proxy_b_unsq = proxy_b_transposed[0].unsqueeze(-1)
-    proxy_out = _cpu_proxy(shape_out, stride_out, dtype_out).unsqueeze(-1)
+    a_dim = _get_gemm_leading_dim(shape_a, stride_a)
+    b_dim = _get_gemm_leading_dim(trans_shape_b[1:], trans_stride_b[1:])
+    c_dim = _get_gemm_leading_dim(shape_out, stride_out)
 
     proxy_offs = _cpu_proxy(shape_offs, (1,), torch.int32)
     proxy_ptrs = _cpu_proxy((G, 3), (3, 1), torch.int64)
@@ -398,6 +436,11 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
     sA_m, sA_k = stride_a
     sB_0, sB_n, sB_k = trans_stride_b
     sC_m, sC_n = stride_out
+
+    compile_options = "--enable-tvm-ffi"
+    if device_capability is not None:
+        major, minor = device_capability
+        compile_options += f" --gpu-arch sm_{major}{minor}a"
 
     prep_executor = cute.compile(
         launch_build_group_ptrs_from_bases,
@@ -420,7 +463,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
         out_problem=_to_fake_cute_tensor(proxy_probs, assumed_align=4),
         out_strides_abc=_to_fake_cute_tensor(proxy_strides, assumed_align=4),
         stream=cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
-        options="--enable-tvm-ffi",
+        options=compile_options,
     )
 
     disk_cache_set(
@@ -477,9 +520,9 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
 
     gemm_executor = cute.compile(
         grouped_gemm,
-        _to_fake_cute_tensor(proxy_a),
-        _to_fake_cute_tensor(proxy_b_unsq),
-        _to_fake_cute_tensor(proxy_out),
+        _to_fake_gemm_tensor(dtype_a, a_dim),
+        _to_fake_gemm_tensor(dtype_b, b_dim),
+        _to_fake_gemm_tensor(dtype_out, c_dim),
         G,
         _to_fake_cute_tensor(proxy_probs, assumed_align=4),
         _to_fake_cute_tensor(proxy_strides, assumed_align=4),
@@ -488,7 +531,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
         _to_fake_cute_tensor(proxy_tensormap),
         max_active_clusters,
         cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
-        options="--enable-tvm-ffi",
+        options=compile_options,
     )
 
     disk_cache_set(

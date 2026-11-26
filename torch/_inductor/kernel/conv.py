@@ -5,12 +5,14 @@ import logging
 from typing import TYPE_CHECKING, TypedDict
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
+    emulate_lowp_output_cast,
     fallback_handler,
     lowerings as L,
     register_lowering,
@@ -42,6 +44,16 @@ log = logging.getLogger(__name__)
 
 
 aten = torch.ops.aten
+
+
+def _conv_template_allow_tf32(device_type: str | None) -> bool:
+    if device_type is None:
+        return False
+    try:
+        iface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        return False
+    return bool(iface.conv_allow_tf32())
 
 
 @SymbolicGridFn
@@ -560,9 +572,12 @@ def convolution(
         if V.graph.sizevars.statically_known_equals(result.get_size()[1], 0):
             # we should not add bias when the output channel is 0
             return result
-        return L[aten.add](
+        result = L[aten.add](
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
         )
+        # The peeled add is not user-visible, so the conv's declared rounded
+        # output must be reproduced for fused consumers (see #201296).
+        return emulate_lowp_output_cast(result)
 
     x.realize()
     weight.realize()
@@ -607,6 +622,7 @@ def convolution(
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
 
+    allow_tf32 = _conv_template_allow_tf32(device_type)
     choices = []
     if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
         choices = [
@@ -681,7 +697,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=unroll,
-                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                    ALLOW_TF32=allow_tf32,
                     num_stages=cfg.num_stages,
                     num_warps=num_warps,
                     **cfg.kwargs,
@@ -704,16 +720,23 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=unroll,
-                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                    ALLOW_TF32=allow_tf32,
                     num_stages=cfg.num_stages,
                     num_warps=num_warps,
                     **cfg.kwargs,
                 )
+    # The Triton conv2d backward-input kernels miscompile on CUDA (wrong results
+    # on sm90, ptxas illegal memory access on sm100) with no perf win, so keep
+    # them on ROCm and fall back to ATEN on CUDA. Same rationale as the
+    # convolution_backward lowering. See
+    # https://github.com/pytorch/pytorch/issues/187081.
+    disable_triton_conv_bwd = device_type == "cuda" and not torch.version.hip
     if (
         torch._inductor.utils._use_conv_autotune_backend("TRITON")
         and use_triton_template(layout)
         and transposed
         and ndim == 2
+        and not disable_triton_conv_bwd
     ):
         # ConvTranspose2d is mathematically identical to conv_backward_input:
         # the input plays the role of grad_output and the same weight layout
@@ -739,13 +762,13 @@ def convolution(
                 DILATION_H=dilation[0],
                 DILATION_W=dilation[1],
                 GROUPS=groups,
-                ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
+                ALLOW_TF32=allow_tf32,
                 num_stages=cfg.num_stages,
                 num_warps=cfg.num_warps,
                 **cfg.kwargs,
             )
 
-    if use_ck_conv_template(layout):
+    if use_ck_conv_template(layout) and not transposed:
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
             layout,
@@ -1077,8 +1100,24 @@ def convolution_backward_lowering(
     # https://github.com/pytorch/pytorch/issues/187081.
     disable_triton_conv_bwd = device_type == "cuda" and not torch.version.hip
 
+    if disable_triton_conv_bwd and not (V.graph.layout_opt and ndim == 2):
+        return aten_convolution_backward_fallback(
+            grad_out,
+            input,
+            weight,
+            bias_sizes,
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups,
+            output_mask,
+        )
+
     conv_configs = V.choices.get_conv_configs(device_type)
     dtype_size = input.get_dtype().itemsize
+    allow_tf32 = _conv_template_allow_tf32(device_type)
 
     has_triton_dw_choices = False
     dw = None
@@ -1127,7 +1166,7 @@ def convolution_backward_lowering(
                         DILATION_H=dilation[0],
                         DILATION_W=dilation[1],
                         GROUPS=groups,
-                        ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                        ALLOW_TF32=allow_tf32,
                         num_stages=cfg.num_stages,
                         num_warps=cfg.num_warps,
                         **cfg.kwargs,
@@ -1183,7 +1222,7 @@ def convolution_backward_lowering(
                         DILATION_H=dilation[0],
                         DILATION_W=dilation[1],
                         GROUPS=groups,
-                        ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                        ALLOW_TF32=allow_tf32,
                         num_stages=cfg.num_stages,
                         num_warps=cfg.num_warps,
                         **cfg.kwargs,

@@ -54,7 +54,7 @@ TEST(CustomClassTest, ScalarTypeClass) {
 
   std::ostringstream oss;
   m.save(oss);
-  std::istringstream iss(oss.str());
+  std::istringstream iss(std::move(oss).str());
   caffe2::serialize::IStreamAdapter adapter{&iss};
   auto loaded_module = torch::jit::load(iss, torch::kCPU);
 }
@@ -135,13 +135,13 @@ TEST(CustomClassTest, Serialization) {
 
   std::ostringstream oss;
   m.save(oss);
-  std::istringstream iss(oss.str());
+  std::istringstream iss(std::move(oss).str());
   caffe2::serialize::IStreamAdapter adapter{&iss};
   auto loaded_module = torch::jit::load(iss, torch::kCPU);
 
   std::ostringstream oss_frozen;
   frozen_m.save(oss_frozen);
-  std::istringstream iss_frozen(oss_frozen.str());
+  std::istringstream iss_frozen(std::move(oss_frozen).str());
   caffe2::serialize::IStreamAdapter adapter_frozen{&iss_frozen};
   auto loaded_frozen_module = torch::jit::load(iss_frozen, torch::kCPU);
 }

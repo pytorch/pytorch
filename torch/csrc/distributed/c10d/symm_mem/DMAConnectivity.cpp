@@ -8,7 +8,7 @@ std::string get_detector_key(
     const std::string& connection_type) {
   std::ostringstream oss;
   oss << device_type << '/' << connection_type;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 class DetectorMap {
@@ -84,7 +84,7 @@ void register_dma_connectivity_detector(
     c10::DeviceType device_type,
     const std::string& connection_type,
     c10::intrusive_ptr<DMAConnectivityDetector> detector) {
-  return DetectorMap::get().register_detector(
+  DetectorMap::get().register_detector(
       device_type, connection_type, std::move(detector));
 }
 

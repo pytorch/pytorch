@@ -88,7 +88,7 @@ struct vectorized_templated_load_helper {
     auto args_accessor = [&args] __device__(int thread_unroll_idx) -> arg_t& {
       return std::get<arg_index>(args[thread_unroll_idx]);
     };
-    self.template load_single_arg<arg_index>(args_accessor, ptr, idx);
+    self.template load_single_arg<arg_index, arg_t>(args_accessor, ptr, idx);
   }
 };
 #endif
@@ -181,6 +181,31 @@ struct StoreWithCast {
   }
 };
 
+#ifdef USE_ROCM
+// LoadWithCast / StoreWithCast for tensor dtypes known at compile time.
+template <typename... CastFromTs>
+struct LoadWithStaticCast {
+  template <typename scalar_t, int i = 0>
+  __device__ scalar_t load(char *base_ptr, uint32_t offset, int arg) {
+    using cast_from_t = std::tuple_element_t<i, std::tuple<CastFromTs...>>;
+    if constexpr (i + 1 < sizeof...(CastFromTs)) {
+      if (arg != i) {
+        return load<scalar_t, i + 1>(base_ptr, offset, arg);
+      }
+    }
+    return c10::convert<scalar_t>(c10::load<cast_from_t>(base_ptr + sizeof(cast_from_t) * offset));
+  }
+};
+
+template <typename CastToT>
+struct StoreWithStaticCast {
+  template<typename scalar_t>
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg = 0) {
+    *(reinterpret_cast<CastToT *>(base_ptr) + offset) = c10::convert<CastToT>(value);
+  }
+};
+#endif
+
 // aligned vector generates vectorized load/store on CUDA
 template<typename scalar_t, int vec_size>
 struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
@@ -192,6 +217,11 @@ __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_p
   using vec_t = aligned_vector<scalar_t, vec_size>;
   auto *from = reinterpret_cast<const vec_t *>(base_ptr);
 #if defined(USE_ROCM)
+  // NOTE: This nontemporal vectorized load is tuned for gfx942 (CDNA3, Wave64).
+  // Do NOT extend to gfx1250 (GFX12.5, Wave32) without first validating
+  // intrinsic codegen and re-benchmarking — the register layout and wave
+  // width differ. gfx1250 falls through to the generic path below, which
+  // is correctness-safe.
   if(__builtin_amdgcn_processor_is("gfx942")) {
     using longx2 = __attribute__((__vector_size__(4*sizeof(int)))) int;
     if constexpr (sizeof(vec_t) == sizeof(int)) {
@@ -404,7 +434,7 @@ struct vectorized_templated {
     return true;
   }
 
-  template <int arg_index, typename accessor_t>
+  template <int arg_index, typename arg_t, typename accessor_t>
   __device__ inline void load_single_arg(accessor_t to, char* ptr, int idx) {
     // extract the arg_index-th input tensor element type from the
     // variadic template argument.
@@ -421,7 +451,7 @@ struct vectorized_templated {
       auto v = load_vector<vec_size>(block_ptr, index);
 #pragma unroll
       for (int j = 0; j < vec_size; j++) {
-        to(vec_size * i + j) = c10::convert<CastToT>(v.val[j]);
+        to(vec_size * i + j) = c10::convert<arg_t>(v.val[j]);
       }
     }
   }

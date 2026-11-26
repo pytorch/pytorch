@@ -6,13 +6,12 @@ import dis
 import functools
 import logging
 import sys
+from collections import Counter
 from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     import types
-
-    from collections.abc import Callable
 
     from .symbolic_convert import InstructionTranslatorBase
 
@@ -22,11 +21,15 @@ from .bytecode_transformation import (
     create_instruction,
     create_swap,
     Instruction,
-    unique_id,
+    unique_id_unbound_in,
 )
 from .codegen import PyCodegen
-from .exc import unimplemented
+from .exc import format_frame_info, unimplemented
+from .graph_break_hints import DYNAMO_BUG
 from .output_graph import GraphCompileReason, StackLocalsMetadata
+from .variables.base import VariableTracker
+from .variables.ctx_manager import ContextWrappingVariable, WithExitFunctionVariable
+from .variables.functions import LocalGeneratorObjectVariable
 from .variables.misc import NullVariable, UnknownVariable
 
 
@@ -51,75 +54,6 @@ def _get_comprehension_bytecode_prefix() -> list[str]:
     end_idx = insts.index("BUILD_LIST")
 
     return insts[start_idx:end_idx]
-
-
-@functools.cache
-def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
-    """Discover bytecode patterns for comprehension result handling.
-
-    Analyzes sample functions to extract the opcode sequences that appear
-    after END_FOR for each result disposition (stored, discarded, returned, consumed).
-
-    Returns patterns with:
-        - pre_store_ops: opcodes between END_FOR and first STORE_FAST
-        - post_store_op: first opcode after all STORE_FASTs (for disambiguation)
-    """
-    if sys.version_info < (3, 12):
-        raise AssertionError(
-            f"comprehension result patterns require Python 3.12+, got {sys.version_info}"
-        )
-
-    def fn_stored() -> list[int]:
-        result = [i for i in range(1)]  # noqa: C416
-        return result
-
-    def fn_discarded() -> int:
-        [i for i in range(1)]  # noqa: C416
-        return 1
-
-    def fn_returned() -> list[int]:
-        return [i for i in range(1)]  # noqa: C416
-
-    def fn_consumed() -> int:
-        return sum([i for i in range(1)])  # noqa: C416
-
-    def extract_pattern(fn: Callable[..., Any]) -> tuple[list[str], str | None]:
-        """Extract (pre_store_ops, post_store_op) from comprehension bytecode."""
-        target_line = list(dis.findlinestarts(fn.__code__))[1][1]
-        insts: list[str] = []
-        started = False
-        for instr in dis.get_instructions(fn):
-            if started and instr.starts_line:
-                break
-            pos = instr.positions
-            if pos and pos.lineno == target_line:
-                started = started or bool(instr.starts_line)
-                insts.append(instr.opname)
-
-        ops = insts[insts.index("END_FOR") + 1 :]
-        idx = 0
-
-        pre_store_ops = []
-        while idx < len(ops) and ops[idx] != "STORE_FAST":
-            pre_store_ops.append(ops[idx])
-            idx += 1
-
-        while idx < len(ops) and ops[idx] == "STORE_FAST":
-            idx += 1
-
-        return pre_store_ops, ops[idx] if idx < len(ops) else None
-
-    stored = extract_pattern(fn_stored)
-    discarded = extract_pattern(fn_discarded)
-    returned = extract_pattern(fn_returned)
-    consumed = extract_pattern(fn_consumed)
-
-    return {
-        "stored": {"pre_store_ops": stored[0], "post_store_op": stored[1]},
-        "discarded": {"pre_store_ops": discarded[0], "post_store_op": discarded[1]},
-        "returned": {"pre_store_ops": returned[0], "post_store_op": returned[1]},
-        "consumed": {"pre_store_ops": consumed[0], "post_store_op": []},
-    }
 
 
 @dataclasses.dataclass
@@ -194,7 +128,6 @@ def _analyze_comprehension(tx: InstructionTranslatorBase) -> ComprehensionAnalys
     if tx.instruction_pointer is None:
         raise AssertionError("instruction_pointer must not be None")
 
-    patterns = _get_comprehension_result_patterns()
     start_ip = tx.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
 
     iterator_vars: list[str] = []
@@ -260,6 +193,11 @@ def _analyze_comprehension(tx: InstructionTranslatorBase) -> ComprehensionAnalys
     # Extract pre_store_ops: all opcodes from END_FOR+1 until first STORE_FAST
     pre_store_ops: list[str] = []
     scan_ip = end_for_ip + 1
+    # In 3.13 END_FOR is followed by POP_TOP to pop the iter.  In 3.12, END_FOR is responsible for doing the pop, and in
+    # 3.14+ POP_ITER is used instead.  We skip over the mandatory POP_TOP in 3.13 to avoid confusing the analysis below
+    # (which looks for an additional POP_TOP if the result is discarded).
+    if sys.version_info[:2] == (3, 13):
+        scan_ip += 1
     while (
         scan_ip < len(tx.instructions)
         and tx.instructions[scan_ip].opname != "STORE_FAST"
@@ -269,40 +207,54 @@ def _analyze_comprehension(tx: InstructionTranslatorBase) -> ComprehensionAnalys
 
     store_fast_ip = scan_ip
 
-    # Skip all STORE_FASTs to find post_store_op
+    # Skip all STORE_FASTs (iteration-variable restores plus an optional result
+    # assignment) to find the end of the comprehension epilogue.
     while (
         scan_ip < len(tx.instructions)
         and tx.instructions[scan_ip].opname == "STORE_FAST"
     ):
         scan_ip += 1
 
-    post_store_op = (
-        tx.instructions[scan_ip].opname if scan_ip < len(tx.instructions) else None
+    # The comprehension epilogue always restores the iteration variables that
+    # were saved by LOAD_FAST_AND_CLEAR (one STORE_FAST each). The disposition
+    # of the result is determined relative to those restores:
+    #   - a POP_TOP right after the loop teardown discards the result
+    #     (bare statement)
+    #   - one extra STORE_FAST beyond the iteration vars is a result
+    #     assignment (the extra store may reuse an iteration var's name)
+    #   - no extra store leaves the result on the stack (returned/consumed)
+    # We use this to classify the handling of the result as discarded, stored,
+    # or returned/consumed
+    n_iter = len(iterator_vars)
+    store_targets = Counter(
+        tx.instructions[i].argval for i in range(store_fast_ip, scan_ip)
     )
 
-    def matches(name: str) -> bool:
-        pat = patterns[name]
-        return pre_store_ops == pat["pre_store_ops"] and (
-            post_store_op == pat["post_store_op"] or not pat["post_store_op"]
-        )
-
     result_var: str | None = None
-    if matches("stored"):
-        result_var = tx.instructions[store_fast_ip].argval
-        result_on_stack = False
-    elif matches("discarded"):
+    if pre_store_ops[-1:] == ["POP_TOP"]:  # discarded
         result_var = None
         result_on_stack = False
-        scan_ip = scan_ip + 1 if patterns["discarded"]["post_store_op"] else scan_ip
-    elif matches("returned") or pre_store_ops == patterns["consumed"]["pre_store_ops"]:
+    elif store_targets.total() > n_iter:  # stored
+        store_targets.subtract(iterator_vars)
+        if store_targets.total() != 1:
+            unimplemented(
+                gb_type="Comprehension analysis failed: ambiguous result store",
+                context=f"store_targets={store_targets}, iterator_vars={iterator_vars}",
+                explanation="Expected exactly one comprehension result assignment.",
+                hints=DYNAMO_BUG,
+            )
+        result_var = next(iter(store_targets))
+        result_on_stack = False
+    elif store_targets.total() == n_iter:  # returned/consumed
         result_var = None
         result_on_stack = True
     else:
         unimplemented(
             gb_type="Comprehension analysis failed: No matches",
-            context=f"pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
+            context=f"pre_store_ops={pre_store_ops}, store_targets={store_targets}, "
+            f"iterator_vars={iterator_vars}",
             explanation="Comprehension does not match any known bytecode pattern.",
-            hints=[],
+            hints=DYNAMO_BUG,
         )
 
     return ComprehensionAnalysis(
@@ -337,6 +289,65 @@ def _handle_comprehension_graph_break(
     stack_pops = 1 + len(analysis.iterator_vars)
     reason = GraphCompileReason("comprehension_graph_break", [tx.frame_summary()])
     log.debug("comprehension triggered compile")
+
+    saved_values = tx.stack[-stack_pops:-1]
+
+    def check_context_value(value: VariableTracker) -> None:
+        if isinstance(value, (ContextWrappingVariable, LocalGeneratorObjectVariable)):
+            unimplemented(
+                gb_type="Unsafe value live across comprehension graph break",
+                context=f"{value}, frame skipped: {format_frame_info(tx.f_code)}",
+                explanation="A context manager or local generator cannot be "
+                "reconstructed safely after a comprehension graph break, so the "
+                "frame falls back to eager.",
+                hints=[
+                    "Close the generator first, or move the comprehension into a helper.",
+                ],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+
+    # SWAP moves the last saved local below the earlier ones. Keep their original
+    # bindings in the frame metadata used by the post-comprehension continuation.
+    saved_names = analysis.iterator_vars[-1:] + analysis.iterator_vars[:-1]
+    for name, value in zip(saved_names, saved_values):
+        tx.symbolic_locals[name] = value
+
+    # Active with exits are reconstructed separately; ordinary context values
+    # can replay a state-changing constructor while restoring frame values.
+    # Reconstructing or closing a local generator can discover more values.
+    # Unstarted and finished generators cannot execute more bytecode on close.
+    values: list[Any] = [
+        [
+            gen
+            for gen in tx.output.local_generators
+            if not gen._frame_state_created() and not gen._frame_state_finished()
+        ],
+        [
+            value
+            for value in tx.output.side_effects.id_to_variable.values()
+            if tx.output.side_effects.is_modified(value)
+        ],
+        tx.output.side_effects.store_attr_mutations,
+        tx.output.side_effects.tensor_hooks,
+        tx.output.side_effects.save_for_backward,
+        tx.output.backward_state,
+    ]
+    cur_tx: InstructionTranslatorBase | None = tx
+    while cur_tx is not None:
+        cur_tx.prune_dead_locals()
+        values.extend(
+            [cur_tx.symbolic_locals, cur_tx.symbolic_cellvars, cur_tx.debug_locals]
+        )
+        values.extend(
+            value
+            for value in cur_tx.stack
+            if not isinstance(value, WithExitFunctionVariable)
+        )
+        cur_tx = cur_tx.parent
+    VariableTracker.visit(
+        check_context_value, values, side_effects=tx.output.side_effects
+    )
 
     # --- Step 1: Compile the graph up to the comprehension ---
 
@@ -416,7 +427,12 @@ def _handle_comprehension_graph_break(
     # Stack: ..., *(non-popped), [cells[0]], [frame_values[0]]
 
     # --- Step 5: Call comprehension function via codegen_call_resume ---
+    from .symbolic_convert import _reconstruct_block_stack
+
+    cleanup: list[Instruction] = []
+    _reconstruct_block_stack(tx, cg, cleanup)
     tx.codegen_call_resume([new_code], [fn_name], cg)
+    cg.extend_output(cleanup)
 
     # Stack: ..., *(non-popped), comp_result
 
@@ -452,6 +468,12 @@ def _handle_comprehension_graph_break(
         if var_name in meta.locals_names:
             existing_vars[var_name] = meta.locals_names[var_name]
         else:
+            # The var was cleared to NULL at the break (e.g. a comprehension
+            # iteration variable reused as the result target). We are binding
+            # it to a real value, so drop the NULL restoration; otherwise the
+            # resume function would reset it to NULL and clobber the result.
+            if var_name in meta.locals_null_keys:
+                meta.locals_null_keys.remove(var_name)
             meta.locals_names[var_name] = len(meta.locals_names)
 
     fv_depth = live_stack_depth + 2  # comp_result + frame_values
@@ -578,7 +600,8 @@ def _build_comprehension_fn(
     )
 
     lineno = tx.lineno if tx.lineno is not None else tx.f_code.co_firstlineno
-    fn_name = unique_id(f"__comprehension_{tx.f_code.co_name}_at_{lineno}")
+    fn_prefix = f"__comprehension_{tx.f_code.co_name}_at_{lineno}"
+    fn_name = unique_id_unbound_in(fn_prefix, tx.output.global_scope)
 
     comprehension_body_vars = (
         analysis.iterator_vars
@@ -589,8 +612,7 @@ def _build_comprehension_fn(
 
     def update(instructions: list[Instruction], code_options: dict[str, Any]) -> None:
         code_options["co_name"] = fn_name
-        if sys.version_info >= (3, 11):
-            code_options["co_qualname"] = fn_name
+        code_options["co_qualname"] = fn_name
         code_options["co_firstlineno"] = lineno
         code_options["co_cellvars"] = ()
         code_options["co_freevars"] = freevars
@@ -699,6 +721,19 @@ def maybe_setup_comprehension_speculation(
         and not tx.active_generic_context_managers
         and tx.output.current_tracer.parent is None
     )
+
+    if can_speculate:
+        if tx.instruction_pointer is None:
+            raise AssertionError("instruction_pointer must not be None")
+        # Mirror should_compile_partial_graph's exception-table check at the
+        # comprehension's first prefix instruction (BUILD_LIST and the body are
+        # covered by the comprehension's own cleanup handler).
+        prefix_len = len(_get_comprehension_bytecode_prefix())
+        entry = tx.instructions[tx.instruction_pointer - 1 - prefix_len].exn_tab_entry
+        if entry is not None and (
+            not tx.block_stack or entry.target is not tx.block_stack[-1].target
+        ):
+            can_speculate = False
 
     if can_speculate and tx.parent is not None:
         can_speculate = tx._can_speculate_comprehension_nested()

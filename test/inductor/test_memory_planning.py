@@ -25,8 +25,9 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
-    skipIfRocm,
+    parametrize,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
 )
@@ -106,8 +107,158 @@ class TestMemoryPlanningOutputGroups(TestCase):
 
 @requires_gpu()
 @config.patch(memory_planning=True)
+@instantiate_parametrized_tests
 class TestMemoryPlanning(TestCase):
     device = GPU_TYPE
+
+    @parametrize("memory_pool", ("none", "intermediates", "outputs", "combined"))
+    def test_branched_concat_projection_subgraph(self, memory_pool):
+        """
+        Two branches over one input, concatenated and projected. The outputs mix a
+        graph input, a derived tensor, and a slice of that derived tensor, which is
+        the combination that exercises buffer grouping and is_output classification.
+        """
+
+        class BranchedConcatProjection(torch.nn.Module):
+            def forward(
+                self, x, side_input, branch_0_weight, branch_1_weight, out_weight
+            ):
+                branch_0 = torch.relu(x.matmul(branch_0_weight))
+                branch_1 = torch.sigmoid(x.matmul(branch_1_weight))
+                concatenated = torch.cat([branch_0, branch_1, side_input], dim=1)
+                projected = concatenated.matmul(out_weight)
+                updated = (projected + x[:, :20]).view_as(projected)
+                return (x, updated, updated[:, :5], projected)
+
+        model = BranchedConcatProjection()
+        args = (
+            torch.randn((6, 40), device=self.device),
+            torch.randn((6, 8), device=self.device),
+            torch.randn((40, 12), device=self.device),
+            torch.randn((40, 10), device=self.device),
+            torch.randn((30, 20), device=self.device),
+        )
+        expected = model(*args)
+
+        with config.patch(memory_pool=memory_pool):
+            compiled = torch.compile(model, fullgraph=True)
+            result, code = run_and_get_cpp_code(compiled, *args)
+
+        self.assertTrue(same(expected, result))
+        FileCheck().check("alloc_from_pool(pool").run(code)
+
+    @parametrize("memory_pool", ("none", "intermediates", "outputs", "combined"))
+    def test_sliced_update_softmax_subgraph(self, memory_pool):
+        """
+        Repeated split-update-concat over the tail columns of a tensor, then a softmax
+        reduction. Each concat produces a short-lived buffer whose slices alias the
+        previous one, so the planner sees a chain of overlapping live ranges.
+        """
+
+        class SlicedUpdateSoftmax(torch.nn.Module):
+            def forward(self, x, side_input, weight, bias):
+                logits = torch.nn.functional.linear(x, weight, bias)
+                split = 4
+                updated = logits[:, split:] + side_input.sum(dim=1, keepdim=True)
+                logits = torch.cat([logits[:, :split], updated], dim=1)
+                logits = torch.cat([logits[:, :split], logits[:, split:] + 0.25], dim=1)
+                probs = torch.nn.functional.softmax(logits, dim=-1)
+                pooled = probs[:, split:].sum(dim=1, keepdim=True)
+                return pooled, torch.logit(pooled, eps=1e-6), probs
+
+        model = SlicedUpdateSoftmax()
+        # Keep the weight small so the softmax stays unsaturated. With unit-variance
+        # weights the logits reach a magnitude where the pooled probability rounds to
+        # 1.0 in fp32, and torch.logit then returns +/-inf, which makes the
+        # eager-vs-compiled comparison flip on a 1e-7 difference. eps is large enough
+        # to stay representable in fp32 so the clamp is identical on both sides.
+        args = (
+            torch.randn((6, 128), device=self.device),
+            torch.randn((6, 5), device=self.device),
+            torch.randn((10, 128), device=self.device) * 0.1,
+            torch.randn((10,), device=self.device),
+        )
+        expected = model(*args)
+
+        with config.patch(memory_pool=memory_pool):
+            compiled = torch.compile(model, fullgraph=True)
+            result, code = run_and_get_cpp_code(compiled, *args)
+
+        self.assertTrue(same(expected, result))
+        FileCheck().check("alloc_from_pool(pool").run(code)
+
+    @parametrize("memory_pool", ("none", "intermediates", "outputs", "combined"))
+    def test_broadcast_gated_slice_subgraph(self, memory_pool):
+        """
+        A [B, 1] gate broadcast-multiplied into the tail columns, then re-concatenated.
+        The gated intermediate is both consumed by the concat and returned as an
+        output, so one buffer is simultaneously live as an intermediate and an output.
+        """
+
+        class BroadcastGatedSlice(torch.nn.Module):
+            def forward(self, x, gate_input_0, gate_input_1, weight, gate_weight):
+                logits = x.matmul(weight)
+                ones_column = torch.ones(
+                    logits.size(0), 1, device=logits.device, dtype=logits.dtype
+                )
+                gate_input = torch.cat([ones_column, gate_input_0, gate_input_1], dim=1)
+                gate = torch.sigmoid(gate_input.matmul(gate_weight))
+                split = 4
+                updated = logits[:, split:] * gate
+                logits = torch.cat([logits[:, :split], updated], dim=1)
+                return logits, updated, gate
+
+        model = BroadcastGatedSlice()
+        args = (
+            torch.randn((6, 128), device=self.device),
+            torch.randn((6, 7), device=self.device),
+            torch.randn((6, 5), device=self.device),
+            torch.randn((128, 10), device=self.device),
+            torch.randn((13, 1), device=self.device),
+        )
+        expected = model(*args)
+
+        with config.patch(memory_pool=memory_pool):
+            compiled = torch.compile(model, fullgraph=True)
+            result, code = run_and_get_cpp_code(compiled, *args)
+
+        self.assertTrue(same(expected, result))
+        FileCheck().check("alloc_from_pool(pool").run(code)
+
+    @parametrize("memory_pool", ("none", "intermediates", "outputs", "combined"))
+    def test_cloned_inplace_slice_subgraph(self, memory_pool):
+        """
+        An in-place slice update applied to a clone while the original is still live as
+        an output. The clone is distinct storage that the planner must not alias onto
+        the tensor it was cloned from.
+        """
+
+        class ClonedInplaceSlice(torch.nn.Module):
+            def forward(self, x, weight, bias):
+                logits = torch.nn.functional.linear(x, weight, bias)
+                cloned = logits.clone().detach()
+                split = 4
+                cloned[:, split:] += 0.25
+                probs = torch.nn.functional.softmax(cloned, dim=-1)
+                pooled = probs[:, split:].sum(dim=1, keepdim=True)
+                return pooled, torch.logit(pooled, eps=1e-6), logits, probs
+
+        model = ClonedInplaceSlice()
+        # See test_sliced_update_softmax_subgraph: the weight is scaled down to keep the
+        # softmax unsaturated so torch.logit stays finite.
+        args = (
+            torch.randn((6, 128), device=self.device),
+            torch.randn((10, 128), device=self.device) * 0.1,
+            torch.randn((10,), device=self.device),
+        )
+        expected = model(*args)
+
+        with config.patch(memory_pool=memory_pool):
+            compiled = torch.compile(model, fullgraph=True)
+            result, code = run_and_get_cpp_code(compiled, *args)
+
+        self.assertTrue(same(expected, result))
+        FileCheck().check("alloc_from_pool(pool").run(code)
 
     def _generate(self, *, device):
         """
@@ -141,7 +292,6 @@ class TestMemoryPlanning(TestCase):
         ).check("buf1 = alloc_from_pool(pool1, align(4*s77*s77),").run(code)
         self.assertTrue(same(f(*args), result))
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180122")
     def test_cpp_wrapper(self):
         f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
@@ -175,6 +325,60 @@ class TestMemoryPlanning(TestCase):
             "AtenTensorHandle tmp_tensor_handle_0;"
         ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)
         self.assertTrue(same(f(*args), result))
+
+    @config.patch(memory_pool="intermediates")
+    def test_unbacked_input_dim_pools(self):
+        """
+        Buffers sized by an unbacked input dim plan like buffers sized by a backed
+        dim: the dim is defined before any of them is allocated.
+        """
+
+        def f(x, w):
+            for _ in range(4):
+                x = torch.relu(x @ w)
+            return x
+
+        w = torch.randn(64, 64, device=self.device)
+        pool_counts = []
+        for mark in (
+            torch._dynamo.decorators.mark_dynamic,
+            torch._dynamo.decorators.mark_unbacked,
+        ):
+            torch._dynamo.reset()
+            x = torch.randn(37, 64, device=self.device)
+            mark(x, 0)
+            result, code = run_and_get_cpp_code(torch.compile(f, fullgraph=True), x, w)
+            self.assertTrue(same(f(x, w), result))
+            pool_counts.append(len(re.findall(r"^\s*pool\d+ = ", code, re.MULTILINE)))
+        self.assertEqual(pool_counts[0], pool_counts[1])
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_data_dependent_size_pools(self):
+        """
+        Buffers sized by a data-dependent size only go to pools created after
+        that size is computed.
+        """
+
+        def f(x, w):
+            h = torch.relu(x @ w)
+            selected = h[x[:, 0] > 0]
+            return torch.relu(torch.relu(selected @ w) @ w).sum(0) + h.sum(0)
+
+        x = torch.randn(37, 64, device=self.device)
+        w = torch.randn(64, 64, device=self.device)
+        result, code = run_and_get_cpp_code(torch.compile(f, fullgraph=True), x, w)
+        self.assertTrue(same(f(x, w), result))
+
+        defined = set()
+        pools_with_unbacked_size = 0
+        for line in code.splitlines():
+            if match := re.match(r"\s*(u\d+) = ", line):
+                defined.add(match.group(1))
+            elif re.match(r"\s*pool\d+ = ", line):
+                symbols = set(re.findall(r"\bu\d+\b", line))
+                self.assertLessEqual(symbols, defined, line)
+                pools_with_unbacked_size += bool(symbols)
+        self.assertGreater(pools_with_unbacked_size, 0)
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,

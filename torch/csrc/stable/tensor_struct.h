@@ -385,6 +385,24 @@ class Tensor {
     return defined;
   }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+  /**
+   * @brief Checks whether the tensor has an associated storage.
+   *
+   * Returns false for undefined tensors and for tensors that do not own a
+   * storage (e.g. sparse tensors).
+   *
+   * @return true if the tensor has a storage, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.14.
+   */
+  bool has_storage() const {
+    bool has_storage = false;
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_has_storage(ath_.get(), &has_storage));
+    return has_storage;
+  }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
   /**
    * @brief Returns the storage offset of the tensor.
    *
@@ -444,6 +462,50 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   Layout layout() const;
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  /**
+   * @brief Checks whether the tensor's conjugate bit is set.
+   *
+   * @return true if the conjugate bit is set, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.16.
+   * Build time minimum version: PyTorch 2.16.
+   */
+  bool is_conj() const {
+    bool result = false;
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_is_conj(ath_.get(), &result));
+    return result;
+  }
+
+  /**
+   * @brief Checks whether the tensor's negative bit is set.
+   *
+   * @return true if the negative bit is set, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.16.
+   * Build time minimum version: PyTorch 2.16.
+   */
+  bool is_neg() const {
+    bool result = false;
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_is_neg(ath_.get(), &result));
+    return result;
+  }
+
+  /**
+   * @brief Checks whether the tensor is an inference tensor.
+   *
+   * @return true if the tensor is an inference tensor, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.16.
+   * Build time minimum version: PyTorch 2.16.
+   */
+  bool is_inference() const {
+    bool result = false;
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_is_inference(ath_.get(), &result));
+    return result;
+  }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
   // =============================================================================
   // END of C-shimified TensorBase APIs

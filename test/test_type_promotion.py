@@ -8,7 +8,7 @@ import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
-                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo)
+                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo, HardwareClassification)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
@@ -37,7 +37,8 @@ def float_double_default_dtype(fn):
 
     return wrapped_fn
 
-class TestTypePromotion(TestCase):
+class TestTypePromotionDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     # In-place operations don't promote.
     # `int+float -> float` but `int.add_(float)` is rejected as an error.
@@ -72,6 +73,23 @@ class TestTypePromotion(TestCase):
         # uint16_tensor + 5 would result in a long_tensor, which is not what we want.
         int16_tensor = torch.tensor([1, 1, 1], dtype=torch.int16, device=device)
         uint8_tensor *= int16_tensor
+
+    # Shell dtypes such as float4_e2m1fn_x2 have no value conversions, so mixing one
+    # with another dtype must raise on every device instead of reinterpreting its
+    # bits inside a kernel.
+    def test_shell_dtype_promotion_raises(self, device):
+        x = torch.zeros(4, dtype=torch.uint8, device=device).view(torch.float4_e2m1fn_x2)
+        others = (True, 1, 0.5, torch.tensor(5, dtype=torch.uint8, device=device))
+        for other in others:
+            for op in (torch.eq, torch.ne):
+                with self.assertRaisesRegex(NotImplementedError, "is not supported"):
+                    op(x, other)
+        out = torch.empty(4, dtype=torch.float4_e2m1fn_x2, device=device)
+        with self.assertRaisesRegex(NotImplementedError, "is not supported"):
+            torch.add(torch.ones(4, device=device), 1, out=out)
+        # comparing two float4 tensors needs no conversion
+        self.assertTrue((x == x.clone()).all())
+
 
     @float_double_default_dtype
     def test_unsigned(self, device):
@@ -1158,8 +1176,9 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(y, y_promo.to(dtype=dtype))
 
 
-class TestTypePromotionCPU(TestCase):
+class TestTypePromotion(TestCase):
     """Pure dtype-algebra tests that don't require any accelerator."""
+    hw_classification = HardwareClassification.GENERIC
 
     @float_double_default_dtype
     def test_can_cast(self):
@@ -1183,7 +1202,7 @@ class TestTypePromotionCPU(TestCase):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
 
-instantiate_device_type_tests(TestTypePromotion, globals())
+instantiate_device_type_tests(TestTypePromotionDevice, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()

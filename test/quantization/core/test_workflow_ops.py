@@ -694,27 +694,6 @@ class TestFakeQuantizeOps(TestCase):
             zero_point_shape_before, zero_point_shape_after,
             msg="FakeQuant zero_point shape must stay consistent")
 
-    def fake_quant_scriptable(self):
-        observer = default_observer
-        quant_min = 0
-        quant_max = 255
-        for FakeQuantizeClass in [FakeQuantize, _LearnableFakeQuantize]:
-            fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
-            scripted_module = torch.jit.script(fq_module)
-
-            X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
-
-            fq_module(X)
-            scripted_module(X)
-            self.assertEqual(fq_module.calculate_qparams(), scripted_module.calculate_qparams())
-
-            buf = io.BytesIO()
-            torch.jit.save(scripted_module, buf)
-            buf.seek(0)
-            loaded_module = torch.jit.load(buf)
-            self.assertEqual(fq_module.calculate_qparams(), loaded_module.calculate_qparams())
-
-
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
@@ -972,13 +951,13 @@ class TestFakeQuantizeOps(TestCase):
 
                 self.assertTrue(
                     torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
-                    f"Expected dX={dX_expected} to match X.grad={dX_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}")
+                    lambda msg: f"{msg}\nExpected dX={dX_expected} to match X.grad={dX_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}")
                 self.assertTrue(
                     torch.allclose(dScale_expected * grad_factor, dScale_actual, rtol=tolerance, atol=tolerance),
-                    f"Expected dScale={dScale_expected * grad_factor} to match scale.grad={dScale_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}")
+                    lambda msg: f"{msg}\nExpected dScale={dScale_expected * grad_factor} to match scale.grad={dScale_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}")
                 self.assertTrue(
                     torch.allclose(dZeroPoint_expected * grad_factor, dZeroPoint_actual, rtol=tolerance, atol=tolerance),
-                    f"Expected dZeroPoint={dZeroPoint_expected * grad_factor} to match zero_point.grad={dZeroPoint_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}")
+                    lambda msg: f"{msg}\nExpected dZeroPoint={dZeroPoint_expected * grad_factor} to match zero_point.grad={dZeroPoint_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}")
                 X_curr.grad.data.zero_()
                 scale_curr.grad.data.zero_()
                 zero_point_curr.grad.data.zero_()

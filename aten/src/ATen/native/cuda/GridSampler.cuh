@@ -1,6 +1,10 @@
 #pragma once
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/GridSamplerUtils.h>
+
+#include <limits>
+#include <type_traits>
 
 namespace at::native {
 
@@ -215,6 +219,9 @@ scalar_t grid_sampler_compute_source_index_set_grad(
   return coord;
 }
 
+// The bounds checks take int, like the sizes the coordinate helpers above
+// work with: checking a coordinate computed from an int-narrowed size against
+// the full extent would admit positions that the narrowed size produced.
 __forceinline__ __device__
 bool within_bounds_2d(int h, int w, int H, int W) {
   return h >= 0 && h < H && w >= 0 && w < W;
@@ -225,10 +232,18 @@ bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
 }
 
-template<typename scalar_t>
+// The helpers below keep integer coordinates and spatial sizes as int, like
+// the bounds checks, and strides as index_t, so the offset products are in the
+// kernel's index type: with int64 indexing a stride can exceed the 32-bit range
+// even when every coordinate fits in int. safe_add_2d and safe_add_3d deduce
+// index_t from NC_offset and memory_span only, because callers pass strides of
+// other integer types, e.g. the int64_t grad_input strides of the 3D backward
+// kernel.
+
+template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t get_value_bounded(
-    const scalar_t *data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
+    const scalar_t *data, scalar_t x, scalar_t y, int W, int H, index_t sW, index_t sH,
     GridSamplerPadding padding_mode,
     bool align_corners) {
 
@@ -247,7 +262,8 @@ scalar_t get_value_bounded(
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 void safe_add_2d(scalar_t *data, int h, int w,
-                 int sH, int sW, int H, int W,
+                 std::type_identity_t<index_t> sH, std::type_identity_t<index_t> sW,
+                 int H, int W,
                  scalar_t delta,
                  const index_t NC_offset,
                  const index_t memory_span) {
@@ -263,7 +279,8 @@ void safe_add_2d(scalar_t *data, int h, int w,
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 void safe_add_3d(scalar_t *data, int d, int h, int w,
-                 int sD, int sH, int sW, int D, int H, int W,
+                 std::type_identity_t<index_t> sD, std::type_identity_t<index_t> sH,
+                 std::type_identity_t<index_t> sW, int D, int H, int W,
                  scalar_t delta,
                  const index_t NC_offset,
                  const index_t memory_span) {
@@ -279,7 +296,7 @@ void safe_add_3d(scalar_t *data, int d, int h, int w,
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 void add_value_bounded(
-    scalar_t* data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
+    scalar_t* data, scalar_t x, scalar_t y, int W, int H, index_t sW, index_t sH,
     scalar_t delta,
     GridSamplerPadding padding_mode,
     bool align_corners,
@@ -317,5 +334,92 @@ void get_cubic_coefficients_grad(
   coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A;
 }
 
+
+// grid_sampler_unnormalize with the extent in index_t, for the kernels that
+// index with int64_t. It converts where the int-taking helper converts.
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t grid_sampler_unnormalize_sized(scalar_t coord, index_t size,
+                                        bool align_corners) {
+  if (align_corners) {
+    return ((coord + 1) / 2) * static_cast<scalar_t>(size - 1);
+  } else {
+    return ((coord + 1) * static_cast<scalar_t>(size) - 1) / 2;
+  }
+}
+
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t grid_sampler_unnormalize_set_grad_sized(scalar_t coord, index_t size,
+                                                 bool align_corners,
+                                                 scalar_t* grad_in) {
+  if (align_corners) {
+    *grad_in = static_cast<scalar_t>(size - 1) / 2;
+    return ((coord + 1) / 2) * static_cast<scalar_t>(size - 1);
+  } else {
+    *grad_in = static_cast<scalar_t>(size) / 2;
+    return ((coord + 1) * static_cast<scalar_t>(size) - 1) / 2;
+  }
+}
+
+// compute_coordinates with the extent in index_t, the reflection parity
+// taken with fmod and no downgrade: no float converts to an integer, and a
+// position past INT_MAX keeps its voxel.
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
+                                   GridSamplerPadding padding_mode,
+                                   bool align_corners) {
+  if (padding_mode == GridSamplerPadding::Border) {
+    coord = ::min(static_cast<scalar_t>(size - 1),
+                  ::max(coord, static_cast<scalar_t>(0)));
+  } else if (padding_mode == GridSamplerPadding::Reflection) {
+    // the bounds reflect_coordinates halves, formed without doubling the extent
+    const scalar_t low =
+        align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
+    const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
+    if (span == 0) {
+      coord = 0;
+    } else {
+      const scalar_t in = ::fabs(coord - low);
+      const scalar_t extra = ::fmod(in, span);
+      const bool odd = ::fmod(::floor(in / span), static_cast<scalar_t>(2)) != 0;
+      coord = odd ? span - extra + low : extra + low;
+    }
+    coord = ::min(static_cast<scalar_t>(size - 1),
+                  ::max(coord, static_cast<scalar_t>(0)));
+  }
+  return coord;
+}
+
+// The device twin of resolve_cubic_taps in ATen/native/GridSampler.cpp.
+template<typename scalar_t, typename index_t>
+__forceinline__ __device__
+void resolve_cubic_taps(
+    scalar_t coord,
+    index_t size,
+    GridSamplerPadding padding_mode,
+    bool align_corners,
+    scalar_t coeffs[4],
+    scalar_t* coeffs_grad,
+    index_t indices[4]) {
+  const scalar_t base = ::floor(coord);
+  get_cubic_upsampling_coefficients<scalar_t>(coeffs, coord - base);
+  if (coeffs_grad != nullptr) {
+    get_cubic_coefficients_grad<scalar_t>(coeffs_grad, coord - base);
+  }
+  const scalar_t index_limit =
+      static_cast<scalar_t>(std::numeric_limits<index_t>::max());
+  #pragma unroll 4
+  for (int i = 0; i < 4; ++i) {
+    const scalar_t tap = compute_coordinates_sized(
+        base - 1 + i, size, padding_mode, align_corners);
+    // a tap that is not finite, or past the index type, fails before the cast
+    const index_t index = (tap >= 0 && tap < index_limit)
+        ? static_cast<index_t>(tap)
+        : static_cast<index_t>(-1);
+    indices[i] = index < size ? index : static_cast<index_t>(-1);
+  }
+}
 
 }  // namespace at::native

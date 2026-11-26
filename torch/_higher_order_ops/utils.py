@@ -5,17 +5,27 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, overload, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
+from torch._functorch.vmap import restore_vmap
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import (
+    _validate_and_convert_non_fake_tensors,
+    CppFakeTensorMode,
+    FakeTensor,
+    FakeTensorMode,
+    is_fake_tensor,
+    maybe_get_fake_mode,
+    unset_fake_temporarily,
+)
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -34,6 +44,40 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 @dataclass
 class UnsupportedAliasMutationException(RuntimeError):
     reason: str
+
+
+def _fake_mode_handler(handler):
+    """Adapt a HOP mode handler to DispatchKey.Fake.
+
+    Pass the active mode or the first input's mode with the fake mode slot
+    unset. Input modes are not entered; the handler controls mode entry.
+    Restore an active mode when the handler returns or raises.
+    """
+
+    @torch._disable_dynamo
+    @functools.wraps(handler)
+    def impl(*args, **kwargs):
+        with unset_fake_temporarily() as mode:
+            if mode is None:
+                for arg in pytree.arg_tree_leaves(*args, **kwargs):
+                    mode = maybe_get_fake_mode(arg)
+                    if mode is not None:
+                        break
+            if mode is None:
+                raise AssertionError("No fake mode found for higher-order operator")
+            return handler(mode, *args, **kwargs)
+
+    return impl
+
+
+def _find_or_create_fake_mode() -> FakeTensorMode | CppFakeTensorMode:
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    fake_mode = detect_fake_mode()
+    if fake_mode is None:
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    return fake_mode
 
 
 def autograd_not_implemented_inner(
@@ -95,6 +139,99 @@ def _maybe_run_with_interpreter(fn):
 
         maybe_interpreted_fn = graph_with_interpreter
     return maybe_interpreted_fn
+
+
+def _move_batch_dims_to_last_for_scan(unbatched_args, in_dims):
+    # Parks the batch dim on the last axis so it never collides with the scan
+    # dim (0). The -1 convention here is a scan/associative_scan contract, not a
+    # general vmap one: both scan batch rules rely on the scan dim being 0.
+    return pytree.tree_map(
+        lambda x, bdim: x.movedim(bdim, -1) if bdim is not None else x,
+        unbatched_args,
+        in_dims,
+    )
+
+
+def _batch_dims_as_last_for_scan(in_dims):
+    # Flat markers matching _move_batch_dims_to_last_for_scan: -1 where batched, else None.
+    # Encodes the same scan-specific last-axis convention described there.
+    return tuple(
+        -1 if bdim is not None else None for bdim in pytree.tree_leaves(in_dims)
+    )
+
+
+class _VmapCombineFnWrapper:
+    """Re-vmaps a scan/associative_scan combine_fn for use inside a scan batch rule.
+
+    The wrapper re-applies vmap to ``combine_fn`` with the batch dim parked on the
+    last axis (the scan-specific convention, see ``_move_batch_dims_to_last_for_scan``) so it
+    cannot collide with the scan dim (0). It is constructed with a fixed ``in_dims``
+    and passed as the combine_fn to the underlying HOP.
+
+    Contract for callers:
+      - ``in_dims`` are the flat, last-axis batch-dim markers for the combine_fn's
+        positional arguments, and are held fixed for the wrapper's lifetime.
+      - ``out_dims`` is ``None`` until ``__call__`` runs at least once, and only then
+        holds the flat per-output markers aligned to the op's flat outputs. Because a
+        scan HOP may not invoke the combine_fn at all (e.g. scan length < 2), a caller
+        MUST check for ``out_dims is None`` and decide the fallback itself:
+        ``associative_scan_batch_rule`` falls back to the xs batch dims (the op is a
+        no-op so outputs alias xs), while ``scan_batch_rule`` asserts the op always
+        runs. The consistency check below guards ``out_dims`` stability across steps,
+        not ``in_dims`` correctness.
+      - ``expected_out_dims`` (optional): the batch-dim markers the caller assumes the
+        combine_fn outputs will carry. ``generic_associative_scan`` feeds combine_fn
+        outputs back as the left-hand arguments on later recursion levels, reusing the
+        fixed ``in_dims``; that is only valid if the outputs keep the same batchedness
+        as those inputs. When the outputs diverge (e.g. batched additional_inputs with
+        unbatched xs), the stale markers would silently reinterpret a batch axis as
+        data. Passing ``expected_out_dims`` makes the wrapper raise a clear error on
+        the first call instead, before the divergence corrupts a later level.
+    """
+
+    def __init__(
+        self,
+        combine_fn: Callable[..., Any],
+        in_dims: tuple[Any, ...],
+        batch_size: int,
+        randomness: str,
+        expected_out_dims: tuple[Any, ...] | None = None,
+        op_name: str = "associative_scan",
+    ) -> None:
+        self.combine_fn = combine_fn
+        self.in_dims = in_dims
+        self.batch_size = batch_size
+        self.randomness = randomness
+        self.expected_out_dims = expected_out_dims
+        self.op_name = op_name
+        self.out_dims: tuple[Any, ...] | None = None
+
+    def __call__(self, *args: Any) -> Any:
+        outputs, per_slice_out_dims = restore_vmap(
+            self.combine_fn, self.in_dims, self.batch_size, self.randomness
+        )(*args)
+        outputs = pytree.tree_map(
+            lambda out, bdim: out.movedim(bdim, -1) if bdim is not None else out,
+            outputs,
+            per_slice_out_dims,
+        )
+        out_dims = _batch_dims_as_last_for_scan(per_slice_out_dims)
+        if self.expected_out_dims is not None and out_dims != self.expected_out_dims:
+            raise RuntimeError(
+                f"{self.op_name} under vmap requires the combine_fn outputs to keep "
+                "the same batched arguments as its xs inputs, because the outputs are "
+                "fed back as inputs on later scan levels. Here they diverge (e.g. "
+                "batched additional_inputs with unbatched xs, or a pytree where an "
+                "output leaf becomes batched via another leaf): expected output batch "
+                f"dims {self.expected_out_dims} but got {out_dims}."
+            )
+        if self.out_dims is not None and out_dims != self.out_dims:
+            raise AssertionError(
+                "combine_fn produced inconsistent output batch dims across scan "
+                f"steps: {self.out_dims} then {out_dims}"
+            )
+        self.out_dims = out_dims
+        return outputs
 
 
 def _hop_compile_and_call(fn, args, kwargs=None):
@@ -305,7 +442,7 @@ def setup_compilation_env():
 
 @contextmanager
 def _set_compilation_env():
-    _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _old_is_tracing = torch.fx._symbolic_trace._get_is_fx_tracing()
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
     _old_capture_scalar_outputs = torch._dynamo.config.capture_scalar_outputs
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
@@ -319,13 +456,13 @@ def _set_compilation_env():
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dynamo
         # once we are confident fx tracing works with dynamo.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        torch.fx._symbolic_trace._set_is_fx_tracing(False)
         # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.allow_empty_graphs = True
         torch._dynamo.config.capture_scalar_outputs = True
         yield
     finally:
-        torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+        torch.fx._symbolic_trace._set_is_fx_tracing(_old_is_tracing)
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
         torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar_outputs
 
@@ -334,8 +471,8 @@ def _set_compilation_env():
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     fake_mode_det = None
     for inp in pytree.tree_leaves(inputs):
-        if isinstance(inp, FakeTensor):
-            fake_mode_det = inp.fake_mode
+        if is_fake_tensor(inp):
+            fake_mode_det = maybe_get_fake_mode(inp)
             break
 
     fake_mode: AbstractContextManager = nullcontext()
@@ -414,7 +551,9 @@ def _has_potential_branch_input_mutation(gm, inputs, pre_dispatch=False):
     return len(inp_mutation) > 0
 
 
-def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
+def has_potential_input_alias_or_mutation(
+    gm, inputs, pre_dispatch=False, *, allow_input_input_aliasing=False
+):
     (
         (
             inp_inp_alias_map,
@@ -426,7 +565,7 @@ def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     return (
         any(
             (
-                len(inp_inp_alias_map) > 0,
+                len(inp_inp_alias_map) > 0 and not allow_input_input_aliasing,
                 len(inp_out_alias_map) > 0,
                 len(out_out_alias_map) > 0,
             )
@@ -455,7 +594,7 @@ def _collect_fake_inputs(inputs):
                             val
                         ) or torch._C._functorch.is_functionaltensor(val):
                             val = torch._C._functorch.get_unwrapped(val)
-                        if not isinstance(val, FakeTensor):
+                        if not is_fake_tensor(val):
                             raise AssertionError(
                                 f"Expected FakeTensor after unwrapping, got {type(val)}"
                             )
@@ -465,14 +604,14 @@ def _collect_fake_inputs(inputs):
                             unwrapped_input = getattr(val, attr_name)
                             if not isinstance(unwrapped_input, torch.Tensor):
                                 continue
-                            if not isinstance(unwrapped_input, FakeTensor):
+                            if not is_fake_tensor(unwrapped_input):
                                 raise AssertionError(
                                     f"Expected FakeTensor after unwrapping, got {type(unwrapped_input)}"
                                 )
                             inputs_fake.append(unwrapped_input)
                     else:
                         # This is the standard case of a TensorVariable
-                        if not isinstance(val, FakeTensor):
+                        if not is_fake_tensor(val):
                             raise AssertionError(
                                 f"Expected FakeTensor, got {type(val)}"
                             )
@@ -491,9 +630,38 @@ def _collect_fake_inputs(inputs):
     return inputs_fake
 
 
-def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
+def _check_alias(
+    graph_module, inputs_fake, name, pre_dispatch, *, allow_input_input_aliasing=False
+):
+    """Raise for aliasing that auto-functionalization does not repair.
+
+    The aliasing half of :func:`_check_alias_and_mutation`, which that path cannot use
+    because it rejects input mutation as well, minus the one case auto-functionalization
+    makes safe: an output aliasing a *mutated* input aliases the clone functionalization
+    inserts for that base, not the caller's tensor.  An output aliasing an input that is
+    not mutated gets no such clone, so its address stays undefined.
+    """
+    (
+        (inp_inp_alias_map, inp_out_alias_map, out_out_alias_map),
+        inp_mutation,
+    ) = potential_input_alias_or_mutation(graph_module, inputs_fake, pre_dispatch)
+    mutated = set(inp_mutation)
+    if (
+        (len(inp_inp_alias_map) > 0 and not allow_input_input_aliasing)
+        or any(inp not in mutated for inp in inp_out_alias_map)
+        or len(out_out_alias_map) > 0
+    ):
+        raise RuntimeError(f"{name} might be aliasing the input or the output!")
+
+
+def _check_alias_and_mutation(
+    graph_module, inputs_fake, name, pre_dispatch, *, allow_input_input_aliasing=False
+):
     aliases, inp_mutation = has_potential_input_alias_or_mutation(
-        graph_module, inputs_fake, pre_dispatch=pre_dispatch
+        graph_module,
+        inputs_fake,
+        pre_dispatch=pre_dispatch,
+        allow_input_input_aliasing=allow_input_input_aliasing,
     )
     if aliases:
         raise RuntimeError(f"{name} might be aliasing the input or the output!")
@@ -572,11 +740,24 @@ def clone_outputs_aliasing_inputs(args):
     return maybe_clone
 
 
+def query_requires_grad(t: torch.Tensor) -> bool:
+    """requires_grad of ``t``, looking through a functional wrapper.
+
+    A FunctionalTensor does not carry the autograd metadata of the tensor it
+    wraps, so asking it directly reports False for something that does require
+    grad. This matters when the joint is traced with functionalization active.
+    """
+    if torch._is_functional_tensor(t):
+        t = torch._from_functional_tensor(t)
+    return t.requires_grad
+
+
 def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
         return fw_out, [
-            bool(isinstance(ret, torch.Tensor) and ret.requires_grad) for ret in fw_out
+            bool(isinstance(ret, torch.Tensor) and query_requires_grad(ret))
+            for ret in fw_out
         ]
 
     return fw_with_masks
@@ -598,12 +779,7 @@ def prepare_fw_with_masks_all_requires_grad(fn):
                 fw_out,
             )
 
-        def _query_requires_grad(t: torch.Tensor) -> bool:
-            if torch._is_functional_tensor(t):
-                t = torch._from_functional_tensor(t)
-            return t.requires_grad
-
-        return fw_out, pytree.tree_map_only(torch.Tensor, _query_requires_grad, fw_out)
+        return fw_out, pytree.tree_map_only(torch.Tensor, query_requires_grad, fw_out)
 
     return fw_with_masks
 
@@ -947,8 +1123,15 @@ def get_dummy_aot_autograd_config():
     )
 
 
-# Slices off the first element of a given dimension
+# Slices off the first element of a given dimension. Used to build a
+# representative single slice for subgraph tracing of control-flow ops.
+# When `dim` has size 0 (e.g. a zero-length scan) there is no real slice to
+# take, so return an uninitialized tensor with `dim` removed.
 def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
+    if t.shape[dim] == 0:
+        shape = list(t.shape)
+        del shape[dim]
+        return t.new_zeros(shape)
     return torch.select_copy(t, dim, 0)
 
 
@@ -1018,13 +1201,27 @@ def diff_tensor_meta(
 #      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
 #      hops may receive int inputs from the shape of outer tensor inputs.
 #      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
-def validate_subgraph_args_types(lifted_args: tuple[Any, ...] | list[Any]):
-    allowed_types = (torch.Tensor, int, torch.SymInt)
+def validate_subgraph_args_types(
+    lifted_args: tuple[Any, ...] | list[Any],
+    extra_allowed_types: tuple[type, ...] = (),
+    *,
+    is_allowed: Callable[[Any], bool] | None = None,
+    hop_name: str | None = None,
+):
+    """Check that ``lifted_args`` are of ``allowed_types`` below, or of
+    ``extra_allowed_types``, or pass ``is_allowed``. ``hop_name`` names the HOP
+    in the error."""
+    # Proxy: symbolic re-tracing replays calls with proxies, e.g. when a
+    # cached GraphModule is unpickled (_deserialize_graph_module).
+    allowed_types = (torch.Tensor, int, torch.SymInt, torch.fx.Proxy)
+    allowed_types += extra_allowed_types
     if not all(
-        isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
+        isinstance(arg, allowed_types) or (is_allowed is not None and is_allowed(arg))
+        for arg in lifted_args
     ):
+        prefix = f"{hop_name} operands " if hop_name else ""
         raise AssertionError(
-            f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
+            f"{prefix}{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
         )
 
 
@@ -1139,6 +1336,7 @@ hops_that_skip_faketensor_cache: set[torch._ops.OpOverload] = set()
 
 
 F = TypeVar("F", bound=Callable)
+_P = ParamSpec("_P")
 
 
 @overload
@@ -1154,8 +1352,9 @@ def register_fake(hop, fn: F, *, skip_cache: bool = ...) -> F: ...
 def register_fake(hop, fn=None, *, skip_cache=False):
     """
     Register a fake function for a HOP. This is conceptually equivalent of the
-    register_fake utility for the custom ops. The registered function is called
-    inside the fake_tensor _dispatch_impl.
+    register_fake utility for the custom ops. Install both a FakeTensorMode
+    handler and a DispatchKey.Fake kernel, which call the function with the
+    fake mode active.
 
     Set skip_cache=True to keep a HOP's fake output out of the FakeTensorMode
     cache -- either to preserve the historical uncached behavior of
@@ -1169,6 +1368,26 @@ def register_fake(hop, fn=None, *, skip_cache=False):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         redirect_to_mode(hop, FakeTensorMode)
+
+        @hop.py_impl(torch._C.DispatchKey.Fake)
+        @_fake_mode_handler
+        def cpp_fake_tensor_mode(mode, *args, **kwargs):
+            flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+            flat_args, _ = _validate_and_convert_non_fake_tensors(
+                mode,
+                hop,
+                mode.fake_tensor_converter,
+                flat_args,
+                args_spec,
+            )
+            args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+            ignore_unbacked = (
+                contextlib.nullcontext()
+                if mode.shape_env is None
+                else mode.shape_env.ignore_fresh_unbacked_symbols()
+            )
+            with mode, ignore_unbacked:
+                return func(*args, **kwargs)
 
         registered_hop_fake_fns[hop] = func
         if skip_cache:
@@ -1200,34 +1419,51 @@ class SubgraphCallableWrapper:
 
 
 class FunctionalizeCtxWrapper(SubgraphCallableWrapper):
-    """
-    Wraps a subgraph with functionalization context for the AOT Dispatcher
-    metadata collection pass.
+    """Functionalizes a subgraph and optionally returns selected input updates.
+
+    Each update is a new tensor; the original input is not mutated.
     """
 
     # Prevents PYTORCH_TEST_WITH_DYNAMO=1 test failures
     @torch._disable_dynamo
-    def __init__(self, ctx, subgraph):
+    def __init__(self, ctx, subgraph, mutated_input_indices=()):
         super().__init__(subgraph, subgraph)
         self.ctx = ctx
+        self.mutated_input_indices = mutated_input_indices
 
     def __repr__(self):
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
 
     def __call__(self, *args, **kwargs):
+        def append_mutated_inputs(fn):
+            if not self.mutated_input_indices:
+                return fn
+
+            def wrapped(*args, **kwargs):
+                inputs = args[0] if self._boxed_call else args
+                # Snapshot before a boxed GraphModule clears its input list.
+                mutated_inputs = tuple(inputs[i] for i in self.mutated_input_indices)
+                # Dynamo normalizes invoke_subgraph outputs to tuples.
+                return (*fn(*args, **kwargs), *mutated_inputs)
+
+            return wrapped
+
         if isinstance(self.subgraph, torch.fx.GraphModule):
             if self._boxed_call:
                 # Not all callers respect _boxed_call (e.g. reenter_make_fx).
+                functionalized = self.ctx.functionalize(
+                    append_mutated_inputs(self.subgraph)
+                )
                 if len(args) == 1 and isinstance(args[0], list):
-                    return self.ctx.functionalize(self.subgraph)(args[0])
-                return self.ctx.functionalize(self.subgraph)(list(args))
+                    return functionalized(args[0])
+                return functionalized(list(args))
             else:
                 # Running graph with interpreter is needed for propagating the stack_trace
                 with fx_traceback.preserve_node_meta():
                     return self.ctx.functionalize(
-                        torch.fx.Interpreter(self.subgraph).run
+                        append_mutated_inputs(torch.fx.Interpreter(self.subgraph).run)
                     )(*args, **kwargs)
-        functionalized = self.ctx.functionalize(self.subgraph)
+        functionalized = self.ctx.functionalize(append_mutated_inputs(self.subgraph))
         if self._boxed_call:
             if len(args) == 1 and isinstance(args[0], list):
                 return functionalized(args[0])
@@ -1424,3 +1660,37 @@ def filter_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
 def fill_none_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
     data_iter = iter(data)
     return [next(data_iter) if kept else None for kept in masks]
+
+
+def create_fn_remove_none(
+    fn: Callable[_P, Any],
+) -> tuple[Callable[_P, list[torch.Tensor]], list[bool]]:
+    """Wrap ``fn`` so its non-Tensor output leaves are dropped, and expose the
+    mask of which leaves survived.
+
+    Returns ``(wrapped, mask)``:
+      - ``wrapped(*args)`` calls ``fn(*args)``, flattens the pytree result and
+        returns only its Tensor leaves as a list.
+      - ``mask`` is a list populated whenever ``wrapped`` runs -- one bool per
+        leaf, ``True`` where the leaf is a Tensor. Callers should read it
+        AFTER invoking ``wrapped`` (typically indirectly via
+        ``materialize_as_graph``), then pass it to ``fill_none_with_masks``
+        to reconstruct the full output with ``None`` at the dropped slots.
+
+    Used in HOP autograd impls in two places:
+      - Around a forward branch that may return non-Tensor leaves (None,
+        int/SymInt), so ``create_bw_fn``'s joint sees a tensor-only signature.
+      - Around the resulting backward joint whose grad list contains ``None``
+        at non-differentiable input slots, so the materialized ``GraphModule``
+        returns a uniform Tensor list.
+    """
+    mask: list[bool] = []
+
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        leaves = pytree.tree_leaves(fn(*args, **kwargs))
+        mask.clear()
+        mask.extend(isinstance(o, torch.Tensor) for o in leaves)
+        return filter_with_masks(leaves, mask)
+
+    return wrapped, mask

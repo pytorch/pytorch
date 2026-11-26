@@ -5,16 +5,20 @@ import torch
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCPU,
 )
 from torch.testing._internal.common_dtype import complex_types
-from torch.testing._internal.common_utils import run_tests, set_default_dtype, TestCase
-
-
-devices = (torch.device("cpu"), torch.device("cuda:0"))
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    set_default_dtype,
+    TestCase,
+)
 
 
 class TestComplexTensor(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    _default_dtype_check_enabled = True
+
     @dtypes(*complex_types())
     def test_to_list(self, device, dtype):
         # test that the complex float tensor has expected values and
@@ -60,7 +64,6 @@ class TestComplexTensor(TestCase):
 
         self.assertFalse(torch.any(x))
 
-    @onlyCPU
     @dtypes(*complex_types())
     def test_eq(self, device, dtype):
         "Test eq on complex types"
@@ -85,7 +88,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\neq\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\neq\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.eq(a, a)
@@ -93,7 +96,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\neq\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\neq\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -102,7 +105,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\neq(out)\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\neq(out)\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -111,7 +114,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\neq(out)\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\neq(out)\nactual {actual}\nexpected {expected}",
             )
 
         # Vectorized operations
@@ -177,7 +180,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\neq\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\neq\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.eq(a, a)
@@ -202,7 +205,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\neq\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\neq\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -228,7 +231,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\neq(out)\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\neq(out)\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -254,10 +257,9 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\neq(out)\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\neq(out)\nactual {actual}\nexpected {expected}",
             )
 
-    @onlyCPU
     @dtypes(*complex_types())
     def test_ne(self, device, dtype):
         "Test ne on complex types"
@@ -282,7 +284,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\nne\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\nne\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.ne(a, a)
@@ -290,7 +292,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\nne\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\nne\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -299,7 +301,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\nne(out)\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\nne(out)\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -308,7 +310,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\nne(out)\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\nne(out)\nactual {actual}\nexpected {expected}",
             )
 
         # Vectorized operations
@@ -374,7 +376,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\nne\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\nne\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.ne(a, a)
@@ -399,7 +401,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\nne\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\nne\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -425,7 +427,7 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\nne(out)\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\nne(out)\nactual {actual}\nexpected {expected}",
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -451,12 +453,43 @@ class TestComplexTensor(TestCase):
             self.assertEqual(
                 actual,
                 expected,
-                msg=lambda msg: f"{msg}\n\nne(out)\nactual {actual}\nexpected {expected}",
+                msg=lambda msg: f"{msg}\nne(out)\nactual {actual}\nexpected {expected}",
             )
 
+    @dtypes(*complex_types())
+    def test_complex_div_underflow_overflow(self, device, dtype):
+        finfo = torch.finfo(dtype)
+        nom_lst = [
+            complex(finfo.min / 2, finfo.min / 2),
+            complex(finfo.max / 2, finfo.max / 2),
+            complex(finfo.tiny, finfo.tiny),
+            complex(finfo.tiny, 0.0),
+            complex(0.0, 0.0),
+        ]
+        denom_lst = [
+            complex(finfo.min / 2, finfo.min / 2),
+            complex(finfo.max / 2, finfo.max / 2),
+            complex(finfo.tiny, finfo.tiny),
+            complex(0.0, finfo.tiny),
+            complex(finfo.tiny, finfo.tiny),
+        ]
+        expected_lst = [
+            complex(1.0, 0.0),
+            complex(1.0, 0.0),
+            complex(1.0, 0.0),
+            complex(0.0, -1.0),
+            complex(0.0, 0.0),
+        ]
+        nom = torch.tensor(nom_lst, dtype=dtype, device=device)
+        denom = torch.tensor(denom_lst, dtype=dtype, device=device)
+        expected = torch.tensor(expected_lst, dtype=dtype, device=device)
+        res = nom / denom
+        self.assertEqual(res, expected)
 
-instantiate_device_type_tests(TestComplexTensor, globals())
+
+instantiate_device_type_tests(
+    TestComplexTensor, globals(), allow_mps=True, allow_xpu=True
+)
 
 if __name__ == "__main__":
-    TestCase._default_dtype_check_enabled = True
     run_tests()

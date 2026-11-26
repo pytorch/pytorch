@@ -71,7 +71,7 @@ namespace detail {
 inline C10_HOST_DEVICE uint8_t fp8e4m3fnuz_from_fp32_value(float f) {
   /*
    * Binary representation of 256.0f, which is the first value not representable
-   * (i.e. the first value which would overflow in to the sign bit, resulting in
+   * (i.e. the first value which would overflow into the sign bit, resulting in
    * a NaN) in fp8e4m3fnuz range:
    * 1 0000 000 - fp8e4m3fnuz
    * 0 10000111 00000000000000000000000 - fp32
@@ -183,9 +183,8 @@ operator*(const Float8_e4m3fnuz& a, const Float8_e4m3fnuz& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE Float8_e4m3fnuz operator/(
-    const Float8_e4m3fnuz& a,
-    const Float8_e4m3fnuz& b) __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE Float8_e4m3fnuz
+operator/(const Float8_e4m3fnuz& a, const Float8_e4m3fnuz& b) {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
@@ -232,8 +231,7 @@ inline C10_HOST_DEVICE float operator-(Float8_e4m3fnuz a, float b) {
 inline C10_HOST_DEVICE float operator*(Float8_e4m3fnuz a, float b) {
   return static_cast<float>(a) * b;
 }
-inline C10_HOST_DEVICE float operator/(Float8_e4m3fnuz a, float b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE float operator/(Float8_e4m3fnuz a, float b) {
   return static_cast<float>(a) / b;
 }
 
@@ -246,8 +244,7 @@ inline C10_HOST_DEVICE float operator-(float a, Float8_e4m3fnuz b) {
 inline C10_HOST_DEVICE float operator*(float a, Float8_e4m3fnuz b) {
   return a * static_cast<float>(b);
 }
-inline C10_HOST_DEVICE float operator/(float a, Float8_e4m3fnuz b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE float operator/(float a, Float8_e4m3fnuz b) {
   return a / static_cast<float>(b);
 }
 
@@ -275,8 +272,7 @@ inline C10_HOST_DEVICE double operator-(Float8_e4m3fnuz a, double b) {
 inline C10_HOST_DEVICE double operator*(Float8_e4m3fnuz a, double b) {
   return static_cast<double>(a) * b;
 }
-inline C10_HOST_DEVICE double operator/(Float8_e4m3fnuz a, double b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE double operator/(Float8_e4m3fnuz a, double b) {
   return static_cast<double>(a) / b;
 }
 
@@ -289,8 +285,7 @@ inline C10_HOST_DEVICE double operator-(double a, Float8_e4m3fnuz b) {
 inline C10_HOST_DEVICE double operator*(double a, Float8_e4m3fnuz b) {
   return a * static_cast<double>(b);
 }
-inline C10_HOST_DEVICE double operator/(double a, Float8_e4m3fnuz b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE double operator/(double a, Float8_e4m3fnuz b) {
   return a / static_cast<double>(b);
 }
 
@@ -403,7 +398,7 @@ class numeric_limits<c10::Float8_e4m3fnuz> {
   static constexpr bool has_infinity = false;
   static constexpr bool has_quiet_NaN = true;
   static constexpr bool has_signaling_NaN = false;
-  static constexpr auto has_denorm = true;
+  static constexpr auto has_denorm = std::denorm_present;
   static constexpr auto has_denorm_loss = true;
   static constexpr auto round_style = numeric_limits<float>::round_style;
   static constexpr bool is_iec559 = false;

@@ -13,13 +13,25 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, cast, Literal, NamedTuple, overload, TypeAlias, TypeVar
-from typing_extensions import deprecated, Never, NotRequired, Self, TypedDict
+from typing import (
+    Any,
+    cast,
+    Literal,
+    NamedTuple,
+    Never,
+    NotRequired,
+    overload,
+    Self,
+    TypeAlias,
+    TypeVar,
+)
+from typing_extensions import deprecated, TypedDict
 
 import torch
 from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
+from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import (
     GetAttrKey,
@@ -79,6 +91,48 @@ def _warn_once(
         _WARNINGS_SHOWN.add(warning_id)
 
 
+def _validate_block_mask_shape(
+    query: Tensor,
+    key: Tensor,
+    q_len: int | torch.SymInt,
+    kv_len: int | torch.SymInt,
+    block_mask_q_len: int | torch.SymInt,
+    block_mask_kv_len: int | torch.SymInt,
+) -> None:
+    """Preserve unbacked checks without specializing regular dynamic lengths."""
+    has_unbacked_input_lengths = has_free_unbacked_symbols(
+        query
+    ) or has_free_unbacked_symbols(key)
+    if not torch.compiler.is_dynamo_compiling():
+        lengths = (q_len, kv_len, block_mask_q_len, block_mask_kv_len)
+        has_unbacked_input_lengths = (
+            has_unbacked_input_lengths or has_free_unbacked_symbols(lengths)
+        )
+
+    # Case 1: unbacked lengths need symbolic checks that can become runtime assertions.
+    if has_unbacked_input_lengths:
+        torch._check(q_len <= block_mask_q_len, _BLOCK_MASK_TOO_SMALL_ERROR)
+        torch._check(kv_len <= block_mask_kv_len, _BLOCK_MASK_TOO_SMALL_ERROR)
+        torch._check(q_len >= block_mask_q_len, _BLOCK_MASK_TOO_LARGE_ERROR)
+        torch._check(kv_len >= block_mask_kv_len, _BLOCK_MASK_TOO_LARGE_ERROR)
+        return
+
+    # Case 2: backed lengths use regular validation so Dynamo can generalize equality.
+    if q_len > block_mask_q_len or kv_len > block_mask_kv_len:
+        raise RuntimeError(_BLOCK_MASK_TOO_SMALL_ERROR)
+    if q_len < block_mask_q_len or kv_len < block_mask_kv_len:
+        raise RuntimeError(_BLOCK_MASK_TOO_LARGE_ERROR)
+
+    if q_len != block_mask_q_len:
+        raise AssertionError(
+            f"query.size(-2) ({q_len}) != block_mask_q_len ({block_mask_q_len})"
+        )
+    if kv_len != block_mask_kv_len:
+        raise AssertionError(
+            f"key.size(-2) ({kv_len}) != block_mask_kv_len ({block_mask_kv_len})"
+        )
+
+
 __all__ = [
     "BlockMask",
     "flex_attention",
@@ -94,7 +148,7 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
-_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
+_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"]
 _R = TypeVar("_R")
 
 
@@ -181,10 +235,25 @@ class FlexKernelOptions(TypedDict, total=False):
     may have more numerical error. Default: False."""
 
     ROWS_GUARANTEED_SAFE: NotRequired[bool]
-    """If True, guarantees that at least one value in each row is not masked out.
-    Allows skipping safety checks for better performance. Only set this if you are certain
-    your mask guarantees this property. For example, causal attention is guaranteed safe
-    because each query has at least 1 key-value to attend to. Default: False."""
+    """If True, skips the guard that sanitizes the softmax row maximum.
+
+    The condition this requires is stronger than "every row attends to at least one key".
+    The kernel carries a running row maximum across the KV blocks the block mask schedules,
+    starting from ``-inf``, and this option removes the only thing keeping it finite. Each
+    row must therefore have an unmasked key in the *first* block scheduled for it: if a
+    row's keys all fall in later blocks, the running maximum is still ``-inf`` when the
+    rescaling runs, and ``exp2`` overflows to NaN. Block metadata can mark a block live
+    because *other* rows in the query block need it, so a mask can look valid at block
+    granularity while individual rows are empty in their first block.
+
+    Causal attention satisfies this. Local or windowed masks often do not, since the
+    earliest key a late row attends to can sit beyond the first scheduled block. Eager
+    execution materializes the full row and is unaffected, so the NaN appears only under
+    ``torch.compile``.
+
+    Only set this if you are certain your mask satisfies the stronger condition; see the
+    ``ROWS_GUARANTEED_SAFE`` demo in attention-gym for a worked example of a mask that
+    looks safe and is not. Default: False."""
 
     BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
     """If True, guarantees that all blocks in the mask are contiguous.
@@ -202,9 +271,27 @@ class FlexKernelOptions(TypedDict, total=False):
     option for debugging. Default: False."""
 
     USE_TMA: NotRequired[bool]
-    """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
-    This is experimental and may not work on all hardware, currently specific
-    to NVIDIA GPUs Hopper+. Default: False."""
+    """Whether to use hardware tensor descriptors for the attention operands.
+    This is experimental and may not work on all hardware. It is supported on
+    NVIDIA Hopper+ (TMA), Intel GPUs, and AMD gfx1250 (TDM); the AMD path covers
+    the forward and decode kernels only, not the backward pass. The default is
+    backend-dependent: Intel GPUs and eligible AMD gfx1250 inputs select
+    descriptors automatically, and everything else defaults to False. Setting
+    False forces the pointer path. Setting True requests descriptors but remains
+    subject to the dtype and layout checks, falling back to the pointer path
+    when the operands are ineligible. On AMD gfx1250, setting
+    ``torch._inductor.config.triton.enable_flex_tdm = False`` at compile time
+    disables the forward and decode descriptors even for ``USE_TMA=True``; it is
+    the control for callers that cannot reach this option, and it does not
+    affect NVIDIA or Intel selection."""
+
+    FLYDSL_DQ_ACCUM_FP32: NotRequired[bool]
+    """Use FP32 for the private dQ accumulation workspace in FlyDSL backward.
+    Specify as ``bwd_FLYDSL_DQ_ACCUM_FP32`` with ``BACKEND="FLYDSL"``.
+    Default: True. False uses BF16 intermediate storage to reduce workspace
+    traffic, rounding after each KV owner and potentially increasing gradient
+    error for long sequences. Both modes use fixed-order, non-atomic accumulation
+    and return gradients in the input dtype. This option does not affect forward."""
 
     # ROCm-specific options
 
@@ -217,6 +304,14 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
+    NUM_XCCS: NotRequired[int]
+    """Number of XCCs to remap the Triton forward and backward kernels' programs
+    across, so the blocks of one (batch, head) share an XCC's L2. Defaults to
+    the device's XCC count on gfx942 and gfx950 with ROCm 7.0+ and off
+    elsewhere; 0 or 1 disables it. Not used by the decode, FLASH or FLYDSL
+    kernels, and skipped when the flattened grid would not fit; may add a size
+    guard with dynamic shapes."""
+
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
 
@@ -226,9 +321,13 @@ class FlexKernelOptions(TypedDict, total=False):
         - "TRITON": Standard Triton flex_attention kernel
         - "TRITON_DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
         - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
+        - "FLYDSL": Experimental FlyDSL FlexAttention forward and backward kernels
+          for BF16 on ROCm gfx950, requiring the optional FlyDSL dependency.
+          Unsupported backward configurations fall back to Triton, including GQA,
+          decode, gradients through LSE, and shapes exceeding the dQ workspace limit.
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
-    Raises an error if the requested backend cannot be used. Default: "AUTO"
+    Raises an error if the requested forward backend cannot be used. Default: "AUTO"
     """
 
 
@@ -2090,6 +2189,12 @@ def _apply_kernel_options(
                 f"Must be one of {valid_backends}"
             )
 
+    for name, num_xccs in kernel_options.items():
+        if name in ("NUM_XCCS", "fwd_NUM_XCCS", "bwd_NUM_XCCS") and (
+            type(num_xccs) is not int or num_xccs < 0
+        ):
+            raise ValueError(f"{name} must be a non-negative int, got {num_xccs!r}")
+
     kernel_options.setdefault("BACKEND", "AUTO")
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
@@ -2128,9 +2233,6 @@ def _apply_kernel_options(
         if any_inputs_on_cpu_device or any_inputs_on_mps_device:
             # CPU/MPS support inference only, no LSE/backward yet.
             # TODO: support CPU for training and return lse
-            kernel_options["OUTPUT_LOGSUMEXP"] = False
-        if any_inputs_on_mps_device:
-            # MPS supports inference only; backward / LSE not yet implemented
             kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     # If forward kernel needs to return max is decided by this rule internally.
@@ -2174,10 +2276,19 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
         raise NotImplementedError(
             "FlexAttention does not support backward on MPS. Please set the input requires_grad to False or use another device."
         )
-    supported_devices = {"cuda", "cpu", "xpu", "hpu", "mps"}
+    # Read the PrivateUse1 name per call: backends rename it after torch import.
+    supported_devices = {
+        "cuda",
+        "cpu",
+        "xpu",
+        "hpu",
+        "mps",
+        torch._C._get_privateuse1_backend_name(),
+    }
     if query.device.type not in supported_devices:
         raise ValueError(
-            "FlexAttention is only supported on CUDA, CPU, HPU, or MPS devices. "
+            "FlexAttention is only supported on CUDA, CPU, XPU, HPU, MPS, or "
+            "PrivateUse1 devices. "
             f"Found input tensors on {query.device.type} device."
         )
 
@@ -2227,7 +2338,8 @@ def _enforce_mem_layouts(
     gemm_precision = query.dtype
 
     should_enforce_mem_layout = (
-        gemm_precision in fp8_dtypes
+        query.device.type == "cuda"
+        and gemm_precision in fp8_dtypes
         and torch.version.cuda is not None
         and torch.cuda.get_device_capability("cuda") >= (8, 9)
         and torch.cuda.get_device_capability("cuda") < (10, 0)
@@ -2457,23 +2569,8 @@ def flex_attention(
         block_mask_q_len = block_mask.shape[-2]
         block_mask_kv_len = block_mask.shape[-1]
 
-        # Keep these as separate checks: explicit sym_and/sym_or calls become
-        # trace-visible non-Tensor ops under Dynamo.
-        torch._check(
-            q_len <= block_mask_q_len,
-            _BLOCK_MASK_TOO_SMALL_ERROR,
-        )
-        torch._check(
-            kv_len <= block_mask_kv_len,
-            _BLOCK_MASK_TOO_SMALL_ERROR,
-        )
-        torch._check(
-            q_len >= block_mask_q_len,
-            _BLOCK_MASK_TOO_LARGE_ERROR,
-        )
-        torch._check(
-            kv_len >= block_mask_kv_len,
-            _BLOCK_MASK_TOO_LARGE_ERROR,
+        _validate_block_mask_shape(
+            query, key, q_len, kv_len, block_mask_q_len, block_mask_kv_len
         )
 
     if scale is None:

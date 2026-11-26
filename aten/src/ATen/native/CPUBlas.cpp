@@ -52,20 +52,20 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #endif  // USE_FBGEMM
 
 #if AT_MKLDNN_ENABLED()
-#include <ideep.hpp>
+#include <ATen/native/mkldnn/detail/Version.h>
 // Add uKernel API versioning to be compatible with different oneDNN versions
 // oneDNN 3.6.x updates the ukernel APIs of brgemm and brgemm_pack_B
 // brgemm_pack_B is changed to transform and the setting of brgemm beta is changed to set_add_C
-#if (IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR == 5)
+#if DNNL_PREREQ(3, 5, 0) && !DNNL_PREREQ(3, 6, 0)
 #define ONEDNN_UKERNEL_1
-#elif ((IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR >= 6) || (IDEEP_VERSION_MAJOR > 3))
+#elif DNNL_PREREQ(3, 6, 0)
 #define ONEDNN_UKERNEL_2
 #endif
 #if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
 #define ONEDNN_UKERNEL_ENABLED
 #endif
 
-#if IDEEP_PREREQ(3, 9, 0, 0)
+#if DNNL_PREREQ(3, 9, 0)
 #define ONEDNN_FP8_UKERNEL_AVAILABLE
 #endif
 
@@ -370,7 +370,7 @@ void gemm(
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
-      int c_size = n_ * m_;
+      int64_t c_size = static_cast<int64_t>(n_) * m_;
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c_size, 0.0f);
       for (const auto j : c10::irange(n)) {
@@ -431,7 +431,7 @@ void gemm(
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
-      int c_size = n_ * m_;
+      int64_t c_size = static_cast<int64_t>(n_) * m_;
       // C matrix in OpenBLAS shgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c_size, 0.0f);
       for (const auto j : c10::irange(n)) {
@@ -1159,7 +1159,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
           c10::CppTypeToScalarType<scalar_t_c>::value,
           add_C);
       (*v).brg.generate();
-      return std::move(v);
+      return v;
     });
     if (get_current() != value) {
 #if defined(ONEDNN_UKERNEL_1)
@@ -1230,7 +1230,7 @@ struct Pack : public KernelCache <PackKey, pack_t> {
       if (could_pack(dt_in)) {
         (*p).generate();
       }
-      return std::move(p);
+      return p;
     });
     if (could_pack(dt_in)) {
       (*pack).execute(in, out);
