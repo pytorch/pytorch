@@ -946,6 +946,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(globals()["_dg_a"], 2)
 
     def test_delete_global_preexisting_tensor_calls_sync_dealloc(self):
+        from torch._dynamo.source import GlobalSource
         from torch._dynamo.symbolic_convert import InstructionTranslatorBase
         from torch._dynamo.variables import TensorVariable
 
@@ -967,6 +968,37 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(emit.call_count, 1)
             self.assertIsInstance(emit.call_args.args[1], TensorVariable)
+            self.assertEqual(emit.call_args.args[1].source, GlobalSource(name))
+
+            # Rebinding the global to a different tensor must not recompile.
+            globals()[name] = torch.ones(2, 2)
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 2)
+            globals()[name] = torch.ones(2, 2)
+            self.assertEqual(opt_fn(x), x + 2)
+            self.assertEqual(cnt.frame_count, 1)
+
+    def test_delete_global_inlined_tensor_uses_module_source(self):
+        from torch._dynamo.source import AttrSource
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+        with crossfile_globals() as mod:
+
+            def fn(x):
+                return mod.delete_crossfile_tensor_fn(x)
+
+            x = torch.ones(2, 2)
+            with mock.patch.object(
+                InstructionTranslatorBase,
+                "_maybe_emit_sync_dealloc",
+                autospec=True,
+            ) as emit:
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(emit.call_count, 1)
+            self.assertIsInstance(emit.call_args.args[1].source, AttrSource)
+            self.assertEqual(emit.call_args.args[1].source.member, "crossfile_tensor")
 
     def test_delete_missing_global_read_after_caught_failed_del(self):
         with mock.patch.dict(globals()):

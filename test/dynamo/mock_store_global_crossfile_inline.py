@@ -68,3 +68,13 @@ def delete_flip_value_fn():
 def delete_missing_value_fn():
     global delete_missing_value
     del delete_missing_value
+
+
+crossfile_tensor = torch.ones(2, 2)
+
+
+def delete_crossfile_tensor_fn(x):
+    global crossfile_tensor
+    y = crossfile_tensor + x
+    del crossfile_tensor
+    return y
