@@ -2398,7 +2398,10 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
             "XPU Flash Attention is not supported",
         )(TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_7)
         test_sdpa_rewriter_8_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_8
-        test_sdpa_rewriter_9_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_9
+        test_sdpa_rewriter_9_gpu = unittest.skipIf(
+            TEST_XPU and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+            "XPU Flash Attention is not supported",
+        )(TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_9)
         test_sdpa_rewriter_10_gpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_10
         )
