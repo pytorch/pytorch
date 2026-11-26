@@ -8000,6 +8000,183 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(dgamma.cpu(), dgamma_ref, msg, atol=atol, rtol=rtol)
             self.assertEqual(dbeta.cpu(), dbeta_ref, msg, atol=atol, rtol=rtol)
 
+    # ---- cached-row forward / fused backward (ROCm wave64 kernels; plain correctness checks elsewhere) ------------
+    # Every output is compared with an fp64 reference computed on the same device. The error budget is relative to
+    # the largest reference magnitude, so it is one output rounding step for fp16/bf16 and a few ulp for fp32.
+    _NORM_REL_TOL = {torch.float32: 2e-4, torch.float16: 4e-3, torch.bfloat16: 1.6e-2}
+
+    @staticmethod
+    def _norm_ref(op, x, weight, bias, eps):
+        x = x.double()
+        if op == "layer_norm":
+            mean = x.mean(-1, keepdim=True)
+            rstd = ((x - mean).pow(2).mean(-1, keepdim=True) + eps).rsqrt()
+            y = (x - mean) * rstd
+        else:
+            mean = None
+            rstd = (x.pow(2).mean(-1, keepdim=True) + eps).rsqrt()
+            y = x * rstd
+        if weight is not None:
+            y = y * weight.double()
+        if bias is not None:
+            y = y + bias.double()
+        return y, mean, rstd
+
+    def _check_close(self, actual, ref, rel_tol, msg):
+        scale = max(ref.abs().max().item(), 1e-30)
+        err = (actual.double() - ref.double()).abs().max().item()
+        self.assertLessEqual(err, rel_tol * scale, f"{msg}: max err {err:.3e} vs scale {scale:.3e}")
+
+    def _aligned_or_not(self, shape, dtype, device, offset):
+        # contiguous view starting `offset` elements into a larger buffer: offset 1 breaks 16-byte alignment
+        n = 1
+        for d in shape:
+            n *= d
+        buf = torch.randn(n + 8, dtype=dtype, device=device)
+        return buf[offset:offset + n].view(shape)
+
+    @onlyAccelerator
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_layer_norm_cached_row_forward_boundaries(self, device, dtype):
+        # Forward shapes around every launch-configuration boundary of the ROCm cached-row kernels: narrow rows
+        # packed 8 / 16 lanes per row, one wave per row, 2 / 4 / 8 / 16 waves per row, rows with a ragged tail,
+        # rows that are not a multiple of the vector width, M that does not fill the last block, and unaligned
+        # pointers (which must fall back to the generic kernel).
+        eps = 1e-5
+        tol = self._NORM_REL_TOL[dtype]
+        shapes = [
+            (1, 64), (3, 100), (33, 128), (257, 256), (1001, 64), (64, 512), (300, 1000), (129, 1024),
+            (65, 1032), (17, 2048), (9, 3000), (64, 4096), (130, 5120), (33, 8192), (7, 12288), (5, 16384),
+            (3, 32768), (4, 4097), (2000, 64), (5000, 128), (1, 8), (2, 16), (3, 24), (5, 40),
+        ]
+        for M, N in shapes:
+            for op in ("layer_norm", "rms_norm"):
+                for affine in ("none", "gamma", "gamma_beta"):
+                    if op == "rms_norm" and affine == "gamma_beta":
+                        continue
+                    for offset in (0, 1):
+                        x = self._aligned_or_not((M, N), dtype, device, offset)
+                        weight = None if affine == "none" else self._aligned_or_not((N,), dtype, device, 0)
+                        bias = self._aligned_or_not((N,), dtype, device, 0) if affine == "gamma_beta" else None
+                        msg = f"op={op} dtype={dtype} M={M} N={N} affine={affine} offset={offset}"
+                        y_ref, mean_ref, rstd_ref = self._norm_ref(op, x, weight, bias, eps)
+                        if op == "layer_norm":
+                            y, mean, rstd = torch.ops.aten.native_layer_norm.default(x, [N], weight, bias, eps)
+                            self._check_close(mean.reshape(-1), mean_ref.reshape(-1), 1e-4 if dtype is torch.float32 else tol, msg + " mean")
+                        else:
+                            y, rstd = torch.ops.aten._fused_rms_norm.default(x, [N], weight, eps)
+                        self._check_close(y, y_ref, tol, msg + " y")
+                        self._check_close(rstd.reshape(-1), rstd_ref.reshape(-1), 1e-4 if dtype is torch.float32 else tol, msg + " rstd")
+
+    @onlyAccelerator
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_layer_norm_cached_row_backward_boundaries(self, device, dtype):
+        # Backward with the output masks that reach the fused kernel (dX with dgamma and / or dbeta) and the ones
+        # that must stay on the existing kernels (no dX, no gamma), around the same configuration boundaries.
+        eps = 1e-5
+        tol = self._NORM_REL_TOL[dtype]
+        shapes = [
+            (1, 64), (33, 128), (257, 256), (1001, 64), (300, 1000), (129, 1024), (65, 1032), (130, 2048),
+            (257, 3072), (200, 4096), (130, 5120), (97, 8192), (40, 12288), (33, 16384), (4, 4097), (2048, 512),
+            (5000, 1024), (4096, 4096),
+        ]
+        ln_masks = ([True, True, True], [True, True, False], [True, False, True], [False, True, True], [True, False, False])
+        rms_masks = ([True, True], [True, False], [False, True])
+        for M, N in shapes:
+            for op in ("layer_norm", "rms_norm"):
+                for offset in (0, 1):
+                    x = self._aligned_or_not((M, N), dtype, device, offset)
+                    gy = torch.randn(M, N, dtype=dtype, device=device)
+                    weight = torch.randn(N, dtype=dtype, device=device)
+                    bias = torch.randn(N, dtype=dtype, device=device) if op == "layer_norm" else None
+                    xd = x.double().requires_grad_(True)
+                    wd = weight.double().requires_grad_(True)
+                    bd = bias.double().requires_grad_(True) if bias is not None else None
+                    y_ref, _, _ = self._norm_ref(op, xd, wd, bd, eps)
+                    y_ref.backward(gy.double())
+                    if op == "layer_norm":
+                        _, mean, rstd = torch.ops.aten.native_layer_norm.default(x, [N], weight, bias, eps)
+                    else:
+                        _, rstd = torch.ops.aten._fused_rms_norm.default(x, [N], weight, eps)
+                    for mask in (ln_masks if op == "layer_norm" else rms_masks):
+                        msg = f"op={op} dtype={dtype} M={M} N={N} offset={offset} mask={mask}"
+                        if op == "layer_norm":
+                            dx, dw, db = torch.ops.aten.native_layer_norm_backward.default(
+                                gy, x, [N], mean, rstd, weight, bias, mask)
+                        else:
+                            dx, dw = torch.ops.aten._fused_rms_norm_backward.default(gy, x, [N], rstd, weight, mask)
+                            db = None
+                        if mask[0]:
+                            self._check_close(dx, xd.grad, tol, msg + " dX")
+                        if mask[1]:
+                            self._check_close(dw, wd.grad, tol, msg + " dgamma")
+                        if op == "layer_norm" and mask[2]:
+                            self._check_close(db, bd.grad, tol, msg + " dbeta")
+
+    @onlyAccelerator
+    def test_layer_norm_cached_row_backward_gamma_none(self, device):
+        # no gamma: dX only, and dbeta without gamma, must keep working next to the fused path
+        M, N, eps = 512, 1024, 1e-5
+        for dtype in (torch.float32, torch.bfloat16):
+            x = torch.randn(M, N, dtype=dtype, device=device)
+            gy = torch.randn(M, N, dtype=dtype, device=device)
+            bias = torch.randn(N, dtype=dtype, device=device)
+            xd = x.double().requires_grad_(True)
+            bd = bias.double().requires_grad_(True)
+            y_ref, _, _ = self._norm_ref("layer_norm", xd, None, bd, eps)
+            y_ref.backward(gy.double())
+            _, mean, rstd = torch.ops.aten.native_layer_norm.default(x, [N], None, bias, eps)
+            dx, dw, db = torch.ops.aten.native_layer_norm_backward.default(
+                gy, x, [N], mean, rstd, None, bias, [True, False, True])
+            tol = self._NORM_REL_TOL[dtype]
+            self._check_close(dx, xd.grad, tol, f"dX {dtype}")
+            self._check_close(db, bd.grad, tol, f"dbeta {dtype}")
+
+    @onlyAccelerator
+    def test_layer_norm_cached_row_accuracy_stress(self, device):
+        # Inputs on which a one-pass E[x^2] - E[x]^2 variance loses everything: large mean against a small
+        # spread, constant rows, and fp16 close to overflow. fp64 reference on the same device.
+        eps = 1e-5
+        for N in (64, 512, 4096, 8192):
+            M = 300
+            weight = torch.randn(N, dtype=torch.float32, device=device)
+            bias = torch.randn(N, dtype=torch.float32, device=device)
+            cases = {
+                "large_mean": 1.0e3 + torch.randn(M, N, dtype=torch.float32, device=device),
+                "constant_rows": torch.full((M, N), 3.25, dtype=torch.float32, device=device) + torch.arange(M, device=device, dtype=torch.float32)[:, None],
+                "tiny_spread": 7.0 + 1e-3 * torch.randn(M, N, dtype=torch.float32, device=device),
+            }
+            for name, x in cases.items():
+                for op in ("layer_norm", "rms_norm"):
+                    msg = f"{name} op={op} N={N}"
+                    y_ref, _, _ = self._norm_ref(op, x, weight, bias if op == "layer_norm" else None, eps)
+                    if op == "layer_norm":
+                        y = torch.ops.aten.native_layer_norm.default(x, [N], weight, bias, eps)[0]
+                    else:
+                        y = torch.ops.aten._fused_rms_norm.default(x, [N], weight, eps)[0]
+                    # fp32 inputs: the error must stay at the fp32 level (a one-pass formula is off by O(1) here)
+                    self._check_close(y, y_ref, 2e-3 if name != "tiny_spread" else 2e-2, msg)
+        # fp16 with values near the format maximum: statistics need fp32 accumulation
+        x = (torch.randn(200, 2048, device=device) * 2.0e4).clamp(-6.0e4, 6.0e4).to(torch.float16)
+        weight = torch.ones(2048, dtype=torch.float16, device=device)
+        y_ref, _, _ = self._norm_ref("layer_norm", x, weight, None, eps)
+        y = torch.ops.aten.native_layer_norm.default(x, [2048], weight, None, eps)[0]
+        self._check_close(y, y_ref, 4e-3, "fp16 near overflow")
+
+    @onlyAccelerator
+    def test_layer_norm_cached_row_small_and_empty(self, device):
+        # M == 0 and tiny M must neither launch an invalid grid nor read out of bounds
+        for dtype in (torch.float32, torch.bfloat16):
+            for M in (0, 1, 2):
+                x = torch.randn(M, 1024, dtype=dtype, device=device, requires_grad=True)
+                w = torch.randn(1024, dtype=dtype, device=device, requires_grad=True)
+                b = torch.randn(1024, dtype=dtype, device=device, requires_grad=True)
+                y = torch.nn.functional.layer_norm(x, [1024], w, b)
+                y.sum().backward()
+                r = torch.nn.functional.rms_norm(x.detach().requires_grad_(), [1024], w.detach().requires_grad_())
+                r.sum().backward()
+                self.assertEqual(y.shape, (M, 1024))
+
 
     @onlyAccelerator
     def test_layer_norm_backward_undefined_gamma(self, device):

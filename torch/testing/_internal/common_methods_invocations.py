@@ -23307,6 +23307,15 @@ if "flydsl" in dsl_ops_by_dsl:
                     ),
                     "flydsl rms_norm override requires gfx950",
                 ),
+                # The contiguous input takes the FlyDSL forward and the non-contiguous one the ATen forward, which
+                # on ROCm reduces in a different order. The saved rstd can then differ in the last bit and dweight
+                # sums that over all rows, so the weight gradients agree to float32 rounding, not bit for bit.
+                DecorateInfo(
+                    toleranceOverride({torch.float32: tol(atol=2e-3, rtol=2e-4)}),
+                    "TestCommon",
+                    "test_noncontiguous_samples",
+                    dtypes=(torch.float32,),
+                ),
             ],
             skips=(
                 # Unsupported FlyDSL dtypes fall through to aten and appear supported,
