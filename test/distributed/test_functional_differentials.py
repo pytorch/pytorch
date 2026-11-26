@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
@@ -13,7 +12,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
-    TEST_SKIPS,
+    with_comms,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -61,31 +60,6 @@ tie_dtypes = [
     subtest(torch.float32, name="fp32"),
     subtest(torch.bfloat16, name="bf16"),
 ]
-
-
-def with_comms(func=None):
-    if func is None:
-        return partial(with_comms)
-
-    @wraps(func)
-    def wrapper(self, device, *args, **kwargs):
-        # The device arg is injected per device variant by
-        # instantiate_device_type_tests; every test method takes it as the
-        # first positional argument after self.
-        device_type = torch.device(device).type
-        if device_type != "cpu":
-            device_count = torch.get_device_module(device_type).device_count()
-            if device_count < self.world_size:
-                sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
-
-        self.pg = self.create_pg(device=device_type)
-        self.device = device_type
-        try:
-            return func(self, device, *args, **kwargs)
-        finally:
-            torch.distributed.destroy_process_group()
-
-    return wrapper
 
 
 class TestFunctionalDifferentialsDevice(MultiThreadedTestCase):
@@ -1136,12 +1110,12 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
                     input_tensor = torch.full(
                         shape,
                         fill_value=float(self.rank),
-                        device=self.device,
+                        device=device,
                         requires_grad=True,
                     )
                 else:
                     input_tensor = torch.randn(
-                        *shape, device=self.device, requires_grad=True
+                        *shape, device=device, requires_grad=True
                     )
 
                 loss = compiled_fn(input_tensor)
@@ -1150,16 +1124,14 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
                 self.assertIsNotNone(input_tensor.grad)
                 if reduce_op == "sum":
                     expected_grad = torch.full(
-                        shape, fill_value=float(self.world_size), device=self.device
+                        shape, fill_value=float(self.world_size), device=device
                     )
                 elif reduce_op == "avg":
-                    expected_grad = torch.full(
-                        shape, fill_value=1.0, device=self.device
-                    )
+                    expected_grad = torch.full(shape, fill_value=1.0, device=device)
                 elif reduce_op == "min":
                     grad_val = float(self.world_size) if self.rank == 0 else 0.0
                     expected_grad = torch.full(
-                        shape, fill_value=grad_val, device=self.device
+                        shape, fill_value=grad_val, device=device
                     )
                 elif reduce_op == "max":
                     grad_val = (
@@ -1168,7 +1140,7 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
                         else 0.0
                     )
                     expected_grad = torch.full(
-                        shape, fill_value=grad_val, device=self.device
+                        shape, fill_value=grad_val, device=device
                     )
                 self.assertEqual(input_tensor.grad, expected_grad)
 
@@ -1192,13 +1164,13 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
                     )
                     return outs[0].sum() + outs[1].sum()
 
-                a = torch.randn(*shape, device=self.device, requires_grad=True)
-                b = torch.randn(*shape, device=self.device, requires_grad=True)
+                a = torch.randn(*shape, device=device, requires_grad=True)
+                b = torch.randn(*shape, device=device, requires_grad=True)
 
                 compiled_fn(a, b).backward()
 
                 fill = float(self.world_size) if reduce_op == "sum" else 1.0
-                expected_grad = torch.full(shape, fill_value=fill, device=self.device)
+                expected_grad = torch.full(shape, fill_value=fill, device=device)
                 self.assertEqual(a.grad, expected_grad)
                 self.assertEqual(b.grad, expected_grad)
 
@@ -1215,7 +1187,7 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
         ws = self.world_size
         rank = self.rank
 
-        idx = torch.arange(ws, device=self.device)
+        idx = torch.arange(ws, device=device)
         holds = (rank + idx) < ws
         count = (ws - idx).to(torch.float32)
         expected_grad = torch.where(holds, ws / count, 0.0)
@@ -1246,7 +1218,7 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
         ws = self.world_size
         rank = self.rank
 
-        idx = torch.arange(ws, device=self.device)
+        idx = torch.arange(ws, device=device)
         holds = (rank + idx) < ws
         count = (ws - idx).to(torch.float32)
         expected_grad = torch.where(holds, ws / count, 0.0)
@@ -1284,7 +1256,7 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
             output = fcols.all_gather_single(tensor, gather_dim=0, group=group_name)
             return output.sum()
 
-        input_tensor = torch.randn(3, 3, 3, device=self.device, requires_grad=True)
+        input_tensor = torch.randn(3, 3, 3, device=device, requires_grad=True)
 
         loss = compiled_fn(input_tensor)
         loss.backward()
@@ -1309,7 +1281,7 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
 
         # Input should be divisible by world_size
         input_tensor = torch.randn(
-            4 * self.world_size, 3, device=self.device, requires_grad=True
+            4 * self.world_size, 3, device=device, requires_grad=True
         )
 
         loss = compiled_fn(input_tensor)
@@ -1338,7 +1310,7 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
 
         # Input should be divisible by world_size
         input_tensor = torch.randn(
-            4 * self.world_size, 3, device=self.device, requires_grad=True
+            4 * self.world_size, 3, device=device, requires_grad=True
         )
 
         loss = compiled_fn(input_tensor)
@@ -1367,7 +1339,7 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
             output = fcols.wait_tensor(output)
             return output.sum()
 
-        input_tensor = torch.randn(3, 3, device=self.device, requires_grad=True)
+        input_tensor = torch.randn(3, 3, device=device, requires_grad=True)
 
         loss = compiled_fn(input_tensor)
         loss.backward()
@@ -1392,7 +1364,7 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
             return output.sum()
 
         input_tensor = torch.randn(
-            4 * self.world_size, 3, device=self.device, requires_grad=True
+            4 * self.world_size, 3, device=device, requires_grad=True
         )
 
         loss = compiled_fn(input_tensor)
@@ -1411,7 +1383,7 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
         group_size = dist.group.WORLD.size()
 
         input_tensor = torch.randn(
-            4 * self.world_size, 3, device=self.device, requires_grad=True
+            4 * self.world_size, 3, device=device, requires_grad=True
         )
         # The raw op requires explicit split sizes (SymInt[], not optional); the
         # None default is only resolved by the all_to_all_single Python wrapper.
