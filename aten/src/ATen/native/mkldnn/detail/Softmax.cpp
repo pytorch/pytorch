@@ -5,11 +5,11 @@
 namespace at::native::mkldnn {
 
 void softmax_forward(
-    const ideep::tensor& src,
-    ideep::tensor& dst,
+    const MkldnnMemory& src,
+    MkldnnMemory& dst,
     int softmax_axis,
     dnnl::prop_kind prop_kind) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto src_desc = src.get_desc();
   // May replace dst's buffer and layout when they differ from src's.
   dst.reinit_if_possible(src_desc);
@@ -25,9 +25,9 @@ void softmax_forward(
       src_desc,
       softmax_axis,
       op_attr);
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
   dnnl::softmax_forward(pd).execute(
-      ideep::stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC, src},
        {DNNL_ARG_DST, dst},
        {DNNL_ARG_SCRATCHPAD, scratchpad}});
