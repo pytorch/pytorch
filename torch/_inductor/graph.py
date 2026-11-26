@@ -472,6 +472,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, TensorBox | TorchBindObject | sympy.Expr] = {}
+        self.negative_buffers: OrderedSet[str] = OrderedSet()
+        self.conjugate_buffers: OrderedSet[str] = OrderedSet()
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         # InputBuffer offsets are relative to input.data_ptr(); explicit FX
         # as_strided storage offsets are relative to the input's storage.
@@ -1012,7 +1014,11 @@ class GraphLowering(torch.fx.Interpreter):
             return f"{self.name}_{name}"
         return name
 
-    def preserve_input_alignment(self, storage_names: Iterable[str]) -> None:
+    def preserve_input_alignment(
+        self,
+        storage_names: Iterable[str],
+        reason: str = "strict FP64 CUDA multiplication requires original input pointer alignment",
+    ) -> None:
         storage_names = OrderedSet(storage_names)
         input_names = OrderedSet[str]()
         # Dtype-changing views can be aliasing fallback buffers.
@@ -1036,10 +1042,39 @@ class GraphLowering(torch.fx.Interpreter):
                 self.inputs_to_check = [
                     idx
                     for idx in self.inputs_to_check
-                    if self.graph_input_names[idx] not in input_names
+                    # Later placeholders may not have registered their names yet.
+                    if idx >= len(self.graph_input_names)
+                    or self.graph_input_names[idx] not in input_names
                 ]
             # CUDA graph input copies can change the native multiplication's NaN priority.
-            self.disable_cudagraphs_reason = "strict FP64 CUDA multiplication requires original input pointer alignment"
+            self.disable_cudagraphs_reason = reason
+
+    def register_lazy_buffer(self, name: str, example: torch.Tensor) -> None:
+        if (
+            example.device.type == "cuda"
+            and torch.version.hip is None
+            and example.is_conj()
+        ):
+            self.conjugate_buffers.add(name)
+            self.never_reuse_but_free_buffers.add(name)
+        if (
+            example.device.type == "cuda"
+            and torch.version.hip is None
+            and example.is_neg()
+        ):
+            self.negative_buffers.add(name)
+            # Reusing this Tensor object retains its flag on an ordinary output.
+            self.never_reuse_but_free_buffers.add(name)
+
+    def is_negative_buffer(self, name: str) -> bool:
+        if self.scheduler is not None:
+            name = self.scheduler.mutation_real_name.get(name, name)
+        return name in self.negative_buffers
+
+    def is_conjugate_buffer(self, name: str) -> bool:
+        if self.scheduler is not None:
+            name = self.scheduler.mutation_real_name.get(name, name)
+        return name in self.conjugate_buffers
 
     def preserve_subgraph_input_alignment(
         self, subgraph: GraphLowering, operands: Sequence[ir.IRNode]
@@ -1529,6 +1564,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names.append(target)
         self.graph_input_storage_offsets[target] = storage_offset
         self.graph_inputs_original[target] = tensor.data.data  # type: ignore[union-attr]
+        self.register_lazy_buffer(target, example)
+        if self.is_negative_buffer(target) or self.is_conjugate_buffer(target):
+            self.preserve_input_alignment(
+                (target,),
+                reason="lazy tensor bits require original input storage",
+            )
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
 

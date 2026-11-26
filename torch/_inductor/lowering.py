@@ -9512,6 +9512,20 @@ add = register_pointwise(
     preserve_cuda_scalar_precision=True,
 )
 
+
+def complex_components(x):
+    x.realize()
+    conjugate = V.graph.is_conjugate_buffer(x.get_name())
+    if conjugate:
+        x = TensorBox.create(ir.ComplexView.create(aten._conj.default, x))
+    components = TensorBox.create(ir.ComplexView.create(aten.view_as_real.default, x))
+    real, imag = select(components, -1, 0), select(components, -1, 1)
+    return real, neg(imag) if conjugate else imag
+
+
+pointwise_add = add
+
+
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
 
 

@@ -453,6 +453,11 @@ def ir_node_to_tensor(
         t = torch.empty_strided(
             size=size, stride=stride, dtype=dtype, device=device
         ).zero_()
+    name = x.maybe_get_name()
+    if name is not None and V.graph.is_negative_buffer(name):
+        t = torch._neg_view(t)
+    if name is not None and V.graph.is_conjugate_buffer(name):
+        t = t.conj()
     return t
 
 
@@ -5771,6 +5776,25 @@ class MutationLayoutSHOULDREMOVE(Layout):
                 src.realize()
                 unsafe_alias = False
 
+        destination_layout = cls(dst)
+        physical_dtype = destination_layout.get_buffer().get_dtype()
+        if (
+            dst.get_dtype() != physical_dtype
+            and src.get_dtype() == dst.get_dtype()
+            and src.get_dtype().itemsize == physical_dtype.itemsize
+        ):
+            loader = src.make_loader()
+            source_dtype = src.get_dtype()
+            src = Pointwise.create(
+                device=src.get_device(),
+                dtype=physical_dtype,
+                ranges=src.get_size(),
+                inner_fn=lambda index: ops.to_dtype_bitcast(
+                    loader(index), physical_dtype, source_dtype
+                ),
+            )
+            unsafe_alias = False
+
         if not unsafe_alias:
             node = Pointwise.create(
                 device=src.get_device(),
@@ -5788,11 +5812,11 @@ class MutationLayoutSHOULDREMOVE(Layout):
             src = node.data
 
         src.realize()
-        if not hasattr(src, "data"):
+        if not isinstance(src, StorageBox) or not isinstance(src.data, Buffer):
             raise AssertionError(src)
         if not isinstance(src.data.layout, FlexibleLayout):
             raise AssertionError(type(src.data.layout))
-        src.data.layout = MutationLayoutSHOULDREMOVE(dst)
+        src.data.layout = destination_layout
         return src.data
 
     def as_fixed(self) -> Self:  # type: ignore[override]
@@ -8445,14 +8469,30 @@ class ExternKernel(InputsKernel):
                     x.get_device_or_error(), x.get_dtype(), x.get_size()
                 ).as_stride_order(order, allow_padding=allow_padding)
 
-            src = x
-            x = torch._inductor.lowering.empty_strided(
-                x.get_size(),
-                layout.stride,
-                dtype=x.get_dtype(),
-                device=x.get_device_or_error(),
-            )
-            InplaceCopyFallback.create(x, src)
+            if torch._inductor.lowering.is_strict_cuda_triton(x.get_device()):
+                real, imag = torch._inductor.lowering.complex_components(x)
+                parts = torch._inductor.lowering.cat(
+                    (
+                        torch._inductor.lowering.unsqueeze(real, -1),
+                        torch._inductor.lowering.unsqueeze(imag, -1),
+                    ),
+                    -1,
+                )
+                parts = cls.require_exact_strides(
+                    parts, [*(2 * s for s in layout.stride), 1], allow_padding
+                )
+                x = TensorBox.create(
+                    ComplexView.create(torch.ops.aten.view_as_complex.default, parts)
+                )
+            else:
+                src = x
+                x = torch._inductor.lowering.empty_strided(
+                    x.get_size(),
+                    layout.stride,
+                    dtype=x.get_dtype(),
+                    device=x.get_device_or_error(),
+                )
+                InplaceCopyFallback.create(x, src)
         else:
             # Although this is a clone, inductor is good about fusing clones into previous
             # operations if they weren't realized and their layouts were flexible.
@@ -9579,6 +9619,35 @@ class InplaceBernoulliFallback(ExternKernel):
 
 
 # Used to deal with torch.complex types
+class NegativeView(ExternKernelAlloc):
+    """Toggle the tensor's lazy negative bit while retaining its storage."""
+
+    def __init__(self, x: IRNode) -> None:
+        x = self.realize_input(x)
+        x.freeze_layout()
+        layout = x.get_layout()
+        device = x.get_device()
+        if device is None:
+            raise AssertionError(f"Expected non-None values, got {device=}")
+        super().__init__(
+            FixedLayout(device, x.get_dtype(), x.get_size(), layout.stride),
+            [x],
+            python_kernel_name="torch.ops.aten._neg_view.default",
+            cpp_kernel_name="aoti_torch_neg_view",
+            op_overload=torch.ops.aten._neg_view.default,
+        )
+        example = V.graph.current_node.meta["val"]
+        negative = not V.graph.is_negative_buffer(x.get_name())
+        if example.is_neg() != negative:
+            example = torch._neg_view(example)
+        if example.is_conj() != V.graph.is_conjugate_buffer(x.get_name()):
+            example = example.conj()
+        V.graph.register_lazy_buffer(self.get_name(), example)
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        return [self.input_name(0)]
+
+
 class InplaceCopyFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
@@ -10954,6 +11023,7 @@ class FallbackKernel(ExternKernelAlloc):
                 kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
+            V.graph.register_lazy_buffer(packed.get_name(), output)
             if (
                 config.assume_unaligned_fallback_output
                 or has_unaligned_input
@@ -11031,6 +11101,7 @@ class FallbackKernel(ExternKernelAlloc):
                     packed,
                     indices,
                 )
+                V.graph.register_lazy_buffer(buf.get_name(), output)
                 if (
                     config.assume_unaligned_fallback_output
                     or has_unaligned_input
