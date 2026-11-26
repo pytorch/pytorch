@@ -4,8 +4,6 @@ Python polyfills for builtins
 
 from __future__ import annotations
 
-import _string  # pyrefly: ignore [missing-import]
-
 import builtins
 import functools
 import operator
@@ -186,54 +184,3 @@ def callable_iterator(fn, sentinel, /):
 @substitute_in_graph(typing.cast, can_constant_fold_through=True)
 def cast(typ: type, val: _T) -> _T:  # type: ignore[type-var]
     return val
-
-
-def str_format(defer, template, /, *args, **kwargs):
-    return _expand_format(defer, template, args, kwargs, 2, 0)[0]
-
-
-def _expand_format(defer, template, args, kwargs, depth, position):
-    # CPython shares positional numbering across nested format specs.
-    if depth == 0:
-        raise ValueError("Max string recursion exceeded")
-    parts = []
-    for literal, name, spec, conv in _string.formatter_parser(template):
-        parts.append(literal)
-        if name is None:
-            continue
-        key, path = _string.formatter_field_name_split(name)
-        if key == "":
-            if position is None:
-                raise ValueError(
-                    "cannot switch from manual field specification to automatic field numbering"
-                )
-            key, position = position, position + 1
-        elif isinstance(key, int):
-            if position:
-                raise ValueError(
-                    "cannot switch from automatic field numbering to manual field specification"
-                )
-            position = None
-        if isinstance(key, int) and key >= len(args):
-            raise IndexError(
-                f"Replacement index {key} out of range for positional args tuple"
-            )
-        value = args[key] if isinstance(key, int) else kwargs[key]
-        for is_attr, index in path:
-            value = getattr(value, index) if is_attr else value[index]
-        if conv in ("s", "r", "a") and defer(value, conv):
-            value = ("{!" + conv + "}").format(value)
-        elif conv == "s":
-            value = str(value)
-        elif conv in ("r", "a"):
-            value = repr(value)
-            if conv == "a":
-                value = str.encode(value, "ascii", "backslashreplace").decode("ascii")
-        elif conv and conv != "\0":
-            ("{!" + conv + "}").format(None)
-        if "{" in spec:
-            spec, position = _expand_format(
-                defer, spec, args, kwargs, depth - 1, position
-            )
-        parts.append(format(value, spec))
-    return "".join(parts), position

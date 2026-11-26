@@ -417,9 +417,7 @@ def _untracked_method_identity(context: str, *, skip_frame: bool = False) -> NoR
         gb_type="Builtin method operation requires identity guards",
         context=context,
         explanation="Dynamo cannot establish the stable receiver identity required by this operation.",
-        hints=[
-            "Bind the method inside the compiled function or pass the computed result as an input."
-        ],
+        hints=["Pass the computed result as an input to the compiled function."],
         skip_frame=skip_frame,
         preserve_skip_frame_after_inline=skip_frame,
     )
@@ -3676,9 +3674,10 @@ class GuardBuilder(GuardBuilderBase):
 
         def check_fn(x: object) -> bool:
             # Mirrors _constant_subclass_base_value: base_type is a union of
-            # int/float/str, none of which typecheck against an opaque arg,
+            # int/float/str/complex, none of which typecheck against an opaque arg,
             # but x is an instance of base_type by construction.
-            return base_type(x) == base_value  # pyrefly: ignore[bad-argument-type]
+            # pyrefly: ignore[bad-argument-type, no-matching-overload]
+            return base_type(x) == base_value
 
         self.get_guard_manager(guard).add_lambda_guard(
             check_fn,
@@ -4176,8 +4175,9 @@ class GuardBuilder(GuardBuilderBase):
         hooks_name: str,
         flags_source: Source,
     ) -> None:
-        """Guard flag membership in storage order. Callers that iterate an OrderedDict
-        in linked order must also guard that order.
+        """Guard flag membership by hook storage position. OrderedDict iteration
+        also needs ORDERED_DICT_ORDER_MATCH. Empty flags require only a guard
+        that the flags stay empty; this does not constrain the hooks dictionary.
         """
         hooks_source = AttrSource(guard.originating_source, hooks_name)
         flags = self.get(flags_source)
@@ -5683,7 +5683,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         modes: collections.abc.Sequence[torch.overrides.TorchFunctionMode] = (),
         annotation: dict[str, Any] | None = None,
     ) -> None:
-        """Retain keys and constructor dependencies before freezing unused dictionary slots."""
+        """Prepare the scopes once before dumping, retaining keys, modes and the FX annotation
+        before pruning local leaves and freezing dictionary slots.
+        """
         value: Any
         for value in itertools.chain(self.guard_tree_values.values(), dictionaries):
             if issubclass(type(value), dict):
@@ -5692,10 +5694,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         dictionaries = tuple(v for v in dictionaries if _can_prune_dict_values(v))
         self._pruned_dictionary_ids.update(map(id, dictionaries))
         self._verbatim_elements.update(map(id, modes))
+        if annotation:
+            self._retain_required_state((annotation,))
         self._prune_local_scope(local_scope)
         if dictionaries or self.missing_values or self.empty_values:
-            if annotation:
-                self._retain_required_state((annotation,))
             roots = itertools.chain(local_scope.values(), global_scope.values(), modes)
             self._retain_dict_aliases(roots)
         for value in dictionaries:
@@ -6279,8 +6281,8 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         elif isinstance(obj, types.MappingProxyType):
             copied = obj.copy()
-            if self._pruned_dictionary_ids:
-                self._retain_dict_aliases((copied,), checking_copy=True)
+            # Custom copy() can introduce dependencies after pruning.
+            self._retain_dict_aliases((copied,), checking_copy=True)
             return type(self)._unpickle_mapping_proxy, (copied,)
 
         elif isinstance(

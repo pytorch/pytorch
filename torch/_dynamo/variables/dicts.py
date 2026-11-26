@@ -51,6 +51,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    ConstantSource,
     ConstDictKeySource,
     DictGetItemSource,
     is_constant_source,
@@ -811,7 +812,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         #   DICT_NOT_CONTAINS guard because our guard are represented via trees.
         #   Be conservative and add DICT_KEYS_MATCH guard.
 
-        if not self.source:
+        if not self.source or is_constant_source(self.source):
             return
 
         if tx.output.side_effects.is_modified(self):
@@ -1190,6 +1191,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         sequences = (variables.ListVariable, variables.TupleVariable)
         if not fast_merge_verified and (
             pydict_checkexact(other)
+            or pyodict_checkexact(other)
             or (
                 not istype(other.realize(), sequences)
                 and generic_hasattr_str(tx, other, "keys")
@@ -1537,7 +1539,11 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         if type(self) is not OrderedDictVariable:
             return None
         source = AttrSource(self.source, "__dict__")
-        value = tx.output.resolve_source_value(source)
+        # assume_constant_result stores its return on the output graph, outside the frame.
+        constants: dict[Source, Any] = {}
+        if isinstance(base := source.get_base(), ConstantSource):
+            constants[base] = tx.output.nn_modules[base.source_name]
+        value = tx.output.resolve_source_value(source, constants)
         return VariableTracker.build(tx, value, source, realize=True)
 
     tp_getset = {"__dict__": GetSet(_instance_dict, unmodeled_setter)}
@@ -1638,7 +1644,6 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
 
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
-    # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
 
     def python_type(self) -> type:
@@ -1665,7 +1670,13 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         )
 
     def _guard_copy_state(self, tx: "InstructionTranslatorBase", name: str) -> None:
-        if self.source and not is_constant_source(self.source):
+        if self.source and is_constant_source(self.source):
+            namespace = self._instance_dict(tx)
+            if (
+                namespace is not None and namespace.items
+            ) or tx.output.side_effects.has_pending_mutation(self):
+                self.unsupported_instance_state(f"OrderedDict.{name}")
+        elif self.source:
             instance_dict = AttrSource(self.source, "__dict__")
             effects = tx.output.side_effects
             # A pending write to another input dict could alias self.__dict__

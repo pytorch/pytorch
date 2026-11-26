@@ -12,7 +12,7 @@ import warnings
 from collections import defaultdict, deque, OrderedDict
 from dataclasses import dataclass
 from itertools import product
-from types import FunctionType, SimpleNamespace as Holder
+from types import FunctionType, SimpleNamespace
 
 import invoke_subgraph_test_module as _lexical
 import sympy
@@ -78,6 +78,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
 
 
+Holder = SimpleNamespace
 nested_compile_region = torch.compiler.nested_compile_region
 _shape_bucket = {4: 0, 8: 1}.get
 
@@ -3725,8 +3726,8 @@ class TestInvokeSubgraphReuse(TestCase):
             return region(x, first) + region(x, second)
 
         x, shared = torch.ones(1), []
-        first = Holder(left=[], right=[])
-        second = Holder(left=shared, right=shared)
+        first = SimpleNamespace(left=[], right=[])
+        second = SimpleNamespace(left=shared, right=shared)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         with self._count_speculate_calls() as count:
             result = compiled(x, first, second)
@@ -3772,7 +3773,6 @@ class TestInvokeSubgraphReuse(TestCase):
 
         mapped = _map_nested_region(lambda x, h: x * h.scale + h.tensor.shape[0])
         fn = lambda x, hs: (hs[1].scale, mapped(x, hs), hs[-1].tensor.sin())
-
         holders = [WithDefaults(tensor=torch.ones(2)) for _ in range(9)]
         holders[-1].tensor = holders[-2].tensor
         path = "torch._guards.Guard.source_dependencies"
@@ -4078,8 +4078,10 @@ class TestInvokeSubgraphReuse(TestCase):
     def test_reuse_order_annotations_include_guard_dependencies(self):
         owner = source.LocalSource("holder")
         mappings = [source.AttrSource(owner, name) for name in ("first", "second")]
-        key = source.ConstDictKeySource
-        sources = [source.DictGetItemSource(m, key(m, 0)) for m in mappings]
+        sources = [
+            source.DictGetItemSource(m, source.ConstDictKeySource(m, 0))
+            for m in mappings
+        ]
         check = functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=sources[1])
         guard = sources[0].make_guard(check)
         tx = mock.Mock()
@@ -5502,7 +5504,7 @@ class GraphModule(torch.nn.Module):
         """Exceeding max_reuse_entries raises RuntimeError."""
 
         @nested_compile_region(max_reuse_entries=2)
-        def gn(x, c):
+        def gn(x, c=1):
             return x * c
 
         def fn(x):
@@ -5510,7 +5512,8 @@ class GraphModule(torch.nn.Module):
             return gn(x, 1) + gn(x, 2) + gn(x, 3)
 
         x = torch.randn(4)
-        with self.assertRaisesRegex(RuntimeError, "exceeded maximum reuse entries"):
+        error = r"reuse entries .*test_invoke_subgraph\.py.*, line \d+"
+        with self.assertRaisesRegex(RuntimeError, error):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
     def test_subgraph_reuse_enum_arg(self):

@@ -710,10 +710,12 @@ def _wrap_binaryfunc_r(
     func: Callable[..., VariableTracker],
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
+    *,
+    name: str = "this method",
 ) -> VariableTracker:
     # Reflected binary op (``__radd__``): same impl, operands from the right.
     if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
+        raise_type_error(tx, f"{name} takes no keyword arguments")
     check_num_args(tx, args, 1)
     other = args[0]
     return func(self, tx, other, reverse=True)
@@ -811,6 +813,7 @@ def _wrap_objobjargproc(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "wrapper __setitem__() takes no keyword arguments")
+    # CPython gh-123446 added the slot name to PyArg_UnpackTuple in 3.14.
     name = "__setitem__" if sys.version_info >= (3, 14) else ""
     check_positional(tx, name, len(args), 2, 2)
     [key, value] = args
@@ -1258,6 +1261,8 @@ def MPSLOT(name: str, impl: str, slot: int, wrapper: WrapperType) -> SlotDef:
 
 
 def NBSLOT(name: str, impl: str, slot: int, wrapper: WrapperType) -> SlotDef:
+    if wrapper in (_wrap_binaryfunc, _wrap_binaryfunc_r):
+        wrapper = functools.partial(wrapper, name=f"wrapper {name}()")
     return SlotDef(name, impl, SlotGroup.NUMBER, slot, wrapper)
 
 
@@ -1609,7 +1614,7 @@ _SLOTDEFS: list[SlotDef] = [
         "__ior__",
         "nb_inplace_or_impl",
         PyNumberSlots.NB_INPLACE_OR,
-        functools.partial(_wrap_binaryfunc, name="wrapper __ior__()"),
+        _wrap_binaryfunc,
     ),
     NBSLOT(
         "__floordiv__",
