@@ -379,6 +379,63 @@ class SharedReadCatTests(TestCase):
             )
         return result, "\n".join(code), metrics.generated_kernel_count
 
+    @requires_gpu_and_triton
+    def test_terminal_cast_padding(self):
+        for width in (1025, 1100):
+            for target in (torch.float16, torch.bfloat16):
+                for dim in (1, -1):
+                    with self.subTest(width=width, target=target, dim=dim):
+                        x = T(17, width)
+
+                        def fn(x):
+                            return torch.cat((x + 1, x * 2), dim).to(target)
+
+                        with config.patch(comprehensive_padding=True, pad_outputs=False):
+                            actual, code, kernels = self.compile_cat(fn, (x,))
+                            with patch.object(lowering, "_cat_inputs_share_read", return_value=False):
+                                expected, _, _ = self.compile_cat(fn, (x,))
+                        self.assert_same_bits(actual, expected)
+                        self.assertEqual(actual.stride(), fn(x).stride())
+                        self.assertEqual(kernels, 1)
+                        self.assertEqual(code.count("tl.load("), 1)
+                        self.assertEqual(code.count("tl.store("), 2)
+
+    @requires_gpu_and_triton
+    def test_terminal_cast_precision_emulation(self):
+        for source in (torch.float64, torch.float32, torch.float16, torch.bfloat16):
+            for target in (torch.float16, torch.bfloat16):
+                for emulate in (False, True):
+                    with self.subTest(source=source, target=target, emulate=emulate):
+                        midpoint = 1 + (2**-11 if target == torch.float16 else 2**-8)
+                        epsilon = 2**-25 if target == torch.float16 else 2**-22
+                        x = torch.full((16,), midpoint, device=T(1).device, dtype=source)
+
+                        def fn(x):
+                            return torch.cat((x + epsilon, x - epsilon), 0).to(target)
+
+                        with config.patch(emulate_precision_casts=emulate):
+                            actual, code, kernels = self.compile_cat(fn, (x,))
+                            with patch.object(lowering, "_cat_inputs_share_read", return_value=False):
+                                expected, _, _ = self.compile_cat(fn, (x,))
+                        self.assert_same_bits(actual, expected)
+                        if emulate and source == torch.float64 and target == torch.float16:
+                            self.assertEqual(actual[:16], torch.full_like(actual[:16], 1 + 2**-10))
+                            self.assertEqual(actual[16:], torch.ones_like(actual[16:]))
+                        self.assertEqual(kernels, 1)
+                        self.assertEqual(code.count("tl.store("), 2)
+
+        x = torch.full((16,), 2**-11 + 2**-30, device=T(1).device, dtype=torch.float64)
+
+        def fn(x):
+            return torch.cat((x + 1, x * 2), 0).half()
+
+        with config.patch(emulate_precision_casts=True):
+            actual, _, _ = self.compile_cat(fn, (x,))
+            with patch.object(lowering, "_cat_inputs_share_read", return_value=False):
+                expected, _, _ = self.compile_cat(fn, (x,))
+        self.assert_same_bits(actual, expected)
+        self.assertEqual(actual[:16], torch.full_like(actual[:16], 1 + 2**-10))
+
     def test_non_cat_fx_inputs(self):
         graph = torch.fx.Graph()
         x = graph.placeholder("x")

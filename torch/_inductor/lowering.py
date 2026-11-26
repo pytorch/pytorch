@@ -931,6 +931,12 @@ def _foreach_map(subgraph, *args, **kwargs):
 
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def _convert_element_type(x: TensorBox, dtype: torch.dtype):
+    src_dtype = x.get_dtype()
+    low_pr_fp = (torch.bfloat16, torch.float16)
+    use_compute_types = not (
+        config.emulate_precision_casts
+        and (src_dtype in low_pr_fp or dtype in low_pr_fp)
+    )
     pending = V.graph.pending_shared_read_cats.pop(V.current_node, None)
     if (
         pending is not None
@@ -940,11 +946,11 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
         and not config.force_pointwise_cat
     ):
         # Only move the terminal cast; producer type promotion and rounding stay put.
-        converted = [to_dtype(inp, dtype, copy=True) for inp in pending.inputs]
-        with (
-            V.set_current_node(pending.node),
-            V.graph.set_current_node(pending.node),
-        ):
+        converted = [
+            to_dtype(inp, dtype, copy=True, use_compute_types=use_compute_types)
+            for inp in pending.inputs
+        ]
+        with V.graph.set_current_node(pending.node):
             return _create_shared_read_cat(converted, pending.dim)
     if dtype.is_complex or x.get_dtype().is_complex:
         if x.get_size():
@@ -957,12 +963,6 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
             return fallback_handler(
                 prims.convert_element_type.default, add_to_fallback_set=False
             )(x, dtype)
-    src_dtype = x.get_dtype()
-    low_pr_fp = (torch.bfloat16, torch.float16)
-    use_compute_types = not (
-        config.emulate_precision_casts
-        and (src_dtype in low_pr_fp or dtype in low_pr_fp)
-    )
     return to_dtype(x, dtype, copy=True, use_compute_types=use_compute_types)
 
 
