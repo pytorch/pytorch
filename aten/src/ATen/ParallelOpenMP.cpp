@@ -89,7 +89,20 @@ namespace internal {
 void set_thread_num(int id) {
   this_thread_id = id;
 }
+
+void set_thread_local_num_threads(int nthreads) {
+  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
+  // Initialize first: otherwise this thread's first parallel region would
+  // initialize from the process-wide setting and replace this one.
+  lazy_init_num_threads();
+#ifdef _OPENMP
+  omp_set_num_threads(nthreads);
+#endif
+#if AT_MKL_ENABLED()
+  mkl_set_num_threads_local(nthreads);
+#endif
 }
+} // namespace internal
 
 bool in_parallel_region() {
 #ifdef _OPENMP

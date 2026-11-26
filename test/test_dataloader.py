@@ -3305,6 +3305,31 @@ class TestDictDataLoaderDevice(TestCase):
                 self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
 
     @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
+    def test_pin_memory_thread_keeps_num_threads_local(self):
+        # The pin-memory thread limits only itself to one intra-op thread;
+        # threads initializing afterwards (e.g. autograd's) keep the process's.
+        import threading
+
+        orig_num_threads = torch.get_num_threads()
+        torch.set_num_threads(2)
+        try:
+            loader = DataLoader(
+                self.dataset, batch_size=2, num_workers=1, pin_memory=True
+            )
+            it = iter(loader)
+            self.assertTrue(next(it)["a_tensor"].is_pinned())
+            counts = []
+            thread = threading.Thread(
+                target=lambda: counts.append(torch.get_num_threads())
+            )
+            thread.start()
+            thread.join()
+            self.assertEqual(counts, [2])
+            del it
+        finally:
+            torch.set_num_threads(orig_num_threads)
+
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_pin_memory_with_only_device(self):
         # pin_memory_device alone (without pin_memory=True) should not pin tensors.
         acc_type = torch.accelerator.current_accelerator().type

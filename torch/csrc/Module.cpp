@@ -358,6 +358,22 @@ static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_setThreadLocalNumThreads(
+    PyObject* module,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "_set_thread_local_num_threads expects an int, but got ",
+      THPUtils_typename(arg));
+  int nthreads = THPUtils_unpackInt(arg);
+  TORCH_CHECK(
+      nthreads > 0, "_set_thread_local_num_threads expects a positive integer");
+  at::internal::set_thread_local_num_threads(nthreads);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_getNumInteropThreads(
     PyObject* module,
     PyObject* noargs) {
@@ -2089,6 +2105,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"get_num_threads", THPModule_getNumThreads, METH_NOARGS, nullptr},
     {"set_num_threads", THPModule_setNumThreads, METH_O, nullptr},
+    {"_set_thread_local_num_threads",
+     THPModule_setThreadLocalNumThreads,
+     METH_O,
+     nullptr},
     {"get_num_interop_threads",
      THPModule_getNumInteropThreads,
      METH_NOARGS,
