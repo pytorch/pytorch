@@ -46,7 +46,6 @@ from torch.utils._cpp_embed_headers import embed_headers
 import numpy as np
 import torch
 import torch.utils._pytree as pytree
-from torch._subclasses.fake_tensor import FakeTensorMode
 from itertools import product
 from torch.testing._internal.common_utils import (
     IS_MACOS,
@@ -12013,23 +12012,24 @@ class TestSDPA(TestCaseMPS):
         requires_grad: bool = False
     ):
 
-        q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps", requires_grad=requires_grad)
-        k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
-        v = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
-        q_cpu = q.cpu().detach().cpu().requires_grad_(requires_grad)
-        k_cpu = k.cpu()
-        v_cpu = v.cpu()
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps", requires_grad=requires_grad)
+            k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
+            v = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
+            q_cpu = q.cpu().detach().cpu().requires_grad_(requires_grad)
+            k_cpu = k.cpu()
+            v_cpu = v.cpu()
 
-        y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=is_causal)
-        y_ref = F.scaled_dot_product_attention(q_cpu, k_cpu, v_cpu, dropout_p=0.0, is_causal=is_causal)
+            y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=is_causal)
+            y_ref = F.scaled_dot_product_attention(q_cpu, k_cpu, v_cpu, dropout_p=0.0, is_causal=is_causal)
 
-        self._compare_tensors(y.cpu(), y_ref)
+            self._compare_tensors(y.cpu(), y_ref)
 
-        if requires_grad and torch.is_grad_enabled():
-            y.sum().backward()
-            y_ref.sum().backward()
+            if requires_grad and torch.is_grad_enabled():
+                y.sum().backward()
+                y_ref.sum().backward()
 
-            self._compare_tensors(q.grad.cpu(), q_cpu.grad)
+                self._compare_tensors(q.grad.cpu(), q_cpu.grad)
 
     def test_sdpa_no_mask_no_causal_fp32(self):
         self._test_sdpa_no_mask(False, torch.float32)
@@ -12092,19 +12092,20 @@ class TestSDPA(TestCaseMPS):
 
     def _test_sdpa_mask(self, dtype: torch.dtype, L: int = 1, S: int = 72, NH: int = 32, HS: int = 128):
         causal_mask = torch.tril(torch.ones(S, S, dtype=torch.bool, device='mps'))
-        i = 42 if S > 42 else S // 2
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            i = 42 if S > 42 else S // 2
 
-        q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
-        k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
-        v = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
+            q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
+            k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
+            v = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
 
-        input_pos = torch.tensor([i], dtype=torch.int32, device='mps')
-        mask = causal_mask[None, None, input_pos]
+            input_pos = torch.tensor([i], dtype=torch.int32, device='mps')
+            mask = causal_mask[None, None, input_pos]
 
-        y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
-        y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
+            y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
 
-        self._compare_tensors(y.cpu(), y_ref)
+            self._compare_tensors(y.cpu(), y_ref)
 
     def test_sdpa_mask_fp32(self):
         self._test_sdpa_mask(torch.float32)
@@ -12247,23 +12248,24 @@ class TestSDPA(TestCaseMPS):
         v = torch.randn(head_num, seq_len, embed_dim, dtype=dtype)
         attention_mask = torch.ones(1, seq_len, seq_len, dtype=dtype)
 
-        y = F.scaled_dot_product_attention(
-            q.to("mps"),
-            k.to("mps"),
-            v.to("mps"),
-            attention_mask.to("mps"),
-            dropout_p=0.0
-        )
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(
+                q.to("mps"),
+                k.to("mps"),
+                v.to("mps"),
+                attention_mask.to("mps"),
+                dropout_p=0.0
+            )
 
-        y_ref = F.scaled_dot_product_attention(
-            q.to("cpu"),
-            k.to("cpu"),
-            v.to("cpu"),
-            attention_mask.to("cpu"),
-            dropout_p=0.0
-        )
+            y_ref = F.scaled_dot_product_attention(
+                q.to("cpu"),
+                k.to("cpu"),
+                v.to("cpu"),
+                attention_mask.to("cpu"),
+                dropout_p=0.0
+            )
 
-        self._compare_tensors(y.cpu(), y_ref)
+            self._compare_tensors(y.cpu(), y_ref)
 
     @parametrize("dtype", [torch.float16, torch.float32])
     def test_sdpa_no_mask_5d(
@@ -12280,7 +12282,8 @@ class TestSDPA(TestCaseMPS):
         k = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
         v = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
 
-        y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
         y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=False)
         self._compare_tensors(y.cpu(), y_ref)
 
@@ -12304,7 +12307,8 @@ class TestSDPA(TestCaseMPS):
         v = torch.randn(B, extra, NH, L, HS, dtype=dtype, device="mps")
         mask = torch.tril(torch.ones(L, L, dtype=torch.bool, device="mps")).unsqueeze(0).unsqueeze(0)
 
-        y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
         y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
         self._compare_tensors(y.cpu(), y_ref)
 
@@ -12329,9 +12333,10 @@ class TestSDPA(TestCaseMPS):
             q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
         )
 
-        y = F.scaled_dot_product_attention(
-            q, k, v, dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
-        )
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(
+                q, k, v, dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
+            )
         self._compare_tensors(y.cpu(), y_ref)
 
     @serialTest()
@@ -12405,13 +12410,14 @@ class TestSDPA(TestCaseMPS):
                                         dtype=torch.bool, device=q.device)
                 attn_mask[..., s_len // 2:] = True
 
-            y = F.scaled_dot_product_attention(
-                q, k, v,
-                attn_mask=attn_mask,
-                dropout_p=dropout_p,
-                is_causal=is_causal,
-                enable_gqa=enable_gqa,
-            )
+            with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+                y = F.scaled_dot_product_attention(
+                    q, k, v,
+                    attn_mask=attn_mask,
+                    dropout_p=dropout_p,
+                    is_causal=is_causal,
+                    enable_gqa=enable_gqa,
+                )
             y_ref = F.scaled_dot_product_attention(
                 q.cpu(),
                 k.cpu(),
@@ -12422,12 +12428,13 @@ class TestSDPA(TestCaseMPS):
                 enable_gqa=enable_gqa,
             )
         else:
-            y = F.scaled_dot_product_attention(
-                q, k, v,
-                dropout_p=dropout_p,
-                is_causal=is_causal,
-                enable_gqa=enable_gqa,
-            )
+            with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+                y = F.scaled_dot_product_attention(
+                    q, k, v,
+                    dropout_p=dropout_p,
+                    is_causal=is_causal,
+                    enable_gqa=enable_gqa,
+                )
             y_ref = F.scaled_dot_product_attention(
                 q.cpu(),
                 k.cpu(),
@@ -12512,11 +12519,12 @@ class TestSDPA(TestCaseMPS):
         k = torch.randn(1, 2, 16, 64, device="mps")
         v = torch.randn(1, 2, 16, 64, device="mps")
         mask = torch.zeros(1, 2, 4, 16, dtype=torch.bool, device="mps")
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True",
-        ):
-            F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=True)
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True",
+            ):
+                F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=True)
 
     @unittest.skip("Full attention fast kernel not implemented yet")
     @parametrize("dtype", [torch.float16, torch.float32])
@@ -12595,11 +12603,12 @@ class TestSDPA(TestCaseMPS):
             else:
                 tol = 0.05
         enable_gqa = q.shape[-3] != k.shape[-3]
-        y = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=attn_mask, dropout_p=0.0,
-            is_causal=is_causal, enable_gqa=enable_gqa,
-        )
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=attn_mask, dropout_p=0.0,
+                is_causal=is_causal, enable_gqa=enable_gqa,
+            )
         cpu_mask = attn_mask.cpu() if attn_mask is not None else None
         y_ref = F.scaled_dot_product_attention(
             q.cpu(), k.cpu(), v.cpu(),
@@ -12709,158 +12718,16 @@ class TestSDPA(TestCaseMPS):
         tol = 0.02 if dtype == torch.float32 else 0.05
         self._run_prefill_test(q, k, v, is_causal=is_causal, tol=tol)
 
-    def test_dropout_uses_math_backend(self):
-        q = torch.randn(1, 2, 4, 8, device="mps", requires_grad=True)
-        for grad_enabled in [True, False]:
-            with torch.set_grad_enabled(grad_enabled):
-                torch.manual_seed(0)
-                y = F.scaled_dot_product_attention(q, q, q, dropout_p=0.2)
-                torch.manual_seed(0)
-                y_ref, _ = torch.ops.aten._scaled_dot_product_attention_math(q, q, q, None, 0.2)
-                self.assertEqual(y, y_ref)
-        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION]), torch.no_grad():
-            with self.assertRaisesRegex(RuntimeError, "does not support dropout"):
-                F.scaled_dot_product_attention(q, q, q, dropout_p=0.2)
-
-    @staticmethod
-    def _efficient_attention_cases(dtype=torch.float32):
-        # Inputs the Metal kernels handle but CPU flash attention constraints would reject,
-        # plus cases the math backend used to cover on MPS through sdpa_kernel(MATH)
-        def rand(*shape):
-            return torch.randn(*shape, device="mps", dtype=dtype)
-        q = rand(2, 4, 8, 16)
-        q5 = rand(2, 3, 4, 8, 16)
-        mask = torch.ones(8, 8, dtype=torch.bool, device="mps").tril()
-        masked_row = mask.clone()
-        masked_row[3] = False
-        return {
-            "5d": ((q5, q5, q5), {}),
-            "mT": ((q, rand(2, 4, 16, 8).mT, q), {}),
-            "dv_ne_d": ((q, q, rand(2, 4, 8, 32)), {}),
-            "gqa": ((rand(2, 8, 8, 16), q, q), {"enable_gqa": True}),
-            "kv1": ((q, rand(2, 1, 8, 16), rand(2, 1, 8, 16)), {}),
-            "bool_mask": ((q, q, q), {"attn_mask": mask}),
-            "fully_masked_row": ((q, q, q), {"attn_mask": masked_row}),
-            "float_mask": ((q, q, q), {"attn_mask": rand(4, 8, 8)}),
-            "causal": ((q, rand(2, 4, 12, 16), rand(2, 4, 12, 16)), {"is_causal": True}),
-            "negative_scale": ((q, q, q), {"scale": -1.0}),
-            "broadcast_batch": ((rand(1, 4, 4, 64), rand(2, 4, 16, 64), rand(2, 4, 16, 64)), {"attn_mask": rand(1, 4, 4, 16)}),
-            "prefill": ((rand(1, 2, 64, 64),) * 3, {}),
-            "negative_scale_prefill": ((rand(1, 3, 64, 64),) * 3, {"scale": -1.0}),
-            "broadcast_batch_prefill": ((rand(2, 1, 4, 32, 64), rand(1, 3, 4, 16, 64), rand(1, 3, 4, 16, 64)),
-                                        {"attn_mask": rand(4, 32, 16)}),
-            "3d_query": ((rand(4, 32, 64), rand(2, 4, 16, 64), rand(2, 4, 16, 64)), {}),
-        }
-
-    def test_efficient_attention_backend_selected(self):
-        from torch.nn.attention import sdpa_kernel, SDPBackend
-        for name, (qkv, kwargs) in self._efficient_attention_cases().items():
-            with self.subTest(name):
-                self.assertEqual(torch._fused_sdp_choice(*qkv, **kwargs), SDPBackend.EFFICIENT_ATTENTION.value)
-                with sdpa_kernel([SDPBackend.MATH]):
-                    self.assertEqual(torch._fused_sdp_choice(*qkv, **kwargs), SDPBackend.MATH.value)
-                    with _RecordOpsMode() as math_ops:
-                        y_math = F.scaled_dot_product_attention(*qkv, **kwargs)
-                with sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION]), _RecordOpsMode() as efficient_ops:
-                    y_efficient = F.scaled_dot_product_attention(*qkv, **kwargs)
-                self.assertEqual(y_efficient, y_math)
-                self.assertIn(torch.ops.aten._scaled_dot_product_efficient_attention.default, efficient_ops.ops)
-                self.assertNotIn(torch.ops.aten._scaled_dot_product_efficient_attention.default, math_ops.ops)
-
-    def test_efficient_attention_priority_order(self):
-        from torch.nn.attention import sdpa_kernel, SDPBackend
-        q = torch.randn(1, 4, 8, 16, device="mps")
-        for order in ([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION], [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
-            with sdpa_kernel(order, set_priority=True):
-                self.assertEqual(torch._fused_sdp_choice(q, q, q), order[0].value)
-
-    def test_efficient_attention_unsupported_shapes(self):
-        from torch.nn.attention import sdpa_kernel, SDPBackend
-        q2d = torch.randn(8, 16, device="mps")
-        y = F.scaled_dot_product_attention(q2d, q2d, q2d)
-        self.assertEqual(y, F.scaled_dot_product_attention(q2d.cpu(), q2d.cpu(), q2d.cpu()))
-        q, kv = torch.randn(1, 4, 8, 16, device="mps"), torch.randn(1, 2, 8, 16, device="mps")
-        self.assertEqual(torch._fused_sdp_choice(q, kv, kv), SDPBackend.MATH.value)
-        self.assertEqual(torch._fused_sdp_choice(q, kv, kv, enable_gqa=True), SDPBackend.EFFICIENT_ATTENTION.value)
-        kv1 = torch.randn(1, 1, 8, 16, device="mps")
-        self.assertEqual(torch._fused_sdp_choice(q, kv1, kv1), SDPBackend.EFFICIENT_ATTENTION.value)
-        # Math broadcasts mismatched K/V heads, the Metal kernels do not
-        for qkv, kwargs in [((q, kv1, q), {}), ((q, q, kv1), {}), ((torch.randn(1, 8, 8, 16, device="mps"), kv, q), {"enable_gqa": True})]:
-            self.assertEqual(torch._fused_sdp_choice(*qkv, **kwargs), SDPBackend.MATH.value)
-            self.assertEqual(F.scaled_dot_product_attention(*qkv, **kwargs),
-                             F.scaled_dot_product_attention(*(t.cpu() for t in qkv), **kwargs))
-        with self.assertRaisesRegex(RuntimeError, "must match the size"):
-            F.scaled_dot_product_attention(q, kv, kv)
-        with sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION]):
-            with self.assertRaisesRegex(RuntimeError, "requires inputs with a heads dimension"):
-                F.scaled_dot_product_attention(q2d, q2d, q2d)
-            with self.assertRaisesRegex(RuntimeError, "enable_gqa is not set"):
-                F.scaled_dot_product_attention(q, kv, kv)
-            with self.assertRaisesRegex(RuntimeError, "key and value have different numbers of heads"):
-                F.scaled_dot_product_attention(q, kv1, q)
-
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_efficient_attention_backward(self, dtype):
-        from torch.nn.attention import sdpa_kernel, SDPBackend
-        for name, (qkv, kwargs) in self._efficient_attention_cases(dtype).items():
-            with self.subTest(name):
-                mask = kwargs.get("attn_mask")
-                inputs = [t.requires_grad_() for t in qkv]
-                if mask is not None and mask.is_floating_point():
-                    inputs.append(mask.requires_grad_())
-                ref_inputs = [t.detach().cpu().double().requires_grad_() for t in inputs]
-                ref_qkv, ref_kwargs = ref_inputs[:3], dict(kwargs)
-                if len(ref_inputs) > 3:
-                    ref_kwargs["attn_mask"] = ref_inputs[3]
-                elif mask is not None:
-                    ref_kwargs["attn_mask"] = mask.cpu()
-                y_ref = F.scaled_dot_product_attention(*ref_qkv, **ref_kwargs)
-                grad_out = torch.randn(y_ref.shape, device="mps", dtype=dtype)
-                ref = torch.autograd.grad(y_ref, ref_inputs, grad_out.cpu().double())
-                errors = {}
-                for backend in [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]:
-                    with sdpa_kernel([backend]):
-                        self.assertEqual(torch._fused_sdp_choice(*qkv, **kwargs), backend.value)
-                        y = F.scaled_dot_product_attention(*qkv, **kwargs)
-                    with _RecordOpsMode() as bwd_ops:
-                        grads = torch.autograd.grad(y, inputs, grad_out)
-                    self.assertEqual(
-                        torch.ops.aten._scaled_dot_product_efficient_attention_backward.default in bwd_ops.ops,
-                        backend == SDPBackend.EFFICIENT_ATTENTION,
-                    )
-                    errors[backend] = [(g.cpu().double() - r).abs().max().item() for g, r in zip(grads, ref)]
-                # P = exp(scores - logsumexp) from the forward is not renormalized, which costs
-                # a few ulps over math; the gradient bound follows test_transformers' fudge factors.
-                for eff, math_err, r in zip(errors[SDPBackend.EFFICIENT_ATTENTION], errors[SDPBackend.MATH], ref):
-                    self.assertLessEqual(eff, 10 * math_err + torch.finfo(dtype).eps * r.abs().max().item())
-
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_efficient_attention_logsumexp(self, dtype):
-        cases = self._efficient_attention_cases(dtype)
-        long_kv = torch.randn(1, 4, 1100, 64, device="mps", dtype=dtype)
-        cases["decode_2pass"] = ((torch.randn(1, 4, 2, 64, device="mps", dtype=dtype), long_kv, long_kv), {})
-        for name, (qkv, kwargs) in cases.items():
-            with self.subTest(name):
-                kwargs = {k: v for k, v in kwargs.items() if k != "enable_gqa"}
-                mask, is_causal, scale = kwargs.get("attn_mask"), kwargs.get("is_causal", False), kwargs.get("scale")
-                out, lse, _, _ = torch.ops.aten._scaled_dot_product_efficient_attention(
-                    *qkv, mask, True, is_causal=is_causal, scale=scale)
-                out_no_lse, no_lse, _, _ = torch.ops.aten._scaled_dot_product_efficient_attention(
-                    *qkv, mask, False, is_causal=is_causal, scale=scale)
-                self.assertEqual(out, out_no_lse)
-                self.assertEqual(no_lse.shape, (*out.shape[:-2], 0))
-                q, k, _ = (t.cpu().double() for t in qkv)
-                k = k.repeat_interleave(q.size(-3) // k.size(-3), -3)
-                scores = q @ k.mT * (scale if scale is not None else q.size(-1) ** -0.5)
-                if is_causal:
-                    scores = scores.masked_fill(torch.ones(scores.shape[-2:], dtype=torch.bool).triu(1), -math.inf)
-                elif mask is not None:
-                    m = mask.cpu()
-                    scores = scores.masked_fill(~m, -math.inf) if m.dtype == torch.bool else scores + m.double()
-                # Fully masked rows get +inf so that exp(score - lse) is 0 in the backward
-                ref = scores.logsumexp(-1).masked_fill(scores.amax(-1) == -math.inf, math.inf)
-                self.assertEqual(lse.dtype, torch.float32)
-                self.assertEqual(lse.cpu().double(), ref, atol=1e-4, rtol=1e-4)
+    def test_dropout_raises_not_implemented(self):
+        q = torch.randn(1, 2, 4, 8, device="mps")
+        # shouldn't raise
+        y_no_drop = F.scaled_dot_product_attention(q, q, q, dropout_p=0.0)
+        y_no_drop = F.scaled_dot_product_attention(q, q, q)
+        # should raise
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"scaled_dot_product_attention for MPS does not support dropout."):
+            F.scaled_dot_product_attention(q, q, q, dropout_p=0.2)
 
     @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize("head_dim", [64, 128])
@@ -12921,27 +12788,12 @@ class TestSDPA(TestCaseMPS):
         y_scale2 = F.scaled_dot_product_attention(q, q, q, scale=2.0)
         self.assertNotEqual(y_default, y_scale2)
 
-class _RecordOpsMode(TorchDispatchMode):
-    def __init__(self):
-        super().__init__()
-        self.ops = set()
-
-    def __torch_dispatch__(self, func, types, args, kwargs=None):
-        self.ops.add(func)
-        return func(*args, **(kwargs or {}))
-
-
 class TestSDPAMetaDispatchMode(TorchDispatchMode):
     """
-    TorchDispatchMode which intercepts the MPS attention aten operators to check
-    that their meta kernels are correct.
+    TorchDispatchMode which intercepts the
+    _scaled_dot_product_attention_math_for_mps aten operator to check that the
+    meta kernel is correct.
     """
-
-    OPS = (
-        torch.ops.aten._scaled_dot_product_attention_math_for_mps.default,
-        torch.ops.aten._scaled_dot_product_efficient_attention.default,
-        torch.ops.aten._scaled_dot_product_efficient_attention_backward.default,
-    )
 
     def __init__(self, test):
         self.test = test
@@ -12950,13 +12802,11 @@ class TestSDPAMetaDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args, kwargs=None):
         kwargs = kwargs or {}
         res = func(*args, **kwargs)
-        if func not in self.OPS:
+        if func != torch.ops.aten._scaled_dot_product_attention_math_for_mps.default:
             return res
 
-        # Fake tensors, unlike meta ones, keep the device the meta kernels branch on.
-        with FakeTensorMode(allow_non_fake_inputs=True) as mode:
-            fake_args, fake_kwargs = pytree.tree_map_only(torch.Tensor, mode.from_tensor, (args, kwargs))
-            meta_res = func(*fake_args, **fake_kwargs)
+        meta_args, meta_kwargs = pytree.tree_map_only(torch.Tensor, lambda t: t.to(device="meta"), (args, kwargs))
+        meta_res = func(*meta_args, **meta_kwargs)
 
         def format_res(res):
             return [
@@ -12964,11 +12814,10 @@ class TestSDPAMetaDispatchMode(TorchDispatchMode):
                 for t in pytree.tree_flatten(res)[0]
             ]
 
-        # Format the output so that we only look at the tensor metadata. The
-        # second output of _scaled_dot_product_attention_math_for_mps is not
-        # consumed and inconsistent across paths.
-        n = 1 if func == self.OPS[0] else None
-        self.test.assertEqual(format_res(res)[:n], format_res(meta_res)[:n])
+        # Format the output so that we only look at the tensor metadata.
+        # Only compare the first returned value for this op; the second output
+        # is not consumed and inconsistent across paths.
+        self.test.assertEqual(format_res(res)[0], format_res(meta_res)[0])
         return res
 
 

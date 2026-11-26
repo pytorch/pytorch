@@ -546,7 +546,6 @@ prefill_attention(
     const constant PrefillAttnParams* params [[buffer(4)]],
     const constant PrefillAttnMaskParams* mask_params [[buffer(5)]],
     const device MaskType* mask [[buffer(6)]],
-    device float* lse [[buffer(7)]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]],
     uint3 tid [[threadgroup_position_in_grid]]) {
@@ -903,17 +902,6 @@ prefill_attention(
               Vtile.frag_at(0, 0),
               Otile.frag_at(iq, id));
         }
-      }
-    }
-  }
-  // Lanes sharing a row hold its reduced max and sum; the sn == 0 one writes.
-  if (lse != nullptr && sn == 0) {
-    PREFILL_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
-      const int row = block_idx * BQ + tm + sm + i * kFragSize;
-      if (row < q_seq_len) {
-        lse[(ulong(batch_idx) * params->H + head_idx) * q_seq_len + row] =
-            prefill_lse(max_score[i], sum_score[i]);
       }
     }
   }

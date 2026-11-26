@@ -605,7 +605,6 @@ prefill_attention_mpp(
     const constant PrefillAttnParams* params [[buffer(4)]],
     const constant PrefillAttnMaskParams* mask_params [[buffer(5)]],
     const device MaskType* mask [[buffer(6)]],
-    device float* lse [[buffer(7)]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]],
     uint3 tid [[threadgroup_position_in_grid]]) {
   using AccumType = c10::metal::accum_t<T>;
@@ -961,20 +960,6 @@ prefill_attention_mpp(
     Otile.store(O, o_seq_stride);
   } else {
     Otile.store_safe(O, o_seq_stride, q_rows, Dv);
-  }
-
-  // Lanes sharing a row hold its reduced max and sum; the sn == 0 one of the
-  // first V/O slab writes. Done last so the row stats need no registers while
-  // O is live.
-  if (lse != nullptr && slab == 0 && sn == 0) {
-    MPP_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
-      const int row = block_idx * BQ + tm + sm + i * otile_t::kFragRowsJump;
-      if (row < qL) {
-        lse[(ulong(batch_idx) * params->H + head_idx) * qL + row] =
-            prefill_lse(max_score[i], sum_score[i]);
-      }
-    }
   }
 }
 
