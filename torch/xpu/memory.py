@@ -55,7 +55,8 @@ def reset_accumulated_memory_stats(device: Device = None) -> None:
     r"""Reset the "accumulated" (historical) stats tracked by the XPU memory allocator.
 
     See :func:`~torch.xpu.memory_stats` for details. Accumulated stats correspond to
-    the `"allocated"` and `"freed"` keys in each individual stat dict.
+    the `"allocated"` and `"freed"` keys in each individual stat dict, as well as
+    `"num_ooms"`.
 
     Args:
         device (torch.device or int or str, optional): selected device. Returns
@@ -118,6 +119,10 @@ def memory_stats(device: Device = None) -> dict[str, Any]:
     - ``peak``: maximum value of this metric.
     - ``allocated``: historical total increase in this metric.
     - ``freed``: historical total decrease in this metric.
+
+    Event counters:
+
+    - ``"num_ooms"``: number of out-of-memory errors thrown.
 
     Args:
         device (torch.device or int or str, optional): selected device. Returns
