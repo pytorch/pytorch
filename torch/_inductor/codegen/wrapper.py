@@ -1327,6 +1327,37 @@ class ExitSubgraphLine(WrapperLine):
         return converter._generate_exit_subgraph
 
 
+@dataclasses.dataclass
+class EnterBranchLine(WrapperLine):
+    """Indents the body of an `if` or `else` line written just before it.
+
+    Names defined inside the branch do not exist after it, so the memo of
+    computed sizes is restored at the matching ExitBranchLine, and
+    memory_plan_reuse scopes its buffer reuse pool to the branch. MemoryPlanner,
+    which runs instead under config.memory_planning, does not see these lines,
+    so with it a branch must not contain allocations.
+    """
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.push_computed_sizes(self.wrapper.computed_sizes)
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_indent()
+
+
+@dataclasses.dataclass
+class ExitBranchLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_unindent()
+
+
 # [device-as-parameter] Name of the call()-local variable holding the runtime current
 # device index under compile-on-one-rank, so the wrapper is byte-identical across ranks.
 _COOR_DEVICE_IDX_VAR = COOR_DEVICE_IDX_VAR
@@ -3990,14 +4021,14 @@ class PythonWrapperCodegen(CodeGen):
                 past_planning_states.append(planning_states.pop())
                 if config.allow_buffer_reuse:
                     self.estimate_peak = peak_estimate_stack.pop()
-            elif isinstance(line, EnterKernelProfileScopeLine):
+            elif isinstance(line, (EnterKernelProfileScopeLine, EnterBranchLine)):
                 # A buffer freed inside the block must not be offered to an
                 # allocation after it, and one freed before it must not be
                 # reused inside: either way the ReuseLine declares its new name
-                # on the wrong side of a brace. The state is the same graph's,
-                # so estimate_peak is left alone.
+                # on the wrong side of a brace, or in a branch that may not run.
+                # The state is the same graph's, so estimate_peak is left alone.
                 planning_states.append(MemoryPlanningState())
-            elif isinstance(line, ExitKernelProfileScopeLine):
+            elif isinstance(line, (ExitKernelProfileScopeLine, ExitBranchLine)):
                 past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:

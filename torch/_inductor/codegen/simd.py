@@ -4781,18 +4781,16 @@ class SIMDScheduling(BaseScheduling):
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
-
-        # Collect config_patches from operations (e.g., decomposition ops with
-        # coordinate_descent_tuning) and apply during kernel codegen
-        config_patches = self._collect_config_patches(node_schedule)
+        if config.triton.atomic_scatter_replication:
+            kernels = self.replicate_atomic_scatters(
+                kernel_features,
+                kernels,
+                [tiling],
+                {"features": kernel_features, "tiling_scores": tiling_score},
+            )
 
         for kernel in kernels:
-            with V.set_kernel_handler(kernel), config.patch(**config_patches):
-                src_code = kernel.codegen_kernel()
-            kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-            log.debug("Generating kernel code with kernel_name: %s", kernel_name)
-            kernel.kernel_name = kernel_name
-            kernel.code_hash = code_hash(src_code)
+            self.codegen_and_define_kernel(node_schedule, kernel)
         del kernel
 
         final_kernel: SIMDKernel | MultiKernel
@@ -4838,6 +4836,19 @@ class SIMDScheduling(BaseScheduling):
         self.free_buffers_in_scheduler()
         return final_kernel
 
+    def codegen_and_define_kernel(self, node_schedule, kernel: SIMDKernel[Any]) -> None:
+        """Generates the source of a kernel whose body has been generated for
+        node_schedule, defines it, and sets its kernel_name and code_hash."""
+        # Collect config_patches from operations (e.g., decomposition ops with
+        # coordinate_descent_tuning) and apply during kernel codegen
+        config_patches = self._collect_config_patches(node_schedule)
+        with V.set_kernel_handler(kernel), config.patch(**config_patches):
+            src_code = kernel.codegen_kernel()
+        kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
+        kernel.kernel_name = kernel_name
+        kernel.code_hash = code_hash(src_code)
+
     def _launch_kernel_and_cleanup(
         self,
         kernel,
@@ -4871,6 +4882,21 @@ class SIMDScheduling(BaseScheduling):
                 **kernel_kwargs,
             )
         ]
+
+    def replicate_atomic_scatters(
+        self,
+        kernel_features: SIMDKernelFeatures,
+        kernels: list[SIMDKernel],
+        kernel_args,
+        kernel_kwargs,
+    ) -> list[SIMDKernel]:
+        """Implements config.triton.atomic_scatter_replication for backends that
+        support it. `kernels` have their bodies generated but are not defined
+        yet, and `kernel_args` and `kernel_kwargs` are the arguments that
+        create_kernel_choices made them with. Returns the kernels to define and
+        launch. To pick a kernel at runtime instead, an override defines the
+        other kernel itself and attaches it to the kernel it returns."""
+        return kernels
 
     def codegen_node_schedule_with_kernel(
         self,
