@@ -612,6 +612,39 @@ def _item_node(t: torch.Tensor):
     return value, proxy.node
 
 
+# What a torch function mode is handed for a read of a tensor's ``.data``.
+_DATA_GETTER = torch.Tensor.data.__get__
+
+
+def _read_data(graph: torch.fx.Graph, t: torch.Tensor) -> torch.Tensor:
+    """``t.data`` for the body being traced, recorded in ``graph`` as that
+    read (``getattr(t, "data")``). make_fx records ``aten.detach``, which is
+    another tensor: what ``detach`` gives shares the version counter of
+    ``t``, what ``.data`` gives has one of its own, so an in-place operator
+    on it writes the memory of ``t`` and counts no version of ``t``. A run
+    of the graph as traced reads ``.data`` again, and a graph with such a
+    read is given to no block pass (see torch.vm._graph.data_reads)."""
+    last = graph._root.prev
+    out = _DATA_GETTER(t)
+    made = []
+    node = last.next
+    while node is not graph._root:
+        if node.op == "call_function":
+            made.append(node)
+        node = node.next
+    if (
+        len(made) != 1
+        or made[0].target is not torch.ops.aten.detach.default
+        or len(made[0].args) != 1
+        or made[0].kwargs
+    ):
+        raise _refuse("it reads .data of a tensor in a way its trace cannot record")
+    made[0].target = getattr
+    made[0].args = (made[0].args[0], "data")
+    made[0]._rename("data")
+    return out
+
+
 class _ScalarArgs(TorchFunctionMode):
     """Puts the _Scalars a torch call is given back into the node the call
     traced: the dispatcher hands make_fx new Python floats. The node's float
@@ -639,6 +672,8 @@ class _ScalarArgs(TorchFunctionMode):
             # The tensor's values, handed to Python as they are: nothing a
             # graph gives back on a later call.
             _scalar_state["specialized"].add(_DATA)
+        if func == _DATA_GETTER and len(args) == 1 and not kwargs:
+            return _read_data(self.graph, args[0])
         if (
             func is torch.Tensor.item
             and not kwargs
@@ -1205,6 +1240,42 @@ def _put_back(backups: dict[int, tuple[Any, ...]]) -> None:
                     torch._C._autograd._unsafe_set_version_counter((x,), tuple(version))
 
 
+def _in_order(x) -> list[Any]:
+    """What the list, dict or set ``x`` holds, in its order (of a dict: each
+    key, then its value)."""
+    return [o for item in x.items() for o in item] if type(x) is dict else list(x)
+
+
+def _hand_back(as_given: list[tuple[Any, list[Any]]]) -> None:
+    """Gives the lists, dicts and sets among a trace's args (``as_given``:
+    each with what it held when the trace began, see _in_order) their
+    contents back where an instruction of the body filled one, before the
+    executor runs the code of a trace that is given up again from those very
+    objects. The instructions that fill a display or a call's arguments
+    (LIST_EXTEND, LIST_APPEND, DICT_MERGE, DICT_UPDATE, MAP_ADD and those of
+    a set) change their container in place, and an earlier block may have
+    made it: run a second time they would add the same items again. Only a
+    container the executor saw such an instruction fill is given back: what
+    anything else did to one meanwhile (the tracer's imports to
+    ``sys.modules``) is not the body's to take back. What the body stored or
+    appended is taken back first (exec/writes.rs: the last write first), so
+    that nothing is taken out of a container that already holds what it
+    held. ``as_given`` is left empty."""
+    filled = set(_rust()._region_given_up()) if as_given else ()
+    for x, items in as_given:
+        now = _in_order(x)
+        if id(x) not in filled or (
+            len(now) == len(items) and all(map(operator.is_, now, items))
+        ):
+            continue
+        if type(x) is list:
+            x[:] = items
+        else:
+            x.clear()
+            x.update(zip(items[::2], items[1::2]) if type(x) is dict else items)
+    as_given.clear()
+
+
 # Operators whose result's size depends on the data and whose schema does
 # not say so (no ``dynamic_output_shape`` tag), by name. Packing a padded
 # sequence reads the lengths from the tensor's memory.
@@ -1739,16 +1810,83 @@ def _lift_constants(gm: torch.fx.GraphModule) -> list[torch.Tensor]:
     return consts
 
 
-def _split_host(gm: torch.fx.GraphModule, n_inputs: int):
+def _same_memory(gm: torch.fx.GraphModule, tensors: list[Any]):
+    """For each node of ``gm`` a key that two nodes have in common if their
+    tensors may be over the same memory, and the nodes that stand for
+    tensors. ``tensors`` are the traced call's values of the placeholders.
+    It errs towards one key. Two nodes share memory if one is made of the
+    other by an operator whose schema says its result is an alias of that
+    argument (the views, ``detach``, ``expand``, ``as_strided``, ``real``,
+    ``reshape`` and ``contiguous``, which may copy; an in-place operator's
+    result and ``out=``), by ``.data``, by taking an item of a list of such
+    tensors, or by a call of anything that is no operator; and two
+    placeholders do if the traced call's tensors were in one storage (a
+    region whose graph is split is entered only by a call whose tensors
+    share memory as the traced call's did: see _overlap)."""
+    key: dict[torch.fx.Node, torch.fx.Node] = {}
+
+    def find(n):
+        while key.setdefault(n, n) is not n:
+            key[n] = n = key[key[n]]
+        return n
+
+    tensor_nodes = set()
+    # The first placeholder of each storage, by the storage's address.
+    first_in: dict[int, torch.fx.Node] = {}
+    for n, t in zip(gm.graph.find_nodes(op="placeholder"), tensors):
+        if isinstance(t, torch.Tensor):
+            tensor_nodes.add(n)
+            first = first_in.setdefault(t.untyped_storage()._cdata, n)
+            key[find(n)] = find(first)
+    for n in gm.graph.nodes:
+        if n.op in ("placeholder", "output"):
+            continue
+        made = pytree.tree_leaves(n.meta.get("val"))
+        if any(isinstance(v, torch.Tensor) for v in made):
+            tensor_nodes.add(n)
+        schema = getattr(n.target, "_schema", None)
+        if schema is None:
+            over = [a for a in n.all_input_nodes if a in tensor_nodes]
+        elif all(r.alias_info is None for r in schema.returns):
+            over = []
+        else:
+            over = [
+                y
+                for i, a in enumerate(schema.arguments)
+                if a.alias_info is not None
+                for y in pytree.tree_leaves(
+                    n.args[i] if i < len(n.args) else n.kwargs.get(a.name)
+                )
+                if isinstance(y, torch.fx.Node)
+            ] or list(n.all_input_nodes)
+        for a in over:
+            key[find(n)] = find(a)
+    return {n: find(n) for n in gm.graph.nodes}, tensor_nodes
+
+
+def _split_host(gm: torch.fx.GraphModule, example: list[Any], consts: list[Any]):
     """Splits a graph that reads CPU tensors' values (`.item()`) into a host
     prologue and the rest: the prologue runs the reads, what they read from
     (CPU ops, and the in-place ops before them on what they read) and the
     Python arithmetic on their values, and the rest takes the floats it needs
-    from the prologue as inputs, after the graph's first `n_inputs` (before
-    the constants). So block passes, which trace with fake tensors, see no
-    reads. Returns (prologue, rest, the float values of the trace) or None if
-    a read can't move first (it reads a GPU tensor's copy, or another op
-    reads what the prologue writes before it does)."""
+    from the prologue as inputs, after the graph's first inputs (``example``;
+    before the constants). So block passes, which trace with fake tensors,
+    see no reads. Returns (prologue, rest, the float values of the trace) or
+    None if a read can't move first (it reads a GPU tensor's copy, or the
+    order in which memory is read and written would not be the program's).
+
+    The prologue runs before the rest, each in the program's order. That is
+    the program's order for the whole only if the two do not meet in
+    memory: every operator that writes memory a node of the prologue is
+    handed, and comes before it, is in the prologue too, and nothing
+    outside it is handed, before a write of the prologue, memory that write
+    may reach. Memory, not nodes (_same_memory): a write through a view,
+    through ``detach()`` or through ``.data`` is a write to the tensor a
+    read reads. A call of anything that is no operator (a call a cfg pass
+    merged as it is, a custom autograd Function) reads and writes what the
+    graph does not show: nothing of the prologue comes behind one. Where
+    the order cannot be kept the graph is not split: the read stays where
+    the program has it."""
 
     def cpu(n):
         v = n.meta.get("val")
@@ -1766,11 +1904,26 @@ def _split_host(gm: torch.fx.GraphModule, n_inputs: int):
                 )
         return out
 
+    traced_tensors = [t for t in example + consts if isinstance(t, torch.Tensor)]
+    if any(
+        t.layout is not torch.strided or t.is_conj() or t.is_neg()
+        for t in traced_tensors
+    ):
+        # A region with a prologue checks how its tensors share memory, as
+        # one with a lowering does: such a region takes no tensor with the
+        # conjugate or the negative bit (see trace_region), and the check
+        # looks at strided tensors.
+        return None
+    mem_of, tensor_nodes = _same_memory(gm, example + consts)
     order = {n: i for i, n in enumerate(gm.graph.nodes)}
+    # By memory: the nodes that write it, and the nodes that are handed it.
     writers: dict[torch.fx.Node, list[torch.fx.Node]] = {}
+    handed_to: dict[torch.fx.Node, list[torch.fx.Node]] = {}
     for n in gm.graph.nodes:
         for x in written(n):
-            writers.setdefault(x, []).append(n)
+            writers.setdefault(mem_of[x], []).append(n)
+        for a in n.all_input_nodes:
+            handed_to.setdefault(mem_of[a], []).append(n)
     reads = [n for n in gm.graph.nodes if n.target in _SKIP_OPS]
     host: set[torch.fx.Node] = set()
     todo = [(n, len(order)) for n in reads]
@@ -1778,7 +1931,7 @@ def _split_host(gm: torch.fx.GraphModule, n_inputs: int):
         n, before = todo.pop()
         todo.extend(
             (w, order[w])
-            for w in writers.get(n, ())
+            for w in writers.get(mem_of[n], ())
             if order[w] < before and w not in host
         )
         if n.op != "call_function" or n in host:
@@ -1797,13 +1950,28 @@ def _split_host(gm: torch.fx.GraphModule, n_inputs: int):
             and any(a in host for a in n.all_input_nodes)
         ):
             host.add(n)
-    for w in host:
-        for x in written(w):
-            if any(
-                u not in host and u.op != "output" and order[u] < order[w]
-                for u in x.users
-            ):
-                return None
+    opaque = [
+        order[n]
+        for n in gm.graph.nodes
+        if n.op == "call_function"
+        and n.target not in (getattr, operator.getitem)
+        and not isinstance(n.target, torch._ops.OpOverload)
+        and (
+            isinstance(n.target, _Effect)
+            or not tensor_nodes.isdisjoint((n, *n.all_input_nodes))
+        )
+    ]
+    if opaque and any(order[h] > min(opaque) for h in host):
+        return None
+    for h in host:
+        # In front of it, and not in the prologue: nothing that writes what
+        # it is handed, and nothing that is handed what it writes.
+        in_front = [w for a in h.all_input_nodes for w in writers.get(mem_of[a], ())]
+        in_front += [u for x in written(h) for u in handed_to.get(mem_of[x], ())]
+        if any(
+            u not in host and u.op != "output" and order[u] < order[h] for u in in_front
+        ):
+            return None
     shared: dict[torch.fx.Node, None] = {}
     for n in gm.graph.nodes:
         if n not in host:
@@ -1832,7 +2000,7 @@ def _split_host(gm: torch.fx.GraphModule, n_inputs: int):
     _dedupe_reads(pro)
     _memo_chains(pro)
     placeholders = list(gm.graph.find_nodes(op="placeholder"))
-    anchor = placeholders[n_inputs - 1] if n_inputs else None
+    anchor = placeholders[len(example) - 1] if example else None
     for i, a in enumerate(shared):
         if anchor is None:
             with gm.graph.inserting_before(next(iter(gm.graph.nodes))):
@@ -2144,13 +2312,16 @@ def _shares(example, consts):
     return _rust().Overlap(tensors, consts, True).key()
 
 
-def _overlap(tensors, consts, reads, checked):
+def _overlap(tensors, consts, reads, checked, hosted=False):
     """A region's check of how its call's tensors share memory (see
     exec/overlap.rs), or None if it has nothing to check. What block passes
-    make of the graph is for the whole of it; the graph run as traced only
-    for which of its inputs are one tensor, or one the body also read from
-    somewhere. ``checked``: the reads look where every constant's data is."""
-    as_traced = block_pipeline is not None and block_pipeline.as_traced
+    make of the graph is for the whole of it, and so is a graph whose reads
+    of values run first (``hosted``: see _split_host, which moves them past
+    writes to memory the traced call's tensors showed to be apart); the
+    graph run as traced only for which of its inputs are one tensor, or one
+    the body also read from somewhere. ``checked``: the reads look where
+    every constant's data is."""
+    as_traced = block_pipeline is not None and block_pipeline.as_traced and not hosted
     also_read = reads.values(tensors) if reads is not None else []
     overlap = _rust().Overlap(tensors, consts, not as_traced, also_read)
     if not overlap.needed:
@@ -2193,6 +2364,8 @@ def _named(gm):
 
 
 def _compile(name, gm, example, consts, args, plan, types):
+    """What a region runs for its graph, and whether the graph's reads of
+    values run first, in a prologue of their own (_split_host)."""
     from torch._inductor.compile_fx import compile_fx
 
     if block_pipeline is None:
@@ -2210,9 +2383,9 @@ def _compile(name, gm, example, consts, args, plan, types):
             stats["compiled"] += 1
         else:
             stats["reused"] += 1
-        return _compiled[key][0]
+        return _compiled[key][0], False
     split = (
-        _split_host(gm, len(example))
+        _split_host(gm, example, consts)
         if any(n.target in _SKIP_OPS for n in gm.graph.nodes)
         else None
     )
@@ -2231,10 +2404,9 @@ def _compile(name, gm, example, consts, args, plan, types):
         def run(*inputs):
             return rest(*inputs[:k], *prologue(*inputs), *inputs[k:])
 
-        return run
-    return _compile_vm(
-        name, gm, example, consts, _input_types(args, plan, types, consts)
-    )
+        return run, True
+    types = _input_types(args, plan, types, consts)
+    return _compile_vm(name, gm, example, consts, types), False
 
 
 def _vm_types():
@@ -2640,6 +2812,9 @@ def trace_region(
     )
     n_tensors = len(example) - n_floats
     backups: dict[int, tuple[Any, ...]] = {}
+    # The lists, dicts and sets among the args, each with what it holds as
+    # the call hands it over (see _hand_back).
+    as_given = [(a, _in_order(a)) for a in args if type(a) in (list, dict, set)]
     locs: list[Any] = []
     state = {"specialized": set()}
 
@@ -2692,6 +2867,7 @@ def trace_region(
             # stands even if no region comes of it.
             result["repeatable"] = not backups
             backups.clear()
+            as_given.clear()
             written.take(_rust()._region_writes(), _plain_result)
             # A comprehension's loop body adds to a container it was given
             # (which purity doesn't see): a region would skip that, unless
@@ -2752,6 +2928,7 @@ def trace_region(
     except Exception as e:
         # The executor runs the block again from its start.
         _put_back(backups)
+        _hand_back(as_given)
         if isinstance(e, _Refused):
             _traced(name, "not yet" if e.later else "refused", str(e))
         else:
@@ -2839,7 +3016,7 @@ def trace_region(
         if DEBUG:
             print(f"region {name}: refused: {e}")
         return None
-    compiled = _compile(name, gm, example, consts, args, plan, types)
+    compiled, hosted = _compile(name, gm, example, consts, args, plan, types)
     checked = False
     bound: Any = None
     if reads is not None:
@@ -2862,7 +3039,7 @@ def trace_region(
 
             bound = Binding(bind, consts)
             reads.bound(bound.rebind)
-    overlap = _overlap(example[:n_tensors], consts, reads, checked)
+    overlap = _overlap(example[:n_tensors], consts, reads, checked, hosted)
     if overlap is not None and overlap.marked:
         # What is made of a graph reads its tensors' memory as it is.
         stats["refused"] += 1

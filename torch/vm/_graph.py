@@ -520,6 +520,23 @@ def direct(gm: torch.fx.GraphModule) -> Callable | None:
     return None
 
 
+def data_reads(gm: torch.fx.GraphModule) -> list[torch.fx.Node]:
+    """The nodes of ``gm`` that read a tensor's ``.data``, as a region's
+    trace records the read: ``getattr(t, "data")``. What the read gives is
+    over the memory of ``t`` and counts its own versions: an in-place
+    operator on it writes to ``t`` and leaves ``t._version`` as it is, and
+    a tensor autograd saved of it stays valid when ``t`` is written. The
+    operator a lowering has for the read, ``aten.detach``, counts the
+    versions of ``t`` (a backward over what was saved then raises where
+    eager computes the gradient). So a graph with such a node runs as
+    traced, and is not given to block passes (see _pipeline.Pipeline)."""
+    return [
+        n
+        for n in gm.graph.find_nodes(op="call_function", target=getattr)
+        if len(n.args) == 2 and n.args[1] == "data"
+    ]
+
+
 @dataclasses.dataclass
 class Segment:
     """A run of a graph's nodes between split points."""

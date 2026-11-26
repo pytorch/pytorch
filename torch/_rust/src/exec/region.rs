@@ -184,6 +184,19 @@ pub fn _region_refuse(why: Py<PyAny>) {
     });
 }
 
+/// The trace running on this thread is given up and the executor runs its
+/// code again: takes back what the body stored or appended (see writes.rs;
+/// the executor's own call of writes::undo that follows finds nothing
+/// left), and returns the addresses of the containers its instructions
+/// filled in place (see covered.rs), for the tracer to give those among
+/// its args back what they held (torch._rust_inductor._hand_back), which
+/// must come after the writes are taken back.
+#[pyfunction]
+pub fn _region_given_up() -> Vec<usize> {
+    super::writes::undo();
+    super::covered::filled()
+}
+
 // Refuses the trace running on this thread from the executor, in place of
 // what its body was about to do: the refusal (`why`: "it ...", as any) is
 // the error raised there. `later`: the place is traced again (see

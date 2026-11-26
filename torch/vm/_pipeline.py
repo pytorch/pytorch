@@ -29,7 +29,13 @@ import torch.fx
 from torch.vm import _guards
 from torch.vm._bound import bind_versions, BoundLowering
 from torch.vm._examples import Examples, raw
-from torch.vm._graph import below_autocast, copy_graph_module, direct, specialize_floats
+from torch.vm._graph import (
+    below_autocast,
+    copy_graph_module,
+    data_reads,
+    direct,
+    specialize_floats,
+)
 from torch.vm._types import exact, TensorType, Type
 
 
@@ -163,7 +169,13 @@ class Pipeline:
             if isinstance(t, TensorType) and t.is_const
         ]
         versions = [Version("v1", [], gm, [])]
-        for p in self.forward:
+        # Only the graph as traced reads `.data` as what it is (data_reads).
+        traced_only = not self.as_traced and bool(data_reads(gm))
+        if traced_only:
+            report.notes.append(
+                "no block pass ran: the graph reads .data of a tensor, which only the graph as traced does (a lowering would count the tensor's versions)"
+            )
+        for p in () if traced_only else self.forward:
             out = self._apply(p, versions[-1].gm, input_types, inputs, report)
             if out is None:
                 continue
@@ -188,7 +200,7 @@ class Pipeline:
             v.gm.meta.pop("vm_example_inputs", None)
         report.versions = versions
         top = versions[-1]
-        if self.autograd is not None:
+        if self.autograd is not None and not traced_only:
             if any(isinstance(x, float) for x in inputs):
                 # AOT Autograd bakes floats in: its version holds for these values.
                 special = specialize_floats(top.gm, inputs)

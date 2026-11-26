@@ -58,6 +58,13 @@
 //     now), and unless it has seen the class by now and still passes the
 //     instruction, the trace is refused before the instruction runs and
 //     the code is observed again, within the same bound;
+//   - FILLED CONTAINERS. filled() names, by address, every container that
+//     an instruction of the traced body or of a frame under it was about
+//     to fill in place since place() (a display or a call's arguments
+//     under construction: kinds::filled says which instructions), whatever
+//     step() answered. One that an earlier block made is among the trace's
+//     args: a trace that is given up gives it back what it held (region.rs's
+//     _region_given_up), as its code then fills it again;
 //   - step() is Ok(true) for a call the optimizer takes at another's word
 //     without looking inside (a callable the pass list calls pure, a call a
 //     cfg pass made movable, a torch function another tracer keeps whole):
@@ -69,6 +76,9 @@
 //     what is kept is per code, not per verdict;
 //   - that the operands an instruction only reads are of the kinds seen
 //     (kinds.rs asks about those it takes from or changes);
+//   - that a container filled() names was there before the trace: most are
+//     the run's own, and an address may be that of one already gone (the
+//     tracer looks only for the args it holds itself);
 //   - that the run as written takes the way the trace took (state may have
 //     changed in between): then nothing new is observed, and the bound is
 //     what ends it.
@@ -191,6 +201,9 @@ thread_local! {
     // How many traces of the place being traced were refused and left it
     // open before.
     static TRIED: Cell<u32> = const { Cell::new(0) };
+    // The containers that instructions of the trace on this thread filled
+    // in place, by address (see filled).
+    static FILLED: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
 // A place is about to be traced; `tried`: how many of its traces were
@@ -199,6 +212,16 @@ thread_local! {
 pub fn place(tried: u32) {
     TRIED.set(tried);
     AGAIN.set(false);
+    FILLED.with_borrow_mut(|f| f.clear());
+}
+
+// The addresses of the containers that an instruction of the trace on this
+// thread filled since place() (kinds::filled says which instructions): a
+// display or a call's arguments under construction, which only the frame's
+// stack refers to. One of them that an earlier block made is among the
+// trace's args, and holds what the body added when the trace is given up.
+pub fn filled() -> Vec<usize> {
+    FILLED.take()
 }
 
 // Whether the trace that just failed on this thread was refused for code
@@ -287,6 +310,14 @@ unsafe fn whole(py: Python<'_>, f: *mut PyObject) -> bool {
 // about it, `callee`: what it calls, if it is a call, and `seen`: the callee
 // recorded for it.
 pub unsafe fn step(c: Option<&Compiled>, under: bool, ins: &Instr, operands: &[*mut PyObject], callee: Option<*mut PyObject>, seen: Option<&effects::Callee>) -> Result<bool, String> {
+    // Kept whatever is answered below (see filled).
+    if let Some(o) = kinds::filled(&ins.op).and_then(|k| operands.get(k)) {
+        FILLED.with_borrow_mut(|f| {
+            if f.last() != Some(&(*o as usize)) {
+                f.push(*o as usize);
+            }
+        });
+    }
     // A trace that is refused already runs on to its end as the program
     // takes it (its handlers, its cleanup): nothing more is asked of it.
     if TRUSTED.get() > 0 || super::region::refused() {

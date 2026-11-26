@@ -70,9 +70,22 @@ fn taken(op: &Op, n: usize, taker: bool, null: bool) -> Range<usize> {
     }
 }
 
-// Whether an instruction with op `op` may be one that is asked about.
+// The operand that an instruction with op `op` fills in place, if it is one
+// of those that build a display or a call's arguments: the container below
+// what it adds (DICT_MERGE's operands begin with the function, for its
+// error).
+pub fn filled(op: &Op) -> Option<usize> {
+    match op {
+        Op::Bytecode { opcode: opcodes::LIST_APPEND | opcodes::SET_ADD | opcodes::MAP_ADD | opcodes::LIST_EXTEND | opcodes::SET_UPDATE | opcodes::DICT_UPDATE, .. } => Some(0),
+        Op::Bytecode { opcode: opcodes::DICT_MERGE, .. } => Some(1),
+        _ => None,
+    }
+}
+
+// Whether an instruction with op `op` may be one that is asked about, or is
+// one whose operands covered.rs is to see for the container it fills.
 pub fn asked(op: &Op) -> bool {
-    !taken(op, 3, true, false).is_empty()
+    !taken(op, 3, true, false).is_empty() || filled(op).is_some()
 }
 
 // What a verdict that covers instr v of `prep` saw of its operands, if v is
