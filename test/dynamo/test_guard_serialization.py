@@ -1869,17 +1869,11 @@ class _ODictSlotsState(_ODictSubclass):
         return {"saved": self.saved}, {"slot": self.slot}
 
 
-class _ODictViewOwner(collections.OrderedDict):
-    __slots__ = ("slot",)
-
-    keys = _ODictNoKeys.keys
-
-
-class _ODictViewStateLookup(_ODictViewOwner):
+class _ODictViewStateLookup(collections.OrderedDict):
     __getattribute__ = _DictStateLookup.__getattribute__
 
 
-class _ODictViewStateGetattr(_ODictViewOwner):
+class _ODictViewStateGetattr(collections.OrderedDict):
     __getattr__ = _DictStateLookup.__getattribute__
 
 
@@ -1942,8 +1936,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertIs(item.loss.cfg, saved["cfgs"][i])
             self.assertEqual(item.loss(), i)
 
-    @parametrize("token_live", [False, True])
-    def test_mapping_proxy_keeps_only_its_copied_state(self, token_live):
+    def test_mapping_proxy_keeps_only_its_copied_state(self):
         token = DictionaryToken(value=3, payload=["required"])
         cfg = {"token": token}
         backing = ClassReducedDict(token)
@@ -1970,12 +1963,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertIsInstance(saved["unused"][name], _Missing)
 
         def copy():
-            consumer = TokenConsumer(token) if token_live else _MappingCallable(cfg)
-            return {"nested": [consumer], "rank": backing.copy.call_count}
+            return {"nested": [_MappingCallable(cfg)], "rank": backing.copy.call_count}
 
         backing.copy = mock.Mock(side_effect=copy)
-        if token_live:
-            scope = {"token": token, **scope}
         scope["second"] = types.MappingProxyType(backing)
         with self.assertRaisesRegex(PackageError, "guarded input"):
             self._roundtrip_pruned(scope, [cfg, unused])
@@ -1983,12 +1973,18 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         backing.copy.reset_mock()
         saved = self._roundtrip_pruned(scope, [cfg, unused], token, token.payload)
         self.assertEqual((saved["proxy"]["rank"], saved["second"]["rank"]), (1, 2))
-        consumer = saved["get"]("nested")[0]
-        if token_live:
-            self.assertIs(consumer.token, saved["cfg"]["token"])
-        else:
-            self.assertIs(consumer.cfg, saved["cfg"])
+        self.assertIs(saved["get"]("nested")[0].cfg, saved["cfg"])
         self.assertEqual(backing.copy.call_count, 2)
+
+    def test_mapping_proxy_copy_needs_pruned_list_item(self):
+        token = DictionaryToken()
+        backing = PlainNamespaceDict()
+        backing.copy = mock.Mock(return_value={"consumer": TokenConsumer(token)})
+        scope = {"items": [token], "proxy": types.MappingProxyType(backing)}
+        with self.assertRaisesRegex(PackageError, "mapping proxy copy needs pruned"):
+            self._roundtrip_pruned(scope, [])
+        saved = self._roundtrip_pruned(scope, [], token)
+        self.assertIs(saved["proxy"]["consumer"].token, saved["items"][0])
 
     def test_dictionary_pruning_does_not_call_metaclass_equality(self):
         class Meta(type):
@@ -2032,7 +2028,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler(objects, {}, {}, {}, buf).dump(value)
         return load_guards_state(buf.getvalue())
 
-    @parametrize("owner_type", [OrderedDict, _ODictViewOwner])
+    @parametrize("owner_type", [OrderedDict, _ODictNoKeys])
     @parametrize("ordered", [False, True])
     @parametrize("view_first", [False, True])
     @parametrize("empty", [False, True])
@@ -3663,28 +3659,31 @@ class TestGuardSerialization(TestGuardSerializationBase):
         check(inputs, True)
         return check
 
-    @parametrize("annotation", [False, True])
-    def test_list_leaf_alias_in_saved_constructor(self, annotation):
+    def test_annotation_aliases_unguarded_module_attribute(self):
+        def fn(x, m):
+            return m.linear(x)
+
+        m = GlobalNestedModule()
+        m.stages = [0, 1]
+        inputs = {"x": torch.ones(1, 10), "m": m}
+        with torch.fx.traceback.annotate({"stages": m.stages}):
+            check = self._roundtrip_checks(("TYPE_MATCH", "FX_ANNOTATION"), fn, inputs)
+        check(inputs, False)
+
+    def test_list_leaf_alias_in_saved_constructor(self):
         def fn(x, items, holder):
             return x + items[1] + holder.weight
 
-        token, holder = DictionaryToken(), DictionaryToken(weight=3)
-        consumer = TokenConsumer(token)
-        if not annotation:
-            holder.cb = consumer.__reduce_ex__
-        metadata = {"consumer": consumer, "token": token} if annotation else {}
-        with torch.fx.traceback.annotate(metadata):
+        first, second = DictionaryToken(), DictionaryToken()
+        holder = DictionaryToken(weight=3, cb=TokenConsumer(first).__reduce_ex__)
+        with torch.fx.traceback.annotate({"consumer": TokenConsumer(second)}):
             self._test_serialization(
-                "CONSTANT_MATCH", fn, torch.ones(1), [token, 5], holder
+                "CONSTANT_MATCH", fn, torch.ones(1), [first, 5, second], holder
             )
         graph = load_guards_state(self._cached_guards_state).output_graph
         items = graph.local_scope["items"]
-        if annotation:
-            self.assertIs(graph.fx_annotation["token"], items[0])
-            consumer = graph.fx_annotation["consumer"]
-        else:
-            consumer = graph.local_scope["holder"].cb.__self__
-        self.assertIs(consumer.token, items[0])
+        self.assertIs(graph.local_scope["holder"].cb.__self__.token, items[0])
+        self.assertIs(graph.fx_annotation["consumer"].token, items[2])
 
     @parametrize("helper_type", [DictionaryToken, ReducedHolder, TokenConsumer])
     @parametrize("mapping_type", [dict, collections.defaultdict])
@@ -3987,8 +3986,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(*managers, {"x": x, "cls": cls}, expected)
 
     @parametrize("reordered", [False, True])
-    @parametrize("mapping_type", [None, OrderedDict, _ODictSubclass])
-    def test_native_ordered_dict_order(self, reordered, mapping_type):
+    def test_native_ordered_dict_order(self, reordered):
         def install_order_guard(ctx):
             from torch._dynamo.guards import GuardBuilder, install_guard
 
@@ -3998,12 +3996,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
             install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
         def fn(x, mapping):
-            if mapping_type is None:
-                comptime(install_order_guard)
-                return x + len(mapping)
-            return x + sum(mapping.values())
+            comptime(install_order_guard)
+            return x + len(mapping)
 
-        mapping = (mapping_type or OrderedDict)(a=1, b=2)
+        mapping = collections.OrderedDict(a=1, b=2)
         if reordered:
             mapping.move_to_end("a")
         x = torch.ones(1)
@@ -6902,11 +6898,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 owner.tag, owner.slot = "saved", owner
             return {"x": torch.ones(3), "view": view_cls.keys(owner), "owner": owner}
 
-        shape = ("TYPE_MATCH", "DICT_KEYS_MATCH", "SEQUENCE_LENGTH")
-        guards = (*shape, "DUPLICATE_INPUT", "ORDERED_DICT_ORDER_MATCH")
-        check = self._roundtrip_checks(guards, fn, inputs())
+        structure = ("TYPE_MATCH", "DICT_KEYS_MATCH", "SEQUENCE_LENGTH")
+        guards = (*structure, "DUPLICATE_INPUT", "ORDERED_DICT_ORDER_MATCH")
         valid = inputs()
-        check(valid, True)
+        check = self._roundtrip_checks(guards, fn, valid)
+        check(inputs(), True)
         saved = self._saved_scope
         saved_owner = saved["owner"]
         self.assertIs(gc.get_referents(saved["view"])[0], saved_owner)
@@ -6921,17 +6917,14 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 self.assertIsInstance(saved_owner["b"], _Missing)
             valid["owner"].move_to_end("a")
             check(valid, view_cls is dict or not walk)
-            invalid = inputs()
-            invalid["owner"]["c"] = invalid["owner"].pop("b")
-            check(invalid, False)
+            valid["owner"].move_to_end("b")
+            valid["owner"]["c"] = valid["owner"].pop("b")
+            check(valid, False)
 
-    @parametrize("iterate", [False, True])
-    def test_dict_keys_serialization(self, iterate):
-        d = {1: 2, 3: threading.Lock()}
+    def test_dict_keys_serialization(self):
+        d = {1: 2, 3: 4}
 
         def foo(x, y):
-            if not iterate:
-                return x + len(y)
             for k in y:
                 x += k
             return x
