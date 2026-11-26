@@ -23,7 +23,6 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
     noop_mask,
 )
-from torch._utils import _is_privateuse1_backend_available
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf32_off
@@ -36,6 +35,7 @@ from torch.testing._internal.common_device_type import (
     requires_capabilities,
     skipCPUIf,
     skipCUDAIf,
+    skipCUDAIfMIG,
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
@@ -922,10 +922,7 @@ class TestFlexDecoding(InductorTestCase):
         )
         self.run_test(score_mod, dtype, block_mask=block_mask, device=device)
 
-    @unittest.skipIf(
-        not (has_triton_tma_device() or _is_privateuse1_backend_available()),
-        "Skip when TMA is not available on CUDA/XPU/CPU or custom accelerator backends",
-    )
+    @unittest.skipIf(not has_triton_tma_device(), "Skip when TMA is not available")
     @skip_on_cpu
     @parametrize_device_dtype("dtypes_fast")
     def test_tma_decoding(self, device, dtype: torch.dtype):
@@ -2242,10 +2239,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             # capped at 32, the largest power of two dividing 96 (a 64-position tile won't fit).
             (64, 16, (96, 128), None, 64),
             # Pinned BLOCK_Ms the old check rejected: 256 rows / 8 heads = 32 positions.
-            (32, 4, 128, 256, 256),
+            # The pinned 256-row kernel spills (#203041), and launching it runs out of
+            # memory on MIG slices.
+            common_utils.subtest((32, 4, 128, 256, 256), decorators=[skipCUDAIfMIG]),
             # Q = 16 is a multiple of the default tile but not of the pinned one: SAFE_M_BOUNDARY
             # must follow the pinned BLOCK_M, or rows past Q_LEN overwrite the next head's.
-            (16, 4, 128, 256, 256),
+            common_utils.subtest((16, 4, 128, 256, 256), decorators=[skipCUDAIfMIG]),
         ],
     )
     def test_gqa_block_m_fits_sparse_q_block(
@@ -2530,7 +2529,7 @@ class TestFlexDecodingLargeKV(InductorTestCase):
 
     @requires_capabilities(Capability.attention.flex_attention)
     @unittest.skip("OOMs in CI")
-    @skipCUDAIf(torch.version.hip is not None, "requires non-HIP CUDA")
+    @skipCUDAIf(torch.version.hip is not None, "Not supported on ROCm/HIP")
     @largeTensorTest("16GB", inductor=True)
     def test_large_kv_decode_int64_pointer_math(self, device):
         H, D = 1, 128
@@ -2567,8 +2566,17 @@ class TestFlexDecodingLargeKV(InductorTestCase):
         torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
 
-instantiate_device_type_tests(TestFlexDecoding, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestFlexDecodingLargeKV, globals(), allow_xpu=True)
+# privateuse1/HPU test bases do not declare Capability.* yet; keep the
+# cpu/cuda/xpu scope until they register their capabilities.
+instantiate_device_type_tests(
+    TestFlexDecoding, globals(), except_for=("privateuse1", "hpu"), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFlexDecodingLargeKV,
+    globals(),
+    except_for=("privateuse1", "hpu"),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
