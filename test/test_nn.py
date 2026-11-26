@@ -6466,6 +6466,26 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 class TestNNDeviceType(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float32, torch.float16)
+    @parametrize_test("factor", [1, 2, 3])
+    @parametrize_test("batch", [1, 2])
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    def test_pixel_unshuffle_output_memory_format(self, device, dtype, factor, batch, memory_format):
+        x = torch.randn(batch, 3, 6, 6, device=device, dtype=dtype).contiguous(
+            memory_format=memory_format
+        ).requires_grad_()
+        expected = torch.pixel_unshuffle(x.detach().cpu(), factor)
+        output = torch.pixel_unshuffle(x, factor)
+        self.assertEqual(output.cpu(), expected)
+        self.assertEqual(output.stride(), expected.stride())
+        self.assertTrue(output.is_contiguous(memory_format=memory_format))
+        self.assertFalse(torch._C._is_alias_of(output, x))
+        with FakeTensorMode() as mode:
+            fake_output = torch.pixel_unshuffle(mode.from_tensor(x), factor)
+        self.assertEqual(fake_output.stride(), output.stride())
+        output.sum().backward()
+        self.assertEqual(x.grad, torch.ones_like(x))
+
     @dtypes(torch.float, torch.double)
     @parametrize_test("use_pos_weight", [False, True])
     @parametrize_test("create_graph", [False, True])

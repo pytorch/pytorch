@@ -136,6 +136,14 @@ Tensor math_pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
       added_dims_shape.end(), {c, oh, downscale_factor, ow, downscale_factor});
   const auto input_reshaped = self.reshape(added_dims_shape);
 
+  if (self.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
+    // Copy in NHWC order before collapsing the channel and subpixel dimensions.
+    return input_reshaped.permute({0, 2, 4, 1, 3, 5})
+        .clone(at::MemoryFormat::Contiguous)
+        .view({self.size(0), oh, ow, oc})
+        .permute({0, 3, 1, 2});
+  }
+
   // Next, unshuffle by permuting the downscale_factor dims alongside the channel dim.
   std::vector<int64_t> permutation(self.sizes().begin(), self_sizes_batch_end);
   // std::iota is used to maintain the batch dims within the permutation.
