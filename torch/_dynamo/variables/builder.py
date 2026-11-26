@@ -17,7 +17,6 @@ The builders in this module handle converting Python values into appropriate
 VariableTracker instances based on their type and usage context.
 """
 
-import _string  # pyrefly: ignore [missing-import]
 import abc
 import builtins
 import collections
@@ -288,7 +287,7 @@ from .higher_order_ops import (
     LocalMapWrappedHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
-from .iter import CountIteratorVariable, FormatIteratorVariable, ItertoolsVariable
+from .iter import CountIteratorVariable, ItertoolsVariable
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
@@ -6153,11 +6152,6 @@ class SourcelessBuilder:
         handlers: dict[
             type, Callable[[InstructionTranslatorBase, Any], VariableTracker]
         ] = {}
-        for iterator in (
-            _string.formatter_parser(""),
-            _string.formatter_field_name_split("")[1],
-        ):
-            handlers[type(iterator)] = lambda tx, value: FormatIteratorVariable(value)
         for t in common_constant_types:
             handlers[t] = lambda tx, value: ConstantVariable.create(value)
         handlers[set] = lambda tx, value: SetVariable(

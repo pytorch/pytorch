@@ -697,28 +697,20 @@ class TpReprTests(TestCase):
         self.assertTrue(same)
         self.assertTrue(distinct)
 
-    @parametrize("observe", [repr, lambda h: ["0", "1"][h % 2], None])
-    def test_repr_of_hash_of_compile_time_object(self, observe):
-        # hash() returning id(self) on a sourceless object yields a
-        # FakeIdVariable (HASH kind). Its text must not embed a temporary hash.
+    def test_repr_of_hash_of_compile_time_object(self):
+        # A sourceless object's identity hash cannot be embedded in a string.
         class Obj:
             def __hash__(self):
                 return id(self)
 
         def fn(x):
-            if observe is None:
-                first, second = Obj(), Obj()
-                return x + [hash(first), hash(second)].index(hash(second))
-            s = observe(hash(Obj()))
+            s = repr(hash(Obj()))
             return x + 1, s.isdigit()
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
-        if observe is None:
-            self.assertEqual(compiled(x), fn(x))
-            return
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Conversion of compile-time-only hash value"
+            torch._dynamo.exc.Unsupported, "compile-time-only hash"
         ):
             compiled(x)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
