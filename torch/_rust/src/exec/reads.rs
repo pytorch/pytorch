@@ -1366,6 +1366,9 @@ pub unsafe fn built_starred(callee: *mut PyObject, args: *mut PyObject, kwargs: 
 // and a lowering that was bound to the constants is bound anew first.
 struct Constant {
     obj: Py<PyAny>,
+    // Its class at the trace, which Python code reads of it and no operator
+    // does: the program can bind another to the same object.
+    class: Py<PyAny>,
     spec: TensorSpec,
     requires_grad: bool,
     at: Cell<usize>,
@@ -1549,12 +1552,13 @@ impl Reads {
     // share memory, also notes whether the data of one is somewhere else
     // than at the last look.
     unsafe fn constants_fail(&self) -> Option<&'static str> {
-        let metadata = "the shape, dtype, device or requires_grad of a constant";
+        let metadata = "the class, shape, dtype, device or requires_grad of a constant";
         let overlap = (*self.overlap.get()).as_ref();
         let watch = (*self.rebind.get()).is_some() || overlap.is_some();
         for c in &*self.consts.get() {
             let Some(t) = tffi::tensor_by_type(c.obj.as_ptr() as usize).as_ref() else { return Some(metadata) };
-            if t.requires_grad() != c.requires_grad || !tffi::tensor_matches(t, c.spec.dtype, c.spec.device_type, c.spec.device_index, &c.spec.sizes, &c.spec.strides) {
+            let class = ffi::Py_TYPE(c.obj.as_ptr()) as *mut PyObject;
+            if class != c.class.as_ptr() || t.requires_grad() != c.requires_grad || !tffi::tensor_matches(t, c.spec.dtype, c.spec.device_type, c.spec.device_index, &c.spec.sizes, &c.spec.strides) {
                 return Some(metadata);
             }
             if let Some(version) = c.unwritten
@@ -1637,7 +1641,8 @@ impl Reads {
             tffi::tensor_meta(t, &mut m);
             let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes: t.sizes().to_vec(), strides: t.strides().to_vec() };
             if tffi::tensor_matches(t, spec.dtype, spec.device_type, spec.device_index, &spec.sizes, &spec.strides) {
-                list.push(Constant { obj: x.unbind(), spec, requires_grad: t.requires_grad(), at: Cell::new(tffi::tensor_data_address(t)), unwritten });
+                let class = x.get_type().into_any().unbind();
+                list.push(Constant { obj: x.unbind(), class, spec, requires_grad: t.requires_grad(), at: Cell::new(tffi::tensor_data_address(t)), unwritten });
             }
         }
         list.len()

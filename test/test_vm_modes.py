@@ -32,7 +32,9 @@ tensor (``.item()``) in a region: it sees every write the program made to
 that memory before it, through whatever tensor, and none it made after. And of a trace that is given up after its
 body filled a display or a call's arguments that an earlier block began:
 the container is handed back as it was before the code runs again, and
-what anything else did to a container meanwhile stays.
+what anything else did to a container meanwhile stays. And of the class of
+a tensor a region is handed: it is a check of the region. And of where a
+region sits: at the same place whatever the process did before.
 """
 
 import array
@@ -4145,7 +4147,14 @@ class TestVmKinds(TestCase):
         if case == "numpy_for_float" and not TEST_NUMPY:
             self.skipTest("needs numpy")
         fn, put, make_a, make_b = MODES_KINDS[case]
-        on = lambda v: v.to(device) if isinstance(v, torch.Tensor) else v  # noqa: E731
+
+        def on(v):
+            # A Parameter moved by `.to` is no Parameter on another device,
+            # and no leaf: it is built there.
+            if isinstance(v, torch.nn.Parameter):
+                return torch.nn.Parameter(v.detach().to(device))
+            return v.to(device) if isinstance(v, torch.Tensor) else v
+
         other = self.ORDERS[order]
         want = self.calls(fn, put, on(make_a()), on(make_b()), other, device)
         compiled = vm(fn, passes=EARLY)
@@ -6216,6 +6225,310 @@ class TestVmModuleHooks(TestCase):
 
 
 instantiate_device_type_tests(TestVmModuleHooks, globals())
+
+
+# What a region checks of the class of a tensor it is handed.
+
+
+class KlassSub(torch.Tensor):
+    """A tensor class with a method of its own."""
+
+    def cos(self):
+        return torch.Tensor.cos(self) + 1
+
+
+def klass_argument(x, w):
+    y = x.sin() * 2 + w
+    return (y * 3 + 1).cos().tanh().exp()
+
+
+def klass_inner(w, x=None):
+    y = x.sin() * 2 + w
+    return (y * 3 + 1).cos().tanh().exp()
+
+
+def klass_keyword(x, w):
+    return klass_inner(w, x=x)
+
+
+def klass_listed(xs):
+    y = xs[1].sin() * 2 + xs[0]
+    return (y * 3 + 1).cos().tanh().exp()
+
+
+def klass_looped(x, w):
+    y = x.sin() * 2 + w
+    for _ in range(3):
+        y = (y * 3 + 1).cos().tanh()
+    return y.exp()
+
+
+def klass_names(x, w):
+    y = x.sin() * 2 + w
+    return (y * 3 + 1).cos().tanh().exp(), x.__class__.__name__
+
+
+class KlassHeld:
+    w = None
+
+
+def klass_reads(x, w):
+    y = x.sin() * 2 + w
+    return (y * 3 + KlassHeld.w).cos().tanh().exp()
+
+
+def klass_parts(x, w):
+    y = x.sin() * 2 + w
+    return (y * 3 + 1).cos().tanh().exp(), x.detach(), x.clone(), x.view(-1), x.data
+
+
+class KlassBox(torch.nn.Module):
+    pass
+
+
+KLASS_BOX = KlassBox()
+
+
+def klass_stores(x, w):
+    y = x.sin() * 2 + w
+    KLASS_BOX.kept = x
+    return (y * 3 + 1).cos().tanh().exp()
+
+
+# How each form is handed the tensor whose class changes, and the other one.
+KLASS_FORMS = {
+    "argument": (klass_argument, lambda x, w: (x, w)),
+    "keyword": (klass_keyword, lambda x, w: (x, w)),
+    "in_a_list": (klass_listed, lambda x, w: ([w, x],)),
+    "in_a_tuple": (klass_listed, lambda x, w: ((w, x),)),
+    "span": (klass_looped, lambda x, w: (x, w)),
+}
+
+KLASS_OF = {
+    "tensor": lambda x: x.requires_grad_(),
+    "parameter": torch.nn.Parameter,
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmTensorClass(TestCase):
+    """The class of a tensor a region is handed is one of the region's
+    checks: a region traced on a torch.Tensor does not run for an object of
+    a subclass with a method of its own, nor for an nn.Parameter (and the
+    other way round), whose class Python code reads."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # The calls whose tensor is of the second class: the trace (call 3) and
+    # the first runs of the region saw the first.
+    SECOND = (5, 6, 7, 11, 12)
+
+    def calls(self, fn, device, first, second, pack=lambda x, w: (x, w), state=None):
+        outs = []
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            w = torch.randn(4, 8, device=device)
+            x = (second if call in self.SECOND else first)(x)
+            if state is None:
+                outs.append(fn(*pack(x, w)))
+            else:
+                KLASS_BOX._parameters.pop("kept", None)
+                KLASS_BOX.__dict__.pop("kept", None)
+                outs.append((fn(*pack(x, w)), state()))
+        return outs
+
+    def same(self, got, want, call=""):
+        if isinstance(want, tuple):
+            self.assertEqual(len(got), len(want))
+            for g, w in zip(got, want):
+                self.same(g, w, call)
+        elif isinstance(want, torch.Tensor):
+            self.assertIs(type(got), type(want), msg=call)
+            plain = (got.as_subclass(torch.Tensor), want.as_subclass(torch.Tensor))
+            self.assertEqual(*plain, atol=0, rtol=0, msg=call)
+        else:
+            self.assertEqual(got, want, msg=call)
+
+    def all_same(self, got, want):
+        for call, (g, w) in enumerate(zip(got, want)):
+            self.same(g, w, f"call {call}")
+
+    @parametrize("form", list(KLASS_FORMS))
+    @isolated
+    def test_subclass_with_a_method_of_its_own(self, device, form):
+        fn, pack = KLASS_FORMS[form]
+
+        def plain(x):
+            return x
+
+        def sub(x):
+            return x.as_subclass(KlassSub)
+
+        want = self.calls(fn, device, plain, sub, pack)
+        compiled = vm(fn, passes=EARLY)
+        self.all_same(self.calls(compiled, device, plain, sub, pack), want)
+        self.assertIs(type(want[5]), KlassSub)
+        # The calls with a torch.Tensor behind the trace run the region.
+        self.assertEqual(region_runs(compiled), 4)
+
+    @parametrize("first", list(KLASS_OF))
+    @isolated
+    def test_parameter_and_tensor_whose_class_is_read(self, device, first):
+        second = "parameter" if first == "tensor" else "tensor"
+        args = (device, KLASS_OF[first], KLASS_OF[second])
+        want = self.calls(klass_names, *args)
+        compiled = vm(klass_names, passes=EARLY)
+        self.all_same(self.calls(compiled, *args), want)
+        self.assertEqual(want[5][1], second.capitalize())
+
+    @parametrize("first", list(KLASS_OF))
+    @isolated
+    def test_parameter_and_tensor_stored_on_a_module(self, device, first):
+        # Module.__setattr__ registers a Parameter and keeps a Tensor as a
+        # plain attribute.
+        def state():
+            return sorted(KLASS_BOX._parameters), "kept" in KLASS_BOX.__dict__
+
+        second = "parameter" if first == "tensor" else "tensor"
+        args = (device, KLASS_OF[first], KLASS_OF[second])
+        want = self.calls(klass_stores, *args, state=state)
+        compiled = vm(klass_stores, passes=(*EARLY, vm.passes.Effects()))
+        self.all_same(self.calls(compiled, *args, state=state), want)
+        registered = (["kept"], False) if second == "parameter" else ([], True)
+        self.assertEqual(want[5][1], registered)
+
+    @isolated
+    def test_parameter_and_tensor_each_have_their_region(self, device):
+        # Operators treat the two alike; each class gets a variant of the
+        # region, and no call behind the two traces runs as written.
+        args = (device, KLASS_OF["tensor"], KLASS_OF["parameter"])
+        want = self.calls(klass_parts, *args)
+        compiled = vm(klass_parts, passes=EARLY)
+        self.all_same(self.calls(compiled, *args), want)
+        self.assertEqual(region_runs(compiled), 8)
+
+    @isolated
+    def test_class_of_the_argument_object_rebound_between_calls(self, device):
+        kept = {}
+
+        def plain(x):
+            kept.setdefault("x", x).__class__ = torch.Tensor
+            return kept["x"]
+
+        def sub(x):
+            kept["x"].__class__ = KlassSub
+            return kept["x"]
+
+        want = self.calls(klass_argument, device, plain, sub)
+        kept.clear()
+        compiled = vm(klass_argument, passes=EARLY)
+        self.all_same(self.calls(compiled, device, plain, sub), want)
+        self.assertIs(type(want[5]), KlassSub)
+        self.assertEqual(region_runs(compiled), 4)
+
+    @isolated
+    def test_class_of_a_tensor_read_from_state_rebound_between_calls(self, device):
+        # The tensor is a constant of the region's graph, found again as
+        # the same object: its class is compared too.
+        def plain(x):
+            KlassHeld.w.__class__ = torch.Tensor
+            return x
+
+        def sub(x):
+            KlassHeld.w.__class__ = KlassSub
+            return x
+
+        KlassHeld.w = torch.randn(4, 8, device=device)
+        want = self.calls(klass_reads, device, plain, sub)
+        compiled = vm(klass_reads, passes=EARLY)
+        self.all_same(self.calls(compiled, device, plain, sub), want)
+        self.assertIs(type(want[5]), KlassSub)
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertEqual(sum(r["runs"] for r in rows), 4, msg=str(rows))
+        miss = "read: the class, shape, dtype, device or requires_grad of a constant"
+        misses = [r["misses"] for r in rows if r["runs"]]
+        self.assertEqual(misses, [{miss: 5}], msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmTensorClass, globals())
+
+
+def placed_tail(x):
+    y = x.sin() * 2
+    return (y * 3 + 1).cos().tanh().exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmStablePlaces(TestCase):
+    """Which place holds a region does not depend on what the process did
+    before: a trace leaves no code behind that would run, when a tensor of
+    the program's dies, under whichever instruction is running then."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @isolated
+    def test_traced_call_s_tensors_are_left_without_a_callback(self, device):
+        compiled = vm(placed_tail, passes=EARLY)
+        kept = [torch.randn(4, 8, device=device) for _ in range(8)]
+        # Call 3 is traced: torch.fx tracks its tensor by a weak reference
+        # whose callback is Python code, in a table that is garbage when
+        # the trace is over. The collector is kept from freeing it here.
+        gc.disable()
+        try:
+            for x in kept:
+                self.assertEqual(compiled(x), placed_tail(x), atol=0, rtol=0)
+            left = [r for x in kept for r in weakref.getweakrefs(x) if r.__callback__]
+        finally:
+            gc.enable()
+        self.assertEqual(region_runs(compiled), 4)
+        self.assertEqual(left, [])
+
+    @parametrize("before", [0, 50, 500])
+    @isolated
+    def test_optimizer_step_s_region_sits_at_the_same_place(self, device, before):
+        # Functions that have nothing to do with the step, defined and
+        # called first: they move the moment at which the collector frees
+        # what the traces of the step leave behind.
+        unrelated: dict = {}
+        for k in range(before):
+            exec(f"def f{k}(x):\n    return x * {k + 1} + {k}\n", unrelated)
+            for _ in range(3):
+                unrelated[f"f{k}"](torch.ones(2, device=device))
+
+        def make():
+            torch.manual_seed(0)
+            layers = [torch.nn.Linear(16, 16), torch.nn.Tanh(), torch.nn.Linear(16, 4)]
+            net = torch.nn.Sequential(*layers).to(device)
+            opt = torch.optim.Adam(net.parameters(), 0.01, foreach=False)
+
+            def step(x):
+                opt.zero_grad(set_to_none=True)
+                loss = net(x).square().mean()
+                loss.backward()
+                opt.step()
+                return loss.detach()
+
+            return net, step
+
+        (net, step), (eager_net, eager_step) = make(), make()
+        compiled = vm(step, passes=EARLY)
+        for call in range(13):
+            x = torch.randn(8, 16, device=device)
+            got, want = compiled(x), eager_step(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        weights, expected = list(net.parameters()), list(eager_net.parameters())
+        self.assertEqual(weights, expected, atol=0, rtol=0)
+        # The step of the four parameters is one region of 72 operations.
+        # `adam` holds all of it, so the region that runs is adam's, not the
+        # one of the function it calls for the step.
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        ran = [(r["function"], r["kind"], r["ops"]) for r in rows if r["runs"]]
+        steps = [r for r in ran if "adam" in r[0]]
+        self.assertEqual(steps, [("adam", "span", 72)], msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmStablePlaces, globals())
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")

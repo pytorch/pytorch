@@ -407,6 +407,12 @@ pub(crate) unsafe fn is_plain_tensor(obj: *mut pyo3::ffi::PyObject) -> bool {
     plain_tensor_types().contains(&(pyo3::ffi::Py_TYPE(obj) as usize))
 }
 
+// Which of the two a plain tensor is: Some(true) for an nn.Parameter, None
+// for an object of any other class.
+pub(crate) unsafe fn is_parameter(obj: *mut pyo3::ffi::PyObject) -> Option<bool> {
+    plain_tensor_types().iter().position(|t| *t == pyo3::ffi::Py_TYPE(obj) as usize).map(|k| k == 1)
+}
+
 // What a frame of the code runs: the current Cfg, prepared.
 pub struct Plan {
     pub prep: Prepared,
@@ -1952,6 +1958,7 @@ pub(crate) fn parse_check_tuple(t: &Bound<'_, PyTuple>) -> PyResult<Parsed> {
         "no_saved_tensor_hooks" => (None, Check::NoSavedTensorHooks),
         "requires_grad" => (arg()?, Check::RequiresGrad(t.get_item(2)?.extract()?)),
         "plain_tensor" => (arg()?, Check::PlainTensor),
+        "class" => (arg()?, Check::Parameter(unsafe { is_parameter(t.get_item(2)?.as_ptr()) }.ok_or_else(bad)?)),
         "null" => (arg()?, Check::Null),
         "tensor" => {
             let x = t.get_item(2)?;

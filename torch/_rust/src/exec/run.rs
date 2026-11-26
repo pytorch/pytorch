@@ -650,6 +650,7 @@ impl Act<'_> {
         let tensor = |o: *mut PyObject| tffi::tensor_by_type(o as usize).as_ref();
         match c {
             Check::PlainTensor => super::is_plain_tensor(o),
+            Check::Parameter(on) => super::is_parameter(o) == Some(*on),
             Check::Exact(t) => {
                 let tp = ffi::Py_TYPE(o);
                 tp == match t {

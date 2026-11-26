@@ -288,6 +288,10 @@ pub enum Check {
     // A tensor whose Python operators run as plain aten ops: exactly
     // torch.Tensor or nn.Parameter (no __torch_function__ of its own).
     PlainTensor,
+    // A tensor of exactly one of those two classes: nn.Parameter (true) or
+    // torch.Tensor. A region asks it of a tensor argument: the class is what
+    // Python code reads of it (`x.__class__`, a module's attribute store).
+    Parameter(bool),
     // Exactly this builtin type (not a subclass).
     Exact(Builtin),
     // A tensor that requires grad (true) or doesn't.
@@ -1353,6 +1357,7 @@ impl<'a> Printer<'a> {
     fn check(&self, e: &str, c: &Check) -> String {
         match c {
             Check::PlainTensor => format!("{e} is a plain tensor"),
+            Check::Parameter(on) => format!("type({e}) is {}", if *on { "Parameter" } else { "Tensor" }),
             Check::Exact(t) => format!("type({e}) is {}", format!("{t:?}").to_lowercase()),
             Check::RequiresGrad(on) => format!("{}{e}.requires_grad", if *on { "" } else { "not " }),
             Check::TensorMeta(t) => format!(

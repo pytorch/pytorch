@@ -1534,6 +1534,11 @@ def _plan(args, unused, span=False, scalars=False):
         elif isinstance(a, torch.Tensor):
             if type(a) not in _PLAIN:
                 raise _Refused(f"arg {i} is a {type(a).__name__}")
+            # The class first: what Python code reads of the tensor
+            # (`x.__class__`, a method a subclass has of its own) is no part
+            # of the graph, and a tensor of another class is turned down
+            # before its sizes are looked at.
+            checks.append(("class", i, a))
             checks.append(("tensor", i, a))
             checks.append(("requires_grad", i, a.requires_grad))
             plan.append(("tensor",))
@@ -2669,7 +2674,7 @@ def _span_checks(checks):
             out.append((kind, c[1], tuple(c[3])))
         elif kind in ("is", "set"):
             out.append((kind, c[1], c[2]))
-        elif kind != "requires_grad":
+        elif kind not in ("requires_grad", "class"):
             raise _Refused(f"a span can't check {kind}")
     if tensors:
         out.append(
@@ -3047,8 +3052,11 @@ def _trace_region(
     autocast = autocast_on()
     below_autocast = bool(autocast.raw_repr())
 
+    fx_tracers: list[PythonKeyTracer] = []
+
     def body(*xs):
         global _scalar_state, _trace_backups
+        fx_tracers.append(_tracer())
         # make_fx tracks the input tensors by identity, wherever args hold them;
         # floats are swapped for _Scalars of their placeholders.
         call_args, restore = args, []
@@ -3167,6 +3175,15 @@ def _trace_region(
     finally:
         del Backward.__init__
         torch.autograd.Function.apply = _function_apply
+        # fx tracks the tensors of the traced call by weak reference, each
+        # with a callback (Python code) for the tensor's death, and the
+        # tracker lives on in garbage until the collector next runs. Until
+        # then a tensor of the program's that dies would run the callback
+        # under whichever instruction of the program is running, and the
+        # executor would take it for something that instruction does.
+        for tracer in fx_tracers:
+            tracer.tensor_tracker.clear()
+            tracer.script_object_tracker.clear()
     stats["traced"] += 1
     # What the body read from outside its args (see exec/reads.rs).
     reads, unchecked = _region_reads(_tree_holders(args, plan))
