@@ -460,11 +460,11 @@ class TokenSwitchReferenceTest(_TokenSwitchContractTests, MultiProcContinuousTes
     _cached_contract_token_switch: _ReferenceTokenSwitch | None = None
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return "gloo"
 
-    @classmethod
-    def device_type(cls):
+    @property
+    def device_type(self):
         return "cpu"
 
     @property
@@ -549,7 +549,7 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
     contract_dtype = torch.bfloat16
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return "nccl"
 
     @classmethod
@@ -1391,7 +1391,7 @@ class TokenSwitchNCCL2Test(TokenSwitchNCCLTest):
     _cached_contract_token_switch: TokenSwitchNCCL | None = None
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return "nccl2"
 
 
@@ -1400,7 +1400,7 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
     _cached_token_switch: TokenSwitchNCCL | None = None
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return "nccl"
 
     def _get_token_switch(self):

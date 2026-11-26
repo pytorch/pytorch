@@ -232,7 +232,7 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "gloo"
 
     @parametrize("thread_count", _THREAD_COUNTS)
@@ -286,7 +286,7 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "gloo"
 
     def get_file_path(self) -> str:
