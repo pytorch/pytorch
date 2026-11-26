@@ -31,6 +31,7 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import (
     Capability,
     instantiate_device_type_tests,
@@ -1290,6 +1291,9 @@ class LoopOrderingTest(TestCase):
         https://github.com/pytorch/pytorch/issues/130015
         for fp8 cast and transpose
         """
+        # sm89 passes the fp8 capability gate but errors out on this test.
+        if torch.device(device).type == "cuda" and not SM90OrLater:
+            self.skipTest("sm89 errors out on this test")
 
         def f(x, scale):
             x = x * scale
@@ -2926,13 +2930,27 @@ class TestIndexInversion(TestCase):
         )
 
 
+# All three classes share one device set. privateuse1/HPU are excluded because
+# requires_capabilities() raises for backends that declare no capabilities;
+# re-enable them once those backends register their capability maps.
 instantiate_device_type_tests(
-    LoopOrderingTest, globals(), except_for="cpu", allow_xpu=True
+    LoopOrderingTest,
+    globals(),
+    except_for=("cpu", "privateuse1", "hpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
-    MemoryCoalescingTest, globals(), except_for="cpu", allow_xpu=True
+    MemoryCoalescingTest,
+    globals(),
+    except_for=("cpu", "privateuse1", "hpu"),
+    allow_xpu=True,
 )
-instantiate_device_type_tests(TestTiling, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestTiling,
+    globals(),
+    except_for=("cpu", "privateuse1", "hpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
