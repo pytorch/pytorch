@@ -91,13 +91,13 @@ programs, and produce lower-level graphs (at the `torch.ops.aten` operator
 level). Note that users can still use {func}`torch.fx.symbolic_trace` as a
 preprocessing step before `torch.export`.
 
-Compared to {func}`torch.jit.script`, `torch.export` does not capture Python
+Compared to legacy TorchScript scripting, `torch.export` does not capture Python
 control flow or data structures, unless using explicit {ref}`control flow operators <higher_order_ops>`,
 but it supports more Python language features due to its comprehensive coverage
 over Python bytecodes. The resulting graphs are simpler and only have straight
 line control flow, except for explicit control flow operators.
 
-Compared to {func}`torch.jit.trace`, `torch.export` is sound:
+Compared to legacy TorchScript tracing, `torch.export` is sound:
 it can trace code that performs integer computation on sizes and records
 all of the side-conditions necessary to ensure that a particular
 trace is valid for other inputs.
@@ -647,6 +647,54 @@ for more details.
 
 In the unfortunate case where your model uses an ATen operator that is does not
 have a FakeTensor kernel implementation yet, please file an issue.
+
+### Autocast Active Outside the Module
+
+`torch.export` records a {class}`torch.autocast` region only when it starts
+inside `forward`. An autocast that is already active when
+{func}`torch.export.export` is called is not recorded. Export still traces under
+it, so the dtypes in the graph follow the autocast, but the graph has none of
+the casts that autocast inserts. When the exported program runs outside that
+autocast, it gives different results, or fails with a dtype mismatch.
+
+To keep the autocast when you export with the default `strict=False`, do one
+of these:
+
+- Enter {class}`torch.autocast` inside `forward`. Export records it as a region
+  of the graph. A submodule called inside the region cannot be swapped or
+  preserved by {func}`~torch.export.unflatten.unflatten`, so for a model you
+  plan to unflatten, enter the autocast inside the submodules instead.
+- Call the module returned by
+  {meth}`ExportedProgram.module() <torch.export.ExportedProgram.module>` inside
+  the same autocast. This adds nothing to the program, so every caller has to
+  enter the autocast, and a saved copy runs without it.
+- Lower the program inside the same autocast with
+  {meth}`~torch.export.ExportedProgram.run_decompositions` or
+  {func}`torch._inductor.aoti_compile_and_package`. This adds the casts to the
+  lowered program, so run the lowered program outside the autocast.
+
+With `strict=True`, export currently traces an autocast region in `forward`
+without its autocast. Dtypes in and after that region can then be wrong, and
+the exported program can fail with a dtype mismatch.
+
+In this example the autocast starts inside `forward`, so the program returns
+bfloat16 even outside any autocast:
+
+```{code-cell}
+import torch
+
+class M(torch.nn.Module):
+    def forward(self, x, y):
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            return x @ y
+
+x, y = torch.randn(4, 4), torch.randn(4, 4)
+ep = torch.export.export(M(), (x, y))
+print(ep.module()(x, y).dtype)  # torch.bfloat16
+```
+
+Recording an outer autocast in the exported program is tracked in
+[#205461](https://github.com/pytorch/pytorch/issues/205461).
 
 ## Read More
 

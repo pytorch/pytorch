@@ -115,7 +115,8 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     expectedFailureXPU,
     instantiate_device_type_tests,
-    skipCUDAIf,
+    largeTensorTest,
+    preserves_device_selection,
     skipMPS,
     skipXPUIf,
 )
@@ -1302,6 +1303,30 @@ class DistributionsTestCase(TestCase):
         for i, (val, log_prob) in enumerate(zip(s_data_flat, log_probs_data_flat)):
             asset_fn(i, val.squeeze(), log_prob)
 
+    def _check_moments(self, samples, mean, variance, gaussian=False, num_se=5):
+        # Check the sample mean and variance against the analytic moments to
+        # within num_se standard errors. For Gaussian samples the standard
+        # error of the sample variance is variance * sqrt(2 / (n - 1));
+        # otherwise it is estimated from the empirical fourth central moment.
+        n = samples.shape[0]
+        empirical_mean = samples.mean(0)
+        empirical_var = samples.var(0)
+        mean_se = (variance / n).sqrt()
+        if gaussian:
+            var_se = variance * (2 / (n - 1)) ** 0.5
+        else:
+            fourth = ((samples - empirical_mean) ** 4).mean(0)
+            var_se = ((fourth - empirical_var**2) / n).sqrt()
+        mean_z = (empirical_mean - mean) / mean_se
+        var_z = (empirical_var - variance) / var_se
+        msg = (
+            f"expected mean {mean}, got {empirical_mean} (z-scores {mean_z}); "
+            f"expected variance {variance}, got {empirical_var} (z-scores {var_z})"
+        )
+        zeros = torch.zeros_like(mean_z)
+        self.assertEqual(mean_z, zeros, atol=num_se, rtol=0, msg=msg)
+        self.assertEqual(var_z, zeros, atol=num_se, rtol=0, msg=msg)
+
     def _check_sampler_sampler(
         self,
         torch_dist,
@@ -1336,7 +1361,8 @@ class DistributionsTestCase(TestCase):
         samples_per_bin = len(samples) // num_bins
         bins = samples.reshape((num_bins, samples_per_bin)).mean(axis=1)
         stddev = samples_per_bin**-0.5
-        threshold = stddev * scipy.special.erfinv(1 - 2 * failure_rate / num_bins)
+        # Two-sided standard-normal quantile.
+        threshold = stddev * scipy.stats.norm.ppf(1 - failure_rate / (2 * num_bins))
         message = f"{message}.sample() is biased:\n{bins}"
         for bias in bins:
             self.assertLess(-threshold, bias, message)
@@ -1345,6 +1371,8 @@ class DistributionsTestCase(TestCase):
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionsDevice(DistributionsTestCase):
+    setUp = preserves_device_selection(DistributionsTestCase.setUp)
+
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_default_device(self, device):
@@ -2007,6 +2035,49 @@ class TestDistributionsDevice(DistributionsTestCase):
                 perm_counts_mult[p] = 1
         self.assertLess(dups_mult, 10)
 
+    @skipMPS  # MPS limits sampling with replacement to 2^24 categories
+    @skipXPUIf(True, "XPU limits sampling with replacement to 2^24 categories")
+    @largeTensorTest("2GB")
+    @dtypes(torch.float, torch.double)
+    def test_multinomial_many_categories(self, device, dtype):
+        # A float32 CDF cannot give 2^25 categories distinct buckets (#2576)
+        n = 1 << 25
+        probs = torch.ones(n, device=device, dtype=dtype)
+        samples = torch.multinomial(probs, 20000, replacement=True)
+        upper = samples[samples >= n // 2]
+        self.assertEqual(upper.numel() / samples.numel(), 0.5, atol=0.05, rtol=0)
+        odd_fraction = (upper % 2).sum().item() / upper.numel()
+        self.assertEqual(odd_fraction, 0.5, atol=0.05, rtol=0)
+        self.assertLess(samples.max().item(), n)
+
+        probs.zero_()
+        probs[-10:] = 1
+        for n_sample, replacement in ((1, True), (1, False), (10, False)):
+            samples = torch.multinomial(probs, n_sample, replacement)
+            self.assertTrue(samples.ge(n - 10).all() and samples.lt(n).all())
+            self.assertEqual(samples.unique().numel(), n_sample)
+
+    def test_multinomial_half_without_replacement(self, device):
+        # In half, p / Exp(1) overflowed to inf whenever Exp(1) < p / 65504 (about 16
+        # times per row here) and argmax picked the first tie
+        n = 1 << 14
+        probs = torch.full((32, n), 64.0, device=device, dtype=torch.half)
+        samples = torch.cat([torch.multinomial(probs, 1) for _ in range(8)])
+        low_fraction = (samples < n // 10).float().mean().item()
+        self.assertEqual(low_fraction, 0.1, atol=0.08, rtol=0)
+
+    @skipXPUIf(True, "XPU's ported kernel overflows its half CDF (old CUDA bug)")
+    @dtypes(torch.half, torch.bfloat16)
+    def test_multinomial_reduced_precision_with_replacement(self, device, dtype):
+        # Half row sums overflow past 65504, and a bfloat16 CDF is too coarse: the old
+        # kernel's 10000 uniform draws hit about 830 distinct categories, not about 9630
+        n = 1 << 17
+        probs = torch.ones(n, device=device, dtype=dtype)
+        samples = torch.multinomial(probs, 10000, replacement=True)
+        upper_fraction = (samples >= n // 2).float().mean().item()
+        self.assertEqual(upper_fraction, 0.5, atol=0.05, rtol=0)
+        self.assertGreater(samples.unique().numel(), 9000)
+
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_categorical_1d(self):
@@ -2368,10 +2439,9 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_forward_ad(lambda x: x.uniform_())
 
     @expectedFailureMPS
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3977")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_vonmises_sample(self):
+        set_rng_seed(0)
         for loc in [0.0, math.pi / 2.0]:
             for concentration in [0.03, 0.3, 1.0, 10.0, 100.0]:
                 self._check_sampler_sampler(
@@ -2657,11 +2727,11 @@ class TestDistributionsDevice(DistributionsTestCase):
         return _sampler
 
     @expectedFailureMPS
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_logisticnormal_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(
+            2 if self.device_type == "xpu" else 0
+        )  # See Note [Randomized statistical tests]
         means = map(np.asarray, [(-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)])
         covs = map(np.diag, [(0.1, 0.1), (1.0, 1.0), (10.0, 10.0)])
         for mean, cov in product(means, covs):
@@ -3034,9 +3104,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(m1.precision_matrix, m2.precision_matrix)
         self.assertEqual(m1.entropy(), m2.entropy())
 
-    @expectedFailureMPS
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5916")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     def test_lowrank_multivariate_normal_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
@@ -3044,10 +3112,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         cov_diag = torch.randn(5).abs()
         d = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
         samples = d.rsample((100000,))
-        empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
-        empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, atol=0.02, rtol=0)
+        self._check_moments(samples, d.mean, d.variance, gaussian=True)
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -3224,10 +3289,11 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
         self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
-    @expectedFailureMPS
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_multivariate_normal_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(
+            2 if self.device_type == "xpu" else 0
+        )  # See Note [Randomized statistical tests]
         mean = torch.randn(3, requires_grad=True)
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
@@ -3271,19 +3337,16 @@ class TestDistributionsDevice(DistributionsTestCase):
         )
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5938")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @set_default_dtype_if_supported(torch.double)
     def test_multivariate_normal_moments(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(
+            3 if self.device_type == "xpu" else 0
+        )  # See Note [Randomized statistical tests]
         mean = torch.randn(5)
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
         d = MultivariateNormal(mean, scale_tril=scale_tril)
         samples = d.rsample((100000,))
-        empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
-        empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, atol=0.05, rtol=0)
+        self._check_moments(samples, d.mean, d.variance, gaussian=True)
 
     # We applied same tests in Multivariate Normal distribution for Wishart distribution
     @expectedFailureMPS
@@ -3387,10 +3450,11 @@ class TestDistributionsDevice(DistributionsTestCase):
         wishart_log_prob_gradcheck(df_no_batch, None, None, scale_tril_batched)
 
     @skipMPS  # flaky failure
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4021")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
+    @set_default_dtype_if_supported(torch.double)
     def test_wishart_stable_with_precision_matrix(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        # At seed 9 a naive cholesky(inverse(P)) rejects P, so the test fails
+        # without the stable path; recheck that before changing the seed.
+        set_rng_seed(9)
         ndim = 10
         x = torch.randn(ndim)
         P = torch.exp(-((x - x.unsqueeze(-1)) ** 2))  # RBF kernel
@@ -3461,11 +3525,11 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @skipMPS  # flaky failure
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(
+            1 if self.device_type == "xpu" else 0
+        )  # See Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
         # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
@@ -3509,19 +3573,16 @@ class TestDistributionsDevice(DistributionsTestCase):
         )
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5938")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     def test_wishart_moments(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(
+            1 if self.device_type == "xpu" else 0
+        )  # See Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([]) + ndim - 1
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
         d = Wishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((ndim * ndim * 100000,))
-        empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=0.5, rtol=0)
-        empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, atol=0.5, rtol=0)
+        self._check_moments(samples, d.mean, d.variance)
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -3770,10 +3831,10 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(GeneralizedPareto(loc, scale, concentration), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     def test_generalized_pareto_sample(self):
-        set_rng_seed(1)  # see note [Randomized statistical tests]
+        set_rng_seed(
+            2 if self.device_type == "xpu" else 1
+        )  # See Note [Randomized statistical tests]
         for loc, scale, concentration in product(
             [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0], [-0.5, 0.0, 0.5]
         ):
@@ -3931,7 +3992,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(FisherSnedecor(df1, df2), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @expectedFailureMPS
     def test_fishersnedecor_sample(self):
         set_rng_seed(1)  # see note [Randomized statistical tests]
         for df1, df2 in product([0.1, 0.5, 1.0, 5.0, 10.0], [0.1, 0.5, 1.0, 5.0, 10.0]):
@@ -3963,10 +4023,10 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(Chi2(df), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     def test_chi2_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(
+            1 if self.device_type == "xpu" else 0
+        )  # See Note [Randomized statistical tests]
         for df in [0.1, 1.0, 5.0]:
             self._check_sampler_sampler(
                 Chi2(df), scipy.stats.chi2(df), f"Chi2(df={df})"
@@ -3997,12 +4057,12 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(StudentT(df), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @expectedFailureMPS
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @set_default_dtype_if_supported(torch.double)
     def test_studentT_sample(self):
-        set_rng_seed(11)  # see Note [Randomized statistical tests]
+        # See Note [Randomized statistical tests]
+        set_rng_seed(
+            0 if self.device_type == "xpu" else 11
+        )  # See Note [Randomized statistical tests]
         for df, loc, scale in product(
             [0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]
         ):
@@ -4985,9 +5045,11 @@ class TestRsampleDevice(DistributionsTestCase):
                 ),
             )
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5215")
     @set_default_dtype(torch.double)
     def test_dirichlet_tangent_field(self):
+        set_rng_seed(
+            0 if self.device_type == "xpu" else 5
+        )  # See Note [Randomized statistical tests]
         num_samples = 20
         alpha_grid = [0.5, 1.0, 2.0]
 
@@ -7112,288 +7174,6 @@ class TestValidationDevice(DistributionsTestCase):
             d.log_prob(sample)
 
 
-class TestJitDevice(DistributionsTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def _examples(self):
-        for Dist, params in _get_examples():
-            for param in params:
-                keys = param.keys()
-                values = tuple(param[key] for key in keys)
-                if not all(isinstance(x, torch.Tensor) for x in values):
-                    continue
-                sample = Dist(**param).sample()
-                yield Dist, keys, values, sample
-
-    def _perturb_tensor(self, value, constraint):
-        if isinstance(constraint, constraints._IntegerGreaterThan):
-            return value + 1
-        if isinstance(constraint, constraints._LessThan):
-            return value - torch.rand(value.shape)
-        if isinstance(
-            constraint, (constraints._GreaterThan, constraints._GreaterThanEq)
-        ):
-            return value + torch.rand(value.shape)
-        if isinstance(
-            constraint,
-            (constraints._PositiveDefinite, constraints._PositiveSemidefinite),
-        ):
-            return value + torch.eye(value.shape[-1])
-        if value.dtype in [torch.float, torch.double]:
-            transform = transform_to(constraint)
-            delta = value.new(value.shape).normal_()
-            return transform(transform.inv(value) + delta)
-        if value.dtype == torch.long:
-            result = value.clone()
-            result[value == 0] = 1
-            result[value == 1] = 0
-            return result
-        raise NotImplementedError
-
-    def _perturb(self, Dist, keys, values, sample):
-        with torch.no_grad():
-            if isinstance(Dist.arg_constraints, dict):
-                values = [
-                    self._perturb_tensor(
-                        value, Dist.arg_constraints.get(key, constraints.real)
-                    )
-                    for key, value in zip(keys, values)
-                ]
-            else:
-                # arg_constraints is parameter-dependent
-                dist = Dist(**dict(zip(keys, values)))
-                values = [
-                    self._perturb_tensor(
-                        value, dist.arg_constraints.get(key, constraints.real)
-                    )
-                    for key, value in zip(keys, values)
-                ]
-            param = dict(zip(keys, values))
-            sample = Dist(**param).sample()
-            return values, sample
-
-    @set_default_dtype(torch.double)
-    def test_sample(self):
-        for Dist, keys, values, sample in self._examples():
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.sample()
-
-            traced_f = torch.jit.trace(f, values, check_trace=False)
-
-            # FIXME Schema not found for node
-            xfail = [
-                Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
-                HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
-                VonMises,  # Variance is not Euclidean
-            ]
-            if Dist in xfail:
-                continue
-
-            with freeze_rng_state():
-                sample = f(*values)
-            traced_sample = traced_f(*values)
-            self.assertEqual(sample, traced_sample)
-
-            # FIXME no nondeterministic nodes found in trace
-            xfail = [Beta, Dirichlet]
-            if Dist not in xfail:
-                self.assertTrue(
-                    any(n.isNondeterministic() for n in traced_f.graph.nodes())
-                )
-
-    def test_rsample(self):
-        for Dist, keys, values, sample in self._examples():
-            if not Dist.has_rsample:
-                continue
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.rsample()
-
-            traced_f = torch.jit.trace(f, values, check_trace=False)
-
-            # FIXME Schema not found for node
-            xfail = [
-                Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
-                HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
-            ]
-            if Dist in xfail:
-                continue
-
-            with freeze_rng_state():
-                sample = f(*values)
-            traced_sample = traced_f(*values)
-            self.assertEqual(sample, traced_sample)
-
-            # FIXME no nondeterministic nodes found in trace
-            xfail = [Beta, Dirichlet]
-            if Dist not in xfail:
-                self.assertTrue(
-                    any(n.isNondeterministic() for n in traced_f.graph.nodes())
-                )
-
-    @set_default_dtype(torch.double)
-    def test_log_prob(self):
-        for Dist, keys, values, sample in self._examples():
-            # FIXME traced functions produce incorrect results
-            xfail = [LowRankMultivariateNormal, MultivariateNormal]
-            if Dist in xfail:
-                continue
-
-            def f(sample, *values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.log_prob(sample)
-
-            traced_f = torch.jit.trace(f, (sample,) + values)
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(sample, *values)
-            actual = traced_f(sample, *values)
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-    def test_enumerate_support(self):
-        for Dist, keys, values, sample in self._examples():
-            # FIXME traced functions produce incorrect results
-            xfail = [Binomial]
-            if Dist in xfail:
-                continue
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.enumerate_support()
-
-            try:
-                traced_f = torch.jit.trace(f, values)
-            except NotImplementedError:
-                continue
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(*values)
-            actual = traced_f(*values)
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-    def test_mean(self):
-        for Dist, keys, values, sample in self._examples():
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.mean
-
-            try:
-                traced_f = torch.jit.trace(f, values)
-            except NotImplementedError:
-                continue
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(*values)
-            actual = traced_f(*values)
-            expected[expected == float("inf")] = 0.0
-            actual[actual == float("inf")] = 0.0
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-    def test_variance(self):
-        for Dist, keys, values, sample in self._examples():
-            if Dist in [Cauchy, HalfCauchy]:
-                continue  # infinite variance
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.variance
-
-            try:
-                traced_f = torch.jit.trace(f, values)
-            except NotImplementedError:
-                continue
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(*values).clone()
-            actual = traced_f(*values).clone()
-            expected[expected == float("inf")] = 0.0
-            actual[actual == float("inf")] = 0.0
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-    @set_default_dtype(torch.double)
-    def test_entropy(self):
-        for Dist, keys, values, sample in self._examples():
-            # FIXME traced functions produce incorrect results
-            xfail = [LowRankMultivariateNormal, MultivariateNormal]
-            if Dist in xfail:
-                continue
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.entropy()
-
-            try:
-                traced_f = torch.jit.trace(f, values)
-            except NotImplementedError:
-                continue
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(*values)
-            actual = traced_f(*values)
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-    @set_default_dtype(torch.double)
-    def test_cdf(self):
-        for Dist, keys, values, sample in self._examples():
-
-            def f(sample, *values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                cdf = dist.cdf(sample)
-                return dist.icdf(cdf)
-
-            try:
-                traced_f = torch.jit.trace(f, (sample,) + values)
-            except NotImplementedError:
-                continue
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(sample, *values)
-            actual = traced_f(sample, *values)
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-
 instantiate_device_type_tests(
     TestDistributionsDevice, globals(), allow_mps=True, allow_xpu=True
 )
@@ -7407,7 +7187,6 @@ for _cls in (
     TestAgainstScipyDevice,
     TestFunctorsDevice,
     TestValidationDevice,
-    TestJitDevice,
 ):
     instantiate_device_type_tests(
         # CUDA is excluded rather than allow-listing devices, per the ACCELERATOR

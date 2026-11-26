@@ -36,6 +36,7 @@ from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeGuard
 import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
+from torch._C._dynamo import get_type_tp_name
 from torch._dynamo.variables.lists import TupleVariable
 from torch._guards import Source
 
@@ -54,12 +55,14 @@ from ..exc import (
     raise_value_error,
     unimplemented,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import _has_tangent, GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
     GenericAttrSource,
     GetItemSource,
+    GlobalStateSource,
+    LocalSource,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -150,12 +153,30 @@ class SuperVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from ..resume_execution import ContinueExecutionCache
+        from ..symbolic_convert import InstructionTranslator
+        from .builder import VariableBuilder
+
+        if not isinstance(self, SuperVariable):
+            unimplemented(
+                gb_type="Reinitializing an existing super object",
+                context="",
+                explanation="Dynamo cannot replay super.__init__ on an object created outside the current graph.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         no_keywords(tx, "super", kwargs)
         check_positional(tx, "super", len(args), 0, 2)
         if args:
             typevar = args[0]
             objvar = args[1] if len(args) == 2 else None
         else:
+            if tx.f_code in ContinueExecutionCache.generated_code_metadata:
+                unimplemented(
+                    gb_type="Zero-argument super.__init__ in a resume frame",
+                    context="",
+                    explanation="A resume frame does not have the original first argument in its first local slot.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             if not tx.f_code.co_argcount:
                 raise_observed_exception(
                     RuntimeError, tx, args=["super(): no arguments"]
@@ -164,6 +185,21 @@ class SuperVariable(VariableTracker):
             objvar = tx.symbolic_locals.get(name)
             if name in tx.f_code.co_cellvars:
                 objvar = cast(CellVariable, tx._cellvar(name))._current_contents(tx)
+            elif (
+                objvar is None
+                and isinstance(tx, InstructionTranslator)
+                and name in tx.f_locals
+                and (
+                    sys.version_info >= (3, 12)
+                    or not any(
+                        inst.opname == "DELETE_FAST" and inst.argval == name
+                        for inst in tx.instructions
+                    )
+                )
+            ):
+                objvar = VariableBuilder(tx, LocalSource(name, is_input=True))(
+                    tx.f_locals[name]
+                )
             if objvar is None or isinstance(objvar, (NullVariable, DeletedVariable)):
                 raise_observed_exception(
                     RuntimeError, tx, args=["super(): arg[0] deleted"]
@@ -182,7 +218,13 @@ class SuperVariable(VariableTracker):
                 msg = f"super(): __class__ is not a type ({typevar.python_type_name()})"
                 raise_observed_exception(RuntimeError, tx, args=[msg])
             raise_type_error(
-                tx, f"super() argument 1 must be type, not {typevar.python_type_name()}"
+                tx,
+                "super() argument 1 must be type, not "
+                + (
+                    "None"
+                    if typevar.is_constant_none()
+                    else get_type_tp_name(typevar.python_type())
+                ),
             )
         type_arg = typevar.as_python_constant()
         if objvar is not None and objvar.is_constant_none():
@@ -226,8 +268,8 @@ class SuperVariable(VariableTracker):
                 if sys.version_info >= (3, 13):
                     kind = "type" if obj_is_type else "instance of"
                     msg = (
-                        f"super(type, obj): obj ({kind} {checked_type.__name__[:200]}) "
-                        f"is not an instance or subtype of type ({type_arg.__name__[:200]})."
+                        f"super(type, obj): obj ({kind} {get_type_tp_name(checked_type)[:200]}) "
+                        f"is not an instance or subtype of type ({get_type_tp_name(type_arg)[:200]})."
                     )
                 raise_type_error(tx, msg)
         tx.output.side_effects.mutation(self)
@@ -284,7 +326,7 @@ class SuperVariable(VariableTracker):
             # objvar itself is a type (e.g. `super(Base, cls)` or
             # `super(Base, list)`); as_python_constant() works uniformly here
             # since objvar must be a type-representing VariableTracker
-            # (UserDefinedClassVariable, BaseBuiltinVariable, ...), unlike
+            # (UserDefinedClassVariable, TypeVariable, ...), unlike
             # `.value` which only some of those define.
             type_to_use = self.objvar.as_python_constant()
             type_to_use_source = self.objvar.source
@@ -506,8 +548,10 @@ class SuperVariable(VariableTracker):
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
-            # type: ignore[arg-type]
-            return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+            from .object_protocol import object_generic_setattr
+
+            no_keywords(tx, "wrapper __setattr__", kwargs)
+            return object_generic_setattr(tx, self.objvar, *args)
         elif inner_fn is object.__delattr__:
             attr = args[0]
             try:
@@ -827,6 +871,39 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
     return trampoline_autograd_apply
 
 
+def _forward_ad_active(tx: "InstructionTranslatorBase", value: Any) -> bool:
+    """Whether a forward-AD tangent can reach an `apply` on `value`.
+
+    A dual made inside the frame (`dual_level()`, `enter_dual_level()`,
+    `torch.func.jvp`) shows on the fake value. The global `_current_level` is no
+    use for that: Dynamo inlines `enter_dual_level()`, so the global stays -1
+    while tracing, and a live level says nothing about whether this input
+    carries a tangent. Level 0 is the only one there can be, since forward AD
+    does not support nesting.
+
+    A dual graph input breaks when it is wrapped only if no functorch transform
+    is active. Under one, as in jvp(vmap(compile(f))), its fake value drops the
+    tangent, so when a dual level was live at frame entry, check the real value
+    of every graph input, since any of them may flow into `apply`.
+    """
+    has_dual = False
+
+    def visit(vt: VariableTracker) -> None:
+        nonlocal has_dual
+        if vt.is_tensor() and not has_dual:
+            has_dual = _has_tangent(vt.as_proxy().node.meta.get("example_value"))
+
+    VariableTracker.visit(visit, value)
+    if has_dual or tx.output.dual_level < 0:
+        return has_dual
+    for var in tx.output.input_source_to_var.values():
+        if var.is_tensor():
+            grapharg = var.as_proxy().node.meta.get("grapharg")
+            if grapharg is not None and _has_tangent(grapharg.example):
+                return True
+    return False
+
+
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass or constructed instance"""
 
@@ -1003,6 +1080,36 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
+        # Forward-mode duals carry requires_grad=False, so the branch below is
+        # not taken under forward AD. Check the custom jvp here instead, or
+        # tracing forward() inline would silently swap it for the default
+        # forward-AD rules of the primitives it decomposes into.
+        jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
+        if jvp_fn is not torch.autograd.Function.jvp:
+            reverse_ad = requires_grad and torch.is_grad_enabled()
+            if reverse_ad or _forward_ad_active(tx, (args, kwargs)):
+                unimplemented(
+                    gb_type="Unsupported custom jvp",
+                    context=f"call_apply {self} {args} {kwargs}",
+                    explanation="Dynamo does not support tracing "
+                    "`torch.autograd.Function` subclasses that define "
+                    "a custom `jvp` method.",
+                    hints=[
+                        "Remove the custom `jvp` method if possible.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            # Not breaking relied on no graph input carrying a tangent, which
+            # nothing guards by default. Pin the dual level, and if one is
+            # already live, that every input is still not dual, so a later dual
+            # input recompiles instead of reusing a graph that inlined forward()
+            # and dropped the jvp.
+            install_guard(GlobalStateSource().make_guard(GuardBuilder.DUAL_LEVEL))
+            if tx.output.dual_level >= 0:
+                for source, var in tx.output.input_source_to_var.items():
+                    if var.is_tensor():
+                        install_guard(source.make_guard(GuardBuilder.NO_TANGENT_MATCH))
+
         if requires_grad and torch.is_grad_enabled():
             source = self.fn_cls_source
 
@@ -1034,20 +1141,6 @@ class AutogradFunctionVariable(VariableTracker):
                     hints=[
                         "Remove the custom `vjp` method if possible.",
                         "Use standard `backward` instead if applicable.",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
-            if jvp_fn is not torch.autograd.Function.jvp:
-                unimplemented(
-                    gb_type="Unsupported custom jvp",
-                    context=f"call_apply {self} {args} {kwargs}",
-                    explanation="Dynamo does not support tracing "
-                    "`torch.autograd.Function` subclasses that define "
-                    "a custom `jvp` method.",
-                    hints=[
-                        "Remove the custom `jvp` method if possible.",
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
@@ -1818,6 +1911,11 @@ class PythonModuleVariable(VariableTracker):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
+        if tx.output.deleted_globals_by_dict:
+            tx.output.check_deleted_global_access(
+                self.value.__dict__, None if name == "__dict__" else name
+            )
+
         attr_value = None
         if self.is_torch or name not in self.value.__dict__:
             try:
@@ -1909,7 +2007,10 @@ class TypingVariable(VariableTracker):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
-        value = getattr(self.value, name)
+        try:
+            value = getattr(self.value, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
         if self.source:
             attr_source = AttrSource(self.source, name)
             return VariableBuilder(tx, attr_source)(value)
@@ -2570,6 +2671,11 @@ class ConstantLikeVariable(VariableTracker):
         ):
             return VariableTracker.build(tx, result)
         return GetAttrVariable(self, name, py_type=type(result))
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return VariableTracker.build(tx, hasattr(self.value, name))  # type: ignore[return-value]
 
 
 class NumpyDTypeVariable(ConstantLikeVariable):

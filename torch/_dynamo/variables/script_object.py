@@ -48,9 +48,9 @@ from ..exc import (
     UnsafeScriptObjectError,
     Unsupported,
 )
-from ..source import AttrSource
+from ..source import AttrSource, TypeSource
 from ..utils import proxy_args_kwargs
-from .base import VariableTracker
+from .base import GetSet, unmodeled_setter, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import TupleVariable
@@ -241,6 +241,15 @@ class CustomClassVariable(UserDefinedVariable):
 
 class CustomClassObjectVariable(UserDefinedObjectVariable):
     _fake_script_object_cache: dict[int, "CustomClassObjectVariable"] = {}
+
+    def _get_class(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if isinstance(self.value, FakeScriptObject) and self.value.real_obj is not None:
+            return VariableTracker.build(
+                tx, type(self.value.real_obj), self.source and TypeSource(self.source)
+            )
+        return self._class_vt(tx)
+
+    tp_getset = {"__class__": GetSet(_get_class, unmodeled_setter)}
 
     @classmethod
     def is_matching_cls(cls, user_cls: type) -> bool:
@@ -462,6 +471,24 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
         # Call call_method directly on this class to avoid the __getitem__ →
         # mp_subscript_impl loop in VariableTracker.call_method.
         return CustomClassObjectVariable.call_method(self, tx, "__getitem__", [key], {})
+
+    def tp_setattro_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # A TorchScript object's attribute writes are not modeled; call_method
+        # rejects them with its usual graph break. Opaque objects keep the
+        # generic protocol, which checks their registered members.
+        obj = self.value
+        if isinstance(obj, FakeScriptObject):
+            obj = obj.real_obj
+        if not isinstance(obj, torch.ScriptObject):
+            return super().tp_setattro_impl(tx, name, value)
+        dunder = "__delattr__" if value is None else "__setattr__"
+        args = [name] if value is None else [name, value]
+        return self.call_method(tx, dunder, args, {})
 
     # We only support method calls on script objects. Interpreting the bytecodes
     # should go through tp_getattro_impl then call_function instead of call_method.

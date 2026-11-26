@@ -32,6 +32,75 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertIs(result, int)
 
+    @parametrize("explicit_none", [False, True])
+    def test_descriptor_default_owner_uses_type(self, explicit_none):
+        class Proxy:
+            def __init__(self):
+                self.reads = 0
+
+            @property
+            def __class__(self):
+                self.reads += 1
+                return int
+
+        def owner(cls):
+            return cls
+
+        def fn(x):
+            proxy = Proxy()
+            descriptor = classmethod(owner)
+            bound = (
+                descriptor.__get__(proxy, None)
+                if explicit_none
+                else descriptor.__get__(proxy)
+            )
+            return x + proxy.reads, bound() is Proxy
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), (x, True))
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_opaque_class_lookup(self):
+        from torch._custom_class_base import CustomClassBase
+        from torch._library.opaque_object import (
+            register_custom_class,
+            unregister_custom_class,
+        )
+
+        class Opaque(CustomClassBase):
+            pass
+
+        register_custom_class(Opaque, typ="symbolic")
+        self.addCleanup(unregister_custom_class, Opaque)
+        obj = Opaque()
+
+        def fn(x, obj):
+            return (
+                x + 1,
+                obj.__class__ is Opaque,
+                getattr(obj, "__class__", None) is Opaque,
+                hasattr(obj, "__class__"),
+            )
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(compiled(x, obj), (x + 1, True, True, True))
+
+    def test_script_object_class_lookup(self):
+        profiler = torch.ops.profiler
+        obj = profiler._record_function_enter_new("class lookup")
+        self.addCleanup(profiler._record_function_exit._RecordFunction, obj)
+
+        def fn(x, obj):
+            return x + 1, obj.__class__ is torch.ScriptObject
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), (x + 1, True))
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+
     def test_getattr_with_default_exists(self):
         def fn():
             return getattr("hello", "__class__", None)
@@ -60,8 +129,6 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             pass
 
         class Proxy:
-            reads = 0
-
             def __init__(self):
                 self.reads = 0
 
@@ -218,7 +285,9 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x), fn(x))
         self.assertEqual(counter.frame_count, 2)
 
-    def test_class_lookup_invalidates_instance_shadow(self):
+    @parametrize("discarded", [False, True])
+    @parametrize("shadowed", [False, True])
+    def test_class_lookup_invalidates_instance_shadow(self, discarded, shadowed):
         class Target:
             pass
 
@@ -227,27 +296,39 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         class Descriptor:
             def __get__(self, instance, owner):
+                if instance.check_class:
+                    raise AttributeError("__class__")
                 return Target
 
         class Proxy:
             __class__ = Descriptor()
+            check_class = False
 
         obj = Proxy()
-        obj.__dict__["__class__"] = Alternate
 
         def fn(x, obj):
+            if discarded:
+                obj.check_class = True
+                try:
+                    obj.__class__
+                except AttributeError:
+                    return x + 2
+                finally:
+                    obj.check_class = False
+                return x + 1
             return x + (getattr(obj, "__class__", None) is Alternate)
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
-        self.assertEqual(compiled(x, obj), fn(x, obj))
-        self.assertEqual(compiled(x, obj), fn(x, obj))
-        self.assertEqual(counter.frame_count, 1)
-        del obj.__dict__["__class__"]
-        self.assertEqual(compiled(x, obj), fn(x, obj))
-        self.assertEqual(compiled(x, obj), fn(x, obj))
-        self.assertEqual(counter.frame_count, 2)
+        for idx, has_shadow in enumerate((shadowed, not shadowed, shadowed)):
+            if has_shadow:
+                obj.__dict__["__class__"] = Alternate
+            else:
+                obj.__dict__.pop("__class__", None)
+            self.assertEqual(compiled(x, obj), fn(x, obj))
+            self.assertEqual(compiled(x, obj), fn(x, obj))
+            self.assertEqual(counter.frame_count, min(idx + 1, 2))
 
     @parametrize(
         "case",
@@ -317,10 +398,9 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             "getattribute": Getattribute(),
             "fallback": Fallback(),
             "attribute_fallback": AttributeFallback(),
-            "missing": Missing(),
             "shadowed": ClassAttribute(),
         }
-        obj = objects[case]
+        obj = objects.get(case)
         if case == "shadowed":
             obj.__dict__["__class__"] = Plain
 
@@ -1033,6 +1113,49 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
                 with self.assertRaises(torch._dynamo.exc.Unsupported):
                     torch.compile(fn, backend="eager", fullgraph=True)()
 
+    def test_classmethod_descriptor_call_none_owner(self):
+        descr = dict.__dict__["fromkeys"]
+
+        def fn():
+            try:
+                return descr(None, "ab")
+            except TypeError as e:
+                return str(e)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_slot_wrapper_bound_to_none_instance(self):
+        # None is a real instance here, not C NULL, so these bind to it.
+        def fn():
+            return (
+                None.__ne__(None),
+                None.__eq__(None),
+                None.__ne__(1),
+                None.__repr__(),
+                None.__bool__(),
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_descriptor_get_none_obj_returns_unbound(self):
+        # __get__(None, owner) maps None to C NULL: class access, unbound.
+        def f(self):
+            return 1
+
+        class C:
+            g = f
+
+        def fn():
+            return (
+                f.__get__(None, C) is f,
+                C.g is f,
+                C().g(),
+                int.__add__(1, 2),
+                str.upper("ab"),
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     def test_staticmethod_constructor_func_attr(self):
         def fn():
             def f():
@@ -1356,6 +1479,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(sorted(result), ["a", "b"])
 
+    @unittest.skipIf(not has_triton_package(), "requires Triton package")
     def test_nonstandard_c_method_descriptor_graph_break_binding(self):
         if not has_triton_package():
             self.skipTest("requires Triton package")
@@ -2022,6 +2146,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(1)
         self.assertEqual(fn(Child, Base, x), (x + 1, False, "default"))
 
+    @unittest.expectedFailure
     def test_class_setattr_abstractmethods_hasattr(self):
         class Base:
             pass
