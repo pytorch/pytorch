@@ -5,6 +5,7 @@ import contextlib
 import copy
 import operator
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
@@ -990,6 +991,25 @@ class TestGroupBatchFusion(TestCase):
             )
             self.assertEqual(counters["inductor"]["batch_linear_lhs"], expected)
             counters.clear()
+
+    def test_batch_linear_lhs_default_drops_graph_without_matmul(self):
+        def f(x):
+            return torch.sigmoid(x)
+
+        with FakeTensorMode():
+            gm = make_fx(f)(torch.randn(32, 64, device="cpu"))
+
+        counters.clear()
+        with patch.object(
+            torch._inductor.fx_passes.group_batch_fusion,
+            "apply_group_batch_fusion",
+        ) as apply:
+            torch._inductor.fx_passes.group_batch_fusion.group_batch_fusion_passes(
+                gm.graph, pre_grad=False
+            )
+        for call in apply.call_args_list:
+            self.assertNotIsInstance(call.args[1], BatchLinearLHSFusion)
+        counters.clear()
 
     @parametrize("dynamic", [False, True])
     @torch._inductor.config.patch(

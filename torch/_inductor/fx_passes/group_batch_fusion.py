@@ -2198,29 +2198,37 @@ def group_batch_fusion_passes(
                 )
             post_grad_options[name] = config.pre_grad_fusion_options[name]
         # Device-scoped defaults must not pay for the search on other
-        # devices. The filter applies to every group/batch fusion option. The
-        # scan is skipped when no option is device-scoped, or when only
-        # batch_linear_lhs is device-scoped and the graph has no mm/addmm.
+        # devices. The filter applies to every group/batch fusion option. For
+        # the batch_linear_lhs-only default, derive the devices from mm/addmm
+        # nodes and drop the option when there are none; other device-scoped
+        # options still scan the graph.
         device_scoped = [
             name for name, options in post_grad_options.items() if "devices" in options
         ]
         if device_scoped:
             batch_only = all(name == "batch_linear_lhs" for name in device_scoped)
-            has_matmul = bool(
-                graph.find_nodes(op="call_function", target=aten.mm.default)
-                or graph.find_nodes(op="call_function", target=aten.addmm.default)
-            )
-            if not batch_only or has_matmul:
+            if batch_only:
+                matmul_nodes = graph.find_nodes(
+                    op="call_function", target=aten.mm.default, sort=False
+                ) + graph.find_nodes(
+                    op="call_function", target=aten.addmm.default, sort=False
+                )
+                graph_devices = OrderedSet()
+                for node in matmul_nodes:
+                    value = node.meta.get("val")
+                    if isinstance(value, torch.Tensor):
+                        graph_devices.add(value.device.type)
+            else:
                 graph_devices = OrderedSet()
                 for node in graph.nodes:
                     value = node.meta.get("val")
                     if isinstance(value, torch.Tensor):
                         graph_devices.add(value.device.type)
-                post_grad_options = {
-                    name: options
-                    for name, options in post_grad_options.items()
-                    if _option_matches_graph_devices(options, graph_devices, name)
-                }
+            post_grad_options = {
+                name: options
+                for name, options in post_grad_options.items()
+                if _option_matches_graph_devices(options, graph_devices, name)
+            }
         fbgemm_fusion_keys = [
             x
             for x in post_grad_options
