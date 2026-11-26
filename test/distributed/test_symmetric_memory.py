@@ -4491,6 +4491,25 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    def test_mempool_other_device_current(self):
+        # A pool routes allocations only on its own device.
+        self._init_process()
+        other = torch.device(device_type, (self.rank + 1) % self.world_size)
+        get_pool = symm_mem.get_mem_pool
+        with device_module.device(other):
+            t = symm_mem.empty(64, device=self.device)
+            pool_of_current = get_pool(device_type)
+        self.assertTrue(symm_mem.is_symm_mem_tensor(t))
+        self.assertIs(pool_of_current, get_pool(other))
+        self.assertIs(get_pool(device_type), get_pool(self.device))
+
+    @skipIfXpu(
+        msg="SymmetricMemory MemPool has no XPU backend: https://github.com/intel/torch-xpu-ops/issues/5404"
+    )
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_mempool_compute_ops(self):
         self._init_process()
