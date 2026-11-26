@@ -8046,7 +8046,7 @@ class PointwiseStrictNumericsTest(TestCase):
         if op.name in POINTWISE_GEOMETRY | POINTWISE_CONDITIONAL:
             self._coverage_filter("raw_bits_require_original_geometry")
             return []
-        if op.name in BITPATTERN_SLOW or "polynomial" in op.name:
+        if op.name in BITPATTERN_SLOW:
             self._coverage_filter("raw_bit_sweep_disabled_for_slow_series")
             return []
         key = (_op_id(op), _dtype_label(dtype))
