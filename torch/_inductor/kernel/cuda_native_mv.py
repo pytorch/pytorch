@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
-import re
-from typing import Any
+
+import sympy
 
 import torch
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 
 from .. import ir, lowering as L
+from ..runtime.cuda_native_mv import _native_options
 from ..select_algorithm import SymbolicGridFn, TritonTemplate
 from ..virtualized import V
 from .mm_common import load_kernel_template
@@ -87,10 +88,24 @@ def cuda_native_mv(x, vector):
                 else:
                     vector = constrained
     device = x.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError(f"Expected non-None values, got {device=}")
     complex_dtype = x.get_dtype() if x.get_dtype().is_complex else None
     x.realize()
     vector.realize()
+    geometry = (*x.get_size(), *x.get_stride(), *vector.get_stride())
+    if any(not isinstance(value, (int, sympy.Integer)) for value in geometry):
+        V.graph.preserve_input_alignment(
+            (x.get_name(), vector.get_name()),
+            "runtime CUDA mv requires original input pointer alignment",
+        )
+        return ir.TensorBox.create(
+            RuntimeCudaNativeMv(
+                ir.FixedLayout(device, x.get_dtype(), [x.get_size()[0]]),
+                (x, vector),
+                python_kernel_name="cuda_native_mv_runtime",
+            )
+        )
     if V.graph.is_negative_buffer(x.get_name()) or V.graph.is_conjugate_buffer(
         x.get_name()
     ):
@@ -264,7 +279,8 @@ def cuda_native_mv(x, vector):
 def _aligned_mv(x, vector, plans):
     options = plans[0][0]
     device = x.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError(f"Expected non-None values, got {device=}")
     complex_dtype = x.get_dtype() if x.get_dtype().is_complex else None
     acc_dtype = (
         torch.float64
@@ -338,59 +354,38 @@ def _aligned_mv(x, vector, plans):
     return output
 
 
-def _native_options(plan, dtype, m, k, s0, s1, vs) -> dict[str, Any]:
-    name, grid, block, _, partition = next(p for p in plan if "reduce" not in p[0])
-    ctas, threads, kind = 1, 1, 0
-    tile_k = 1
-    if "dot_kernel" in name:
-        kind, ctas, threads = 2, grid[0], block[0]
-    elif name.startswith("nvjet_"):
-        kind = 4
-        tiles = re.search(r"nvjet_[^_]+_(\d+)x(\d+)_(\d+)x(\d+)_", name)
-        if tiles is None:
-            raise NotImplementedError(f"Strict CUDA mv tensor-core geometry for {name}")
-        tile_m = max(int(tiles[1]), int(tiles[2]))
-        tile_k = int(tiles[3])
-        if any("splitKreduce" in p[0] for p in plan):
-            kind = 5
-            ctas = grid[0] * grid[1] * grid[2] // ((m + tile_m - 1) // tile_m)
-    elif any("splitKreduce" in p[0] for p in plan):
-        kind, ctas, threads = 3, grid[2], block[1]
-    elif "gemvx" in name:
-        flags = [int(v) for v in re.findall(r"Lb([01])E", name)]
-        threads = block[0] if flags[2] else block[1]
+class RuntimeCudaNativeMv(ir.ExternKernelOut):
+    def codegen(self, wrapper):
+        if V.graph.aot_mode:
+            from .cuda_native_mv_aoti import codegen_cuda_native_mv
 
-    elif "gemv2N_kernel" in name:
-        threads = 1
-    elif "gemvNSP_kernel" in name:
-        threads = block[1]
-        partition = (4, 1, 0)
-    elif k == 1:
-        threads = 1
-    else:
-        raise NotImplementedError(f"Strict CUDA mv reduction order for {name}")
-    acc_dtype = (
-        torch.float64 if dtype in (torch.float64, torch.complex128) else torch.float32
-    )
-    options = dict(
-        M=m,
-        K=k,
-        S0=s0,
-        S1=s1,
-        VS=vs,
-        CTAS=ctas,
-        THREADS=1 << (threads - 1).bit_length(),
-        ACTIVE_THREADS=threads,
-        INNER_CHUNK=partition[0],
-        INNER_STRIDE=partition[1],
-        KIND=kind,
-        ACC_TYPE="tl.float64" if acc_dtype == torch.float64 else "tl.float32",
-    )
-    if kind in (4, 5):
-        options.update(K_SLICE=((k + ctas - 1) // ctas + tile_k - 1) // tile_k * tile_k)
-    options.update(
-        SWAP=not bool(partition[2]) if kind == 2 else bool(partition[2]),
-        PRODUCT="gemmk1_kernel" in name,
-        PRE_SCALE="gemv2N_kernel" in name,
-    )
-    return options
+            codegen_cuda_native_mv(self, wrapper)
+        elif V.graph.cpp_wrapper:
+            wrapper.include_extra_header(
+                "torch/csrc/inductor/cpp_wrapper/lazy_triton_compile.h"
+            )
+            matrix, vector = self.codegen_args()
+            output = self.codegen_reference()
+            lines = f"""
+RAIIPyObject module(PyImport_ImportModule("torch._inductor.runtime.cuda_native_mv"));
+AOTI_TORCH_CHECK(module, "Failed to import the runtime GEMV launcher");
+RAIIPyObject launcher(PyObject_GetAttrString(module, "cuda_native_mv"));
+AOTI_TORCH_CHECK(launcher, "Failed to load the runtime GEMV launcher");
+RAIIPyObject matrix(convertArgToPython({matrix}));
+RAIIPyObject vector(convertArgToPython({vector}));
+RAIIPyObject output(convertArgToPython({output}));
+AOTI_TORCH_CHECK(matrix && vector && output, "Failed to wrap GEMV arguments");
+RAIIPyObject args(PyTuple_Pack(2, matrix.get(), vector.get()));
+RAIIPyObject kwargs(PyDict_New());
+AOTI_TORCH_CHECK(args && kwargs, "Failed to construct GEMV arguments");
+AOTI_TORCH_CHECK(PyDict_SetItemString(kwargs, "out", output.get()) == 0,
+                 "Failed to construct the GEMV output argument");
+RAIIPyObject result(PyObject_Call(launcher, args, kwargs));
+AOTI_TORCH_CHECK(result, "Failed to launch generated GEMV kernels");
+"""
+            wrapper.writelines(wrapper.generate_scoped_gil_acquire([], lines))
+        else:
+            wrapper.add_import_once(
+                "from torch._inductor.runtime.cuda_native_mv import cuda_native_mv as cuda_native_mv_runtime"
+            )
+            super().codegen(wrapper)

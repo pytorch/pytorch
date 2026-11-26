@@ -4255,7 +4255,8 @@ def batch_norm_update_stats(input, running_mean, running_var, momentum):
         and running_var is None
     ):
         input_node = V.graph.current_node.args[0]
-        assert isinstance(input_node, torch.fx.Node)
+        if not isinstance(input_node, torch.fx.Node):
+            raise AssertionError(f"Expected torch.fx.Node, got {type(input_node)!r}")
         value = input_node.meta["val"]
         if value.is_neg():
             input = clone(input)
@@ -4280,7 +4281,10 @@ def batch_norm_update_stats(input, running_mean, running_var, momentum):
 
 
 for _batch_norm_op in NATIVE_BATCH_NORM_OPS:
-    assert isinstance(_batch_norm_op, torch._ops.OpOverload)
+    if not isinstance(_batch_norm_op, torch._ops.OpOverload):
+        raise AssertionError(
+            f"Expected torch._ops.OpOverload, got {type(_batch_norm_op)!r}"
+        )
     make_fallback(
         _batch_norm_op,
         layout_constraint=constrain_to_fx_exact_strides,
@@ -4321,9 +4325,12 @@ def native_batch_norm_backward(
             )
         node = V.graph.current_node
         grad_node, input_node = node.args[:2]
-        assert isinstance(grad_node, torch.fx.Node) and isinstance(
+        if not isinstance(grad_node, torch.fx.Node) or not isinstance(
             input_node, torch.fx.Node
-        )
+        ):
+            raise AssertionError(
+                f"Expected non-None values, got {isinstance=}, {grad_node=}, {input_node=}, {torch=}"
+            )
         value = input_node.meta["val"]
         grad_value = grad_node.meta["val"]
         input_channels_last = (
@@ -4362,7 +4369,10 @@ def native_batch_norm_backward(
             )
             if not train and (mean is None or mean.numel() == 0):
                 running_mean_node = node.args[3]
-                assert isinstance(running_mean_node, torch.fx.Node)
+                if not isinstance(running_mean_node, torch.fx.Node):
+                    raise AssertionError(
+                        f"Expected torch.fx.Node, got {type(running_mean_node)!r}"
+                    )
                 mean = running_mean_node.meta["val"].to(dtype)
             weight_node = node.args[2]
             weight_contiguous = weight is None or (
