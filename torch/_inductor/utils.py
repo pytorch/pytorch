@@ -3367,8 +3367,10 @@ def use_nv_universal_gemm_template(
     mat_b: IRNode,
     offs: IRNode | None = None,
     g: _IntLike | None = None,
+    *,
+    allow_symbolic_shapes: bool = False,
 ) -> bool:
-    """
+    r"""
     Return True if we can use the NVIDIA Universal GEMM Template.
 
     Required conditions:
@@ -3378,11 +3380,15 @@ def use_nv_universal_gemm_template(
         4. Max autotune or max autotune gemm is enabled
         5. Not in AOT Inductor mode (requires runtime JIT compilation)
         6. Base pointers are 16-byte aligned
-        7. Shape dimensions are static
+        7. Shape dimensions are static, unless the caller passes
+           allow_symbolic_shapes=True
 
     Note:
-        - Shape and stride constraints are handled internally by
-          cutlass.operators.get_operators() which filters incompatible kernels.
+        - This check installs no guards and does not check kernel-specific
+          shape requirements. NVUniversalGemmCaller checks those for each
+          candidate without guards, then again for the selected kernel,
+          installing guards. See Note: [NVGEMM dynamic shapes] in
+          codegen/nv_universal_gemm/nv_universal_gemm.py.
         - GroupedGemm currently only supports TN layout (column-major B).
           Any other layout will act as a noop and fall back to ATen.
     """
@@ -3406,12 +3412,10 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    # cutlass.operators 0.2 cannot handle symbolic shapes because it hashes
-    # dimensions while evaluating its constraints.
     dims_to_check = [m, n, k]
     if g is not None:
         dims_to_check.append(g)
-    if has_free_symbols(dims_to_check):
+    if not allow_symbolic_shapes and has_free_symbols(dims_to_check):
         return False
 
     # Base pointer must be 16-byte aligned. cutlass.operators can't check this at
