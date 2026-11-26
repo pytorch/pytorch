@@ -246,6 +246,7 @@ class SideEffects:
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
     keepalive: list[object]
+    deleted_globals_by_dict: dict[int, tuple[Any, set[str]]]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
     _capture_user_stacks: bool
@@ -282,6 +283,7 @@ class SideEffects:
         self.store_attr_mutations = store_attr_mutations or {}
         self.attr_mutation_kinds = attr_mutation_kinds or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
+        self.deleted_globals_by_dict: dict[int, tuple[Any, set[str]]] = {}
         # Snapshot per compile (policy must not change mid-compilation): stacks
         # are only read when formatting messages for the side_effects log or
         # the dynamo_side_effects structured-trace artifact.
@@ -444,7 +446,7 @@ class SideEffects:
         ref = self.output_graph_weakref()
         if ref is None:
             raise AssertionError("output_graph weakref is dead during clone")
-        return self.__class__(
+        result = self.__class__(
             output_graph=ref,
             id_to_variable=dict(self.id_to_variable),
             store_attr_mutations={
@@ -458,6 +460,11 @@ class SideEffects:
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
         )
+        result.deleted_globals_by_dict = {
+            key: (globals_dict, set(names))
+            for key, (globals_dict, names) in self.deleted_globals_by_dict.items()
+        }
+        return result
 
     def __contains__(self, item: object) -> bool:
         return id(item) in self.id_to_variable

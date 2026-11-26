@@ -789,11 +789,6 @@ class OutputGraph(OutputGraphCommon):
         self.compile_id: int = next(_compile_id_counter)
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
-        # Names deleted in this trace, keyed by id() of the globals dict they
-        # were deleted from; the entry keeps the dict alive so the id cannot
-        # be reused. Later module-object or module-__dict__ accesses to those
-        # names graph-break (see check_deleted_global_access).
-        self.deleted_globals_by_dict: dict[int, tuple[Any, set[str]]] = {}
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -1087,6 +1082,11 @@ class OutputGraph(OutputGraphCommon):
             ),
             hints=[*graph_break_hints.SUPPORTABLE],
         )
+
+    @property
+    def deleted_globals_by_dict(self) -> dict[int, tuple[Any, set[str]]]:
+        # Owned by SideEffects so clone()/restore snapshots include it.
+        return self.side_effects.deleted_globals_by_dict
 
     def check_deleted_global_access(self, globals_dict: Any, name: str | None) -> None:
         """Graph-break if this trace deleted `name` from `globals_dict`; with
