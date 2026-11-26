@@ -2771,6 +2771,7 @@ class _XpuDeviceProperties:
     is_integrated_gpu: _bool
     total_memory: _int
     gpu_subslice_count: _int
+    xe_core_count: _int
     architecture: _int
     type: str
     uuid: Any

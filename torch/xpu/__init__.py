@@ -549,7 +549,8 @@ def get_device_properties(
     - ``has_subgroup_2d_block_io`` (bool): whether 2D block I/O for efficient matrix multiplication is supported.
     - ``is_integrated_gpu`` (bool): whether the device is an integrated GPU (iGPU).
     - ``total_memory`` (int): device global memory in bytes.
-    - ``gpu_subslice_count`` (int): number of subslice.
+    - ``gpu_subslice_count`` (int): number of subslices. Deprecated, use ``xe_core_count`` instead.
+    - ``xe_core_count`` (int): number of Xe cores (formerly known as subslices).
     - ``architecture`` (int): device architecture identifier (experimental).
     - ``type`` (str): device type, e.g. 'cpu', 'gpu', accelerator', 'host', 'unknown'.
     - ``uuid`` (Any): device UUID (Universal Unique ID), 16 bytes.
