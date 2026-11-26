@@ -3472,6 +3472,13 @@ def _index_add(
         ),
     )
     torch._check(
+        x.dtype == tensor.dtype,
+        lambda: (
+            f"index_add_(): self ({x.dtype}) and source ({tensor.dtype}) "
+            "must have the same scalar type"
+        ),
+    )
+    torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
@@ -3557,6 +3564,13 @@ def _index_copy(
     from torch.fx.experimental.symbolic_shapes import sym_eq
 
     dim = utils.canonicalize_dims(x.ndim, dim)
+    torch._check(
+        x.dtype == tensor.dtype,
+        lambda: (
+            f"index_copy_(): self and source expected to have the same dtype, "
+            f"but got (self) {x.dtype} and (source) {tensor.dtype}"
+        ),
+    )
     torch._check(
         x.device == index.device and x.device == tensor.device,
         lambda: (

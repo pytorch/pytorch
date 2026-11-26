@@ -808,6 +808,24 @@ class TestDecomp(TestCase):
         res_p = res.sum() / torch.prod(torch.tensor(res.size()))
         self.assertEqual(ref_p, res_p, atol=0.06 * p, rtol=0.06)
 
+    def test_index_add_copy_dtype_check(self, device):
+        # The index_add/index_copy decompositions must reject mixed
+        # self/source dtypes the way the eager kernels do, instead of
+        # silently casting (https://github.com/pytorch/pytorch/issues/205291).
+        import torch._decomp.decompositions as decomp
+
+        idx = torch.tensor([0, 0, 1], device=device)
+        src_long = torch.ones(3, dtype=torch.int64, device=device)
+        for fn in (decomp.index_add_, decomp.index_copy_):
+            with self.assertRaisesRegex(RuntimeError, "same"):
+                fn(torch.zeros(2, device=device), 0, idx, src_long)
+
+        # same-dtype path remains correct
+        x = torch.zeros(2, device=device)
+        src = torch.ones(3, device=device)
+        self.assertEqual(decomp.index_add_(x.clone(), 0, idx, src).tolist(), [2.0, 1.0])
+        self.assertEqual(decomp.index_copy_(x.clone(), 0, idx, src).tolist(), [1.0, 1.0])
+
     def test_broadcasting_index_copy(self, device):
         x = torch.zeros([1, 10], device=device)
         xs = torch.ones([2, 10], device=device)
