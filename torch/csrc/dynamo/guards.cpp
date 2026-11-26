@@ -3064,8 +3064,8 @@ class OBJECT_ALIASING : public RelationalGuard {
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     if (!_first_value) {
-      // An accessor may return a temporary whose address can be reused.
-      _first_value = py::reinterpret_borrow<py::object>(value);
+      // Keep temporary accessor results alive. The slot is empty on this path.
+      _first_value.ptr() = Py_NewRef(value);
       return true;
     }
     return _first_value.ptr() == value;
@@ -5023,6 +5023,11 @@ class RootGuardManager : public GuardManager {
           cloned->_relational_state_clones.clear();
         });
     clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
+    // A shared leaf visits several managers but needs only one reset per check.
+    std::unordered_set<RelationalGuard*> seen;
+    std::erase_if(
+        cloned_root->_relational_guard_resetters,
+        [&](const auto& guard) { return !seen.insert(guard.get()).second; });
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
     }
