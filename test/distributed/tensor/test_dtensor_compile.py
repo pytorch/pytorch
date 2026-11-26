@@ -49,7 +49,6 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
@@ -491,7 +490,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(local.grad)
 
     @unittest.skipIf(not HAS_GPU, "standalone_compile requires GPU and triton")
-    @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
     @skip_if_lt_x_gpu(1)
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_aot_standalone_compile_dtensor_to_dtype_layout(self):
@@ -992,7 +990,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(res, ref)
 
     @skipIfHpu
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1981")
     def test_dtensor_dynamic_loss_parallel_log_softmax(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
