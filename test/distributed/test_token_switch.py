@@ -1941,6 +1941,36 @@ class TokenSwitchLifecycleTest(MultiProcContinuousTest):
         del routing, switch
         gc.collect()
 
+    @skip_if_lt_x_gpu(2)
+    def test_async_input_reusable_after_wait_under_capture(self):
+        # Async ops keep their tensors in the Work instead of recording them on
+        # the group stream: a recorded block is not reused until capture ends,
+        # so every MoE layer's exchange buffers would pile up in the graph pool.
+        switch, routing = self._inputs()
+        source, weights, received, scores, ids = self._buffers(self.rank)
+
+        def dispatch(tokens):
+            switch._ep._nccl_ep_dispatch(
+                routing.handle, tokens, weights, received, scores, ids, async_op=True
+            )
+            wait_tensor(received)
+            wait_tensor(scores)
+            wait_tensor(ids)
+
+        dispatch(source)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            # The only allocation in the fresh graph pool, so once freed it is
+            # the block the next same-size allocation gets.
+            tokens = source.clone()
+            tokens_ptr = tokens.data_ptr()
+            dispatch(tokens)
+            del tokens
+            reused_ptr = torch.empty_like(source).data_ptr()
+        self.assertEqual(reused_ptr, tokens_ptr)
+        del graph
+        gc.collect()
+
 
 class TestRoutingUpdate(TestCase):
     hw_classification = HardwareClassification.GENERIC
