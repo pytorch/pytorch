@@ -53,8 +53,6 @@ from torch.utils._triton import has_triton
 torch._logging.set_logs(inductor_metrics=True)
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
-# Accelerator cases in this file compile kernels with Triton; gate them
-# individually so the GENERIC classes still run on triton-less hosts.
 requires_triton = skipIf(not has_triton(), "requires triton")
 
 
@@ -128,7 +126,6 @@ class ImplDetailTest(MockSchedulerTest):
         if strides is None:
             strides = ir.FlexibleLayout.contiguous_strides(sizes)
 
-        # IR metadata only; no tensor is allocated on this device.
         box_a = ir.TensorBox.create(
             ir.Buffer(
                 name="a",
@@ -294,7 +291,6 @@ class ImplDetailTest(MockSchedulerTest):
             self.assertEqual(select_tiling.call_count, 4)
 
     def test_template_producer_loop_state_rollback(self):
-        # IR metadata only; no tensor is allocated on this device.
         layout = ir.FixedLayout(
             torch.device("cuda"), torch.float32, [sympy.Integer(8)], [1]
         )
@@ -422,7 +418,6 @@ class ImplDetailTest(MockSchedulerTest):
                     "primal", i3 + 49 * i2 + 2401 * ModularIndexing(i0, 1, 64)
                 )
 
-            # IR metadata only; no tensor is allocated on this device.
             buf = ir.Pointwise.create(
                 device=torch.device("cuda"),
                 dtype=torch.float32,
@@ -1285,10 +1280,6 @@ class LoopOrderingTest(TestCase):
 
     @requires_triton
     @requires_capabilities(Capability.dtype.fp8)
-    # can-gaa-hou asked to remove the unittest.skipIf form; Tam's review requires
-    # the sm89 protection to stay, so it is a CUDA-scoped skipIf here. Moving it
-    # to a dedicated sm90 capability needs a common_device_type change and is
-    # left to a follow-up PR.
     @skipIf(not SM90OrLater, "sm89 errors out on this test", device_type="cuda")
     def test_fp8_cast_and_t(self, device):
         """
@@ -2932,9 +2923,6 @@ class TestIndexInversion(TestCase):
         )
 
 
-# All three classes share one device set. privateuse1/HPU are excluded because
-# requires_capabilities() raises for backends that declare no capabilities;
-# re-enable them once those backends register their capability maps.
 instantiate_device_type_tests(
     LoopOrderingTest,
     globals(),
