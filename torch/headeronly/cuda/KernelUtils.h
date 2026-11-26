@@ -44,15 +44,19 @@
       __ATOMIC_RELAXED,                                     \
       __HIP_MEMORY_SCOPE_AGENT)
 #endif
+// Internal, test-only; not an extension knob. Nonzero compiles out the
+// hardware packed atomic so a GPU that has it still runs the CAS loop.
+#if defined(TORCH_HEADERONLY_INTERNAL_TEST_FORCE_PACKED_CAS) && \
+    TORCH_HEADERONLY_INTERNAL_TEST_FORCE_PACKED_CAS
+#define TORCH_HIP_PACKED_HW_ATOMIC 0
+#else
+#define TORCH_HIP_PACKED_HW_ATOMIC 1
+#endif
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
     __hip_bfloat162* address,
     __hip_bfloat162 value) {
-  // Test TUs set this so a GPU with the hardware atomic still runs the CAS.
-#if defined(TORCH_HEADERONLY_FORCE_PACKED_CAS)
-  if (false) {
-#else
+#if TORCH_HIP_PACKED_HW_ATOMIC
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16)) {
-#endif
     typedef short __attribute__((ext_vector_type(2))) vec_short2;
     static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
     union {
@@ -62,30 +66,27 @@ __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
     u.vs2 =
         __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
     return static_cast<__hip_bfloat162>(u.bf162_raw);
-  } else {
-    static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
-    union u_hold {
-      __hip_bfloat162_raw h2r;
-      unsigned int u32;
-    };
-    u_hold old_val, new_val;
-    old_val.u32 = TORCH_HIP_RELAXED_AGENT_LOAD((unsigned int*)address);
-    do {
-      new_val.h2r = __hadd2(old_val.h2r, value);
-    } while (!TORCH_HIP_RELAXED_AGENT_CAS(
-        (unsigned int*)address, &old_val.u32, new_val.u32));
-    return old_val.h2r;
   }
+#endif
+  static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
+  union u_hold {
+    __hip_bfloat162_raw h2r;
+    unsigned int u32;
+  };
+  u_hold old_val, new_val;
+  old_val.u32 = TORCH_HIP_RELAXED_AGENT_LOAD((unsigned int*)address);
+  do {
+    new_val.h2r = __hadd2(old_val.h2r, value);
+  } while (!TORCH_HIP_RELAXED_AGENT_CAS(
+      (unsigned int*)address, &old_val.u32, new_val.u32));
+  return old_val.h2r;
 }
 
 __device__ inline __half2 preview_unsafeAtomicAdd(
     __half2* address,
     __half2 value) {
-#if defined(TORCH_HEADERONLY_FORCE_PACKED_CAS)
-  if (false) {
-#else
+#if TORCH_HIP_PACKED_HW_ATOMIC
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2f16)) {
-#endif
     // The api expects an ext_vector_type of half
     typedef _Float16 __attribute__((ext_vector_type(2))) vec_fp162;
     static_assert(sizeof(vec_fp162) == sizeof(__half2_raw));
@@ -96,21 +97,22 @@ __device__ inline __half2 preview_unsafeAtomicAdd(
     u.fp16 =
         __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
     return static_cast<__half2>(u.h2r);
-  } else {
-    static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
-    union u_hold {
-      __half2_raw h2r;
-      unsigned int u32;
-    };
-    u_hold old_val, new_val;
-    old_val.u32 = TORCH_HIP_RELAXED_AGENT_LOAD((unsigned int*)address);
-    do {
-      new_val.h2r = __hadd2(old_val.h2r, value);
-    } while (!TORCH_HIP_RELAXED_AGENT_CAS(
-        (unsigned int*)address, &old_val.u32, new_val.u32));
-    return old_val.h2r;
   }
+#endif
+  static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
+  union u_hold {
+    __half2_raw h2r;
+    unsigned int u32;
+  };
+  u_hold old_val, new_val;
+  old_val.u32 = TORCH_HIP_RELAXED_AGENT_LOAD((unsigned int*)address);
+  do {
+    new_val.h2r = __hadd2(old_val.h2r, value);
+  } while (!TORCH_HIP_RELAXED_AGENT_CAS(
+      (unsigned int*)address, &old_val.u32, new_val.u32));
+  return old_val.h2r;
 }
+#undef TORCH_HIP_PACKED_HW_ATOMIC
 #undef TORCH_HIP_RELAXED_AGENT_LOAD
 #undef TORCH_HIP_RELAXED_AGENT_CAS
 #define ATOMICADD preview_unsafeAtomicAdd
