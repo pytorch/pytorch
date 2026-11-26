@@ -799,10 +799,11 @@ class SubgraphReuseMatch:
             dim = prop() if source.idx is None else prop(source.idx)
         else:
             vt = self.build_capture(source)
-            if isinstance(vt, SymNodeVariable):
-                dim = vt.sym_num
-            else:
-                dim = vt.as_python_constant()
+            dim = (
+                vt.sym_num
+                if isinstance(vt, SymNodeVariable)
+                else vt.as_python_constant()
+            )
         raw = dim.node._expr if isinstance(dim, torch.SymInt) else sympy.Integer(dim)
         self.symbol_replacements[lifted.expr] = raw
         return raw
@@ -1313,21 +1314,15 @@ def save_reuse_entry(
     shape_guards: list[sympy.Basic] = []
     if rebound and condition is not None:
         shape_env = tx.output.shape_env
-        candidates = [
-            guard.expr
-            for guard in shape_env.guards
-            if guard.expr.free_symbols & rebound
-        ]
+        candidates = [g.expr for g in shape_env.guards if g.expr.free_symbols & rebound]
         # Range facts can have removed a branch before any ShapeGuard was emitted.
-        for symbol in rebound & shape_env.var_to_range.keys():
+        for symbol in sorted(rebound.intersection(shape_env.var_to_range), key=str):
             bounds = shape_env.var_to_range[symbol]
             for rel, limit in ((sympy.Ge, bounds.lower), (sympy.Le, bounds.upper)):
                 if isinstance(limit, sympy.Integer):
                     candidates.append(rel(symbol, limit))
-        for assertions in shape_env.deferred_runtime_asserts.values():
-            candidates.extend(
-                a.expr for a in assertions if a.expr.free_symbols & rebound
-            )
+        for group in shape_env.deferred_runtime_asserts.values():
+            candidates.extend(a.expr for a in group if a.expr.free_symbols & rebound)
         known: set[sympy.Basic] = set()
         for predicate in candidates:
             if symbolic_shapes.canonicalize_bool_expr(predicate) in known:

@@ -1489,7 +1489,7 @@ class Child(torch.nn.Module):
 
 
 CHILD = Child()
-CHILD.register_forward_hook(identity_child_hook)
+CHILD.register_forward_hook(identity_child_hook)  # retain the synthetic module alias
 
 
 def fn(x):
