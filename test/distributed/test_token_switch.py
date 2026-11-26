@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+from torch.distributed._functional_collectives import wait_tensor
 from torch.distributed._token_switch import (
     _import_mori,
     _import_nccl_ep,
@@ -1720,6 +1721,10 @@ class TokenSwitchMoRITest(
         )
 
 
+def _work_count():
+    return torch._C._distributed_c10d._get_work_registry_size()
+
+
 @requires_nccl_ep()
 class TokenSwitchLifecycleTest(MultiProcContinuousTest):
     hw_classification = HardwareClassification.CUDA
@@ -1728,7 +1733,7 @@ class TokenSwitchLifecycleTest(MultiProcContinuousTest):
     def backend_str(cls):
         return "nccl"
 
-    def _inputs(self):
+    def _switch(self, close_on_cleanup=True):
         torch.cuda.set_device(self.rank)
         dist.barrier()
         switch = TokenSwitchNCCL(
@@ -1738,37 +1743,200 @@ class TokenSwitchLifecycleTest(MultiProcContinuousTest):
             self.world_size * 16,
             128,
         )
-        ids = torch.full(
-            (16, 1),
-            (self.rank + 1) % self.world_size,
-            device="cuda",
-            dtype=torch.int64,
-        )
-        routing = switch.create_routing(ids, layout="flat")
-        return switch, routing
+        if close_on_cleanup:
+            self.addCleanup(switch.close)
+        return switch
 
-    def _buffers(self, rank):
+    def _ids(self, shift=1, dtype=torch.int64):
+        dst = (self.rank + shift) % self.world_size
+        return torch.full((16, 1), dst, device="cuda", dtype=dtype)
+
+    def _inputs(self, close_on_cleanup=True):
+        switch = self._switch(close_on_cleanup)
+        return switch, switch.create_routing(self._ids(), layout="flat")
+
+    def _buffers(self, rank, phase=0):
+        # Row-distinct payloads and weights so misrouted or permuted rows fail.
         capacity = self.world_size * 16
-        rows = torch.arange(16, device="cuda") + rank * 16 + 1
-        tokens = rows[:, None].expand(16, 64).to(torch.bfloat16)
-        weights = (rows[:, None] / 100).float()
+        rows = torch.arange(16, device="cuda") + 16 * (rank + self.world_size * phase)
+        tokens = (rows[:, None] + 1).expand(16, 64).to(torch.bfloat16)
+        weights = (rows[:, None] + 1).float() / 128
         received = tokens.new_zeros(capacity, 64)
         scores = weights.new_zeros(capacity, 1)
         ids = torch.full((capacity, 1), -1, device="cuda", dtype=torch.int64)
         return tokens, weights, received, scores, ids
 
+    def _source(self, shift=1, phase=0):
+        return self._buffers((self.rank - shift) % self.world_size, phase)[:2]
+
+    @skip_if_lt_x_gpu(2)
+    def test_close_with_retained_routing(self):
+        switch, routing = self._inputs()
+        tokens, weights, received, scores, ids = self._buffers(self.rank)
+        other_device = (self.rank + 1) % self.world_size
+        with torch.cuda.device(other_device):
+            switch.close()
+            switch.close()
+            self.assertEqual(torch.cuda.current_device(), other_device)
+        with self.assertRaisesRegex(ValueError, "group is closed"):
+            switch.dispatch(routing, tokens, weights, out=(received, scores, ids))
+        with self.assertRaisesRegex(ValueError, "group is closed"):
+            routing.handle.get_num_recv_tokens()
+        with self.assertRaisesRegex(ValueError, "group is closed"):
+            switch.create_routing(routing.topk_idx, layout="flat")
+        del routing, switch
+        gc.collect()
+
     @skip_if_lt_x_gpu(2)
     def test_handle_retains_group(self):
-        switch, routing = self._inputs()
+        # The switch must be unreferenced here, so it is not closed on cleanup.
+        switch, routing = self._inputs(close_on_cleanup=False)
         ep = switch._ep
         del switch
         gc.collect()
         self.assertEqual(routing.handle.get_num_recv_tokens(), 16)
         tokens, weights, received, scores, ids = self._buffers(self.rank)
         ep._nccl_ep_dispatch(routing.handle, tokens, weights, received, scores, ids)
-        source, _, _, _, _ = self._buffers((self.rank - 1) % self.world_size)
-        self.assertEqual(received[:16], source)
+        source_tokens, source_weights = self._source()
+        self.assertEqual(received[:16], source_tokens)
+        self.assertEqual(scores[:16], source_weights)
         del routing
+        gc.collect()
+
+    @skip_if_lt_x_gpu(2)
+    def test_rejects_mismatched_shapes(self):
+        # Every rank fails the same check before communicating, so none hangs.
+        switch, routing = self._inputs()
+        ep = switch._ep
+        handle = routing.handle
+        tokens, weights, received, scores, ids = self._buffers(self.rank)
+        wide = tokens.new_zeros(16, 65)
+        wide_received = received.new_zeros(received.shape[0], 65)
+        dispatch_cases = [
+            ("tokens must have one row", tokens[:8], weights[:8], received, ids),
+            ("above max_token_bytes", wide, weights, wide_received, ids),
+            ("topk_weights must be float32", tokens, weights.double(), received, ids),
+            ("out_tokens must have at least", tokens, weights, received[:8], ids),
+            ("out_topk_idx must be", tokens, weights, received, ids[:8]),
+        ]
+        for error, src, src_weights, dst, dst_ids in dispatch_cases:
+            with self.assertRaisesRegex(ValueError, error):
+                ep._nccl_ep_dispatch(handle, src, src_weights, dst, scores, dst_ids)
+        with self.assertRaisesRegex(ValueError, "combine output must be"):
+            ep._nccl_ep_combine(handle, received, tokens[:8].clone())
+        with self.assertRaisesRegex(ValueError, "topk_idx must be"):
+            switch.create_routing(self._ids()[:, 0], layout="flat")
+
+    @skip_if_lt_x_gpu(2)
+    def test_async_roundtrip_and_backward(self):
+        switch, routing = self._inputs()
+        ep = switch._ep
+        producer = torch.cuda.Stream()
+        consumer = torch.cuda.Stream()
+        initial_work_count = _work_count()
+        with torch.cuda.stream(producer):
+            tokens, weights, received, scores, ids = self._buffers(self.rank)
+            ep._nccl_ep_dispatch(
+                routing.handle, tokens, weights, received, scores, ids, async_op=True
+            )
+        self.assertGreater(_work_count(), initial_work_count)
+        with torch.cuda.stream(consumer):
+            wait_tensor(received)
+            wait_tensor(scores)
+            wait_tensor(ids)
+            combined = torch.zeros_like(tokens)
+            ep._nccl_ep_combine(routing.handle, received, combined, async_op=True)
+        with torch.cuda.stream(producer):
+            wait_tensor(combined)
+            expert_grads = torch.zeros_like(received)
+            ep._nccl_ep_dispatch_backward(
+                routing.handle, tokens, expert_grads, async_op=True
+            )
+        with torch.cuda.stream(consumer):
+            wait_tensor(expert_grads)
+            source_grads = torch.zeros_like(tokens)
+            score_grads = torch.zeros_like(weights)
+            ep._nccl_ep_combine_backward(
+                routing.handle,
+                received,
+                scores,
+                source_grads,
+                score_grads,
+                async_op=True,
+            )
+        with torch.cuda.stream(producer):
+            wait_tensor(source_grads)
+            wait_tensor(score_grads)
+            source_tokens, source_weights = self._source()
+            self.assertEqual(received[:16], source_tokens)
+            self.assertEqual(scores[:16], source_weights)
+            self.assertEqual(combined, tokens)
+            self.assertEqual(source_grads, tokens)
+            self.assertEqual(expert_grads, received)
+            self.assertEqual(score_grads, weights)
+        producer.synchronize()
+        self.assertEqual(_work_count(), initial_work_count)
+        del routing, switch
+        gc.collect()
+
+    @skip_if_lt_x_gpu(2)
+    def test_int32_routing_on_producer_stream(self):
+        switch = self._switch()
+        producer = torch.cuda.Stream()
+        consumer = torch.cuda.Stream()
+        for shift in range(1, 4):
+            with torch.cuda.stream(producer):
+                ids = self._ids(shift, dtype=torch.int32)
+                routing = switch.create_routing(ids, layout="flat")
+                tokens, weights, received, scores, received_ids = self._buffers(
+                    self.rank
+                )
+                switch._ep._nccl_ep_dispatch(
+                    routing.handle,
+                    tokens,
+                    weights,
+                    received,
+                    scores,
+                    received_ids,
+                    async_op=True,
+                )
+            with torch.cuda.stream(consumer):
+                wait_tensor(received)
+                wait_tensor(scores)
+                wait_tensor(received_ids)
+                self.assertEqual(received[:16], self._source(shift)[0])
+            consumer.synchronize()
+            del routing
+
+    @skip_if_lt_x_gpu(2)
+    def test_async_wait_on_other_stream(self):
+        switch, routing = self._inputs()
+        producer = torch.cuda.Stream()
+        consumer = torch.cuda.Stream()
+        initial_work_count = _work_count()
+        for phase in range(3):
+            with torch.cuda.stream(producer):
+                tokens, weights, received, scores, ids = self._buffers(self.rank, phase)
+                switch._ep._nccl_ep_dispatch(
+                    routing.handle,
+                    tokens,
+                    weights,
+                    received,
+                    scores,
+                    ids,
+                    async_op=True,
+                )
+            del tokens, weights
+            self.assertGreater(_work_count(), initial_work_count)
+            with torch.cuda.stream(consumer):
+                ready = wait_tensor(received)
+                wait_tensor(scores)
+                wait_tensor(ids)
+                result = ready[:16].clone()
+            consumer.synchronize()
+            self.assertEqual(result, self._source(phase=phase)[0])
+            self.assertEqual(_work_count(), initial_work_count)
+        del routing, switch
         gc.collect()
 
 

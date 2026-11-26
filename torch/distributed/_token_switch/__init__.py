@@ -411,6 +411,14 @@ class TokenSwitchNCCL(TokenSwitch):
             max_token_bytes,
         )
 
+    def close(self) -> None:
+        """Release EP resources before destroying the process group.
+
+        Tear down captured graphs first. Closing synchronizes the CUDA device,
+        invalidates routing handles, and is idempotent.
+        """
+        self._group.close()
+
     @property
     def max_recv_tokens_per_rank(self) -> int:
         return self._max_recv_tokens_per_rank
