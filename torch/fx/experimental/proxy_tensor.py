@@ -66,8 +66,8 @@ from torch._subclasses.fake_tensor import (
     in_kernel_invocation_manager,
     is_fake,
     is_fake_tensor,
-    maybe_get_fake_dispatch_keys,
     maybe_get_fake_constant,
+    maybe_get_fake_dispatch_keys,
     maybe_get_fake_mode,
     maybe_get_real_tensor,
     track_fake_tensor_for_export,
@@ -2294,8 +2294,8 @@ def _preserve_original_aten_mutation_storage(
         and maybe_get_fake_constant(new) is None
         and maybe_get_real_tensor(old) is None
         and maybe_get_real_tensor(new) is None
-        and old.untyped_storage()._cdata in native_storages
         and old.layout == new.layout == torch.strided
+        and old.untyped_storage()._cdata in native_storages
         and old.dtype == new.dtype
         and old.device == new.device
         and old.is_neg() == new.is_neg()
@@ -2308,7 +2308,7 @@ def _preserve_original_aten_mutation_storage(
     input_storages = {
         value.untyped_storage()._cdata
         for value in pytree.tree_leaves(args_kwargs)
-        if isinstance(value, Tensor)
+        if isinstance(value, Tensor) and value.layout == torch.strided
     }
     old_storage = old.untyped_storage()._cdata
     new_storage = new.untyped_storage()._cdata

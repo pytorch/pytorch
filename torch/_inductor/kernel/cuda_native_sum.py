@@ -45,7 +45,8 @@ cuda_dynamic_sum_template = TritonTemplate(
 
 def cuda_dynamic_sum(x, keepdims, dtype):
     device = x.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError(f"Expected non-None values, got {device=}")
     x.realize()
     if V.graph.is_negative_buffer(x.get_name()):
         x = L.clone(x)
@@ -132,7 +133,8 @@ cuda_symbolic_sum_template = TritonTemplate(
 def cuda_symbolic_sum(x, dims, keepdims, dtype):
     r"""Generate native CUDA reduction geometry from symbolic tensor metadata."""
     device = x.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError(f"Expected non-None values, got {device=}")
     output_dtype = dtype or x.get_dtype()
     node = V.graph.current_node
     source = (
