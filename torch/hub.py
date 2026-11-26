@@ -3,6 +3,7 @@ import contextlib
 import errno
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -90,6 +91,7 @@ _TRUSTED_REPO_OWNERS = (
 )
 ENV_GITHUB_TOKEN = "GITHUB_TOKEN"
 ENV_TORCH_HOME = "TORCH_HOME"
+ENV_TORCH_HUB_LOCK_TIMEOUT = "TORCH_HUB_LOCK_TIMEOUT"
 ENV_XDG_CACHE_HOME = "XDG_CACHE_HOME"
 DEFAULT_CACHE_DIR = "~/.cache"
 VAR_DEPENDENCY = "dependencies"
@@ -267,7 +269,8 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
     )
 
 
-# How long to wait for another process's download before downloading anyway.
+# How long to wait for another process's download before downloading anyway,
+# unless TORCH_HUB_LOCK_TIMEOUT sets it.
 _CACHE_LOCK_TIMEOUT_S = 3600
 # How often a waiting process tries the lock. filelock's default of 50 ms would
 # mean tens of thousands of attempts (round trips on NFS) during a long download.
@@ -331,6 +334,30 @@ def _lock_unavailable(lock_path, mode):
     return None
 
 
+def _cache_lock_timeout(stacklevel):
+    """Return how long to wait for another process's download, in seconds.
+
+    The environment variable ``TORCH_HUB_LOCK_TIMEOUT`` overrides the default of
+    ``_CACHE_LOCK_TIMEOUT_S``: 0 doesn't wait, and a negative value waits until
+    the lock is released. A value that isn't a number is ignored with a warning.
+    """
+    value = os.getenv(ENV_TORCH_HUB_LOCK_TIMEOUT)
+    if value is None:
+        return _CACHE_LOCK_TIMEOUT_S
+    try:
+        timeout = float(value)
+    except ValueError:
+        timeout = math.nan
+    if math.isnan(timeout):
+        warnings.warn(
+            f"Ignoring {ENV_TORCH_HUB_LOCK_TIMEOUT}={value!r}, which isn't a number "
+            f"of seconds, and waiting up to {_CACHE_LOCK_TIMEOUT_S} s instead.",
+            stacklevel=stacklevel + 1,
+        )
+        return _CACHE_LOCK_TIMEOUT_S
+    return timeout
+
+
 @contextlib.contextmanager
 def _cache_lock(path, stacklevel, verbose):
     """Hold the lock for cache entry ``path`` while populating it.
@@ -338,7 +365,8 @@ def _cache_lock(path, stacklevel, verbose):
     Processes that share a cache directory (for example DDP ranks) take this lock
     so that only one of them downloads an entry while the others wait for it.
     If the lock can't be taken (no flock support, an unwritable lock file) or
-    stays held for more than ``_CACHE_LOCK_TIMEOUT_S``, the entry is populated
+    stays held for longer than the lock timeout (``_CACHE_LOCK_TIMEOUT_S``, or
+    ``TORCH_HUB_LOCK_TIMEOUT``), the entry is populated
     without it, with a warning that ``stacklevel`` points at the user's call.
     With filelock older than 3.20.1, it isn't taken at all.
     """
@@ -351,8 +379,8 @@ def _cache_lock(path, stacklevel, verbose):
         yield
         return
 
-    # A dot file, so that it isn't the path of another entry: "<entry>.lock" would
-    # be the cached checkpoint of a URL that ends in "<entry>.lock".
+    # A dot file, so that it isn't the path of the entry of a URL that ends in
+    # "<entry>.lock". (A URL that ends in ".<entry>.lock" would still collide.)
     lock_dir, name = os.path.split(path)
     lock_path = os.path.join(lock_dir, "." + name + ".lock")
     # filelock gives the lock files it creates this mode, whatever the umask.
@@ -380,16 +408,19 @@ def _cache_lock(path, stacklevel, verbose):
             error = _lock_unavailable(lock_path, mode)
             if error is not None:
                 raise error from None
+            timeout = _cache_lock_timeout(stacklevel)
             if verbose:
                 sys.stderr.write(f"Waiting for another process to download {path}\n")
-            stack.enter_context(new_lock(timeout=_CACHE_LOCK_TIMEOUT_S))
+            stack.enter_context(new_lock(timeout=timeout))
     except filelock.Timeout:
         message = (
             f"Another process has held {lock_path} for more than "
-            f"{_CACHE_LOCK_TIMEOUT_S} s, so this process stops waiting and "
+            f"{timeout:g} s, so this process stops waiting and "
             "downloads the entry if it isn't cached by then. If downloading it "
-            "takes longer than that, populate the cache from one process before "
-            "the others load it."
+            "takes longer than that, set the environment variable "
+            f"{ENV_TORCH_HUB_LOCK_TIMEOUT} to a longer time in seconds (or to -1 "
+            "to wait without a limit), or populate the cache from one process "
+            "before the others load it."
         )
     except (NotImplementedError, OSError) as e:
         message = (
@@ -466,10 +497,16 @@ def _get_cache_or_reload(
         # Remove work directories of processes killed mid-download. A running
         # download keeps writing to a file in its work directory, so only those
         # untouched for longer than _STALE_WORK_DIR_S are removed.
-        for name in os.listdir(hub_dir):
-            if not name.startswith(work_prefix):
-                continue
-            stale = os.path.join(hub_dir, name)
+        with os.scandir(hub_dir) as hub_entries:
+            # Only directories: lock files of other refs, like ".<repo>_main~1.lock"
+            # for ref "main~1", can start with the prefix too.
+            candidates = [
+                entry.path
+                for entry in hub_entries
+                if entry.name.startswith(work_prefix)
+                and entry.is_dir(follow_symlinks=False)
+            ]
+        for stale in candidates:
             try:
                 with os.scandir(stale) as entries:
                     mtimes = [e.stat().st_mtime for e in entries]

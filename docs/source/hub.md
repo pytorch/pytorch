@@ -153,7 +153,9 @@ If the lock can't be taken (for example on a filesystem without `flock` support,
 another user created without giving this user write access), the entry is downloaded without it,
 as in earlier releases, and a `UserWarning` is raised. If another process holds it for more than
 an hour, a `UserWarning` is raised and the entry is downloaded without the lock, unless that
-process has cached it by then. Repos are downloaded and extracted in a temporary work directory in
+process has cached it by then. The environment variable `TORCH_HUB_LOCK_TIMEOUT` sets this wait
+in seconds: for example `TORCH_HUB_LOCK_TIMEOUT=7200` for downloads that take longer than an
+hour, `0` to not wait, or `-1` to wait until the lock is released. Repos are downloaded and extracted in a temporary work directory in
 the hub directory, whose name starts with `.<owner_repo_ref>~`.
 
 ### Known limitations:

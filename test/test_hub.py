@@ -909,6 +909,66 @@ class TestHubCache(TestCase):
         self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
         self._assert_no_leftovers()
 
+    @parametrize(
+        "value, timeout", [("5", 5.0), ("1e3", 1000.0), ("0", 0.0), ("-1", -1.0)]
+    )
+    def test_cache_lock_timeout_from_env(self, value, timeout):
+        with patch.dict(os.environ, {hub.ENV_TORCH_HUB_LOCK_TIMEOUT: value}):
+            self.assertEqual(hub._cache_lock_timeout(stacklevel=1), timeout)
+
+    def test_cache_lock_timeout_default(self):
+        with patch.dict(os.environ):
+            os.environ.pop(hub.ENV_TORCH_HUB_LOCK_TIMEOUT, None)
+            self.assertEqual(
+                hub._cache_lock_timeout(stacklevel=1), hub._CACHE_LOCK_TIMEOUT_S
+            )
+
+    @parametrize("value", ["soon", "nan", ""])
+    def test_cache_lock_timeout_ignores_bad_env(self, value):
+        with (
+            patch.dict(os.environ, {hub.ENV_TORCH_HUB_LOCK_TIMEOUT: value}),
+            self.assertWarnsRegex(UserWarning, "isn't a number of seconds"),
+        ):
+            self.assertEqual(
+                hub._cache_lock_timeout(stacklevel=1), hub._CACHE_LOCK_TIMEOUT_S
+            )
+
+    @skipIfOldFilelock
+    def test_load_state_dict_from_url_lock_timeout_from_env(self):
+        url, model_dir = self._save_weights()
+        os.makedirs(model_dir)
+        with (
+            ThreadPoolExecutor(1) as pool,
+            FileLock(os.path.join(model_dir, ".weights.pt.lock")),
+            patch.dict(os.environ, {hub.ENV_TORCH_HUB_LOCK_TIMEOUT: "0.2"}),
+            self.assertWarnsRegex(UserWarning, "for more than 0.2 s"),
+        ):
+            state_dict = pool.submit(
+                hub.load_state_dict_from_url, url, model_dir=model_dir
+            ).result(timeout=60)
+        self.assertEqual(state_dict["w"], torch.arange(10))
+
+    @skipIfOldFilelock
+    def test_load_state_dict_from_url_negative_timeout_waits(self):
+        url, model_dir = self._save_weights()
+        os.makedirs(model_dir)
+        lock = FileLock(os.path.join(model_dir, ".weights.pt.lock"))
+        with (
+            ThreadPoolExecutor(1) as pool,
+            patch.dict(os.environ, {hub.ENV_TORCH_HUB_LOCK_TIMEOUT: "-1"}),
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("error")
+            with lock:
+                load = pool.submit(
+                    hub.load_state_dict_from_url, url, model_dir=model_dir
+                )
+                # Well past the poll interval: it is still waiting, not downloading.
+                time.sleep(3 * hub._CACHE_LOCK_POLL_S)
+                self.assertFalse(load.done())
+            state_dict = load.result(timeout=60)
+        self.assertEqual(state_dict["w"], torch.arange(10))
+
     def test_get_cache_or_reload_failed_publish_raises(self):
         url = self._make_hub_archive("repo")
         repo_dir = os.path.join(hub.get_dir(), "owner_repo_main")
