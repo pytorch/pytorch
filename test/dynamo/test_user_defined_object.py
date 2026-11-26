@@ -1,18 +1,22 @@
 # Owner(s): ["module: dynamo"]
 
+import _json
 import copy
 import dataclasses
 import datetime
 import os
+import re
 import sys
 import types
 import unittest
+import warnings
 
 import torch
 import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.utils import common_constant_types
+from torch._dynamo.utils import common_constant_types, counters
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -851,6 +855,7 @@ class TestUserDefinedClassDict(TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
 
+@instantiate_parametrized_tests
 class TestClassSetattr(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -934,51 +939,147 @@ class TestClassSetattr(TestCase):
         self.assertEqual(compiled(doc), doc + 1)
         self.assertEqual(MyClass.__doc__, doc)
 
+    @parametrize("mutable_constant", [False, True])
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
-    def test_trace_local_class_doc_dynamic_value_graph_breaks(self):
-        def fn(doc):
+    def test_trace_local_class_doc_dynamic_value_graph_breaks(self, mutable_constant):
+        def fn(x):
             class MyClass:
                 "original"
 
-            MyClass.__doc__ = doc
-            return MyClass.__doc__
+            doc = [] if mutable_constant else x
+            type.__dict__["__doc__"].__set__(MyClass, doc)
+            return x + 1
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(Unsupported, "on sourceless class __doc__"):
             compiled(torch.tensor(1.0))
 
-    def test_namedtuple_tree_map_class_doc_set(self):
-        from collections import namedtuple
-
-        from torch.utils._pytree import tree_map
-
-        Point = namedtuple("Point", ["x"])
-        original_doc = Point.__doc__
-
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_trace_local_exception_class_doc(self):
         def fn(x):
-            result = tree_map(lambda value: value + 1, Point(x))
-            type(result).__doc__ = "updated"
-            return result.x + 1
+            class LocalError(Exception):
+                pass
+
+            LocalError.__doc__ = "local error"
+            try:
+                raise LocalError
+            except LocalError as exc:
+                return x + 1, type(exc).__name__, LocalError.__doc__
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.tensor(1.0)
-        self.assertEqual(compiled(x), x + 2)
-        self.assertEqual(Point.__doc__, "updated")
-        self.assertNotEqual(Point.__doc__, original_doc)
+        self.assertEqual(compiled(x), fn(x))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_trace_local_class_doc_rejects_outer_scope_mutation(self):
+        def fn(pred, x):
+            class MyClass:
+                "original"
+
+            def true_fn(x):
+                MyClass.__doc__ = "true branch"
+                return x + 1
+
+            def false_fn(x):
+                return x - 1
+
+            return torch.cond(pred, true_fn, false_fn, (x,))
+
+        from torch._dynamo.exc import UncapturedHigherOrderOpError
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            UncapturedHigherOrderOpError, "HOP: Unsafe side effect"
+        ):
+            compiled(torch.tensor(False), torch.tensor(1.0))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_class_doc_does_not_mutate_class_returned_by_metaclass(self):
+        class Existing:
+            "original"
+
+        class Meta(type):
+            def __new__(mcls, name, bases, namespace):
+                if name == "Aliased":
+                    return Existing
+                return super().__new__(mcls, name, bases, namespace)
+
+        class Base(metaclass=Meta):
+            pass
+
+        def fn(x):
+            class Aliased(Base):
+                pass
+
+            Aliased.__doc__ = "updated"
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "on sourceless class __doc__"):
+            compiled(torch.tensor(1.0))
+        self.assertEqual(Existing.__doc__, "original")
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_class_doc_does_not_mutate_class_returned_by_explicit_metaclass(self):
+        class Existing:
+            "original"
+
+        def factory(name, bases, namespace):
+            return Existing
+
+        def fn(x):
+            class Aliased(metaclass=factory):
+                pass
+
+            Aliased.__doc__ = "updated"
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "on sourceless class __doc__"):
+            compiled(torch.tensor(1.0))
+        self.assertEqual(Existing.__doc__, "original")
+
+    def test_type_doc_descriptor_get_with_custom_metaclass_dict(self):
+        class Meta(type):
+            @property
+            def __dict__(cls):
+                return {"__doc__": torch.tensor(5)}
+
+        class MyClass(metaclass=Meta):
+            __doc__ = torch.tensor(2)
+
+        doc = type.__dict__["__doc__"]
+
+        def fn(x):
+            return x + doc.__get__(MyClass)
+
+        x = torch.tensor(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Custom metaclass metadata access"):
+            compiled(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_namedtuple_class_doc_set_inside_trace(self):
+        from collections import namedtuple
+
+        def fn(x):
+            Point = namedtuple("Point", ["x"])
+            Point.__doc__ = "updated"
+            return x + 1, Point.__doc__
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor(1.0)
+        self.assertEqual(compiled(x), fn(x))
 
     def test_builtin_mutable_class_doc_set_graph_breaks(self):
-        import builtins
-
-        if not hasattr(builtins, "ExceptionGroup"):
-            self.skipTest("ExceptionGroup is unavailable")
-
         original_doc = ExceptionGroup.__doc__
+        self.addCleanup(setattr, ExceptionGroup, "__doc__", original_doc)
 
         def fn():
             type.__dict__["__doc__"].__set__(ExceptionGroup, "updated")
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(Unsupported, "Write to unmodeled getset/member"):
             compiled()
         self.assertEqual(ExceptionGroup.__doc__, original_doc)
 
@@ -990,9 +1091,8 @@ class TestClassSetattr(TestCase):
                 return str(error)
             raise AssertionError("expected type.__doc__ descriptor to raise TypeError")
 
-        expected = "cannot set '__doc__' attribute of immutable type 'date'"
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(), expected)
+        self.assertEqual(compiled(), fn())
 
     def test_class_doc_descriptor_is_not_mutated_during_trace(self):
         class DocDescriptor:
@@ -1018,6 +1118,71 @@ class TestClassSetattr(TestCase):
         doc = torch.tensor(1.0)
         self.assertEqual(compiled(doc), doc + 1)
         self.assertEqual(seen_during_compile, [True])
+        self.assertIs(MyClass.__dict__["__doc__"], doc)
+
+    def test_class_doc_pending_descriptor_get(self):
+        class DocDescriptor:
+            def __get__(self, obj, owner):
+                return owner.__name__
+
+        class MyClass:
+            pass
+
+        descriptor = DocDescriptor()
+        type_doc = type.__dict__["__doc__"]
+
+        def fn(x):
+            type_doc.__set__(MyClass, descriptor)
+            return x + 1, MyClass.__doc__, type_doc.__get__(MyClass)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor(1.0)
+        self.assertEqual(compiled(x), (x + 1, "MyClass", "MyClass"))
+        self.assertIs(MyClass.__dict__["__doc__"], descriptor)
+
+    def test_type_doc_descriptor_get_cache_with_shadowing_metaclass(self):
+        class Meta(type):
+            @property
+            def __doc__(cls):
+                return "shadow"
+
+        class MyClass(metaclass=Meta):
+            "first"
+
+        type_doc = type.__dict__["__doc__"]
+
+        def fn(x):
+            return x + len(type_doc.__get__(MyClass))
+
+        counter = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(1.0)
+        self.assertEqual(compiled(x), fn(x))
+        type_doc.__set__(MyClass, "new value")
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(MyClass.__doc__, "shadow")
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_class_doc_setattr_with_abc_metaclass(self):
+        from abc import ABC, abstractmethod
+
+        class MyClass(ABC):
+            "original"
+
+            @abstractmethod
+            def method(self):
+                pass
+
+        def fn(doc):
+            MyClass.__doc__ = doc
+            return MyClass.__doc__ + 1
+
+        counter = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for doc in (torch.tensor(1.0), torch.tensor(2.0)):
+            self.assertEqual(compiled(doc), doc + 1)
+            self.assertIs(MyClass.__doc__, doc)
+        self.assertEqual(counter.frame_count, 1)
 
     def test_custom_metaclass_doc_set_graph_breaks(self):
         class Meta(type):
@@ -1031,7 +1196,7 @@ class TestClassSetattr(TestCase):
             MyClass.__doc__ = "updated"
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(Unsupported, "Write to unmodeled getset/member"):
             compiled()
         self.assertEqual(MyClass.__doc__, "original")
 
@@ -1637,6 +1802,20 @@ class TestObjectConstruction(TestCase):
         self.assertIs(type(s), object)
         self.assertEqual(cnt.frame_count, 0)
 
+    @parametrize("base", ["int", "float", "str"])
+    def test_constant_subclass_construction(self, base):
+        # Before CPython 3.12.5 (gh-117482), int, float and str each publish
+        # their own __getattribute__ wrapper instead of inheriting object's
+        typ, arg = {"int": (int, 3), "float": (float, 0.5), "str": (str, "s")}[base]
+        cls = type("Sub", (typ,), {})
+
+        def fn():
+            obj = cls(arg)
+            return type(obj) is cls, obj == arg
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), (True, True))
+
 
 class _Namespace(types.SimpleNamespace):
     pass
@@ -1964,6 +2143,7 @@ class TestSimpleNamespace(TestCase):
         self.assertEqual(vars(ns_eager), vars(ns_compiled))
 
 
+@instantiate_parametrized_tests
 class TestConstantTypeProperty(TestCase):
     """Attribute access on a type in common_constant_types.
 
@@ -1973,6 +2153,106 @@ class TestConstantTypeProperty(TestCase):
     """
 
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("obj, attr", ((str, "__name__"), (3, "real")))
+    def test_getattr_with_unused_default(self, obj, attr):
+        def fn(x, default):
+            value = getattr(obj, attr, default)
+            return x + 1, value
+
+        x = torch.randn(3)
+        default = {"unused": (i for i in range(4))}
+        counter = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, default), fn(x, default))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    @parametrize("use_getattr", (False, True))
+    def test_c_property_on_constant_type(self, use_getattr):
+        class Encoded(str):
+            __slots__ = ()
+
+            encoded = property(_json.encode_basestring_ascii)
+
+        obj = Encoded('a string with "quotes"')
+        common_constant_types.add(Encoded)
+        self.addCleanup(common_constant_types.discard, Encoded)
+
+        def fn(x):
+            value = getattr(obj, "encoded", "missing") if use_getattr else obj.encoded
+            return x + len(value), value
+
+        x = torch.randn(3)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(type(actual[1]), type(expected[1]))
+        self.assertEqual(
+            [w for w in caught if "does not know how to trace" in str(w.message)], []
+        )
+        self.assertEqual(counters["unimplemented"], {})
+
+    @parametrize("use_getattr", (False, True))
+    def test_c_property_guarded_on_fget(self, use_getattr):
+        class Encoded(str):
+            __slots__ = ()
+
+            encoded = property(_json.encode_basestring_ascii)
+
+        holder = Encoded("abc")
+        common_constant_types.add(Encoded)
+        self.addCleanup(common_constant_types.discard, Encoded)
+        calls = []
+        field = "encoded"
+
+        def get_encoded(self):
+            calls.append("get")
+            return "replacement value"
+
+        def fn(x):
+            value = getattr(holder, field) if use_getattr else holder.encoded
+            return x + len(value), value
+
+        x = torch.randn(3)
+        expected = fn(x)
+        counter = dynamo_testing.CompileCounter()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            self.assertEqual(compiled(x), expected)
+            self.assertEqual(counter.frame_count, 1)
+            Encoded.encoded = property(get_encoded)
+            expected = x + len("replacement value"), "replacement value"
+            self.assertEqual(compiled(x), expected)
+            self.assertEqual(counter.frame_count, 2)
+            self.assertEqual(compiled(x), expected)
+        if use_getattr:
+            self.assertEqual(calls, ["get", "get"])
+        self.assertEqual(
+            [w for w in caught if "does not know how to trace" in str(w.message)], []
+        )
+        self.assertEqual(counters["unimplemented"], {})
+
+    def test_property_with_re_escape(self):
+        class Escaped(str):
+            __slots__ = ()
+
+            escaped = property(re.escape)
+
+        obj = Escaped("a string with [brackets]")
+        common_constant_types.add(Escaped)
+        self.addCleanup(common_constant_types.discard, Escaped)
+
+        def fn(x):
+            first, second = obj.escaped, obj.escaped
+            return x + len(first), first, second, first is second
+
+        x = torch.randn(3)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, fn(x))
 
     def test_property_on_constant_type(self):
         class Holder:
@@ -2126,21 +2406,29 @@ class TestConstantTypeProperty(TestCase):
             common_constant_types.discard(Holder)
 
 
-class TestConstantTypePropertyAccelerator(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+class TestDevicePropertyConstants(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_property_on_cuda_device_properties(self):
-        # _CudaDeviceProperties is the constant type carrying properties that
-        # shows up in practice.
-        props = torch.cuda.get_device_properties(0)
+    @parametrize("capture_props", (False, True))
+    def test_property_on_cuda_device_properties(self, device, capture_props):
+        props = torch.cuda.get_device_properties(device)
 
         def fn(x):
-            return x + props.multi_processor_count
+            if capture_props:
+                return x + props.multi_processor_count
+            current_props = torch.cuda.get_device_properties(x.device)
+            return x + current_props.clock_rate + current_props.memory_clock_rate
 
-        x = torch.randn(3, device="cuda")
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(x), fn(x))
+        x = torch.randn(3, device=device)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, fn(x))
+        self.assertEqual(
+            [w for w in caught if "does not know how to trace" in str(w.message)], []
+        )
+        if not capture_props:
+            self.assertEqual(counters["unimplemented"], {})
 
 
 class _LenZeroDict(dict):
@@ -2249,6 +2537,7 @@ class TestConstantSubclassHash(TestCase):
 
 
 instantiate_parametrized_tests(TestObjectConstruction)
+instantiate_device_type_tests(TestDevicePropertyConstants, globals(), only_for="cuda")
 
 
 class _InitOnly:
