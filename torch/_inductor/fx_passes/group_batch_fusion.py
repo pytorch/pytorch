@@ -881,7 +881,7 @@ class BatchLinearLHSFusion(BatchFusion):
             split_sections.append(weight.meta["val"].shape[1])  # type: ignore[union-attr]
 
         visible_flags = [
-            self._reaches_user_visible_output(node, graph) for node in batch_nodes
+            self._reaches_user_visible_output(node, graph.graph) for node in batch_nodes
         ]
         max_bytes = self.graph_search_options.get(
             "max_fuse_tensor_bytes_batch_linear_lhs"
@@ -2058,7 +2058,7 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                     log.debug(
                         "%s declined a subset of %s nodes",
                         rule.__class__.__name__,
-                        len(subset),
+                        len(list(subset)),
                     )
                     continue
                 fused_set.update(subset)
@@ -2152,7 +2152,7 @@ def group_batch_fusion_passes(
         # Keep the old pre-grad key working for fusions that moved post grad.
         # The pristine default is the option's registered default, not a
         # module-level dict that users could patch.
-        pristine = config._config["post_grad_fusion_options"].default
+        pristine = config._config["post_grad_fusion_options"].default  # type: ignore[attr-defined]
         for name in _PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD:
             if name not in config.pre_grad_fusion_options:
                 continue
