@@ -6678,14 +6678,29 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # root frame instruction translator, to enforce consistency.
             super()._load_global(inst)
             return
+        side_effects = self.output.side_effects
+        if name not in self.f_globals:
+            # Only a pending inlined store/delete can make a name absent from
+            # f_globals resolve to something other than a builtin. Check the
+            # registered module's VT directly so builtin loads skip source and
+            # VariableBuilder work (and the guards/aliases they install).
+            registered_module = _registered_module_for_globals(
+                self.f_globals.get("__name__"), self.f_globals
+            )
+            if (
+                registered_module is None
+                or registered_module[1] not in side_effects
+                or not side_effects.has_pending_mutation_of_attr(
+                    side_effects[registered_module[1]], name
+                )
+            ):
+                return self.load_builtin(inst)
         _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
-        if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
+        if side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
             if self._global_deleted_in_trace(fglobals_vt, name):
                 return self.load_builtin(inst)
-            self.push(self.output.side_effects.load_attr(fglobals_vt, name))
+            self.push(side_effects.load_attr(fglobals_vt, name))
             return
-        if name not in self.f_globals:
-            return self.load_builtin(inst)
         value = self.f_globals[name]
         self.push(VariableTracker.build(self, value, global_source))
 
