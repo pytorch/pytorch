@@ -811,20 +811,35 @@ class TestDecomp(TestCase):
     def test_index_add_copy_dtype_check(self, device):
         # The index_add/index_copy decompositions must reject mixed
         # self/source dtypes the way the eager kernels do, instead of
-        # silently casting (https://github.com/pytorch/pytorch/issues/205291).
-        import torch._decomp.decompositions as decomp
-
+        # silently rounding the source
+        # (https://github.com/pytorch/pytorch/issues/205291).
         idx = torch.tensor([0, 0, 1], device=device)
-        src_long = torch.ones(3, dtype=torch.int64, device=device)
-        for fn in (decomp.index_add_, decomp.index_copy_):
-            with self.assertRaisesRegex(RuntimeError, "same"):
-                fn(torch.zeros(2, device=device), 0, idx, src_long)
+        x0 = torch.zeros(2, dtype=torch.int32, device=device)
+        s = torch.ones(3, dtype=torch.float64, device=device)
 
-        # same-dtype path remains correct
-        x = torch.zeros(2, device=device)
-        src = torch.ones(3, device=device)
-        self.assertEqual(decomp.index_add_(x.clone(), 0, idx, src).tolist(), [2.0, 1.0])
-        self.assertEqual(decomp.index_copy_(x.clone(), 0, idx, src).tolist(), [1.0, 1.0])
+        def add(x=x0, src=s):
+            return x.index_add(0, idx, src)
+
+        def copy(x=x0, src=s):
+            return x.index_copy(0, idx, src)
+
+        for fn in (add, copy):
+            with self.assertRaisesRegex(RuntimeError, "same"):
+                fn()
+            compiled = torch.compile(fn)
+            with self.assertRaisesRegex(Exception, "same"):
+                compiled()
+
+        # index_fill takes a 0-d tensor value of another dtype and casts it,
+        # both eagerly and through the decomposition chain
+        x0i = torch.zeros(2, dtype=torch.int32, device=device)
+        for value in (
+            torch.tensor(3.7, dtype=torch.float64, device=device),
+            torch.tensor(2, dtype=torch.int64, device=device),
+        ):
+            ref = torch.zeros(2, dtype=torch.int32, device=device).index_fill(0, idx, value)
+            got = torch.compile(lambda x=x0i, v=value: x.index_fill(0, idx, v))()
+            self.assertEqual(ref, got)
 
     def test_broadcasting_index_copy(self, device):
         x = torch.zeros([1, 10], device=device)

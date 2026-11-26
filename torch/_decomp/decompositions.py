@@ -3464,18 +3464,18 @@ def _index_add(
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
+        x.dtype == tensor.dtype,
+        lambda: (
+            f"index_add_(): self ({x.dtype}) and source ({tensor.dtype}) "
+            "must have the same scalar type"
+        ),
+    )
+    torch._check(
         x.device == index.device and x.device == tensor.device,
         lambda: (
             f"index_add(): self, index and source expected to be in the same device, "
             f"but got (self) {x.device}, (index) {index.device}, "
             f"and (source) {tensor.device}"
-        ),
-    )
-    torch._check(
-        x.dtype == tensor.dtype,
-        lambda: (
-            f"index_add_(): self ({x.dtype}) and source ({tensor.dtype}) "
-            "must have the same scalar type"
         ),
     )
     torch._check(

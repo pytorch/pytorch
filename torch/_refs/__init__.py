@@ -4541,7 +4541,10 @@ def _index_fill(
     # index_copy does not broadcast on value so we have to do it manually
     shape = list(y.shape)
     shape[dim] = index.numel()
-    value = value.expand(shape)
+    # eager index_fill_.int_Tensor casts the 0-d value to the self dtype
+    # (source.to(self.scalar_type()).item()); mirror that so a mismatched
+    # dtype keeps working here and never reaches index_copy's own checks
+    value = value.to(x.dtype).expand(shape)
     index_copy = Tensor.index_copy_ if inplace else torch.index_copy
     out = index_copy(y, dim, index, value)  # type: ignore[operator]
     if inplace:
