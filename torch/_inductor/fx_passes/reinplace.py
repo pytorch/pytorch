@@ -1192,7 +1192,7 @@ def reinplace_inplaceable_ops_core(
                 return any(
                     get_node_storage(a) in storage_of_reinplaced_args for a in arg
                 )
-            return get_node_storage(mutated_arg) in storage_of_reinplaced_args
+            return get_node_storage(arg) in storage_of_reinplaced_args
 
         for arg in old_tensors_to_clone:
             if arg not in kwargs:
