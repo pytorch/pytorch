@@ -1,0 +1,73 @@
+{% if FINAL and KIND in (2, 3) %}
+{{def_kernel("X", "VECTOR", "PARTIAL")}}
+{% else %}
+{{def_kernel("X", "VECTOR")}}
+{% endif %}
+    row = tl.program_id(0).to(tl.int64)
+    cta = tl.program_id(1)
+    {% if FINAL and KIND == 3 %}
+    value = tl.full((1,), 0, ACC_TYPE)
+    for index in range(CTAS):
+        value += tl.load(PARTIAL + row * CTAS + index)
+    {% elif FINAL and KIND == 2 %}
+    lane = tl.arange(0, THREADS)
+    total = tl.full((THREADS,), 0, ACC_TYPE)
+    for chunk in range(triton.cdiv(CTAS, THREADS)):
+        index = lane + chunk * THREADS
+        total += tl.load(PARTIAL + row * CTAS + index, index < CTAS, 0)
+    for shift in tl.static_range(THREADS // 2, 16, -32):
+        partner = tl.gather(total, (lane + shift) % THREADS, 0)
+        total = tl.where(lane < shift, total + partner, total)
+    group = tl.arange(0, 4)
+    sums = tl.full((4,), 0, ACC_TYPE)
+    for index in tl.static_range(8):
+        sums += tl.gather(total, group + index * 4, 0)
+    value = tl.full((1,), 0, ACC_TYPE)
+    for index in tl.static_range(4):
+        value += tl.gather(sums, tl.full((1,), index, tl.int32), 0)
+    {% else %}
+    lane = tl.arange(0, THREADS)
+    total = tl.full((THREADS,), 0, ACC_TYPE)
+    {% if KIND == 2 %}
+    pair: tl.constexpr = S1 == 1 and VS == 1 and ACC_TYPE != tl.float64
+    second = tl.full((THREADS,), 0, ACC_TYPE)
+    for chunk in range(triton.cdiv(K, THREADS * CTAS * (2 if pair else 1))):
+        index = (lane + THREADS * (cta + CTAS * chunk)) * (2 if pair else 1)
+        valid = index < K
+        x = tl.load(X + row * S0 + index * S1, valid, 0).to(ACC_TYPE)
+        vector = tl.load(VECTOR + index * VS, valid, 0).to(ACC_TYPE)
+        total = tl.where(valid, tl.fma(x, vector, total), total)
+        if pair:
+            valid = index + 1 < K
+            x = tl.load(X + row * S0 + (index + 1) * S1, valid, 0).to(ACC_TYPE)
+            vector = tl.load(VECTOR + (index + 1) * VS, valid, 0).to(ACC_TYPE)
+            second = tl.where(valid, tl.fma(x, vector, second), second)
+    if pair:
+        total = (tl.full((THREADS,), 0, ACC_TYPE) + total) + second
+    {% elif KIND == 3 %}
+    CHUNK: tl.constexpr = triton.cdiv(K, CTAS)
+    for step in range(triton.cdiv(CHUNK, THREADS)):
+        index = cta * CHUNK + lane + step * THREADS
+        valid = (index < K) & (lane + step * THREADS < CHUNK)
+        x = tl.load(X + row * S0 + index * S1, valid, 0).to(ACC_TYPE)
+        vector = tl.load(VECTOR + index * VS, valid, 0).to(ACC_TYPE)
+        total = tl.where(valid, tl.fma(x, vector, total), total)
+    {% else %}
+    STEP: tl.constexpr = INNER_CHUNK * (ACTIVE_THREADS if INNER_STRIDE == 1 else INNER_STRIDE)
+    for chunk in range(triton.cdiv(K, STEP)):
+        for step in range(INNER_CHUNK):
+            index = lane * (INNER_CHUNK if INNER_STRIDE == 1 else 1) + chunk * STEP + step * INNER_STRIDE
+            valid = (index < K) & (lane < ACTIVE_THREADS)
+            x = tl.load(X + row * S0 + index * S1, valid, 0).to(ACC_TYPE)
+            vector = tl.load(VECTOR + index * VS, valid, 0).to(ACC_TYPE)
+            total = tl.where(valid, tl.fma(x, vector, total), total)
+    {% endif %}
+    total = triton_helpers.cuda_native_sum_x_reduce(total, lane, THREADS, THREADS, True)
+    value = tl.gather(total, tl.full((1,), 0, tl.int32), 0)
+    {% endif %}
+    {% if FINAL %}
+    value = tl.fma(value, 1., 0.)
+    {{store_output(("row",), "value", "row < M", val_shape=("1",))}}
+    {% else %}
+    {{store_output(("row", "cta"), "value", "row < M", val_shape=("1",))}}
+    {% endif %}
