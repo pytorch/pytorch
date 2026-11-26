@@ -16,7 +16,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipIf,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -26,14 +25,9 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
-from torch.utils._triton import has_triton
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-
-requires_triton = skipIf(
-    not has_triton(), "requires triton for CUDA or XPU", device_type=("cuda", "xpu")
-)
 
 
 class DeterministicTestGeneric(TestCase):
@@ -102,9 +96,7 @@ class DeterministicTestRun2Run(TestCase):
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
     @parametrize("training_or_inference", ["training", "inference"])
     @parametrize("precision", ["float32", "bfloat16", "float16", "amp"])
-    def test_run2run_determinism(
-        self, device, model_name, training_or_inference, precision
-    ):
+    def test_run2run_determinism(self, model_name, training_or_inference, precision):
         """
         Test run2run determinism for a few huggingface models.
 
@@ -126,7 +118,6 @@ class DeterministicTestRun2Run(TestCase):
             saved_pkl = os.path.join(tmpdir, "saved.pkl")
             cmd = (
                 f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
-                + f" --devices {device}"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
             )
@@ -143,7 +134,6 @@ class DeterministicTestRun2Run(TestCase):
 
             cmd = (
                 f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
-                + f" --devices {device}"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
             )
@@ -177,7 +167,6 @@ class DeterministicTestAccelerator(TestCase):
         self._exit_stack.close()
         super().tearDown()
 
-    @requires_triton
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, device, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -195,7 +184,6 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["pad_mm_bench"] > 0)
 
-    @requires_triton
     @parametrize("deterministic", [False, True])
     @inductor_config.patch(max_autotune=True)
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
@@ -215,7 +203,6 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["select_algorithm_autotune"] > 0)
 
-    @requires_triton
     def test_pointwise_coordesc_tuning(self, device):
         @torch.compile(mode="max-autotune")
         def f(x):
@@ -226,7 +213,6 @@ class DeterministicTestAccelerator(TestCase):
 
         self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
-    @requires_triton
     @parametrize("deterministic", [False, True])
     def test_reduction_coordesc_tuning(self, device, deterministic):
         with inductor_config.patch(
@@ -247,7 +233,6 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
-    @requires_triton
     @parametrize("fp_fusion", [True, False])
     @parametrize("deterministic", [False, True])
     def test_fp_fusion(self, device, deterministic, fp_fusion):
@@ -262,7 +247,6 @@ class DeterministicTestAccelerator(TestCase):
         triton_fusion = fp_fusion and not deterministic
         self.assertIn(f"'enable_fp_fusion': {triton_fusion}", code)
 
-    @requires_triton
     @parametrize(
         "deterministic,fp_fusion",
         [(True, True), (False, False)],
@@ -302,7 +286,6 @@ class DeterministicTestAccelerator(TestCase):
         self.assertNotEqual(xblocks[0], xblocks[1])
         self.assertEqual(outs[0].view(torch.int32), outs[1].view(torch.int32))
 
-    @requires_triton
     @inductor_config.patch(batch_invariant=True)
     def test_persistent_reduction_batch_invariance(self, device):
         H = 768
@@ -335,7 +318,6 @@ class DeterministicTestAccelerator(TestCase):
             )
             size //= 2
 
-    @requires_triton
     def test_cumsum_deterministic(self, device):
         from torch._inductor.utils import run_and_get_code
 
@@ -349,7 +331,6 @@ class DeterministicTestAccelerator(TestCase):
             self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
         self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
 
-    @requires_triton
     @inductor_config.patch(deterministic=True)
     def test_deterministic_flag_survives_compile(self, device):
         # Dynamo restores the deterministic-algorithms state after each frame;
@@ -379,5 +360,7 @@ instantiate_device_type_tests(
 
 
 if __name__ == "__main__":
+    from torch.utils._triton import has_triton
+
     if has_triton():
         run_tests()
