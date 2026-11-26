@@ -396,6 +396,15 @@ class ContinueExecutionCache:
             args = ["__nested_resume_fns", "__nested_frame_values"]
             args += [f"___stack{i}" for i in range(nstack)]
             args.extend(v for v in argnames if v not in args)
+            # A cellvar that is also a fast local (e.g. an argument captured by a
+            # closure) shares one slot in CPython. It becomes a freevar below, so
+            # on 3.13+ (where fix_vars maps LOAD_FAST etc. of a free name to its
+            # free slot) drop the fast local, or the name gets a second slot.
+            cell_locals = (
+                set(code_options["co_cellvars"])
+                if sys.version_info >= (3, 13)
+                else set()
+            )
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
@@ -421,10 +430,11 @@ class ContinueExecutionCache:
             code_options["co_argcount"] = len(args)
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0
+            varnames = code_options["co_varnames"]
             code_options["co_varnames"] = tuple(
                 args
                 + [v for v in argnames_null if v not in args]
-                + [v for v in code_options["co_varnames"] if v not in args]
+                + [v for v in varnames if v not in args and v not in cell_locals]
                 + [IS_TRACING_RESUME_PROLOGUE_VARNAME]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
