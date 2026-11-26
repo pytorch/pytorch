@@ -2666,6 +2666,7 @@ class TestStreamIdentity(InductorTestCase):
         self.assertNotIn("torch.cuda.Stream(device=", code)
 
 
+@unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
 class TestPDLWithMultiStream(InductorTestCase):
     """Tests that PDL (Programmatic Dependent Launch) composes safely with
     user-annotated multi-stream code under torch.compile.
@@ -2684,7 +2685,7 @@ class TestPDLWithMultiStream(InductorTestCase):
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    def test_pdl_single_side_stream(self, device):
+    def test_pdl_single_side_stream(self):
         """PDL metadata is emitted for a kernel on a side stream."""
         from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 
@@ -2696,7 +2697,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             s.synchronize()
             return b
 
-        x = torch.randn(1024, device=device)
+        x = torch.randn(1024, device="cuda")
         expected = fn(x)
 
         compiled_fn = torch.compile(fn)
@@ -2717,7 +2718,7 @@ class TestPDLWithMultiStream(InductorTestCase):
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    def test_pdl_correctness_with_multiple_streams(self, device):
+    def test_pdl_correctness_with_multiple_streams(self):
         """Enabling PDL with independent side streams produces correct results."""
         from torch._inductor.utils import run_and_get_triton_code
 
@@ -2739,7 +2740,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             e2.wait()
             return a + b
 
-        x = torch.randn(1024, device=device)
+        x = torch.randn(1024, device="cuda")
         expected = fn(x)
         compiled_fn = torch.compile(fn)
         self.assertEqual(compiled_fn(x), expected)
@@ -2765,7 +2766,7 @@ class TestPDLWithMultiStream(InductorTestCase):
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    def test_pdl_cross_stream_events_preserved(self, device):
+    def test_pdl_cross_stream_events_preserved(self):
         """Event record/wait for cross-stream sync must survive with PDL on.
 
         PDL is stream-local so it cannot replace event-based cross-stream
@@ -2786,7 +2787,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             s.synchronize()
             return b
 
-        x = torch.randn(1024, device=device)
+        x = torch.randn(1024, device="cuda")
         expected = fn(x)
 
         compiled_fn = torch.compile(fn)
@@ -2813,7 +2814,7 @@ class TestPDLWithMultiStream(InductorTestCase):
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    def test_pdl_same_stream_consecutive_kernels(self, device):
+    def test_pdl_same_stream_consecutive_kernels(self):
         """Two consecutive kernels on the same side stream should both get PDL.
 
         This is the case where PDL is actually useful: the second kernel can
@@ -2829,8 +2830,8 @@ class TestPDLWithMultiStream(InductorTestCase):
             s.synchronize()
             return y
 
-        x = torch.randn(1024, device=device)
-        y = torch.empty(1024, device=device)
+        x = torch.randn(1024, device="cuda")
+        y = torch.empty(1024, device="cuda")
         expected = fn(x, y.clone())
         compiled_fn = torch.compile(fn)
         self.assertEqual(compiled_fn(x, y.clone()), expected)
@@ -2846,7 +2847,7 @@ class TestPDLWithMultiStream(InductorTestCase):
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    def test_pdl_no_fusion_across_streams(self, device):
+    def test_pdl_no_fusion_across_streams(self):
         """PDL must not cause cross-stream ops to be fused."""
         from torch._inductor.utils import run_and_get_triton_code
 
@@ -2870,7 +2871,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             e2.wait()
             return b + d
 
-        x = torch.randn(1024, device=device)
+        x = torch.randn(1024, device="cuda")
         expected = fn(x)
 
         compiled_fn = torch.compile(fn)
@@ -2902,7 +2903,7 @@ class TestPDLWithMultiStream(InductorTestCase):
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    def test_pdl_stress_multistream_correctness(self, device):
+    def test_pdl_stress_multistream_correctness(self):
         """Stress test: heavy work across streams with PDL must produce
         correct results over many iterations to surface any races.
 
@@ -2930,8 +2931,8 @@ class TestPDLWithMultiStream(InductorTestCase):
             s.synchronize()
             return out
 
-        x = torch.randn(N, N, device=device)
-        w = torch.eye(N, device=device) * 0.9
+        x = torch.randn(N, N, device="cuda")
+        w = torch.eye(N, device="cuda") * 0.9
 
         # Verify codegen once before the stress loop
         compiled_fn = torch.compile(fn)
@@ -2956,7 +2957,7 @@ class TestPDLWithMultiStream(InductorTestCase):
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    def test_pdl_mutation_across_streams(self, device):
+    def test_pdl_mutation_across_streams(self):
         """Buffer mutation on one stream, read on another, with PDL enabled.
 
         The mutation is on a locally-created buffer (not an input) to avoid
@@ -2979,7 +2980,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             s.synchronize()
             return a
 
-        x = torch.randn(1024, device=device)
+        x = torch.randn(1024, device="cuda")
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
@@ -3274,7 +3275,6 @@ instantiate_device_type_tests(TestStreamIdentity, globals(), allow_xpu=True)
 instantiate_device_type_tests(
     TestStreamExternalObjectRestore, globals(), allow_xpu=True
 )
-instantiate_device_type_tests(TestPDLWithMultiStream, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
     TestAOTIUserStreams, globals(), except_for=("cpu",), allow_xpu=True
 )
