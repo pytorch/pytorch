@@ -1912,6 +1912,104 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.special.erfinv(x), expected, atol=0, rtol=4 * torch.finfo(dtype).eps)
 
 
+class TestNativePolygammaNumerics(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("order", (2, 4))
+    def test_polygamma_near_negative_half_integer(self, device, dtype, order):
+        references = {
+            (torch.float32, 2): [-0.8288081723144936, -0.0015473789916810635, -12.823114532658765, -0.8287908801942379, 0.0014253105417598986, 12.823114532656946],
+            (torch.float32, 4): [-3.475166016430169, -0.1173571018354836, -1072.561971129474, -3.4737917317858114, 0.11735705713427359, 1072.561971129474],
+            (torch.float64, 2): [-0.8287966442343415, -6.103422772911467e-05, -2.268073085788694e-08, -0.8287966442343092, -6.103422219204894e-05, 2.2678911868483397e-08],
+            (torch.float64, 4): [-3.474249826668932, -2.2569199601860484e-08, -1.7907269179361025e-06, -3.4742498266663717, -2.2132010412911263e-08, 1.7907269179361025e-06],
+        }
+        x = torch.tensor([-0.5, -127.5, -1048575.5], device=device, dtype=dtype)
+        below = torch.nextafter(x, torch.full_like(x, -math.inf))
+        above = torch.nextafter(x, torch.full_like(x, math.inf))
+        expected = torch.tensor(references[dtype, order], device=device, dtype=dtype)
+        rtol = 1e-5 if dtype == torch.float32 else 1e-12
+        self.assertEqual(torch.polygamma(order, torch.cat((below, above))), expected, atol=0, rtol=rtol)
+
+    @dtypes(torch.float64)
+    @parametrize("order", (1000, 10000, 1000000, 1000000000))
+    def test_polygamma_large_order_finite_double(self, device, dtype, order):
+        inputs = {
+            1000: 367.87944117144235,
+            10000: 3678.7944117144234,
+            1000000: 367879.44117144233,
+            1000000000: 367879441.17144233,
+        }
+        references = {
+            1000: -0.2307353336857205432384,
+            10000: -0.07295250225765654676302,
+            1000000: -0.007295113595951233267297,
+            1000000000: -0.0002306916987383346168118,
+        }
+        x = torch.tensor(inputs[order], device=device, dtype=dtype)
+        expected = torch.tensor(references[order], device=device, dtype=dtype)
+        self.assertEqual(torch.polygamma(order, x), expected, atol=0, rtol=1e-12)
+
+    @dtypes(torch.float32)
+    @parametrize("order", (1000, 10000, 1000000))
+    def test_polygamma_large_order_finite(self, device, dtype, order):
+        inputs = {1000: 367.87945556640625, 10000: 3678.79443359375, 1000000: 367879.4375}
+        references = {1000: -0.2307262980, 10000: -0.07294816325, 1000000: -0.007368283509493551}
+        x = torch.tensor(inputs[order], device=device, dtype=dtype)
+        expected = torch.tensor(references[order], device=device, dtype=dtype)
+        self.assertEqual(torch.polygamma(order, x), expected, atol=0, rtol=1e-5)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("order", (4, 40))
+    def test_polygamma_negative_half_integer_low_precision(self, device, dtype, order):
+        references = {
+            4: [-3.5755513082649705e-7, -2.2350605007385875e-8],
+            40: [-1.1354636749779649e-26, -1.0456275197134683e-38],
+        }
+        x = torch.tensor([-63.5, -127.5], device=device, dtype=dtype)
+        expected = torch.tensor(references[order], device=device, dtype=dtype)
+        actual = torch.polygamma(order, x)
+        self.assertEqual(actual, expected, atol=0, rtol=2 * torch.finfo(dtype).eps)
+        self.assertEqual(actual.signbit(), expected.signbit())
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("order", (2, 4))
+    def test_polygamma_negative_half_integer(self, device, dtype, order):
+        x = torch.tensor([-127.5, -4095.5, -1048575.5], device=device, dtype=dtype)
+        # The reflection term vanishes for even orders at half-integers.
+        expected = torch.polygamma(order, 1 - x)
+        rtol = 1e-5 if dtype == torch.float32 else 1e-12
+        self.assertEqual(torch.polygamma(order, x), expected, atol=0, rtol=rtol)
+
+    @dtypes(torch.float32)
+    @parametrize("order", (39, 40, 128))
+    def test_polygamma_negative_large_order_infinity(self, device, dtype, order):
+        x = torch.tensor([-127.75, -127.25], device=device, dtype=dtype)
+        values = [math.inf, math.inf] if order % 2 else [-math.inf, math.inf]
+        expected = torch.tensor(values, device=device, dtype=dtype)
+        self.assertEqual(torch.polygamma(order, x), expected)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("order", (40, 60, 100, 200))
+    @parametrize("negative", (False, True))
+    def test_polygamma_gamma_overflow(self, device, dtype, order, negative):
+        references = {
+            40: [-8327848.721661187, -1.0456275197134683e-38, -6.534094169482355e-99],
+            60: [-8.345955089401754e20, -5.074489050284016e-47, -2.5143328721589466e-137],
+            100: [-9.333237300479084e56, -1.729482540444945e-55, -5.419983498754258e-206],
+            200: [-7.886578711401554e173, -1.289428502515622e-49, -0.0],
+        }
+        x = torch.tensor([10.0, 128.5, 4096.5], device=device, dtype=dtype)
+        expected = torch.tensor(references[order], device=device, dtype=dtype)
+        if negative:
+            x = 1 - x[1:]
+            expected = expected[1:]
+        actual = torch.polygamma(order, x)
+        rtol = 1e-4 if dtype == torch.float32 else 1e-12
+        self.assertEqual(actual, expected, atol=0, rtol=rtol)
+        self.assertEqual(actual.signbit(), expected.signbit())
+
+
 class TestUnaryUfuncsCpuOnly(TestCase):
     hw_classification = HardwareClassification.CPU
 
@@ -2029,6 +2127,7 @@ class TestUnaryUfuncsCUDADevice(TestCase):
 
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals(), allow_mps=True)
+instantiate_device_type_tests(TestNativePolygammaNumerics, globals(), except_for=("mps", "xpu"))
 instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")
 instantiate_device_type_tests(TestUnaryUfuncsCUDADevice, globals(), only_for="cuda")
 
