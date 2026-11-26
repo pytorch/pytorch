@@ -8214,6 +8214,67 @@ class TestNNDeviceType(NNTestCase):
                     self.assertEqual(out[start:start + 8], ref)
             del outs
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    def test_layer_norm_vectorized_row_shapes(self, device, dtype):
+        # Vectorized layer_norm / rms_norm launch shapes: narrow rows (N / 4 <= 32, one warp per row for rms_norm on
+        # gfx1250) with row counts around the 8 rows of a block, the first widths past them, 2- and 4-warp rows, and
+        # long rows on each side of N = 32768 (the largest block on gfx1250). Outputs and statistics are checked
+        # against a float64 reference, rows of a batch must match the same rows normalized alone bit for bit, and an
+        # all-zero row (zero variance), a negative-zero row (sign kept), a row with a NaN (NaN only in that row) and
+        # a misaligned (non-vectorized) view are controls.
+        eps = 1e-5
+
+        def reference(x, w, b, rms):
+            x = x.double()
+            if rms:
+                mean = None
+                rstd = (x.pow(2).mean(-1, keepdim=True) + eps).rsqrt()
+                y = x * rstd
+            else:
+                mean = x.mean(-1, keepdim=True)
+                rstd = (x.var(-1, unbiased=False, keepdim=True) + eps).rsqrt()
+                y = (x - mean) * rstd
+            y = y if w is None else y * w.double()
+            y = y if b is None else y + b.double()
+            return y, mean, rstd
+
+        def bits(t):
+            return t.view(torch.int16 if t.element_size() == 2 else torch.int32)
+
+        def norm(x, w, b, rms):
+            n = x.shape[-1]
+            if rms:
+                y, rstd = torch._fused_rms_norm(x, [n], w, eps)
+                return y, None, rstd
+            return torch.native_layer_norm(x, [n], w, b, eps)
+
+        shapes = [(1003, 4), (1003, 52), (1003, 104), (1003, 124), (1003, 128), (1003, 132), (1003, 256), (1003, 260)]
+        shapes += [(1, 128), (7, 128), (8, 128), (9, 128), (17, 52)]
+        shapes += [(3, 32764), (4, 32768), (3, 65536), (4, 212992)]
+        for m, n in shapes:
+            flat = torch.randn(m * n + 4, device=device, dtype=dtype)
+            flat[n:2 * n] = 0.0
+            if m > 3:
+                flat[2 * n:3 * n] = -0.0
+                flat[3 * n + 1] = float("nan")
+            w = torch.randn(n, device=device, dtype=dtype)
+            b = torch.randn(n, device=device, dtype=dtype)
+            for layout, x in (("aligned", flat[:-4].view(m, n)), ("misaligned", flat[1:-3].view(m, n))):
+                for rms, w_, b_ in ((False, w, b), (False, w, None), (False, None, b), (False, None, None), (True, w, None), (True, None, None)):
+                    msg = f"{m}x{n} {layout} rms={rms} weight={w_ is not None} bias={b_ is not None}"
+                    outs = norm(x, w_, b_, rms)
+                    for out, ref in zip(outs, reference(x, w_, b_, rms)):
+                        if ref is not None:
+                            tol = dict(atol=1e-4, rtol=1e-5) if out.dtype == torch.float else {}
+                            self.assertEqual(out, ref.to(out.dtype), msg=msg, **tol)
+                    if m > 3 and layout == "aligned" and rms:
+                        self.assertEqual(torch.signbit(outs[0][2]), torch.signbit(reference(x, w_, b_, rms)[0][2]), msg=msg)
+                    for start, stop in ((0, 1), (m - 1, m), (max(1, m - 9), m)) if m > 1 else ():
+                        for out, ref in zip(outs, norm(x[start:stop], w_, b_, rms)):
+                            if ref is not None:
+                                self.assertEqual(bits(out[start:stop]), bits(ref), msg=f"{msg} rows {start}:{stop}")
+
     def test_glu_bfloat16(self, device):
         def test_dtype(fn, input, dtype):
             input = input.detach().clone().to(dtype=dtype).requires_grad_(True)

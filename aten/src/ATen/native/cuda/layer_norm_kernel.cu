@@ -30,6 +30,9 @@
 
 #ifdef USE_ROCM
 #include <ATen/cuda/detail/ROCmMacros.cuh>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <c10/util/CallOnce.h>
+#include <array>
 #endif
 
 
@@ -375,6 +378,76 @@ __global__ void vectorized_layer_norm_kernel(
   T* Y){
     vectorized_layer_norm_kernel_impl<T, T_ACC, rms_norm>(N, eps, X, gamma, beta, mean, rstd, Y);
   }
+
+#ifdef USE_ROCM
+// gfx1250 rms_norm only: rows of at most one warp of vectors, one warp per row and blockDim.y rows per block.
+// Bitwise identical to vectorized_layer_norm_kernel<T, T_ACC, true> launched with one warp per block (what
+// launch_vectorized_layer_norm_kernel gives these rows on wave32): each row repeats the per-thread Welford loop and
+// WARP_SHFL_DOWN tree of compute_stats and the output expressions of vectorized_layer_norm_kernel_impl, so the two
+// must stay in sync.
+template <typename T, typename T_ACC>
+__global__ void vectorized_rms_norm_warp_per_row_kernel(
+  const int64_t M,
+  const int N,
+  T_ACC eps,
+  const  T* __restrict__ X,
+  const  T* gamma,
+  T_ACC* rstd,
+  T* Y){
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__)
+  if constexpr (!std::is_same_v<T, double>) {
+    using vec_t = aligned_vector<T, vec_size>;
+    using acc_t = acc_type<T, true>;
+    const vec_t * gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
+    const int numx = blockDim.x;
+    const int thrx = threadIdx.x;
+    const int n_vec_to_read = N/vec_size;
+    const int64_t row_stride = static_cast<int64_t>(gridDim.x) * blockDim.y;
+    for (int64_t row = static_cast<int64_t>(blockIdx.x) * blockDim.y + threadIdx.y; row < M; row += row_stride) {
+      const int64_t row_offset = row * static_cast<int64_t>(N);
+      const vec_t * X_vec = reinterpret_cast<const vec_t*>(X + row_offset);
+      vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + row_offset);
+
+      WelfordDataLN wd(0.f, 0.f, 0.f);
+      for (int i = thrx; i < n_vec_to_read; i += numx) {
+        vec_t data = X_vec[i];
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          wd = cuWelfordOnlineSum<acc_t, true>(static_cast<acc_t>(data.val[ii]), wd);
+        }
+      }
+      for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
+        WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset), WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
+        wd = cuWelfordCombine<true>(wd, wdB);
+      }
+      const T_ACC rstd_val = c10::cuda::compat::rsqrt(WARP_SHFL(wd.sigma2, 0) / float(N) + eps);
+
+      for (int i = thrx; i < n_vec_to_read; i += numx) {
+        vec_t data = X_vec[i];
+        vec_t out;
+        if (gamma_vec != nullptr) {
+          #pragma unroll
+          for (int ii=0; ii < vec_size; ii++){
+            out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * static_cast<T_ACC>(data.val[ii]));
+          }
+        } else {
+          #pragma unroll
+          for (int ii=0; ii < vec_size; ii++){
+            out.val[ii] = rstd_val * static_cast<T_ACC>(data.val[ii]);
+          }
+        }
+        Y_vec[i] = out;
+      }
+      if (thrx == 0) {
+        rstd[row] = rstd_val;
+      }
+    }
+  }
+#else
+  CUDA_KERNEL_ASSERT(false && "vectorized_rms_norm_warp_per_row_kernel is gfx1250-only");
+#endif
+}
+#endif
 
 
 template<typename T, typename T_ACC, bool rms_norm>
@@ -1089,6 +1162,67 @@ void LaunchGammaBetaBackwardCUDAKernel(
   }
 }
 
+#ifdef USE_ROCM
+bool is_gfx1250_device(c10::DeviceIndex device_index) {
+  TORCH_INTERNAL_ASSERT(
+      device_index >= 0 && device_index < C10_COMPILE_TIME_MAX_GPUS);
+  static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> once_flags;
+  static std::array<bool, C10_COMPILE_TIME_MAX_GPUS> results{};
+  c10::call_once(once_flags[device_index], [device_index] {
+    results[device_index] =
+        at::detail::getCUDAHooks().isGPUArch({"gfx1250"}, device_index);
+  });
+  return results[device_index];
+}
+
+// Long rows take the largest block when it still leaves every thread at least
+// this many vectors to accumulate before the cross-warp reduction.
+constexpr int kLongRowMinVecsPerThread = 8;
+
+// Rows of at most one warp of vectors, where the default launch gives every row
+// its own one-warp block.
+static inline bool can_use_warp_per_row_rms_norm(int N) {
+  return N / vec_size <= at::cuda::warp_size();
+}
+
+// Requires can_use_warp_per_row_rms_norm(N). Packs num_threads() / warp_size
+// rows into one block, one row per warp.
+template <typename T, typename T_ACC>
+static inline void launch_warp_per_row_rms_norm_kernel(
+    int N,
+    int64_t M,
+    T_ACC eps,
+    const T* X_data,
+    const T* gamma_data,
+    T* Y_data,
+    T_ACC* rstd_data) {
+  const int warp_size = at::cuda::warp_size();
+  const int rows_per_block =
+      static_cast<int>(std::min<int64_t>(num_threads() / warp_size, M));
+  // ROCm rejects gridDim.x * blockDim.x above UINT32_MAX; the kernel strides
+  // over the remaining rows.
+  const int64_t max_blocks = std::numeric_limits<uint32_t>::max() / warp_size;
+  const dim3 threads(warp_size, rows_per_block, 1);
+  const dim3 blocks(
+      static_cast<uint32_t>(std::min<int64_t>(
+          at::ceil_div<int64_t>(M, rows_per_block), max_blocks)));
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
+  vectorized_rms_norm_warp_per_row_kernel<T, T_ACC>
+      <<<blocks, threads, 0, stream>>>(
+          M, N, eps, X_data, gamma_data, rstd_data, Y_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+// True when the largest block (maxThreadsPerBlock) still leaves every thread
+// kLongRowMinVecsPerThread vectors. Depends on N and the device only, not on M,
+// so a row's result does not depend on the batch size.
+static inline bool can_use_long_row_layer_norm(int N) {
+  const int max_threads =
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  return N / vec_size / max_threads >= kLongRowMinVecsPerThread;
+}
+#endif
+
 template <typename T, typename T_ACC, bool rms_norm = false>
 void launch_vectorized_layer_norm_kernel(
   int N,
@@ -1099,7 +1233,8 @@ void launch_vectorized_layer_norm_kernel(
   const T* beta_data,
   T* Y_data,
   T_ACC* mean_data,
-  T_ACC* rstd_data
+  T_ACC* rstd_data,
+  int max_threads_per_row = num_threads()
 ) {
     //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -1107,7 +1242,7 @@ void launch_vectorized_layer_norm_kernel(
     // Only N / vec_size threads have a vector to read. For narrow rows (e.g. per-head
     // q/k norms) launch just enough warps to cover them, instead of idle warps that
     // still take part in the cross-warp reduction.
-    int threads_y = num_threads() / warp_size;
+    int threads_y = max_threads_per_row / warp_size;
     while (threads_y > 1 && (threads_y / 2) * warp_size >= N / vec_size) {
       threads_y /= 2;
     }
@@ -1191,6 +1326,42 @@ void LayerNormKernelImplInternal(
   if ((std::is_same_v<T, float> || std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) &&
   N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && N % num_vec_elems == 0 &&
   can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
+#ifdef USE_ROCM
+    if (is_gfx1250_device(X.device().index())) {
+      // Narrow rows, rms_norm only: its short per-row work leaves them bound by
+      // block dispatch. The host gate must agree with the device gate of
+      // vectorized_rms_norm_warp_per_row_kernel
+      // (__gfx1250__, __gfx1250_strict__ or __SPIRV__); a mismatch asserts.
+      if constexpr (rms_norm) {
+        if (can_use_warp_per_row_rms_norm(static_cast<int>(N))) {
+          launch_warp_per_row_rms_norm_kernel<T, T_ACC>(
+              static_cast<int>(N),
+              M,
+              eps,
+              X_data,
+              gamma_data,
+              Y_data,
+              rstd_data);
+          return;
+        }
+      }
+      // Both ops: long rows take the largest block per row.
+      if (can_use_long_row_layer_norm(static_cast<int>(N))) {
+        launch_vectorized_layer_norm_kernel<T, T_ACC, rms_norm>(
+            static_cast<int>(N),
+            M,
+            eps,
+            X_data,
+            gamma_data,
+            beta_data,
+            Y_data,
+            mean_data,
+            rstd_data,
+            at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock);
+        return;
+      }
+    }
+#endif
     launch_vectorized_layer_norm_kernel<T, T_ACC, rms_norm>(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
   } else {
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
