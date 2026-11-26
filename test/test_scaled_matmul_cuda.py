@@ -1114,7 +1114,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         self.assertEqual(actual, expected)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
+    @skipMPS
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_float8_scale_result_ignored_for_non_float8_out(self, device, out_dtype) -> None:
