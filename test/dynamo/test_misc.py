@@ -3013,6 +3013,89 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
 
+    def test_setattr_readonly_function_closure(self):
+        def make_f():
+            a = 12
+
+            def f():
+                return a
+
+            return f
+
+        def try_readonly(f):
+            results = []
+            try:
+                f.__closure__ = f.__closure__
+            except AttributeError:
+                results.append("set")
+            try:
+                del f.__closure__
+            except AttributeError:
+                results.append("del")
+            try:
+                f.__globals__ = {}
+            except AttributeError:
+                results.append("globals")
+            try:
+                f.__builtins__ = {}
+            except AttributeError:
+                results.append("builtins")
+            return results
+
+        def nested(x):
+            return x + 1, try_readonly(make_f())
+
+        def sourced(x, f):
+            return x + 1, try_readonly(f)
+
+        x = torch.ones(1)
+        for fn, args in ((nested, (x,)), (sourced, (x, make_f()))):
+            ref = fn(*args)
+            res = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            self.assertEqual(ref, res)
+            self.assertEqual(res[1], ["set", "del", "globals", "builtins"])
+
+    def test_setattr_writable_function_attributes(self):
+        def make_g():
+            def g():
+                pass
+
+            return g
+
+        def fn(x, g):
+            g.foo = 1
+            g.__annotations__ = {"x": int}
+            return x + g.foo
+
+        x = torch.ones(1)
+        g_ref, g_res = make_g(), make_g()
+        ref = fn(x, g_ref)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, g_res)
+        self.assertEqual(ref, res)
+        self.assertEqual(g_res.foo, 1)
+        self.assertEqual(g_res.__annotations__, {"x": int})
+
+    def test_setattr_readonly_names_on_lru_cache_wrapper(self):
+        @functools.lru_cache
+        def g():
+            return 1
+
+        def fn(x):
+            try:
+                g.__closure__ = None
+                ok = True
+            except AttributeError:
+                ok = False
+            return x + 1, ok
+
+        # The lru_cache wrapper is not a FunctionType, so eager allows the write.
+        # Replaying it onto the wrapper's __dict__ is tracked in #202350.
+        x = torch.ones(1)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(ref, res)
+        self.assertTrue(res[1])
+
     # Asserting on the graph break counters rather than on the compiled result:
     # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method
     # and turns a failure to trace the comparison into a silent fall back to
@@ -5425,27 +5508,26 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     )
     def test_ordered_dict_copy_input_order(self, copier):
         def fn(x, od):
-            key = next(reversed(copier(od)))
-            return x + (key == "first key"), key
+            result = copier(od)
+            return x + (next(reversed(result)) == "first key"), next(iter(result))
 
         counter = CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.tensor(10)
-        value = [1]
-        original = collections.OrderedDict(b=value)
-        original[b"first key".decode()] = None
+        original = collections.OrderedDict.fromkeys(["".join(["first", " key"]), "b"])
+        original["b"] = value = [1]
         equal_key = "".join(["first", " key"])
-        self.assertIsNot(next(reversed(original)), equal_key)
+        self.assertIsNot(next(iter(original)), equal_key)
         self.assertEqual(compiled(x, original), fn(x, original))
         original.clear()
-        original.update([("b", value), (equal_key, None)])
+        original.update([(equal_key, None), ("b", value)])
         result = compiled(x, original)
         self.assertEqual(result, fn(x, original))
         self.assertIs(result[1], equal_key)
         self.assertEqual(counter.frame_count, 1)
         reversed_input = collections.OrderedDict(reversed(list(original.items())))
         self.assertEqual(compiled(x, reversed_input), fn(x, reversed_input))
-        original.move_to_end(equal_key, last=False)
+        original.move_to_end(equal_key)
         self.assertEqual(compiled(x, original), fn(x, original))
 
     @parametrize("copier", [copy.copy, copy.deepcopy])
@@ -5468,33 +5550,48 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     @parametrize("via_dict", [False, True])
     @parametrize("local", [False, True])
     def test_ordered_dict_copy_after_instance_dict_write(self, copier, via_dict, local):
-        value = [42]
-
         def fn(x, od):
-            if local:
-                od = collections.OrderedDict(a=1)
+            view, od, copied = copy_with_state(od)
+            return x + next(iter(view)), od, copied
+
+        def copy_with_state(inp):
+            od = collections.OrderedDict(a=1) if local else inp
             view = od.values()
             if via_dict:
                 od.__dict__["tag"] = value
             else:
                 od.tag = value
-            return x + next(iter(view)), od, copier(od)
+            return view, od, copier(od)
 
+        value = [42]
         x = torch.tensor(10)
         inp = collections.OrderedDict(a=1)
         if local:
-            with self.assertRaisesRegex(Unsupported, "__deepcopy__|__reduce_ex__"):
+            with self.assertRaisesRegex(Unsupported, r"OrderedDict\.__reduce_ex__"):
                 torch.compile(fn, backend="eager", fullgraph=True)(x, inp)
-        compiled = torch.compile(fn, backend="eager")
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
         result, od, copied = compiled(x, inp)
         self.assertEqual(result, x + 1)
         self.assertEqual(copied.tag, [42])
         self.assertEqual(copied.tag is od.tag, copier is copy.copy)
         self.assertIs(od.tag, value)
-        if not local:
-            self.assertIs(od, inp)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            compiled(x, collections.OrderedDict(a=1))
+        self.assertEqual(od is inp, not local)
+        compiled(x, collections.OrderedDict(a=1))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_return_ordered_dict_with_instance_state(self):
+        def fn(x):
+            value = collections.OrderedDict(a=x)
+            value.__dict__["tag"] = x
+            return value, value.tag
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(Unsupported, "returning a local OrderedDict"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        value, tag = torch.compile(fn, backend="eager")(x)
+        self.assertIs(value["a"], x)
+        self.assertIs(value.tag, tag)
 
     @parametrize("copier", [copy.copy, copy.deepcopy])
     def test_ordered_dict_copy_after_possible_instance_dict_alias_write(self, copier):

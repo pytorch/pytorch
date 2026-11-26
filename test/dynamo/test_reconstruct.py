@@ -99,7 +99,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             compiled(torch.ones(3), replacement), fn(torch.ones(3), replacement)
         )
 
-    @parametrize("target", ["scalar", "nested", "attribute"])
+    @parametrize("target", ["scalar", "nested", "attribute", "graph_break"])
     def test_storage_offset_reconstruction_after_data_swap(self, target):
         class Box:
             pass
@@ -107,6 +107,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         def fn(x, y, box):
             offset = x.storage_offset()
             x.data = y
+            if target == "graph_break":
+                torch._dynamo.graph_break()
             if target == "attribute":
                 box.key = (offset, "value")
                 return x + 1
@@ -116,13 +118,14 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             return torch.ones(4)[offset : offset + 3], torch.ones(2, 5)[:, 1:], Box()
 
         counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled = torch.compile(fn, backend=counter, fullgraph=target != "graph_break")
+        initial_frames = 2 if target == "graph_break" else 1
         for index, offset in enumerate((0, 0, 1)):
             eager_inputs, compiled_inputs = inputs(offset), inputs(offset)
             self.assertEqual(compiled(*compiled_inputs), fn(*eager_inputs))
             if target == "attribute":
                 self.assertEqual(compiled_inputs[2].key, eager_inputs[2].key)
-            self.assertEqual(counter.frame_count, 1 if index < 2 else 2)
+            self.assertEqual(counter.frame_count, initial_frames + (index == 2))
 
     @parametrize("leaf", ["int", "bool", "computed"])
     @parametrize("aggregate", ["tuple", "list", "slice_list", "slice_dict"])

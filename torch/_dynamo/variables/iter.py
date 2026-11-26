@@ -336,22 +336,6 @@ class IteratorVariable(VariableTracker):
         return self
 
 
-class FormatIteratorVariable(IteratorVariable):
-    def __init__(self, iterator: Any) -> None:
-        super().__init__()
-        self.iterator = iterator
-
-    def python_type(self) -> type:
-        return type(self.iterator)
-
-    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        try:
-            item = next(self.iterator)
-        except (StopIteration, ValueError) as exc:
-            raise_observed_exception(type(exc), tx, args=list(exc.args))
-        return VariableTracker.build(tx, item)
-
-
 class ChainVariable(IteratorVariable):
     """
     Represents itertools.chain(*iterables) — yields one item per tp_iternext_impl call.
@@ -1007,31 +991,35 @@ class DictViewIterator(IteratorVariable):
         return iterator_cls(items, view_type=cls.view_type, owner=owner)
 
     @staticmethod
-    def _can_reconstruct(
+    def _reconstruction_blocker(
         tx: "InstructionTranslatorBase", container: VariableTracker
-    ) -> bool:
+    ) -> str | None:
         from .dicts import ConstDictVariable, DunderDictVariable
         from .sets import BaseSetVariable
 
         if not container.source:
-            return True
+            # Reconstructing a new object's namespace emits a copy of its entries.
+            return (
+                "new instance namespace"
+                if isinstance(container, DunderDictVariable)
+                else None
+            )
         # Stack reconstruction precedes replay of mutations to a live input.
         side_effects = tx.output.side_effects
         if side_effects.is_modified(container):
-            return False
-        if container.python_type() is dict and any(
-            attrs and not isinstance(var, variables.CellVariable)
-            for var, attrs in side_effects.store_attr_mutations.items()
-        ):
+            return f"pending mutation of {container.source}"
+        if issubclass(container.python_type(), dict):
             # A dict input can alias an instance namespace or the globals on a cache hit.
-            return False
+            for var, attrs in side_effects.store_attr_mutations.items():
+                if attrs and not isinstance(var, variables.CellVariable):
+                    return f"possible alias of a namespace with a pending write to {next(iter(attrs))!r}"
         if isinstance(container, DunderDictVariable):
             owner = container.items.item
             modified_sources = side_effects.mutated_dict_sources
             if modified_sources:
                 namespace = container.items.get_example_value_dict(owner)
                 if type(namespace) is not dict:
-                    return False
+                    return "cannot exclude aliases of a modified namespace"
                 # Only read frame bindings here. Resolving an arbitrary attribute
                 # could invoke user code while checking for an alias.
                 frame = tx.output.root_tx
@@ -1041,9 +1029,9 @@ class DictViewIterator(IteratorVariable):
                     elif type(src) is GlobalSource:
                         binding = frame.f_globals.get(src.global_name)
                     else:
-                        return False
+                        return f"cannot exclude an alias of {src}"
                     if type(binding) is not dict or binding is namespace:
-                        return False
+                        return f"possible alias of modified mapping {src}"
         else:
             modified_sources = (
                 var.source
@@ -1061,10 +1049,10 @@ class DictViewIterator(IteratorVariable):
                 or not (is_from_local_source(s) or is_from_global_source(s))
                 for s in sources
             ):
-                return False
+                return f"cannot guard against an alias of {source}"
             check = functools.partial(GuardBuilder.NOT_DUPLICATE_INPUT, source_b=source)
             install_guard(container.make_guard(check))
-        return True
+        return None
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         from .dicts import ConstDictVariable, DictKeysVariable, DictViewVariable
@@ -1076,13 +1064,13 @@ class DictViewIterator(IteratorVariable):
         container = owner.dv_dict if isinstance(owner, DictViewVariable) else owner
         if not isinstance(container, (ConstDictVariable, BaseSetVariable)):
             return super().reconstruct(codegen)
-        if not self._can_reconstruct(codegen.tx, container):
+        if reason := self._reconstruction_blocker(codegen.tx, container):
             unimplemented(
-                gb_type="Iterator reconstruction before an input mutation",
-                context=str(container.source),
-                explanation="Reconstructing the iterator before pending mutations are replayed could change which elements it sees.",
+                gb_type="Cannot reconstruct a live container iterator",
+                context=reason,
+                explanation="Rebuilding the iterator could change its backing container or the mutations it observes.",
                 hints=[
-                    "Create the iterator after returning from the compiled function.",
+                    "Keep iterator creation and consumption in the same region, or create the iterator in eager code.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
