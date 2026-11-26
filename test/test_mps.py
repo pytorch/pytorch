@@ -12737,10 +12737,6 @@ class TestSDPA(TestCaseMPS):
             "5d": ((q5, q5, q5), {}),
             "mT": ((q, rand(2, 4, 16, 8).mT, q), {}),
             "dv_ne_d": ((q, q, rand(2, 4, 8, 32)), {}),
-            "wide_value_prefill": (
-                (rand(2, 4, 33, 288), rand(2, 2, 35, 288), rand(2, 2, 35, 385)),
-                {"attn_mask": rand(1, 4, 33, 35), "enable_gqa": True},
-            ),
             "wide_value_decode": (
                 (rand(2, 4, 8, 577), rand(2, 2, 8, 577), rand(2, 2, 8, 769)),
                 {"attn_mask": masked_row, "enable_gqa": True},

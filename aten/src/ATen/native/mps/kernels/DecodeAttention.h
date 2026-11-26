@@ -578,10 +578,7 @@ METAL_FUNC float4 sdpa_wide_load4(const device T* values) {
 }
 
 template <typename T, bool HasMask, bool IsCausal, typename MaskType>
-[[kernel,
-  max_total_threads_per_threadgroup(
-      kDecodeSimdgroups * c10::metal::simdgroup_size)]] void
-sdpa_vector_wide(
+[[kernel, max_total_threads_per_threadgroup(kDecodeSimdgroups* c10::metal::simdgroup_size)]] void sdpa_vector_wide(
     const device T* q [[buffer(0)]],
     const device T* k [[buffer(1)]],
     const device T* v [[buffer(2)]],
@@ -605,12 +602,10 @@ sdpa_vector_wide(
   const uint key = group / splits;
   const uint split = group % splits;
   const uint kv_head = grid.y / params->gqa_factor;
-  q += grid.z * params->Q_strides[0] + grid.y * params->Q_strides[1] +
-      grid.x * params->Q_strides[2];
+  q += grid.z * params->Q_strides[0] + grid.y * params->Q_strides[1] + grid.x * params->Q_strides[2];
   k += grid.z * params->K_strides[0] + kv_head * params->K_strides[1];
   v += grid.z * params->V_strides[0] + kv_head * params->V_strides[1];
-  out += grid.z * params->O_strides[0] + grid.y * params->O_strides[1] +
-      grid.x * params->O_strides[2];
+  out += grid.z * params->O_strides[0] + grid.y * params->O_strides[1] + grid.x * params->O_strides[2];
 
   threadgroup float partial[kDecodeSimdgroups];
   threadgroup float weights[kWideDecodeMaxKeys];
@@ -643,10 +638,8 @@ sdpa_vector_wide(
         score = lane <= grid.x ? score : -INFINITY;
       }
       if IF_CONSTEXPR (HasMask) {
-        const auto bias = mask[grid.z * mask_params->M_strides[0] +
-                               grid.y * mask_params->M_strides[1] +
-                               grid.x * mask_params->M_strides[2] +
-                               lane * mask_params->M_strides[3]];
+        const auto bias = mask[grid.z * mask_params->M_strides[0] + grid.y * mask_params->M_strides[1] +
+                               grid.x * mask_params->M_strides[2] + lane * mask_params->M_strides[3]];
         if IF_CONSTEXPR (is_same_v<MaskType, bool>) {
           score = bias ? score : -INFINITY;
         } else {
@@ -663,8 +656,7 @@ sdpa_vector_wide(
     }
     if (lse && lane == 0) {
       const ulong offset = (ulong(grid.z) * params->H + grid.y) * params->qL + grid.x;
-      lse[offset] = empty_row ? INFINITY
-                              : (max_score + metal::log2(denominator)) * M_LN2_F;
+      lse[offset] = empty_row ? INFINITY : (max_score + metal::log2(denominator)) * M_LN2_F;
     }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -676,8 +668,7 @@ sdpa_vector_wide(
       const device T* value = v + i * params->V_strides[2] + column;
       acc = fma(weights[i], sdpa_wide_load4(value), acc);
     }
-    *reinterpret_cast<device Packed4*>(out + column) =
-        Packed4(T(acc.x), T(acc.y), T(acc.z), T(acc.w));
+    *reinterpret_cast<device Packed4*>(out + column) = Packed4(T(acc.x), T(acc.y), T(acc.z), T(acc.w));
   }
   for (; column < value_dim; ++column) {
     float acc = 0.0f;
@@ -688,19 +679,14 @@ sdpa_vector_wide(
   }
 }
 
-#define INSTANTIATE_SDPA_VECTOR_WIDE(dtype, hm, dc, mtype)                  \
-  instantiate_kernel(                                                     \
-      "sdpa_vector_wide_" #dtype "_hm" #hm "_dc" #dc "_mask" #mtype,         \
-      sdpa_vector_wide,                                                    \
-      dtype,                                                              \
-      hm,                                                                 \
-      dc,                                                                 \
-      mtype)
+#define INSTANTIATE_SDPA_VECTOR_WIDE(dtype, hm, dc, mtype) \
+  instantiate_kernel(                                      \
+      "sdpa_vector_wide_" #dtype "_hm" #hm "_dc" #dc "_mask" #mtype, sdpa_vector_wide, dtype, hm, dc, mtype)
 
-#define INSTANTIATE_SDPA_VECTOR_WIDE_MASKS(dtype)       \
-  INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 0, 0, dtype);     \
-  INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 0, 1, dtype);     \
-  INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 1, 0, dtype);     \
+#define INSTANTIATE_SDPA_VECTOR_WIDE_MASKS(dtype)   \
+  INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 0, 0, dtype); \
+  INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 0, 1, dtype); \
+  INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 1, 0, dtype); \
   INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 1, 0, bool)
 
 INSTANTIATE_SDPA_VECTOR_WIDE_MASKS(float);

@@ -251,15 +251,13 @@ static void sdpa_prefill_mps(const Tensor& q,
   const bool exact_simd_tile = widest > kMppTiles.back() && widest <= kMppMaxSimdTile && dv > kMppTiles.back();
   const bool use_mpp = at::mps::has_mpp() && q.scalar_type() != kFloat && k.size(2) > 0 &&
       (exact_mpp_tile || (is_apple10_or_newer && !exact_simd_tile));
-  const bool reuse_scores = !use_mpp && dv > kPrefillTiles.back() && k.size(2) > 0;
-  const bool wide_decode = reuse_scores && q.size(2) <= kDecodeMaxQueries && k.size(2) <= kWideDecodeMaxKeys;
+  const bool wide_decode = !use_mpp && dv > kPrefillTiles.back() && k.size(2) > 0 && q.size(2) <= kDecodeMaxQueries &&
+      k.size(2) <= kWideDecodeMaxKeys;
   const c10::ArrayRef<int> tiles = use_mpp ? c10::ArrayRef<int>(kMppTiles) : c10::ArrayRef<int>(kPrefillTiles);
   const int64_t bd = use_mpp && exact_mpp_tile ? d
       : widest > tiles.back()                  ? kChunkTile
                                                : *std::lower_bound(tiles.begin(), tiles.end(), widest);
-  const int64_t simdgroups = wide_decode ? kDecodeSimdgroups
-      : use_mpp                         ? kPrefillSimdgroups
-                                        : prefill_simdgroups(bd);
+  const int64_t simdgroups = wide_decode ? kDecodeSimdgroups : use_mpp ? kPrefillSimdgroups : prefill_simdgroups(bd);
   const int64_t bq = wide_decode ? 1 : use_mpp ? kMppBQ : prefill_bq(bd);
 
   std::optional<Tensor> mask = mask_;
@@ -274,13 +272,8 @@ static void sdpa_prefill_mps(const Tensor& q,
 
   const auto dtype = scalarToMetalTypeString(q);
   const auto mask_dtype = mask ? scalarToMetalTypeString(*mask) : dtype;
-  const auto kname = reuse_scores
-      ? fmt::format("{}_{}_hm{:d}_dc{:d}_mask{}",
-                    wide_decode ? "sdpa_vector_wide"sv : "prefill_attention_reuse"sv,
-                    dtype,
-                    mask.has_value(),
-                    is_causal,
-                    mask_dtype)
+  const auto kname = wide_decode
+      ? fmt::format("sdpa_vector_wide_{}_hm{:d}_dc{:d}_mask{}", dtype, mask.has_value(), is_causal, mask_dtype)
       : use_mpp ? fmt::format("prefill_attention_mpp_{}_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_mask{}",
                               is_apple10_or_newer ? "a10"sv : "pre_a10"sv,
                               dtype,
@@ -299,20 +292,15 @@ static void sdpa_prefill_mps(const Tensor& q,
                               mask_dtype);
   const auto pso = lib.getPipelineStateForFunc(kname);
   const int64_t nq = at::ceil_div(q.size(2), bq);
-  const int64_t step = reuse_scores                       ? dv
+  const int64_t step = wide_decode                        ? dv
       : use_mpp && nq * q.size(0) * q.size(1) < core_grid ? std::max(dv / bd * bd, bd)
                                                           : bd;
-  Tensor partial;
-  const int64_t key_span = is_causal ? std::min(q.size(2), k.size(2)) : k.size(2);
-  if (reuse_scores && !wide_decode && key_span > prefill_bk(bd) && out.scalar_type() != kFloat) {
-    partial = at::empty(out.sizes(), out.options().dtype(kFloat));
-  }
   const MTLSize threadgroup = MTLSizeMake(c10::metal::simdgroup_size, simdgroups, 1);
   MPSStream* mpsStream = getCurrentMPSStream();
   for (int64_t v0 = 0; v0 < dv; v0 += step) {
-    const auto vs = reuse_scores ? v : v.narrow(3, v0, std::min(step, dv - v0));
-    const auto os = reuse_scores ? out : out.narrow(3, v0, vs.size(3));
-    const int64_t slabs = reuse_scores ? 1 : at::ceil_div(vs.size(3), bd);
+    const auto vs = wide_decode ? v : v.narrow(3, v0, std::min(step, dv - v0));
+    const auto os = wide_decode ? out : out.narrow(3, v0, vs.size(3));
+    const int64_t slabs = wide_decode ? 1 : at::ceil_div(vs.size(3), bd);
     TORCH_INTERNAL_ASSERT(vs.size(3) % slabs == 0);
     const MTLSize grid = MTLSizeMake(nq, q.size(1), q.size(0) * slabs);
     const PrefillAttnParams params{
@@ -343,9 +331,6 @@ static void sdpa_prefill_mps(const Tensor& q,
           mtl_setArgs<6>(computeEncoder, *mask);
         }
         mtl_setArgs<7>(computeEncoder, lse_);
-        if (reuse_scores && !wide_decode) {
-          mtl_setArgs<8>(computeEncoder, partial.defined() ? partial : out);
-        }
         [computeEncoder dispatchThreadgroups:grid threadsPerThreadgroup:threadgroup];
       }
     });
