@@ -6,7 +6,6 @@ import inspect
 import math
 import operator
 import os
-import re
 import sys
 import unittest
 
@@ -446,6 +445,31 @@ def _record_launches():
         if dtypes:
             (dtype,) = dtypes
             launched.append((dtype, dict(self.size_hints)))
+        return run(self, *args, **kwargs)
+
+    with unittest.mock.patch.object(CachingAutotuner, "run", recording_run):
+        yield launched
+
+
+@contextlib.contextmanager
+def _record_launch_numels():
+    """Record (index dtype, numel) for every Triton kernel launched inside the block:
+    the numel is the product of the numel args passed to that launch."""
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+    launched: list[tuple[str, int]] = []
+    run = CachingAutotuner.run
+
+    def recording_run(self, *args, **kwargs):
+        signature = self.triton_meta["signature"]
+        numels = [
+            (signature[name], arg)
+            for name, arg in zip(signature, args)
+            if "numel" in name and isinstance(arg, int)
+        ]
+        if numels:
+            dtype = "i64" if any(t == "i64" for t, _ in numels) else "i32"
+            launched.append((dtype, math.prod(arg for _, arg in numels)))
         return run(self, *args, **kwargs)
 
     with unittest.mock.patch.object(CachingAutotuner, "run", recording_run):
@@ -1148,13 +1172,16 @@ class TestInductorDynamic(DynamicShapesTestCase):
             big = torch.randint(
                 -3, 3, (2**16 + 1, 2**15), dtype=torch.int8, device=device
             )
-            with _record_launches() as launched:
+            with _record_launches() as launched, _record_launch_numels() as numels:
                 actual = compiled(big)
             if dual:
-                # The int64 kernel runs, tuned for sizes past int32. (Smaller kernels,
-                # like the second stage of a split reduction on GPUs below sm100,
-                # run int32.)
-                self.assertIn("i64", {dtype for dtype, _ in launched})
+                # Each launch runs the kernel for the numel it gets: int64 past int32,
+                # int32 otherwise (e.g. the second stage of a split reduction, which
+                # this sum is on GPUs below sm100).
+                self.assertIn("i64", {dtype for dtype, _ in numels})
+                for dtype, numel in numels:
+                    self.assertEqual(dtype, "i64" if numel > 2**31 - 1 else "i32")
+                # The int64 kernel is tuned for sizes past int32.
                 for dtype, size_hints in launched:
                     if dtype == "i64":
                         self.assertGreaterEqual(math.prod(size_hints.values()), 2**31)
@@ -1188,40 +1215,33 @@ class TestInductorDynamic(DynamicShapesTestCase):
     @onlyAccelerator
     @config.patch({"trace.provenance_tracking_level": 1, "force_disable_caches": True})
     def test_dual_index_dtype_provenance(self, device):
-        """Provenance tracking records both the int32 and the int64 kernel of a dual
-        pair, each with its own debug handle."""
-        import torch._inductor.codegen.triton as triton_codegen
+        """The provenance mapping (kernel -> post-grad nodes) has both the int32 and
+        the int64 kernel of a dual pair, each mapped to the nodes it computes."""
         from torch._inductor import debug
 
         def fn(x):
             return x.sum(-1)
 
-        recorded: dict[str, list[str]] = {}
-        set_tracing = debug.set_kernel_post_grad_provenance_tracing
+        dumps = []
+        dump = debug.dump_inductor_provenance_info
 
-        def recording(node_schedule, kernel_name, *args, **kwargs):
-            names = [n.get_name() for n in node_schedule if hasattr(n, "get_name")]
-            recorded[kernel_name] = names
-            return set_tracing(node_schedule, kernel_name, *args, **kwargs)
+        def recording_dump():
+            dumps.append(dump())
+            return dumps[-1]
 
         with (
             debug.reset_provenance_globals(),
             config.patch(dual_index_dtype_kernels=True),
             unittest.mock.patch.object(
-                debug, "set_kernel_post_grad_provenance_tracing", recording
-            ),
-            unittest.mock.patch.object(
-                triton_codegen, "set_kernel_post_grad_provenance_tracing", recording
+                debug, "dump_inductor_provenance_info", recording_dump
             ),
         ):
-            _, (code, *_) = run_and_get_code(
-                torch.compile(fn, dynamic=True), torch.randn(64, 512, device=device)
-            )
-        handles = re.findall(r"\[Provenance debug handles\] (\w+):\d+", code)
-        self.assertEqual(len(set(handles)), 2)
-        # Both kernels are mapped to the same nodes.
-        self.assertEqual(sorted(recorded), sorted(set(handles)))
-        (nodes0, nodes1) = recorded.values()
+            torch.compile(fn, dynamic=True)(torch.randn(64, 512, device=device))
+        (mapping,) = (d["cppCodeToPost"] for d in dumps if d.get("cppCodeToPost"))
+        # Keys are "<kernel name>:<debug handle>".
+        kernels = {key.rsplit(":", 1)[0]: nodes for key, nodes in mapping.items()}
+        self.assertEqual(len(kernels), 2)
+        (nodes0, nodes1) = kernels.values()
         self.assertTrue(nodes0)
         self.assertEqual(nodes0, nodes1)
 
