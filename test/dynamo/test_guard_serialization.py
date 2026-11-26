@@ -1927,8 +1927,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertIs(item.loss.cfg, saved["cfgs"][i])
             self.assertEqual(item.loss(), i)
 
-    @parametrize("token_live", [False, True])
-    def test_mapping_proxy_keeps_only_its_copied_state(self, token_live):
+    def test_mapping_proxy_keeps_only_its_copied_state(self):
         token = DictionaryToken(value=3, payload=["required"])
         cfg = {"token": token}
         backing = ClassReducedDict(token)
@@ -1955,12 +1954,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertIsInstance(saved["unused"][name], _Missing)
 
         def copy():
-            consumer = TokenConsumer(token) if token_live else _MappingCallable(cfg)
-            return {"nested": [consumer], "rank": backing.copy.call_count}
+            return {"nested": [_MappingCallable(cfg)], "rank": backing.copy.call_count}
 
         backing.copy = mock.Mock(side_effect=copy)
-        if token_live:
-            scope = {"token": token, **scope}
         scope["second"] = types.MappingProxyType(backing)
         with self.assertRaisesRegex(PackageError, "guarded input"):
             self._roundtrip_pruned(scope, [cfg, unused])
@@ -1968,12 +1964,18 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         backing.copy.reset_mock()
         saved = self._roundtrip_pruned(scope, [cfg, unused], token, token.payload)
         self.assertEqual((saved["proxy"]["rank"], saved["second"]["rank"]), (1, 2))
-        consumer = saved["get"]("nested")[0]
-        if token_live:
-            self.assertIs(consumer.token, saved["cfg"]["token"])
-        else:
-            self.assertIs(consumer.cfg, saved["cfg"])
+        self.assertIs(saved["get"]("nested")[0].cfg, saved["cfg"])
         self.assertEqual(backing.copy.call_count, 2)
+
+    def test_mapping_proxy_copy_needs_pruned_list_item(self):
+        token = DictionaryToken()
+        backing = PlainNamespaceDict()
+        backing.copy = mock.Mock(return_value={"consumer": TokenConsumer(token)})
+        scope = {"items": [token], "proxy": types.MappingProxyType(backing)}
+        with self.assertRaisesRegex(PackageError, "mapping proxy copy needs pruned"):
+            self._roundtrip_pruned(scope, [])
+        saved = self._roundtrip_pruned(scope, [], token)
+        self.assertIs(saved["proxy"]["consumer"].token, saved["items"][0])
 
     def test_dictionary_pruning_does_not_call_metaclass_equality(self):
         class Meta(type):
@@ -3624,28 +3626,31 @@ class TestGuardSerialization(TestGuardSerializationBase):
         check(inputs, True)
         return check
 
-    @parametrize("annotation", [False, True])
-    def test_list_leaf_alias_in_saved_constructor(self, annotation):
+    def test_annotation_aliases_unguarded_module_attribute(self):
+        def fn(x, m):
+            return m.linear(x)
+
+        m = GlobalNestedModule()
+        m.stages = [0, 1]
+        inputs = {"x": torch.ones(1, 10), "m": m}
+        with torch.fx.traceback.annotate({"stages": m.stages}):
+            check = self._roundtrip_checks(("TYPE_MATCH", "FX_ANNOTATION"), fn, inputs)
+        check(inputs, False)
+
+    def test_list_leaf_alias_in_saved_constructor(self):
         def fn(x, items, holder):
             return x + items[1] + holder.weight
 
-        token, holder = DictionaryToken(), DictionaryToken(weight=3)
-        consumer = TokenConsumer(token)
-        if not annotation:
-            holder.cb = consumer.__reduce_ex__
-        metadata = {"consumer": consumer, "token": token} if annotation else {}
-        with torch.fx.traceback.annotate(metadata):
+        first, second = DictionaryToken(), DictionaryToken()
+        holder = DictionaryToken(weight=3, cb=TokenConsumer(first).__reduce_ex__)
+        with torch.fx.traceback.annotate({"consumer": TokenConsumer(second)}):
             self._test_serialization(
-                "CONSTANT_MATCH", fn, torch.ones(1), [token, 5], holder
+                "CONSTANT_MATCH", fn, torch.ones(1), [first, 5, second], holder
             )
         graph = load_guards_state(self._cached_guards_state).output_graph
         items = graph.local_scope["items"]
-        if annotation:
-            self.assertIs(graph.fx_annotation["token"], items[0])
-            consumer = graph.fx_annotation["consumer"]
-        else:
-            consumer = graph.local_scope["holder"].cb.__self__
-        self.assertIs(consumer.token, items[0])
+        self.assertIs(graph.local_scope["holder"].cb.__self__.token, items[0])
+        self.assertIs(graph.fx_annotation["consumer"].token, items[2])
 
     @parametrize("helper_type", [DictionaryToken, ReducedHolder, TokenConsumer])
     @parametrize("mapping_type", [dict, collections.defaultdict])
