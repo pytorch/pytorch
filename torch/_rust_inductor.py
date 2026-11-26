@@ -2466,15 +2466,22 @@ def _span_holds(checks, args) -> bool:
     return True
 
 
-def _held(outs, old) -> list[Any]:
+def _held(outs, old, given) -> list[Any]:
     """The lists, dicts and sets among ``outs`` (and in what a region builds
     for them) that were there before the traced run, which the run came by
     through something it read (a global, an attribute, an item, a cell)
-    rather than through its arguments. A region hands back the very object,
-    as it does one an argument holds: only what the run itself made is built
-    anew. Each is added to ``old`` (which tells _template) and returned: a
-    later call must come by the same object (see _lost)."""
-    known = _rust()._region_known
+    rather than through its arguments (``given``). A region hands back the
+    very object, as it does one an argument holds: only what the run itself
+    made is built anew. Each is added to ``old`` (which tells _template) and
+    returned: a later call must come by the same object (see _lost).
+
+    One that is neither raises _Refused: the run is not seen to make it
+    (exec/made.rs: a display, a comprehension, a class or a copy-maker
+    called), and no read leads to it from what was there before (that the
+    run read FROM it says nothing: it reads what it made too). The trace's
+    object handed back would have the traced call's content, and a copy
+    would not be the object the program holds."""
+    known, made = _rust()._region_known, _rust()._region_made
     held: list[Any] = []
     seen: set[int] = set()
     todo = list(outs)
@@ -2484,7 +2491,12 @@ def _held(outs, old) -> list[Any]:
             if id(x) in seen or id(x) in old:
                 continue
             seen.add(id(x))
-            if known(x):
+            if not made(x):
+                if not known(x, given):
+                    raise _Refused(
+                        f"it hands on a {type(x).__name__} that its run is not seen to make "
+                        "and that none of its reads leads to"
+                    )
                 old[id(x)] = True
                 held.append(x)
                 continue
@@ -2497,13 +2509,13 @@ def _held(outs, old) -> list[Any]:
     return held
 
 
-def _lost(reads, held) -> str | None:
+def _lost(reads, held, given) -> str | None:
     """Why a region cannot hand back one of ``held`` (see _held), or None:
     nothing its trace read, which is what is checked before the region is
     entered, leads to the object, so a later call might use another one in
     its place."""
     for x in held if reads is not None else ():
-        if not reads.knows(x):
+        if not reads.knows(x, given):
             return f"it hands on a {type(x).__name__} that was there before it ran and that none of its reads leads to"
     return None
 
@@ -2611,6 +2623,9 @@ def trace_region(
     locs: list[Any] = []
     state = {"specialized": set()}
 
+    # What was there before the run for sure: the arguments, and what a
+    # tuple or a list among them holds.
+    roots = [*args, *(i for a in args if isinstance(a, (tuple, list)) for i in a)]
     in_vm = block_pipeline is not None
     _skip_tracer_frames()
     # The trace records below autocast: the graph holds the casts autocast
@@ -2668,10 +2683,17 @@ def trace_region(
             # A container that was there before the run is handed back as the
             # object it is, never as a copy, whatever the run came by it
             # through.
-            result["held"] = _held(outs, old)
             tensor_outs: list[Any] = []
             objects: list[Any] = []
-            if span and _shared_container(outs, old):
+            try:
+                result["held"] = _held(outs, old, roots)
+            except _Refused as e:
+                result["refused"] = str(e)
+                return []
+            # (A block that ends in front of a call hands on what the call
+            # is to be handed, next to its locals: `out.append(y)` with the
+            # list `out` made in the block.)
+            if _shared_container(outs, old):
                 result["refused"] = "its outputs share a container"
                 return []
 
@@ -2725,8 +2747,8 @@ def trace_region(
     # run read leads to them.
     unchecked = (
         unchecked
-        or _lost(reads, result.get("held", ()))
-        or written.unreachable(reads)
+        or _lost(reads, result.get("held", ()), roots)
+        or written.unreachable(reads, roots)
     )
     if unchecked is not None:
         result.setdefault("refused", unchecked)

@@ -168,11 +168,12 @@ class Written:
             key = f" {vs[0]!r}" if vs and type(vs[0]) in (str, int) else ""
             self.text.append(f"{name}{key} of a {type(target).__name__}")
 
-    def unreachable(self, reads) -> str | None:
+    def unreachable(self, reads, given) -> str | None:
         """Why the region cannot hold one of its targets (see the module's
         guarantees), or None. ``reads``: what the trace read
-        (torch._rust.Reads), or None for a trace that read nothing."""
+        (torch._rust.Reads), or None for a trace that read nothing;
+        ``given``: the region's arguments, which were there before the run."""
         for target in self.pinned if reads is not None else ():
-            if not reads.knows(target):
+            if not reads.knows(target, given):
                 return f"it writes to a {type(target).__name__} that nothing it read leads to"
         return None

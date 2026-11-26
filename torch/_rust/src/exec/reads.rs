@@ -45,12 +45,14 @@
 // (autocast, the default dtype, deterministic algorithms) is one integer,
 // taken when the trace starts and compared first.
 //
-// Two kinds of entries are dropped rather than checked. One whose holder
+// Three kinds of entries are dropped rather than checked. One whose holder
 // doesn't hold what was read any more when the trace ends: the traced run
 // changed it itself, and it was something the run made (a list it builds,
-// the object it constructs). And one whose holder nothing else refers to:
-// nothing can change it. Both keep the traced call's temporaries from being
-// kept alive, and from failing every check.
+// the object it constructs). One whose holder nothing else refers to:
+// nothing can change it. And one whose holder is a list, dict or set the
+// traced run made (made.rs), whoever still refers to it: a region's run
+// makes its own. They keep the traced call's temporaries and results from
+// being kept alive, and from failing every check.
 //
 // The writes of the traced run to what outlives it are recorded by writes.rs:
 // a region makes them again, in order, on every run. Here is what they mean
@@ -159,6 +161,8 @@ struct Group {
     // Read whole (or measured) after the traced run changed it.
     late: bool,
     late_at: String,
+    // A namespace a global was loaded from: there before any run.
+    root: bool,
 }
 
 struct Typed {
@@ -287,10 +291,12 @@ pub fn frame_entered() {
 pub fn begin() {
     // Looked up here, outside the executor: not a read of the body's.
     builtins();
+    super::made::clear();
     TRACE.set(Some(Trace { thread: tffi::region_thread_state(), ..Trace::default() }));
 }
 
 pub fn end() {
+    super::made::clear();
     TRACE.set(None);
     ON.set(false);
 }
@@ -532,7 +538,7 @@ impl Trace {
         let i = match self.group_of.get(&(holder as usize)) {
             Some(i) => *i,
             None => {
-                self.entries.groups.push(Group { holder: own(holder), kind, version: Cell::new(0), items: vec![], whole: None, len: None, late: false, late_at: String::new() });
+                self.entries.groups.push(Group { holder: own(holder), kind, version: Cell::new(0), items: vec![], whole: None, len: None, late: false, late_at: String::new(), root: false });
                 self.group_of.insert(holder as usize, self.entries.groups.len() - 1);
                 self.entries.groups.len() - 1
             }
@@ -946,9 +952,11 @@ pub unsafe fn global(globals: *mut PyObject, builtins: *mut PyObject, name: *mut
         if dict_get(globals, name).is_null() {
             t.item(globals, Holder::Dict, name, Want::Absent, std::ptr::null_mut());
             t.item(builtins, Holder::Dict, name, want_of(value), value);
+            t.group(builtins, Holder::Dict).root = true;
         } else {
             t.item(globals, Holder::Dict, name, want_of(value), value);
         }
+        t.group(globals, Holder::Dict).root = true;
     });
 }
 
@@ -1341,7 +1349,7 @@ impl Reads {
         let i = match e.groups.iter().position(|g| g.holder.is(holder)) {
             Some(i) => i,
             None => {
-                e.groups.push(Group { holder: holder.clone().unbind(), kind: Holder::Dict, version: Cell::new(0), items: vec![], whole: None, len: None, late: false, late_at: String::new() });
+                e.groups.push(Group { holder: holder.clone().unbind(), kind: Holder::Dict, version: Cell::new(0), items: vec![], whole: None, len: None, late: false, late_at: String::new(), root: false });
                 e.groups.len() - 1
             }
         };
@@ -1422,11 +1430,13 @@ impl Reads {
         unsafe { *self.overlap.get() = Some(overlap) };
     }
 
-    /// Whether what the trace read leads to ``obj`` (see leads_to): a region
-    /// that holds an object itself (a list it hands back, which was there
-    /// before it ran) has the right one for as long as its reads hold.
-    fn knows(&self, obj: &Bound<'_, PyAny>) -> bool {
-        unsafe { leads_to(&*self.entries.get(), obj.as_ptr()) }
+    /// Whether what the trace read leads to ``obj`` (see leads_to;
+    /// ``given``: the region's arguments): a region that holds an object
+    /// itself (a list it hands back, which was there before it ran) has the
+    /// right one for as long as its reads hold.
+    fn knows(&self, obj: &Bound<'_, PyAny>, given: Vec<Bound<'_, PyAny>>) -> bool {
+        let given: Vec<*mut PyObject> = given.iter().map(|g| g.as_ptr()).collect();
+        unsafe { leads_to(&*self.entries.get(), &given, obj.as_ptr()) }
     }
 
     /// Drops what was read from these containers and objects: the region
@@ -1491,24 +1501,79 @@ pub(super) unsafe fn instance_dict(obj: *mut PyObject) -> *mut PyObject {
     d
 }
 
-// Whether what was read (`e`) leads to `p`: it is something an entry was
-// read from (or the object whose __dict__ is), or a value an entry expects
-// by identity.
-unsafe fn leads_to(e: &Entries, p: *mut PyObject) -> bool {
-    let d = if ffi::PyList_Check(p) != 0 || ffi::PyDict_Check(p) != 0 || ffi::PyAnySet_Check(p) != 0 { std::ptr::null_mut() } else { instance_dict(p) };
-    let is = |o: &Py<PyAny>| o.as_ptr() == p || (!d.is_null() && o.as_ptr() == d);
-    e.typed.iter().any(|t| is(&t.obj))
-        || e.reads.iter().any(|r| is(&r.obj) || r.value.as_ref().is_some_and(|v| r.want == Want::Is && is(v)))
-        || e.groups.iter().any(|g| is(&g.holder) || g.items.iter().any(|i| i.want == Want::Is && i.value.as_ref().is_some_and(&is)) || g.whole.as_ref().is_some_and(|w| w.items.iter().any(&is)))
+// Whether what was read (`e`) leads to the container `p` from something
+// that was there before the traced run. What was there before: the
+// namespaces globals were loaded from, the cells the run read and neither
+// made nor stored into, and `given` (the region's arguments). From those, by
+// what the entries expect by identity: an item of a namespace or of a
+// container that is led to (read alone, or with the whole content), an
+// attribute of an object that is led to (an item of its __dict__, a slot,
+// what its class or a base has under a name), the items of a tuple, the
+// self of a bound method, the defaults of a function. That an entry was
+// read FROM `p` leads nowhere: a run reads what it made too (made.rs).
+unsafe fn leads_to(e: &Entries, given: &[*mut PyObject], p: *mut PyObject) -> bool {
+    let mut known: HashSet<usize> = HashSet::new();
+    let mut fresh: Vec<*mut PyObject> = given.to_vec();
+    let is = |v: &Option<Py<PyAny>>| v.as_ref().map(|v| v.as_ptr());
+    loop {
+        // What an object that is led to brings with it.
+        while let Some(o) = fresh.pop() {
+            if o.is_null() || !known.insert(o as usize) {
+                continue;
+            }
+            if ffi::PyTuple_Check(o) != 0 {
+                fresh.extend((0..ffi::PyTuple_GET_SIZE(o)).map(|i| ffi::PyTuple_GET_ITEM(o, i)));
+            } else if !tr_bound_self(o).is_null() {
+                fresh.push(tr_bound_self(o));
+            } else if ffi::PyFunction_Check(o) != 0 {
+                fresh.push(ffi::PyFunction_GetDefaults(o));
+            } else if ffi::PyList_Check(o) == 0 && ffi::PyDict_Check(o) == 0 && ffi::PyAnySet_Check(o) == 0 {
+                fresh.push(instance_dict(o));
+            }
+            // Its class and the bases were there before it.
+            let class = if ffi::PyType_Check(o) != 0 { o as *mut ffi::PyTypeObject } else { ffi::Py_TYPE(o) };
+            let mro = (*class).tp_mro;
+            if !mro.is_null() && known.insert(class as usize) {
+                known.extend((0..ffi::PyTuple_GET_SIZE(mro)).map(|i| ffi::PyTuple_GET_ITEM(mro, i) as usize));
+            }
+        }
+        if known.contains(&(p as usize)) {
+            return true;
+        }
+        let led = |o: &Py<PyAny>| known.contains(&(o.as_ptr() as usize));
+        for g in e.groups.iter().filter(|g| g.root || led(&g.holder)) {
+            fresh.extend(g.items.iter().filter(|i| i.want == Want::Is).filter_map(|i| is(&i.value)));
+            fresh.extend(g.whole.iter().flat_map(|w| w.items.iter().map(|x| x.as_ptr())));
+        }
+        for r in e.reads.iter().filter(|r| r.want == Want::Is) {
+            let from = if r.name.is_none() { !super::made::own_cell(r.obj.as_ptr()) } else { led(&r.obj) };
+            fresh.extend(is(&r.value).filter(|_| from));
+        }
+        for c in e.classes.iter().filter(|c| led(&c.class)) {
+            fresh.extend(c.names.iter().filter_map(|(_, had)| is(had)));
+        }
+        fresh.retain(|o| !o.is_null() && !known.contains(&(*o as usize)));
+        if fresh.is_empty() {
+            return false;
+        }
+    }
 }
 
-/// Whether the trace running on this thread came by ``obj`` through
-/// something it read (a namespace, an attribute, an item, a cell), as far
-/// as it has run: then ``obj`` was there before the traced run, and is
-/// nothing the run made.
+/// Whether the run of the trace on this thread made the list, dict or set
+/// ``obj`` (see made.rs): a region builds it anew on every call.
 #[pyfunction]
-pub fn _region_known(obj: &Bound<'_, PyAny>) -> bool {
-    TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| unsafe { leads_to(&t.entries, obj.as_ptr()) }))
+pub fn _region_made(obj: &Bound<'_, PyAny>) -> bool {
+    super::made::is(obj.as_ptr())
+}
+
+/// Whether the trace running on this thread came by the container ``obj``
+/// through what it read, as far as it has run, from something that was
+/// there before it (see leads_to; ``given``: the region's arguments): then
+/// ``obj`` was there before the traced run.
+#[pyfunction]
+pub fn _region_known(obj: &Bound<'_, PyAny>, given: Vec<Bound<'_, PyAny>>) -> bool {
+    let given: Vec<*mut PyObject> = given.iter().map(|g| g.as_ptr()).collect();
+    TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| unsafe { leads_to(&t.entries, &given, obj.as_ptr()) }))
 }
 
 static MISSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -1546,6 +1611,10 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
                 *had = (!found.is_null()).then(|| own(found));
             }
         }
+        // What the run read from a container it made is no entry: every
+        // run of the region makes its own, and the trace's is the traced
+        // call's result, which its caller may change or keep.
+        e.groups.retain(|g| !super::made::is(g.holder.as_ptr()));
         // The traced run's own temporaries first: what was read from them
         // is no entry (so a getset that gives another object on every read
         // of one of them is nothing to refuse).

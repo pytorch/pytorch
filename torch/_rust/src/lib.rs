@@ -108,6 +108,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::region::_region_refuse, m)?)?;
     m.add_function(wrap_pyfunction!(exec::reads::_region_reads, m)?)?;
     m.add_function(wrap_pyfunction!(exec::reads::_region_known, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_made, m)?)?;
     m.add_function(wrap_pyfunction!(exec::reads::_region_read_misses, m)?)?;
     m.add_class::<exec::reads::Reads>()?;
     m.add_class::<exec::overlap::Overlap>()?;

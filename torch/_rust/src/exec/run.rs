@@ -2237,6 +2237,9 @@ impl Act<'_> {
                 let cell = check(PyCell_New(*p))?;
                 let old = std::mem::replace(&mut *p, cell);
                 ffi::Py_XDECREF(old);
+                if self.reading {
+                    super::made::cell(cell);
+                }
                 return Ok(());
             }
             Op::CopyFreeVars(n) => {
@@ -2263,6 +2266,9 @@ impl Act<'_> {
             Op::StoreDeref { slot } => {
                 if PyCell_Set(*self.local(*slot), a(0)) < 0 {
                     return Err(Exc::Error);
+                }
+                if self.reading {
+                    super::made::cell(*self.local(*slot));
                 }
                 return Ok(());
             }
@@ -2352,6 +2358,10 @@ impl Act<'_> {
             }
         };
         self.set(v, obj);
+        if self.reading {
+            let operands: Vec<*mut PyObject> = ins.args.iter().take(2).map(|x| self.val(*x)).collect();
+            super::made::result(&ins.op, &operands, obj);
+        }
         Ok(())
     }
 }

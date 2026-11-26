@@ -12,6 +12,7 @@ pub mod ffi;
 pub mod graph;
 pub mod joint;
 mod live;
+mod made;
 pub mod overlap;
 pub mod reads;
 pub mod region;
@@ -3655,6 +3656,9 @@ pub fn call_with_cfg_execution<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     trampoline::init(func.py())?;
     shown::ready();
+    // Made here, as shown's tables are: a traced run asks for them
+    // (made.rs), and making them runs Python code.
+    makers();
     region::next_call();
     let _guard = ExecGuard::new();
     let _ops = (RECORD.load(Ordering::Relaxed) || torch_ops::printing()).then(torch_ops::OpHookGuard::new);

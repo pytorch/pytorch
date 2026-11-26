@@ -20,7 +20,9 @@ of the thread state a region is for, no region is traced or entered under a
 torch function mode, and a method that tells of a tensor what a region does
 not check ends the region also where it is taken from the class. And of a
 nested tensor, which the executor's record of the operators that run does
-not ask for sizes.
+not ask for sizes. And of a list or a dict a region's run makes: it is made
+anew by every run, also when the run read it, and one that was there before
+is handed back as the object it is.
 """
 
 import array
@@ -1965,6 +1967,269 @@ class TestVmNestedTensors(TestCase):
 
 
 instantiate_device_type_tests(TestVmNestedTensors, globals())
+
+
+MODES_LAYERS = torch.nn.ModuleList([torch.nn.Linear(8, 8) for _ in range(6)]).eval()
+
+
+class ModesKeeps:
+    def __init__(self):
+        self.items = [torch.ones(8)]
+        self.kept = None
+
+    @property
+    def through_property(self):
+        return self.items
+
+
+MODES_KEEPS = ModesKeeps()
+MODES_KEPT = [torch.ones(8)]
+MODES_KEPT_LISTS = [[torch.ones(8)], [torch.zeros(8)]]
+
+
+def modes_made_in_a_loop(x, which=4):
+    out = []
+    for i, m in enumerate(MODES_LAYERS):
+        x = m(x)
+        if i == which:
+            out.append(x)
+    return x, out
+
+
+def modes_made_holds_the_result(x):
+    return modes_made_in_a_loop(x, 5)
+
+
+def modes_made_on_every_round(x):
+    out = []
+    for m in MODES_LAYERS:
+        x = m(x)
+        out.append(x)
+    return x, out
+
+
+def modes_made_dict_in_a_loop(x):
+    d = {}
+    for i, m in enumerate(MODES_LAYERS):
+        x = m(x)
+        if i == 4:
+            d["four"] = x
+    return x, d
+
+
+def modes_made_in_a_tuple(x):
+    out = []
+    for i, m in enumerate(MODES_LAYERS):
+        x = m(x)
+        if i == 4:
+            out.append(x)
+    return x, (out, 1)
+
+
+def modes_made_in_a_callee(x):
+    return modes_made_in_a_loop(x)
+
+
+def modes_made_then_iterated(x):
+    a = x * 2
+    c = (a + 1).relu()
+    ys = [a, c]
+    d = torch.cat(ys).sum()
+    return d * 2, ys
+
+
+def modes_made_then_measured(x):
+    a = x * 2
+    c = (a + 1).relu()
+    ys = [a, c]
+    return c.sum() * len(ys), ys
+
+
+def modes_made_then_subscripted(x):
+    a = x * 2
+    c = (a + 1).relu()
+    ys = [a, c]
+    return ys[0].sum() + ys[1].sum(), ys
+
+
+def modes_made_dict_then_read(x):
+    a = x * 2
+    c = (a + 1).relu()
+    d = {"a": a, "c": c}
+    return d["a"].sum() + d.get("c").sum() * len(d), d
+
+
+def modes_made_then_copied(x):
+    a = x * 2
+    c = (a + 1).relu()
+    ys = [a, c]
+    return c.sum() * len(tuple(ys)), ys[:1] + sorted(ys, key=len)
+
+
+def modes_made_then_stored(x):
+    a = x * 2
+    c = (a + 1).relu()
+    ys = [a.sin() * 2, c.cos() * 3]
+    d = torch.cat(ys).sum()
+    MODES_KEEPS.kept = ys
+    return d * 2
+
+
+def modes_made_appended_twice(x):
+    out = []
+    out.append(((x.sin() * 2).cos() + 1).tanh())
+    out.append((x * 3).relu() + x.sigmoid())
+    return out
+
+
+def modes_made_appended_then_read(x):
+    out = []
+    out.append(((x.sin() * 2).cos() + 1).tanh())
+    out.append((x * 3).relu() + x.sigmoid())
+    return out[0] + out[1]
+
+
+MODES_MADE = [
+    modes_made_in_a_loop,
+    modes_made_holds_the_result,
+    modes_made_on_every_round,
+    modes_made_dict_in_a_loop,
+    modes_made_in_a_tuple,
+    modes_made_in_a_callee,
+    modes_made_then_iterated,
+    modes_made_then_measured,
+    modes_made_then_subscripted,
+    modes_made_dict_then_read,
+    modes_made_then_copied,
+    modes_made_then_stored,
+    modes_made_appended_twice,
+    modes_made_appended_then_read,
+]
+
+
+def modes_kept_global(x):
+    c = (x * 2 + 1).relu() + MODES_KEPT[0]
+    return c.sum() * len(MODES_KEPT), MODES_KEPT
+
+
+def modes_kept_attribute(x):
+    c = (x * 2 + 1).relu() + MODES_KEEPS.items[0]
+    return c.sum() * 2, [MODES_KEEPS.items, c]
+
+
+def modes_kept_of_an_argument(x, keeps=MODES_KEEPS):
+    c = (x * 2 + 1).relu() + keeps.items[0]
+    return c.sum() * 2, keeps.items
+
+
+def modes_kept_through_a_property(x):
+    items = MODES_KEEPS.through_property
+    c = (x * 2 + 1).relu() + items[0]
+    return c.sum() * 2, items
+
+
+def modes_kept_from_an_iterator(x):
+    first = next(iter(MODES_KEPT_LISTS))
+    c = (x * 2 + 1).relu() + first[0]
+    return c.sum() * 2, first
+
+
+MODES_KEPT_FNS = [
+    modes_kept_global,
+    modes_kept_attribute,
+    modes_kept_of_an_argument,
+    modes_kept_through_a_property,
+    modes_kept_from_an_iterator,
+]
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmMadeContainers(TestCase):
+    """A list or a dict that a region's run makes is made anew by every run
+    of the region, also when the run read it (its length, an item, all of
+    it), and once, however many places it is handed on to; one that was
+    there before the run is handed back as the object it is; and a region
+    keeps no entry about a container it made."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def parts(self, out, tensors, containers):
+        if isinstance(out, (list, tuple, dict)):
+            if not isinstance(out, tuple):
+                containers.append(out)
+            for item in out.values() if isinstance(out, dict) else out:
+                self.parts(item, tensors, containers)
+        else:
+            tensors.append(out)
+        return tensors, containers
+
+    @parametrize("fn", MODES_MADE, name_fn=lambda fn: fn.__name__[11:])
+    @isolated
+    def test_made_container_is_this_calls(self, device, fn):
+        MODES_LAYERS.to(device)
+        compiled = vm(fn)
+        last = []
+        with torch.no_grad():
+            for call in range(40):
+                torch.manual_seed(call)
+                x = torch.rand(3, 8, device=device)
+                # The list that leaves through a store behind the region
+                # is looked at as one that is returned.
+                stored = fn is modes_made_then_stored
+                want = fn(x)
+                want = (want, MODES_KEEPS.kept) if stored else want
+                got = compiled(x)
+                got = (got, MODES_KEEPS.kept) if stored else got
+                (want, _), (got, made) = (
+                    self.parts(want, [], []),
+                    self.parts(got, [], []),
+                )
+                self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+                shared = [c for c in made if any(c is p for p in last)]
+                self.assertEqual(shared, [], msg=f"call {call}: from the call before")
+                last = made
+        regions = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        # (A block with a store into an object runs as it is.)
+        self.assertEqual([r["runs"] for r in regions], [] if stored else [15])
+
+    @parametrize("fn", MODES_KEPT_FNS, name_fn=lambda fn: fn.__name__[11:])
+    @isolated
+    def test_container_from_before_is_the_object(self, device, fn):
+        for t in (MODES_KEPT, MODES_KEEPS.items, *MODES_KEPT_LISTS):
+            t[0] = t[0].to(device)
+        compiled = vm(fn)
+        for call in range(40):
+            torch.manual_seed(call)
+            x = torch.rand(3, 8, device=device)
+            want, got = fn(x), compiled(x)
+            self.assertEqual(got[0], want[0], atol=0, rtol=0, msg=f"call {call}")
+            if fn is modes_kept_attribute:
+                want, got = want[1][0], got[1][0]
+            else:
+                want, got = want[1], got[1]
+            self.assertIs(got, want, msg=f"call {call}")
+        if fn in (modes_kept_global, modes_kept_attribute, modes_kept_of_an_argument):
+            self.assertEqual(region_runs(compiled), 15)
+
+    @isolated
+    def test_region_keeps_nothing_of_a_container_it_made(self, device):
+        compiled = vm(modes_made_then_iterated)
+        made = []
+        for call in range(40):
+            torch.manual_seed(call)
+            out = compiled(torch.rand(3, 8, device=device))
+            made.append(weakref.ref(out[1][0]))
+            # What a caller does to the list it was handed is its own.
+            out[1].append(None)
+            del out
+        gc.collect()
+        alive = [call for call, ref in enumerate(made) if ref() is not None]
+        self.assertEqual(alive, [])
+        (region,) = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertEqual((region["runs"], region["misses"]), (15, {}))
+
+
+instantiate_device_type_tests(TestVmMadeContainers, globals())
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
