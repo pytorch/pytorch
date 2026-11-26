@@ -319,12 +319,19 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
   const auto uk = static_cast<uint32_t>(k);
   const auto uB = static_cast<uint32_t>(Bnum);
   const auto N = un + uk;
+  constexpr uint32_t kDiagTile = 32;
+  const auto tail = un % kDiagTile;
+  const bool directTail = tail != 0 && tail <= kDiagTile / 2 && uk < c10::metal::simdgroup_size;
 
   auto pivotPSO = lib.getPipelineStateForFunc(fmt::format("luApplyPivotsRHS_{}", tname));
-  auto fwdPSO = lib.getPipelineStateForFunc(
-      fmt::format("trsmDiagSolveLU_{}_{}", tname, adjoint ? "lower_nonunit" : "lower_unit"));
-  auto backPSO = lib.getPipelineStateForFunc(
-      fmt::format("trsmDiagSolveLU_{}_{}", tname, adjoint ? "upper_unit" : "upper_nonunit"));
+  auto diagPSOs = [&](const char* kind) {
+    const auto name = fmt::format("trsmDiagSolveLU_{}_{}", tname, kind);
+    auto tiled = !directTail || un >= kDiagTile ? lib.getPipelineStateForFunc(name) : nil;
+    auto partial = directTail ? lib.getPipelineStateForFunc(name + "_direct") : tiled;
+    return std::array{tiled, partial};
+  };
+  const auto fwdPSOs = diagPSOs(adjoint ? "lower_nonunit" : "lower_unit");
+  const auto backPSOs = diagPSOs(adjoint ? "upper_unit" : "upper_nonunit");
   auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
   auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
   auto gemmSimdPSO = (!useMpp && !isComplex) ? lib.getPipelineStateForFunc("gemmSimdLU") : nil;
@@ -348,9 +355,9 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
         [enc dispatchThreadgroups:MTLSizeMake(uB, 1, 1)
             threadsPerThreadgroup:MTLSizeMake(std::clamp(uk, 1u, 256u), 1, 1)];
       };
-      auto trsm = [&](id<MTLComputePipelineState> pso, uint32_t d0, uint32_t nr) {
+      auto trsm = [&](const auto& psos, uint32_t d0, uint32_t nr) {
         setP4(d0, un, N, nr);
-        [enc setComputePipelineState:pso];
+        [enc setComputePipelineState:psos[nr == kDiagTile ? 0 : 1]];
         [enc dispatchThreadgroups:MTLSizeMake(uB, at::ceil_div(uk, 128u), 1)
             threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
       };
@@ -385,15 +392,16 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
       if (!adjoint) {
         pivotApply(false);
       }
-      for (auto p0 = 0u; p0 < un; p0 += 32) {
-        const auto pw = std::min(32u, un - p0);
-        trsm(fwdPSO, p0, pw);
+      for (auto p0 = 0u; p0 < un; p0 += kDiagTile) {
+        const auto pw = std::min(kDiagTile, un - p0);
+        trsm(fwdPSOs, p0, pw);
         gemm(p0 + pw, un, p0, pw);
       }
-      for (auto pb = un ? (static_cast<int64_t>(un) - 1) / 32 * 32 : int64_t{0}; pb >= 0; pb -= 32) {
+      const auto lastTile = (static_cast<int64_t>(un) - 1) / kDiagTile * kDiagTile;
+      for (auto pb = lastTile; pb >= 0; pb -= kDiagTile) {
         const auto p0 = static_cast<uint32_t>(pb);
-        const auto pw = std::min(32u, un - p0);
-        trsm(backPSO, p0, pw);
+        const auto pw = std::min(kDiagTile, un - p0);
+        trsm(backPSOs, p0, pw);
         gemm(0, p0, p0, pw);
       }
       if (adjoint) {
