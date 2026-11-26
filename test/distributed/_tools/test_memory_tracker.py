@@ -3,17 +3,23 @@ import contextlib
 import io
 import os
 import tempfile
-import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import torch
 import torch.nn as nn
 from torch.distributed._tools import MemoryTracker
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestMemoryTracker(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_load_restores_op_index(self):
         with patch.object(torch, "get_device_module"):
             tracker = MemoryTracker()
@@ -45,14 +51,49 @@ class TestMemoryTracker(TestCase):
             loaded_tracker.summary()
         self.assertEqual(actual_output.getvalue(), expected_output.getvalue())
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
-    def test_local_model(self):
+    def test_save_load_preserves_op_index(self):
+        """
+        A save/load round trip must restore the operation count so that
+        ``summary()`` keeps reporting the per-operator memory deltas. This runs
+        on CPU without an accelerator by populating the traces directly, mirror-
+        ing what ``_record_memory_stats()`` does during a monitored run.
+        """
+        tracker = MemoryTracker()
+        for i, name in enumerate(("op_a", "op_b")):
+            tracker.memories_allocated[i] = (name, float(i + 1))
+            tracker.memories_active[i] = (name, float(i + 1))
+            tracker.memories_reserved[i] = (name, float(i + 1))
+        tracker._op_index = 2
+
+        path = "memory_op_index.trace"
+        try:
+            tracker.save_stats(path)
+
+            loaded = MemoryTracker()
+            loaded.load(path)
+
+            self.assertEqual(loaded._op_index, tracker._op_index)
+
+            # With _op_index lost, summary() iterates range(1, 0) and emits no
+            # operator deltas; once restored, the operator name must appear.
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                loaded.summary()
+            self.assertIn("op_b", buf.getvalue())
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+
+class TestMemoryTrackerDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_local_model(self, device):
         """
         Minimal test case to check the memory tracker can collect the expected
         memory stats at operator level, as well as can print the summary result
         without crash.
         """
-        device = torch.accelerator.current_accelerator()
         # Create a model with a hierarchy of modules
         torch.manual_seed(0)
         model = nn.Sequential(
@@ -99,39 +140,10 @@ class TestMemoryTracker(TestCase):
         self.assertTrue(tracker._cur_module_name != "")
         self.assertTrue(hasattr(tracker, "_num_alloc_retries"))
 
-    def test_save_load_preserves_op_index(self):
-        """
-        A save/load round trip must restore the operation count so that
-        ``summary()`` keeps reporting the per-operator memory deltas. This runs
-        on CPU without an accelerator by populating the traces directly, mirror-
-        ing what ``_record_memory_stats()`` does during a monitored run.
-        """
-        tracker = MemoryTracker()
-        for i, name in enumerate(("op_a", "op_b")):
-            tracker.memories_allocated[i] = (name, float(i + 1))
-            tracker.memories_active[i] = (name, float(i + 1))
-            tracker.memories_reserved[i] = (name, float(i + 1))
-        tracker._op_index = 2
 
-        path = "memory_op_index.trace"
-        try:
-            tracker.save_stats(path)
-
-            loaded = MemoryTracker()
-            loaded.load(path)
-
-            self.assertEqual(loaded._op_index, tracker._op_index)
-
-            # With _op_index lost, summary() iterates range(1, 0) and emits no
-            # operator deltas; once restored, the operator name must appear.
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                loaded.summary()
-            self.assertIn("op_b", buf.getvalue())
-        finally:
-            if os.path.exists(path):
-                os.remove(path)
-
+instantiate_device_type_tests(
+    TestMemoryTrackerDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
