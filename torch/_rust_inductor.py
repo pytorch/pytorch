@@ -2658,6 +2658,12 @@ def trace_region(
             bound = Binding(bind, consts)
             reads.bound(bound.rebind)
     overlap = _overlap(example[:n_tensors], consts, reads, checked)
+    if overlap is not None and overlap.marked:
+        # What is made of a graph reads its tensors' memory as it is.
+        stats["refused"] += 1
+        why = "a tensor with the conjugate or the negative bit under a lowering"
+        _traced(name, "refused", why)
+        return None
     record = _traced(
         name,
         "region",
@@ -2697,7 +2703,7 @@ def trace_region(
         why = [] if DEBUG else None
         inputs = _inputs(region_args, plan, why)
         if inputs is not None and overlap is not None and not overlap.holds(inputs):
-            inputs, why = None, ["how its tensors share memory"]
+            inputs, why = None, ["how its tensors share memory, or a conjugate or negative bit"]
         if inputs is not None and arithmetic is not None and not arithmetic(inputs[n_tensors:]):
             inputs, why = None, ["a number its arithmetic does not take"]
         for i in unread if inputs is not None else ():

@@ -25,6 +25,8 @@ pub mod ffi {
         storage: usize,
         low: usize,
         high: usize,
+        // 1: the conjugate bit, 2: the negative bit.
+        marks: u8,
     }
 
     unsafe extern "C++" {

@@ -708,6 +708,10 @@ def modes_reading(x, w):
     return (b.tanh() - w) * 2.0 + MODES_READ
 
 
+def modes_reads_memory(x):
+    return ((x * 2 + 1).sin() * x).cos() + x
+
+
 MODES_LISTS = {
     "default": EARLY,
     "autograd": (*EARLY, vm.passes.Autograd(), vm.passes.Partition()),
@@ -785,6 +789,24 @@ class TestVmSharedMemory(TestCase):
     @isolated
     def test_input_over_a_weight_on_some_calls(self, device, passes, traced):
         self.calls(device, passes, "exact", traced, module=ModesShared)
+
+    @parametrize("bit", ["conjugate", "negative"])
+    @parametrize("passes", list(MODES_LISTS))
+    @isolated
+    def test_bit_that_says_how_memory_is_read(self, device, passes, bit):
+        # A kernel made for the trace's tensors reads memory as theirs was:
+        # a tensor with another conjugate or negative bit is a call of its
+        # own.
+        compiled = vm(modes_reads_memory, passes=MODES_LISTS[passes])
+        dtype = torch.cfloat if bit == "conjugate" else torch.float
+        mark = torch.conj if bit == "conjugate" else torch._neg_view
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, dtype=dtype, device=device)
+            x = mark(x) if call >= 6 else x
+            want = modes_reads_memory(x)
+            self.assertEqual(compiled(x), want, msg=f"call {call}")
+        self.assertGreater(region_runs(compiled), 0)
 
     @isolated
     def test_input_that_overlaps_a_weight_in_part(self, device):

@@ -206,6 +206,7 @@ void tensor_span(const Tensor& t, TensorSpan& out) noexcept {
   out.storage = 0;
   out.low = 0;
   out.high = 0;
+  out.marks = !t.defined() ? 0 : (t.is_conj() ? 1 : 0) | (t.is_neg() ? 2 : 0);
   const c10::TensorImpl* impl = t.unsafeGetTensorImpl();
   if (!t.defined() || impl->is_python_dispatch() || !impl->has_storage() ||
       t.layout() != c10::kStrided) {

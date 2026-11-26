@@ -16,7 +16,10 @@
 //!   and with `whole`:
 //!   - no other two are one object;
 //!   - the tensors of a storage in which two overlapped are in one storage,
-//!     each where it was in it, and every other tensor overlaps none.
+//!     each where it was in it, and every other tensor overlaps none;
+//!   - no input has the conjugate or the negative bit: they say how its
+//!     memory is to be read, and a kernel reads it as it is. (`marked`: a
+//!     tensor of the trace has one; the tracer makes no such region.)
 //! A graph run as traced needs the first only: it reads and writes the
 //! call's own tensors in the program's order. What is made of a graph (by
 //! AOT Autograd, by Inductor, in a CUDA graph, by a pass) has writes moved
@@ -43,12 +46,14 @@ use super::ffi::GilCell;
 use crate::bindings::ffi as tffi;
 
 // A tensor of a call: which object it is, which storage its elements are in
-// (0: none to look at) and the bytes of the storage they span.
+// (0: none to look at), the bytes of the storage they span, and its
+// conjugate and negative bits.
 struct Place {
     obj: usize,
     storage: usize,
     low: usize,
     high: usize,
+    marks: u8,
 }
 
 unsafe fn place(obj: *mut PyObject) -> Place {
@@ -56,7 +61,7 @@ unsafe fn place(obj: *mut PyObject) -> Place {
     if let Some(t) = tffi::tensor_by_type(obj as usize).as_ref() {
         tffi::tensor_span(t, &mut span);
     }
-    Place { obj: obj as usize, storage: span.storage, low: span.low, high: span.high }
+    Place { obj: obj as usize, storage: span.storage, low: span.low, high: span.high, marks: span.marks }
 }
 
 // How the tensors of a call stand to one another, each named by its place in
@@ -70,6 +75,8 @@ struct Relation {
     // of them, where it starts in the storage). Spans are compared: two
     // tensors whose elements interleave count as overlapping.
     shared: Vec<(u32, u32, usize)>,
+    // (tensor, its conjugate and negative bits), for those that have one.
+    marked: Vec<(u32, u8)>,
 }
 
 // One step per tensor, and a sort of the tensors of a storage that has
@@ -80,6 +87,9 @@ fn relation(places: &[Place]) -> Relation {
     let mut storages: HashMap<usize, Vec<u32>> = HashMap::new();
     for (i, p) in places.iter().enumerate() {
         let i = i as u32;
+        if p.marks != 0 {
+            out.marked.push((i, p.marks));
+        }
         let k = *first.entry(p.obj).or_insert(i);
         if k != i {
             out.same.push((i, k));
@@ -127,6 +137,8 @@ pub struct Overlap {
     traced: Relation,
     // The inputs the traced run also read from somewhere, by place.
     read: Vec<(usize, Py<PyAny>)>,
+    // The bits of the trace's inputs.
+    marks: Vec<u8>,
     constants: GilCell<Constants>,
     // The constants are to be counted again: a constant's data is somewhere
     // else, or nothing says when one is (`told`).
@@ -162,6 +174,7 @@ impl Overlap {
             whole,
             traced: Relation::default(),
             read: read.into_iter().filter(|&i| i < n).map(|i| (i, inputs[i].clone().unbind())).collect(),
+            marks: inputs.iter().map(|x| unsafe { place(x.as_ptr()) }.marks).collect(),
             constants: GilCell::new(Constants::default()),
             stale: Cell::new(true),
             told: Cell::new(false),
@@ -170,6 +183,7 @@ impl Overlap {
         if !whole {
             out.traced.same.retain(|&(i, _)| (i as usize) < n);
             out.traced.shared.clear();
+            out.traced.marked.clear();
         }
         out
     }
@@ -178,6 +192,14 @@ impl Overlap {
     #[getter]
     fn needed(&self) -> bool {
         self.whole || !self.traced.same.is_empty() || !self.read.is_empty()
+    }
+
+    /// Whether a tensor of the trace has the conjugate or the negative bit
+    /// and the region runs something made of its graph: a kernel reads the
+    /// memory as it is, so such a region is not made.
+    #[getter]
+    fn marked(&self) -> bool {
+        !self.traced.marked.is_empty()
     }
 
     /// The trace's relation, as a key: what is made of a graph is for one.
@@ -202,7 +224,7 @@ impl Overlap {
         if self.stale.replace(!self.told.get()) {
             // The inputs stand in as tensors that are alone (their numbers
             // are no addresses).
-            let places = unsafe { self.places(|i| Place { obj: i + 1, storage: 0, low: 0, high: 0 }) };
+            let places = unsafe { self.places(|i| Place { obj: i + 1, storage: 0, low: 0, high: 0, marks: self.marks[i] }) };
             c.alone = relation(&places) == self.traced;
             c.known.clear();
             for p in &places[self.inputs..] {
@@ -215,6 +237,9 @@ impl Overlap {
         let mut alone = true;
         for i in 0..self.inputs {
             let p = unsafe { place(item(i)) };
+            if p.marks != self.marks[i] {
+                return false;
+            }
             alone &= !c.known.contains(&p.obj) && c.seen.insert(p.obj);
             alone &= p.storage == 0 || (!c.known.contains(&p.storage) && c.seen.insert(p.storage));
         }
