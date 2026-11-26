@@ -18,6 +18,7 @@ import inspect
 import contextlib
 import os
 import unittest
+import warnings
 
 
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
@@ -272,7 +273,11 @@ def evaluate_platform_sdpa_supports_hdim512():
 
 def evaluate_platform_supports_ck_gemm():
     if TEST_WITH_ROCM:
-        return torch._C._is_ck_gemm_available()
+        # ckGemmSupported() warns about setting the BLAS backend on unsupported archs,
+        # which is noise when this is evaluated at import time by skipIf decorators.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return torch._C._is_ck_gemm_available()
     return False
 
 def evaluate_platform_supports_efficient_attention():
