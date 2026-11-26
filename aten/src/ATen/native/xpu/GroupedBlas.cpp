@@ -15,7 +15,13 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <ATen/native/xpu/grouped_mm/grouped_mm_api.h>
+#include <ATen/xpu/XPUContext.h>
 #include <c10/util/MaybeOwned.h>
+#include <c10/util/env.h>
+
+#include <algorithm>
+#include <array>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -324,6 +330,131 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_xpu_v2_out)
   return;
 }
 
+namespace {
+
+// XPU_GROUP_GEMM_BACKEND = fallback (default) | onednn | sycltla, read on
+// every call, selects the grouped GEMM kernel:
+//   fallback  the per-group mm (_grouped_mm_fallback)
+//   onednn    the oneDNN grouped matmul: 2D mat_a, same dtypes, no bias
+//   sycltla   the SYCL-TLA grouped GEMM from torch-xpu-ops: bf16/fp16, offs,
+//             no bias, the input dtype as output dtype, on the architectures
+//             its kernels are built for, when sycltla::can_use_grouped_mm
+//             accepts the layouts and alignment
+// A call the selected kernel cannot serve takes the per-group fallback. Like
+// the CUDA and ROCm selection, the checks never look at the routed row counts,
+// so every rank of an expert-parallel job selects the same kernel.
+bool sycltla_grouped_mm_arch_supported() {
+  constexpr auto supported_architectures =
+      std::to_array<sycl::ext::oneapi::experimental::architecture>({
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc,
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc_vg,
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21,
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g31});
+  const auto device_architecture =
+      at::xpu::getCurrentDeviceProperties()->architecture;
+  return std::find(
+             supported_architectures.begin(),
+             supported_architectures.end(),
+             device_architecture) != supported_architectures.end();
+}
+
+bool sycltla_grouped_mm_supported(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const std::optional<at::Tensor>& offs,
+    const std::optional<at::Tensor>& bias,
+    c10::ScalarType out_dtype,
+    const Tensor& out) {
+  if (!offs.has_value() || bias.has_value() ||
+      out_dtype != mat_a.scalar_type()) {
+    return false;
+  }
+  return sycltla::is_grouped_mm_available() &&
+      sycltla_grouped_mm_arch_supported() &&
+      sycltla::can_use_grouped_mm(mat_a, mat_b, *offs, out);
+}
+
+enum class GroupedMMKernel { Fallback, OneDnn, SyclTla };
+
+GroupedMMKernel requested_grouped_mm_kernel() {
+  const auto v = c10::utils::get_env("XPU_GROUP_GEMM_BACKEND");
+  if (!v.has_value() || v->empty() || *v == "fallback") {
+    return GroupedMMKernel::Fallback;
+  }
+  if (*v == "onednn") {
+    return GroupedMMKernel::OneDnn;
+  }
+  if (*v == "sycltla") {
+    return GroupedMMKernel::SyclTla;
+  }
+  TORCH_WARN_ONCE(
+      "Ignoring unknown XPU_GROUP_GEMM_BACKEND='",
+      *v,
+      "'; expected fallback, onednn or sycltla. Using fallback.");
+  return GroupedMMKernel::Fallback;
+}
+
+GroupedMMKernel select_grouped_mm_kernel(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const std::optional<at::Tensor>& offs,
+    const std::optional<at::Tensor>& bias,
+    std::optional<c10::ScalarType> out_dtype,
+    const Tensor& out) {
+  switch (requested_grouped_mm_kernel()) {
+    case GroupedMMKernel::SyclTla:
+      if (sycltla_grouped_mm_supported(
+              mat_a, mat_b, offs, bias, out.scalar_type(), out)) {
+        return GroupedMMKernel::SyclTla;
+      }
+      break;
+    case GroupedMMKernel::OneDnn: {
+      const bool a_b_and_out_are_same_type =
+          (mat_a.dtype() == mat_b.dtype()) &&
+          (!out_dtype.has_value() || mat_a.dtype() == *out_dtype);
+      // OneDNN only supports 2dx3d and 2dx2d for grouped matmul.
+      if (a_b_and_out_are_same_type && mat_a.dim() == 2 && !bias.has_value()) {
+        return GroupedMMKernel::OneDnn;
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  return GroupedMMKernel::Fallback;
+}
+
+void _grouped_mm_xpu_impl(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const std::optional<at::Tensor>& offs,
+    const std::optional<at::Tensor>& bias,
+    std::optional<c10::ScalarType> out_dtype,
+    GroupedMMKernel kernel,
+    Tensor& out) {
+  switch (kernel) {
+    case GroupedMMKernel::SyclTla:
+      // fast path, no d2h sync needed
+      sycltla::grouped_mm(mat_a, mat_b, *offs, out);
+      return;
+    case GroupedMMKernel::OneDnn:
+      at::native::onednn::scaled_grouped_matmul(
+          mat_a,
+          mat_b,
+          std::nullopt,
+          std::nullopt,
+          std::nullopt,
+          std::nullopt,
+          offs.value(),
+          out);
+      return;
+    default:
+      _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  }
+}
+
+} // namespace
+
 Tensor _grouped_mm_xpu(
     const Tensor& mat_a,
     const Tensor& mat_b,
@@ -331,33 +462,18 @@ Tensor _grouped_mm_xpu(
     const std::optional<at::Tensor>& bias,
     std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
-  const bool a_b_and_out_are_same_type = (mat_a.dtype() == mat_b.dtype()) &&
-      (!out_dtype.has_value() || mat_a.dtype() == *out_dtype);
-
-  const bool a_is_2d = mat_a.dim() == 2;
-
-  // OneDNN only supports 2dx3d and 2dx2d for grouped matmul.
-  const bool supported_cases = a_is_2d && !bias.has_value();
-
-  bool use_fast_path = a_b_and_out_are_same_type && supported_cases;
   const auto out_dtype_ =
       _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out =
       create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
-  if (use_fast_path) {
-    at::native::onednn::scaled_grouped_matmul(
-        mat_a,
-        mat_b,
-        std::nullopt,
-        std::nullopt,
-        std::nullopt,
-        std::nullopt,
-        offs.value(),
-        out);
-  } else {
-    _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
-  }
-
+  _grouped_mm_xpu_impl(
+      mat_a,
+      mat_b,
+      offs,
+      bias,
+      out_dtype,
+      select_grouped_mm_kernel(mat_a, mat_b, offs, bias, out_dtype, out),
+      out);
   return out;
 }
 
