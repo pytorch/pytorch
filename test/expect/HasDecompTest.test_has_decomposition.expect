@@ -397,6 +397,7 @@ aten::_grid_sampler_2d_cpu_fallback
 aten::_grid_sampler_2d_cpu_fallback.out
 aten::_grid_sampler_2d_cpu_fallback_backward
 aten::_grouped_mm
+aten::_grouped_mm.out
 aten::_has_same_storage_numel
 aten::_histogramdd_bin_edges
 aten::_histogramdd_bin_edges.out
@@ -673,6 +674,8 @@ aten::_upsample_bilinear2d_aa
 aten::_upsample_bilinear2d_aa.out
 aten::_upsample_bilinear2d_aa_backward
 aten::_upsample_bilinear2d_aa_backward.grad_input
+aten::_upsample_inter_area2d
+aten::_upsample_inter_area2d.out
 aten::_upsample_lanczos2d_aa
 aten::_upsample_lanczos2d_aa.out
 aten::_upsample_lanczos2d_aa_backward

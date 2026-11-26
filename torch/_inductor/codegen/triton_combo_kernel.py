@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 from .. import config, metrics
 from ..runtime.hints import TritonMeta
 from ..runtime.runtime_utils import next_power_of_2
+from ..runtime.tiling import is_z_prefix
 from ..runtime.triton_heuristics import (
     RoundRobinComboKernelGrid,
     SequentialComboKernelGrid,
@@ -293,6 +294,9 @@ class PartitionState:
     partitions: list[list[BaseSchedulerNode]]
     cur_partition: list[BaseSchedulerNode]
     cur_count: int
+    # Dynamic-shape subkernels in cur_partition; capped separately because
+    # each one adds size arguments and index math that static ones do not.
+    cur_dynamic_count: int = 0
 
     def finalize(self) -> None:
         if self.cur_partition:
@@ -339,18 +343,33 @@ class ComboKernel(Kernel):
     A kernel that combines multiple sub-kernels into a single fused kernel.
     """
 
+    # Maximum number of dynamic-shape subkernels in one combo/foreach kernel.
+    # Each one adds its own size arguments and index math, and Triton compile
+    # time grows faster than linearly in kernel size.
+    MAX_DYNAMIC_SUBKERNELS = 16
+
     @staticmethod
     def _update_partition(
         partition_state: PartitionState,
         node_rw_count: int,
         node_info: BaseSchedulerNode,
+        is_dynamic: bool = False,
     ) -> None:
-        if partition_state.cur_count + node_rw_count > config.combo_kernel_max_num_args:
+        too_many_args = (
+            partition_state.cur_count + node_rw_count > config.combo_kernel_max_num_args
+        )
+        too_many_dynamic = (
+            is_dynamic
+            and partition_state.cur_dynamic_count >= ComboKernel.MAX_DYNAMIC_SUBKERNELS
+        )
+        if too_many_args or too_many_dynamic:
             partition_state.partitions.append(partition_state.cur_partition)
             partition_state.cur_partition = [node_info]
             partition_state.cur_count = node_rw_count
+            partition_state.cur_dynamic_count = int(is_dynamic)
         else:
             partition_state.cur_count += node_rw_count
+            partition_state.cur_dynamic_count += int(is_dynamic)
             partition_state.cur_partition.append(node_info)
 
     @staticmethod
@@ -381,19 +400,31 @@ class ComboKernel(Kernel):
         all_partitions = []
 
         for node in subkernel_nodes:
+            node_features = node_info_map[node].features
             tiled_groups = node_info_map[node].tiling
             node_info = node
 
             read_writes = node.read_writes
             read_write_count = len(read_writes.reads) + len(read_writes.writes)
+            is_dynamic = any(
+                isinstance(v, sympy.Expr) and v.free_symbols
+                for v in tiled_groups.values()
+            )
 
             ndim = len(tiled_groups)
             if ndim < 2:
                 raise AssertionError(f"Combokernel not support tile {tiled_groups}")
 
+            # Grid-split reductions use program_id(0) as the reduction split.
+            # Combo kernels remap that program id for dispatch, so emit these as
+            # standalone kernels instead.
+            if node_features.get_grid_split() is not None:
+                all_partitions.append([node_info])
+                continue
+
             # Skip multi-axis reductions and 3D pointwise kernels from combo.
             keys = tiled_groups.keys()
-            if ("r0_" in keys and "r1_" in keys) or "z0_" in keys:
+            if ("r0_" in keys and "r1_" in keys) or any(is_z_prefix(k) for k in keys):
                 all_partitions.append([node_info])
                 continue
 
@@ -401,14 +432,14 @@ class ComboKernel(Kernel):
                 y_elem = tiled_groups["y"]
                 partition_state = yelem_to_partition_state[y_elem]
                 ComboKernel._update_partition(
-                    partition_state, read_write_count, node_info
+                    partition_state, read_write_count, node_info, is_dynamic
                 )
             else:
                 if not (mixed_sizes or ndim <= 3):
                     raise AssertionError(f"No mixed sizes: tile {tiled_groups}")
                 partition_state = ndim_to_partition_state[ndim]
                 ComboKernel._update_partition(
-                    partition_state, read_write_count, node_info
+                    partition_state, read_write_count, node_info, is_dynamic
                 )
 
         for partition_state in ndim_to_partition_state.values():
@@ -947,11 +978,10 @@ class ComboKernel(Kernel):
             config_of(
                 signature,
                 # sub-kernel bodies are spliced into this kernel, so their
-                # atomics are this kernel's atomics
+                # pointer-range restrictions apply to the combined kernel
                 pointer_range_override=(
                     ()
-                    if torch.version.hip is not None
-                    and any(k.atomic_add_found for k in self.sub_kernels)
+                    if any(k.pointer_range_override() == () for k in self.sub_kernels)
                     else None
                 ),
                 skip_cpp_wrapper_input_tensor_alignment=True,
