@@ -2135,13 +2135,27 @@ class FakeTensor(Tensor):
                 "'device' (or 'fake_device')"
             )
 
-        self = Tensor._make_subclass(
-            cls,
-            elem,
-            elem.requires_grad if requires_grad is None else requires_grad,
-            dispatch_device=True,
-            device_for_backend_keys=device,
+        # `_make_subclass` detaches `elem` after tagging it with the backend
+        # keys of `device`.  For a Python PrivateUse1 backend that detach can
+        # dispatch into the backend's own aten::detach kernel, which returns a
+        # tensor already bound to a plain python object and breaks subclass
+        # construction.  Exclude the backend key while the keys are transferred
+        # so the detach stays in the C++ fallback (the backend keys set on the
+        # result are metadata, not dispatch).
+        # https://github.com/pytorch/pytorch/issues/196309
+        detach_guard = (
+            torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.PrivateUse1, True)
+            if device.type == torch._C._get_privateuse1_backend_name()
+            else contextlib.nullcontext()
         )
+        with detach_guard:
+            self = Tensor._make_subclass(
+                cls,
+                elem,
+                elem.requires_grad if requires_grad is None else requires_grad,
+                dispatch_device=True,
+                device_for_backend_keys=device,
+            )
         if not fake_mode._allow_unsafe_data_ptr_access:
             torch._C._set_throw_on_mutable_data_ptr(self)
         else:
