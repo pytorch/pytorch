@@ -3063,6 +3063,21 @@ class MissingOther(dict):
         return self["other"] * 2
 
 
+FILLED = FILLED_TWIN = None
+
+
+def filled_work(y, k):
+    return ((y.sin() + 1) * (k + 0.25)).tanh().cos().exp()
+
+
+def filled_global(x):
+    return filled_work(x, FILLED["n"])
+
+
+def filled_global_twin(x):
+    return filled_work(x, FILLED_TWIN["n"])
+
+
 def reads_through(inner):
     """A function with one region that is traced through a call of `inner`."""
 
@@ -4140,6 +4155,90 @@ class TestVmReads(TestCase):
                 sorted(twin.table.items()),
                 msg=f"call {call}",
             )
+
+    def filled_in(self, device, passes):
+        # Thirteen calls of a function that asks a defaultdict, which its
+        # region is handed, for a key; the key is taken out before every
+        # third call and set to another value twice. Each call against
+        # eager, on the result and on what the dict holds afterwards.
+        import collections
+
+        table, twin = collections.defaultdict(float), collections.defaultdict(float)
+        fn = reads_through(lambda y: y * (table["n"] + 0.25))
+        eager = reads_through(lambda y: y * (twin["n"] + 0.25))
+        g = vm(fn, passes=passes)
+        for call in range(13):
+            if call % 3 == 2:
+                table.pop("n", None)
+                twin.pop("n", None)
+            if call in (7, 8):
+                table["n"] = twin["n"] = 0.5
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), eager(x), atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(
+                sorted(table.items()), sorted(twin.items()), msg=f"call {call}"
+            )
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"].endswith("outer") and r["kind"] != "call"
+        )
+        return row
+
+    @isolated
+    def test_key_a_defaultdict_fills_in_is_stored_on_every_call(self, device):
+        # The subscript stores the key, in C. The region is handed the dict
+        # and checks it as it is given, before the store: a trace of a call
+        # that finds the key absent is refused, and the calls that find it
+        # there have their region.
+        row = self.filled_in(device, EARLY)
+        self.assertGreater(row["runs"], 0, msg=str(row))
+        refusals = [why for state, why in row["traces"] if state == "refused"]
+        self.assertGreater(len(refusals), 0, msg=str(row))
+        for why in refusals:
+            self.assertIn(
+                "asks a collections.defaultdict it is handed for a key it does not have, which stores the key",
+                why,
+            )
+
+    @isolated
+    def test_key_a_defaultdict_fills_in_with_the_effects_pass(self, device):
+        row = self.filled_in(device, (*EARLY, vm.passes.Effects()))
+        self.assertGreater(row["runs"], 0, msg=str(row))
+
+    @parametrize("factory", ("function", "builtin"))
+    @isolated
+    def test_key_filled_in_by_a_factory_is_checked_to_be_there(self, device, factory):
+        # The dict is found by a read. A factory that is a Python function
+        # runs a frame, which reads nothing of the dict. The region is
+        # entered while the key is there with the value the trace found; a
+        # call that lacks the key runs as written and stores it.
+        import collections
+
+        global FILLED, FILLED_TWIN
+        FILLED, FILLED_TWIN = (
+            collections.defaultdict((lambda: 0.5) if factory == "function" else float)
+            for _ in range(2)
+        )
+        g = vm(filled_global, passes=EARLY)
+        for call in range(13):
+            if call % 3 == 2:
+                FILLED.pop("n", None)
+                FILLED_TWIN.pop("n", None)
+            if call in (7, 8):
+                FILLED["n"] = FILLED_TWIN["n"] = 0.75
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(
+                g(x), filled_global_twin(x), atol=0, rtol=0, msg=f"call {call}"
+            )
+            self.assertEqual(dict(FILLED), dict(FILLED_TWIN), msg=f"call {call}")
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "filled_global" and r["kind"] != "call"
+        )
+        self.assertEqual(row["state"], "region", msg=str(row))
+        self.assertGreater(row["runs"], 3, msg=str(row))
 
 
 instantiate_device_type_tests(TestVmReads, globals())

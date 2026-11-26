@@ -477,6 +477,32 @@ pub unsafe fn store_slice(container: *mut PyObject) -> Token {
     refused(format!("stores a slice of a {}, which a region cannot do again", reads::type_name(container)))
 }
 
+// `container[key]` is about to run. A defaultdict that is asked for a key it
+// does not have stores what its factory makes under that key, in C: a write
+// no region makes again, and none to record. The reads are told (see
+// reads::fills): a region is entered only where the key is there.
+pub unsafe fn load_item(container: *mut PyObject, key: *mut PyObject) -> Token {
+    if !recording() || ffi::PyDict_Check(container) == 0 || ffi::PyDict_CheckExact(container) != 0 || reads::owned(container) || made::is(container) {
+        return 0;
+    }
+    static DEFAULTDICT: OnceLock<usize> = OnceLock::new();
+    let py = Python::assume_attached();
+    let class = *DEFAULTDICT.get_or_init(|| py.import("collections").and_then(|m| m.getattr("defaultdict")).map_or(0, |c| c.as_ptr() as usize));
+    if class == 0 || ffi::PyObject_TypeCheck(container, class as *mut ffi::PyTypeObject) == 0 || !reads::dict_get(container, key).is_null() {
+        return 0;
+    }
+    let factory = ffi::PyObject_GetAttrString(container, c"default_factory".as_ptr());
+    if factory.is_null() {
+        ffi::PyErr_Clear();
+        return 0;
+    }
+    ffi::Py_DECREF(factory);
+    if factory != ffi::Py_None() {
+        reads::fills(container);
+    }
+    0
+}
+
 // The builtin `callee` is about to be called with these positional
 // arguments: a write a region makes again, if it is one of writers().
 pub unsafe fn write_call(callee: *mut PyObject, args: &[*mut PyObject]) -> Token {

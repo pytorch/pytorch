@@ -18,7 +18,8 @@
 //     instance of a Python class: the object's class, and what the class has
 //     as the special method that ran;
 //   - a subscript or a membership test of a dict (str or int key) or a list
-//     (int index), and dict.get: the item;
+//     (int index), and dict.get: the item (of a defaultdict that stored the
+//     key because it was asked for it: the item it stored);
 //   - a cell read: the cell's content;
 //   - a frame of a Python function: which code the function has, and the
 //     defaults a call fills its arguments from (the tuple by identity, the
@@ -269,6 +270,9 @@ struct Trace {
     // which proxy): what is read from them or written to them while the body
     // runs (the entry of a tensor that died is taken out) is not the body's.
     own: HashSet<usize>,
+    // The defaultdicts a load of the traced run stored a missing key into,
+    // with where.
+    filled: HashMap<usize, String>,
 }
 
 thread_local! {
@@ -1191,14 +1195,27 @@ pub unsafe fn called(obj: *mut PyObject) {
     });
 }
 
+// A load is about to ask the defaultdict `container`, which outlives the
+// run, for a key it does not have: C code stores what the factory makes.
+// The load's item is then recorded as it is afterwards, whether or not the
+// factory ran a frame; and where the region checks the dict itself, as it
+// is handed it (no entry of the reads stands for it), the trace is refused
+// when it is over (see _region_reads).
+pub unsafe fn fills(container: *mut PyObject) {
+    with(|t| {
+        t.filled.entry(container as usize).or_insert_with(|| place());
+    });
+}
+
 // container[key] was read (`ran`: by Python code, which records its own).
 pub unsafe fn subscript(container: *mut PyObject, key: *mut PyObject, ran: bool) {
     with(|t| {
         if ffi::PyDict_Check(container) != 0 && key_ok(key) {
             // A dict subclass's __missing__ ran because C code found no such
             // key: no frame reads that, and one that stores nothing leaves
-            // the key absent.
-            if !ran || dict_get(container, key).is_null() {
+            // the key absent. Nor does the frame of a defaultdict's factory
+            // read that the key was missing.
+            if !ran || dict_get(container, key).is_null() || t.filled.contains_key(&(container as usize)) {
                 t.dict_item(container, key, false);
             }
         } else if ffi::PyList_Check(container) != 0 && ffi::Py_TYPE(key) == &raw mut ffi::PyLong_Type && !ran {
@@ -1818,6 +1835,9 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
     let Some(t) = TRACE.take() else { return Ok((None, None)) };
     if let Some(why) = t.refused {
         return Ok((None, Some(why)));
+    }
+    if let Some((d, at)) = given.iter().find_map(|x| t.filled.get(&(x.as_ptr() as usize)).map(|at| (x, at))) {
+        return Ok((None, Some(format!("it asks a {} it is handed for a key it does not have, which stores the key{at}", unsafe { type_name(d.as_ptr()) }))));
     }
     let mut e = t.entries;
     unsafe {

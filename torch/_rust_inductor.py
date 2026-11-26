@@ -21,11 +21,14 @@ before ``func`` is called (torch/_rust/src/exec/reads.rs): a region traced in
 training mode isn't entered in evaluation mode, which gets one of its own.
 """
 
+import collections
 import contextlib
 import dataclasses
 import functools
+import gc
 import importlib
 import inspect
+import itertools
 import logging
 import math
 import operator
@@ -957,6 +960,10 @@ def _walk(x, leaves, shape):
 _ITERATORS = tuple(
     type(iter(x)) for x in ([], (), {}, {}.values(), {}.items(), range(0))
 )
+# The iterators a region can make again (see _template).
+_LOOPS = (*_ITERATORS, enumerate, zip)
+# Methods bound to an object, which a region pins as the objects they are.
+_BOUND = (types.MethodType, types.BuiltinFunctionType, types.MethodWrapperType)
 # Objects an output may be read from a region's pinned objects as: those that
 # a run doesn't make anew with its tensors in them.
 _PINNABLE = (
@@ -1631,35 +1638,68 @@ def _template(o, args, tensor_outs, objects, old):
             keys,
             [_template(v, args, tensor_outs, objects, old) for v in o.values()],
         )
-    if type(o) is enumerate:
-        it, count = o.__reduce__()[1]
-        objects.append(_enumerate)
-        return (
-            "call",
-            len(objects) - 1,
-            [
-                _template(it, args, tensor_outs, objects, old),
-                _template(count, args, tensor_outs, objects, old),
-            ],
-        )
-    if type(o) is zip:
-        objects.append(_zip)
-        return (
-            "call",
-            len(objects) - 1,
-            [
-                _template(it, args, tensor_outs, objects, old)
-                for it in o.__reduce__()[1]
-            ],
-        )
-    if type(o) in _ITERATORS:
-        # A loop's iterator: rebuilt over what's left of it (the trace's run
-        # consumed the rest), which misses changes to the container later.
-        reduced = o.__reduce__()
-        start = reduced[2] if len(reduced) > 2 and reduced[2] is not None else 0
-        rest = list(reduced[1][0])[start:]
-        return ("iter", _template(rest, args, tensor_outs, objects, old))
+    if type(o) in _LOOPS:
+        if id(o) in old:
+            # An iterator that was there before the run (see _held): the
+            # program's own, which goes on from where it is.
+            objects.append(o)
+            return ("obj", len(objects) - 1)
+        if not _rust()._region_made(o):
+            raise _Refused(
+                f"it hands on a {type(o).__name__} that its run is not seen to make "
+                "and that none of its reads leads to"
+            )
+        if type(o) in (enumerate, zip):
+            reduced = o.__reduce__()
+            rebuild = _enumerate if type(o) is enumerate else _zip
+            if len(reduced) > 2 and reduced[2]:
+                rebuild = _zip_strict
+            objects.append(rebuild)
+            return (
+                "call",
+                len(objects) - 1,
+                [_template(x, args, tensor_outs, objects, old) for x in reduced[1]],
+            )
+        # An iterator the run made is made again over what it is over, by
+        # the rule of that: a list or a dict that was there before is the
+        # object itself (what the program does to it while it loops is
+        # seen), one the run made is built anew (what is left of it).
+        c, taken = _iterated(o)
+        nth = _ITERATORS.index(type(o))
+        source = None
+        if type(c) is range:
+            objects.append(c)
+            source = ("obj", len(objects) - 1)
+        elif isinstance(c, (list, dict)):
+            if id(c) in old or any(c is a for a in args):
+                source = _template(c, args, tensor_outs, objects, old)
+            elif not _rust()._region_made(c):
+                raise _Refused(
+                    f"it hands on an iterator over a {type(c).__name__} that its run "
+                    "is not seen to make and that none of its reads leads to"
+                )
+        if source is None:
+            if nth >= 2:
+                left = o.__reduce__()[1][0]
+            else:
+                plain = tuple.__iter__(c) if isinstance(c, tuple) else list.__iter__(c)
+                left = list(itertools.islice(plain, taken, None))
+            items = [_template(x, args, tensor_outs, objects, old) for x in left]
+            return ("iter", ("tuple" if isinstance(c, tuple) else "list", items))
+        if taken == 0 and type(c) in (list, dict, range) and nth not in (3, 4):
+            return ("iter", source)
+        objects.append(functools.partial(_iterator, nth, taken))
+        return ("call", len(objects) - 1, [source])
     if (names := _init_fields(o)) is not None:
+        if id(o) in old:
+            # One that was there before the run (see _held): the object.
+            objects.append(o)
+            return ("obj", len(objects) - 1)
+        if not _rust()._region_made(o):
+            raise _Refused(
+                f"it hands on a {type(o).__name__} that its run is not seen to make "
+                "and that none of its reads leads to"
+            )
         objects.append(functools.partial(_dataclass, type(o), names))
         return (
             "call",
@@ -1667,17 +1707,20 @@ def _template(o, args, tensor_outs, objects, old):
             [_template(getattr(o, n), args, tensor_outs, objects, old) for n in names],
         )
     if _is_tree(o):
-        leaves, spec = _flatten(o)
-        # What a region hands back is made by pytree from the leaves: only
-        # where that is an object of the output's own class (a subclass of a
-        # container that pytree does not know is its own single leaf).
-        if (len(leaves) == 1 and leaves[0] is o) or type(_unflatten(spec, leaves)) is not type(o):
+        # What a region hands back is made by pytree from what the node
+        # holds, one level at a time: a list in a namedtuple goes by the
+        # rules above (one that was there before is the object itself). Only
+        # where that makes an object of the output's own class (pytree does
+        # not know a subclass of a container).
+        node = pytree.SUPPORTED_NODES.get(pytree._get_node_type(o))
+        held, context = node.flatten_fn(o) if node is not None else ((), None)
+        if node is None or type(node.unflatten_fn(held, context)) is not type(o):
             raise _Refused(f"an output is a {type(o).__name__}, which a region cannot make again")
-        objects.append(functools.partial(_unflatten, spec))
+        objects.append(functools.partial(_unflatten, node.unflatten_fn, context))
         return (
             "call",
             len(objects) - 1,
-            [_template(x, args, tensor_outs, objects, old) for x in leaves],
+            [_template(x, args, tensor_outs, objects, old) for x in held],
         )
     if isinstance(o, types.FunctionType) and o.__code__ is _fx_wrapper_code():
         # A function fx.wrap registered, which make_fx patches while tracing.
@@ -1740,8 +1783,8 @@ def _contents(args) -> dict[int, Any]:
     return out
 
 
-def _unflatten(spec, leaves):
-    return pytree.tree_unflatten(leaves, spec)
+def _unflatten(unflatten, context, held):
+    return unflatten(held, context)
 
 
 def _enumerate(items):
@@ -1750,6 +1793,54 @@ def _enumerate(items):
 
 def _zip(items):
     return zip(*items)
+
+
+def _zip_strict(items):
+    return zip(*items, strict=True)
+
+
+def _iterated(it):
+    """What iterator ``it`` (of a class in _ITERATORS) is over, and how many
+    items were taken from it: the list or the tuple, the dict of a dict
+    iterator, and of a range what is left of it. One that is used up is over
+    ``()``."""
+    kind = _ITERATORS.index(type(it))
+    if 2 <= kind <= 4:
+        # A dict iterator shows its dict to the collector only.
+        held = gc.get_referents(it)
+        if not held or not isinstance(held[0], dict):
+            return (), 0
+        try:
+            left = len(it.__reduce__()[1][0])
+        except RuntimeError:
+            raise _Refused("it hands on an iterator of a resized dict") from None
+        return held[0], len(held[0]) - left
+    reduced = it.__reduce__()
+    if kind == 5:
+        return reduced[1][0], 0
+    return (reduced[1][0], reduced[2]) if len(reduced) > 2 else ((), 0)
+
+
+def _made_from(it):
+    """What a region makes iterator ``it`` (of _LOOPS) from: the iterators
+    inside a zip or an enumerate object, or what the iterator is over."""
+    if type(it) is zip:
+        return list(it.__reduce__()[1])
+    if type(it) is enumerate:
+        return [it.__reduce__()[1][0]]
+    return [_iterated(it)[0]]
+
+
+def _iterator(kind, taken, items):
+    """A new iterator of class ``_ITERATORS[kind]`` over ``items[0]`` itself,
+    past the ``taken`` items the traced run took from its own."""
+    c = items[0]
+    if kind == 0:
+        it = list.__iter__(c)
+    else:
+        it = iter((dict.keys, dict.values, dict.items)[kind - 2](c))
+    collections.deque(itertools.islice(it, taken), maxlen=0)
+    return it
 
 
 def _dataclass(cls, names, items):
@@ -2658,28 +2749,68 @@ def _span_holds(checks, args) -> bool:
     return True
 
 
-def _held(outs, old, given) -> list[Any]:
-    """The lists, dicts and sets among ``outs`` (and in what a region builds
-    for them) that were there before the traced run, which the run came by
-    through something it read (a global, an attribute, an item, a cell)
-    rather than through its arguments (``given``). A region hands back the
-    very object, as it does one an argument holds: only what the run itself
-    made is built anew. Each is added to ``old`` (which tells _template) and
-    returned: a later call must come by the same object (see _lost).
+def _held(outs, old, given, args=(), pinned=(), rebuilt=None) -> list[Any]:
+    """The lists, dicts, sets, iterators and dataclass instances among
+    ``outs`` (and in what a region builds for them) that were there before
+    the traced run, which the run came by through something it read (a
+    global, an attribute, an item, a cell) rather than through its arguments
+    (``given``). A region hands back the very object, as it does one an
+    argument holds: only what the run itself made is built anew (the
+    dataclass instances among those are appended to ``rebuilt``). Each is added
+    to ``old`` (which tells _template) and returned: a later call must come
+    by the same object (see _lost).
 
     One that is neither raises _Refused: the run is not seen to make it
     (exec/made.rs: a display, a comprehension, a class or a copy-maker
-    called), and no read leads to it from what was there before (that the
-    run read FROM it says nothing: it reads what it made too). The trace's
-    object handed back would have the traced call's content, and a copy
-    would not be the object the program holds."""
+    called, GET_ITER of a list), and no read leads to it from what was there
+    before (that the run read FROM it says nothing: it reads what it made
+    too). The trace's object handed back would have the traced call's
+    content, and a copy would not be the object the program holds.
+
+    An iterator the run made is made again from what it is over, which is
+    judged the same way: the list or the dict it loops over is the
+    program's own or one the run made, never a copy of one that was there
+    before. A tuple is built anew, of its items by their rules: one inside
+    an argument is another tuple on every call.
+
+    A bound method is the trace's own object wherever a region hands it on.
+    One that was there before (a read leads to the method itself) is the
+    program's. One that an attribute load of the run bound is the right one
+    on a later call only if what it is bound to is found again as the same
+    object, by a read or as one of the arguments that are checked by
+    identity (``args`` at ``pinned``). Bound to anything else (a list the
+    run made, a tensor it computed, an argument found by its structure), it
+    raises _Refused."""
     known, made = _rust()._region_known, _rust()._region_made
     held: list[Any] = []
     seen: set[int] = set()
+    fixed = [args[i] for i in pinned]
+    loose = [a for a in args if not any(a is f for f in fixed)]
     todo = list(outs)
     while todo:
         x = todo.pop()
-        if isinstance(x, (list, dict, set)):
+        if isinstance(x, _BOUND):
+            me = getattr(x, "__self__", None)
+            if (
+                me is None
+                or isinstance(me, (types.ModuleType, type))
+                or type(me) in _IMMUTABLE
+                or any(x is a for a in args)
+            ):
+                continue
+            if known(x, fixed):
+                held.append(x)
+            elif any(me is a for a in loose) or not known(me, fixed):
+                raise _Refused(
+                    f"it hands on a method of a {type(me).__name__} that its run made, "
+                    "or that none of its reads leads to"
+                )
+            else:
+                held.append(me)
+            continue
+        plain = isinstance(x, (list, dict, set)) or type(x) in _LOOPS
+        names = None if plain else _init_fields(x)
+        if plain or names:
             if id(x) in seen or id(x) in old:
                 continue
             seen.add(id(x))
@@ -2692,11 +2823,15 @@ def _held(outs, old, given) -> list[Any]:
                 old[id(x)] = True
                 held.append(x)
                 continue
+            if names and rebuilt is not None:
+                rebuilt.append(x)
         if isinstance(x, (list, tuple, set)):
             todo.extend(x)
         elif isinstance(x, dict):
             todo.extend(x.values())
-        elif (names := _init_fields(x)) is not None:
+        elif type(x) in _LOOPS:
+            todo.extend(_made_from(x))
+        elif names:
             todo.extend(getattr(x, n) for n in names)
     return held
 
@@ -2713,14 +2848,17 @@ def _lost(reads, held, given) -> str | None:
 
 
 def _shared_container(outs, old=()) -> bool:
-    """Whether a list, dict or set is reachable twice from outs (a region
-    makes each anew, so they'd no longer be the same); one of ``old`` was
-    there before the run and stays the one it is."""
+    """Whether a list, dict, set, iterator or dataclass instance is reachable
+    twice from outs (a region makes each anew, so they'd no longer be the
+    same; an iterator reaches what it is made from: see _made_from); one of
+    ``old`` was there before the run and stays the one it is."""
     seen: set[int] = set()
     todo = list(outs)
     while todo:
         x = todo.pop()
-        if isinstance(x, (list, dict, set)):
+        plain = isinstance(x, (list, dict, set)) or type(x) in _LOOPS
+        names = None if plain else _init_fields(x)
+        if plain or names:
             if id(x) in old:
                 continue
             if id(x) in seen:
@@ -2730,7 +2868,9 @@ def _shared_container(outs, old=()) -> bool:
             todo.extend(x)
         elif isinstance(x, dict):
             todo.extend(x.values())
-        elif (names := _init_fields(x)) is not None:
+        elif type(x) in _LOOPS:
+            todo.extend(_made_from(x))
+        elif names:
             todo.extend(getattr(x, n) for n in names)
     return False
 
@@ -2817,6 +2957,8 @@ def trace_region(
     as_given = [(a, _in_order(a)) for a in args if type(a) in (list, dict, set)]
     locs: list[Any] = []
     state = {"specialized": set()}
+    # The dataclass instances the run made that the region builds anew.
+    rebuilt: list[Any] = []
 
     # What was there before the run for sure: the arguments, and what a
     # tuple or a list among them holds.
@@ -2876,13 +3018,27 @@ def trace_region(
                 if id(x) not in written.targets and _contents([x])[id(x)][1] != items:
                     result["refused"] = f"it changes a {type(x).__name__} it was given"
                     return []
-            # A container that was there before the run is handed back as the
-            # object it is, never as a copy, whatever the run came by it
-            # through.
+            # A container or an iterator that was there before the run is
+            # handed back as the object it is, never as a copy, whatever the
+            # run came by it through; and so is one the run stored into
+            # something that outlives it (a region makes that write again).
             tensor_outs: list[Any] = []
             objects: list[Any] = []
+
+            def made(x):
+                # What a region builds anew, or what dies with the run.
+                kind = isinstance(x, (list, dict, set)) or _init_fields(x)
+                return bool(kind) and _rust()._region_made(x)
+
             try:
-                result["held"] = _held(outs, old, roots)
+                stored = [
+                    v
+                    for _, target, vs in written.recorded
+                    if not made(target)
+                    for v in vs
+                ]
+                handed = [*outs, *stored]
+                result["held"] = _held(handed, old, roots, call_args, pinned, rebuilt)
             except _Refused as e:
                 result["refused"] = str(e)
                 return []
@@ -2898,7 +3054,6 @@ def trace_region(
 
             try:
                 result["outputs"] = [describe(o) for o in outs]
-                made = _rust()._region_made
                 written.plan(outs, call_args, old, objects, describe, _shared_container, made)
             except (_Refused, _writes.Unrepeatable) as e:
                 result["refused"] = str(e)
@@ -3026,8 +3181,11 @@ def trace_region(
         for home, key, const in _const_homes(args, consts):
             reads.pin(home, key, const)
         # The containers among the args are the region's own to check, by
-        # structure, on every call.
-        reads.forget(_tree_holders(args, plan))
+        # structure, on every call. What the run read of an object it made
+        # is no check: every run of the region makes its own.
+        its_dicts = [vars(o) for o in rebuilt if hasattr(o, "__dict__")]
+        reads.forget([*_tree_holders(args, plan), *rebuilt, *its_dicts])
+        rebuilt.clear()
         stats["reads"] += len(reads)
         # The graph is for the constants' shapes and dtypes as well: checked
         # with the reads. Where every constant is checked, a lowering that

@@ -1971,8 +1971,9 @@ impl Act<'_> {
     }
 
     // Reports the write the generic instruction `ins` is about to make (a
-    // subscript store or deletion, an attribute deletion) to the trace (see
-    // writes.rs).
+    // subscript store or deletion, an attribute deletion, the key a
+    // defaultdict fills in when it is asked for one it does not have) to
+    // the trace (see writes.rs).
     unsafe fn note_write(&self, opcode: u8, oparg: u32, ins: &Instr) -> writes::Token {
         use crate::cfg::opcodes::*;
         let a = |k: usize| self.val(ins.args[k]);
@@ -1981,6 +1982,7 @@ impl Act<'_> {
             DELETE_SUBSCR => writes::store_item(a(0), a(1), std::ptr::null_mut(), None),
             DELETE_ATTR => writes::store_attr(a(0), self.name(oparg), std::ptr::null_mut(), false),
             STORE_SLICE => writes::store_slice(a(1)),
+            BINARY_SUBSCR => writes::load_item(a(0), a(1)),
             _ => 0,
         }
     }
@@ -2379,7 +2381,7 @@ impl Act<'_> {
         };
         self.set(v, obj);
         if self.reading {
-            let operands: Vec<*mut PyObject> = ins.args.iter().take(2).map(|x| self.val(*x)).collect();
+            let operands: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
             super::made::result(&ins.op, &operands, obj);
         }
         Ok(())

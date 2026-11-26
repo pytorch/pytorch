@@ -27,8 +27,8 @@ Guarantees
     run's order, or raises ``Unrepeatable``. The target is an argument, a
     container inside one (found by its path on every run), or the object
     itself, which the region then holds (``pinned``). A write into a
-    container the region builds anew, for an output or for a written value,
-    is none: the container is built as the run left it.
+    container or an object the region builds anew, for an output or for a
+    written value, is none: it is built as the run left it.
   - ``unreachable`` names a held target that nothing the run read leads to:
     the checks of such a region would not notice that the program uses
     another object in its place.
@@ -141,8 +141,16 @@ class Written:
         """Fills ``templates``, ``text`` and ``pinned`` (appending what the
         templates refer to to ``objects``, as ``describe`` does). ``outs``:
         the outputs of the traced run, which the region builds too.
-        ``made(x)``: whether the run made the list, dict or set ``x``."""
-        values = [v for _, _, vs in self.recorded for v in vs]
+        ``made(x)``: whether the run made ``x``, a list, dict or set, or an
+        object that a region builds anew from its fields."""
+        # What the run stored into an object it made is in that object as
+        # the region builds it, and nowhere else.
+        values = [
+            v
+            for _, target, vs in self.recorded
+            if isinstance(target, (list, dict, set)) or not made(target)
+            for v in vs
+        ]
         if shared([*outs, *values], old):
             raise Unrepeatable("a container the run made is held in two places")
         built = _built([*outs, *values], old)
@@ -151,8 +159,9 @@ class Written:
                 continue
             # A container the run made and hands to nobody (the list a loop
             # collects tensors in for one operator call): nothing of the
-            # write outlives the run.
-            if isinstance(target, (list, dict, set)) and made(target):
+            # write outlives the run. An object the run made is built as the
+            # run left it, if it is handed on at all.
+            if made(target):
                 continue
             inside = isinstance(target, (list, dict, set)) and type(old.get(id(target))) is tuple
             if inside or any(target is a for a in args):

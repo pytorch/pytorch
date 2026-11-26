@@ -38,7 +38,9 @@ what anything else did to a container meanwhile stays.
 import array
 import collections
 import contextlib
+import copy
 import ctypes
+import dataclasses
 import functools
 import gc
 import itertools
@@ -2474,6 +2476,1381 @@ class TestVmMadeContainers(TestCase):
 
 
 instantiate_device_type_tests(TestVmMadeContainers, globals())
+
+
+# What the iterator tests loop over and take from, and where the bodies of
+# their loops leave a mark (a call that ends a region). Each side of a test,
+# eager mode and torch.vm, runs a copy of the function with a MODES_HELD and
+# a MODES_MARKS of its own (see modes_sides).
+MODES_HELD = None
+MODES_MARKS = []
+MODES_RATES = [0.5, 0.25]
+
+
+def modes_sides(fn, held):
+    """``fn`` twice, for eager mode and for torch.vm: each a copy whose
+    globals are this file's with what ``held()`` gives as MODES_HELD and an
+    empty MODES_MARKS, so that what one side leaves behind is not what the
+    other finds."""
+    sides = []
+    for _ in range(2):
+        torch.manual_seed(0)
+        space = {**globals(), "MODES_HELD": held(), "MODES_MARKS": []}
+        clone = types.FunctionType(fn.__code__, space, fn.__name__, fn.__defaults__)
+        sides.append((clone, space))
+    return sides
+
+
+def modes_loop_store(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD:
+        g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_store_lr(x, lr):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD:
+        g["lr"] = lr
+    y = y * lr
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_optimizer(x, lr):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD.param_groups:
+        g["lr"] = lr
+    y = y * lr
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_read(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD:
+        MODES_MARKS.append(1)
+        y = y * g["s"]
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_read_what_the_body_wrote(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD:
+        MODES_MARKS.append(1)
+        y = y * g["s"]
+        MODES_HELD[1]["s"] = 3.0
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_append(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for bucket in MODES_HELD:
+        bucket.append(y)
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_items(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for name, g in MODES_HELD.items():
+        g["dirty"] = name
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_values(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD.values():
+        g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_keys(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for name in MODES_HELD:
+        MODES_HELD[name] = MODES_HELD[name] + 1
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_enumerate(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for i, g in enumerate(MODES_HELD, start=1):
+        g["dirty"] = i
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_zip(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g, rate in zip(MODES_HELD, MODES_RATES):
+        g["dirty"] = rate
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_zip_strict(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g, rate in zip(MODES_HELD, MODES_RATES, strict=True):
+        MODES_MARKS.append(1)
+        y = y * g["s"] * rate
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_display(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in [MODES_HELD[0], MODES_HELD[1]]:
+        g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_slice(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD[1:]:
+        g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_inner(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for groups in MODES_HELD:
+        y = ((y.sin() * 2).cos() + 1).tanh()
+        for g in groups:
+            g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_worklist(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for v in MODES_HELD:
+        if len(MODES_HELD) < 4:
+            MODES_HELD.append(v * 0.5)
+        y = y * v
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_first(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    first = next(iter(MODES_HELD))
+    return ((y * 3).cos() + 1).tanh().exp(), first
+
+
+def modes_loop_first_read(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    first = next(iter(MODES_HELD))
+    k = first[0]
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_loop_tensors(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for buffer in MODES_HELD:
+        MODES_MARKS.append(1)
+        buffer.add_(1.0)
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_modules(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for m in MODES_HELD:
+        MODES_MARKS.append(1)
+        y = m(y).tanh()
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_enumerate_modules(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for i, layer in enumerate(MODES_HELD.layers):
+        MODES_MARKS.append(i)
+        if i == 0:
+            # Seen by a loop over the module list itself.
+            MODES_HELD.layers[1] = MODES_HELD.spare
+        y = layer(y).tanh()
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_objects(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for box in MODES_HELD:
+        box.kept = y
+        y = y * 2
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_span(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD:
+        y = y * g["s"]
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_pop(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    work = list(MODES_HELD)
+    while work:
+        v = work.pop()
+        MODES_MARKS.append(v)
+        y = y * v
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_range(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for i in range(len(MODES_HELD)):
+        MODES_MARKS.append(i)
+        y = y * (i + 2)
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_rows(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for row in y:
+        MODES_MARKS.append(1)
+        y = y + row
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_made_and_kept(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    ys = [y, y * 2]
+    for v in ys:
+        MODES_MARKS.append(1)
+        if len(ys) < 4:
+            ys.append(v * 0.5)
+        y = y + v
+    return ((y * 3).cos() + 1).tanh().exp(), ys
+
+
+def modes_loop_pairs(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    it = iter(MODES_HELD)
+    for a, b in zip(it, it):
+        MODES_MARKS.append(1)
+        y = y * a + b
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_not_seen_made(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for v in MODES_HELD.__iter__():
+        MODES_MARKS.append(1)
+        y = y * v
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_stores_held(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    MODES_HELD.kept = MODES_HELD.items
+    MODES_HELD.at = MODES_HELD.it
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given(x, ws):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for w in ws:
+        MODES_MARKS.append(1)
+        y = y * w
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_inside(x, pair):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for w in pair[0]:
+        MODES_MARKS.append(1)
+        y = y * w
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_values(x, named):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for w in named.values():
+        MODES_MARKS.append(1)
+        y = y * w
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_listed(x, named):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for w in named["ws"]:
+        MODES_MARKS.append(1)
+        y = y * w
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_next(x, it):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    w = next(it)
+    return ((y * w).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_next_inside(x, pair):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    w = next(pair[0])
+    return ((y * w).cos() + 1).tanh().exp()
+
+
+def modes_loop_stores_given(x, pair):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    MODES_HELD.kept = pair[0]
+    MODES_HELD.at = pair[1]
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_first(x, ws):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    w = next(iter(ws))
+    return ((y * w).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_zip(x, ws):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for i, (w, rate) in enumerate(zip(ws, MODES_RATES)):
+        MODES_MARKS.append(i)
+        y = y * w * rate
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_dicts(x, groups):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in groups:
+        g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp(), [dict(g) for g in groups]
+
+
+def modes_next(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = next(MODES_HELD)
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_pair(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    a, b = next(MODES_HELD)
+    return ((y * a * (b + 1)).cos() + 1).tanh().exp()
+
+
+def modes_next_of_an_attribute(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = next(MODES_HELD.items)
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_of_an_item(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = next(MODES_HELD[0])
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_by_its_method(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = MODES_HELD.__next__()
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_by_islice(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    (k,) = itertools.islice(MODES_HELD, 1)
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_by_a_loop(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = 0.0
+    for v in MODES_HELD:
+        k = v
+        break
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_under_enumerate(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for i, v in enumerate(MODES_HELD):
+        MODES_MARKS.append(i)
+        y = y * v
+        if i == 1:
+            break
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_next_under_zip(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for v, rate in zip(MODES_HELD, MODES_RATES):
+        MODES_MARKS.append(1)
+        y = y * v * rate
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+class ModesLayers(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)]
+        )
+        self.second = self.layers[1]
+        self.spare = torch.nn.Linear(8, 8)
+
+
+def modes_numbers(n=400):
+    return [float(i % 7 + 1) for i in range(n)]
+
+
+def modes_weights(call):
+    return torch.full((8,), call + 1.0), torch.full((8,), 2.0)
+
+
+def modes_on(value, device):
+    """``value`` with the tensors in its tuples, lists and dicts on
+    ``device``."""
+    if isinstance(value, torch.Tensor):
+        return value.to(device)
+    if isinstance(value, (tuple, list)):
+        return type(value)(modes_on(v, device) for v in value)
+    if type(value) is type(iter(())):
+        return iter(tuple(modes_on(v, device) for v in value))
+    if isinstance(value, dict):
+        return {k: modes_on(v, device) for k, v in value.items()}
+    return value
+
+
+def modes_counted():
+    i = 0
+    while True:
+        i += 1
+        yield float(i % 7 + 1)
+
+
+def modes_holder(**fields):
+    holder = types.SimpleNamespace()
+    vars(holder).update(fields)
+    return holder
+
+
+def modes_flags(n=2):
+    return [{"dirty": False} for _ in range(n)]
+
+
+def modes_clear(held):
+    for g in held.values() if isinstance(held, dict) else held:
+        if isinstance(g, list):
+            modes_clear(g)
+        else:
+            g["dirty"] = False
+
+
+def modes_two_scales():
+    return [{"s": 2.0}, {"s": 1.0}]
+
+
+def modes_rescale(held, call):
+    if call in (6, 9):
+        held[0]["s"] = float(call)
+
+
+def modes_optimizer(device):
+    return torch.optim.SGD(torch.nn.Linear(8, 8).parameters(), lr=0.1)
+
+
+def modes_peek(held, out):
+    """What the caller's next ``next`` would give."""
+    return next(copy.deepcopy(held))
+
+
+# A test of TestVmIterators: the function; what its MODES_HELD is (given the
+# device); what the trace of its first block comes to, how often that region
+# runs in thirteen calls (regions run from the fifth call on) and why it is
+# none; the state to compare after every call (given MODES_HELD and the
+# result); what the caller does after and before every call; the other
+# arguments of a call.
+ModesLoop = collections.namedtuple(
+    "ModesLoop",
+    "fn held front state after before args",
+    defaults=(("region", 9, None), None, None, None, None),
+)
+MODES_SHARED = ("refused", 0, "its outputs share a container")
+MODES_ANOTHER = (
+    "it is found by which object (or value) an argument is, and that was another on "
+    "every call: its regions never ran, so they were dropped and the place takes no "
+    "new one"
+)
+MODES_UNSEEN = "that its run is not seen to make and that none of its reads leads to"
+MODES_LOOPS = {
+    # A loop over what was there before, whose iterator a region makes:
+    # stores into the items, and what the body reads of them.
+    "store": ModesLoop(
+        modes_loop_store,
+        lambda d: modes_flags(),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "store_another_lr_on_every_call": ModesLoop(
+        modes_loop_store_lr,
+        lambda d: [{"lr": 0.1}, {"lr": 0.1}],
+        # The region is entered while the dicts are what the trace found.
+        front=("region", 0, None),
+        state=lambda h, out: [dict(g) for g in h],
+        args=lambda call: (0.1 * 0.9**call,),
+    ),
+    "store_the_same_lr": ModesLoop(
+        modes_loop_store_lr,
+        lambda d: [{"lr": 0.1}, {"lr": 0.1}],
+        state=lambda h, out: [dict(g) for g in h],
+        after=lambda h: [g.update(lr=0.1) for g in h],
+        args=lambda call: (0.05,),
+    ),
+    "optimizer_schedule": ModesLoop(
+        modes_loop_optimizer,
+        modes_optimizer,
+        front=("region", 0, None),
+        state=lambda h, out: [g["lr"] for g in h.param_groups],
+        args=lambda call: (0.1 * 0.9**call,),
+    ),
+    "optimizer_the_same_lr": ModesLoop(
+        modes_loop_optimizer,
+        modes_optimizer,
+        state=lambda h, out: [g["lr"] for g in h.param_groups],
+        after=lambda h: [g.update(lr=0.1) for g in h.param_groups],
+        args=lambda call: (0.05,),
+    ),
+    "read_changed_between_calls": ModesLoop(
+        modes_loop_read,
+        lambda d: modes_two_scales(),
+        front=("region", 7, None),
+        before=modes_rescale,
+    ),
+    "read_what_the_body_wrote": ModesLoop(
+        modes_loop_read_what_the_body_wrote,
+        lambda d: modes_two_scales(),
+        after=lambda h: h[1].update(s=1.0),
+    ),
+    "append": ModesLoop(
+        modes_loop_append,
+        lambda d: [[], []],
+        state=lambda h, out: [[len(b), b[-1].sum()] for b in h],
+        after=lambda h: [b.clear() for b in h],
+    ),
+    "dict_items": ModesLoop(
+        modes_loop_items,
+        lambda d: {"a": {"dirty": False}, "b": {"dirty": False}},
+        state=lambda h, out: [dict(g) for g in h.values()],
+        after=modes_clear,
+    ),
+    "dict_values": ModesLoop(
+        modes_loop_values,
+        lambda d: {"a": {"dirty": False}, "b": {"dirty": False}},
+        state=lambda h, out: [dict(g) for g in h.values()],
+        after=modes_clear,
+    ),
+    "dict_keys": ModesLoop(
+        modes_loop_keys,
+        lambda d: {"a": 0, "b": 0},
+        state=lambda h, out: dict(h),
+        after=lambda h: h.update(a=0, b=0),
+    ),
+    "enumerate": ModesLoop(
+        modes_loop_enumerate,
+        lambda d: modes_flags(),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "zip": ModesLoop(
+        modes_loop_zip,
+        lambda d: modes_flags(),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "list_display": ModesLoop(
+        modes_loop_display,
+        lambda d: modes_flags(),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "slice": ModesLoop(
+        modes_loop_slice,
+        lambda d: modes_flags(3),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "tuple": ModesLoop(
+        modes_loop_store,
+        lambda d: tuple(modes_flags()),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "ordered_dicts": ModesLoop(
+        modes_loop_store,
+        lambda d: [
+            collections.OrderedDict(dirty=False),
+            collections.OrderedDict(dirty=False),
+        ],
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "inner_loop": ModesLoop(
+        modes_loop_inner,
+        lambda d: [modes_flags(1), modes_flags(1)],
+        state=lambda h, out: [dict(g) for groups in h for g in groups],
+        after=modes_clear,
+    ),
+    "grows_in_the_loop": ModesLoop(
+        modes_loop_worklist,
+        lambda d: [],
+        state=lambda h, out: list(h),
+        before=lambda h, call: h.__setitem__(slice(None), [2.0, 1.0]),
+    ),
+    "grows_and_shrinks_between_calls": ModesLoop(
+        modes_loop_read,
+        lambda d: modes_two_scales(),
+        front=("region", 7, None),
+        before=lambda h, call: h.append({"s": 0.5})
+        if call == 6
+        else h.pop(0)
+        if call == 9
+        else None,
+    ),
+    "first_item": ModesLoop(
+        modes_loop_first, lambda d: [[1.0], [2.0]], state=lambda h, out: out[1] is h[0]
+    ),
+    "first_item_changed_between_calls": ModesLoop(
+        modes_loop_first_read,
+        lambda d: [[2.0], [1.0]],
+        front=("region", 8, None),
+        before=lambda h, call: h[0].__setitem__(
+            0, 5.0 if 5 <= call < 8 or call >= 11 else 2.0
+        ),
+    ),
+    # What was right, and stays so.
+    "tensors": ModesLoop(
+        modes_loop_tensors,
+        lambda d: [torch.zeros(8, device=d), torch.zeros(8, device=d)],
+        state=lambda h, out: [b.clone() for b in h],
+    ),
+    "modules": ModesLoop(
+        modes_loop_modules,
+        lambda d: torch.nn.ModuleList(
+            [torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)]
+        ).to(d),
+        before=lambda h, call: h[0].weight.data.mul_(0.5) if call in (6, 9) else None,
+    ),
+    "enumerate_modules": ModesLoop(
+        modes_loop_enumerate_modules,
+        lambda d: ModesLayers().to(d),
+        after=lambda h: h.layers.__setitem__(1, h.second),
+    ),
+    "objects": ModesLoop(
+        modes_loop_objects,
+        lambda d: [modes_holder(kept=None), modes_holder(kept=None)],
+        state=lambda h, out: [box.kept for box in h],
+    ),
+    "one_span": ModesLoop(
+        modes_loop_span,
+        lambda d: modes_two_scales(),
+        front=("region", 7, None),
+        before=modes_rescale,
+    ),
+    "while_pop": ModesLoop(
+        modes_loop_pop,
+        lambda d: [2.0, 1.0],
+        front=("region", 7, None),
+        before=lambda h, call: h.__setitem__(0, float(call))
+        if call in (6, 9)
+        else None,
+    ),
+    "range": ModesLoop(
+        modes_loop_range,
+        lambda d: [1, 2, 3],
+        front=("region", 8, None),
+        before=lambda h, call: h.pop() if call == 6 else None,
+    ),
+    "rows_of_a_tensor": ModesLoop(modes_loop_rows, lambda d: None),
+    # No region: a list the run made that goes on next to its iterator, one
+    # iterator in two places, an iterator nothing is seen to make.
+    "made_and_kept": ModesLoop(
+        modes_loop_made_and_kept, lambda d: None, front=MODES_SHARED
+    ),
+    "one_iterator_twice": ModesLoop(
+        modes_loop_pairs, lambda d: [1.0, 2.0, 3.0, 4.0], front=MODES_SHARED
+    ),
+    "strict_zip": ModesLoop(
+        modes_loop_zip_strict,
+        lambda d: modes_two_scales(),
+        front=("region", 8, None),
+        before=lambda h, call: h.append({"s": 0.5}) if call == 8 else None,
+    ),
+    # What an argument holds is found by its structure, another object on
+    # every call: the loop is over this call's.
+    "argument_tuple": ModesLoop(
+        modes_loop_given, lambda d: None, args=lambda call: (modes_weights(call),)
+    ),
+    "argument_list": ModesLoop(
+        modes_loop_given,
+        lambda d: None,
+        args=lambda call: (list(modes_weights(call)),),
+    ),
+    "argument_tuple_in_a_tuple": ModesLoop(
+        modes_loop_given_inside,
+        lambda d: None,
+        args=lambda call: ((modes_weights(call), 3),),
+    ),
+    "argument_dict_values": ModesLoop(
+        modes_loop_given_values,
+        lambda d: None,
+        args=lambda call: (dict(zip("ab", modes_weights(call))),),
+    ),
+    "argument_tuple_first": ModesLoop(
+        modes_loop_given_first,
+        lambda d: None,
+        args=lambda call: (modes_weights(call),),
+    ),
+    "argument_tuple_zip": ModesLoop(
+        modes_loop_given_zip,
+        lambda d: None,
+        args=lambda call: (modes_weights(call),),
+    ),
+    "argument_list_of_dicts": ModesLoop(
+        modes_loop_given_dicts, lambda d: None, args=lambda call: (modes_flags(),)
+    ),
+    "argument_list_in_a_dict": ModesLoop(
+        modes_loop_given_listed,
+        lambda d: None,
+        args=lambda call: ({"ws": list(modes_weights(call))},),
+    ),
+    "argument_iterator": ModesLoop(
+        modes_loop_given_next,
+        lambda d: None,
+        args=lambda call: (iter(modes_weights(call)),),
+    ),
+    # (An iterator inside an argument is found by which object it is.)
+    "argument_iterator_in_a_tuple": ModesLoop(
+        modes_loop_given_next_inside,
+        lambda d: None,
+        front=("refused", 0, MODES_ANOTHER),
+        args=lambda call: ((iter(modes_weights(call)), 1),),
+    ),
+    # An iterator that was there before the call is the program's own.
+    "next_list_iterator": ModesLoop(
+        modes_next, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_tuple_iterator": ModesLoop(
+        modes_next, lambda d: iter(tuple(modes_numbers())), state=modes_peek
+    ),
+    "next_range_iterator": ModesLoop(
+        modes_next, lambda d: iter(range(1, 400)), state=modes_peek
+    ),
+    "next_dict_iterator": ModesLoop(
+        modes_next,
+        lambda d: iter({v + i / 64: i for i, v in enumerate(modes_numbers(40))}),
+        state=modes_peek,
+    ),
+    "next_batch": ModesLoop(
+        modes_next,
+        lambda d: iter([torch.full((8,), v, device=d) for v in modes_numbers(40)]),
+        state=modes_peek,
+    ),
+    "next_of_zip": ModesLoop(
+        modes_next_pair, lambda d: zip(modes_numbers(), range(400)), state=modes_peek
+    ),
+    "next_of_enumerate": ModesLoop(
+        modes_next_pair, lambda d: enumerate(modes_numbers()), state=modes_peek
+    ),
+    "next_of_an_attribute": ModesLoop(
+        modes_next_of_an_attribute,
+        lambda d: modes_holder(items=iter(modes_numbers())),
+        state=lambda h, out: modes_peek(h.items, out),
+    ),
+    "next_of_an_item": ModesLoop(
+        modes_next_of_an_item,
+        lambda d: [iter(modes_numbers())],
+        state=lambda h, out: modes_peek(h[0], out),
+    ),
+    "next_by_its_method": ModesLoop(
+        modes_next_by_its_method, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_by_islice": ModesLoop(
+        modes_next_by_islice, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_by_a_loop": ModesLoop(
+        modes_next_by_a_loop, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_under_enumerate": ModesLoop(
+        modes_next_under_enumerate, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_under_zip": ModesLoop(
+        modes_next_under_zip, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_of_a_generator": ModesLoop(
+        modes_next,
+        lambda d: modes_counted(),
+        front=("refused", 0, "an output is a generator"),
+    ),
+    "next_of_a_cycle": ModesLoop(
+        modes_next,
+        lambda d: itertools.cycle([2.0, 5.0, 3.0]),
+        front=("refused", 0, "an output is a cycle"),
+    ),
+    "not_seen_made": ModesLoop(
+        modes_loop_not_seen_made,
+        lambda d: [2.0, 1.0],
+        front=("refused", 0, f"it hands on a list_iterator {MODES_UNSEEN}"),
+    ),
+}
+
+
+def modes_front(fn, compiled):
+    """What the trace of the block (or the span) that the first line of
+    ``fn``'s body is in came to, how often its region ran, and why it is
+    none."""
+    line = fn.__code__.co_firstlineno
+    rows = [r for r in vm.regions(compiled) if r["function"] == fn.__name__]
+    spans = [r for r in rows if r["kind"] == "span"]
+    (row,) = spans or [
+        r for r in rows if r["kind"] == "block" and r["lines"][0] == line
+    ]
+    return row["state"], row["runs"], row["why"]
+
+
+def modes_compare(test, case, device):
+    """Thirteen calls of ``case`` (a ModesLoop) in eager mode and under
+    torch.vm, each side on a state of its own: the results, the state left
+    behind and the marks of every call, then the trace of the first block."""
+    (eager, theirs), (traced, mine) = modes_sides(case.fn, lambda: case.held(device))
+    compiled = vm(traced, passes=EARLY)
+    for call in range(13):
+        row = []
+        for run, space in ((eager, theirs), (compiled, mine)):
+            held = space["MODES_HELD"]
+            if case.before is not None:
+                case.before(held, call)
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            given = modes_on(case.args(call), device) if case.args else ()
+            try:
+                out = run(x, *given)
+            except ValueError as e:
+                out = str(e)
+            state = None if case.state is None else case.state(held, out)
+            if case.after is not None:
+                case.after(held)
+            # A container handed back is compared by what it holds.
+            row.append((out, state, list(space["MODES_MARKS"])))
+        test.assertEqual(row[1], row[0], atol=0, rtol=0, msg=f"call {call}")
+    test.assertEqual(modes_front(case.fn, compiled), case.front)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmIterators(TestCase):
+    """What a region hands on of an iterator: one its run made (the
+    ``for`` right behind tensor work) loops over the list or the dict
+    itself where that was there before the run, so a store into an item is
+    the program's and what the body does to the container is seen; one that
+    was there before the run is the program's own, and goes on from where it
+    is; anything else is no region."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def front(self, fn, compiled):
+        return modes_front(fn, compiled)
+
+    @parametrize("name", list(MODES_LOOPS), name_fn=str)
+    @isolated
+    def test_loop(self, device, name):
+        modes_compare(self, MODES_LOOPS[name], device)
+
+    @isolated
+    def test_what_a_write_is_handed_is_the_object(self, device):
+        # With the effects pass a region makes the stores again: with the
+        # list and the iterator the program has, not with copies of them.
+        def held():
+            return modes_holder(
+                items=[1.0, 2.0], it=iter(modes_numbers()), kept=None, at=None
+            )
+
+        (eager, _), (traced, mine) = modes_sides(modes_loop_stores_held, held)
+        effects = (*vm.DEFAULT_PASSES, vm.passes.Effects())
+        compiled = vm(
+            traced,
+            passes=vm.configure(effects, regions={"at": 3, "observe": 1}, pure_calls=1),
+        )
+        held = mine["MODES_HELD"]
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            self.assertEqual(compiled(x), eager(x), atol=0, rtol=0, msg=f"call {call}")
+            self.assertIs(held.kept, held.items, msg=f"call {call}")
+            self.assertIs(held.at, held.it, msg=f"call {call}")
+            held.kept = held.at = None
+        self.assertEqual(
+            self.front(modes_loop_stores_held, compiled), ("region", 9, None)
+        )
+
+    @isolated
+    def test_what_a_write_is_handed_of_an_argument(self, device):
+        # The list and the iterator inside the argument of this call, which
+        # are others on every call.
+        (eager, _), (traced, mine) = modes_sides(
+            modes_loop_stores_given, lambda: modes_holder(kept=None, at=None)
+        )
+        effects = (*vm.DEFAULT_PASSES, vm.passes.Effects())
+        compiled = vm(
+            traced,
+            passes=vm.configure(effects, regions={"at": 3, "observe": 1}, pure_calls=1),
+        )
+        held = mine["MODES_HELD"]
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            ours, theirs = (([1.0, call], iter(modes_numbers())) for _ in range(2))
+            got, want = compiled(x, ours), eager(x, theirs)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertIs(held.kept, ours[0], msg=f"call {call}")
+            self.assertIs(held.at, ours[1], msg=f"call {call}")
+            held.kept = held.at = None
+
+
+instantiate_device_type_tests(TestVmIterators, globals())
+
+
+@dataclasses.dataclass
+class ModesConfig:
+    scale: float
+    n: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class ModesFrozen:
+    scale: float
+
+
+@dataclasses.dataclass
+class ModesOut:
+    a: torch.Tensor
+    b: object = None
+
+
+@dataclasses.dataclass
+class ModesPooled:
+    """Its objects are handed out by a ``__new__`` of its own, which could
+    as well give one that was there before."""
+
+    scale: float
+    n: int = 0
+
+    def __new__(cls, *args, **kwargs):
+        return object.__new__(cls)
+
+
+ModesPair = collections.namedtuple("ModesPair", "a b")
+
+
+class ModesCounter:
+    def __init__(self):
+        self.n = 0
+        self.kept = self.bump
+
+    def bump(self):
+        self.n += 1
+        return self.n
+
+
+def modes_object_stored_into(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = MODES_HELD
+    MODES_MARKS.append(1)
+    c.n += 1
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_object_returned(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = MODES_HELD
+    MODES_MARKS.append(1)
+    return ((y * 3).cos() + 1).tanh().exp(), c
+
+
+def modes_object_of_an_attribute(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = MODES_HELD.cfg
+    MODES_MARKS.append(1)
+    c.n += 1
+    y = y * c.scale
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_object_in_a_display(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    cs = [MODES_HELD[0], MODES_HELD[1]]
+    MODES_MARKS.append(1)
+    cs[0].n += 1
+    return ((y * 3).cos() + 1).tanh().exp(), cs[1] is MODES_HELD[1]
+
+
+def modes_object_inside_an_argument(x, pair):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = pair[0]
+    MODES_MARKS.append(1)
+    c.n += 1
+    return ((y * c.scale).cos() + 1).tanh().exp(), c.n
+
+
+def modes_object_looped(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for c in MODES_HELD:
+        MODES_MARKS.append(1)
+        c.n += 1
+        y = y * c.scale
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_object_made(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    return ModesOut(y.exp(), b=y * 2)
+
+
+def modes_object_made_then_changed(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    o = ModesOut(y, y * 2)
+    MODES_MARKS.append(1)
+    o.b = o.b + 1
+    return ((y * 3).cos() + 1).tanh().exp(), o
+
+
+def modes_out_of(a, b):
+    return ModesOut(a=a, b=b)
+
+
+def modes_object_made_in_a_callee(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    o = modes_out_of(y, y * 2)
+    MODES_MARKS.append(1)
+    return ((y * 3).cos() + 1).tanh().exp(), o
+
+
+def modes_object_made_holding_a_list(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    o = ModesOut(y, [y * 2, y * 3])
+    MODES_MARKS.append(1)
+    o.b.append(1)
+    return ((y * 3).cos() + 1).tanh().exp(), o
+
+
+def modes_object_made_by_replace(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = dataclasses.replace(MODES_HELD, n=3)
+    MODES_MARKS.append(1)
+    c.n += 1
+    return ((y * 3).cos() + 1).tanh().exp(), c, c is MODES_HELD
+
+
+def modes_object_handed_out(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = ModesPooled(2.0)
+    MODES_MARKS.append(1)
+    c.n += 1
+    return ((y * 3).cos() + 1).tanh().exp(), c
+
+
+def modes_object_made_and_stored(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    MODES_HELD.kept = ModesOut(y, [y * 2])
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_node_held(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    pair = MODES_HELD
+    MODES_MARKS.append(1)
+    pair.b.append(1.0)
+    return ((y * 3).cos() + 1).tanh().exp(), pair
+
+
+def modes_node_made(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    pair = ModesPair(y, [y * 2])
+    MODES_MARKS.append(1)
+    pair.b.append(1.0)
+    return ((y * 3).cos() + 1).tanh().exp(), pair
+
+
+def modes_node_made_over_held(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    named = collections.OrderedDict(kept=MODES_HELD)
+    MODES_MARKS.append(1)
+    named["kept"].append(1.0)
+    return ((y * 3).cos() + 1).tanh().exp(), named
+
+
+def modes_method_of_a_made_list(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    out = []
+    add = out.append
+    MODES_MARKS.append(1)
+    add(y)
+    return ((y * 3).cos() + 1).tanh().exp(), out
+
+
+def modes_method_of_an_argument(x, out):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    add = out.append
+    MODES_MARKS.append(1)
+    add(1)
+    return ((y * 3).cos() + 1).tanh().exp(), list(out)
+
+
+def modes_method_inside_an_argument(x, pair):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    bump = pair[0].bump
+    MODES_MARKS.append(1)
+    k = bump()
+    return ((y * k).cos() + 1).tanh().exp(), pair[0].n
+
+
+def modes_method_of_a_made_dict(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    d = {"a": y}
+    get = d.get
+    MODES_MARKS.append(1)
+    return ((y * 3).cos() + 1).tanh().exp() + get("a")
+
+
+def modes_method_of_a_made_iterator(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    take = iter(MODES_HELD).__next__
+    MODES_MARKS.append(1)
+    k = take() + take()
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_method_of_held(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    bump = MODES_HELD.bump
+    MODES_MARKS.append(1)
+    k = bump()
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_method_that_is_kept(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    bump = MODES_HELD.kept
+    MODES_MARKS.append(1)
+    k = bump()
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_method_of_a_held_list(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    add = MODES_HELD.append
+    MODES_MARKS.append(1)
+    add(y)
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_two_configs():
+    return [ModesConfig(2.0), ModesConfig(1.0)]
+
+
+def modes_method_refused(kind):
+    why = f"it hands on a method of a {kind} that its run made, or that none of its reads leads to"
+    return ("refused", 0, why)
+
+
+MODES_OBJECTS = {
+    # A dataclass instance that was there before the run is the object.
+    "known_stored_into": ModesLoop(
+        modes_object_stored_into,
+        lambda d: ModesConfig(2.0),
+        state=lambda h, out: h.n,
+    ),
+    "known_returned": ModesLoop(
+        modes_object_returned,
+        lambda d: ModesConfig(2.0),
+        state=lambda h, out: out[1] is h,
+    ),
+    "known_frozen": ModesLoop(
+        modes_object_returned,
+        lambda d: ModesFrozen(2.0),
+        state=lambda h, out: out[1] is h,
+    ),
+    "known_of_an_attribute": ModesLoop(
+        modes_object_of_an_attribute,
+        lambda d: modes_holder(cfg=ModesConfig(2.0)),
+        state=lambda h, out: h.cfg.n,
+        before=lambda h, call: setattr(h.cfg, "scale", float(call))
+        if call in (6, 9)
+        else None,
+    ),
+    "known_in_a_display": ModesLoop(
+        modes_object_in_a_display,
+        lambda d: modes_two_configs(),
+        state=lambda h, out: h[0].n,
+    ),
+    # (Inside an argument it is found by which object it is: another on
+    # every call here.)
+    "known_inside_an_argument": ModesLoop(
+        modes_object_inside_an_argument,
+        lambda d: None,
+        front=("refused", 0, MODES_ANOTHER),
+        args=lambda call: ((ModesConfig(call + 1.0, call), 1),),
+    ),
+    "known_looped_over": ModesLoop(
+        modes_object_looped,
+        lambda d: modes_two_configs(),
+        state=lambda h, out: [c.n for c in h],
+        before=lambda h, call: setattr(h[0], "scale", float(call))
+        if call in (6, 9)
+        else None,
+    ),
+    # One the run made is made by every run.
+    "made": ModesLoop(modes_object_made, lambda d: None),
+    "made_then_changed": ModesLoop(modes_object_made_then_changed, lambda d: None),
+    "made_in_a_callee": ModesLoop(modes_object_made_in_a_callee, lambda d: None),
+    "made_holding_a_list": ModesLoop(modes_object_made_holding_a_list, lambda d: None),
+    "made_by_replace": ModesLoop(
+        modes_object_made_by_replace,
+        lambda d: ModesConfig(2.0),
+        state=lambda h, out: h.n,
+    ),
+    # A class that hands out its objects itself is called behind the region.
+    "handed_out_by_its_class": ModesLoop(modes_object_handed_out, lambda d: None),
+    # A namedtuple or an OrderedDict is built of what it holds, each by its
+    # own rule: a list in it that was there before is the object itself.
+    "node_holding_a_known_list": ModesLoop(
+        modes_node_held,
+        lambda d: ModesPair(1.0, [2.0]),
+        state=lambda h, out: [len(h.b), out[1].b is h.b],
+    ),
+    "node_made": ModesLoop(modes_node_made, lambda d: None),
+    "node_made_over_a_known_list": ModesLoop(
+        modes_node_made_over_held,
+        lambda d: [],
+        state=lambda h, out: [len(h), out[1]["kept"] is h],
+        after=lambda h: h.clear(),
+    ),
+    # A method bound by the run is pinned only to what is found again.
+    "method_of_a_made_list": ModesLoop(
+        modes_method_of_a_made_list,
+        lambda d: None,
+        front=modes_method_refused("list"),
+    ),
+    "method_of_an_argument": ModesLoop(
+        modes_method_of_an_argument,
+        lambda d: None,
+        front=modes_method_refused("list"),
+        args=lambda call: ([],),
+    ),
+    "method_of_an_object_in_an_argument": ModesLoop(
+        modes_method_inside_an_argument,
+        lambda d: None,
+        front=modes_method_refused("ModesCounter"),
+        args=lambda call: ((ModesCounter(), call),),
+    ),
+    "method_of_a_made_dict": ModesLoop(
+        modes_method_of_a_made_dict,
+        lambda d: None,
+        front=modes_method_refused("dict"),
+    ),
+    "method_of_a_made_iterator": ModesLoop(
+        modes_method_of_a_made_iterator,
+        lambda d: modes_numbers(40),
+        front=modes_method_refused("list_iterator"),
+    ),
+    "method_of_a_known_object": ModesLoop(
+        modes_method_of_held,
+        lambda d: ModesCounter(),
+        state=lambda h, out: h.n,
+    ),
+    "method_that_was_there_before": ModesLoop(
+        modes_method_that_is_kept,
+        lambda d: ModesCounter(),
+        state=lambda h, out: h.n,
+    ),
+    "method_of_a_known_list": ModesLoop(
+        modes_method_of_a_held_list,
+        lambda d: [],
+        state=lambda h, out: [len(h), h[-1].sum()],
+        after=lambda h: h.clear(),
+    ),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmHandedOn(TestCase):
+    """What a region hands on of an object it can make again from its
+    fields (a dataclass instance) and of a bound method: the instance that
+    was there before the run is the program's own object, one the run made
+    is made by every run, and one of unknown origin is no region; a method
+    the run bound is handed on only where what it is bound to is found
+    again as the same object."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("name", list(MODES_OBJECTS), name_fn=str)
+    @isolated
+    def test_object(self, device, name):
+        modes_compare(self, MODES_OBJECTS[name], device)
+
+    def test_unknown_origin_is_no_region(self, device):
+        # No program hands a region such an object today (a call that could
+        # give one that was there before ends the region in front of it), so
+        # the rule itself is asked: outside a trace nothing is made, and
+        # nothing is led to.
+        from torch._rust_inductor import _held, _Refused
+
+        for x, what in (
+            (ModesConfig(2.0), f"a ModesConfig {MODES_UNSEEN}"),
+            (iter([1.0]), f"a list_iterator {MODES_UNSEEN}"),
+            ([].append, "a method of a list that its run made"),
+            (ModesCounter().bump, "a method of a ModesCounter that its run made"),
+        ):
+            with self.assertRaisesRegex(_Refused, f"it hands on {what}"):
+                _held([x], {}, [])
+
+    @isolated
+    def test_made_object_is_this_calls(self, device):
+        compiled = vm(modes_object_made_holding_a_list, passes=EARLY)
+        made = []
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            want, out = modes_object_made_holding_a_list(x), compiled(x)
+            self.assertEqual(out, want, atol=0, rtol=0, msg=f"call {call}")
+            before = [ref() for ref in made]
+            self.assertFalse(any(out[1] is o for o in before), msg=f"call {call}")
+            made.append(weakref.ref(out[1]))
+            # What a caller does to the object it was handed is its own.
+            out[1].b = None
+            del out, want, before
+        gc.collect()
+        alive = [call for call, ref in enumerate(made) if ref() is not None]
+        self.assertEqual(alive, [])
+        (region,) = [
+            r
+            for r in vm.regions(compiled)
+            if r["state"] == "region"
+            and r["lines"][0]
+            == modes_object_made_holding_a_list.__code__.co_firstlineno
+        ]
+        self.assertEqual((region["runs"], region["misses"]), (9, {}))
+
+    @isolated
+    def test_made_object_a_write_is_handed(self, device):
+        # With the effects pass the store is the region's: of a new object
+        # on every run, holding a new list.
+        (eager, theirs), (traced, mine) = modes_sides(
+            modes_object_made_and_stored, lambda: modes_holder(kept=None)
+        )
+        effects = (*vm.DEFAULT_PASSES, vm.passes.Effects())
+        compiled = vm(
+            traced,
+            passes=vm.configure(effects, regions={"at": 3, "observe": 1}, pure_calls=1),
+        )
+        last = None
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            self.assertEqual(compiled(x), eager(x), atol=0, rtol=0, msg=f"call {call}")
+            got, want = mine["MODES_HELD"].kept, theirs["MODES_HELD"].kept
+            self.assertEqual((got.a, got.b), (want.a, want.b), atol=0, rtol=0)
+            self.assertIsNot(got, last, msg=f"call {call}")
+            last = got
+        self.assertEqual(
+            modes_front(modes_object_made_and_stored, compiled), ("region", 9, None)
+        )
+
+
+instantiate_device_type_tests(TestVmHandedOn, globals())
 
 
 # What the kinds tests iterate, unpack, test membership in or compute with:
