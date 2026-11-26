@@ -1873,7 +1873,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         for name in ("_all_weights", "_flat_weights_names", "_flat_weights"):
             self.assertNotIn(id(lstm.__dict__[name]), pickler.missing_values, name)
 
-    def test_fake_tensor_reduces_from_the_real_tensors_recorded_dispatch_keys(self):
+    @parametrize("pytype", [torch.Tensor, torch.nn.Parameter, SubclassWithMeta])
+    def test_fake_tensor_reduces_from_the_real_tensors_recorded_dispatch_keys(
+        self, pytype
+    ):
         # A guarded FakeTensor stands for a real tensor: the converter may have
         # recorded that tensor's dispatch keys, whereas _dispatch_keys(fake)
         # reports the Python keys of the fake itself, and empty_like(fake)
@@ -1882,6 +1885,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             FakeTensorMode,
             is_fake_tensor,
             maybe_get_fake_dispatch_keys,
+            maybe_get_fake_pytype,
         )
 
         real = torch.randn(2)
@@ -1893,7 +1897,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             mode,
             torch.empty_like(real, device="meta"),
             real.device,
-            torch.Tensor,
+            pytype,
             torch._C._dispatch_keys(real),
         )
         without_keys = mode.from_tensor(real)
@@ -1912,6 +1916,14 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             out = load_guards_state(buf.getvalue())["t"]
             self.assertTrue(is_fake_tensor(out))
             self.assertEqual(out.shape, real.shape)
+            expected_type = pytype if fake is with_keys else torch.Tensor
+            self.assertIs(maybe_get_fake_pytype(out), expected_type)
+            buf = io.BytesIO()
+            GuardsStatePickler({id(out): out}, {}, {}, {}, buf).dump(out)
+            self.assertIs(
+                maybe_get_fake_pytype(load_guards_state(buf.getvalue())),
+                expected_type,
+            )
         buf = io.BytesIO()
         GuardsStatePickler({id(with_keys): with_keys}, {}, {}, {}, buf).dump(
             {"t": with_keys}
@@ -2060,6 +2072,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.shape, x.shape)
 
     def test_literal_on_a_fake_tensor_owned_name_is_not_a_guard_read(self):
+        from torch._subclasses.fake_tensor import maybe_get_fake_constant
+
         x = torch.randn(3)
         x._is_param = True
         x.constant = 2
@@ -2069,17 +2083,22 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x})
         out = load_guards_state(buf.getvalue())["x"]
         self.assertIs(out._is_param, True)
-        self.assertIsNone(out.constant)
+        self.assertIsNone(maybe_get_fake_constant(out))
 
     def test_fake_tensor_setter_names_are_owned(self):
+        from torch._subclasses.fake_tensor import (
+            maybe_get_fake_device,
+            maybe_get_item_memo,
+        )
+
         x = torch.randn(3)
         x.fake_device = torch.device("meta")
         x.item_memo = [5]
         buf = io.BytesIO()
         GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump({"x": x})
         out = load_guards_state(buf.getvalue())["x"]
-        self.assertEqual(out.fake_device, torch.device("cpu"))
-        self.assertIsNone(out.item_memo)
+        self.assertEqual(maybe_get_fake_device(out), torch.device("cpu"))
+        self.assertIsNone(maybe_get_item_memo(out))
         tree = {id(v): v for v in (x, x.item_memo)}
         with self.assertRaisesRegex(PackageError, "reads 'item_memo' off a tensor"):
             GuardsStatePickler(tree, {}, {}, {}, io.BytesIO()).dump({"x": x})
@@ -3272,6 +3291,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
 
+    def test_dict_guard_on_the_globals_of_a_deleted_global(self):
+        def fn(x):
+            global DELETE_GLOBAL_GUARD
+            DELETE_GLOBAL_GUARD = 1
+            del DELETE_GLOBAL_GUARD
+            return x + 1
+
+        x = torch.randn(3)
+        self.assertNotIn("DELETE_GLOBAL_GUARD", globals())
+        ref, loaded = self._test_serialization("DICT_NOT_CONTAINS", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"DELETE_GLOBAL_GUARD": 1}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_guard_through_globals_of_a_wrapper_from_another_module(self):
         # A guard reads through wrapper.__globals__, so the dict it read travels
         # as a snapshot; __module__ is the wrapped function's and is restored as
@@ -3709,21 +3742,21 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"f": bound, "x": x}, True)
         self._test_check_fn(ref, loaded, {"f": global_add, "x": x}, False)
 
-    def test_tensor_match(self):
+    @parametrize("tensor_type", [torch.Tensor, torch.nn.Parameter])
+    def test_tensor_match(self, tensor_type):
         def f(x: torch.Tensor):
             return x + 1
 
         ref, loaded = self._test_serialization(
-            "TENSOR_MATCH", f, torch.ones(2, dtype=torch.float32)
+            "TENSOR_MATCH", f, tensor_type(torch.ones(2))
         )
+        self._test_check_fn(ref, loaded, {"x": tensor_type(torch.randn(2))}, True)
+        self._test_check_fn(ref, loaded, {"x": tensor_type(torch.randn(3))}, False)
         self._test_check_fn(
-            ref, loaded, {"x": torch.randn(2, dtype=torch.float32)}, True
-        )
-        self._test_check_fn(
-            ref, loaded, {"x": torch.randn(3, dtype=torch.float32)}, False
-        )
-        self._test_check_fn(
-            ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
+            ref,
+            loaded,
+            {"x": tensor_type(torch.randn(2, dtype=torch.float64))},
+            False,
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
 
@@ -5501,17 +5534,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_serialization("EQUALS_MATCH", fn, x)
 
     def test_guard_reading_a_literal_fake_tensor_owned_name_warns(self):
+        attr = "constant"
+
         def fn(x):
-            return x * x.constant
+            return x * getattr(x, attr)
 
         x = torch.randn(3)
-        x.constant = 2
+        setattr(x, attr, 2)
         with self.assertLogs("torch._dynamo.guards", "WARNING") as logs:
             ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
-        self.assertIn("'constant' attribute holds 2", "\n".join(logs.output))
-        # The loaded guard compares against the FakeTensor's own constant.
-        self.assertTrue(ref.check({"x": x}))
-        self.assertFalse(loaded.check({"x": x}))
+        self.assertIn(f"'{attr}' attribute holds 2", "\n".join(logs.output))
+        # The loaded guard compares against the fake's own metadata.
+        self.assertTrue(ref.check({"x": x, "attr": attr}))
+        self.assertFalse(loaded.check({"x": x, "attr": attr}))
 
     def test_dim_markings_round_trip(self):
         def fn(x):
@@ -5557,6 +5592,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": wider}, False)
         renamed = marked(min=2, max=8, shape_id="t")
         self._test_check_fn(ref, loaded, {"x": renamed}, False)
+
+        def refined_fn(x):
+            torch._check(x.shape[0] == 1)
+            return x + 1
+
+        def refined_marked(size, static_size=2):
+            t = torch.randn(size, static_size)
+            torch._dynamo.decorators.mark_unbacked(t, 0)
+            return t
+
+        # torch._check replaces the unbacked size with 1; the serialized
+        # TENSOR_MATCH must leave that dim unchecked, like the live guard,
+        # instead of requiring size 1.
+        x = refined_marked(1)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", refined_fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        # The runtime assertion, not either input guard, enforces the refinement.
+        self._test_check_fn(ref, loaded, {"x": refined_marked(2)}, True)
+        self._test_check_fn(ref, loaded, {"x": refined_marked(2, 3)}, False)
 
     def test_weak_and_strict_markings_round_trip(self):
         def fn(x):
