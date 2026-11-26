@@ -537,11 +537,8 @@
 
 - name: IDEEP
   patterns:
-  - third_party/ideep
-  - caffe2/ideep/**
-  - caffe2/python/ideep/**
+  - third_party/oneDNN
   - cmake/Modules/FindMKLDNN.cmake
-  - third_party/mkl-dnn.BUILD
   approved_by:
   - XiaobingSuper
   - jgong5
@@ -734,6 +731,7 @@
   - dolpm
   - sanrise
   - NicolasHug
+  - thomasywang
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -808,6 +806,7 @@
   - '**sycl**'
   - '**SYCL**'
   - torch/_C/__init__.pyi.in
+  - test/test_transformers.py
   approved_by:
   - EikanWang
   - gujinghui

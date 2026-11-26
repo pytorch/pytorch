@@ -4059,7 +4059,7 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     cx = hidden[1].unsqueeze(0)
 
     batch_sizes: list[int] = []
-    mode = 2  # third_party/ideep/include/ideep/abstract_types.hpp: ideep::rnn_kind::LSTM = 2
+    mode = 2  # aten/src/ATen/native/mkldnn/detail/IdeepUtils.h: rnn_kind::LSTM = 2
     hidden_size = hx.size(2)
     num_layers = 1
 
@@ -4592,6 +4592,16 @@ def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
     return torch.ops.aten._upsample_bicubic2d_aa(
         input, osize, align_corners, scale_h, scale_w
     )
+
+
+@register_decomposition(aten._upsample_inter_area2d.vec)
+@aten._upsample_inter_area2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_inter_area2d.vec.py_impl(DispatchKey.Autograd)
+def upsample_inter_area2d_vec(input, output_size, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_inter_area2d(input, osize, scale_h, scale_w)
 
 
 @register_decomposition(aten._upsample_lanczos2d_aa.vec)
