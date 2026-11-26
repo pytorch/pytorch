@@ -255,8 +255,6 @@ test_failures = {
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     # Unsupported XPU configurations still fall back to ATen eager, so no
     # Triton kernel is generated.
-    "test_max_pool2d_with_indices_backward2_dynamic_shapes": TestFailure(("xpu",)),
-    "test_max_pool2d_with_indices_backward4_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(("xpu",)),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
