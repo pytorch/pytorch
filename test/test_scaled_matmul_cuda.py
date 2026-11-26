@@ -46,6 +46,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyMPS,
     e4m3_type,
     e5m2_type,
     E4M3_MAX_POS,
@@ -684,19 +685,23 @@ def _2d_grouped_tensor_to_blocked_scaled(t, MN, G, offs, format='mxfp8'):
 
             # Convert scales to blocked format.
             if torch.version.cuda:
-                t_scale_slice_blocked = to_blocked(
+                t_scale_slice = to_blocked(
                     t_scale_slice
                 )  # (round_up(M, 128), round_up(K_group//32, 4))
-            t_blocked_scale_list.append(t_scale_slice_blocked)
+            t_blocked_scale_list.append(t_scale_slice)
 
     # Assemble the full XQ and WQ
     tq = torch.cat(t_list, dim=1).contiguous()
     th = torch.cat(th_list, dim=1).contiguous()
 
     # Combine all XQ groups blocked scales into one tensor.
-    t_blocked_scales = torch.cat(t_blocked_scale_list, dim=0)
-    MN_rounded = round_up(MN, 128)
-    t_blocked_scales = t_blocked_scales.reshape(MN_rounded, -1)
+    if torch.version.cuda:
+        t_blocked_scales = torch.cat(t_blocked_scale_list, dim=0)
+        MN_rounded = round_up(MN, 128)
+        t_blocked_scales = t_blocked_scales.reshape(MN_rounded, -1)
+    else:
+        # Unswizzled (MN, total_K // block) scales, each group's blocks following the previous group's
+        t_blocked_scales = torch.cat(t_blocked_scale_list, dim=1).contiguous()
 
     # Global scales only exist for nvfp4
     t_global_scales = None
@@ -1138,14 +1143,13 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(scaled, unscaled)
 
     @onlyAccelerator
-    @skipMPS
     @skipXPU  # XPU scaled grouped mm does not support 2d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [2048, 2049])
     @parametrize("N", [8192])
     @parametrize("K", [16640])
-    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else ["nvfp4"] if torch.backends.mps.is_available() else []))
     @parametrize("use_out", [False, True])
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
@@ -1219,13 +1223,13 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
     @onlyAccelerator
-    @skipMPS
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
-    @parametrize("M", [16640])
+    # The decode-sized M, with no more rows than groups, takes the MPS few rows kernels
+    @parametrize("M", [16640, subtest(16, decorators=[onlyMPS])])
     @parametrize("N", [8192])
     @parametrize("K", [4096])
-    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda or torch.version.xpu else []))
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda or torch.version.xpu else ["nvfp4"] if torch.backends.mps.is_available() else []))
     @parametrize("use_out", [False, True])
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
@@ -1237,7 +1241,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         X = torch.randn((total_M, K), dtype=torch.bfloat16, device=device) * 0.1
         W = torch.randn((G, N, K), dtype=torch.bfloat16, device=device) * 0.01
         input_group_end_offsets = generate_jagged_offs(
-            G, total_M, multiple_of=32, device=device
+            G, total_M, multiple_of=32 if total_M >= 32 else 1, device=device
         )
 
         # For each constituent 2d subtensor in the 3d weights, quantize and convert scale to blocked format separately,
@@ -3190,7 +3194,9 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     def scaled_grouped_mm_helper(self, alist, blist, ascalelist, bscalelist, outlist, use_fast_accum):
         for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
+            # Explicit recipes, since a single row's (1, 1) scale would be inferred as TensorWise
             out_ref = scaled_mm_wrap(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
+                                     scale_recipe_a=ScalingType.RowWise, scale_recipe_b=ScalingType.RowWise,
                                      out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
             self.assertEqual(out, out_ref, atol=5e-2, rtol=5e-4)
 
@@ -3203,10 +3209,13 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
-    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
+    @parametrize("strided", [False] + ([True] if torch.version.cuda or torch.backends.mps.is_available() else []))
     # AMD does not support NVFP4
-    @parametrize("wrap_v2", [True, False])
-    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, wrap_v2, device):
+    # v1 _scaled_grouped_mm has no MPS kernel
+    @parametrize("wrap_v2", [True, subtest(False, decorators=[skipMPS])])
+    # A group with no K writes zeros, which the MPS Metal 4.1 kernel does separately
+    @parametrize("empty_group", [False, subtest(True, decorators=[onlyMPS])])
+    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, wrap_v2, empty_group, device):
 
         fp8_dtype = e4m3_type
         m, n, k, n_groups = 16, 32, 64, 4
@@ -3215,6 +3224,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
         scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+        if empty_group:
+            offs[0] = 0
         f = scaled_grouped_mm_wrap
         out = f(a, b.t(),
                 scale_a,
@@ -3241,18 +3252,20 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
-    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
+    @parametrize("strided", [False] + ([True] if torch.version.cuda or torch.backends.mps.is_available() else []))
     @parametrize(
         "wrap_v2",
         [
             True,
-            subtest(False, decorators=[skipXPU]),  # v1 _scaled_grouped_mm has no XPU kernel
+            subtest(False, decorators=[skipXPU, skipMPS]),  # v1 _scaled_grouped_mm has no XPU or MPS kernel
         ],
     )
-    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, wrap_v2, device):
+    # One row per group takes the MPS few rows kernel
+    @parametrize("m", [16, subtest(1, decorators=[onlyMPS])])
+    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, wrap_v2, m, device):
 
         fp8_dtype = e4m3_type
-        m, n, k, n_groups = 16, 32, 64, 4
+        n, k, n_groups = 32, 64, 4
         s_int = int(strided)
         a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(fp8_dtype)[:, :k]
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
@@ -3294,8 +3307,9 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
-    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    @parametrize("wrap_v2", [True, False])
+    @parametrize("strided", [False] + ([True] if torch.version.cuda or torch.backends.mps.is_available() else []))
+    # v1 _scaled_grouped_mm has no MPS kernel
+    @parametrize("wrap_v2", [True, subtest(False, decorators=[skipMPS])])
     def test_scaled_grouped_gemm_3d_3d(self, fast_accum, strided, wrap_v2, device):
 
         fp8_dtype = e4m3_type
@@ -3321,8 +3335,9 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
-    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    @parametrize("wrap_v2", [True, False])
+    @parametrize("strided", [False] + ([True] if torch.version.cuda or torch.backends.mps.is_available() else []))
+    # v1 _scaled_grouped_mm has no MPS kernel
+    @parametrize("wrap_v2", [True, subtest(False, decorators=[skipMPS])])
     def test_scaled_grouped_gemm_3d_2d(self, fast_accum, strided, wrap_v2, device):
 
         fp8_dtype = e4m3_type
@@ -3440,19 +3455,23 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         block_recipe = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
         swizzle = mx_swizzle_for(device, A.dtype)
 
-        compiled_scaled_mm = torch.compile(scaled_mm_wrap, backend="inductor")
-        C = compiled_scaled_mm(
-            A,
-            B.t(),
-            A_scale,
-            B_scale,
-            scale_recipe_a=block_recipe,
-            scale_recipe_b=block_recipe,
-            swizzle_a=swizzle,
-            swizzle_b=swizzle,
-            out_dtype=torch.bfloat16,
-            use_fast_accum=False,
-        )
+        # Quantizing A in the graph makes Inductor generate the kernels that pack it
+        @torch.compile(backend="inductor")
+        def quantize_and_scaled_mm(a):
+            return scaled_mm_wrap(
+                _bfloat16_to_float4_e2m1fn_x2(a),
+                B.t(),
+                A_scale,
+                B_scale,
+                scale_recipe_a=block_recipe,
+                scale_recipe_b=block_recipe,
+                swizzle_a=swizzle,
+                swizzle_b=swizzle,
+                out_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        C = quantize_and_scaled_mm(A_ref)
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 
