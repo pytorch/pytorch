@@ -594,7 +594,6 @@
   "test/test_pytree.py",
   "test/test_reductions.py",
   "test/test_reuse_old_whl.py",
-  "test/test_scatter_gather_ops.py",
   "test/test_serialization.py",
   "test/test_set_default_mobile_cpu_allocator.py",
   "test/test_sort_and_select.py",
