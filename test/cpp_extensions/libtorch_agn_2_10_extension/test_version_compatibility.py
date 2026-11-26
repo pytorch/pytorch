@@ -31,6 +31,7 @@ from torch.utils.cpp_extension import (
     CUDA_HOME,
     get_cxx_compiler,
     include_paths as torch_include_paths,
+    IS_HIP_EXTENSION,
     ROCM_HOME,
 )
 
@@ -54,8 +55,16 @@ if not IS_WINDOWS:
             cls.csrc_dir_2_9 = ext_dir.parent / "libtorch_agn_2_9_extension" / "csrc"
             cls.build_dir = Path(tempfile.mkdtemp(prefix="version_check_"))
 
+            # HIP extension builds need the ROCm include set. rocThrust headers,
+            # reached through torch/headeronly/util/complex.h, require libhipcxx,
+            # which is only installed under <rocm>/include/hipccl.
+            # include_paths("cuda") supplies that directory; the "cpu" set adds no
+            # ROCm paths at all. CUDA builds keep the "cpu" set unchanged.
             cls.pytorch_includes = [
-                f"-I{path}" for path in torch_include_paths(device_type="cpu")
+                f"-I{path}"
+                for path in torch_include_paths(
+                    device_type="cuda" if IS_HIP_EXTENSION else "cpu"
+                )
             ]
             cls.cuda_includes = []
             if GPU_HOME:
