@@ -19,6 +19,10 @@
 
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#ifdef USE_ROCM
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <c10/util/CallOnce.h>
+#endif
 
 namespace at::native {
 
@@ -1021,6 +1025,50 @@ class AccumulationBuffer {
   at::DataPtr buffer_;
 };
 
+#ifdef USE_ROCM
+// Vectorized input loads for reductions along the contiguous dim on gfx1250.
+// 2-byte inputs: 16 bytes per lane, the widest global load, and what the 16-bit
+// sum and mean kernels already request on every arch (input_vec_size 8).
+// 1-byte inputs: 8 elements; their 16-element vectors hit a gfx1250 backend
+// error (illegal V_PERM_B32 operand) with the current compiler.
+constexpr int kReduceInputVectorBytes = 16;
+constexpr int kReduceByteInputVecSize = 8;
+// 2-byte rows: a row takes the fewest power-of-two lanes (at least
+// input_vec_size, since the head and the tail of a row are reduced one element
+// per lane) that leave each lane at most this many elements, so a short row
+// takes fewer lanes and fewer shuffle steps while each lane stays below the
+// split_across_warps threshold (256 values per thread).
+constexpr int64_t kShortRowValuesPerLane = 128;
+
+// Whether reductions on this device use the wide input vectors above (gfx1250),
+// cached per device for all instantiations.
+inline bool reduce_wide_input_vec_device(c10::DeviceIndex device_index) {
+  TORCH_INTERNAL_ASSERT(
+      device_index >= 0 && device_index < C10_COMPILE_TIME_MAX_GPUS);
+  static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> once_flags;
+  static std::array<bool, C10_COMPILE_TIME_MAX_GPUS> results{};
+  c10::call_once(once_flags[device_index], [device_index] {
+    results[device_index] =
+        at::detail::getCUDAHooks().isGPUArch({"gfx1250"}, device_index);
+  });
+  return results[device_index];
+}
+
+// setReduceConfig's "vectorize along input" condition (Case 1), without the
+// rest of the config and its device queries.
+template <typename scalar_t>
+bool reduce_vectorizes_input(const TensorIterator& iter) {
+  if (iter.ndim() == 0 || iter.num_reduce_dims() != 1) {
+    return false;
+  }
+  const auto& strides = iter.strides(iter.ntensors() - 1);
+  const bool on_fastest_striding_dim =
+      iter.num_reduce_dims() == iter.ndim() || strides[0] < strides[1];
+  return on_fastest_striding_dim && strides[0] == sizeof(scalar_t) &&
+      iter.numel() / iter.num_output_elements() >= 128;
+}
+#endif
+
 template <typename scalar_t>
 int get_output_vec_size(const TensorIterator &iter) {
   int vec_size = 4;
@@ -1046,7 +1094,7 @@ int get_output_vec_size(const TensorIterator &iter) {
   return vec_size;
 }
 
-template<typename arg_t, typename scalar_t, int vt0, int input_vec_size=vt0>
+template<typename arg_t, typename scalar_t, int vt0, int input_vec_size=vt0, bool short_rows=false>
 ReduceConfig setReduceConfig(const TensorIterator& iter){
   // Start by assuming that each thread handles a single output and all
   // the inputs for that output.
@@ -1119,6 +1167,25 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
       // we should avoid vectorization.
       config.vectorize_input = true;
       dim0 /= input_vec_size;
+#ifdef USE_ROCM
+      if constexpr (short_rows) {
+        // Only when the rows fill at least two blocks of max_threads / lanes
+        // rows per CU: block_height is then max_threads / lanes (at least 16),
+        // so the warp-split threshold is 256 values per thread, and the grid
+        // still covers every CU. Full and few-row reductions keep the default.
+        int64_t lanes = input_vec_size;
+        while (lanes * kShortRowValuesPerLane < inputs_per_output) {
+          lanes *= 2;
+        }
+        const int64_t num_mp =
+            at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+        if (lanes < dim0 &&
+            dim1 * lanes >=
+                2 * num_mp * mnt_wrapper<scalar_t>::MAX_NUM_THREADS) {
+          dim0 = lanes;
+        }
+      }
+#endif
     } else if (!reduction_on_fastest_striding_dimension) {
       // Case 2: "vectorize along output"
       config.output_vec_size = get_output_vec_size<scalar_t>(iter);
@@ -1195,7 +1262,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   return config;
 };
 
-template <typename scalar_t, typename out_scalar_t, int vt0=4, int input_vec_size=vt0, typename ops_t, typename ident_t=double>
+template <typename scalar_t, typename out_scalar_t, int vt0=4, int input_vec_size=vt0, typename ops_t, typename ident_t=double, bool wide_input_vec=false>
 inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
                               AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
@@ -1247,11 +1314,36 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       int64_t sub_iter_base_idx = sub_iter.view_offsets()[0];
 
-      gpu_reduce_kernel<scalar_t, out_scalar_t, vt0, input_vec_size>(sub_iter, ops, ident,
+      gpu_reduce_kernel<scalar_t, out_scalar_t, vt0, input_vec_size, ops_t, ident_t, wide_input_vec>(sub_iter, ops, ident,
           acc_buf_ptr, sub_iter_base_idx);
     }
     return;
   }
+
+#ifdef USE_ROCM
+  // Callers with a vt0 below the default (Welford var/std) keep their config.
+  constexpr int wide_vec_size = sizeof(scalar_t) == 1
+      ? kReduceByteInputVecSize
+      : kReduceInputVectorBytes / sizeof(scalar_t);
+  if constexpr (
+      sizeof(scalar_t) <= 2 && vt0 >= 4 && input_vec_size < wide_vec_size) {
+    // vectorize_input means a contiguous reduced dim with rows of at least 128
+    // elements: at least 16 vectors of 8 elements per row, so the short-row
+    // lane count never drops under input_vec_size.
+    if (reduce_wide_input_vec_device(iter.device(0).index()) &&
+        reduce_vectorizes_input<scalar_t>(iter)) {
+      gpu_reduce_kernel<
+          scalar_t,
+          out_scalar_t,
+          vt0,
+          wide_vec_size,
+          ops_t,
+          ident_t,
+          /*wide_input_vec=*/true>(iter, ops, ident, acc_buf_ptr, base_idx);
+      return;
+    }
+  }
+#endif
 
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
@@ -1264,7 +1356,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
-  ReduceConfig config = setReduceConfig<arg_t, scalar_t, vt0, input_vec_size>(iter);
+  ReduceConfig config = setReduceConfig<arg_t, scalar_t, vt0, input_vec_size, wide_input_vec && sizeof(scalar_t) == 2>(iter);
   at::DataPtr buffer;
   at::DataPtr semaphores;
   if (config.should_global_reduce()) {
@@ -1296,7 +1388,20 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   reduce.accumulate = iter.should_accumulate();
   reduce.final_output = iter.is_final_output();
 
-  launch_reduce_kernel<mnt_wrapper<scalar_t>::MAX_NUM_THREADS>(config, reduce);
+  if constexpr (wide_input_vec) {
+    // vectorize_input implies output_vec_size 1, so only that kernel is built.
+    TORCH_INTERNAL_ASSERT(
+        config.vectorize_input && config.output_vec_size == 1);
+    reduce_kernel<mnt_wrapper<scalar_t>::MAX_NUM_THREADS, 1, decltype(reduce)>
+        <<<config.grid(),
+           config.block(),
+           config.shared_memory_size(),
+           at::cuda::getCurrentCUDAStream()>>>(reduce);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    launch_reduce_kernel<mnt_wrapper<scalar_t>::MAX_NUM_THREADS>(
+        config, reduce);
+  }
 }
 
 //TODO this is 100 lines of almost-copy-paste, because we have to have different template args for this function
