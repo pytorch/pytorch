@@ -483,16 +483,13 @@ def _reset_autograd_backward() -> None:
 
 
 @compatibility(is_backward_compatible=False)
-def set_grad_fn_seq_nr(seq_nr: int, grad_fn_name: str | None = None) -> None:
+def set_grad_fn_seq_nr(seq_nr: int) -> None:
     global current_meta
 
     if should_preserve_node_meta:
         # The seq_nr is captured by eager mode in the grad_fn during forward
         current_meta["grad_fn_seq_nr"] = current_meta.get("grad_fn_seq_nr", []) + [
             seq_nr
-        ]
-        current_meta["grad_fn_names"] = current_meta.get("grad_fn_names", []) + [
-            grad_fn_name
         ]
         current_meta["in_grad_fn"] = current_meta.get("in_grad_fn", 0) + 1
 
@@ -509,11 +506,9 @@ def reset_grad_fn_seq_nr() -> None:
         if current_level == 1:
             del current_meta["in_grad_fn"]
             del current_meta["grad_fn_seq_nr"]
-            del current_meta["grad_fn_names"]
         else:
             current_meta["in_grad_fn"] = current_level - 1
             current_meta["grad_fn_seq_nr"] = current_meta["grad_fn_seq_nr"][:-1]
-            current_meta["grad_fn_names"] = current_meta["grad_fn_names"][:-1]
 
 
 @compatibility(is_backward_compatible=False)

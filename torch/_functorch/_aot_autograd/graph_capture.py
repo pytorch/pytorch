@@ -544,9 +544,6 @@ def aot_dispatch_autograd_graph(
         aot_config=aot_config,
     )
 
-    if joint_fn_handle.native_gradient_info is not None:
-        fx_g.meta["native_gradient_info"] = joint_fn_handle.native_gradient_info
-
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.
     # See Note: [Fake Modules and AOTAutograd]

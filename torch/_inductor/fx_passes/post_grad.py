@@ -1833,33 +1833,15 @@ def _storage_base(node: torch.fx.Node) -> torch.fx.Node:
     return node
 
 
-def _depends_on_storage_offset(
-    node: torch.fx.Node, *, strict_cuda_pointwise: bool = False
-) -> bool:
+def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
     """Whether a user of ``node``, or of a view of it, depends on where it sits in its storage.
 
     This is a denylist of consumers known to observe placement: ``as_strided``, whose
     storage offset is relative to the storage, and user-defined kernels of any DSL,
     which are opaque and may need an aligned base, for example to build a TMA
     descriptor on the host or on the device. Other opaque consumers, such as custom
-    ops and extern fallback kernels, are intentionally not included. Views are
-    followed through single- and multi-output view ops.
-
-    ``strict_cuda_pointwise`` checks native CUDA iteration masks, which observe
-    runtime pointer alignment when selecting fused arithmetic.
+    ops and extern fallback kernels, are intentionally not included.
     """
-    if strict_cuda_pointwise:
-        return any(
-            user.target == inductor_prims.cuda_pointwise_iteration
-            and all(
-                isinstance(arg, torch.fx.Node)
-                and isinstance(value := arg.meta.get("val"), torch.Tensor)
-                and value.dtype in (torch.float64, torch.complex64, torch.complex128)
-                and is_strict_cuda_triton(value.device)
-                for arg in cast(list[torch.fx.Node], user.args[0])
-            )
-            for user in _storage_users(node)
-        )
     return any(
         user.target is aten.as_strided.default
         or is_user_kernel_functional_hop(user.target)
@@ -1973,12 +1955,6 @@ def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
-    from torch.fx.experimental.proxy_tensor import (
-        _is_original_aten_mutation,
-        _original_aten_mutation_storages,
-        _original_mutation_destination,
-    )
-
     inputs = OrderedSet[torch.fx.Node]()
     input_storages = OrderedSet[int | None]()
     output_storages = OrderedSet[int | None]()
@@ -2023,11 +1999,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
             storage = replaced_storages[storage]
         return storage
 
-    if config.strict_pointwise:
-        mutated_storages.update(_original_aten_mutation_storages(graph))
     for node in graph.nodes:
-        if config.strict_pointwise and _is_original_aten_mutation(node):
-            continue
         if node.target in noop_registry:
             cond, src_index = noop_registry[node.target]
             if isinstance(src_index, int):
@@ -2061,23 +2033,6 @@ def remove_noop_ops(graph: torch.fx.Graph):
             node_storage = resolve(get_node_storage(node))
             src_storage = resolve(get_node_storage(src))
             node_is_view = node_storage == src_storage
-            native_src_storage = src_storage
-            if config.strict_pointwise and isinstance(
-                src.meta.get("val"), torch.Tensor
-            ):
-                native_source = _original_mutation_destination(
-                    src.meta["val"], node=src
-                )
-                if isinstance(native_source, torch.Tensor):
-                    native_src_storage = native_source.untyped_storage()._cdata
-            # Native iteration masks observe fresh allocation alignment even when
-            # the source is aligned while tracing; later calls can change its pointer.
-            if (
-                config.strict_pointwise
-                and not node_is_view
-                and _depends_on_storage_offset(node, strict_cuda_pointwise=True)
-            ):
-                continue
             if (
                 not node_is_view
                 and node_storage in output_storages
@@ -2095,12 +2050,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 continue
 
             # Keep a real copy of a storage that is mutated in this graph.
-            if not node_is_view and (
-                any(
-                    resolve(storage) == native_src_storage
-                    for storage in mutated_storages
-                )
-                or (config.strict_pointwise and node_storage in mutated_storages)
+            if not node_is_view and any(
+                resolve(storage) == src_storage for storage in mutated_storages
             ):
                 continue
 

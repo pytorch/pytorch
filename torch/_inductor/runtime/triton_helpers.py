@@ -2968,387 +2968,6 @@ def cuda_native_sum_x_reduce(
 
 
 @triton.jit
-def cuda_cudnn_bn_reduce(value):
-    lane = tl.arange(0, 512)
-    value = cuda_native_sum_x_reduce(value, lane, 32, 512, True)
-    warp = tl.arange(0, 16)
-    value = tl.gather(value, warp * 32, 0)
-    value = cuda_native_sum_x_reduce(value, warp, 16, 16, True)
-    return tl.sum(tl.where(warp == 0, value, 0), 0)
-
-
-@triton.jit
-def cuda_cudnn_bn_statistics(
-    X,
-    RM,
-    RV,
-    channel,
-    N,
-    C: tl.constexpr,
-    S,
-    EPS,
-    MOMENTUM,
-    WELFORD: tl.constexpr,
-    VEC: tl.constexpr,
-    BW: tl.constexpr,
-):
-    r"""Reproduce cuDNN NCHW means, variances, and running-stat updates."""
-    DOUBLE: tl.constexpr = X.dtype.element_ty == tl.float64
-    DTYPE: tl.constexpr = tl.float64 if DOUBLE else tl.float32
-    EPS = tl.full((), EPS, DTYPE)
-    MOMENTUM = tl.full((), MOMENTUM, DTYPE)
-    lane = tl.arange(0, 512)
-    scale = libdevice.div_rn(tl.full((), 1, DTYPE), (N * S).to(DTYPE))
-    if WELFORD:
-        local_mean = tl.full((512,), 0, DTYPE)
-        local_var = tl.full((512,), 0, DTYPE)
-        count = tl.full((512,), 0, DTYPE)
-        for batch_tile in range(tl.cdiv(N, 512 // BW)):
-            batch = lane // BW + batch_tile * (512 // BW)
-            for spatial_tile in range(tl.cdiv(S, BW)):
-                spatial = lane % BW + spatial_tile * BW
-                valid = (batch < N) & (spatial < S)
-                value = tl.load(
-                    X + batch * C * S + channel * S + spatial, valid, other=0
-                ).to(DTYPE)
-                new_count = count + valid.to(DTYPE)
-                delta = value - local_mean
-                denominator = tl.where(new_count > 0, new_count, 1)
-                if DOUBLE:
-                    new_mean = local_mean + libdevice.div_rn(delta, denominator)
-                else:
-                    reciprocal = tl.inline_asm_elementwise(
-                        "rcp.approx.ftz.f32 $0,$1;",
-                        constraints="=f,f",
-                        args=[denominator],
-                        dtype=tl.float32,
-                        is_pure=True,
-                        pack=1,
-                    )
-                    new_mean = tl.fma(delta, reciprocal, local_mean)
-                local_var = tl.where(
-                    valid, tl.fma(delta, value - new_mean, local_var), local_var
-                )
-                local_mean = tl.where(valid, new_mean, local_mean)
-                count = new_count
-        mean = cuda_cudnn_bn_reduce(local_mean * count) * scale
-        delta = mean - local_mean
-        variance = cuda_cudnn_bn_reduce(tl.fma(delta * delta, count, local_var))
-        invstd = libdevice.rsqrt(tl.fma(variance, scale, EPS))
-        if DOUBLE:
-            unbiased = libdevice.div_rn(variance, (N * S - 1).to(DTYPE))
-        else:
-            reciprocal = tl.inline_asm_elementwise(
-                "rcp.approx.ftz.f32 $0,$1;",
-                constraints="=f,f",
-                args=[(N * S - 1).to(DTYPE)],
-                dtype=tl.float32,
-                is_pure=True,
-                pack=1,
-            )
-            unbiased = variance * reciprocal
-        old_var = tl.load(RV + channel).to(DTYPE)
-        if DOUBLE:
-            new_var = tl.fma(unbiased, MOMENTUM, (1 - MOMENTUM) * old_var)
-        else:
-            new_var = tl.fma(old_var, 1 - MOMENTUM, unbiased * MOMENTUM)
-    else:
-        total = tl.full((512,), 0, DTYPE)
-        for tile in range(tl.cdiv(N * S, 512 * VEC)):
-            for component in tl.static_range(VEC):
-                index = lane * VEC + tile * 512 * VEC + component
-                value = tl.load(
-                    X + (index // S) * C * S + channel * S + index % S,
-                    index < N * S,
-                    other=0,
-                ).to(DTYPE)
-                total = total + value
-        mean = cuda_cudnn_bn_reduce(total) * scale
-        local_var = tl.full((512,), 0, DTYPE)
-        for tile in range(tl.cdiv(N * S, 512 * VEC)):
-            for component in tl.static_range(VEC):
-                index = lane * VEC + tile * 512 * VEC + component
-                valid = index < N * S
-                value = tl.load(
-                    X + (index // S) * C * S + channel * S + index % S, valid, other=0
-                ).to(DTYPE)
-                delta = value - mean
-                local_var = tl.where(valid, tl.fma(delta, delta, local_var), local_var)
-        variance = cuda_cudnn_bn_reduce(local_var) * scale
-        invstd = libdevice.rsqrt(variance + EPS)
-        correction = libdevice.div_rn((N * S).to(DTYPE), (N * S - 1).to(DTYPE))
-        old_var = tl.load(RV + channel).to(DTYPE)
-        new_var = tl.fma(variance * MOMENTUM, correction, (1 - MOMENTUM) * old_var)
-    old_mean = tl.load(RM + channel).to(DTYPE)
-    new_mean = tl.fma(old_mean, 1 - MOMENTUM, mean * MOMENTUM)
-    return mean, invstd, new_mean, new_var
-
-
-@triton.jit
-def cuda_cudnn_bn_backward_reduce(value):
-    lane = tl.arange(0, 512)
-    value = cuda_native_sum_x_reduce(value, lane, 32, 512, False)
-    warp = tl.arange(0, 32)
-    value = tl.gather(value, tl.minimum(warp, 15) * 32, 0)
-    value = tl.where(warp < 16, value, 0)
-    value = cuda_native_sum_x_reduce(value, warp, 32, 32, False)
-    return tl.sum(tl.where(warp == 0, value, 0), 0)
-
-
-@triton.jit
-def cuda_cudnn_bn_backward_statistics(
-    X,
-    G,
-    M,
-    channel,
-    N,
-    C: tl.constexpr,
-    S,
-    SINGLE: tl.constexpr,
-    VEC: tl.constexpr,
-    BW: tl.constexpr,
-):
-    DTYPE: tl.constexpr = tl.float64 if X.dtype.element_ty == tl.float64 else tl.float32
-    lane = tl.arange(0, 512)
-    mean = tl.load(M + channel)
-    total = tl.full((512,), 0, DTYPE)
-    dot = tl.full((512,), 0, DTYPE)
-    if SINGLE:
-        for tile in range(tl.cdiv(N * S, 512 * VEC)):
-            for component in tl.static_range(VEC):
-                index = lane * VEC + tile * 512 * VEC + component
-                valid = index < N * S
-                offset = (index // S) * C * S + channel * S + index % S
-                value = tl.load(X + offset, valid, other=0).to(DTYPE)
-                grad = tl.load(G + offset, valid, other=0).to(DTYPE)
-                total = total + grad
-                dot = tl.where(valid, tl.fma(value - mean, grad, dot), dot)
-    else:
-        for batch_tile in range(tl.cdiv(N, 512 // BW)):
-            batch = lane // BW + batch_tile * (512 // BW)
-            for spatial_tile in range(tl.cdiv(S, BW)):
-                spatial = lane % BW + spatial_tile * BW
-                valid = (batch < N) & (spatial < S)
-                offset = batch * C * S + channel * S + spatial
-                value = tl.load(X + offset, valid, other=0).to(DTYPE)
-                grad = tl.load(G + offset, valid, other=0).to(DTYPE)
-                total = total + grad
-                dot = tl.where(valid, tl.fma(value - mean, grad, dot), dot)
-    return cuda_cudnn_bn_backward_reduce(total), cuda_cudnn_bn_backward_reduce(dot)
-
-
-@triton.jit
-def cuda_cudnn_bn_nhwc_reduce(value, TILE: tl.constexpr, VEC: tl.constexpr):
-    WARP: tl.constexpr = 32 * VEC
-    lane = tl.arange(0, 512 * VEC)
-    for power in tl.static_range(5):
-        shift = TILE * (1 << power)
-        if shift < WARP:
-            value = value + tl.gather(value, (lane + shift) % (512 * VEC), 0)
-    index = tl.arange(0, WARP)
-    warp, channel = index // TILE, index % TILE
-    total = tl.gather(value, warp * WARP + channel, 0)
-    for part in tl.static_range(1, tl.cdiv(16, WARP // TILE)):
-        total = total + tl.gather(
-            value, (warp + part * (WARP // TILE)) * WARP + channel, 0
-        )
-    for power in tl.static_range(5):
-        shift = TILE * (1 << power)
-        if shift < WARP:
-            total = total + tl.gather(total, (index + shift) % WARP, 0)
-    return tl.gather(total, lane % TILE, 0)
-
-
-@triton.jit
-def cuda_cudnn_bn_nhwc_partial(
-    X,
-    cta,
-    channel_tile,
-    N,
-    C: tl.constexpr,
-    TILE: tl.constexpr,
-    VEC: tl.constexpr,
-    SAMPLES: tl.constexpr,
-    PARTS: tl.constexpr,
-):
-    LANES: tl.constexpr = 512 * VEC
-    ROWS: tl.constexpr = LANES // TILE
-    SPAN: tl.constexpr = SAMPLES * ROWS
-    lane = tl.arange(0, LANES)
-    channel = channel_tile * TILE + lane % TILE
-    extra = tl.maximum(0, tl.cdiv(N, PARTS * ROWS) - SAMPLES)
-    mean = tl.full((LANES,), 0, tl.float32)
-    variance = tl.full((LANES,), 0, tl.float32)
-    count = tl.full((LANES,), 0, tl.float32)
-    # Register-cached tiles precede the separately partitioned stream of extra samples.
-    for sample in range(SAMPLES + extra):
-        row = tl.where(
-            sample < SAMPLES,
-            cta * SPAN + lane // TILE + sample * ROWS,
-            PARTS * SPAN
-            + cta * extra * ROWS
-            + lane // TILE
-            + (sample - SAMPLES) * ROWS,
-        )
-        valid = (row < N) & (channel < C)
-        value = tl.load(X + row * C + channel, valid, other=0).to(tl.float32)
-        new_count = count + valid.to(tl.float32)
-        delta = value - mean
-        reciprocal = tl.div_rn(1, tl.where(new_count > 0, new_count, 1))
-        new_mean = tl.fma(delta, reciprocal, mean)
-        variance = tl.where(
-            valid,
-            tl.fma(delta * (value - new_mean), valid.to(tl.float32), variance),
-            variance,
-        )
-        mean = tl.where(valid, new_mean, mean)
-        count = new_count
-    cached = tl.minimum(tl.maximum(N - cta * SPAN, 0), SPAN)
-    extra_start = PARTS * SPAN + cta * extra * ROWS
-    streamed = tl.minimum(tl.maximum(N - extra_start, 0), extra * ROWS)
-    total_count = (cached + streamed).to(tl.float32)
-    total = cuda_cudnn_bn_nhwc_reduce(mean * count, TILE, VEC)
-    delta = tl.fma(total, tl.div_rn(1, total_count), -mean)
-    variance = tl.fma(delta * delta, count, variance)
-    total_var = cuda_cudnn_bn_nhwc_reduce(variance, TILE, VEC)
-    return total, total_var, total_count
-
-
-@triton.jit
-def cuda_cudnn_bn_nhwc_backward_partial(
-    X,
-    G,
-    M,
-    cta,
-    channel_tile,
-    N,
-    C: tl.constexpr,
-    TILE: tl.constexpr,
-    VEC: tl.constexpr,
-    PARTS: tl.constexpr,
-    GROUPS: tl.constexpr,
-    EXTRA: tl.constexpr,
-    STREAMED: tl.constexpr,
-):
-    LANES: tl.constexpr = 512 * VEC
-    ROWS: tl.constexpr = LANES // TILE
-    lane = tl.arange(0, LANES)
-    channel = channel_tile * TILE + lane % TILE
-    shift = N - PARTS * (3 * GROUPS + EXTRA) * ROWS if STREAMED else 0
-    mean = tl.load(M + channel, channel < C, other=0)
-    grad_mean = tl.full((LANES,), 0, tl.float32)
-    dot_mean = tl.full((LANES,), 0, tl.float32)
-    count = tl.full((LANES,), 0, tl.float32)
-    for sample in range(3 * GROUPS + EXTRA):
-        row = (
-            tl.where(
-                sample < 3 * GROUPS,
-                cta * 3 * ROWS
-                + lane // TILE
-                + (sample % 3) * ROWS
-                + (sample // 3) * PARTS * 3 * ROWS,
-                PARTS * 3 * GROUPS * ROWS
-                + cta * EXTRA * ROWS
-                + lane // TILE
-                + (sample - 3 * GROUPS) * ROWS,
-            )
-            + shift
-        )
-        valid = (row >= 0) & (row < N) & (channel < C)
-        value = tl.load(X + row * C + channel, valid, other=0).to(tl.float32)
-        grad = tl.load(G + row * C + channel, valid, other=0).to(tl.float32)
-        new_count = count + valid.to(tl.float32)
-        reciprocal = tl.div_rn(1, tl.where(new_count > 0, new_count, 1))
-        grad_mean = tl.where(
-            valid, tl.fma(grad - grad_mean, reciprocal, grad_mean), grad_mean
-        )
-        delta = tl.fma(value - mean, grad, -dot_mean)
-        dot_mean = tl.where(valid, tl.fma(delta, reciprocal, dot_mean), dot_mean)
-        count = new_count
-    total = cuda_cudnn_bn_nhwc_reduce(grad_mean * count, TILE, VEC)
-    dot = cuda_cudnn_bn_nhwc_reduce(dot_mean * count, TILE, VEC)
-    return total, dot
-
-
-@triton.jit
-def cuda_cudnn_bn_nhwc_backward_finish(
-    P,
-    channel_tile,
-    C: tl.constexpr,
-    TILE: tl.constexpr,
-    VEC: tl.constexpr,
-    PARTS: tl.constexpr,
-):
-    LANES: tl.constexpr = 512 * VEC
-    ROWS: tl.constexpr = LANES // TILE
-    lane = tl.arange(0, LANES)
-    channel = channel_tile * TILE + lane % TILE
-    total = tl.full((LANES,), 0, tl.float32)
-    dot = tl.full((LANES,), 0, tl.float32)
-    for tile in range(tl.cdiv(PARTS, ROWS)):
-        part = lane // TILE + tile * ROWS
-        valid = (part < PARTS) & (channel < C)
-        offset = part * C + channel
-        total = total + tl.load(P + offset, valid, other=0)
-        dot = dot + tl.load(P + PARTS * C + offset, valid, other=0)
-    return cuda_cudnn_bn_nhwc_reduce(total, TILE, VEC), cuda_cudnn_bn_nhwc_reduce(
-        dot, TILE, VEC
-    )
-
-
-@triton.jit
-def cuda_cudnn_bn_nhwc_finish(
-    P,
-    RM,
-    RV,
-    channel_tile,
-    N,
-    C: tl.constexpr,
-    TILE: tl.constexpr,
-    VEC: tl.constexpr,
-    PARTS: tl.constexpr,
-    EPS: tl.constexpr,
-    MOMENTUM: tl.constexpr,
-    INDEX_DTYPE: tl.constexpr,
-):
-    LANES: tl.constexpr = 512 * VEC
-    ROWS: tl.constexpr = LANES // TILE
-    lane = tl.arange(0, LANES)
-    channel = (channel_tile * TILE + lane % TILE).to(INDEX_DTYPE)
-    total = tl.full((LANES,), 0, tl.float32)
-    for tile in range(tl.cdiv(PARTS, ROWS)):
-        part = (lane // TILE + tile * ROWS).to(INDEX_DTYPE)
-        value = tl.load(P + part * C + channel, (part < PARTS) & (channel < C), other=0)
-        total = total + value
-    scale = tl.div_rn(1, N.to(tl.float32))
-    mean = cuda_cudnn_bn_nhwc_reduce(total, TILE, VEC) * scale
-    total_var = tl.full((LANES,), 0, tl.float32)
-    for tile in range(tl.cdiv(PARTS, ROWS)):
-        part = (lane // TILE + tile * ROWS).to(INDEX_DTYPE)
-        valid = (part < PARTS) & (channel < C)
-        offset = part * C + channel
-        value = tl.load(P + offset, valid, other=0)
-        variance = tl.load(P + PARTS * C + offset, valid, other=0)
-        count = tl.load(P + 2 * PARTS * C + offset, valid, other=1)
-        local_mean = value * tl.div_rn(1, count)
-        delta = local_mean - mean
-        variance = tl.fma(delta * delta, count, variance)
-        total_var = total_var + tl.where(valid, variance, 0)
-    variance = cuda_cudnn_bn_nhwc_reduce(total_var, TILE, VEC)
-    invstd = libdevice.rsqrt(tl.fma(variance, scale, tl.full((), EPS, tl.float32)))
-    momentum = tl.full((), MOMENTUM, tl.float32)
-    old_mean = tl.load(RM + channel, channel < C, other=0)
-    old_var = tl.load(RV + channel, channel < C, other=0)
-    if VEC == 4:
-        new_mean = tl.fma(old_mean, 1 - momentum, mean * momentum)
-    else:
-        new_mean = tl.fma(mean, momentum, old_mean * (1 - momentum))
-    unbiased_scale = tl.div_rn(1, (N - 1).to(tl.float32))
-    new_var = tl.fma(old_var, 1 - momentum, (variance * momentum) * unbiased_scale)
-    return mean, invstd, new_mean, new_var
-
-
-@triton.jit
 def cuda_native_sum_y_reduce(
     value,
     lane,
@@ -3998,19 +3617,19 @@ def cuda_native_mv_value(
     PARTIAL,
     row,
     cta,
-    K: tl.constexpr,
-    S0: tl.constexpr,
-    S1: tl.constexpr,
-    VS: tl.constexpr,
-    CTAS: tl.constexpr,
+    K,
+    S0,
+    S1,
+    VS,
+    CTAS,
     THREADS: tl.constexpr,
-    ACTIVE_THREADS: tl.constexpr,
-    INNER_CHUNK: tl.constexpr,
-    INNER_STRIDE: tl.constexpr,
+    ACTIVE_THREADS,
+    INNER_CHUNK,
+    INNER_STRIDE,
     KIND: tl.constexpr,
     ACC_TYPE: tl.constexpr,
     FINAL: tl.constexpr,
-    PARTIAL_CTAS: tl.constexpr,
+    PARTIAL_CTAS,
 ):
     r"""Compute a real GEMV partial or final value in native reduction order."""
     if FINAL and KIND != 2 and KIND != 3:
@@ -4023,7 +3642,7 @@ def cuda_native_mv_value(
         elif FINAL and KIND == 2:
             lane = tl.arange(0, THREADS)
             total = tl.full((THREADS,), 0, ACC_TYPE)
-            for chunk in range(triton.cdiv(CTAS, THREADS)):
+            for chunk in range(tl.cdiv(CTAS, THREADS)):
                 index = lane + chunk * THREADS
                 total += tl.load(PARTIAL + row * PARTIAL_CTAS + index, index < CTAS, 0)
             for shift in tl.static_range(THREADS // 2, 16, -32):
@@ -4040,10 +3659,12 @@ def cuda_native_mv_value(
             lane = tl.arange(0, THREADS)
             total = tl.full((THREADS,), 0, ACC_TYPE)
             if KIND == 2:
-                pair: tl.constexpr = S1 == 1 and VS == 1 and ACC_TYPE != tl.float64
+                pair = S1 == 1 and VS == 1 and ACC_TYPE != tl.float64
                 second = tl.full((THREADS,), 0, ACC_TYPE)
-                for chunk in range(triton.cdiv(K, THREADS * CTAS * (2 if pair else 1))):
-                    index = (lane + THREADS * (cta + CTAS * chunk)) * (2 if pair else 1)
+                for chunk in range(tl.cdiv(K, THREADS * CTAS * (tl.where(pair, 2, 1)))):
+                    index = (lane + THREADS * (cta + CTAS * chunk)) * (
+                        tl.where(pair, 2, 1)
+                    )
                     valid = index < K
                     x = tl.load(X + row * S0 + index * S1, valid, 0).to(ACC_TYPE)
                     vector = tl.load(VECTOR + index * VS, valid, 0).to(ACC_TYPE)
@@ -4060,21 +3681,21 @@ def cuda_native_mv_value(
                 if pair:
                     total = (tl.full((THREADS,), 0, ACC_TYPE) + total) + second
             elif KIND == 3:
-                CHUNK: tl.constexpr = triton.cdiv(K, CTAS)
-                for step in range(triton.cdiv(CHUNK, THREADS)):
+                CHUNK = tl.cdiv(K, CTAS)
+                for step in range(tl.cdiv(CHUNK, THREADS)):
                     index = cta * CHUNK + lane + step * THREADS
                     valid = (index < K) & (lane + step * THREADS < CHUNK)
                     x = tl.load(X + row * S0 + index * S1, valid, 0).to(ACC_TYPE)
                     vector = tl.load(VECTOR + index * VS, valid, 0).to(ACC_TYPE)
                     total = tl.where(valid, tl.fma(x, vector, total), total)
             else:
-                STEP: tl.constexpr = INNER_CHUNK * (
-                    ACTIVE_THREADS if INNER_STRIDE == 1 else INNER_STRIDE
+                STEP = INNER_CHUNK * (
+                    tl.where(INNER_STRIDE == 1, ACTIVE_THREADS, INNER_STRIDE)
                 )
-                for chunk in range(triton.cdiv(K, STEP)):
+                for chunk in range(tl.cdiv(K, STEP)):
                     for step in range(INNER_CHUNK):
                         index = (
-                            lane * (INNER_CHUNK if INNER_STRIDE == 1 else 1)
+                            lane * (tl.where(INNER_STRIDE == 1, INNER_CHUNK, 1))
                             + chunk * STEP
                             + step * INNER_STRIDE
                         )
@@ -4104,22 +3725,22 @@ def cuda_native_complex_mv_value(
     PARTIAL,
     row,
     cta,
-    K: tl.constexpr,
-    S0: tl.constexpr,
-    S1: tl.constexpr,
-    VS: tl.constexpr,
-    CTAS: tl.constexpr,
+    K,
+    S0,
+    S1,
+    VS,
+    CTAS,
     THREADS: tl.constexpr,
-    ACTIVE_THREADS: tl.constexpr,
-    INNER_CHUNK: tl.constexpr,
-    INNER_STRIDE: tl.constexpr,
+    ACTIVE_THREADS,
+    INNER_CHUNK,
+    INNER_STRIDE,
     KIND: tl.constexpr,
     ACC_TYPE: tl.constexpr,
     FINAL: tl.constexpr,
-    PARTIAL_CTAS: tl.constexpr,
-    SWAP: tl.constexpr,
-    PRODUCT: tl.constexpr,
-    PRE_SCALE: tl.constexpr,
+    PARTIAL_CTAS,
+    SWAP,
+    PRODUCT,
+    PRE_SCALE,
 ):
     r"""Compute a complex GEMV partial or final value in native reduction order."""
     if FINAL and KIND != 2 and KIND != 3:
@@ -4135,7 +3756,7 @@ def cuda_native_complex_mv_value(
         elif FINAL and KIND == 2:
             lane = tl.arange(0, THREADS)
             total_real = tl.full((THREADS,), 0, ACC_TYPE)
-            for chunk_real in range(triton.cdiv(CTAS, THREADS)):
+            for chunk_real in range(tl.cdiv(CTAS, THREADS)):
                 index_real = lane + chunk_real * THREADS
                 total_real += tl.load(
                     PARTIAL + 2 * (row * PARTIAL_CTAS + index_real) + 0,
@@ -4155,7 +3776,7 @@ def cuda_native_complex_mv_value(
             for index_real in tl.static_range(4):
                 real += tl.gather(sums_real, tl.full((1,), index_real, tl.int32), 0)
             total_imag = tl.full((THREADS,), 0, ACC_TYPE)
-            for chunk_imag in range(triton.cdiv(CTAS, THREADS)):
+            for chunk_imag in range(tl.cdiv(CTAS, THREADS)):
                 index_imag = lane + chunk_imag * THREADS
                 total_imag += tl.load(
                     PARTIAL + 2 * (row * PARTIAL_CTAS + index_imag) + 1,
@@ -4179,35 +3800,35 @@ def cuda_native_complex_mv_value(
             total_real = tl.full((THREADS,), 0, ACC_TYPE)
             total_imag = tl.full((THREADS,), 0, ACC_TYPE)
             if KIND == 2:
-                CHUNK: tl.constexpr = K
-                STEP: tl.constexpr = THREADS * CTAS
-                INNER: tl.constexpr = 1
+                CHUNK = K
+                STEP = THREADS * CTAS
+                INNER = 1
             elif KIND == 3:
-                CHUNK: tl.constexpr = triton.cdiv(K, CTAS)
-                STEP: tl.constexpr = INNER_CHUNK * (
-                    ACTIVE_THREADS if INNER_STRIDE == 1 else INNER_STRIDE
+                CHUNK = tl.cdiv(K, CTAS)
+                STEP = INNER_CHUNK * (
+                    tl.where(INNER_STRIDE == 1, ACTIVE_THREADS, INNER_STRIDE)
                 )
-                INNER: tl.constexpr = INNER_CHUNK
+                INNER = INNER_CHUNK
             else:
-                CHUNK: tl.constexpr = K
-                STEP: tl.constexpr = INNER_CHUNK * (
-                    THREADS if INNER_STRIDE == 1 else INNER_STRIDE
+                CHUNK = K
+                STEP = INNER_CHUNK * (
+                    tl.where(INNER_STRIDE == 1, THREADS, INNER_STRIDE)
                 )
-                INNER: tl.constexpr = INNER_CHUNK
-            for chunk in range(triton.cdiv(CHUNK, STEP)):
+                INNER = INNER_CHUNK
+            for chunk in range(tl.cdiv(CHUNK, STEP)):
                 for step in range(INNER):
                     if KIND == 2:
                         index = lane + THREADS * cta + chunk * STEP
                     elif KIND == 3:
                         index = (
                             cta * CHUNK
-                            + lane * (INNER_CHUNK if INNER_STRIDE == 1 else 1)
+                            + lane * (tl.where(INNER_STRIDE == 1, INNER_CHUNK, 1))
                             + chunk * STEP
                             + step * INNER_STRIDE
                         )
                     else:
                         index = (
-                            lane * (INNER_CHUNK if INNER_STRIDE == 1 else 1)
+                            lane * (tl.where(INNER_STRIDE == 1, INNER_CHUNK, 1))
                             + chunk * STEP
                             + step * INNER_STRIDE
                         )
@@ -4239,7 +3860,7 @@ def cuda_native_complex_mv_value(
             )
             real = tl.gather(total_real, tl.full((1,), 0, tl.int32), 0)
             imag = tl.gather(total_imag, tl.full((1,), 0, tl.int32), 0)
-    if FINAL and not PRE_SCALE:
+    if FINAL and PRE_SCALE == 0:
         real, imag = tl.fma(real, 1.0, -imag * 0.0), tl.fma(imag, 1.0, real * 0.0)
     return real, imag
 
@@ -4249,18 +3870,18 @@ def cuda_native_mv_mma_value(
     X,
     VECTOR,
     cta,
-    M: tl.constexpr,
-    K: tl.constexpr,
-    S0: tl.constexpr,
-    S1: tl.constexpr,
-    VS: tl.constexpr,
-    K_SLICE: tl.constexpr,
+    M,
+    K,
+    S0,
+    S1,
+    VS,
+    K_SLICE,
 ):
     row = tl.program_id(0) * 16 + tl.arange(0, 16)
     column = tl.arange(0, 16)
     inner = tl.arange(0, 64)
     total = tl.full((16, 16), 0, tl.float32)
-    for chunk in range(triton.cdiv(K_SLICE, 64)):
+    for chunk in range(tl.cdiv(K_SLICE, 64)):
         index = cta * K_SLICE + chunk * 64 + inner
         valid = (index < K) & (chunk * 64 + inner < K_SLICE)
         matrix = tl.load(

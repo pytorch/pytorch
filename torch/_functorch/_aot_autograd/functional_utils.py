@@ -324,13 +324,6 @@ def gen_alias_from_base(
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
     # and (ii) the concrete returned output does require grad or not.
     def patch_requires_grad(out: Tensor) -> Tensor:
-        # Input metadata retains lazy flags. A real functionalized output can
-        # instead be a resolved snapshot, so preserve its replayed view flags.
-        if is_fake_tensor(target_meta_tensor):
-            if out.is_neg() != target_meta_tensor.is_neg():
-                out = torch._neg_view(out)
-            if out.is_conj() != target_meta_tensor.is_conj():
-                out = torch._conj(out)
         if aliased_base_tensor.requires_grad and not target_requires_grad:
             out = out.detach()
         elif not aliased_base_tensor.requires_grad and target_requires_grad:

@@ -504,16 +504,6 @@ class FunctionalTensorMode(TorchDispatchMode):
             kwargs = {}
 
         if _has_unrecognized_tensor_types(types):
-            if (
-                fx_traceback.has_preserved_node_meta()
-                and not fx_traceback.get_current_meta().get(
-                    "tensor_subclass_dispatch", False
-                )
-            ):
-                # Restore this mode before delegating to the tensor subclass.
-                with self, fx_traceback.preserve_node_meta():
-                    fx_traceback.get_current_meta()["tensor_subclass_dispatch"] = True
-                    return func(*args, **kwargs)
             return NotImplemented
 
         if (

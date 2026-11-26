@@ -553,36 +553,13 @@ class OpsHandler(Generic[T]):
     def sub(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 
-    def cuda_pointwise_unrolled(
-        self,
-        index: T,
-        numel: T,
-        contiguous: T,
-        *,
-        alignments,
-        itemsize=8,
-        vectorized_tail=False,
-        unroll_prefix=0,
-    ) -> T:
-        """Mask for native CUDA FP64 contiguous unrolled TensorIterator execution."""
-        raise NotImplementedError
+    def mul(self, x0: T, x1: T, *, native_cuda_execution=None) -> T:
+        """Multiply, optionally retaining native CUDA iteration and pointer provenance.
 
-    def cuda_pointwise_vectorized(
-        self,
-        index: T,
-        numel: T,
-        contiguous: T,
-        *,
-        alignments,
-        itemsize=8,
-        vectorized_tail=False,
-        unroll_prefix=0,
-    ) -> T:
-        """Mask for native CUDA FP64 vectorized TensorIterator execution."""
-        raise NotImplementedError
-
-    def mul(self, x0: T, x1: T) -> T:
-        """Multiply two values."""
+        The metadata carries physical index, element count, operand base pointers
+        and offsets, and contiguity. It affects strict FP64 CUDA NaN priority;
+        other backends and dtype propagation ignore it.
+        """
         raise NotImplementedError
 
     # NB: this returns a float, like the torch operation
@@ -953,7 +930,7 @@ class BasicMathOpsMixin:
         return f"{a} - {b}"
 
     @staticmethod
-    def mul(a, b):
+    def mul(a, b, *, native_cuda_execution=None):
         return f"{a} * {b}"
 
     @staticmethod

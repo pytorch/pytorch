@@ -130,7 +130,7 @@ from .codegen.common import (
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
-from .fx_passes.joint_graph import joint_graph_passes, restore_masked_fill_backward
+from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import (
     decompose_user_kernel_wrapper_functional,
     post_grad_passes,
@@ -2746,7 +2746,6 @@ def partition_fn(
             skip_invoke_subgraph=True,
             input_device=next(iter(inputs_devices)),
         )
-        restore_masked_fill_backward(gm, kwargs["num_fwd_outputs"])
 
     static_lifetime_input_indices: list[int] | None = kwargs.pop(  # type: ignore[assignment]
         "static_lifetime_input_indices", None
