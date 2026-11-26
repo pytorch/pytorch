@@ -9,7 +9,8 @@
 //
 // What it is given
 //   - by the optimizer (mod.rs's pure_compiled): the instructions of a code
-//     it judged to only compute, by their code units (judged);
+//     it judged to only compute, by their code units, and for a call the
+//     callee its visits called (judged);
 //   - by the executor (run.rs), before a place is traced: how many traces
 //     of that place were refused here and left it open (place); and for
 //     each instruction that a traced body or a frame under it is about to
@@ -20,7 +21,9 @@
 // What it guarantees
 //   - step() is Err, with the reason for torch.vm.regions, before a frame
 //     under the body runs an instruction that no verdict covered, and
-//     before a call of a callable that is neither the one seen there, nor
+//     before a call of a callable that is neither one seen there (by the
+//     frame's own records, or by a verdict on any copy of the code: the
+//     frame a trace runs is often a call site's copy that no call ran), nor
 //     judged where it runs (a Python function: by its instructions), nor
 //     known to only compute (the engine's tables, a class whose objects
 //     Python code makes);
@@ -78,6 +81,8 @@ use super::{Compiled, effects, shown};
 #[derive(Default)]
 pub struct Units {
     seen: Mutex<Vec<bool>>,
+    // The callables a verdict saw called at a code unit.
+    called: Mutex<HashMap<u32, Vec<Py<PyAny>>>>,
     // While frames of the code are observed again: one more than the code
     // unit a trace was refused for (0: none), and how many more frames.
     wanted: AtomicU32,
@@ -120,20 +125,35 @@ unsafe fn own(c: &Compiled) -> &Compiled {
 }
 
 // The optimizer judged the instructions at `units` of c's code to only
-// compute. Kept with `c` as well: its code's own Compiled may not be there
-// yet.
-pub fn judged(c: &Compiled, units: impl Iterator<Item = u32>) {
-    let units: Vec<u32> = units.collect();
+// compute, each with the callee its visits called, if it is a call that
+// recorded one. Kept with `c` as well: its code's own Compiled may not be
+// there yet.
+pub fn judged(c: &Compiled, units: impl Iterator<Item = (u32, Option<Py<PyAny>>)>) {
+    let py = unsafe { Python::assume_attached() };
+    let units: Vec<(u32, Option<Py<PyAny>>)> = units.collect();
     let o = unsafe { own(c) };
     for at in [Some(c), (!std::ptr::eq(o, c)).then_some(o)].into_iter().flatten() {
         let mut seen = at.covered.seen.lock().unwrap();
-        for u in &units {
+        let mut called = at.covered.called.lock().unwrap();
+        for (u, callee) in &units {
             if seen.len() <= *u as usize {
                 seen.resize(*u as usize + 1, false);
             }
             seen[*u as usize] = true;
+            if let Some(f) = callee {
+                let known = called.entry(*u).or_default();
+                if !known.iter().any(|k| k.as_ptr() == f.as_ptr()) {
+                    known.push(f.clone_ref(py));
+                }
+            }
         }
     }
+}
+
+// Whether a verdict saw `g` called at code unit `unit` of c's code.
+fn called(c: &Compiled, unit: u32, g: *mut PyObject) -> bool {
+    let at = |c: &Compiled| c.covered.called.lock().unwrap().get(&unit).is_some_and(|k| k.iter().any(|f| f.as_ptr() == g));
+    at(c) || at(unsafe { own(c) })
 }
 
 thread_local! {
@@ -260,7 +280,7 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, unit: u32, callee: Option<
         // Torch's hand-over to the trace's function mode is covered as it
         // is.
         if let Some(block) = super::hand_over(c, unit) {
-            judged(c, block.into_iter());
+            judged(c, block.into_iter().map(|u| (u, None)));
             return Ok(false);
         }
         let units = &own(c).covered;
@@ -310,7 +330,7 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, unit: u32, callee: Option<
     if ffi::PyFunction_Check(g) != 0 {
         return Ok(partial.is_null() && call.is_null() && whole(py, g));
     }
-    if seen.and_then(|s| s.get(py)).is_some_and(|s| s.as_ptr() == g) {
+    if seen.and_then(|s| s.get(py)).is_some_and(|s| s.as_ptr() == g) || c.is_some_and(|c| called(c, unit, g)) {
         return Ok(false);
     }
     let g = Bound::from_borrowed_ptr(py, g);

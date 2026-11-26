@@ -3390,7 +3390,9 @@ fn pure_compiled(py: Python<'_>, c: &Compiled, own: Own, depth: u32, memo: &mut 
     }
     if r.is_ok() {
         // What a traced body may run of this code (see covered.rs).
-        covered::judged(c, judged.iter().flat_map(|b| cfg[*b].versions.first()).flat_map(|ver| ver.body.iter()).map(|v| cfg[*v].origin));
+        let callees = unsafe { &*prep.callees.get() };
+        let callee = |v: &ValueId| callees.get(v).and_then(|k| k.get(py)).map(|f| f.unbind());
+        covered::judged(c, judged.iter().flat_map(|b| cfg[*b].versions.first()).flat_map(|ver| ver.body.iter()).map(|v| (cfg[*v].origin, callee(v))));
     }
     memo.insert(key, r.clone());
     r

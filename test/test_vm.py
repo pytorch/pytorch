@@ -1528,6 +1528,18 @@ def unseen_picks_builtin(box, y, on):
     return y * 2
 
 
+def unseen_collects(box, y, on):
+    out = []
+    for _ in range(3):
+        y = (y * 2).sin()
+        out.append(y)
+    return out[0] + out[-1]
+
+
+def unseen_delegates(box, y, on):
+    return unseen_collects(box, y, on) * 2
+
+
 def unseen_around(helper):
     def around(box, x, on):
         return (helper(box, x.sin(), on) + 1).cos().tanh()
@@ -1661,6 +1673,15 @@ class TestVmUnseenCode(TestCase):
         # `2 - y` is Tensor.__rsub__, whose wrapper in torch hands the call
         # to the function modes when one is on: under a trace, the trace's.
         rows = self.calls(unseen_reflected, device, lambda box: box.n)
+        self.assertEqual([r["state"] for r in rows], ["region"], msg=str(rows))
+        self.assertEqual([t[0] for t in rows[0]["traces"]], ["region"], msg=str(rows))
+        self.assertEqual(rows[0]["runs"], 6, msg=str(rows))
+
+    @isolated
+    def test_function_two_calls_deep_that_appends_to_a_list_it_made(self, device):
+        # The frame a trace runs for it is another copy of its code than the
+        # one the calls before ran: what those were seen to call counts.
+        rows = self.calls(unseen_delegates, device, lambda box: box.n)
         self.assertEqual([r["state"] for r in rows], ["region"], msg=str(rows))
         self.assertEqual([t[0] for t in rows[0]["traces"]], ["region"], msg=str(rows))
         self.assertEqual(rows[0]["runs"], 6, msg=str(rows))
