@@ -1369,10 +1369,11 @@ impl Act<'_> {
         let work: usize = self.cfg[b].versions[vi].body.iter().map(ops).sum();
         // A write to something that outlives the block isn't replayed by a
         // region: the version keeps running as it is, so the write is made
-        // on every call, with that call's value.
+        // on every call, with that call's value. A store into a tensor is
+        // torch ops, which a region does run again.
         let body = &self.cfg[b].versions[vi].body;
         let code = self.c.map_or(0, |c| c.code);
-        let escapes = body.iter().any(|v| super::escaping_write(self.cfg, code, body, *v));
+        let escapes = body.iter().any(|v| super::escaping_write(self.cfg, code, body, *v) && !writes::taken(self.p, code, &self.cfg[*v]));
         if work < 2 || escapes {
             self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
             if let (Some(c), true) = (self.c, work > 0) {
@@ -1971,6 +1972,7 @@ impl Act<'_> {
             STORE_SUBSCR => writes::store_item(a(1), a(2), a(0), None),
             DELETE_SUBSCR => writes::store_item(a(0), a(1), std::ptr::null_mut(), None),
             DELETE_ATTR => writes::store_attr(a(0), self.name(oparg), std::ptr::null_mut(), false),
+            STORE_SLICE => writes::store_slice(a(1)),
             _ => 0,
         }
     }
@@ -1984,6 +1986,12 @@ impl Act<'_> {
             BINARY_SUBSCR => reads::subscript(a(0), a(1), ran),
             CONTAINS_OP => reads::contains(a(1), a(0), ran),
             LOAD_SUPER_ATTR => reads::super_attr(a(1), a(2), self.name(oparg >> 2)),
+            // A store into a tensor is C code that reads the index and the
+            // value it is handed (a list of indices, a list of numbers).
+            STORE_SUBSCR | STORE_SLICE if reads::tensor(a(1)) => {
+                let handed: Vec<*mut PyObject> = ins.args.iter().enumerate().filter(|(k, _)| *k != 1).map(|(_, x)| self.val(*x)).collect();
+                reads::used(&handed);
+            }
             // They build or change a container: no read of it.
             BUILD_LIST | BUILD_MAP | BUILD_SET | BUILD_STRING | BUILD_SLICE | BUILD_CONST_KEY_MAP | LIST_APPEND | SET_ADD | MAP_ADD
             | STORE_SUBSCR | DELETE_SUBSCR | STORE_SLICE | STORE_GLOBAL | DELETE_GLOBAL | DELETE_ATTR => {}

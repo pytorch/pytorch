@@ -15,11 +15,12 @@
 //     a cfg pass for one instruction: _cfg_write_site); and whether a call
 //     is one of the two questions about a class that a module's store asks
 //     (type_question). With no write taken by the pass list every answer is
-//     no, and nothing is recorded;
+//     no, but for a subscript or slice store into a tensor: that is torch
+//     ops on the tensor, as an in-place method is, and no write to record;
 //   - by the executor (run.rs), while a region's body is traced: each store
 //     or deletion of an attribute or an item and each call of a builtin that
-//     writes, right before it is made (store_attr, store_item, write_call),
-//     and whether it then succeeded (done);
+//     writes, right before it is made (store_attr, store_item, store_slice,
+//     write_call), and whether it then succeeded (done);
 //   - by reads.rs: what the trace has read so far (to tell the objects that
 //     died with the run), and the place where it notes that an item was
 //     written (what the run reads of it afterwards is its own);
@@ -69,6 +70,7 @@ use pyo3::prelude::*;
 use super::ffi::*;
 use super::reads;
 use super::covered;
+use super::made;
 use super::{Prepared, types};
 use crate::cfg::ir::{Instr, Op, RegionOut, ValueId};
 use crate::cfg::opcodes;
@@ -160,10 +162,12 @@ fn recordable(op: &Op) -> bool {
 }
 
 // Whether instr `ins` of `code` (with what `prep` observed), a store or a
-// deletion, is one a region takes with it where wanted: a store or deletion
+// deletion, is one a region takes with it: where wanted, a store or deletion
 // of an attribute of an object, or of an item of a dict, a list or an
-// object; and a subscript or slice store into a tensor, which is torch ops
-// on that tensor (nothing is recorded for it: see store_item).
+// object; and whatever the pass list says, a subscript or slice store into
+// what was a tensor on every observed call, which is torch ops on that
+// tensor (nothing is recorded for it: see store_item and store_slice, which
+// also say what the trace does if it finds something else there).
 pub(super) fn taken(prep: &Prepared, code: usize, ins: &Instr) -> bool {
     use types::{Kind, Ty};
     let types = unsafe { &*prep.types.get() };
@@ -174,8 +178,10 @@ pub(super) fn taken(prep: &Prepared, code: usize, ins: &Instr) -> bool {
     match ins.op {
         Op::StoreAttr(_) => wanted() && all(ins.args.get(1), |k| matches!(k, Kind::Object(_))),
         Op::Bytecode { opcode: opcodes::DELETE_ATTR, .. } => wanted() && all(ins.args.first(), |k| matches!(k, Kind::Object(_))),
-        Op::Bytecode { opcode: opcodes::STORE_SUBSCR, .. } => wanted() && all(ins.args.get(1), |k| matches!(k, Kind::Tensor(_) | Kind::Dict(_) | Kind::List(_) | Kind::Object(_))),
-        Op::Bytecode { opcode: opcodes::STORE_SLICE, .. } => wanted() && all(ins.args.get(1), |k| matches!(k, Kind::Tensor(_))),
+        Op::Bytecode { opcode: opcodes::STORE_SUBSCR, .. } => {
+            all(ins.args.get(1), |k| matches!(k, Kind::Tensor(_))) || (wanted() && all(ins.args.get(1), |k| matches!(k, Kind::Tensor(_) | Kind::Dict(_) | Kind::List(_) | Kind::Object(_))))
+        }
+        Op::Bytecode { opcode: opcodes::STORE_SLICE, .. } => all(ins.args.get(1), |k| matches!(k, Kind::Tensor(_))),
         Op::Bytecode { opcode: opcodes::DELETE_SUBSCR, .. } => wanted() && all(ins.args.first(), |k| matches!(k, Kind::Dict(_) | Kind::List(_) | Kind::Object(_))),
         _ => false,
     }
@@ -458,6 +464,17 @@ pub unsafe fn store_item(container: *mut PyObject, key: *mut PyObject, value: *m
         return 0;
     }
     refused(format!("{} an item of a {}, which a region cannot do again", if del { "deletes" } else { "stores" }, reads::type_name(container)))
+}
+
+// `container[start:stop] = value` is about to run. Into a tensor it is torch
+// ops on that tensor, and into a container the run made it is the run's own;
+// the code of a Python class runs under the executor. Into anything else it
+// is a write no region makes again: the trace is refused.
+pub unsafe fn store_slice(container: *mut PyObject) -> Token {
+    if !recording() || reads::tensor(container) || reads::owned(container) || made::is(container) || tr_python_setitem(ffi::Py_TYPE(container), 0) != 0 {
+        return 0;
+    }
+    refused(format!("stores a slice of a {}, which a region cannot do again", reads::type_name(container)))
 }
 
 // The builtin `callee` is about to be called with these positional

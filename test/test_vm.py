@@ -6042,6 +6042,390 @@ class TestVmEffects(TestCase):
 instantiate_device_type_tests(TestVmEffects, globals())
 
 
+class StoresNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("stat", torch.zeros(4, 8))
+        self.weight = torch.nn.Parameter(torch.ones(4, 8))
+
+
+class StoresBox:
+    kept = None
+
+
+STORES_NET = None
+STORES_BOX = None
+
+
+def stores_work(x):
+    return (x.sin() * 2).cos().tanh()
+
+
+def stores_put(io, v):
+    io[..., :2] = v
+    return io
+
+
+def stores_scale(io, s):
+    io[..., :4] *= s
+    return io
+
+
+def stores_put_at(io, i, v):
+    io[i] = v
+    return io
+
+
+def stores_put_upto(io, n, v):
+    io[:n] = v
+    return io
+
+
+def stores_put_where(io, v):
+    io[io > 0.5] = v
+    return io
+
+
+def stores_put_under(io, mask, v):
+    io[mask] = v
+    return io
+
+
+def stores_rows_from_rows(io):
+    io[[0, 2]] = io[[1, 3]]
+    return io
+
+
+def stores_through_a_view(out):
+    part = out[1:]
+    part[..., :2] = 5.0
+    return out
+
+
+def stores_fill_front(io, v):
+    io[:2] = v
+    return io
+
+
+def stores_at_rows_kept(io):
+    io[STORES_BOX.picks] = 0.25
+    return io
+
+
+def stores_at_columns_kept(io):
+    io[:, STORES_BOX.picks] = 0.25
+    return io
+
+
+def stores_under_a_mask_kept(io):
+    io[STORES_BOX.mask] = 0.25
+    return io
+
+
+def stores_into_rows_kept(x, k):
+    return stores_at_rows_kept(stores_work(x)).exp()
+
+
+def stores_into_columns_kept(x, k):
+    return stores_at_columns_kept(stores_work(x)).exp()
+
+
+def stores_under_a_mask_that_is_kept(x, k):
+    return stores_under_a_mask_kept(stores_work(x)).exp()
+
+
+def stores_into_a_made_tensor(x, k):
+    io = stores_put(stores_work(x), x[..., :2] * 3)
+    return stores_scale(io, 0.5 + k % 3).exp()
+
+
+def stores_of_a_float_at_an_index(x, k):
+    return stores_put_at(stores_work(x), k % 3, 0.25 * (k % 4)).exp()
+
+
+def stores_up_to_a_bound(x, k):
+    return stores_put_upto(stores_work(x), 1 + k % 3, 7.0).exp()
+
+
+def stores_under_a_mask(x, k):
+    return stores_put_where(stores_work(x), -1.0).exp()
+
+
+def stores_under_a_mask_of_the_argument(x, k):
+    return stores_put_under(stores_work(x), x > 0.1 * (k + 3), -1.0).exp()
+
+
+def stores_into_an_argument(x, k):
+    stores_put(x[1:], stores_work(x)[1:, :2])
+    return (stores_scale(x, 1.5) + stores_work(x)).exp()
+
+
+def stores_rows_of_an_argument_into_its_rows(x, k):
+    return (stores_rows_from_rows(x) + stores_work(x)).exp()
+
+
+def stores_through_a_view_of_an_output(x, k):
+    return stores_through_a_view(stores_work(x))
+
+
+def stores_into_a_buffer(x, k):
+    stat = STORES_NET.stat
+    return (stores_scale(stat, 1.5) + stores_put(stat, stores_work(x)[..., :2])).exp()
+
+
+def stores_into_a_parameter(x, k):
+    with torch.no_grad():
+        STORES_NET.weight[..., :2] = stores_work(x)[..., :2]
+    return (STORES_NET.weight * 2 + stores_work(x)).exp()
+
+
+def stores_into_a_leaf(x, k):
+    leaf = (x * 1).detach().requires_grad_()
+    leaf[0] = stores_work(x)[0]
+    return leaf * 2
+
+
+def stores_in_the_block_itself(x, k):
+    io = stores_work(x)
+    io[..., :2] = x[..., :2] * 3
+    io[..., :4] *= 0.5 + k % 3
+    io[k % 2] = 0.25 * (k % 4)
+    io[1:3] = io[1:3] * 2
+    return io.exp()
+
+
+def stores_front_of_what_is_kept(x, k):
+    y = stores_work(x)
+    stores_fill_front(STORES_BOX.kept, y[:2] * 2)
+    return y.exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmTensorStores(TestCase):
+    """A subscript or slice store into a tensor (`io[..., :2] = v`,
+    `io[..., :4] *= s`, `io[1:3] = v`) is torch operations on that tensor, as
+    an in-place method is: it is part of its block's region, in the block's
+    own code and in a function the block calls, whatever the pass list. Every
+    call gives what eager gives and leaves the tensor written to as eager
+    leaves it."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def against_eager(self, fn, device, passes=EARLY):
+        # Twelve calls with three values of `k` in turn: regions form on the
+        # fourth call, one per value of `k` the function reads.
+        global STORES_NET
+        mine, theirs = StoresNet().to(device), StoresNet().to(device)
+        g = vm(fn, passes=passes)
+        for call in range(12):
+            x = torch.rand(4, 8, device=device)
+            ours, eagers = x.clone(), x.clone()
+            STORES_NET = mine
+            got = g(ours, call % 3)
+            STORES_NET = theirs
+            self.assertEqual(
+                got, fn(eagers, call % 3), atol=0, rtol=0, msg=f"call {call}"
+            )
+            for a, b in (
+                (ours, eagers),
+                (mine.stat, theirs.stat),
+                (mine.weight, theirs.weight),
+            ):
+                self.assertEqual(a, b, atol=0, rtol=0, msg=f"call {call}")
+                self.assertEqual(a._version, b._version, msg=f"call {call}")
+        rows = [
+            r
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["kind"] != "call"
+        ]
+        return [(r["state"], r["variants"], r["runs"], dict(r["misses"])) for r in rows]
+
+    @isolated
+    def test_slice_store_and_in_place_scaling_of_a_made_tensor(self, device):
+        # The block and the two functions it calls are one region.
+        self.assertEqual(
+            self.against_eager(stores_into_a_made_tensor, device),
+            [("region", 3, 12 - 3 - 3, {})],
+        )
+
+    @isolated
+    def test_float_stored_at_an_index_that_changes(self, device):
+        self.assertEqual(
+            self.against_eager(stores_of_a_float_at_an_index, device),
+            [("region", 3, 12 - 3 - 3, {})],
+        )
+
+    @isolated
+    def test_store_up_to_a_bound_that_changes(self, device):
+        self.assertEqual(
+            self.against_eager(stores_up_to_a_bound, device),
+            [("region", 3, 12 - 3 - 3, {})],
+        )
+
+    @isolated
+    def test_store_under_a_mask(self, device):
+        self.assertEqual(
+            self.against_eager(stores_under_a_mask, device),
+            [("region", 1, 12 - 3 - 1, {})],
+        )
+
+    @isolated
+    def test_store_under_a_mask_computed_from_the_argument(self, device):
+        self.assertEqual(
+            self.against_eager(stores_under_a_mask_of_the_argument, device),
+            [("region", 3, 12 - 3 - 3, {})],
+        )
+
+    @isolated
+    def test_store_into_an_argument_and_a_view_of_it(self, device):
+        self.assertEqual(
+            self.against_eager(stores_into_an_argument, device),
+            [("region", 1, 12 - 3 - 1, {})],
+        )
+
+    @isolated
+    def test_rows_of_an_argument_stored_into_other_rows_of_it(self, device):
+        rows = self.against_eager(stores_rows_of_an_argument_into_its_rows, device)
+        self.assertIn(("region", 1, 12 - 3 - 1, {}), rows)
+
+    @isolated
+    def test_store_through_a_view_of_an_output(self, device):
+        self.assertEqual(
+            self.against_eager(stores_through_a_view_of_an_output, device),
+            [("region", 1, 12 - 3 - 1, {})],
+        )
+
+    @isolated
+    def test_store_into_a_buffer(self, device):
+        self.assertEqual(
+            self.against_eager(stores_into_a_buffer, device),
+            [("region", 1, 12 - 3 - 1, {})],
+        )
+
+    @isolated
+    def test_store_into_a_parameter_without_grad(self, device):
+        # Content and version of the parameter after every call.
+        self.against_eager(stores_into_a_parameter, device)
+
+    @isolated
+    def test_store_into_a_leaf_that_requires_grad_raises_as_eager_does(self, device):
+        g = vm(stores_into_a_leaf, passes=EARLY)
+        for call in range(8):
+            with self.assertRaisesRegex(
+                RuntimeError, "a view of a leaf Variable that requires grad"
+            ):
+                g(torch.rand(4, 8, device=device), call % 3)
+
+    @isolated
+    def test_stores_in_the_block_itself(self, device):
+        self.assertEqual(
+            self.against_eager(stores_in_the_block_itself, device),
+            [("region", 3, 12 - 3 - 3, {})],
+        )
+
+    @isolated
+    def test_stores_in_the_block_itself_with_the_pass_that_takes_writes(self, device):
+        with_effects = (*EARLY, vm.passes.Effects())
+        self.assertEqual(
+            self.against_eager(stores_in_the_block_itself, device, passes=with_effects),
+            [("region", 3, 12 - 3 - 3, {})],
+        )
+
+    def indices_changed_in_place(self, device, passes):
+        # The store is C code that reads its index as a subscript does: a
+        # list of indices, a list inside the index's tuple, a list of bools.
+        # Thirteen calls of each function; the lists change in place every
+        # three calls. One region per state of the list, the first found
+        # again when its state comes back.
+        global STORES_BOX
+        STORES_BOX = StoresBox()
+        STORES_BOX.picks, STORES_BOX.mask = [0, 2], [True, False, True, False]
+        for fn in (
+            stores_into_rows_kept,
+            stores_into_columns_kept,
+            stores_under_a_mask_that_is_kept,
+        ):
+            g = vm(fn, passes=passes)
+            for call in range(13):
+                second = (call // 3) % 2 == 1
+                STORES_BOX.picks[0], STORES_BOX.mask[1] = (
+                    (1, True) if second else (0, False)
+                )
+                x = torch.rand(4, 8, device=device)
+                self.assertEqual(
+                    g(x, 0), fn(x, 0), atol=0, rtol=0, msg=f"{fn.__name__}, call {call}"
+                )
+            rows = [
+                r
+                for r in vm.regions(g)
+                if r["function"] == fn.__name__ and r["kind"] != "call"
+            ]
+            self.assertEqual(
+                [(r["state"], r["variants"], list(r["misses"])) for r in rows],
+                [("region", 2, ["read: a namespace or a container"])],
+                msg=fn.__name__,
+            )
+            self.assertGreaterEqual(rows[0]["runs"], 13 - 3 - 2, msg=fn.__name__)
+
+    @isolated
+    def test_lists_a_store_reads_its_index_from_change_in_place(self, device):
+        self.indices_changed_in_place(device, EARLY)
+
+    @isolated
+    def test_lists_a_store_reads_its_index_from_change_in_place_with_the_pass_that_takes_writes(
+        self, device
+    ):
+        self.indices_changed_in_place(device, (*EARLY, vm.passes.Effects()))
+
+    @isolated
+    def test_slice_store_into_a_list_where_the_calls_before_stored_into_a_tensor(
+        self, device
+    ):
+        # The traced call is the first that finds a list where every call
+        # before found a tensor. A slice store into a list is no torch op and
+        # no region makes it again: the trace is given up, and every call
+        # leaves in the list what eager leaves.
+        global STORES_BOX
+        mine, theirs = StoresBox(), StoresBox()
+        g = vm(stores_front_of_what_is_kept, passes=EARLY)
+        for call in range(10):
+            if call in (0, 3):
+                for box in (mine, theirs):
+                    box.kept = (
+                        torch.zeros(4, 8, device=device) if call == 0 else [0, 0, 0, 0]
+                    )
+            x = torch.rand(4, 8, device=device)
+            STORES_BOX = mine
+            got = g(x, 0)
+            STORES_BOX = theirs
+            self.assertEqual(
+                got,
+                stores_front_of_what_is_kept(x, 0),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+            self.assertEqual(mine.kept, theirs.kept, atol=0, rtol=0, msg=f"call {call}")
+        rows = [
+            (r["state"], r["runs"], str(r["why"]))
+            for r in vm.regions(g)
+            if r["function"] == "stores_front_of_what_is_kept" and r["kind"] != "call"
+        ]
+        self.assertEqual(
+            rows,
+            [
+                (
+                    "refused",
+                    0,
+                    "it stores a slice of a list, which a region cannot do again",
+                )
+            ],
+        )
+
+
+instantiate_device_type_tests(TestVmTensorStores, globals())
+
+
 class TestVmWithoutRuntime(TestCase):
     """A build of PyTorch that skipped the torch._rust crate (another Python
     than 3.12, another system than Linux, no cargo)."""
