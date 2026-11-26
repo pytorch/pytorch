@@ -8350,7 +8350,9 @@ class PointwiseStrictNumericsTest(TestCase):
                 self._coverage.mismatches[kind] += 1
 
     @dtypes(torch.float64)
-    @parametrize("change", ("none", "dtype", "stride", "value", "result", "duplicate"))
+    @parametrize(
+        "change", ("none", "dtype", "stride", "value", "result", "duplicate", "inplace")
+    )
     def test_native_call_probe_detects_changed_execution(self, device, dtype, change):
         from torch._dynamo.backends.registry import lookup_backend
         from torch._inductor.graph import GraphLowering
@@ -8376,6 +8378,8 @@ class PointwiseStrictNumericsTest(TestCase):
                 result = result + 1
             elif change == "duplicate":
                 result = packet(x, degree) + result
+            elif change == "inplace":
+                result.add_(1)
             return result
 
         def backend(gm, inputs):
@@ -8398,12 +8402,14 @@ class PointwiseStrictNumericsTest(TestCase):
         with config.patch(fx_graph_cache=False, fx_graph_remote_cache=False):
             actual = torch.compile(fn, backend=backend, fullgraph=True)(x, degree)
         self.assertEqual(len(observed), 1)
-        direct = len(wrappers) == 1 and _native_call_wrapper_is_direct(
-            wrappers[0], observed[0].frames[0][0]
-        )
-        self.assertEqual(
-            direct and eager.matches(observed[0], expected, actual), change == "none"
-        )
+        self.assertEqual(len(wrappers), 1)
+        direct = _native_call_wrapper_is_direct(wrappers[0], observed[0].frames[0][0])
+        matched = eager.matches(observed[0], expected, actual)
+        if change == "inplace":
+            self.assertTrue(matched)
+            self.assertEqual(actual, torch.ones_like(expected), atol=0, rtol=0)
+            self.assertFalse(direct)
+        self.assertEqual(direct and matched, change == "none")
 
     def setUp(self):
         super().setUp()
