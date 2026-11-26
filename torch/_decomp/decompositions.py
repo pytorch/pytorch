@@ -1159,6 +1159,7 @@ def col2im(
 
 @register_decomposition(aten.native_dropout_backward)
 @out_wrapper()
+@pw_cast_for_opmath_non_tensor_args
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     # According to the CUDA kernel implementation we should have this test;
     # but it seems to fail tests!
@@ -4058,7 +4059,7 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     cx = hidden[1].unsqueeze(0)
 
     batch_sizes: list[int] = []
-    mode = 2  # third_party/ideep/include/ideep/abstract_types.hpp: ideep::rnn_kind::LSTM = 2
+    mode = 2  # aten/src/ATen/native/mkldnn/detail/IdeepUtils.h: rnn_kind::LSTM = 2
     hidden_size = hx.size(2)
     num_layers = 1
 
@@ -4593,6 +4594,16 @@ def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
     )
 
 
+@register_decomposition(aten._upsample_inter_area2d.vec)
+@aten._upsample_inter_area2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_inter_area2d.vec.py_impl(DispatchKey.Autograd)
+def upsample_inter_area2d_vec(input, output_size, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_inter_area2d(input, osize, scale_h, scale_w)
+
+
 @register_decomposition(aten._upsample_lanczos2d_aa.vec)
 @aten._upsample_lanczos2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_lanczos2d_aa.vec.py_impl(DispatchKey.Autograd)
@@ -4634,7 +4645,7 @@ def upsample_linear1d(
     [aten.upsample_bilinear2d.default, aten.upsample_bilinear2d.out]
 )
 @aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True)
 def upsample_bilinear2d(
     input: Tensor,
     output_size: list[int],
@@ -4819,7 +4830,7 @@ def _upsample_linear(
     result = vs[0]
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
+    memory_format = utils.upsample_output_memory_format(input)
 
     # following "heuristic: only use channels_last path when it's faster than the contiguous path"
     if input.device.type == "cuda" and n_channels < 16:
@@ -5526,7 +5537,7 @@ def matmul(tensor1, tensor2, *, is_out=False):
 
 @register_decomposition([aten.upsample_bicubic2d.default, aten.upsample_bicubic2d.out])
 @aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True)
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
     input: Tensor,
@@ -5610,7 +5621,7 @@ def upsample_bicubic2d_default(
         result = _sum_tensors(c1 * c2 for (c1, c2) in zip(src_y, weights_y))
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
+    memory_format = utils.upsample_output_memory_format(input)
     result = result.contiguous(memory_format=memory_format)
     return result
 
@@ -6278,16 +6289,63 @@ def max_pool2d_with_indices_backward(
     Returns:
         Gradient w.r.t. input [B, C, H_in, W_in]
     """
+
+    # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
+    # (#163327) and numerical differences on macOS 15+.
+    if grad_output.device.type == "mps":
+        return NotImplemented
+
+    if not stride:
+        stride = kernel_size
+
+    def to_pair(value):
+        if isinstance(value, IntLike):
+            return [value, value]
+        if len(value) == 1:
+            return [value[0], value[0]]
+        return list(value)
+
+    kernel_size = to_pair(kernel_size)
+    stride = to_pair(stride)
+    padding = to_pair(padding)
+    dilation = to_pair(dilation)
+
+    nonoverlap = (
+        self.dim() in (3, 4)
+        and all(p == 0 for p in padding)
+        and all(d == 1 for d in dilation)
+        and all(s >= k for s, k in zip(stride, kernel_size))
+    )
+    if nonoverlap:
+        in_height, in_width = self.shape[-2:]
+        out_height, out_width = grad_output.shape[-2:]
+        h = torch.arange(in_height, device=self.device)
+        w = torch.arange(in_width, device=self.device)
+        ph = h // stride[0]
+        pw = w // stride[1]
+        valid_h = (ph < out_height) & (h < ph * stride[0] + kernel_size[0])
+        valid_w = (pw < out_width) & (w < pw * stride[1] + kernel_size[1])
+        ph = ph.clamp(0, out_height - 1)
+        pw = pw.clamp(0, out_width - 1)
+
+        # indices is produced by max_pool2d_with_indices with the same parameters.
+        # With non-overlapping windows, an input can belong to at most one output.
+        # Index the trailing H/W dims via Ellipsis so this handles both the
+        # unbatched (C, H, W) and batched (N, C, H, W) layouts.
+        selected_indices = indices[..., ph, :][..., pw]
+        selected_grads = grad_output[..., ph, :][..., pw]
+        input_indices = h[:, None] * in_width + w[None, :]
+        grad_input = torch.where(
+            valid_h[:, None] & valid_w[None, :] & (selected_indices == input_indices),
+            selected_grads,
+            0,
+        )
+        return grad_input.contiguous(memory_format=utils.suggest_memory_format(self))
     # Use native kernel in deterministic mode
     if torch.are_deterministic_algorithms_enabled():
         return NotImplemented
 
     if grad_output.is_xpu:
-        return NotImplemented
-
-    # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
-    # (#163327) and numerical differences on macOS 15+.
-    if grad_output.device.type == "mps":
         return NotImplemented
 
     # Get spatial dimensions
