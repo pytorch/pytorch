@@ -19,7 +19,6 @@ These rules are critical for TorchDynamo's ability to automatically determine
 compilation boundaries and optimize PyTorch programs effectively.
 """
 
-import _string  # pyrefly: ignore [missing-import]
 import abc
 import builtins
 import contextlib
@@ -4175,8 +4174,6 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES = {
-    _string.formatter_parser: BuiltinVariable,
-    _string.formatter_field_name_split: BuiltinVariable,
     bool: BoolBuiltinVariable,
     bytearray: ByteArrayBuiltinVariable,
     bytes: BytesBuiltinVariable,
