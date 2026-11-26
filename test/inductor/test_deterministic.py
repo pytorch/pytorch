@@ -164,8 +164,6 @@ class DeterministicTestAccelerator(TestCase):
         super().setUp()
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(fresh_cache())
-        # Keep deterministic state from leaking between tests: some tests turn
-        # deterministic algorithms on without restoring them.
         self._exit_stack.enter_context(inductor_config.patch(deterministic=False))
         self._exit_stack.enter_context(DeterministicGuard(False))
 
