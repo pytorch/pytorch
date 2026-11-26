@@ -4815,6 +4815,38 @@ class SIMDScheduling(BaseScheduling):
                     merged_patches.update(patches)
         return merged_patches
 
+    @staticmethod
+    def _union_must_keep_buffers(kernels: list[Any]) -> OrderedSet[str] | None:
+        """Versions of a kernel built under different hints can make different
+        persistent or cooperative reduction choices, and so keep different stored
+        buffers (must_keep_buffers) and remove the others. Every version must write
+        the same buffers. If they remove different ones, return every buffer some
+        version keeps, to rebuild all versions keeping it; else None."""
+        first = kernels[0]
+        if all(
+            k.removed_buffers == first.removed_buffers
+            and k.inplaced_to_remove == first.inplaced_to_remove
+            for k in kernels[1:]
+        ):
+            return None
+        return OrderedSet(
+            name
+            for kernel in kernels
+            for leaf in leaf_kernels(kernel)
+            for name in leaf.must_keep_buffers
+        )
+
+    @staticmethod
+    def _check_same_graph_effects(kernels: list[Any]) -> None:
+        for kernel in kernels[1:]:
+            for attr in (
+                "removed_buffers",
+                "inplaced_to_remove",
+                "inplace_update_buffers",
+            ):
+                if getattr(kernel, attr) != getattr(kernels[0], attr):
+                    raise AssertionError(f"kernel versions differ in {attr}")
+
     def _should_build_int32_and_int64(
         self, kernel_features: SIMDKernelFeatures
     ) -> bool:
@@ -4878,14 +4910,17 @@ class SIMDScheduling(BaseScheduling):
         if self._should_build_int32_and_int64(kernel_features) and (
             int32_conditions := kernel_features.int32_index_conditions()
         ):
-            int32_kernel = self._create_node_schedule_kernel(
-                kernel_features, torch.int32
+            int64_hints = _int64_kernel_hint_overrides(int32_conditions)
+            build = functools.partial(
+                self._create_node_schedule_kernel, kernel_features
             )
-            int64_kernel = self._create_node_schedule_kernel(
-                kernel_features,
-                torch.int64,
-                _int64_kernel_hint_overrides(int32_conditions),
-            )
+            int32_kernel = build(torch.int32)
+            int64_kernel = build(torch.int64, int64_hints)
+            keep = self._union_must_keep_buffers([int32_kernel, int64_kernel])
+            if keep is not None:
+                int32_kernel = build(torch.int32, must_keep_buffers=keep)
+                int64_kernel = build(torch.int64, int64_hints, keep)
+            self._check_same_graph_effects([int32_kernel, int64_kernel])
             final_kernel = ConditionalMultiKernel(
                 [
                     (sympy.And(*int32_conditions), int32_kernel),
@@ -4939,6 +4974,7 @@ class SIMDScheduling(BaseScheduling):
         kernel_features: SIMDKernelFeatures,
         index_dtype: torch.dtype | None = None,
         optimization_hint_overrides: dict[sympy.Symbol, int] | None = None,
+        must_keep_buffers: OrderedSet[str] | None = None,
     ) -> SIMDKernel | BenchmarkedMultiKernel:
         """Build step of codegen_node_schedule: pick the tiling, create the kernel
         objects (one kernel, or a multi-kernel over several leaf kernels) and generate
@@ -4953,7 +4989,8 @@ class SIMDScheduling(BaseScheduling):
         from the sizes. optimization_hint_overrides replaces the hints that the
         heuristics read, here and when _define_node_schedule_kernels renders the
         kernels: tiling scores included, but not the memory-coalescing analysis, which
-        is computed before codegen.
+        is computed before codegen. must_keep_buffers are buffers the kernels must
+        write even if they could remove them (_union_must_keep_buffers).
         """
         with V.graph.sizevars.optimization_hint_overrides(optimization_hint_overrides):
             tiling, tiling_score = self.get_tiling_and_scores(
@@ -4976,6 +5013,8 @@ class SIMDScheduling(BaseScheduling):
                 kernel_features, [tiling], kernel_kwargs
             )
             for kernel in kernels:
+                if must_keep_buffers is not None:
+                    kernel.must_keep_buffers.update(must_keep_buffers)
                 self.codegen_node_schedule_with_kernel(
                     kernel_features.node_schedule, kernel
                 )
