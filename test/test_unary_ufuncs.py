@@ -50,6 +50,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfNoSciPy,
+    skipIfTorchDynamo,
     slowTest,
     suppress_warnings,
     TEST_SCIPY,
@@ -600,6 +601,13 @@ class TestUnaryUfuncs(TestCase):
         y = x.clone()
         y.relu_()
         self.assertEqual(torch.signbit(y), exp)
+
+    @skipIfTorchDynamo("dynamo drops the sign of a -nan constant")
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    def test_signbit_signed_nan(self, device, dtype):
+        x = torch.tensor([-nan, nan], device=device, dtype=dtype)
+        exp = torch.tensor([True, False], device=device)
+        self.assertEqual(torch.signbit(x), exp)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_clamp_signed_zero(self, device, dtype):
