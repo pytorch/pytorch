@@ -779,12 +779,19 @@ class TestLibtorchAgnostic(TestCase):
         out = libtorch_agnostic.ops.my_transpose(t, 0, 1)
         self.assertEqual(out, torch.transpose(t, 0, 1))
 
-        with self.assertStableATenError(
-            RuntimeError,
-            regex_before="API call failed",
-            regex_after=r"Dimension out of range \(expected to be in range of \[-2, 1\], but got 2\)",
-        ):
-            libtorch_agnostic.ops.my_transpose(t, 1, 2)
+        if TEST_WITH_TORCHDYNAMO:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"(?s)RuntimeError when making fake tensor call.*API call failed",
+            ):
+                libtorch_agnostic.ops.my_transpose(t, 1, 2)
+        else:
+            with self.assertStableATenError(
+                RuntimeError,
+                regex_before="API call failed",
+                regex_after=r"Dimension out of range \(expected to be in range of \[-2, 1\], but got 2\)",
+            ):
+                libtorch_agnostic.ops.my_transpose(t, 1, 2)
 
     def test_my_empty_like(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
