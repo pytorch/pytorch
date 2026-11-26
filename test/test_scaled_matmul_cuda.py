@@ -1672,18 +1672,11 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         mat2_ref = torch.eye(n, k, device=device, dtype=torch.bfloat16)
         mat1 = mat1_ref.to(e4m3_type)
         mat2 = mat2_ref.to(e4m3_type).t()
-        if self.device_type == "xpu":
-            scale_a = torch.ones(m, k // 32, device=device, dtype=torch.float8_e8m0fnu)
-            scale_b = torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu)
-            swizzle = SwizzleType.NO_SWIZZLE
-        else:
-            scale_a = to_blocked(
-                torch.ones(m, k // 32, device=device, dtype=torch.float8_e8m0fnu)
-            )
-            scale_b = to_blocked(
-                torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu)
-            )
-            swizzle = SwizzleType.SWIZZLE_32_4_4
+        swizzle = mx_swizzle_for(device, mat1.dtype)
+        scale_a = torch.ones(m, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+        scale_b = torch.ones(n, k // 32, device=device, dtype=torch.float8_e8m0fnu)
+        if swizzle == SwizzleType.SWIZZLE_32_4_4:
+            scale_a, scale_b = to_blocked(scale_a), to_blocked(scale_b)
 
         args = (
             mat1,
@@ -1720,18 +1713,11 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         mat2_ref = torch.eye(n, k, device=device, dtype=torch.bfloat16)
         mat1 = _bfloat16_to_float4_e2m1fn_x2(mat1_ref)
         mat2 = _bfloat16_to_float4_e2m1fn_x2(mat2_ref).t()
-        if self.device_type == "xpu":
-            scale_a = torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
-            scale_b = torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
-            swizzle = SwizzleType.NO_SWIZZLE
-        else:
-            scale_a = to_blocked(
-                torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
-            )
-            scale_b = to_blocked(
-                torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
-            )
-            swizzle = SwizzleType.SWIZZLE_32_4_4
+        swizzle = mx_swizzle_for(device, mat1.dtype)
+        scale_a = torch.ones(m, k // 16, device=device, dtype=torch.float8_e4m3fn)
+        scale_b = torch.ones(n, k // 16, device=device, dtype=torch.float8_e4m3fn)
+        if swizzle == SwizzleType.SWIZZLE_32_4_4:
+            scale_a, scale_b = to_blocked(scale_a), to_blocked(scale_b)
         gemm_scale = 1.0
         if two_level:
             global_scale_a = torch.full((1,), 0.5, device=device)

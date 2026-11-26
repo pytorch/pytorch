@@ -261,9 +261,9 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       scale_b.strides());
 }
 
-// out = alpha * (A @ B) + beta * input; input is pre-copied into out for
-// oneDNN's sum post-op.
+// out = alpha * (A @ B) + beta * accumulator
 struct ScaledGemmEpilogue {
+  std::optional<Tensor> accumulator;
   float alpha = 1.0f;
   float beta = 0.0f;
 };
@@ -285,6 +285,10 @@ Tensor& _scaled_gemm(
   if (use_fast_accum) {
     TORCH_WARN(
         "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
+  }
+  // oneDNN's sum post-op accumulates into dst.
+  if (epilogue.accumulator.has_value() && !out.is_same(*epilogue.accumulator)) {
+    out.copy_(*epilogue.accumulator);
   }
   // TODO: scale_result is not defined or used!
   std::optional<Tensor> scale_result = std::nullopt;
@@ -1154,46 +1158,7 @@ Tensor& _scaled_nvfp4_nvfp4(
   return out;
 }
 
-// V2: Computes matrix multiply + bias while applying scaling to input and
-// output matrices. Scales are applicable when matrices are of Float8 or
-// Float4 (packed) type and assumed to be equal to 1.0 by default. If output
-// matrix type is 16 or 32-bit type, scale_result is not applied.
-// Known limitations:
-//  - Only works if mat1 is row-major and mat2 is column-major
-//  - Only works if matrices sizes are divisible by 32
-//  - If 1-dimensional tensors are used then scale_a should be size =
-//  mat1.size(0)
-//    and scale_b should have size = to mat2.size(1)
-//  Arguments:
-//    - `mat_a`: the first operand of the matrix multiply, can be type
-//    `torch.float8_e4m3fn`, `torch.float8_e5m2`, or `torch.float4_e2m1fn_x2`
-//    - `mat_b`: the second operand of the matrix multiply, can be type
-//    `torch.float8_e4m3fn`, `torch.float8_e5m2`, or `torch.float4_e2m1fn_x2`
-//    - `scale_a`: a tensor with the inverse scale of `mat1`, whose
-//    shape/strides/dtype depend on the scaling scheme
-//    - `scale_recipe_a`: An integer corresponding to an enum describing the
-//    scaling scheme used for `scale_a`
-//    - `swizzle_a`: An integer corresponding to a `SwizzleType` enum describing
-//    the swizzling scheme for `scale_a`.
-//        Not supported for XPU for now.
-//    - `scale_b`: a tensor with the inverse scale of `mat2`, whose
-//    shape/strides/dtype depend on the scaling scheme
-//    - `scale_recipe_b`: An integer corresponding to an enum describing the
-//    scaling scheme used for `scale_b`
-//    - `swizzle_b`: An integer corresponding to a `SwizzleType` enum describing
-//    the swizzling scheme for `scale_b`.
-//        Not supported for XPU for now.
-//    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
-//    - `out_dtype`: the output dtype, can either be a float8 or a higher
-//    precision floating point type
-//    - `contraction_dim`: describe which dimensions are `K` in the matmul.
-//       Not supported for XPU. Should always be empty.
-//    - `use_fast_accum`: Not supported for XPU, should always be false.
-//    - `out`: a reference to the output tensor
-// Note: The `contraction_dim` is not actually used in this kernel for now,
-// but is accepted to keep the XPU/CUDA signatures aligned. Shape inference +
-// output allocation happens in TORCH_META_FUNC(_scaled_mm_v2).
-// When `accumulator` is set (scaled_addmm), computes
+// Shared by _scaled_mm_v2 and _scaled_addmm; with `accumulator` set, computes
 // out = alpha * (A @ B) + beta * accumulator.
 static void _scaled_mm_xpu_v2_impl(
     const Tensor& mat_a,
@@ -1391,25 +1356,15 @@ static void _scaled_mm_xpu_v2_impl(
 
   ScaledGemmEpilogue epilogue;
   if (accumulator.has_value()) {
-    TORCH_CHECK_VALUE(
-        reinterpret_cast<uintptr_t>(accumulator->const_data_ptr()) % 16 == 0,
-        "input data pointer must be 16-byte aligned");
-    TORCH_CHECK_VALUE(
-        !accumulator->is_neg(), "input must not be a negative view");
-    epilogue.alpha = alpha.to<float>();
-    epilogue.beta = beta.to<float>();
-    if (mat_a.size(0) == 0 || mat_a.size(1) == 0 || mat_b.size(1) == 0 ||
-        epilogue.alpha == 0.0f) {
-      if (epilogue.beta == 0.0f) {
-        out_mut.zero_();
-      } else {
-        at::mul_out(out_mut, *accumulator, beta);
-      }
+    scaled_blas::check_scaled_addmm_input(*accumulator);
+    if (scaled_blas::scaled_addmm_skip_matmul(
+            mat_a, mat_b, *accumulator, beta, alpha, out)) {
       return;
     }
-    // oneDNN sum post-op accumulates into dst.
-    if (epilogue.beta != 0.0f && !out.is_same(*accumulator)) {
-      out_mut.copy_(*accumulator);
+    epilogue.alpha = alpha.to<float>();
+    epilogue.beta = beta.to<float>();
+    if (epilogue.beta != 0.0f) {
+      epilogue.accumulator = accumulator;
     }
   }
 
@@ -1522,6 +1477,45 @@ static void _scaled_mm_xpu_v2_impl(
   }
 }
 
+// V2: Computes matrix multiply + bias while applying scaling to input and
+// output matrices. Scales are applicable when matrices are of Float8 or
+// Float4 (packed) type and assumed to be equal to 1.0 by default. If output
+// matrix type is 16 or 32-bit type, scale_result is not applied.
+// Known limitations:
+//  - Only works if mat1 is row-major and mat2 is column-major
+//  - Only works if matrices sizes are divisible by 32
+//  - If 1-dimensional tensors are used then scale_a should be size =
+//  mat1.size(0)
+//    and scale_b should have size = to mat2.size(1)
+//  Arguments:
+//    - `mat_a`: the first operand of the matrix multiply, can be type
+//    `torch.float8_e4m3fn`, `torch.float8_e5m2`, or `torch.float4_e2m1fn_x2`
+//    - `mat_b`: the second operand of the matrix multiply, can be type
+//    `torch.float8_e4m3fn`, `torch.float8_e5m2`, or `torch.float4_e2m1fn_x2`
+//    - `scale_a`: a tensor with the inverse scale of `mat1`, whose
+//    shape/strides/dtype depend on the scaling scheme
+//    - `scale_recipe_a`: An integer corresponding to an enum describing the
+//    scaling scheme used for `scale_a`
+//    - `swizzle_a`: An integer corresponding to a `SwizzleType` enum describing
+//    the swizzling scheme for `scale_a`.
+//        Not supported for XPU for now.
+//    - `scale_b`: a tensor with the inverse scale of `mat2`, whose
+//    shape/strides/dtype depend on the scaling scheme
+//    - `scale_recipe_b`: An integer corresponding to an enum describing the
+//    scaling scheme used for `scale_b`
+//    - `swizzle_b`: An integer corresponding to a `SwizzleType` enum describing
+//    the swizzling scheme for `scale_b`.
+//        Not supported for XPU for now.
+//    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
+//    - `out_dtype`: the output dtype, can either be a float8 or a higher
+//    precision floating point type
+//    - `contraction_dim`: describe which dimensions are `K` in the matmul.
+//       Not supported for XPU. Should always be empty.
+//    - `use_fast_accum`: Not supported for XPU, should always be false.
+//    - `out`: a reference to the output tensor
+// Note: The `contraction_dim` is not actually used in this kernel for now,
+// but is accepted to keep the XPU/CUDA signatures aligned. Shape inference +
+// output allocation happens in TORCH_META_FUNC(_scaled_mm_v2).
 TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
 (const Tensor& mat_a,
  const Tensor& mat_b,

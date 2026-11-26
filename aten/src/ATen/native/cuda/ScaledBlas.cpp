@@ -1729,11 +1729,7 @@ void scaled_mm_cuda_v2_impl(
   if (accumulator) {
     // Layout was validated by the meta function; cuBLASLt additionally needs
     // a 16-byte aligned C pointer, which in-place callers can violate.
-    TORCH_CHECK_VALUE(
-        reinterpret_cast<uintptr_t>(accumulator->const_data_ptr()) % 16 == 0,
-        "input data pointer must be 16-byte aligned");
-    TORCH_CHECK_VALUE(
-        !accumulator->is_neg(), "input must not be a negative view");
+    scaled_blas::check_scaled_addmm_input(*accumulator);
   }
 
   // Materialize the scale lists so the existing acceptance helpers (which
@@ -1889,17 +1885,12 @@ void scaled_mm_cuda_v2_impl(
         gemm_impl == ScaledGemmImplementation::MNK4_1x128_1x128) {
       scaled_blas::check_mnk4_support();
     }
-    epilogue.beta = beta.to<float>();
-    epilogue.alpha = alpha.to<float>();
-    if (mat_a.size(0) == 0 || mat_a.size(1) == 0 ||
-        mat_b.size(1) == 0 || epilogue.alpha == 0.0f) {
-      if (epilogue.beta == 0.0f) {
-        out_mut.zero_();
-      } else {
-        at::mul_out(out_mut, *accumulator, beta);
-      }
+    if (scaled_blas::scaled_addmm_skip_matmul(
+            mat_a, mat_b, *accumulator, beta, alpha, out_mut)) {
       return;
     }
+    epilogue.beta = beta.to<float>();
+    epilogue.alpha = alpha.to<float>();
     if (epilogue.beta != 0.0f) {
       epilogue.accumulator = accumulator;
     }

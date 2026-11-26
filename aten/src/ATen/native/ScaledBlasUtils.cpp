@@ -26,6 +26,7 @@
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
 #endif
 
 using at::blas::ScalingType;
@@ -807,6 +808,33 @@ void validate_scaled_grouped_mm_v2_inputs(
       !bf16_only || out_dtype_ == ScalarType::BFloat16,
       rowwise ? "Rowwise grouped GEMM requires BFloat16 output"
               : "Grouped scaling configuration requires BFloat16 output");
+}
+
+void check_scaled_addmm_input(const Tensor& input) {
+  TORCH_CHECK_VALUE(
+      reinterpret_cast<uintptr_t>(input.const_data_ptr()) % 16 == 0,
+      "input data pointer must be 16-byte aligned");
+  TORCH_CHECK_VALUE(!input.is_neg(), "input must not be a negative view");
+}
+
+bool scaled_addmm_skip_matmul(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& input,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& out) {
+  if (mat_a.size(0) != 0 && mat_a.size(1) != 0 && mat_b.size(1) != 0 &&
+      alpha.to<float>() != 0.0f) {
+    return false;
+  }
+  Tensor& out_mut = const_cast<Tensor&>(out);
+  if (beta.to<float>() == 0.0f) {
+    out_mut.zero_();
+  } else {
+    at::mul_out(out_mut, input, beta);
+  }
+  return true;
 }
 
 }  // at::scaled
