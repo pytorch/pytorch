@@ -118,6 +118,10 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "triton_kernel_wrapper_functional",
     "cutedsl_kernel_wrapper_mutation",  # Runs a host function: needs cutlass and CUDA
     "cutedsl_kernel_wrapper_functional",  # Runs a host function: needs cutlass and CUDA
+    # FXIR runtime HOPs launch process-local compiled callables after codegen.
+    # Covered by test/inductor/test_fxir_backend.py.
+    "compiled_kernel_wrapper_mutation",
+    "compiled_kernel_wrapper_functional",
     "hints_wrapper",
     "dynamo_bypassing_wrapper",  # TODO(soulitzer)
     "foreach_map",

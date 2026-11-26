@@ -17,6 +17,7 @@ import torch.utils._pytree as pytree
 from torch._C._dynamo.guards import assert_alignment, assert_size_stride
 from torch._dynamo.utils import same
 from torch._higher_order_ops.compiled_kernel_wrap import (
+    compiled_kernel_wrapper_functional,
     compiled_kernel_wrapper_mutation,
 )
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -25,9 +26,14 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 )
 from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+from torch._inductor.codegen.cpp import CppScheduling
+from torch._inductor.codegen.halide import HalideScheduling
+from torch._inductor.codegen.mps import MetalScheduling
+from torch._inductor.codegen.rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen, UnbackedSymbolDefsLine
 from torch._inductor.codegen.wrapper_fxir import (
+    _supports_compiled_kernel_fxir,
     FxConverter,
     replace_floor_div,
     WrapperFxCodegen,
@@ -37,6 +43,7 @@ from torch._inductor.runtime.runtime_utils import assert_tensor_metadata
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
@@ -78,12 +85,7 @@ test_config = {
 }
 
 
-@requires_gpu_and_triton
-@config.patch(test_config)
-@instantiate_parametrized_tests
-class FxirTestCase(InductorTestCase):
-    device = GPU_TYPE
-
+class FxirTestCaseBase(InductorTestCase):
     def _count_ops(self, gm: torch.fx.GraphModule, target: Callable) -> int:
         return len(gm.graph.find_nodes(op="call_function", target=target))
 
@@ -118,7 +120,7 @@ class FxirTestCase(InductorTestCase):
                         changed = True
         return assert_nodes
 
-    def _run_and_capture_graphs(self, opt, args) -> torch.fx.GraphModule:
+    def _run_and_capture_graphs(self, opt, args) -> list[torch.fx.GraphModule]:
         gms = []
 
         orig_generate = FxConverter.generate
@@ -170,18 +172,26 @@ class FxirTestCase(InductorTestCase):
 
         self.assertTrue(same(ref, result))
 
-        # Verify all non-assertion, non-triton call_function nodes have metadata.
+        # Mutating kernel launches write into output buffers and return no value.
+        kernel_hops = (triton_kernel_wrapper_mutation, compiled_kernel_wrapper_mutation)
         for gm in gms:
             assert_nodes = self._get_assert_nodes(gm) if check_assertions else set()
             for node in gm.graph.nodes:
                 if (
                     node.op == "call_function"
-                    and node.target != triton_kernel_wrapper_mutation
+                    and node.target not in kernel_hops
                     and node not in assert_nodes
                 ):
                     self.assertTrue(node.meta.get("val", None) is not None)
 
         return gms
+
+
+@requires_gpu_and_triton
+@config.patch(test_config)
+@instantiate_parametrized_tests
+class FxirTestCase(FxirTestCaseBase):
+    device = GPU_TYPE
 
     @classmethod
     def setUpClass(cls):
@@ -2058,6 +2068,23 @@ class TestReplaceFloorDiv(InductorTestCase):
         self._check(expr)
 
 
+@instantiate_parametrized_tests
+class TestCompiledKernelFxirSupport(InductorTestCase):
+    @parametrize(
+        "scheduling_cls,supported",
+        (
+            (CppScheduling, True),
+            (TritonScheduling, False),
+            (HalideScheduling, False),
+            (MetalScheduling, False),
+            (ROCmCPPScheduling, False),
+        ),
+    )
+    def test_required_interfaces(self, scheduling_cls, supported):
+        scheduling = scheduling_cls(None)
+        self.assertEqual(_supports_compiled_kernel_fxir(scheduling), supported)
+
+
 class TestUnbackedSymbolDefs(InductorTestCase):
     """Tests for FxConverter._generate_unbacked_symbol_defs."""
 
@@ -2077,22 +2104,54 @@ class TestUnbackedSymbolDefs(InductorTestCase):
 
 
 @config.patch({**test_config, "fx_wrapper": True})
-class FxirCpuCompiledKernelTestCase(InductorTestCase):
+class FxirCpuCompiledKernelTestCase(FxirTestCaseBase):
     """The FX backend embeds non-Triton CPU cpp_fused_* kernels as
     compiled_kernel_wrapper_mutation HOP nodes instead of raising on them."""
 
-    def _compile_and_capture(self, func, args, **compile_kwargs):
-        gms = []
-        orig_generate = FxConverter.generate
+    def test_cpp_fused_kernel(self):
+        def foo(x, y):
+            return (x + y).relu() * 2.0
 
-        def generate(self):
-            gm = orig_generate(self)
-            gms.append(gm)
-            return gm
+        args = [torch.randn(8, 8, device="cpu") for _ in range(2)]
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+        (mutation,) = gm.graph.find_nodes(
+            op="call_function", target=compiled_kernel_wrapper_mutation
+        )
+        hop_fields = {"kernel_idx", "args", "mutated_arg_indices"}
+        self.assertEqual(set(mutation.kwargs), hop_fields)
 
-        with unittest.mock.patch.object(FxConverter, "generate", generate):
-            result = torch.compile(func, **compile_kwargs)(*args)
+        functional = torch.func.functionalize(gm)
+        functional_gm = make_fx(functional, tracing_mode="fake")(*args)
+        (functional_node,) = functional_gm.graph.find_nodes(
+            op="call_function", target=compiled_kernel_wrapper_functional
+        )
+        self.assertEqual(set(functional_node.kwargs) - {"tensor_bases"}, hop_fields)
+        self.assertEqual(
+            functional_node.kwargs["mutated_arg_indices"],
+            mutation.kwargs["mutated_arg_indices"],
+        )
+        self.assertEqual(functional_gm(*args), gm(*args))
 
+    def test_cpp_fused_kernel_with_extern(self):
+        # a @ b stays an aten extern; the pointwise tail fuses into a cpp kernel.
+        def foo(a, b):
+            return torch.relu(a @ b + a) * 2.0
+
+        args = [torch.randn(16, 16, device="cpu") for _ in range(2)]
+        gms = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+        self.assertTrue(
+            any(self._count_ops(gm, compiled_kernel_wrapper_mutation) for gm in gms)
+        )
+
+    def test_cpp_fused_kernel_dynamic_shapes(self):
+        # Dynamic shapes add sizevar args, which must reach the HOP as graph nodes.
+        def foo(x, y):
+            return (x + y).relu() * 2.0
+
+        args = [torch.randn(8, 8, device="cpu") for _ in range(2)]
+        gms = self._compile_and_check(
+            foo, args, expected_num_triton_kernels=0, compile_kwargs={"dynamic": True}
+        )
         hop_nodes = [
             node
             for gm in gms
@@ -2100,36 +2159,6 @@ class FxirCpuCompiledKernelTestCase(InductorTestCase):
                 op="call_function", target=compiled_kernel_wrapper_mutation
             )
         ]
-        return result, hop_nodes
-
-    def test_cpp_fused_kernel(self):
-        def foo(x, y):
-            return (x + y).relu() * 2.0
-
-        args = [torch.randn(8, 8) for _ in range(2)]  # cpu
-        result, hop_nodes = self._compile_and_capture(foo, args)
-        self.assertTrue(same(foo(*args), result))
-        self.assertGreater(len(hop_nodes), 0)
-
-    def test_cpp_fused_kernel_with_extern(self):
-        # a @ b stays an aten extern; the pointwise tail fuses into a cpp kernel.
-        def foo(a, b):
-            return torch.relu(a @ b + a) * 2.0
-
-        args = [torch.randn(16, 16) for _ in range(2)]  # cpu
-        result, hop_nodes = self._compile_and_capture(foo, args)
-        self.assertTrue(same(foo(*args), result))
-        self.assertGreater(len(hop_nodes), 0)
-
-    def test_cpp_fused_kernel_dynamic_shapes(self):
-        # Dynamic shapes add sizevar args, which must reach the HOP as graph nodes.
-        def foo(x, y):
-            return (x + y).relu() * 2.0
-
-        args = [torch.randn(8, 8) for _ in range(2)]  # cpu
-        result, hop_nodes = self._compile_and_capture(foo, args, dynamic=True)
-        self.assertTrue(same(foo(*args), result))
-        self.assertGreater(len(hop_nodes), 0)
 
         hop_args = [arg for node in hop_nodes for arg in node.kwargs["args"]]
         self.assertEqual(
@@ -2145,6 +2174,37 @@ class FxirCpuCompiledKernelTestCase(InductorTestCase):
                 for arg in hop_args
             )
         )
+
+    def test_compiled_kernel_uses_registered_backend(self):
+        writes = []
+
+        class CustomScheduling(CppScheduling):
+            def get_fx_kernel_mutated_arg_indices(self, line):
+                indices = super().get_fx_kernel_mutated_arg_indices(line)
+                writes.append(indices)
+                return indices
+
+        common.init_backend_registration()
+        with (
+            unittest.mock.patch.dict(common.device_codegens),
+            unittest.mock.patch.dict(common.custom_backend_passes),
+            unittest.mock.patch.dict(common.custom_backend_codegen_configs),
+        ):
+            common.register_backend_for_device(
+                "cpu",
+                CustomScheduling,
+                PythonWrapperCodegen,
+                device_fx_wrapper_codegen=WrapperFxCodegen,
+            )
+            args = [torch.randn(8, device="cpu") for _ in range(2)]
+            (gm,) = self._compile_and_check(
+                torch.add, args, expected_num_triton_kernels=0
+            )
+
+        (node,) = gm.graph.find_nodes(
+            op="call_function", target=compiled_kernel_wrapper_mutation
+        )
+        self.assertEqual(writes, [node.kwargs["mutated_arg_indices"]])
 
 
 if __name__ == "__main__":

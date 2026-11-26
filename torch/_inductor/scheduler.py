@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
     from .codegen.multi_kernel import MultiKernel
     from .codegen.simd import MemoryCoalescing
-    from .codegen.wrapper import PythonWrapperCodegen
+    from .codegen.wrapper import KernelCallLine, PythonWrapperCodegen
     from .memory import FreeableInputBuffer
     from .tiling_utils import CoalesceVarAnalysis
 
@@ -13603,6 +13603,12 @@ class BaseScheduling:  # noqa: docstring_linter
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         """Return a set of .codegen.common.BackendFeature()"""
         return OrderedSet()
+
+    def get_fx_kernel_mutated_arg_indices(
+        self, line: KernelCallLine
+    ) -> tuple[int, ...]:
+        r"""Return the positions written by a compiled kernel launched from FXIR."""
+        raise NotImplementedError
 
     def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
         """Whether ``nodes`` codegen through the sub-parent staged emitter.

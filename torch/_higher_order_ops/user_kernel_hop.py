@@ -452,9 +452,9 @@ class UserKernelWrapperHOP(HigherOrderOperator):
 
 def trace_user_kernel_wrapper(
     proxy_mode: ProxyTorchDispatchMode,
-    func_overload: Callable[..., Any],
+    func_overload: Callable[..., _T],
     node_args: dict[str, Any],
-) -> dict[str, Any] | None:
+) -> _T:
     with disable_proxy_modes_tracing():
         out = func_overload(**node_args)
 
@@ -475,7 +475,7 @@ def trace_user_kernel_wrapper(
 
 
 def clone_mutated_arg(
-    key: str, val: Tensor, tensor_bases: dict[str, Tensor] | None
+    key: _T, val: Tensor, tensor_bases: Mapping[_T, Tensor] | None
 ) -> Tensor:
     """Clone a mutated pointer arg.
 
