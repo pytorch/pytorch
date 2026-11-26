@@ -2093,7 +2093,7 @@ class TestUnbackedSymbolDefs(InductorTestCase):
 
 
 @instantiate_parametrized_tests
-class TestFxirCpu(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
+class TestFxirGeneric(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @parametrize("dynamic", (False, True))
@@ -2113,7 +2113,7 @@ class TestFxirCpu(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
         self.check(M(), (x,), dynamic_shapes=dynamic_shapes)
 
 
-class TestFxirCppBackend(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
+class TestFxirCppBackendCpu(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
     hw_classification = HardwareClassification.CPU
 
     def test_cpp_raises(self):
@@ -2144,7 +2144,7 @@ instantiate_device_type_tests(
     AOTFxirTestCase, globals(), except_for="cpu", allow_xpu=True
 )
 
-instantiate_device_type_tests(TestFxirCppBackend, globals(), only_for="cpu")
+instantiate_device_type_tests(TestFxirCppBackendCpu, globals(), only_for="cpu")
 
 
 if __name__ == "__main__":
