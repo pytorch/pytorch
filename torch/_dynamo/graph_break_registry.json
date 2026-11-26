@@ -3392,7 +3392,7 @@
       "Context": "context",
       "Explanation": "Dynamo cannot establish the stable receiver identity required by this operation.",
       "Hints": [
-        "Bind the method inside the compiled function or pass the computed result as an input."
+        "Pass the computed result as an input to the compiled function."
       ]
     }
   ],
@@ -7627,7 +7627,7 @@
   "GB3943": [
     {
       "Gb_type": "Unsupported user-defined formatting",
-      "Context": "{value.python_type_name()}.__format__, pending class mutation: {mutated}",
+      "Context": "{value.python_type_name()}, {detail}",
       "Explanation": "Dynamo cannot safely specialize this object's formatting behavior.",
       "Hints": [
         "Format this value outside the compiled region."
@@ -7666,11 +7666,11 @@
   ],
   "GB4121": [
     {
-      "Gb_type": "Iterator reconstruction before an input mutation",
-      "Context": "str(container.source)",
-      "Explanation": "Reconstructing the iterator before pending mutations are replayed could change which elements it sees.",
+      "Gb_type": "Cannot reconstruct a live container iterator",
+      "Context": "reason",
+      "Explanation": "Rebuilding the iterator could change its backing container or the mutations it observes.",
       "Hints": [
-        "Create the iterator after returning from the compiled function.",
+        "Keep iterator creation and consumption in the same region, or create the iterator in eager code.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
