@@ -968,6 +968,26 @@ def combine_inputs_asm(outputs):
             for j in range(i + outputs, 16, outputs):
                 instructions.append(f"v_xor_b32 ${i}, ${i}, ${outputs + j}")
         return "\n".join(instructions), ",".join(["=&v"] * outputs + ["v"] * 17)
+    if torch.xpu.is_available():
+        # vISA, whose operands name whole SIMD vectors: the width must match the
+        # sub-group size, 32 for Triton kernels on Intel GPUs. A mismatch is not
+        # an error; only part of each vector is computed.
+        def dst(n):
+            return f"${n}(0,0)<1>"
+
+        def src(n):
+            return f"${n}(0,0)<1;1,0>"
+
+        instructions = []
+        for i in range(outputs):
+            instructions.append(
+                f"xor (M1, 32) {dst(i)} {src(outputs + i)} {src(outputs + 16)}"
+            )
+            for j in range(i + outputs, 16, outputs):
+                instructions.append(
+                    f"xor (M1, 32) {dst(i)} {src(i)} {src(outputs + j)}"
+                )
+        return "\n".join(instructions), ",".join(["=rw"] * outputs + ["rw"] * 17)
     asm = f"{{ .reg .b32 a<16>; .reg .b32 m; mov.b32 m, ${outputs + 16}; "
     asm += " ".join(f"mov.b32 a{i}, ${outputs + i};" for i in range(16))
     for i in range(outputs):
