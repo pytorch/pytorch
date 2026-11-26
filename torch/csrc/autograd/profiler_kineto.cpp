@@ -1,10 +1,12 @@
 #include <fmt/format.h>
 #include <cstring>
+#include <optional>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/autograd/profiler_kineto.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/ApproximateClock.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/flat_hash_map.h>
@@ -26,6 +28,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <mutex>
 #include <utility>
 
@@ -61,7 +64,7 @@ inline int64_t getTimeNs() {
 #ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
 #else
-  return c10::getTime();
+  return c10::getTimeSinceEpoch();
 #endif // USE_KINETO
 }
 
@@ -174,13 +177,9 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     recordQueue.stop();
   }
 
-  void resumePython() {
-    recordQueue.restart();
-  }
-
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
   finalizeTrace() {
-    auto end_time = getTimeNs();
+    auto end_time = stoppedAt.value_or(getTimeNs());
     recordQueue.stop();
 
     std::lock_guard<std::mutex> guard(state_mutex_);
@@ -215,8 +214,9 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
         eventTree.push_back(e);
       }
 
-      // Unfinished events automatically have end time set to trace end time
-      if (!e->finished_) {
+      // Unfinished events automatically have end time set to trace end time.
+      // So do events that ended after an early stop.
+      if (!e->finished_ || e->endTimeNS() > trace_end_ns) {
         e->visit(c10::overloaded(
             [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
               i.end_time_ns_ = trace_end_ns;
@@ -241,6 +241,8 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   }
 
   uint64_t startTime;
+  // Set when collection stops early; the trace then ends there.
+  std::optional<int64_t> stoppedAt;
   c10::ApproximateClockToUnixTimeConverter clockConverter;
   torch::profiler::impl::RecordQueue recordQueue;
   std::vector<KinetoEvent> kinetoEvents;
@@ -249,15 +251,17 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   post_process_t eventPostProcessCb;
 };
 
+void closeGlobalCallbackSession();
+
 // Coordinates one global RecordFunction callback session (KINETO_ONDEMAND, or
 // KINETO with profile_all_threads) against teardown. Those callbacks fire on
 // every thread and touch the profiler state while disableProfiler() finalizes
 // and frees it on another thread.
 //
 // While the session is active, each callback invocation brackets only its own
-// short critical section - getGlobal() plus the RecordQueue access - with
-// enter()/exit(). Teardown calls drain(), which closes the session to new
-// callbacks and blocks until the in-flight count reaches zero, so finalize
+// short critical section - getGlobal(), RecordQueue access, and correlation
+// pop - with enter()/exit(). Teardown calls drain(), which stops recording and
+// blocks until the in-flight count reaches zero, so finalize
 // never races a live critical section.
 //
 // The enter()/isActive() re-check is a handshake: a callback that joined before
@@ -279,19 +283,20 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 // hot path; the mutex/cv are touched only on the teardown handoff.
 //
 // Because we coordinate across threads that can call it at any arbitrary time,
-// this object must have static lifetime.
+// this object must outlive every callback, so its single instance is
+// intentionally leaked.
 class GlobalCallbackSession {
  public:
   GlobalCallbackSession() = default;
-  ~GlobalCallbackSession() = default;
+  ~GlobalCallbackSession() = delete;
 
-  // Single, static instance only: neither copyable nor movable.
+  // Single, leaked instance only: neither copyable nor movable.
   GlobalCallbackSession(const GlobalCallbackSession&) = delete;
   GlobalCallbackSession& operator=(const GlobalCallbackSession&) = delete;
   GlobalCallbackSession(GlobalCallbackSession&&) = delete;
   GlobalCallbackSession& operator=(GlobalCallbackSession&&) = delete;
 
-  // Open the session (at enableProfiler time) so callbacks begin participating.
+  // Open the session (at enableProfiler time) unless the exit hook closed it.
   // On a true enable a fresh RecordQueue was just installed, so bump the
   // session generation first: callbacks in the new session stamp the new value
   // and a straddling exit from the prior session detects the mismatch. The
@@ -299,10 +304,37 @@ class GlobalCallbackSession {
   // passes false; bumping there would wrongly drop end-events for ops that
   // straddle the toggle.
   void activate(bool new_session) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (closed_.load()) {
+      LOG(WARNING) << "Global CPU operation recording was disabled at process "
+                      "exit, so this profiling session will not record CPU "
+                      "operations. Kineto may already be destroyed and the "
+                      "correlation ID stack may be unbalanced.";
+      return;
+    }
+    // Register closeGlobalCallbackSession after Kineto and the global profiler
+    // state exist so it runs before their static destructors.
+    static c10::once_flag exit_hook;
+    c10::call_once(exit_hook, [] { std::atexit(closeGlobalCallbackSession); });
     if (new_session) {
       generation_.fetch_add(1);
     }
     active_.store(true);
+  }
+
+  void markClosed() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const bool was_active = isActive();
+    if (!closed_.exchange(true) && was_active) {
+      LOG(WARNING)
+          << "Process is exiting without stopping the profiler, so the "
+             "in-progress trace is lost. Stop the profiler before exit "
+             "to keep it.";
+    }
+  }
+
+  bool isClosed() const {
+    return closed_.load();
   }
 
   // Session generation, stamped into each callback's ObserverContext at enter
@@ -324,7 +356,7 @@ class GlobalCallbackSession {
   }
 
   // Deregister an in-flight callback. When this is the last one and the session
-  // has been closed (drain() in progress), wake the waiting teardown thread.
+  // is inactive (drain() in progress), wake the waiting teardown thread.
   // During normal profiling this is a single lock-free decrement.
   void exit() {
     if (in_flight_.fetch_sub(1) == 1 && !active_.load()) {
@@ -333,21 +365,23 @@ class GlobalCallbackSession {
     }
   }
 
-  // Close the session to new callbacks and block until all in-flight ones have
-  // exited; returns true once drained (also returns true if the session was
-  // never opened; it remained purely thread-local profiling). Closing is fused
-  // with the wait, so the session cannot be closed without waiting out
-  // in-flight callbacks.
+  // Deactivate the session to new callbacks and block until all in-flight ones
+  // have exited; returns true once drained (also returns true if the session
+  // was never opened; it remained purely thread-local profiling). Deactivation
+  // is fused with the wait, so the session cannot be deactivated without
+  // waiting out in-flight callbacks.
   //
   // Returns false if the drain does not complete within kDrainTimeout. A normal
   // drain takes microseconds (the in-flight window is just a callback's
-  // getGlobal() + RecordQueue critical section, never an op body), so a
+  // RecordQueue access and correlation pop, never an op body), so a
   // multi-second wait means a callback's thread was killed or wedged inside
   // that critical section. The caller must then leave the state installed:
   // freeing it under a live callback would reintroduce the use-after-free this
   // session guards against.
   bool drain() {
-    if (!active_.exchange(false)) {
+    // At process exit, late callbacks may still be popping correlations even
+    // if the session is already inactive.
+    if (!active_.exchange(false) && !closed_.load()) {
       return true;
     }
     std::unique_lock<std::mutex> lock(mutex_);
@@ -363,11 +397,23 @@ class GlobalCallbackSession {
   std::atomic<bool> active_{false};
   std::atomic<int64_t> in_flight_{0};
   std::atomic<uint64_t> generation_{0};
+  // Set at process exit. Once closed, the session can't be reopened because the
+  // correlation stack may be imbalanced.
+  std::atomic<bool> closed_{false};
   std::mutex mutex_;
   std::condition_variable cv_; // guarded by mutex_
 };
 
-GlobalCallbackSession global_callback_session;
+// Intentionally leaked: callbacks on other threads still check it during
+// static destruction at exit.
+GlobalCallbackSession& global_callback_session = *new GlobalCallbackSession();
+
+void closeGlobalCallbackSession() {
+  global_callback_session.markClosed();
+  if (!global_callback_session.drain()) {
+    LOG(ERROR) << "Timed out draining global profiler callbacks at exit.";
+  }
+}
 
 std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
@@ -462,7 +508,9 @@ void onFunctionExitImpl(
 // stale-session early exits that skip event finalization: the correlation stack
 // lives in the device profiling backend (per thread) and is not reset across
 // profiler sessions, so a skipped pop leaks. Safe on those paths because it
-// touches only that stack, never the possibly-freed event_.
+// touches only that stack, never the possibly-freed event_. The exception is a
+// global exit after closeGlobalCallbackSession(), which skips the pop because
+// Kineto may already be destroyed.
 void maybePopCorrelationId(
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
@@ -487,19 +535,19 @@ void onFunctionExitGlobal(
     return;
   }
 
-  // Balance the correlation id pushed at begin_op on every path below,
-  // including the teardown and stale-session early exits that skip event
-  // finalization.
-  auto correlation_guard =
-      c10::make_scope_exit([&] { maybePopCorrelationId(fn, ctx_ptr); });
-
-  // Take this exit's own in-flight ref, paired here because
-  // onFunctionEnterGlobal no longer hands one off. It covers only this exit's
-  // getGlobal() + RecordQueue write, never the op body, so the drain cannot
-  // block on it.
+  // Declare this guard before correlation_guard so the pop runs before the
+  // in-flight count drops and process-exit teardown can finish.
   global_callback_session.enter();
   auto in_flight_guard =
       c10::make_scope_exit([] { global_callback_session.exit(); });
+
+  // Pop the correlation id pushed by begin_op on every return path. After the
+  // exit hook closes the session, Kineto may be destroyed, so skip the pop.
+  auto correlation_guard = c10::make_scope_exit([&] {
+    if (!global_callback_session.isClosed()) {
+      maybePopCorrelationId(fn, ctx_ptr);
+    }
+  });
 
   // Re-check after the increment, mirroring onFunctionEnterGlobal: if teardown
   // began concurrently the queue may already be finalized/freed, so skip the
@@ -709,31 +757,19 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
   }
 }
 
-// Set this function to be unused as profiler implementation needs more
-// refactoring to support Python ops collection dynamic toggling
-#ifdef _MSC_VER
-#define UNUSED
-#else
-#define UNUSED __attribute__((unused))
-#endif
-static UNUSED void togglePythonCollectionDynamic(bool enable) {
-  std::shared_ptr<KinetoThreadLocalState> global_state =
-      KinetoThreadLocalState::getGlobal();
-  if (global_state) {
-    if (enable) {
-      global_state->resumePython();
-    } else {
-      global_state->pausePython();
-    }
-  } else {
-    KinetoThreadLocalState* tls_state = KinetoThreadLocalState::getTLS();
-    TORCH_CHECK(tls_state);
-    if (enable) {
-      tls_state->resumePython();
-    } else {
-      tls_state->pausePython();
-    }
-  }
+void togglePythonCollectionDynamic(bool enable) {
+  // PythonTracer::restart() does not re-capture the frames already on the
+  // stack, so later returns would be matched against the wrong frames.
+  TORCH_CHECK(!enable, "Resuming Python stack collection is not supported yet");
+  std::shared_ptr<ProfilerStateBase> global_state =
+      ProfilerStateBase::getGlobal();
+  ProfilerStateBase* state =
+      global_state ? global_state.get() : ProfilerStateBase::getTLS();
+  // The legacy, NVTX and ITT profilers use the same state slot.
+  TORCH_CHECK(
+      state != nullptr && state->profilerType() == ActiveProfilerType::KINETO,
+      "Toggling Python stack collection requires an active Kineto profiler");
+  static_cast<KinetoThreadLocalState*>(state)->pausePython();
 }
 
 static void toggleCPUCollectionDynamic(bool enable) {
@@ -801,6 +837,15 @@ void enableProfilerWithEventPostProcess(
   }
 }
 
+namespace {
+// A session stopProfilerCollection() stopped, until disableProfiler()
+// finalizes its trace. Leaked for the same reason as profilerStateInfo().
+std::shared_ptr<ProfilerStateBase>& stoppedSession() {
+  static auto& session = *new std::shared_ptr<ProfilerStateBase>();
+  return session;
+}
+} // namespace
+
 void enableProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities,
@@ -813,6 +858,8 @@ void enableProfiler(
       !already_enabled,
       "Profiler is already enabled",
       (config.global() ? "." : " on this thread."));
+  // A session stopped early but never disabled is dropped.
+  stoppedSession().reset();
 
   // Handle external tracer states - these use their own tracing callbacks
   if (isExternalTracerState(config.state)) {
@@ -882,7 +929,10 @@ void disableProfilerInChildThread() {
   state_ptr->removeCallback();
 }
 
-std::unique_ptr<ProfilerResult> disableProfiler() {
+namespace {
+// Pops and stops the current session, the first half of disableProfiler().
+// Returns nullptr if there is no trace left to finalize.
+std::shared_ptr<ProfilerStateBase> stopProfilerState() {
   // releasing to inform child threads to stop profiling
   profilerStateInfo() = nullptr;
 
@@ -907,7 +957,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     if (auto state_ptr = ProfilerStateBase::pop()) {
       state_ptr->removeCallback();
     }
-    return std::make_unique<ProfilerResult>();
+    return nullptr;
   }
 
   auto state_ptr = ProfilerStateBase::pop();
@@ -915,14 +965,48 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     LOG(WARNING)
         << "disableProfiler called but no active profiling session found. "
         << "This can happen if profiling was cancelled during warmup.";
-    return std::make_unique<ProfilerResult>();
+    return nullptr;
   }
-  const auto& config = state_ptr->config();
   TORCH_CHECK(
-      isValidDisableState(config.state),
+      isValidDisableState(state_ptr->config().state),
       "Can't disable Kineto profiler: config is not in a valid disable state");
 
   state_ptr->removeCallback();
+  return state_ptr;
+}
+} // namespace
+
+void stopProfilerCollection() {
+  std::shared_ptr<ProfilerStateBase> global_state =
+      ProfilerStateBase::getGlobal();
+  ProfilerStateBase* state =
+      global_state ? global_state.get() : ProfilerStateBase::getTLS();
+  TORCH_CHECK(
+      state != nullptr && state->profilerType() == ActiveProfilerType::KINETO,
+      "Stopping collection requires an active Kineto profiler");
+  auto state_ptr = stopProfilerState();
+  if (!state_ptr) {
+    return;
+  }
+  auto kineto_state_ptr =
+      std::static_pointer_cast<KinetoThreadLocalState>(state_ptr);
+  kineto_state_ptr->recordQueue.stop();
+  // Stamped once no event can start, and before Kineto stops, so Kineto's
+  // window holds the whole trace.
+  kineto_state_ptr->stoppedAt = getTimeNs();
+  stoppedSession() = std::move(state_ptr);
+  torch::profiler::impl::kineto::stopCollection();
+}
+
+std::unique_ptr<ProfilerResult> disableProfiler() {
+  auto state_ptr = std::exchange(stoppedSession(), nullptr);
+  if (!state_ptr) {
+    state_ptr = stopProfilerState();
+  }
+  if (!state_ptr) {
+    return std::make_unique<ProfilerResult>();
+  }
+  const auto& config = state_ptr->config();
 
   // Traces are converged via libkineto automatically for ondemand flow
   if (config.global()) {
