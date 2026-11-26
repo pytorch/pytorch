@@ -1302,6 +1302,38 @@ for warning in w:
 
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
+    def test_stable_cpu_capabilities(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        getters = {
+            int: libtorch_agnostic.ops.my_cpu_capability_int,
+            bool: libtorch_agnostic.ops.my_cpu_capability_bool,
+            str: libtorch_agnostic.ops.my_cpu_capability_string,
+        }
+        capabilities = torch.cpu.get_capabilities()
+        for key, value in capabilities.items():
+            with self.subTest(key=key):
+                op = getters[type(value)]
+                self.assertEqual(op(key), value)
+
+        missing_key = "nonexistent_test_cpu_capability"
+        self.assertNotIn(missing_key, capabilities)
+        for kind, op in getters.items():
+            with self.subTest(kind=kind):
+                self.assertIsNone(op(missing_key))
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_stable_cpu_capabilities_wrong_type(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with self.assertRaisesRegex(
+            RuntimeError, "CPU capability 'architecture' has type String, expected Int"
+        ):
+            libtorch_agnostic.ops.my_cpu_capability_int("architecture")
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
     @parametrize("flag", ["conj", "neg", "inference"])
     def test_is_conj_is_neg_is_inference(self, device, flag):
         import libtorch_agn_2_16 as libtorch_agnostic
@@ -1506,6 +1538,36 @@ for warning in w:
         expected[:, 1:5:2] = -1
         view.fill_(-1)
         self.assertEqual(x, expected)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("outer_enabled", [False, True])
+    @parametrize("inner_enabled", [None, False, True])
+    def test_inference_mode_guard(self, device, outer_enabled, inner_enabled):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with torch.inference_mode(outer_enabled):
+            if inner_enabled is None:
+                actual = libtorch_agnostic.ops.my_default_inference_mode_guard()
+            else:
+                actual = libtorch_agnostic.ops.my_inference_mode_guard(inner_enabled)
+            self.assertEqual(actual, True if inner_enabled is None else inner_enabled)
+            # The stable guard must restore the outer thread-local state.
+            self.assertEqual(torch.is_inference_mode_enabled(), outer_enabled)
+            self.assertEqual(torch.is_grad_enabled(), not outer_enabled)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("inference_enabled", [False, True])
+    def test_is_inference_mode_enabled(self, device, inference_enabled):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        # Grad mode is disabled in both cases; only inference mode differs.
+        with torch.inference_mode(inference_enabled), torch.no_grad():
+            self.assertEqual(
+                libtorch_agnostic.ops.my_is_inference_mode_enabled(),
+                inference_enabled,
+            )
 
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
