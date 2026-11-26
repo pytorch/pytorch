@@ -26,7 +26,7 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
-from collections.abc import Set as AbstractSet
+from collections.abc import Sequence, Set as AbstractSet
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
@@ -209,7 +209,7 @@ class CacheInfo(TypedDict, total=False):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, KeysView, Sequence
+    from collections.abc import Callable, Generator, KeysView
     from concurrent.futures import Future
 
     from .compile_fx import _CompileFxKwargs
