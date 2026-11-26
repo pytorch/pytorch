@@ -7,8 +7,11 @@
 #include <pybind11/numpy.h>
 
 #include <c10/util/ApproximateClock.h>
+#include <c10/util/Exception.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <utility>
@@ -260,9 +263,9 @@ void initCuspyBindings(py::module& m) {
   //       int_annos:  [(key, int64_col, skip_zero), ...],
   //       str_annos:  [(key, idx_int64_col, [str, ...]), ...],
   //       arr_annos:  [(key, [int64_col, ...]), ...],
-  //       json_annos: [(int32_offsets_col, blob_bytes), ...],
+  //       json_annos: [(int64_offsets_col, blob_bytes), ...],
   //       flow: int64_col | None,
-  //       gpu_corr: (int32_offsets_col, int64_ids_col) CSR | None,
+  //       gpu_corr: (int64_offsets_col, int64_ids_col) CSR | None,
   //       cat_iid: uint64_col | None)
   //  - metadata: list of (name, json) top-level trace fields
   // All columns are numpy arrays; they are kept alive for the encode.
@@ -290,6 +293,7 @@ void initCuspyBindings(py::module& m) {
         using AU64 = py::array_t<uint64_t, kFlags>;
         using A32 = py::array_t<int32_t, kFlags>;
         std::vector<py::object> keepalive;
+        std::vector<std::vector<int64_t>> csr_keepalive;
         auto i64 = [&](const py::handle& h) -> const int64_t* {
           A64 a = py::cast<A64>(h);
           const int64_t* p = a.data();
@@ -306,6 +310,31 @@ void initCuspyBindings(py::module& m) {
           A32 a = py::cast<A32>(h);
           const int32_t* p = a.data();
           keepalive.push_back(std::move(a));
+          return p;
+        };
+        auto csr_offsets = [&](const py::handle& h,
+                               size_t n,
+                               size_t size,
+                               const char* name) -> const int64_t* {
+          A64 a = py::cast<A64>(h);
+          TORCH_CHECK_VALUE(
+              a.ndim() == 1 && static_cast<size_t>(a.size()) == n + 1,
+              name,
+              " offsets must be one-dimensional with n + 1 entries");
+          // Snapshot before validation: the encoder releases the GIL, and the
+          // caller may retain a writable or unaligned offsets array.
+          auto& offsets = csr_keepalive.emplace_back(a.size());
+          std::memcpy(offsets.data(), a.data(), a.nbytes());
+          const int64_t* p = offsets.data();
+          TORCH_CHECK_VALUE(p[0] == 0, name, " offsets must start at zero");
+          TORCH_CHECK_VALUE(
+              std::is_sorted(p, p + n + 1),
+              name,
+              " offsets must be non-decreasing");
+          TORCH_CHECK_VALUE(
+              p[n] >= 0 && static_cast<uint64_t>(p[n]) == size,
+              name,
+              " final offset must equal the data length");
           return p;
         };
         using AF64 = py::array_t<double, kFlags>;
@@ -384,17 +413,23 @@ void initCuspyBindings(py::module& m) {
           }
           for (const auto& s : g[7].cast<py::list>()) {
             auto t = s.cast<py::tuple>();
-            const int32_t* offsets = i32(t[0]);
             auto blob = t[1].cast<py::bytes>();
+            const int64_t* offsets = csr_offsets(
+                t[0], pg.n, PyBytes_GET_SIZE(blob.ptr()), "json_annos");
             keepalive.push_back(blob);
             pg.json_annos.push_back({offsets, PyBytes_AS_STRING(blob.ptr())});
           }
           pg.flow = g[8].is_none() ? nullptr : i64(g[8]);
-          // gpu_corr: (int32_offsets, int64_ids) CSR or None.
+          // gpu_corr: (int64_offsets, int64_ids) CSR or None.
           if (py::len(g) > 9 && !g[9].is_none()) {
             auto gc = g[9].cast<py::tuple>();
-            pg.gpu_corr_offsets = i32(gc[0]);
-            pg.gpu_corr_ids = i64(gc[1]);
+            A64 ids = py::cast<A64>(gc[1]);
+            TORCH_CHECK_VALUE(
+                ids.ndim() == 1, "gpu_corr ids must be one-dimensional");
+            pg.gpu_corr_offsets =
+                csr_offsets(gc[0], pg.n, ids.size(), "gpu_corr");
+            pg.gpu_corr_ids = ids.data();
+            keepalive.push_back(std::move(ids));
           }
           pg.cat_iid =
               py::len(g) > 10 && !g[10].is_none() ? u64(g[10]) : nullptr;
@@ -407,7 +442,7 @@ void initCuspyBindings(py::module& m) {
         //   gfx_contexts = [(iid, pid), ...]
         //   stage_cols   = (ts, dur, event_id, gpu_id, hw_queue_iid, stage_iid,
         //                   context, name_iid,
-        //                   event_wait=(int32_offsets, uint64_ids) CSR) | None
+        //                   event_wait=(int64_offsets, uint64_ids) CSR) | None
         //   extra        = [(key, int64_col, skip_zero), ...]  (-> extra_data)
         //   launch       = (gx, gy, gz, bx, by, bz, kernel_iid_col, args) |
         //   None
@@ -415,7 +450,7 @@ void initCuspyBindings(py::module& m) {
         //   tables       = (compute_kernels, compute_arg_names); each
         //                   [(iid, name), ...]
         //   const_extra  = [(key, value), ...] (r[6], trace-wide string args)
-        //   metadata     = (int32_offsets, blob_bytes) CSR (r[7], collective
+        //   metadata     = (int64_offsets, blob_bytes) CSR (r[7], collective
         //                   descriptor spread as extra_data)
         std::vector<PftraceGpuSpec> spec_vec;
         std::vector<PftraceGfxContext> ctx_vec;
@@ -461,13 +496,18 @@ void initCuspyBindings(py::module& m) {
             stages.context = u64(sc[6]);
             stages.name_iid =
                 py::len(sc) > 7 && !sc[7].is_none() ? u64(sc[7]) : nullptr;
-            // sc[8] (optional): event_wait = (int32_offsets, uint64_ids) CSR.
+            // sc[8] (optional): event_wait = (int64_offsets, uint64_ids) CSR.
+            stages.n = static_cast<size_t>(py::len(sc[0]));
             if (py::len(sc) > 8 && !sc[8].is_none()) {
               auto ew = sc[8].cast<py::tuple>();
-              stages.event_wait_offsets = i32(ew[0]);
-              stages.event_wait_ids = u64(ew[1]);
+              AU64 ids = py::cast<AU64>(ew[1]);
+              TORCH_CHECK_VALUE(
+                  ids.ndim() == 1, "event_wait ids must be one-dimensional");
+              stages.event_wait_offsets =
+                  csr_offsets(ew[0], stages.n, ids.size(), "event_wait");
+              stages.event_wait_ids = ids.data();
+              keepalive.push_back(std::move(ids));
             }
-            stages.n = static_cast<size_t>(py::len(sc[0]));
             stages.extra = extras_from(r[3]);
             // r[6] (optional): const_extra = [(key, value), ...] string args.
             if (py::len(r) > 6 && !r[6].is_none()) {
@@ -497,13 +537,17 @@ void initCuspyBindings(py::module& m) {
               stages.compute_kernels = names_from(tb[0]);
               stages.compute_arg_names = names_from(tb[1]);
             }
-            // r[7] (optional): metadata = (int32_offsets, blob_bytes) CSR
+            // r[7] (optional): metadata = (int64_offsets, blob_bytes) CSR
             // spread as extra_data (the collective descriptor mirrored onto
             // each render stage).
             if (py::len(r) > 7 && !r[7].is_none()) {
               auto mt = r[7].cast<py::tuple>();
-              stages.meta_offsets = i32(mt[0]);
               auto blob = mt[1].cast<py::bytes>();
+              stages.meta_offsets = csr_offsets(
+                  mt[0],
+                  stages.n,
+                  PyBytes_GET_SIZE(blob.ptr()),
+                  "render metadata");
               keepalive.push_back(blob);
               stages.meta_buffer = PyBytes_AS_STRING(blob.ptr());
             }
