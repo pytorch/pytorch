@@ -261,7 +261,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
     # in most cases this is a no-op because the state is empty
     def move_step_if_cpu(self) -> None:
         for p, state in self.value.state.items():
-            if "step" in state and state["step"].is_cpu:
+            if (
+                "step" in state
+                and isinstance(state["step"], torch.Tensor)
+                and state["step"].is_cpu
+            ):
                 state["step"] = state["step"].to(p.device)
 
     def map_sources_and_install_guards(self, tx: "InstructionTranslatorBase") -> None:

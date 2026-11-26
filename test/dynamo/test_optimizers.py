@@ -105,6 +105,45 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(params, opt_params)
 
+    def test_init_group_with_int_step(self):
+        class IntStepOptimizer(torch.optim.Optimizer):
+            def __init__(self, params, lr=1e-2):
+                super().__init__(params, {"lr": lr})
+
+            def _init_group(self, group):
+                for p in group["params"]:
+                    if not self.state[p]:
+                        self.state[p]["step"] = 0
+
+            def step(self):
+                for group in self.param_groups:
+                    self._init_group(group)
+                    for p in group["params"]:
+                        if p.grad is not None:
+                            self.state[p]["step"] += 1
+                            p.data.add_(p.grad, alpha=-group["lr"])
+
+        p_eager = Parameter(torch.ones(4, 4))
+        p_compiled = Parameter(torch.ones(4, 4))
+        p_eager.grad = torch.ones_like(p_eager)
+        p_compiled.grad = torch.ones_like(p_compiled)
+
+        opt_eager = IntStepOptimizer([p_eager])
+        opt_compiled = IntStepOptimizer([p_compiled])
+        compiled_step = torch.compile(backend="eager", fullgraph=True)(
+            opt_compiled.step
+        )
+
+        # Warm up eager first so state["step"] is an int when Dynamo traces _init_group
+        opt_eager.step()
+        opt_compiled.step()
+        for _ in range(2):
+            opt_eager.step()
+            compiled_step()
+
+        self.assertEqual(p_compiled, p_eager)
+        self.assertEqual(opt_compiled.state[p_compiled]["step"], 3)
+
     def test_stock_optimizer_init_group_after_disable_patch(self):
         # TorchPatcher wraps stock Optimizer._init_group with compiler.disable.
         # Compiling the inner step must still constant-fold _init_group via
