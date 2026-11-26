@@ -3539,6 +3539,163 @@ class TestTorchDeviceType(TestCase):
 
         self.assertEqual(dst, expected)
 
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.half, torch.bfloat16, torch.float32)
+    def test_copy_from_bool(self, device, dtype):
+        # Odd rows hold random bytes 0..255, mostly non-canonical bools (2..255),
+        # which must read as True.
+        raw = torch.randint(0, 256, (67, 4099), dtype=torch.uint8)
+        raw[::2] = raw[::2] > 127
+        raw_d = raw.to(device)
+
+        def views(t):
+            flat = t.view(-1)
+            return {
+                "contiguous": t,
+                "transposed": t.t(),
+                "misaligned": flat[1 : 1 + 66 * 4099].view(66, 4099),
+                "strided_rows": t[:, ::2],
+            }
+
+        for (name, src), ref in zip(views(raw_d).items(), views(raw).values()):
+            expected = (ref != 0).to(dtype)
+            src = src.view(torch.bool)
+            self.assertEqual(src.to(dtype), expected, msg=name, atol=0, rtol=0)
+            dst = torch.empty(src.shape, dtype=dtype, device=device)
+            dst.copy_(src)
+            self.assertEqual(dst, expected, msg=name, atol=0, rtol=0)
+
+    # Copies with a contiguous destination row and a strided source (column
+    # gathers, transposes below the tiled-transpose size, inner-dim broadcasts),
+    # including partial final vectors and layouts that must fall back.
+    @onlyCUDA
+    @dtypes(torch.uint8, torch.int16, torch.bfloat16, torch.float32, torch.int64, torch.float64, torch.complex64)
+    def test_copy_strided_gather(self, device, dtype):
+        # make() builds the base tensor on the CPU; each case applies its view to
+        # the device copy (the source under test) and to the CPU base (the
+        # reference), so the reference never goes through a device copy.
+        def make(shape):
+            if dtype.is_complex:
+                return torch.randn(shape, dtype=dtype)
+            if dtype.is_floating_point:
+                # Raw element moves: NaN, infinities, signed zeros and denormals must be copied bit for bit.
+                t = torch.randn(shape, dtype=dtype)
+                special = torch.tensor([float("nan"), float("inf"), -float("inf"), -0.0, torch.finfo(dtype).tiny / 4],
+                                       dtype=dtype)
+                t.view(-1)[::7] = special.repeat(t.numel() // 35 + 1)[: t.view(-1)[::7].numel()]
+                return t
+            return torch.randint(0, 250, shape, dtype=dtype)
+
+        cases = {
+            "column [6814] of [6814,20]": ((6814, 20), lambda t: t[:, 3]),
+            "column [11840] of [11840,22]": ((11840, 22), lambda t: t[:, 21]),
+            "column [5] of [5,3]": ((5, 3), lambda t: t[:, 1]),
+            "every other [4099]": ((8198,), lambda t: t[::2]),
+            "transpose [1024,64]": ((64, 1024), lambda t: t.t()),
+            "transpose [96,16,64]": ((96, 64, 16), lambda t: t.transpose(1, 2)),
+            "inner broadcast [300,64]": ((300, 1), lambda t: t.expand(300, 64)),
+            "transpose [7,13] (row not a vector multiple)": ((13, 7), lambda t: t.t()),
+            "column of a misaligned base [6814]": ((6814 * 20 + 1,), lambda t: t[1:].view(6814, 20)[:, 3]),
+            "single element": ((5, 3), lambda t: t[:1, 1]),
+            "empty column": ((0, 3), lambda t: t[:, 1]),
+        }
+        bits = torch.uint8 if dtype.itemsize == 1 else {2: torch.int16, 4: torch.int32, 8: torch.int64}[dtype.itemsize]
+        for name, (shape, view) in cases.items():
+            base = make(shape)
+            src = view(base.to(device))
+            expected = view(base).contiguous()
+            dst = torch.empty(src.shape, dtype=dtype, device=device)
+            dst.copy_(src)
+            self.assertEqual(dst.cpu().view(bits), expected.view(bits), msg=name, atol=0, rtol=0)
+            # A destination base that is not 16-byte aligned takes the generic kernel.
+            flat = torch.empty(src.numel() + 1, dtype=dtype, device=device)
+            dst = flat[1:].view(src.shape)
+            dst.copy_(src)
+            self.assertEqual(dst.cpu().view(bits), expected.view(bits), msg=name + " misaligned dst", atol=0, rtol=0)
+
+    # Converting copies with a statically typed kernel on some GPUs; results must
+    # match the CPU conversion bit for bit (NaNs by value), contiguous and
+    # strided. Float to integer sources stay in range: out-of-range, NaN and inf
+    # conversions to integers are undefined.
+    @onlyCUDA
+    def test_copy_converting_pairs(self, device):
+        def special(dtype):
+            return torch.tensor([float("nan"), float("inf"), -float("inf"), 0.0, -0.0, 1e30, -1e30,
+                                 6e-8, 1e-40, 65504.0, 65520.0, 3.0e38], dtype=torch.float32).to(dtype)
+
+        def source(src_dtype, numel):
+            if src_dtype == torch.int8:
+                return torch.arange(numel, dtype=torch.int64).remainder(256).sub(128).to(torch.int8)
+            if src_dtype == torch.int64:
+                # Values past 2^24 and 2^31 exercise float rounding and int32 wraparound.
+                t = torch.randint(-(2 ** 40), 2 ** 40, (numel,), dtype=torch.int64)
+                t[:4] = torch.tensor([2 ** 53 + 1, -(2 ** 31) - 1, 2 ** 31, 2 ** 24 + 1])[:numel]
+                return t
+            t = torch.randn(numel, dtype=torch.float32).mul(1000)
+            if src_dtype == torch.float32:
+                # Truncation toward zero, fp32 rounding past 2^24, and the int32 limits
+                # (2^31 - 128 is the largest fp32 below 2^31).
+                edges = [0.5, -0.5, 2.5, -1.9999, -0.0, 2.0 ** 24 + 1, 2.0 ** 31 - 128, -(2.0 ** 31)]
+                t[:8] = torch.tensor(edges)[:numel]
+                return t
+            t = t.to(src_dtype)
+            t[:12] = special(src_dtype)[:numel]
+            return t
+
+        def same_bits(actual, expected):
+            if not expected.dtype.is_floating_point:
+                return actual == expected
+            int_dtype = {2: torch.int16, 4: torch.int32}[expected.dtype.itemsize]
+            return (actual.view(int_dtype) == expected.view(int_dtype)) | (actual.isnan() & expected.isnan())
+
+        pairs = ((torch.int8, torch.bfloat16), (torch.int8, torch.half), (torch.bfloat16, torch.half),
+                 (torch.half, torch.bfloat16), (torch.int64, torch.int32), (torch.int64, torch.float32),
+                 (torch.float32, torch.int64), (torch.float32, torch.int32))
+        shapes = ((71, 64), (4320,), (1029, 917), (1, 1))
+        for (src_dtype, dst_dtype), shape in product(pairs, shapes):
+            numel = math.prod(shape)
+            src_cpu = source(src_dtype, 2 * numel).view(*shape[:-1], 2 * shape[-1])
+            for layout, view in (("contiguous", lambda t: t[..., : shape[-1]].contiguous()),
+                                 ("strided", lambda t: t[..., ::2])):
+                src = view(src_cpu.to(device))
+                msg = f"{src_dtype} -> {dst_dtype} {shape} {layout}"
+                expected = view(src_cpu).to(dst_dtype)
+                dst = torch.empty(shape, dtype=dst_dtype, device=device)
+                dst.copy_(src)
+                for actual in (src.to(dst_dtype).cpu(), dst.cpu()):
+                    self.assertTrue(same_bits(actual, expected).all(), msg=msg)
+
+    # Which kernel direct_copy_kernel_cuda launches on gfx1250 for the copies it
+    # routes to the strided gather and the statically typed converting copies;
+    # results alone cannot tell these paths from the generic kernels.
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_copy_gfx1250_kernel_selection(self, device):
+        if "gfx1250" not in torch.cuda.get_device_properties(device).gcnArchName:
+            self.skipTest("these copy paths are gfx1250-only")
+
+        def kernels(dst, src):
+            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+                dst.copy_(src)
+                torch.cuda.synchronize()
+            names = [e.name for e in prof.events() if e.device_type == torch.autograd.DeviceType.CUDA]
+            if not names:
+                self.skipTest("the profiler recorded no kernels")
+            return " ".join(names)
+
+        column = torch.randn(6814, 20, device=device, dtype=torch.bfloat16)[:, 3]
+        mask = torch.rand(4096, 1024, device=device) > 0.5
+        x = torch.randn(4096, 1024, device=device, dtype=torch.bfloat16)
+        cases = (
+            ("column gather", column, torch.bfloat16, "strided_gather_copy_kernel"),
+            ("bool -> uint8", mask, torch.uint8, "vectorized_elementwise_kernel"),
+            ("bf16 -> fp16", x, torch.half, "vectorized_elementwise_kernel"),
+        )
+        for name, src, dtype, kernel in cases:
+            dst = torch.empty(src.shape, dtype=dtype, device=device)
+            self.assertIn(kernel, kernels(dst, src), msg=name)
+        misaligned_dst = torch.empty(column.numel() + 1, dtype=torch.bfloat16, device=device)[1:]
+        self.assertNotIn("strided_gather_copy_kernel", kernels(misaligned_dst, column))
+
     @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16, torch.half)
     def test_reduced_type_float_copy(self, device, dtype):
