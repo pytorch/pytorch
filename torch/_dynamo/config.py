@@ -456,7 +456,8 @@ skip_fsdp_guards = True
 # When calling forward directly on a module without hooks, skip guards on empty
 # builtin local hook registries. Later global hooks can be missed with either setting.
 # Hook dispatch skips type checks for builtin registries read through the imported
-# torch.nn.modules.module namespace. Independent aliases can retain a type guard.
+# torch.nn.modules.module namespace. Flag membership need not specialize hook IDs.
+# Independent aliases can retain a type guard.
 skip_nnmodule_hook_guards = True
 
 # Make dynamo skip no tensor aliasing guard on parameters
