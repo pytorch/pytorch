@@ -30,7 +30,7 @@ from ..pattern_matcher import (
     PatternMatcherPass as PatternMatcherPassBase,
     stable_topological_sort,
 )
-from ..utils import is_cpu_device, pass_execution_and_save
+from ..utils import is_cpu_device, is_strict_cuda_triton, pass_execution_and_save
 from .group_batch_fusion import group_batch_fusion_passes, PRE_GRAD_FUSIONS
 from .misc_patterns import numpy_compat_normalization
 from .split_cat import PRE_GRAD_PATTERNS
@@ -333,6 +333,51 @@ def _resolve_pre_grad_fusion_options(
     return resolved
 
 
+def _preserve_symbolic_strides(gm: torch.fx.GraphModule) -> None:
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    for node in list(gm.graph.nodes):
+        if not (
+            (node.op == "call_method" and node.target == "stride")
+            or (
+                node.op == "call_function"
+                and node.target
+                in (torch.ops.aten.sym_stride.default, torch.ops.aten.sym_stride.int)
+            )
+        ):
+            continue
+        tensor = node.args[0] if node.args else node.kwargs.get("self")
+        if not isinstance(tensor, torch.fx.Node):
+            continue
+        value = tensor.meta.get("example_value", tensor.meta.get("val"))
+        strides = node.meta.get("example_value", node.meta.get("val"))
+        if not (
+            isinstance(value, torch.Tensor)
+            and is_strict_cuda_triton(value.device)
+            and strides is not None
+            and free_unbacked_symbols(strides)
+        ):
+            continue
+        # Functionalization can densify a data-only mutation's replacement.
+        # Preserve the user's captured stride expressions before that tracing.
+        sequence = isinstance(strides, (tuple, list))
+        values = tuple(strides) if sequence else (strides,)
+        container = list if isinstance(strides, list) else tuple
+        with gm.graph.inserting_before(node):
+            materialized = gm.graph.materialize_symints(values)
+            replacement = (
+                gm.graph.call_function(container, (materialized,))
+                if sequence
+                else materialized[0]
+            )
+        if not isinstance(replacement, torch.fx.Node):
+            raise AssertionError(
+                "Expected a symbolic stride to materialize as an FX node"
+            )
+        node.replace_all_uses_with(replacement)
+        gm.graph.erase_node(node)
+
+
 def pre_grad_passes(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[object] = (),
@@ -350,6 +395,7 @@ def pre_grad_passes(
     Consider adding a new pass to post_grad.py or joint_graph.py which
     are after functionalization and normalization.
     """
+    _preserve_symbolic_strides(gm)
     if config.pattern_matcher:
         lazy_init()
         if hasattr(

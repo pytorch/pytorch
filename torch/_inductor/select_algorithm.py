@@ -1211,12 +1211,13 @@ class TritonTemplateKernel(TritonKernel):
 
         return self._register_hook("<DEF_KERNEL>", hook)
 
-    def size(self, name: str | None, index: int):
+    def size(self, name: str | None, index: int, *, precomputed: bool = False):
         """
         Hook called from template code to get the size of an arg.
         Will add needed args to pass it in if it is dynamic.
         Automatically wraps with tl.full([], ..., dtype=INDEX_DTYPE) when
         int64 indexing is needed to prevent overflow in size arithmetic.
+        Precomputed sizes evaluate compound expressions in the wrapper.
         """
         if not isinstance(index, int):
             raise AssertionError(f"expected index to be int, got {type(index)}")
@@ -1226,6 +1227,8 @@ class TritonTemplateKernel(TritonKernel):
             if not isinstance(name, str):
                 raise AssertionError(f"expected name to be str, got {type(name)}")
             val = self.named_input_nodes[name].get_size()[index]
+        if precomputed:
+            val = V.graph.sizevars.lookup_precomputed_size(val)
         result = texpr(self.rename_indexing(val))
         if self.index_dtype == "tl.int64":
             return f"tl.full([], {result}, dtype=INDEX_DTYPE)"
@@ -2215,6 +2218,11 @@ class TritonTemplateKernel(TritonKernel):
             mask_constant_index=mask_constant_index,
             allow_reduction_invariant_indexing=allow_reduction_invariant_indexing,
         )
+
+    def _mask_shape(self, mask):
+        if mask == self.template_mask and isinstance(self.template_out_shape, tuple):
+            return self.template_out_shape
+        return super()._mask_shape(mask)
 
     def codegen_range_tree(self):
         pass  # ignore default codegen

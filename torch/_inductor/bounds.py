@@ -182,16 +182,6 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
         # so we don't have full coverage
         return ValueRanges.unknown()
 
-    @classmethod
-    def mul(
-        cls,
-        a: AllIn | ValueRanges[Any],
-        b: AllIn | ValueRanges[Any],
-        *,
-        native_cuda_execution=None,
-    ) -> ValueRanges[Any]:
-        return super().mul(a, b)
-
     def load(self, name: str, index: sympy.Expr) -> ValueRanges[Any]:
         return ValueRanges.unknown()
 
