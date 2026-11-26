@@ -671,9 +671,10 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
 
 
 def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
-    """Global names required to rebuild or check the retained guard tree."""
-    # Alongside guards' originating sources and dictionary order roots, the
-    # serialized global_scope carries DUPLICATE_INPUT's source_b and C++ SHAPE_ENV's
+    """Global names needed to rebuild or check retained guards, including dictionary order."""
+    # Wider than their originating_sources: the serialized global_scope is the
+    # serializer's own record of the names the kept guards resolve, so it also
+    # carries a DUPLICATE_INPUT's source_b and a cpp-form SHAPE_ENV guard's
     # shape_env_sources. A SHAPE_ENV guard installed as a Python lambda reads
     # its G['NAME'] operands from the same scope, and none of them reaches
     # global_scope -- shape_env_sources is filled from the cpp code parts alone
