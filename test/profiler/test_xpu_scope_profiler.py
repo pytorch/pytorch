@@ -9,6 +9,7 @@ from pathlib import Path
 
 import torch
 from torch.testing._internal.common_utils import (
+    lazy_skip_if,
     preserves_unittest_skip_marks,
     run_tests,
     TEST_XPU,
@@ -137,8 +138,8 @@ class XpuScopeProfilerTest(TestCase):
         )
 
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
-    @unittest.skipIf(
-        TEST_XPU
+    @lazy_skip_if(
+        lambda: TEST_XPU
         and os.environ.get("ZET_ENABLE_METRICS") != "1"
         and not _pti_version_at_least(1, 2, 0),
         "ZET_ENABLE_METRICS=1 required for PTI version < 1.2.0",
