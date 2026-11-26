@@ -325,6 +325,15 @@ def has_triton_compile_iq() -> bool:
     return importlib.util.find_spec("triton.magnon") is not None
 
 
+@functools.cache
+def has_triton_compile_iq_static() -> bool:
+    """Whether fbtriton's compile_iq hooks also serve launchers that bypass Triton's own launcher
+    (triton.magnon.static), such as Inductor's static launcher."""
+    if not has_triton_compile_iq():
+        return False
+    return importlib.util.find_spec("triton.magnon.static") is not None
+
+
 def triton_compile_iq_collect_enabled() -> bool:
     """Whether fbtriton's compile_iq collection is on, parsed the same way Triton parses it."""
     return _triton_compile_iq_flag("TRITON_COMPILE_IQ_COLLECT", "collect_enabled")

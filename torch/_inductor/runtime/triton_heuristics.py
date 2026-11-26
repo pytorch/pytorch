@@ -2888,6 +2888,7 @@ class CachingAutotuner(KernelInterface):
             # this kernel must save its params again, because CudaKernelParamCache
             # is keyed by kernel name and shared by every compile in the process.
             and not launcher.store_cubin
+            and not _compile_iq_first_launch_pending(launcher)
         ):
             self._cached_profiler_kwargs = self.get_profiler_kwargs(None, launcher)
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
@@ -3442,6 +3443,8 @@ class StaticTritonCompileResult(CompileResult[_T]):
             except NotImplementedError as e:
                 raise CannotStaticallyLaunchKernel(f"NotImplemented: {str(e)}") from e
 
+            if torch._inductor.config.compile_iq_static_hooks:
+                static_kernel.attach_compile_iq_hooks(kernel)
             return static_kernel
 
         try:
@@ -3535,6 +3538,9 @@ class StaticTritonCompileResult(CompileResult[_T]):
             self._host_tma_static_pre_runner_lines(runner_args, call_args)
         )
         scope.update(tma_scope)
+        if self.kernel._ciq is not None:
+            # Host-side TMA hands run() expanded descriptor params, which have no names.
+            self.kernel._compile_iq_arg_names = None if pre_runner_lines else call_args
         launcher = self._gen_launcher_code(
             scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
         )
@@ -3547,6 +3553,13 @@ class StaticTritonCompileResult(CompileResult[_T]):
         launcher._is_static = True  # type: ignore[attr-defined]
         launcher._compile_result = self  # type: ignore[attr-defined]
         return launcher
+
+
+def _compile_iq_first_launch_pending(launcher: LauncherType) -> bool:
+    """Whether a static launcher's fbtriton compile_iq first-launch hook has yet to run. The fast
+    launcher binds kernel.function, which that hook may still replace with a tuned ACF twin."""
+    result = getattr(launcher, "_compile_result", None)
+    return getattr(getattr(result, "kernel", None), "_ciq", None) is not None
 
 
 class TritonCompileResult(CompileResult[CompiledKernel]):

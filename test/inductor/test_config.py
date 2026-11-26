@@ -96,12 +96,13 @@ class TestInductorConfig(TestCase):
                     self.assertFalse(triton_utils.use_block_ptr_enabled())
 
     @staticmethod
-    def _patch_compile_iq(env, *, flags=None, fbtriton=True):
+    def _patch_compile_iq(env, *, flags=None, fbtriton=True, static=False):
         """Patch `env` into os.environ, fbtriton detection, and a stub triton.magnon
         package.
 
         `flags` maps triton.magnon.flags function names to their return values; None
-        makes importing triton.magnon.flags fail.
+        makes importing triton.magnon.flags fail. `static` is whether the fbtriton
+        provides triton.magnon.static, which the static launcher calls itself.
         """
         magnon = types.ModuleType("triton.magnon")
         magnon.__path__ = []
@@ -117,6 +118,12 @@ class TestInductorConfig(TestCase):
         stack.enter_context(
             unittest.mock.patch(
                 "torch.utils._triton.has_triton_compile_iq", return_value=fbtriton
+            )
+        )
+        stack.enter_context(
+            unittest.mock.patch(
+                "torch.utils._triton.has_triton_compile_iq_static",
+                return_value=fbtriton and static,
             )
         )
         return stack
@@ -146,6 +153,22 @@ class TestInductorConfig(TestCase):
         ):
             self.assertFalse(config.static_cuda_launcher_default())
         self.assertIn("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER=1", logs.output[0])
+
+    @parametrize("env_var", ["TRITON_COMPILE_IQ_COLLECT", "TRITON_COMPILE_IQ_APPLY"])
+    def test_static_cuda_launcher_kept_when_magnon_serves_it(self, env_var):
+        with (
+            self._patch_compile_iq(
+                {env_var: "1", "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER": "1"},
+                static=True,
+            ),
+            self.assertNoLogs("torch._inductor.config", level="WARNING"),
+        ):
+            self.assertTrue(config.static_cuda_launcher_default())
+            self.assertTrue(config.compile_iq_static_hooks_default())
+
+    def test_compile_iq_static_hooks_default_off_without_compile_iq(self):
+        with self._patch_compile_iq({}, static=True):
+            self.assertFalse(config.compile_iq_static_hooks_default())
 
     def test_static_cuda_launcher_default_follows_magnon_flag_parsing(self):
         with self._patch_compile_iq(
