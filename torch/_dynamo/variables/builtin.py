@@ -105,7 +105,7 @@ from .dicts import (
     pydict_checkexact,
 )
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
-from .misc import CellVariable, NullVariable, StringFormatVariable
+from .misc import CellVariable, NullVariable
 from .object_protocol import (
     _is_skipped_constant_property,
     _NO_DEFAULT,
@@ -146,6 +146,7 @@ from .object_protocol import (
     pynumber_negative,
     pynumber_positive,
     pynumber_tobase,
+    pyobject_format,
     pysequence_check,
     pysequence_contains,
     python_constant_richcompare_impl,
@@ -881,7 +882,6 @@ class BuiltinVariable(TypeVariable):
             repr,
             round,
             str,
-            str.format,
             sum,
             type,
             operator.abs,
@@ -3000,13 +3000,16 @@ class BuiltinVariable(TypeVariable):
     def call_format(
         self,
         tx: "InstructionTranslatorBase",
-        _format_string: VariableTracker,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        format_string = _format_string.as_python_constant()
-        format_string = str(format_string)
-        return StringFormatVariable.create(tx, format_string, list(args), kwargs)
+        no_keywords(tx, "format", kwargs)
+        check_positional(tx, "format", len(args), 1, 2)
+        spec = args[1] if len(args) == 2 else VariableTracker.build(tx, "")
+        if not issubclass(spec.python_type(), str):
+            msg = f"format() argument 2 must be str, not {spec.python_type_name()}"
+            raise_type_error(tx, msg)
+        return pyobject_format(tx, args[0], spec)
 
     def call_id(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
