@@ -262,23 +262,20 @@ def _build_p2p_edge_groups(
         if candidate_default_type == parent_default_type:
             backend_filter = candidate
 
-    use_torchcomms = dist.distributed_c10d._use_torchcomms_enabled()
-    timeout = None
-    if not use_torchcomms:
-        parent_backend = parent._get_backend(device)
-        if not parent_backend.supports_splitting:
-            raise RuntimeError(
-                f"Pipeline P2P edge groups require backend {backend_name!r} to "
-                "support split_group"
-            )
-        # Preserve the timeout configured on this exact native backend.
-        timeout = parent_backend.options._timeout
-        if backend_filter is None and len(set(device_backend_map.values())) > 1:
-            _initialize_additional_parent_backends(
-                parent,
-                device_backend_map,
-                backend_name,
-            )
+    parent_backend = parent._get_backend(device)
+    if not parent_backend.supports_splitting:
+        raise RuntimeError(
+            f"Pipeline P2P edge groups require backend {backend_name!r} to "
+            "support split_group"
+        )
+    # Reuse the parent backend options' timeout for the edge groups.
+    timeout = parent_backend.options._timeout
+    if backend_filter is None and len(set(device_backend_map.values())) > 1:
+        _initialize_additional_parent_backends(
+            parent,
+            device_backend_map,
+            backend_name,
+        )
     for round_index, round_edges in enumerate(split_rounds):
         child = dist.split_group(
             parent_pg=parent,
