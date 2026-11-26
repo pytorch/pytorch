@@ -116,6 +116,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<exec::reads::Reads>()?;
     m.add_class::<exec::overlap::Overlap>()?;
     m.add_function(wrap_pyfunction!(exec::graph::_run_aten_graph, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::hist::_gate_report, m)?)?;
     m.add_class::<exec::graph::Ref>()?;
     m.add_function(wrap_pyfunction!(exec::joint::_trace_joint, m)?)?;
     m.add_function(wrap_pyfunction!(exec::autograd::_set_cfg_autograd, m)?)?;

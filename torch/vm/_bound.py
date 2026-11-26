@@ -20,7 +20,7 @@ callable is the only way in (``BoundLowering.__call__`` takes every input).
 The parts, in the order a region meets them: ``BoundLowering`` is the call
 ``lower_to`` puts in the pass's graph; ``bind_versions`` hands a region's
 constants to its versions (torch/vm/_pipeline.py); ``Binding`` is what a
-region keeps (torch/_rust_inductor.py's trace_region) and what the executor
+region keeps (torch._rust_inductor's trace_region) and what the executor
 has bound again when a constant's data moved (exec/reads.rs).
 """
 

@@ -47,7 +47,7 @@ storage that the first request for a mutable pointer clears (nothing is
 copied: the mark's only other owner is dropped at once).
 
 The parts: ``Unwritten`` is the check; ``watched`` says, for the region's
-checks (exec/reads.rs, through torch/_rust_inductor.py) and for the memo of
+checks (exec/reads.rs, through torch._rust_inductor) and for the memo of
 the passes' output, which version counter a guarded tensor is to keep;
 ``keep_unwritten`` is for a lowering that captures CUDA graphs.
 """

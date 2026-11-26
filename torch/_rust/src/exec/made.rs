@@ -2,7 +2,7 @@
 //
 // A region hands back a list, dict or set that was there before its trace
 // as the object it is, and builds one that its run made anew on every call
-// (torch/_rust_inductor.py's _held and _template). The reads cannot tell the
+// (torch._rust_inductor's _held and _template). The reads cannot tell the
 // two apart: a run reads what it made (its length, an item, all of it) as it
 // reads anything else. The same of an iterator: one that was there before is
 // the program's, with its position, and one the run made is made again over

@@ -664,6 +664,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     super::reads::begin();
     super::backward::ready();
     super::writes::begin();
+    super::hist::begin();
     let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span, types, asked)));
     super::reads::end();
     TRACING.set(false);

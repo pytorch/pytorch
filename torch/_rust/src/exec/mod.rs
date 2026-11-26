@@ -12,6 +12,7 @@ mod covered;
 pub mod effects;
 pub mod ffi;
 pub mod graph;
+pub mod hist;
 pub mod joint;
 mod kinds;
 mod live;
@@ -79,6 +80,13 @@ thread_local! {
     // called from that frame, runs the clone; taken by the first match.
     pub(crate) static NEXT_CLONE: Cell<(usize, usize, usize)> = const { Cell::new((0, 0, 0)) };
 }
+
+// TORCH_RUST_TRACE_PLAIN (read once; unset, empty or 0: off): a frame under a
+// traced body runs the first plan of its code, the instructions as written,
+// and never a clone made for its call site. So a trace meets nothing the
+// optimizer rewrote (a constant, a pinned object, a guarded read, an inlined
+// callee) but in the body itself.
+static TRACE_PLAIN: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| std::env::var_os("TORCH_RUST_TRACE_PLAIN").is_some_and(|v| !v.is_empty() && v != "0"));
 
 thread_local! {
     // Why the last elision attempt was refused (see TORCH_RUST_ELIDE_DEBUG).
@@ -816,7 +824,7 @@ unsafe fn tracer_code(code: *mut pyo3::ffi::PyObject) -> Option<bool> {
     } else if rest == "utils/weak.py" {
         // The trace's table of tensors, when one of them goes.
         Some(true)
-    } else if rest.starts_with("fx/") || rest == "overrides.py" || rest == "_rust_inductor.py" {
+    } else if rest.starts_with("fx/") || rest == "overrides.py" || rest.starts_with("_rust_inductor/") {
         Some(false)
     } else {
         None
@@ -866,9 +874,13 @@ unsafe extern "C" fn eval_frame(
         }
         return if deep { outside_executor(|| prev(tstate, frame, throwflag)) } else { prev(tstate, frame, throwflag) };
     }
+    let plain = tracing && *TRACE_PLAIN;
     let pending = NEXT_CLONE.get();
-    let compiled = if !gen_frame && pending.2 != 0 && pending.0 == code as usize && tr_current_frame(tstate) as usize == pending.1 {
+    let cloned = !gen_frame && pending.2 != 0 && pending.0 == code as usize && tr_current_frame(tstate) as usize == pending.1;
+    if cloned {
         NEXT_CLONE.set((0, 0, 0));
+    }
+    let compiled = if cloned && !plain {
         Some(&*(pending.2 as *const Compiled))
     } else {
         match compiled(code) {
@@ -928,8 +940,9 @@ unsafe extern "C" fn eval_frame(
     // A frame of code that a trace was refused for runs the first plan,
     // which records, so that the next trace finds what it ran judged (see
     // covered.rs).
+    // Under TRACE_PLAIN every frame under a traced body runs it too.
     let observed = !tracing && !gen_frame && covered::observes(c);
-    let plan = if observed { unsafe { &*(&*c.plans.lock().unwrap()[0] as *const Plan) } } else { c.plan() };
+    let plan = if observed || plain { unsafe { &*(&*c.plans.lock().unwrap()[0] as *const Plan) } } else { c.plan() };
     let start = if gen_frame {
         let unit = tr_frame_get_instr(frame) as u32;
         let Some(&(b, ver, i)) = plan.resume.get(&unit) else {

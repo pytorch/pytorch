@@ -21,6 +21,10 @@
 //     (int index), and dict.get: the item (of a defaultdict that stored the
 //     key because it was asked for it: the item it stored);
 //   - a cell read: the cell's content;
+//   - a tensor found by one of these reads that the run then asks something
+//     of (an attribute, a method, its length, its class) or hands to C code:
+//     the tensor's class, dtype, device, sizes, strides and requires_grad as
+//     they were when it was first asked (see Keyed);
 //   - a frame of a Python function: which code the function has, and the
 //     defaults a call fills its arguments from (the tuple by identity, the
 //     keyword-only ones also item by item);
@@ -230,6 +234,51 @@ struct Dicted {
     dict: Py<PyAny>,
 }
 
+// What a tensor is compared on: its class, and what tensor_matches takes.
+struct Key {
+    class: Py<PyAny>,
+    spec: TensorSpec,
+    requires_grad: bool,
+}
+
+impl Key {
+    // None: no plain strided tensor, which nothing here can compare.
+    unsafe fn of(o: *mut PyObject) -> Option<Key> {
+        let t = tffi::tensor_by_type(o as usize).as_ref()?;
+        let mut m = tffi::TensorMeta::default();
+        tffi::tensor_meta(t, &mut m);
+        let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes: t.sizes().to_vec(), strides: t.strides().to_vec() };
+        tffi::tensor_matches(t, spec.dtype, spec.device_type, spec.device_index, &spec.sizes, &spec.strides).then(|| Key { class: own(ffi::Py_TYPE(o) as *mut PyObject), spec, requires_grad: t.requires_grad() })
+    }
+
+    unsafe fn holds(&self, o: *mut PyObject) -> bool {
+        let s = &self.spec;
+        tffi::tensor_by_type(o as usize).as_ref().is_some_and(|t| ffi::Py_TYPE(o) as *mut PyObject == self.class.as_ptr() && t.requires_grad() == self.requires_grad && tffi::tensor_matches(t, s.dtype, s.device_type, s.device_index, &s.sizes, &s.strides))
+    }
+}
+
+// A tensor the traced run found by a read (an item, a cell, an attribute:
+// state, not an argument) and asked something of: its dtype or shape, whether
+// it requires grad, its length, its class, a method. The answer is in the
+// region as a constant or as the path taken, and the block's guard covers the
+// region's arguments only: the region is entered while the tensor has the
+// key it had when it was first asked. It lives as long as an entry that
+// leads to the tensor (see led): the read that found it says it is still
+// the one.
+struct Keyed {
+    obj: Py<PyAny>,
+    key: Key,
+}
+
+// A tensor the run asked something of, while the trace runs: most are the
+// run's own (an argument, a result), so it is held weakly, and a tensor made
+// later at the address of one that died is asked anew.
+struct Asked {
+    weak: Py<PyAny>,
+    // None: see Key::of.
+    key: Option<Key>,
+}
+
 #[derive(Default)]
 struct Entries {
     groups: Vec<Group>,
@@ -242,13 +291,14 @@ struct Entries {
     // abc's counter of registrations when a class with ABCMeta's machinery
     // was asked about.
     abc: Option<u64>,
+    keyed: Vec<Keyed>,
 }
 
 impl Entries {
     fn len(&self) -> usize {
         let groups: usize = self.groups.iter().map(|g| g.items.len() + g.whole.as_ref().map_or(0, |w| w.items.len()) + usize::from(g.len.is_some())).sum();
         let asked = self.mros.len() + usize::from(self.abc.is_some());
-        groups + self.typed.len() + self.classes.iter().map(|c| c.names.len()).sum::<usize>() + self.reads.len() + self.functions.len() + self.dicted.len() + asked
+        groups + self.typed.len() + self.classes.iter().map(|c| c.names.len()).sum::<usize>() + self.reads.len() + self.functions.len() + self.dicted.len() + asked + self.keyed.len()
     }
 }
 
@@ -273,6 +323,10 @@ struct Trace {
     // The defaultdicts a load of the traced run stored a missing key into,
     // with where.
     filled: HashMap<usize, String>,
+    // The tensors the run asked something of, in order, and each one's place
+    // by address.
+    asked_of: Vec<Asked>,
+    asked_at: HashMap<usize, usize>,
 }
 
 thread_local! {
@@ -709,6 +763,24 @@ impl Trace {
         }
     }
 
+    // The run asks something of the tensor `o`, or hands it to C code: its
+    // key as it is now, once per tensor (see Keyed).
+    unsafe fn keyed(&mut self, o: *mut PyObject) {
+        if let Some(i) = self.asked_at.get(&(o as usize))
+            && ffi::PyWeakref_GetObject(self.asked_of[*i].weak.as_ptr()) == o
+        {
+            return;
+        }
+        let weak = ffi::PyWeakref_NewRef(o, std::ptr::null_mut());
+        if weak.is_null() {
+            ffi::PyErr_Clear();
+            self.refused = Some(format!("it asks about a {}, which takes no weak reference", type_name(o)));
+            return;
+        }
+        self.asked_at.insert(o as usize, self.asked_of.len());
+        self.asked_of.push(Asked { weak: Py::from_owned_ptr(Python::assume_attached(), weak), key: Key::of(o) });
+    }
+
     unsafe fn container(o: *mut PyObject) -> Option<(*mut PyObject, Holder)> {
         if ffi::PyDict_Check(o) != 0 {
             Some((o, Holder::Dict))
@@ -770,7 +842,11 @@ impl Trace {
     // tensor's class is the guard's; a class that cannot change needs none.
     unsafe fn handed(&mut self, o: *mut PyObject) {
         let tp = ffi::Py_TYPE(o);
-        if tr_type_immutable(tp) != 0 || tensor(o) {
+        if tensor(o) {
+            self.keyed(o);
+            return;
+        }
+        if tr_type_immutable(tp) != 0 {
             return;
         }
         if self.seen.insert((o as usize, 0)) {
@@ -840,7 +916,8 @@ impl Trace {
         if !q.instance && ffi::PyType_Check(q.subject) == 0 {
             self.refused = Some(format!("it asks issubclass of a {}, which is no class", type_name(q.subject)));
         } else if q.instance && tensor(q.subject) {
-            // Which class a tensor is of, the guard says.
+            // Which class a tensor is of, the guard says, or its key.
+            self.keyed(q.subject);
             self.looked(of, class_name);
             self.looked(of, getattribute);
         } else if q.instance && !q.against.is_null() && asked::answers_class_itself(q.subject, of, class_name, getattribute) {
@@ -967,9 +1044,11 @@ impl Trace {
         }
         if tensor(obj) {
             // A tensor's class, dtype, device, sizes, strides and
-            // requires_grad are the guard's, its values the graph's. Nothing
-            // else it can be asked is: an attribute the program put on the
+            // requires_grad are the guard's (or, of a tensor the run read
+            // from state, its key's), its values the graph's. Nothing else
+            // it can be asked is: an attribute the program put on the
             // object, or one of UNCHECKED_OF_A_TENSOR.
+            self.keyed(obj);
             let n = text(name);
             let mut dict = std::ptr::null_mut();
             let own_attr = tr_attr_home(obj, name, &mut dict, 1) == 2;
@@ -1297,6 +1376,9 @@ pub unsafe fn truth(obj: *mut PyObject) {
         if let Some((h, kind)) = Trace::container(obj).filter(|(h, _)| *h == obj) {
             t.length(h, kind);
         } else {
+            if tensor(obj) {
+                t.keyed(obj);
+            }
             t.special(obj, c"__bool__");
             t.special(obj, c"__len__");
         }
@@ -1432,6 +1514,40 @@ unsafe fn sweep(e: &mut Entries) {
             break;
         }
     }
+    unfound(e);
+}
+
+// The objects the entries expect to find, by address: the value of an item,
+// of a cell or of a slot, what a container read whole holds, what a class
+// has under a name. Tuples aren't recorded: what one holds is found with it.
+unsafe fn led(e: &Entries) -> HashSet<usize> {
+    unsafe fn reach(o: *mut PyObject, out: &mut HashSet<usize>, depth: u8) {
+        out.insert(o as usize);
+        if depth < 4 && ffi::PyTuple_Check(o) != 0 {
+            for k in 0..ffi::PyTuple_GET_SIZE(o) {
+                reach(ffi::PyTuple_GET_ITEM(o, k), out, depth + 1);
+            }
+        }
+    }
+    let mut out: HashSet<usize> = HashSet::new();
+    let mut add = |o: &Py<PyAny>| reach(o.as_ptr(), &mut out, 0);
+    for g in &e.groups {
+        g.items.iter().filter_map(|i| i.value.as_ref()).for_each(&mut add);
+        g.whole.iter().flat_map(|w| &w.items).for_each(&mut add);
+    }
+    e.reads.iter().filter_map(|r| r.value.as_ref()).for_each(&mut add);
+    e.classes.iter().flat_map(|c| &c.names).filter_map(|(_, had)| had.as_ref()).for_each(&mut add);
+    out
+}
+
+// Drops the key of a tensor no entry leads to any more: the read that found
+// it is gone (its holder died, or is the region's own to check), and with it
+// the way a later call would come by the tensor.
+unsafe fn unfound(e: &mut Entries) {
+    if !e.keyed.is_empty() {
+        let led = led(e);
+        e.keyed.retain(|k| led.contains(&(k.obj.as_ptr() as usize)));
+    }
 }
 
 // Every reference the entries hold, reported to `hold`.
@@ -1464,6 +1580,10 @@ fn held(e: &Entries, hold: &mut impl FnMut(&Py<PyAny>)) {
     for m in &e.mros {
         hold(&m.class);
         hold(&m.mro);
+    }
+    for k in &e.keyed {
+        hold(&k.obj);
+        hold(&k.key.class);
     }
     for g in &e.groups {
         hold(&g.holder);
@@ -1537,6 +1657,9 @@ impl Reads {
             "the __dict__ of an object"
         } else if let Some(why) = self.constants_fail() {
             why
+        } else if !e.keyed.iter().all(|k| k.key.holds(k.obj.as_ptr())) {
+            // Behind the constants: a tensor that is both is a constant's miss.
+            "the class, shape, dtype, device or requires_grad of a tensor read from state"
         } else {
             return true;
         };
@@ -1666,24 +1789,7 @@ impl Reads {
     /// (After ``forget``: what was read from the region's own arguments is
     /// no such read.)
     fn values(&self, objects: Vec<Bound<'_, PyAny>>) -> Vec<usize> {
-        // Tuples aren't recorded: what one holds is read with it.
-        unsafe fn reach(o: *mut PyObject, out: &mut HashSet<usize>, depth: u8) {
-            out.insert(o as usize);
-            if depth < 4 && ffi::PyTuple_Check(o) != 0 {
-                for k in 0..ffi::PyTuple_GET_SIZE(o) {
-                    reach(ffi::PyTuple_GET_ITEM(o, k), out, depth + 1);
-                }
-            }
-        }
-        let e = unsafe { &*self.entries.get() };
-        let mut read: HashSet<usize> = HashSet::new();
-        let mut add = |o: &Py<PyAny>| unsafe { reach(o.as_ptr(), &mut read, 0) };
-        for g in &e.groups {
-            g.items.iter().filter_map(|i| i.value.as_ref()).for_each(&mut add);
-            g.whole.iter().flat_map(|w| &w.items).for_each(&mut add);
-        }
-        e.reads.iter().filter_map(|r| r.value.as_ref()).for_each(&mut add);
-        e.classes.iter().flat_map(|c| &c.names).filter_map(|(_, had)| had.as_ref()).for_each(&mut add);
+        let read = unsafe { led(&*self.entries.get()) };
         (0..objects.len()).filter(|&i| read.contains(&(objects[i].as_ptr() as usize))).collect()
     }
 
@@ -1712,6 +1818,7 @@ impl Reads {
         e.typed.retain(|t| !given(&t.obj));
         e.reads.retain(|r| !given(&r.obj));
         e.dicted.retain(|d| !given(&d.obj));
+        unsafe { unfound(e) };
     }
 
     /// The entries as text, for debugging.
@@ -1724,6 +1831,7 @@ impl Reads {
         };
         let mut out = vec![format!("thread state {:#x}", self.thread)];
         out.extend(unsafe { &*self.consts.get() }.iter().map(|c| format!("{} keeps its shape {:?}, strides, dtype, device and requires_grad", show(&c.obj), c.spec.sizes)));
+        out.extend(e.keyed.iter().map(|k| format!("{} keeps its class, shape {:?}, strides, dtype, device and requires_grad", show(&k.obj), k.key.spec.sizes)));
         out.extend(e.typed.iter().map(|t| format!("type({}) is {}", show(&t.obj), show(&t.class))));
         for c in &e.classes {
             let class = c.class.bind(py).getattr("__qualname__").map_or("?".into(), |n| n.to_string());
@@ -1927,6 +2035,20 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
             }
         }
         sweep(&mut e);
+        // The tensors asked about that a read found: each with the key it
+        // had when it was first asked.
+        let found = led(&e);
+        for a in t.asked_of {
+            // None: it died with the run.
+            let o = ffi::PyWeakref_GetObject(a.weak.as_ptr());
+            if o == ffi::Py_None() || !found.contains(&(o as usize)) {
+                continue;
+            }
+            let Some(key) = a.key else {
+                return Ok((None, Some(format!("it asks about a {} it read from state that is no plain strided tensor, which it cannot check", type_name(o)))));
+            };
+            e.keyed.push(Keyed { obj: own(o), key });
+        }
     }
     let reads = Reads {
         thread: t.thread,

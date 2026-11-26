@@ -1440,7 +1440,7 @@ ownership:
       - /torch/_python_dispatcher.py
       - /torch/_refs/
       - /torch/_rust/
-      - /torch/_rust_inductor.py
+      - /torch/_rust_inductor/
       - /torch/_size_docs.py
       - /torch/_sources.py
       - /torch/_storage_docs.py
@@ -1504,6 +1504,7 @@ ownership:
       - /test/test_type_hints.py
       - /test/test_typing.py
       - /test/test_vm.py
+      - /test/test_vm_gate.py
       - /test/test_vm_modes.py
       - /test/torch_np/
       - /test/typing/

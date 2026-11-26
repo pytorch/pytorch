@@ -1200,6 +1200,7 @@ impl Act<'_> {
             let ver = &blk.versions[vi];
             let code = &self.p.code[b.idx()][vi];
             let fast = self.rec.is_null();
+            let counted = self.reading && super::hist::on();
             if first == 0 && vi + 1 == blk.versions.len() && blk.origin.is_some() && self.c.is_some() && !super::region::tracing() {
                 if super::region::observing() {
                     self.region_observe(b, vi);
@@ -1221,6 +1222,9 @@ impl Act<'_> {
                 let kills = code.kills.get_unchecked(step.kill.0 as usize..step.kill.1 as usize);
                 i += 1;
                 if fast && step.op != Fast::No {
+                    if counted {
+                        self.count(&self.cfg[step.v], None, true);
+                    }
                     // A value is null until its instr defines it.
                     let vals = self.vals.as_mut_ptr();
                     match step.op {
@@ -1842,6 +1846,9 @@ impl Act<'_> {
         let ins = &self.cfg[*v];
         let flags = step.flags;
         if flags & FLAG_YIELD != 0 {
+            if self.reading && super::hist::on() {
+                self.count(ins, None, false);
+            }
             let (value, stack) = ins.args.split_last().expect("Yield has the yielded value");
             for a in stack {
                 tr_frame_push(self.f, xincref(self.val(*a)));
@@ -1932,6 +1939,9 @@ impl Act<'_> {
     // covered.rs).
     #[inline(always)]
     unsafe fn guarded(&mut self, v: ValueId, ins: &Instr, callee: Option<*mut PyObject>) -> R {
+        if self.reading && super::hist::on() {
+            self.count(ins, callee, false);
+        }
         match callee {
             Some(f) if super::backward::is(f) => {
                 if self.reading {
@@ -1959,6 +1969,20 @@ impl Act<'_> {
             }
             _ => self.exec(v, ins),
         }
+    }
+
+    // Hands instruction `ins`, about to run in a traced body or a frame
+    // under it, to the histogram (see hist.rs) with its operands: for a call
+    // of `callee`, what follows the callable.
+    #[cold]
+    unsafe fn count(&self, ins: &Instr, callee: Option<*mut PyObject>, inline: bool) {
+        let skip = match callee {
+            Some(f) if !ins.args.is_empty() && self.val(ins.args[0]) == f => 1,
+            Some(_) => 2,
+            None => 0,
+        };
+        let operands: Vec<*mut PyObject> = ins.args.iter().skip(skip).map(|x| self.val(*x)).collect();
+        super::hist::step(self.under_body, &ins.op, &operands, callee, inline);
     }
 
     // Whether LoadAttr/LoadMethod `ins` of name `n` reads what the span being

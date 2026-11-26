@@ -6625,5 +6625,177 @@ class TestVmCudaGraphs(TestCase):
         self.assertEqual(self.unwritten(capture), ["kept"])
 
 
+class ModesAsked:
+    """A tensor in each kind of place a traced call finds one in."""
+
+    def __init__(self, device):
+        self.t = torch.ones(8, device=device)
+        self.listed = [torch.ones(8, device=device)]
+        self.pair = (torch.ones(8, device=device), None)
+        self.named = {"t": torch.ones(8, device=device)}
+        self.net = torch.nn.BatchNorm1d(8, device=device)
+        self.sparse = torch.ones(8, device=device).to_sparse()
+
+
+MODES_ASKED = MODES_ASKED_GLOBAL = None
+
+
+def modes_asked_in_a_cell():
+    t = MODES_ASKED_GLOBAL
+    return lambda: t
+
+
+# Where the call finds the tensor it asks about.
+MODES_ASKED_IN = {
+    "attribute": lambda: MODES_ASKED.t,
+    "list": lambda: MODES_ASKED.listed[0],
+    "tuple": lambda: MODES_ASKED.pair[0],
+    "dict": lambda: MODES_ASKED.named["t"],
+    "parameter": lambda: MODES_ASKED.net.weight,
+    "buffer": lambda: MODES_ASKED.net.running_mean,
+    "parameters": lambda: next(iter(MODES_ASKED.net.parameters())),
+    "global": lambda: MODES_ASKED_GLOBAL,
+    "cell": modes_asked_in_a_cell,
+}
+
+
+def modes_other_data(make):
+    def change(t, other, device):
+        t.data = make(device) if other else torch.ones(8, device=device)
+
+    return change
+
+
+def modes_other_class(t, other, device):
+    t.__class__ = ModesTensor if other else torch.Tensor
+
+
+MODES_OTHER_DTYPE = modes_other_data(lambda d: torch.ones(8, device=d).long())
+MODES_OTHER_SIZE = modes_other_data(lambda d: torch.ones(5, device=d))
+MODES_OTHER_RANK = modes_other_data(lambda d: torch.ones(2, 4, device=d))
+MODES_OTHER_STRIDE = modes_other_data(lambda d: torch.ones(16, device=d)[::2])
+MODES_OTHER_DEVICE = modes_other_data(lambda d: torch.ones(8))
+
+# What is asked of the tensor (the answer is a number of the result), and a
+# change to the same object that gives another answer.
+MODES_QUESTIONS = {
+    "dtype": (lambda t: 2.0 if t.dtype == torch.float32 else 3.0, MODES_OTHER_DTYPE),
+    "is_floating_point": (
+        lambda t: 2.0 if t.is_floating_point() else 3.0,
+        MODES_OTHER_DTYPE,
+    ),
+    "function_is_floating_point": (
+        lambda t: 2.0 if torch.is_floating_point(t) else 3.0,
+        MODES_OTHER_DTYPE,
+    ),
+    "shape": (lambda t: float(t.shape[0]), MODES_OTHER_SIZE),
+    "size": (lambda t: float(t.size(0)), MODES_OTHER_SIZE),
+    "numel": (lambda t: float(t.numel()), MODES_OTHER_SIZE),
+    "function_numel": (lambda t: float(torch.numel(t)), MODES_OTHER_SIZE),
+    "len": (lambda t: float(len(t)), MODES_OTHER_SIZE),
+    "data_shape": (lambda t: float(t.data.shape[0]), MODES_OTHER_SIZE),
+    "ndim": (lambda t: float(t.ndim), MODES_OTHER_RANK),
+    "dim": (lambda t: float(t.dim()), MODES_OTHER_RANK),
+    "is_contiguous": (
+        lambda t: 2.0 if t.is_contiguous() else 3.0,
+        MODES_OTHER_STRIDE,
+    ),
+    "stride": (lambda t: float(t.stride(0)), MODES_OTHER_STRIDE),
+    "requires_grad": (
+        lambda t: 2.0 if t.requires_grad else 3.0,
+        lambda t, other, device: t.requires_grad_(other),
+    ),
+    "isinstance": (
+        lambda t: 2.0 if isinstance(t, ModesTensor) else 3.0,
+        modes_other_class,
+    ),
+    "type": (lambda t: 2.0 if type(t) is torch.Tensor else 3.0, modes_other_class),
+    "is_cuda": (lambda t: 2.0 if t.is_cuda else 3.0, MODES_OTHER_DEVICE),
+    "device": (lambda t: 2.0 if t.device.type == "cpu" else 3.0, MODES_OTHER_DEVICE),
+}
+
+
+def modes_asking(find, ask):
+    def asking(x):
+        y = modes_work(x)
+        return modes_work(y * ask(find()))
+
+    return asking
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmAskedTensors(TestCase):
+    """What a call asks of a tensor it finds in the program's state (its
+    dtype, its sizes, whether it requires grad, its class) is the answer for
+    as long as that tensor is as it was: a region formed with the answer is
+    not entered once the same object has another dtype, other sizes or
+    strides, another device, class or requires_grad."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, device, find, ask, change=None):
+        # Six calls, three with the tensor changed, three with it put back.
+        global MODES_ASKED, MODES_ASKED_GLOBAL
+        MODES_ASKED = ModesAsked(device)
+        MODES_ASKED_GLOBAL = torch.ones(8, device=device)
+        if find is modes_asked_in_a_cell:
+            find = find()
+        fn = modes_asking(find, ask)
+        compiled = vm(fn, passes=EARLY)
+        runs = []
+        for call in range(12):
+            if change is not None and call in (6, 9):
+                change(find(), call == 6, device)
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(compiled(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+            runs.append(region_runs(compiled))
+        return compiled, runs
+
+    @parametrize("what", list(MODES_QUESTIONS))
+    @isolated
+    def test_answer_is_the_call_s_own_after_the_tensor_changed(self, device, what):
+        if what in ("is_cuda", "device") and torch.device(device).type == "cpu":
+            self.skipTest("needs a second device")
+        ask, change = MODES_QUESTIONS[what]
+        _, runs = self.calls(device, MODES_ASKED_IN["attribute"], ask, change)
+        # A region served the first state, and one serves the other.
+        self.assertGreater(runs[5], 0)
+        self.assertGreater(runs[8], runs[6])
+        self.assertGreater(runs[11], runs[8])
+
+    @parametrize("where", list(MODES_ASKED_IN))
+    @isolated
+    def test_tensor_is_asked_wherever_the_call_found_it(self, device, where):
+        ask, change = MODES_QUESTIONS["shape"]
+        _, runs = self.calls(device, MODES_ASKED_IN[where], ask, change)
+        self.assertGreater(runs[5], 0)
+        self.assertGreater(runs[11], runs[8])
+
+    @parametrize("where", list(MODES_ASKED_IN))
+    @isolated
+    def test_tensor_that_stays_as_it_was_costs_no_region(self, device, where):
+        ask, _ = MODES_QUESTIONS["shape"]
+        compiled, runs = self.calls(device, MODES_ASKED_IN[where], ask)
+        # Every call behind the traced one ran its regions, and none missed.
+        steps = {after - before for before, after in itertools.pairwise(runs[4:])}
+        self.assertEqual(len(steps), 1, msg=str(runs))
+        self.assertGreater(min(steps), 0)
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertEqual([dict(r["misses"] or {}) for r in rows], [{}] * len(rows))
+
+    @isolated
+    def test_tensor_that_is_not_strided_is_asked_on_every_call(self, device):
+        # No check covers a sparse tensor: what is asked of it is no region's.
+        def resize(t, other, device):
+            t.sparse_resize_and_clear_((5 if other else 8,), 1, 0)
+
+        ask, _ = MODES_QUESTIONS["shape"]
+        self.calls(device, lambda: MODES_ASKED.sparse, ask, resize)
+
+
+instantiate_device_type_tests(TestVmAskedTensors, globals())
+
+
 if __name__ == "__main__":
     run_tests()
