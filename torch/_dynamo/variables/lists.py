@@ -1439,6 +1439,7 @@ class ListVariable(BaseListVariable):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/listobject.c#L3597-L3616
     tp_methods = {
+        "__getitem__": Method.from_slot(BaseListVariable.mp_subscript_impl),
         "append": Method(BaseListVariable.list_append),
         "extend": Method(BaseListVariable.list_extend),
         "insert": Method(BaseListVariable.list_insert),
@@ -1859,13 +1860,8 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not (self.is_mutable() and len(args) > 0):
             return None
-        if kwargs or len(args) != 2:
-            raise_args_mismatch(
-                tx,
-                "insert",
-                "2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        no_keywords(tx, "deque.insert", kwargs)
+        check_positional(tx, "insert", len(args), 2, 2)
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None and len(self.items) == maxlen:
             raise_observed_exception(
@@ -2048,19 +2044,16 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # tuple.__new__(cls, iterable=()); `self` is the BuiltinVariable(tuple)
-        # __new__ was found on (there's no TupleBuiltinVariable -- BuiltinVariable
-        # delegates here explicitly), `args[0]` is the actual (possibly
-        # subclassed) cls.
-        from .builtin import BuiltinVariable
-
+        # tuple.__new__(cls, iterable=()); `self` is the TupleBuiltinVariable
+        # __new__ was found on, `args[0]` is the actual (possibly subclassed)
+        # cls.
         if not 1 <= len(args) <= 2:
             return VariableTracker.tp_new_impl(self, tx, args, kwargs)
         # tuple_new rejects keywords only when tuple's own tp_init would run.
         cls = args[0].as_python_constant()
         if cls is tuple or cls.__init__ is tuple.__init__:
             no_keywords(tx, "tuple", kwargs)
-        if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
+        if cls is tuple:
             init_args = unpack_iterable(tx, args[1]) if len(args) == 2 else []
             return TupleVariable(init_args, mutation_type=ValueMutationNew())
         return tx.output.side_effects.track_new_user_defined_object(
@@ -2895,6 +2888,30 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "rjust")
 
+    def bytearray_strip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "strip")
+
+    def bytearray_lstrip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "lstrip")
+
+    def bytearray_rstrip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "rstrip")
+
     def bytearray_reduce(
         self,
         tx: "InstructionTranslatorBase",
@@ -3017,6 +3034,9 @@ class ByteArrayVariable(VariableTracker):
         "center": Method(bytearray_center),
         "ljust": Method(bytearray_ljust),
         "rjust": Method(bytearray_rjust),
+        "strip": Method(bytearray_strip),
+        "lstrip": Method(bytearray_lstrip),
+        "rstrip": Method(bytearray_rstrip),
         "zfill": Method(bytearray_zfill),
         "expandtabs": Method(bytearray_expandtabs),
         "isalnum": Method(bytearray_isalnum),
