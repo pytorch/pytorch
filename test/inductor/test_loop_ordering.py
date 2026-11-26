@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import (
     Capability,
     instantiate_device_type_tests,
     requires_capabilities,
+    skipIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -50,6 +51,10 @@ from torch.utils._triton import has_triton
 # set so that metrics appear
 torch._logging.set_logs(inductor_metrics=True)
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+
+# Accelerator cases in this file compile kernels with Triton; gate them
+# individually so the GENERIC classes still run on triton-less hosts.
+requires_triton = skipIf(not has_triton(), "requires triton")
 
 
 class MockScheduler:
@@ -122,6 +127,7 @@ class ImplDetailTest(MockSchedulerTest):
         if strides is None:
             strides = ir.FlexibleLayout.contiguous_strides(sizes)
 
+        # IR metadata only; no tensor is allocated on this device.
         box_a = ir.TensorBox.create(
             ir.Buffer(
                 name="a",
@@ -287,6 +293,7 @@ class ImplDetailTest(MockSchedulerTest):
             self.assertEqual(select_tiling.call_count, 4)
 
     def test_template_producer_loop_state_rollback(self):
+        # IR metadata only; no tensor is allocated on this device.
         layout = ir.FixedLayout(
             torch.device("cuda"), torch.float32, [sympy.Integer(8)], [1]
         )
@@ -414,6 +421,7 @@ class ImplDetailTest(MockSchedulerTest):
                     "primal", i3 + 49 * i2 + 2401 * ModularIndexing(i0, 1, 64)
                 )
 
+            # IR metadata only; no tensor is allocated on this device.
             buf = ir.Pointwise.create(
                 device=torch.device("cuda"),
                 dtype=torch.float32,
@@ -543,18 +551,18 @@ class LoopOrderingTest(TestCase):
     def setUp(self):
         super().setUp()
         metrics.reset()
-        self._config_patch = inductor_config.patch(
+        # config.patch cannot be a class decorator here: it returns a subclass
+        # whose __dict__ holds no test methods, so instantiate_device_type_tests
+        # would silently collect zero tests.
+        ctx = inductor_config.patch(
             {
                 "benchmark_kernel": True,
                 "loop_ordering_after_fusion": True,
                 "triton.unique_kernel_names": True,
             }
         )
-        self._config_patch.__enter__()
-
-    def tearDown(self):
-        self._config_patch.__exit__(None, None, None)
-        super().tearDown()
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
 
     @staticmethod
     def _get_node_origins(node):
@@ -598,6 +606,7 @@ class LoopOrderingTest(TestCase):
         ):
             yield decisions
 
+    @requires_triton
     def test_for_reordering_reindex(self, device):
         """
         ComputedBuffer.iter_reoredering_reindex can cause some fusion
@@ -628,6 +637,7 @@ class LoopOrderingTest(TestCase):
         expected_num_bytes *= x.itemsize
         self.assertEqual(expected_num_bytes, metrics.num_bytes_accessed)
 
+    @requires_triton
     def test_apbt_realize(self, device):
         M = 1024
         N = 2048
@@ -647,6 +657,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, y)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     def test_sum_and_t(self, device):
         N = 1024
 
@@ -657,6 +668,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     def test_pw_outer_red(self, device):
         def f(x):
             x = realize(x + 1)
@@ -667,6 +679,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     def test_pw_outer_red_2(self, device):
         """
         The pointwise kernel is a fused kernel
@@ -683,6 +696,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     @inductor_config.patch(split_reductions=False)
     def test_different_reduction_order(self, device):
         """
@@ -698,6 +712,7 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(2, metrics.generated_kernel_count)
         self.assertEqual(0, metrics.num_loop_reordering)
 
+    @requires_triton
     def test_keep_fake_dep(self, device):
         """
         In this model, there are fake dependencies (StarDep) between Scatter
@@ -740,6 +755,7 @@ class LoopOrderingTest(TestCase):
         # some buffer is used before being defined.
         f(input_ids, labels, position_ids)
 
+    @requires_triton
     def test_different_broadcast_shapes(self, device):
         def f(x, y, c):
             return x + c, y + c
@@ -752,6 +768,7 @@ class LoopOrderingTest(TestCase):
         # The two kernels are not fused due to c is broadcasted
         self.assertEqual(2, metrics.generated_kernel_count)
 
+    @requires_triton
     def test_view(self, device):
         """
         Passing this test relies that we compare normalized MemoryDep.
@@ -771,6 +788,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     def test_reshape_reindexing_for_reduction(self, device):
         """
         RMS norm pattern where reshape(-1, head_dim) changes the loop
@@ -809,6 +827,7 @@ class LoopOrderingTest(TestCase):
             optf = torch.compile(f)
             print(f"ms={do_bench(lambda: optf(x))}")
 
+    @requires_triton
     @inductor_config.patch("triton.coalesce_tiling_analysis", True)
     def test_reshape_reindexing_transposed_input(self, device):
         """
@@ -846,6 +865,7 @@ class LoopOrderingTest(TestCase):
             )
         )
 
+    @requires_triton
     @inductor_config.patch("loop_ordering_after_fusion", False)
     def test_reshape_reindexing_without_loop_ordering(self, device):
         """
@@ -871,6 +891,7 @@ class LoopOrderingTest(TestCase):
         torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     def test_reindex_unfusable_write_read_dep(self, device):
         """
         Grouped quantization where a custom op consumes both the
@@ -918,6 +939,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     def test_reindex_rollback_on_no_improvement(self, device):
         """
         When reindexing is attempted but doesn't improve the fusion
@@ -939,6 +961,7 @@ class LoopOrderingTest(TestCase):
         x = torch.randn(M, N * 2, device=device)
         self.do_acc_test(f, x)
 
+    @requires_triton
     def test_floordiv_broadcast_vertical_fusion(self, device):
         """
         Block-wise quantization pattern: a reduction produces per-block
@@ -972,6 +995,7 @@ class LoopOrderingTest(TestCase):
         # Block reduction + broadcast pointwise should fuse into 1 kernel
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     @parametrize("nested_reduction", (False, True))
     def test_floordiv_broadcast_with_preceding_reduction(
         self, device, nested_reduction
@@ -1019,6 +1043,7 @@ class LoopOrderingTest(TestCase):
         self.assertTrue(same(expect, actual, tol=1e-2))
         self.assertEqual(1 if nested_reduction else 2, metrics.generated_kernel_count)
 
+    @requires_triton
     @inductor_config.patch(
         layout_optimization=True,
         force_layout_optimization=True,
@@ -1067,6 +1092,7 @@ class LoopOrderingTest(TestCase):
             decisions,
         )
 
+    @requires_triton
     @inductor_config.patch("triton.coalesce_tiling_analysis", True)
     def test_horizontal_reindexing_memory_guard(self, device):
         def f(x):
@@ -1093,6 +1119,7 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(2, metrics.generated_kernel_count)
         self.assertIn(False, target_decisions)
 
+    @requires_triton
     @inductor_config.patch(
         {
             "assert_indirect_indexing": False,
@@ -1134,6 +1161,7 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 2)
         self.assertEqual(actual, f(x))
 
+    @requires_triton
     def test_reindex_attention_layout_clone_for_index_inversion(self, device):
         """Regression test for https://github.com/pytorch/pytorch/issues/188635."""
 
@@ -1151,6 +1179,7 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(inverse.call_count, 1)
         self.assertEqual(metrics.generated_kernel_count, 1)
 
+    @requires_triton
     def test_reindex_block_scale_swizzle_with_epilogue(self, device):
         def f(x):
             y = realize(x + 1)
@@ -1163,6 +1192,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(metrics.generated_kernel_count, 1)
 
+    @requires_triton
     @inductor_config.patch(fx_graph_cache=False)
     def test_noninvertible_reindex_skips_loop_mutation(self, device):
         reindexed = False
@@ -1188,6 +1218,7 @@ class LoopOrderingTest(TestCase):
         self.assertFalse(reindexed)
         self.assertEqual(actual, f(x))
 
+    @requires_triton
     @inductor_config.patch(fx_graph_cache=False)
     def test_rejected_reindex_for_index_inversion_rollback(self, device):
         from torch._inductor.choices import InductorChoices
@@ -1219,6 +1250,7 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(set(observed_sizes), {(1024,)})
         self.assertEqual(actual, f(x))
 
+    @requires_triton
     def test_reshape_reindexing_fused_pointwise(self, device):
         """
         Redecomposition where the pointwise side is a FusedSchedulerNode.
@@ -1250,6 +1282,7 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
         torch._dynamo.reset()
 
+    @requires_triton
     @requires_capabilities(Capability.dtype.fp8)
     def test_fp8_cast_and_t(self, device):
         """
@@ -1272,6 +1305,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, scale)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     @requires_capabilities(Capability.dtype.fp8)
     def test_fp8_pattern_2(self, device):
         """
@@ -1311,6 +1345,7 @@ class LoopOrderingTest(TestCase):
         expected_numbytes += tensor_fp8.nbytes + tensor_fp8_t.nbytes  # output
         self.assertEqual(expected_numbytes, metrics.num_bytes_accessed)
 
+    @requires_triton
     def test_outer_dimension_softmax(self, device):
         """
         This test repros the not able to fuse problem for outer dimension
@@ -1330,6 +1365,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     def test_outer_dimension_sum_fuse_with_pw(self, device):
         """
         Test the fusion of an outer dimension sum with a followed pointwise.
@@ -1355,6 +1391,7 @@ class LoopOrderingTest(TestCase):
     # Disable split reduction to make it easier to calculate the expected
     # number of bytes accessed. In this case, split reduction does not
     # help perf much.
+    @requires_triton
     @inductor_config.patch(split_reductions=False)
     def test_fuse_reduction_with_tiled_pw(self, device):
         def f(x):
@@ -1396,6 +1433,7 @@ class LoopOrderingTest(TestCase):
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
+    @requires_triton
     def test_factored_vs_expanded_pw_numel_in_fused_group(self, device):
         """
         Regression test for https://github.com/pytorch/pytorch/issues/181563
@@ -1438,6 +1476,7 @@ class LoopOrderingTest(TestCase):
         with torch.no_grad():
             self.do_acc_test(mod, x)
 
+    @requires_triton
     @inductor_config.patch(
         {
             "max_autotune": True,
@@ -1450,9 +1489,7 @@ class LoopOrderingTest(TestCase):
         Make sure the dependency prefix for TritonTempalate and its
         prologue match.
         """
-        if not has_triton():
-            self.skipTest("Triton is required for max-autotune")
-        if not is_big_gpu():
+        if not is_big_gpu(torch.device(device)):
             self.skipTest("Need big gpu for max-autotune")
 
         @torch.compile
@@ -1473,6 +1510,7 @@ class LoopOrderingTest(TestCase):
             run_count, 2, "Prologue fusion produces 1 kernel; unfused produces 2"
         )
 
+    @requires_triton
     @inductor_config.patch(
         {
             "max_autotune": True,
@@ -1484,9 +1522,7 @@ class LoopOrderingTest(TestCase):
         """
         Skip MultiTemplateBuffer during loop reordering
         """
-        if not has_triton():
-            self.skipTest("Triton is required for max-autotune")
-        if not is_big_gpu():
+        if not is_big_gpu(torch.device(device)):
             self.skipTest("Need big gpu for max-autotune")
 
         @torch.compile
@@ -1501,6 +1537,7 @@ class LoopOrderingTest(TestCase):
         # didn't fuse due to small savings
         FileCheck().check_count("@triton.jit", 2, exactly=True).run(code[0])
 
+    @requires_triton
     def test_fuse_with_scalar_shared_memory(self, device):
         """
         Make sure if we can fuse two nodes sharing a scalar before,
@@ -1518,6 +1555,7 @@ class LoopOrderingTest(TestCase):
         out, code = run_and_get_code(f, x)
         FileCheck().check_count("@triton.jit", 1, exactly=True).run(code[0])
 
+    @requires_triton
     def test_3dred_pw_2d_outer_red(self, device):
         """
         Test a pattern as follows. We have a 3d contiguous tensor [m, n, k] as input.
@@ -1549,6 +1587,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(0, metrics.num_loop_reordering)
 
+    @requires_triton
     def test_qknorm_rope_fusion(self, device):
         """
         When qknorm (RMS norm) is followed by RoPE which uses cat, the cat
@@ -1582,6 +1621,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, q, norm_weight, freqs_cos, freqs_sin)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @requires_triton
     def test_qknorm_interleaved_rope_fusion(self, device):
         """
         Interleaved RoPE (stack + flatten) should also fuse with qknorm.
@@ -1623,7 +1663,10 @@ class MemoryCoalescingTest(MockSchedulerTest):
     def setUp(self):
         super().setUp()
         metrics.reset()
-        self._config_patch = inductor_config.patch(
+        # config.patch cannot be a class decorator here: it returns a subclass
+        # whose __dict__ holds no test methods, so instantiate_device_type_tests
+        # would silently collect zero tests.
+        ctx = inductor_config.patch(
             {
                 "triton.unique_kernel_names": True,
                 "loop_ordering_after_fusion": True,
@@ -1631,11 +1674,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
                 "triton.coalesce_tiling_analysis": True,
             }
         )
-        self._config_patch.__enter__()
-
-    def tearDown(self):
-        self._config_patch.__exit__(None, None, None)
-        super().tearDown()
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
 
     def _check_memory_metrics(self, node, expected_tiling):
         analysis = node.get_coalesce_analysis()
@@ -1736,6 +1776,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
         var_ranges = fused_norm_read_writes.var_ranges
         self.assertEqual(list(var_ranges.values()), list(expected_size))
 
+    @requires_triton
     def test_remapped_reads(self, device):
         from torch._inductor import tiling_utils
 
@@ -1769,6 +1810,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
                 torch.rand([4, 4], device=device).T,
             )
 
+    @requires_triton
     def test_remapped_reads_split(self, device):
         from torch._inductor import tiling_utils
 
@@ -1811,6 +1853,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
                 torch.rand([6, 6], device=device).T,
             )
 
+    @requires_triton
     @parametrize("dynamic", (False, True))
     def test_reduction_pointwise(self, device, dynamic):
         # test one pw var, one red var
@@ -1857,6 +1900,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
             self.assertEqual(foo(x, y), torch.compile(foo)(x, y))
 
+    @requires_triton
     @parametrize("dynamic", (False, True))
     def test_reduction_no_pointwise(self, device, dynamic):
         # test one pw var, one red var
@@ -1883,6 +1927,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
             self.assertEqual(foo(x), torch.compile(foo)(x))
 
+    @requires_triton
     @parametrize("downcast_transposed_v", (False, True))
     @parametrize("dynamic", (False, True))
     def test_tiled_coalesce_analysis(self, device, downcast_transposed_v, dynamic):
@@ -1923,6 +1968,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
             self.assertEqual(foo(x, y), torch.compile(foo)(x, y))
 
+    @requires_triton
     def test_multiple_reduction_dims(self, device):
         def foo(x):
             return (*torch.var_mean(x, [1, 3]),)
@@ -1955,6 +2001,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             out = torch.compile(foo)(inp)
             self.assertEqual(out, out_eager)
 
+    @requires_triton
     def test_reduction_memory_costs_follow_selected_tiling(self, device):
         def foo(x, y):
             return (x + y).sum((1, 3))
@@ -2000,6 +2047,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
         ):
             self.assertEqual(torch.compile(foo)(x, y), foo(x, y))
 
+    @requires_triton
     @parametrize("dynamic", (False, True))
     def test_induced_fused_tiling(self, device, dynamic):
         def fn(nodes):
@@ -2156,6 +2204,22 @@ class MemoryMetricsSolveTest(TestCase):
         ):
             self.assertIsNone(tiling_utils.solve_for_zero(expr))
 
+    def test_find_broadcast_var(self):
+        """Test broadcast variable detection for tiling improvements."""
+        from torch._inductor import tiling_utils
+
+        i, j, k = sympy.symbols("i j k", integer=True)
+
+        # Test broadcast pattern detection: FloorDiv creates broadcast
+        result = tiling_utils.find_broadcast_var(
+            FloorDiv(i, 10), {i: 100, j: 50, k: 20}
+        )
+        self.assertEqual(result, i)
+
+        # Test non-broadcast: linear access pattern
+        result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8, k: 20})
+        self.assertEqual(result, None)
+
 
 layouts = ("cont", "NHWC", "T")
 
@@ -2165,18 +2229,18 @@ class TestTiling(TestCase):
 
     def setUp(self):
         super().setUp()
-        self._config_patch = inductor_config.patch(
+        # config.patch cannot be a class decorator here: it returns a subclass
+        # whose __dict__ holds no test methods, so instantiate_device_type_tests
+        # would silently collect zero tests.
+        ctx = inductor_config.patch(
             {
                 "triton.unique_kernel_names": True,
                 "loop_ordering_after_fusion": True,
                 "triton.coalesce_tiling_analysis": True,
             }
         )
-        self._config_patch.__enter__()
-
-    def tearDown(self):
-        self._config_patch.__exit__(None, None, None)
-        super().tearDown()
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
 
     def T(self, device, layout: str):
         SIZE_A = 128
@@ -2200,6 +2264,7 @@ class TestTiling(TestCase):
                 memory_format=torch.channels_last
             )
 
+    @requires_triton
     @parametrize("a", layouts)
     @parametrize("b", layouts)
     @parametrize("dynamic", (False, True))
@@ -2217,6 +2282,7 @@ class TestTiling(TestCase):
 
         self.assertEqual(res, foo(x, y))
 
+    @requires_triton
     def test_tiled_reduction(self, device):
         def f(a, b):
             return (a * b).sum(dim=-1)
@@ -2234,6 +2300,7 @@ class TestTiling(TestCase):
         ).run(code[0])
         self.assertEqual(out, f(*inps), atol=0.001, rtol=0.04)
 
+    @requires_triton
     @parametrize("dynamic", (False, True))
     def test_3d_pointwise(self, device, dynamic):
         inps = (self.T(device, "cont"), self.T(device, "T"), self.T(device, "NHWC"))
@@ -2249,6 +2316,7 @@ class TestTiling(TestCase):
         )
         self.assertEqual(out, f(*inps))
 
+    @requires_triton
     def test_cat(self, device):
         # test unwrapping Identity
 
@@ -2265,6 +2333,7 @@ class TestTiling(TestCase):
         FileCheck().check_dag("ynumel").check_dag("xnumel").run(code[0])
         self.assertEqual(out, f(*inps))
 
+    @requires_triton
     def test_penalized_small_dim(self, device):
         x = torch.rand([2000, 1], device=device)
         y = torch.rand([4, 1], device=device).T
@@ -2280,6 +2349,7 @@ class TestTiling(TestCase):
         FileCheck().check_not("ynumel").check_dag("xnumel").run(code[0])
         self.assertEqual(out, f(*inps))
 
+    @requires_triton
     def test_mutation_deps(self, device):
         def f(x):
             return x.add_(1)
@@ -2311,22 +2381,7 @@ class TestTiling(TestCase):
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
             torch.compile(f)(x)
 
-    def test_find_broadcast_var(self, device):
-        """Test broadcast variable detection for tiling improvements."""
-        from torch._inductor import tiling_utils
-
-        i, j, k = sympy.symbols("i j k", integer=True)
-
-        # Test broadcast pattern detection: FloorDiv creates broadcast
-        result = tiling_utils.find_broadcast_var(
-            FloorDiv(i, 10), {i: 100, j: 50, k: 20}
-        )
-        self.assertEqual(result, i)
-
-        # Test non-broadcast: linear access pattern
-        result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8, k: 20})
-        self.assertEqual(result, None)
-
+    @requires_triton
     def test_indirect_access_not_coalesced(self, device):
         """Test that memory accesses with indirect indexing are treated as uncoalesced.
 
@@ -2400,6 +2455,7 @@ class TestTiling(TestCase):
         expected = embedding_1d(indices, weights)
         self.assertEqual(out, expected)
 
+    @requires_triton
     @parametrize("dynamic", (False, True))
     def test_scatter_broadcast_no_tiling(self, device, dynamic):
         """Scatter with broadcast loads should not trigger 2D tiling."""
@@ -2423,6 +2479,7 @@ class TestTiling(TestCase):
         FileCheck().check_not("ynumel").run(code[0])
         self.assertEqual(out, f(src, features))
 
+    @requires_triton
     def test_cont_plus_transposed_picks_2d(self, device):
         """Contiguous + transposed addition should still pick 2D tiling."""
         x = torch.randn(256, 256, device=device)
@@ -2435,6 +2492,7 @@ class TestTiling(TestCase):
         FileCheck().check("ynumel").run(code[0])
         self.assertEqual(out, f(x, y))
 
+    @requires_triton
     def test_mixed_broadcast_transpose_picks_2d(self, device):
         """Mixed broadcast and transposed access: 2D chosen for real coalescing only."""
         x = torch.randn(256, 256, device=device)
@@ -2878,5 +2936,4 @@ instantiate_device_type_tests(TestTiling, globals(), except_for="cpu", allow_xpu
 
 
 if __name__ == "__main__":
-    if has_triton():
-        run_tests()
+    run_tests()
