@@ -852,7 +852,7 @@ class BatchLinearLHSFusion(BatchFusion):
         )
         return group_key
 
-    def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
+    def fuse(self, graph: torch.fx.Graph, subset: list[torch.fx.Node]):
         """
         Fuse linear nodes into one wide GEMM and split the result. Returns
         False to decline the subset when its fused weights plus the copies
