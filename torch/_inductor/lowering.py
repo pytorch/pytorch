@@ -3970,7 +3970,9 @@ def constrain_to_fx_exact_strides(fx_node, *args, **kwargs):
         lambda node: node.meta.get("val"),
         (fx_node.args, fx_node.kwargs),
     )
-    return constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs)
+    return constrain_to_fake_tensors(
+        args, kwargs, fake_args, fake_kwargs, fx_node=fx_node
+    )
 
 
 # The mv decomposition retains native CUDA reduction order under strict numerics.
