@@ -65,14 +65,16 @@
 // (autocast, the default dtype, deterministic algorithms) is one integer,
 // taken when the trace starts and compared first.
 //
-// Three kinds of entries are dropped rather than checked. One whose holder
-// doesn't hold what was read any more when the trace ends: the traced run
-// changed it itself, and it was something the run made (a list it builds,
-// the object it constructs). One whose holder nothing else refers to:
-// nothing can change it. And one whose holder is a list, dict or set the
-// traced run made (made.rs), whoever still refers to it: a region's run
-// makes its own. They keep the traced call's temporaries and results from
-// being kept alive, and from failing every check.
+// Two kinds of entries are dropped rather than checked. One whose holder
+// nothing else refers to: nothing can change it. And one whose holder is a
+// list, dict or set the traced run made (made.rs), whoever still refers to
+// it: a region's run makes its own. They keep the traced call's temporaries
+// and results from being kept alive, and from failing every check. An entry
+// of anything else is never dropped: one that is not as it was read when the
+// traced body is over refuses the trace, unless a write the run recorded
+// explains it (see _region_settled), because what changed it is something
+// no region would do again; and one that changes later is a later call's
+// miss.
 //
 // The writes of the traced run to what outlives it are recorded by writes.rs:
 // a region makes them again, in order, on every run. Here is what they mean
@@ -96,7 +98,7 @@ use super::ffi::*;
 use super::overlap::Overlap;
 use super::special;
 use crate::bindings::ffi as tffi;
-use crate::cfg::ir::TensorSpec;
+use super::tensor_key::TensorKey;
 
 // What a tensor answers about itself that a region neither checks nor
 // computes, so that a trace that asks is refused: what autograd keeps on it,
@@ -234,29 +236,6 @@ struct Dicted {
     dict: Py<PyAny>,
 }
 
-// What a tensor is compared on: its class, and what tensor_matches takes.
-struct Key {
-    class: Py<PyAny>,
-    spec: TensorSpec,
-    requires_grad: bool,
-}
-
-impl Key {
-    // None: no plain strided tensor, which nothing here can compare.
-    unsafe fn of(o: *mut PyObject) -> Option<Key> {
-        let t = tffi::tensor_by_type(o as usize).as_ref()?;
-        let mut m = tffi::TensorMeta::default();
-        tffi::tensor_meta(t, &mut m);
-        let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes: t.sizes().to_vec(), strides: t.strides().to_vec() };
-        tffi::tensor_matches(t, spec.dtype, spec.device_type, spec.device_index, &spec.sizes, &spec.strides).then(|| Key { class: own(ffi::Py_TYPE(o) as *mut PyObject), spec, requires_grad: t.requires_grad() })
-    }
-
-    unsafe fn holds(&self, o: *mut PyObject) -> bool {
-        let s = &self.spec;
-        tffi::tensor_by_type(o as usize).as_ref().is_some_and(|t| ffi::Py_TYPE(o) as *mut PyObject == self.class.as_ptr() && t.requires_grad() == self.requires_grad && tffi::tensor_matches(t, s.dtype, s.device_type, s.device_index, &s.sizes, &s.strides))
-    }
-}
-
 // A tensor the traced run found by a read (an item, a cell, an attribute:
 // state, not an argument) and asked something of: its dtype or shape, whether
 // it requires grad, its length, its class, a method. The answer is in the
@@ -267,7 +246,7 @@ impl Key {
 // the one.
 struct Keyed {
     obj: Py<PyAny>,
-    key: Key,
+    key: TensorKey,
 }
 
 // A tensor the run asked something of, while the trace runs: most are the
@@ -275,8 +254,8 @@ struct Keyed {
 // later at the address of one that died is asked anew.
 struct Asked {
     weak: Py<PyAny>,
-    // None: see Key::of.
-    key: Option<Key>,
+    // None: it has no key (see exec/tensor_key.rs).
+    key: Option<TensorKey>,
 }
 
 #[derive(Default)]
@@ -327,6 +306,19 @@ struct Trace {
     // by address.
     asked_of: Vec<Asked>,
     asked_at: HashMap<usize, usize>,
+    // What was no longer as it was read when the body was over, by the
+    // address of what it was read from (see _region_settled).
+    stale: Vec<(Stale, usize, String)>,
+}
+
+// What a stale read was read from: a cell, a function (its code and
+// defaults), an object (its __dict__), a container (an item, all of it, its
+// length).
+enum Stale {
+    Cell,
+    Function,
+    Dict,
+    Group,
 }
 
 thread_local! {
@@ -504,6 +496,25 @@ pub(super) unsafe fn text(o: *mut PyObject) -> String {
 
 pub(super) unsafe fn type_name(o: *mut PyObject) -> String {
     std::ffi::CStr::from_ptr((*ffi::Py_TYPE(o)).tp_name).to_string_lossy().into_owned()
+}
+
+// For a refusal: an int, a float or a str as it prints (C code), anything
+// else by its class; NULL is nothing.
+unsafe fn shown(o: *mut PyObject) -> String {
+    if o.is_null() {
+        return "nothing".into();
+    }
+    if !exact_scalar(o) {
+        return format!("a {}", type_name(o));
+    }
+    let r = ffi::PyObject_Repr(o);
+    if r.is_null() {
+        ffi::PyErr_Clear();
+        return "?".into();
+    }
+    let out = text(r);
+    ffi::Py_DECREF(r);
+    out
 }
 
 // The item of dict d at key k (borrowed), NULL if absent; no Python code runs
@@ -778,7 +789,7 @@ impl Trace {
             return;
         }
         self.asked_at.insert(o as usize, self.asked_of.len());
-        self.asked_of.push(Asked { weak: Py::from_owned_ptr(Python::assume_attached(), weak), key: Key::of(o) });
+        self.asked_of.push(Asked { weak: Py::from_owned_ptr(Python::assume_attached(), weak), key: TensorKey::of(o) });
     }
 
     unsafe fn container(o: *mut PyObject) -> Option<(*mut PyObject, Holder)> {
@@ -1448,11 +1459,9 @@ pub unsafe fn built_starred(callee: *mut PyObject, args: *mut PyObject, kwargs: 
 // and a lowering that was bound to the constants is bound anew first.
 struct Constant {
     obj: Py<PyAny>,
-    // Its class at the trace, which Python code reads of it and no operator
-    // does: the program can bind another to the same object.
-    class: Py<PyAny>,
-    spec: TensorSpec,
-    requires_grad: bool,
+    // What it was at the trace (the class too: the program can bind another
+    // to the same object).
+    key: TensorKey,
     at: Cell<usize>,
     // For a constant a pass keeps something derived from (torch.vm.Unwritten):
     // its version counter when the pass looked. The region is entered while
@@ -1581,10 +1590,7 @@ fn held(e: &Entries, hold: &mut impl FnMut(&Py<PyAny>)) {
         hold(&m.class);
         hold(&m.mro);
     }
-    for k in &e.keyed {
-        hold(&k.obj);
-        hold(&k.key.class);
-    }
+    e.keyed.iter().for_each(|k| hold(&k.obj));
     for g in &e.groups {
         hold(&g.holder);
         for i in &g.items {
@@ -1680,8 +1686,7 @@ impl Reads {
         let watch = (*self.rebind.get()).is_some() || overlap.is_some();
         for c in &*self.consts.get() {
             let Some(t) = tffi::tensor_by_type(c.obj.as_ptr() as usize).as_ref() else { return Some(metadata) };
-            let class = ffi::Py_TYPE(c.obj.as_ptr()) as *mut PyObject;
-            if class != c.class.as_ptr() || t.requires_grad() != c.requires_grad || !tffi::tensor_matches(t, c.spec.dtype, c.spec.device_type, c.spec.device_index, &c.spec.sizes, &c.spec.strides) {
+            if !c.key.holds(c.obj.as_ptr()) {
                 return Some(metadata);
             }
             if let Some(version) = c.unwritten
@@ -1751,22 +1756,17 @@ impl Reads {
     }
 
     /// The tensors the region's graph reads that are none of its arguments
-    /// (weights): the region is entered while each has the dtype, device,
-    /// sizes, strides and requires_grad it has now. ``unwritten`` has, for a
-    /// constant under torch.vm.Unwritten, the version counter it is to keep
-    /// (None for the others). Returns how many of the constants are checked:
-    /// all that are plain strided tensors.
+    /// (weights): the region is entered while each has the key it has now
+    /// (exec/tensor_key.rs). ``unwritten`` has, for a constant under
+    /// torch.vm.Unwritten, the version counter it is to keep (None for the
+    /// others). Returns how many of the constants are checked: those that
+    /// have a key.
     fn constants(&self, consts: Vec<Bound<'_, PyAny>>, unwritten: Vec<Option<i64>>) -> usize {
         let list = unsafe { &mut *self.consts.get() };
         for (x, unwritten) in consts.into_iter().zip(unwritten) {
-            let Some(t) = (unsafe { tffi::tensor_by_type(x.as_ptr() as usize).as_ref() }) else { continue };
-            let mut m = tffi::TensorMeta::default();
-            tffi::tensor_meta(t, &mut m);
-            let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes: t.sizes().to_vec(), strides: t.strides().to_vec() };
-            if tffi::tensor_matches(t, spec.dtype, spec.device_type, spec.device_index, &spec.sizes, &spec.strides) {
-                let class = x.get_type().into_any().unbind();
-                list.push(Constant { obj: x.unbind(), class, spec, requires_grad: t.requires_grad(), at: Cell::new(tffi::tensor_data_address(t)), unwritten });
-            }
+            let Some(key) = (unsafe { TensorKey::of(x.as_ptr()) }) else { continue };
+            let at = unsafe { tffi::tensor_by_type(x.as_ptr() as usize).as_ref() }.map_or(0, tffi::tensor_data_address);
+            list.push(Constant { obj: x.unbind(), key, at: Cell::new(at), unwritten });
         }
         list.len()
     }
@@ -1830,8 +1830,8 @@ impl Reads {
             if unsafe { exact_scalar(o.as_ptr()) } || o.is_none() || o.is_instance_of::<pyo3::types::PyBool>() { format!("{}", o.repr().map_or("?".into(), |r| r.to_string())) } else { format!("<{tp} at {:p}>", o.as_ptr()) }
         };
         let mut out = vec![format!("thread state {:#x}", self.thread)];
-        out.extend(unsafe { &*self.consts.get() }.iter().map(|c| format!("{} keeps its shape {:?}, strides, dtype, device and requires_grad", show(&c.obj), c.spec.sizes)));
-        out.extend(e.keyed.iter().map(|k| format!("{} keeps its class, shape {:?}, strides, dtype, device and requires_grad", show(&k.obj), k.key.spec.sizes)));
+        out.extend(unsafe { &*self.consts.get() }.iter().map(|c| format!("{} stays a {}", show(&c.obj), c.key)));
+        out.extend(e.keyed.iter().map(|k| format!("{}, which was asked about, stays a {}", show(&k.obj), k.key)));
         out.extend(e.typed.iter().map(|t| format!("type({}) is {}", show(&t.obj), show(&t.class))));
         for c in &e.classes {
             let class = c.class.bind(py).getattr("__qualname__").map_or("?".into(), |n| n.to_string());
@@ -1948,6 +1948,53 @@ pub fn _region_known(obj: &Bound<'_, PyAny>, given: Vec<Bound<'_, PyAny>>) -> bo
     TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| unsafe { leads_to(&t.entries, &given, obj.as_ptr()) }))
 }
 
+/// The body of the trace on this thread is over, and everything is still as
+/// its run left it (the trace's stand-ins for the floats of the arguments
+/// are where the body found them): notes every read that is no longer as it
+/// was read, unless a write the run recorded explains it (the holder is one
+/// the run wrote to, the cell one it made or stored into). `_region_reads`
+/// refuses the trace for each of them whose holder outlives the run.
+#[pyfunction]
+pub fn _region_settled() {
+    TRACE.with_borrow_mut(|t| {
+        let Some(t) = t else { return };
+        let e = &t.entries;
+        let wrote: HashSet<usize> = t.written.iter().map(|(h, _)| *h).chain(t.changed.iter().copied()).collect();
+        let mut stale = vec![];
+        unsafe {
+            for r in e.reads.iter().filter(|r| r.name.is_none() && !r.holds() && !super::made::own_cell(r.obj.as_ptr())) {
+                let was = shown(r.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr()));
+                stale.push((Stale::Cell, r.obj.as_ptr() as usize, format!("a cell that held {was} and holds {}", shown(PyCell_Get_borrowed(r.obj.as_ptr())))));
+            }
+            for f in e.functions.iter().filter(|f| !f.holds()) {
+                stale.push((Stale::Function, f.func.as_ptr() as usize, format!("the code and the defaults of {}, which are others", text((*(f.func.as_ptr() as *mut ffi::PyFunctionObject)).func_qualname))));
+            }
+            for d in e.dicted.iter().filter(|d| tr_instance_dict(d.obj.as_ptr()) != d.dict.as_ptr()) {
+                stale.push((Stale::Dict, d.obj.as_ptr() as usize, format!("the __dict__ of a {}, which is another dict", type_name(d.obj.as_ptr()))));
+            }
+            for g in e.groups.iter().filter(|g| !wrote.contains(&(g.holder.as_ptr() as usize))) {
+                let (h, kind) = (g.holder.as_ptr(), g.kind);
+                let of = type_name(h);
+                let item = g.items.iter().find(|i| !i.holds(h, kind)).map(|i| {
+                    let was = match i.want {
+                        Want::Absent => "nothing".into(),
+                        Want::Present => "something".into(),
+                        Want::Is | Want::Equal => shown(i.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr())),
+                    };
+                    let now = if kind == Holder::Dict { shown(dict_get(h, i.key.as_ptr())) } else { "another object".into() };
+                    format!("item {} of a {of}, which was {was} and is {now}", shown(i.key.as_ptr()))
+                });
+                let whole = g.whole.as_ref().filter(|w| !w.holds(h, kind)).map(|w| format!("a {of} whole{}, which holds something else", w.at));
+                let len = g.len.filter(|n| size(h, kind) != *n).map(|n| format!("the length of a {of}, which was {n} and is {}", size(h, kind)));
+                if let Some(what) = item.or(whole).or(len) {
+                    stale.push((Stale::Group, h as usize, what));
+                }
+            }
+        }
+        t.stale = stale;
+    });
+}
+
 static MISSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// How many times a region wasn't entered because what its trace read had
@@ -2012,28 +2059,27 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
             let why = if ordered_ok(g.holder.as_ptr(), g.kind) { "whole after changing it" } else { "whole, and its keys are not all strs or ints" };
             return Ok((None, Some(format!("it reads a {} {why}{}", type_name(g.holder.as_ptr()), g.late_at))));
         }
-        // What changed after the run read it, by other ways than the run's
-        // recorded writes, is no check. What the run read of a container (or
-        // an object's __dict__) it then wrote to stays as it was read: that
-        // is how a later call must find it for the region's writes to be the
-        // run's (the region writes to it again).
-        let wrote: HashSet<usize> = t.written.iter().map(|(h, _)| *h).chain(t.changed.iter().copied()).collect();
-        e.reads.retain(|r| r.holds() || r.name.as_ref().is_some_and(|n| t.written.contains(&(r.obj.as_ptr() as usize, n.as_ptr() as usize))));
-        e.functions.retain(|f| f.holds());
-        e.dicted.retain(|d| tr_instance_dict(d.obj.as_ptr()) == d.dict.as_ptr());
-        for g in &mut e.groups {
-            let (h, kind) = (g.holder.as_ptr(), g.kind);
-            if wrote.contains(&(h as usize)) {
-                continue;
-            }
-            g.items.retain(|i| i.holds(h, kind));
-            if g.whole.as_ref().is_some_and(|w| !w.holds(h, kind)) {
-                g.whole = None;
-            }
-            if g.len.is_some_and(|n| size(h, kind) != n) {
-                g.len = None;
-            }
+        // What was no longer as it was read when the body was over (see
+        // _region_settled), in something that outlives the run: a region
+        // without that check would run on a state its trace did not see.
+        let stale = |what: &str| -> PyResult<(Option<Py<Reads>>, Option<String>)> { Ok((None, Some(format!("it read {what} when the traced run ends, and no write the run recorded explains it")))) };
+        let at = |o: &Py<PyAny>| o.as_ptr() as usize;
+        if let Some((_, _, what)) = t.stale.iter().find(|(kind, a, _)| match kind {
+            Stale::Cell => e.reads.iter().any(|r| r.name.is_none() && at(&r.obj) == *a),
+            Stale::Function => e.functions.iter().any(|f| at(&f.func) == *a),
+            Stale::Dict => e.dicted.iter().any(|d| at(&d.obj) == *a),
+            Stale::Group => e.groups.iter().any(|g| at(&g.holder) == *a),
+        }) {
+            return stale(what);
         }
+        // What a cell the run made or stored into held before is no check.
+        // Everything else stays as it was read, whatever is there now: what
+        // the run read of a container (or an object's __dict__) it then wrote
+        // to is how a later call must find it for the region's writes to be
+        // the run's, and what changed since the body ended is a later call's
+        // to find changed (the floats the trace puts back into the
+        // arguments' containers are the region's own to check: see forget).
+        e.reads.retain(|r| r.name.is_some() || r.holds() || !super::made::own_cell(r.obj.as_ptr()));
         sweep(&mut e);
         // The tensors asked about that a read found: each with the key it
         // had when it was first asked.
@@ -2045,8 +2091,11 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
                 continue;
             }
             let Some(key) = a.key else {
-                return Ok((None, Some(format!("it asks about a {} it read from state that is no plain strided tensor, which it cannot check", type_name(o)))));
+                return Ok((None, Some(format!("it asks about a {} it read from state that has no key (no plain dense tensor of exactly torch.Tensor or nn.Parameter), which it cannot check", type_name(o)))));
             };
+            if !key.holds(o) {
+                return stale(&format!("the class, dtype, device, shape or requires_grad of a {}, which is another", type_name(o)));
+            }
             e.keyed.push(Keyed { obj: own(o), key });
         }
     }

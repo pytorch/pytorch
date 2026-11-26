@@ -218,14 +218,9 @@ def _is_float(x) -> bool:
 
 def _same_value(x, kind: type, want) -> bool:
     """Whether x is the value ``want`` of exactly the type ``kind``, as a
-    region's check asks: equal, and for a float the same number (0.0 and
-    -0.0 are equal and are two numbers: a product, a text and a division by
-    either differ)."""
-    return (
-        type(x) is kind
-        and x == want
-        and (kind is not float or x != 0.0 or math.copysign(1.0, x) == math.copysign(1.0, want))
-    )
+    region's check asks: not equal (0.0 and -0.0, True and 1, 1 and 1.0 are)
+    but the same to whatever reads it, by the one rule of exec/exact.rs."""
+    return type(x) is kind and _rust()._same(x, want)
 
 
 def _tracer() -> PythonKeyTracer:
@@ -1468,8 +1463,20 @@ def _run_graph(record: Trace, repeatable: bool, call, *args):
     return out
 
 
-def _meta(t: torch.Tensor):
-    return (type(t), t.dtype, t.device, t.shape, t.stride(), t.requires_grad)
+def _meta(t: torch.Tensor, where: str):
+    """What a region compares of a tensor it is entered with (the one
+    definition: exec/tensor_key.rs). A tensor that has no key (of a class
+    that is not exactly Tensor or Parameter, or not plain, dense and strided)
+    enters no region: the trace is refused."""
+    key = _rust().TensorKey.of(t)
+    if key is None:
+        what = (
+            "tensor that is not plain and strided"
+            if type(t) in _PLAIN
+            else type(t).__name__
+        )
+        raise _Refused(f"{where} is a {what}")
+    return key
 
 
 def _unsure_key(k) -> bool:
@@ -1505,9 +1512,7 @@ def _leaf_check(leaf, where, scalars=False):
     if scalars and _is_float(leaf):
         return (_FLOAT, None)
     if isinstance(leaf, torch.Tensor):
-        if type(leaf) not in _PLAIN:
-            raise _Refused(f"{where} is a {type(leaf).__name__}")
-        return (_TENSOR, _meta(leaf))
+        return (_TENSOR, _meta(leaf, where))
     if type(leaf) in _IMMUTABLE or isinstance(leaf, torch.Size):
         return (_VALUE, (type(leaf), leaf))
     if isinstance(leaf, (list, dict, set)):
@@ -1532,15 +1537,10 @@ def _plan(args, unused, span=False, scalars=False):
             checks.append(("null", i))
             plan.append(None)
         elif isinstance(a, torch.Tensor):
-            if type(a) not in _PLAIN:
-                raise _Refused(f"arg {i} is a {type(a).__name__}")
-            # The class first: what Python code reads of the tensor
-            # (`x.__class__`, a method a subclass has of its own) is no part
-            # of the graph, and a tensor of another class is turned down
-            # before its sizes are looked at.
-            checks.append(("class", i, a))
+            # The guard compares the key of this tensor (the class in it:
+            # what Python code reads of the tensor is no part of the graph).
+            _meta(a, f"arg {i}")
             checks.append(("tensor", i, a))
-            checks.append(("requires_grad", i, a.requires_grad))
             plan.append(("tensor",))
         elif scalars and _is_float(a):
             plan.append(("float", None))
@@ -1611,7 +1611,7 @@ def _inputs(args, plan, why=None):
             floats.append(float.__float__(a))
             continue
         if p[0] == "equal":
-            if type(a) is not p[1] or a != p[2]:
+            if not _rust()._same(a, p[2]):
                 if why is not None:
                     why.append(f"arg {i} ({p[1].__name__}, checked by value)")
                 return None
@@ -1629,7 +1629,7 @@ def _inputs(args, plan, why=None):
             return None
         for k, (leaf, (kind, want)) in enumerate(zip(leaves, p[2])):
             if kind == _TENSOR:
-                ok = isinstance(leaf, torch.Tensor) and _meta(leaf) == want
+                ok = want.holds(leaf)
                 if ok:
                     inputs.append(leaf)
             elif kind == _VALUE:
@@ -2528,7 +2528,7 @@ def _compile(name, gm, example, consts, args, plan, types):
         named = _named(gm)
         key = (
             gm.code,
-            tuple(_meta(t) for t in example + consts),
+            tuple(_meta(t, "an input") for t in example + consts),
             torch.is_grad_enabled(),
             _shares(example, consts),
             tuple(map(id, named)),
@@ -2582,7 +2582,8 @@ def _compile_vm(name, gm, example, consts, input_types):
         block_pipeline,
         gm.code,
         tuple(
-            _meta(t) if isinstance(t, torch.Tensor) else float for t in example + consts
+            _meta(t, "an input") if isinstance(t, torch.Tensor) else float
+            for t in example + consts
         ),
         torch.is_grad_enabled(),
         autocast_on().raw_repr(),
@@ -2674,7 +2675,7 @@ def _span_checks(checks):
             out.append((kind, c[1], tuple(c[3])))
         elif kind in ("is", "set"):
             out.append((kind, c[1], c[2]))
-        elif kind not in ("requires_grad", "class"):
+        else:
             raise _Refused(f"a span can't check {kind}")
     if tensors:
         out.append(
@@ -2794,6 +2795,7 @@ def _dropped(func, settled: bool = False) -> None:
 
 
 def _span_holds(checks, args) -> bool:
+    same = _rust()._same
     for kind, i, want in checks:
         if kind == "grad_enabled":
             ok = torch.is_grad_enabled() == want
@@ -2804,9 +2806,14 @@ def _span_holds(checks, args) -> bool:
         elif kind == "value":
             ok = _same_value(args[i], *want)
         elif kind == "ints":
-            ok = type(args[i]) is tuple and args[i] == want
+            ok = same(args[i], want)
         elif kind == "set":
-            ok = type(args[i]) is set and args[i] == want
+            # Not `==`: a set of 1 and one of True or of 1.0 are equal.
+            ok = (
+                type(args[i]) is set
+                and len(args[i]) == len(want)
+                and all(any(same(x, y) for y in want) for x in args[i])
+            )
         else:
             ok = args[i] is want
         if not ok:
@@ -3145,6 +3152,9 @@ def _trace_region(
             result["tensors"] = tensor_outs
             return tensor_outs
         finally:
+            # While the stand-ins are still where the body found them: what
+            # the run read that is no longer as it was read (exec/reads.rs).
+            _rust()._region_settled()
             _scalar_state = None
             for container, k, v, stand_in in reversed(restore):
                 # Only where the stand-in still is: a slot the body wrote to
@@ -3257,6 +3267,8 @@ def _trace_region(
         return None
     try:
         consts = _lift_constants(gm)
+        for const in consts:
+            _meta(const, "a tensor it reads from outside its arguments")
     except _Refused as e:
         stats["refused"] += 1
         _traced(name, "refused", str(e))

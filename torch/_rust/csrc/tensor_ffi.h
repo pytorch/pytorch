@@ -63,13 +63,21 @@ bool forward_ad_active();
 // Whether saved_tensors_hooks would pack tensors saved for backward.
 bool saved_tensor_hooks_active();
 
-// Whether t is a plain strided tensor with exactly this dtype, device, sizes
-// and strides (c10's enums for dtype and device).
-bool tensor_matches(
+// Defined by the cxx bridge (src/bindings/ffi.rs).
+struct TensorFacts;
+
+// The one definition of what a region compares of a tensor it is entered
+// with (see src/exec/tensor_key.rs, which adds the Python class): fills in
+// the dtype and the device (c10's enums) and, in `bits`, requires_grad (1),
+// the conjugate bit (2), the negative bit (4) and whether it is an inference
+// tensor (8); the sizes and strides are the tensor's own. False for a tensor
+// that has no key and so enters no region: one that is not a plain dense
+// strided tensor with concrete sizes.
+bool tensor_key(const Tensor& t, TensorFacts& out) noexcept;
+// Whether t has a key, and it is exactly this one.
+bool tensor_key_is(
     const Tensor& t,
-    int8_t dtype,
-    int8_t device_type,
-    int8_t device_index,
+    const TensorFacts& want,
     ::rust::Slice<const int64_t> sizes,
     ::rust::Slice<const int64_t> strides) noexcept;
 

@@ -11219,8 +11219,6 @@ class TestVmGraphResults(TestCase):
                 expected = calls(fn, usual, other, graded)
                 self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
 
-    # The results, or how often the Python code of a dict key runs, differ from eager's.
-    @unittest.expectedFailure
     @isolated
     def test_the_code_of_a_key_runs_as_often_as_the_instructions_run_it(self, device):
         def keep(gm, input_types):

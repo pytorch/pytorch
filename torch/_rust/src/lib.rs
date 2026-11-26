@@ -103,13 +103,16 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::_cfg_opaque, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_opaque_site, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_set_cfg_scalar_reads, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::exact::_same, m)?)?;
     m.add_class::<exec::TreeChecks>()?;
+    m.add_class::<exec::tensor_key::TensorKey>()?;
     m.add_function(wrap_pyfunction!(exec::region::_region_given_up, m)?)?;
     m.add_function(wrap_pyfunction!(exec::region::_region_body, m)?)?;
     m.add_function(wrap_pyfunction!(exec::region::_region_refuse, m)?)?;
     m.add_function(wrap_pyfunction!(exec::value_reads::_region_value_read, m)?)?;
     m.add_function(wrap_pyfunction!(exec::value_reads::_region_value_needed, m)?)?;
     m.add_function(wrap_pyfunction!(exec::reads::_region_reads, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_settled, m)?)?;
     m.add_function(wrap_pyfunction!(exec::reads::_region_known, m)?)?;
     m.add_function(wrap_pyfunction!(exec::reads::_region_made, m)?)?;
     m.add_function(wrap_pyfunction!(exec::reads::_region_read_misses, m)?)?;

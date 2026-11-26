@@ -11,6 +11,7 @@ NotOverlapping) are checked on every call, in front of the version.
 """
 
 import dataclasses
+import sys
 from typing import Any
 
 import torch
@@ -203,13 +204,16 @@ class TensorMeta(Check):
 
 @dataclasses.dataclass(frozen=True)
 class Value(Check):
-    """The value equals ``value`` (None, a bool, int or float)."""
+    """The value is ``value`` (None, a bool, int or float): of exactly its
+    class and bit for bit the same. Not ``==``: 0.0 and -0.0, True and 1, 1
+    and 1.0 are equal, and a graph with one baked in is not a graph for the
+    other."""
 
     value: Any
     dynamic = True
 
     def holds(self, t, value_of):
-        return type(t) is type(self.value) and t == self.value
+        return sys.modules["torch._rust"]._same(t, self.value)
 
 
 @dataclasses.dataclass(frozen=True)

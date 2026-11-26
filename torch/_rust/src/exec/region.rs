@@ -722,9 +722,9 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
 // A check of a region's args that its func makes too, asked first (see
 // torch._rust_inductor._quick).
 pub enum Quick {
-    // Arg i is (or equals, with the same exact type) this.
+    // Arg i is this object (true), or the same value by exact::same.
     Arg(u32, bool, Py<PyAny>),
-    // Arg i is an exact tuple or list whose item j is (or equals) this.
+    // Arg i is an exact tuple or list whose item j is this (likewise).
     Item(u32, u32, bool, Py<PyAny>),
     // These args, as a tuple, pass the TreeChecks.
     Tensors(Vec<u32>, Py<super::TreeChecks>),
@@ -744,20 +744,10 @@ fn parse_quick(q: &Bound<'_, PyTuple>) -> PyResult<Quick> {
 }
 
 impl Quick {
-    // No Python code runs: the values compared by == are exact ints, bools,
-    // strs, bytes, torch.Sizes or None (a Tree's TreeChecks is one that is
-    // `quick`).
+    // No Python code runs: a value is compared by exact::same (a Tree's
+    // TreeChecks is one that is `quick`).
     unsafe fn holds(&self, py: Python<'_>, args: &[*mut PyObject]) -> bool {
-        let is = |x: *mut PyObject, same: bool, want: &Py<PyAny>| {
-            if same || x.is_null() {
-                return x == want.as_ptr();
-            }
-            let eq = ffi::Py_TYPE(x) == ffi::Py_TYPE(want.as_ptr()) && ffi::PyObject_RichCompareBool(x, want.as_ptr(), ffi::Py_EQ) == 1;
-            if !ffi::PyErr_Occurred().is_null() {
-                ffi::PyErr_Clear();
-            }
-            eq
-        };
+        let is = |x: *mut PyObject, same: bool, want: &Py<PyAny>| if same { x == want.as_ptr() } else { super::exact::same(x, want.as_ptr()) };
         let arg = |i: u32| args.get(i as usize).copied().unwrap_or(std::ptr::null_mut());
         match self {
             Quick::Arg(i, same, want) => is(arg(*i), *same, want),

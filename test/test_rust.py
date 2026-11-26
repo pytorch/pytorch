@@ -2395,9 +2395,9 @@ bb1(%3 s0, %4 s1, %5 s2):
     guard no forward AD
     guard no saved tensor hooks
     guard s0.requires_grad
-    guard s0 is tensor(f32 cpu [3] stride [1])
+    guard s0 is tensor(f32 cpu [3] stride [1]) requires_grad
     guard s1.requires_grad
-    guard s1 is tensor(f32 cpu [3] stride [1])
+    guard s1 is tensor(f32 cpu [3] stride [1]) requires_grad
     guard s2 == 2
     %6 = Autograd t0 %3, %4, %5
     %7 = Project 0 %6

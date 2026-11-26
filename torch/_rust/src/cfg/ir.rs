@@ -288,16 +288,13 @@ pub enum Check {
     // A tensor whose Python operators run as plain aten ops: exactly
     // torch.Tensor or nn.Parameter (no __torch_function__ of its own).
     PlainTensor,
-    // A tensor of exactly one of those two classes: nn.Parameter (true) or
-    // torch.Tensor. A region asks it of a tensor argument: the class is what
-    // Python code reads of it (`x.__class__`, a module's attribute store).
-    Parameter(bool),
     // Exactly this builtin type (not a subclass).
     Exact(Builtin),
     // A tensor that requires grad (true) or doesn't.
     RequiresGrad(bool),
-    // A plain strided tensor with exactly this dtype, device, sizes and strides.
-    TensorMeta(Box<TensorSpec>),
+    // A tensor with exactly this key (exec/tensor_key.rs): what a region
+    // compares of a tensor it is entered with.
+    Tensor(Box<crate::exec::tensor_key::TensorKey>),
     // Exactly this scalar: same type, and the same value (floats bitwise).
     Value(Lit),
     // (By identity) the object Cfg::pins[i] was pinned to.
@@ -329,16 +326,6 @@ impl Check {
     pub fn global(&self) -> bool {
         matches!(self, Check::NoTorchFunctionMode | Check::GradEnabled(_) | Check::NoForwardAD | Check::NoSavedTensorHooks)
     }
-}
-
-// c10's ScalarType and DeviceType enums.
-#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Debug)]
-pub struct TensorSpec {
-    pub dtype: i8,
-    pub device_type: i8,
-    pub device_index: i8,
-    pub sizes: Vec<i64>,
-    pub strides: Vec<i64>,
 }
 
 // An object an optimized version holds (see cfg/optimize.rs), named for
@@ -1357,16 +1344,9 @@ impl<'a> Printer<'a> {
     fn check(&self, e: &str, c: &Check) -> String {
         match c {
             Check::PlainTensor => format!("{e} is a plain tensor"),
-            Check::Parameter(on) => format!("type({e}) is {}", if *on { "Parameter" } else { "Tensor" }),
             Check::Exact(t) => format!("type({e}) is {}", format!("{t:?}").to_lowercase()),
             Check::RequiresGrad(on) => format!("{}{e}.requires_grad", if *on { "" } else { "not " }),
-            Check::TensorMeta(t) => format!(
-                "{e} is tensor({} {} {:?} stride {:?})",
-                crate::bindings::ffi::dtype_name(t.dtype),
-                crate::bindings::ffi::device_name(t.device_type, t.device_index),
-                t.sizes,
-                t.strides
-            ),
+            Check::Tensor(k) => format!("{e} is {k}"),
             Check::Value(Lit::Bool(true)) => e.to_string(),
             Check::Value(Lit::Bool(false)) => format!("not {e}"),
             Check::Value(Lit::None) => format!("{e} is None"),

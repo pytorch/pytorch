@@ -268,23 +268,45 @@ bool saved_tensor_hooks_active() {
   return at::SavedTensorDefaultHooks::get_hooks().has_value();
 }
 
-bool tensor_matches(
-    const Tensor& t,
-    int8_t dtype,
-    int8_t device_type,
-    int8_t device_index,
-    ::rust::Slice<const int64_t> sizes,
-    ::rust::Slice<const int64_t> strides) noexcept {
+bool tensor_key(const Tensor& t, TensorFacts& out) noexcept {
+  if (!t.defined()) {
+    return false;
+  }
   const c10::TensorImpl* impl = t.unsafeGetTensorImpl();
-  if (!t.defined() || impl->is_python_dispatch() ||
-      impl->has_symbolic_sizes_strides() || t.is_nested() ||
-      t.layout() != c10::kStrided ||
-      static_cast<int8_t>(t.scalar_type()) != dtype) {
+  // Everything a plain dense tensor carries in its key set next to its
+  // backend. A key that is none of these makes a tensor of another kind
+  // (sparse, quantized, nested, a zero tensor, a wrapper of functorch or of
+  // functionalization, a Python-dispatch tensor): it has no key.
+  static const c10::DispatchKeySet plain =
+      c10::DispatchKeySet({c10::DispatchKey::Dense,
+                           c10::DispatchKey::ADInplaceOrView,
+                           c10::DispatchKey::AutogradFunctionality,
+                           c10::DispatchKey::Conjugate,
+                           c10::DispatchKey::Negative}) |
+      c10::autocast_dispatch_keyset;
+  const auto other = (impl->key_set() - plain).raw_repr() & ~c10::full_backend_mask;
+  if (other != 0 || impl->has_symbolic_sizes_strides() ||
+      t.layout() != c10::kStrided) {
     return false;
   }
   c10::Device d = t.device();
-  if (static_cast<int8_t>(d.type()) != device_type ||
-      d.index() != device_index) {
+  out.dtype = static_cast<int8_t>(t.scalar_type());
+  out.device_type = static_cast<int8_t>(d.type());
+  out.device_index = d.index();
+  out.bits = (t.requires_grad() ? 1 : 0) | (t.is_conj() ? 2 : 0) |
+      (t.is_neg() ? 4 : 0) | (t.is_inference() ? 8 : 0);
+  return true;
+}
+
+bool tensor_key_is(
+    const Tensor& t,
+    const TensorFacts& want,
+    ::rust::Slice<const int64_t> sizes,
+    ::rust::Slice<const int64_t> strides) noexcept {
+  TensorFacts got;
+  if (!tensor_key(t, got) || got.dtype != want.dtype ||
+      got.device_type != want.device_type ||
+      got.device_index != want.device_index || got.bits != want.bits) {
     return false;
   }
   auto sz = t.sizes();

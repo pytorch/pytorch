@@ -417,15 +417,11 @@ impl Bootstrap {
             let mut copy = None;
             if let Some(t) = tffi::tensor_from_pyobject(*p as usize).as_ref() {
                 let rg = t.requires_grad();
-                let mut m = tffi::TensorMeta::default();
-                tffi::tensor_meta(t, &mut m);
-                if !m.has_shape {
-                    untrainable.get_or_insert_with(|| format!("tensor param {i} has no fixed shape"));
-                }
                 checks.push((Some(i as u32), Check::RequiresGrad(rg)));
-                let (sizes, strides) = (t.sizes().to_vec(), t.strides().to_vec());
-                let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes, strides };
-                checks.push((Some(i as u32), Check::TensorMeta(Box::new(spec))));
+                match super::tensor_key::TensorKey::of(*p) {
+                    Some(key) => checks.push((Some(i as u32), Check::Tensor(Box::new(key)))),
+                    None => drop(untrainable.get_or_insert_with(|| format!("tensor param {i} is no plain strided tensor"))),
+                }
                 if rg {
                     let c = obj.call_method0("detach")?.call_method0("requires_grad_")?;
                     copies.push(tensors.len());

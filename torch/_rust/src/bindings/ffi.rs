@@ -19,6 +19,15 @@ pub mod ffi {
         sizes: Vec<i64>,
     }
 
+    // See tensor_key in tensor_ffi.h.
+    #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+    struct TensorFacts {
+        dtype: i8,
+        device_type: i8,
+        device_index: i8,
+        bits: u8,
+    }
+
     // See tensor_span in tensor_ffi.h.
     #[derive(Default)]
     struct TensorSpan {
@@ -47,14 +56,8 @@ pub mod ffi {
         fn tensor_is_cow(t: &Tensor) -> bool;
         fn forward_ad_active() -> bool;
         fn saved_tensor_hooks_active() -> bool;
-        fn tensor_matches(
-            t: &Tensor,
-            dtype: i8,
-            device_type: i8,
-            device_index: i8,
-            sizes: &[i64],
-            strides: &[i64],
-        ) -> bool;
+        fn tensor_key(t: &Tensor, out: &mut TensorFacts) -> bool;
+        fn tensor_key_is(t: &Tensor, want: &TensorFacts, sizes: &[i64], strides: &[i64]) -> bool;
         fn tensor_dim(t: &Tensor) -> i64;
         fn tensor_numel(t: &Tensor) -> i64;
         fn tensor_size_at(t: &Tensor, dim: i64) -> i64;

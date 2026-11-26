@@ -650,7 +650,6 @@ impl Act<'_> {
         let tensor = |o: *mut PyObject| tffi::tensor_by_type(o as usize).as_ref();
         match c {
             Check::PlainTensor => super::is_plain_tensor(o),
-            Check::Parameter(on) => super::is_parameter(o) == Some(*on),
             Check::Exact(t) => {
                 let tp = ffi::Py_TYPE(o);
                 tp == match t {
@@ -663,8 +662,7 @@ impl Act<'_> {
             Check::NoTorchFunctionMode => !tffi::torch_function_mode_active(),
             Check::GradEnabled(on) => tffi::grad_mode_enabled() == *on,
             Check::RequiresGrad(on) => tensor(o).is_some_and(|t| t.requires_grad() == *on),
-            Check::TensorMeta(m) => tensor(o)
-                .is_some_and(|t| tffi::tensor_matches(t, m.dtype, m.device_type, m.device_index, &m.sizes, &m.strides)),
+            Check::Tensor(k) => k.holds(o),
             Check::Value(l) => {
                 let tp = ffi::Py_TYPE(o);
                 match l {

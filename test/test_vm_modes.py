@@ -6797,5 +6797,164 @@ class TestVmAskedTensors(TestCase):
 instantiate_device_type_tests(TestVmAskedTensors, globals())
 
 
+class ModesDropped:
+    """An object whose finalizer changes state: the change is made inside the
+    call that drops the object, and by no instruction of that call."""
+
+    change = None
+
+    def __del__(self):
+        ModesDropped.change()
+
+
+MODES_STALE_READ = None
+
+
+def modes_stale_reading(x):
+    y = modes_work(x)
+    k = MODES_STALE_READ()
+    ModesDropped()
+    return modes_work(y * k)
+
+
+def modes_stale_item(device):
+    state = {"k": 2.0}
+
+    def change():
+        state["k"] = 5.0 - state["k"]
+
+    return (lambda: state["k"], change)
+
+
+def modes_stale_list_item(device):
+    state = [2.0]
+
+    def change():
+        state[0] = 5.0 - state[0]
+
+    return (lambda: state[0], change)
+
+
+def modes_stale_length(device):
+    state = [1.0, 1.0]
+
+    def change():
+        if len(state) == 2:
+            state.append(1.0)
+        else:
+            state.pop()
+
+    return (lambda: float(len(state)), change)
+
+
+def modes_stale_whole(device):
+    state = [1.0, 1.0]
+
+    def change():
+        state[1] = 3.0 - state[1]
+
+    return (lambda: sum(state), change)
+
+
+def modes_stale_cell(device):
+    k = 2.0
+
+    def change():
+        nonlocal k
+        k = 5.0 - k
+
+    return (lambda: k, change)
+
+
+def modes_stale_defaults(device):
+    def scale(k=2.0):
+        return k
+
+    def change():
+        scale.__defaults__ = (5.0 - scale.__defaults__[0],)
+
+    return (lambda: scale(), change)
+
+
+def modes_stale_code(device):
+    def scale():
+        return 2.0
+
+    def other():
+        return 3.0
+
+    codes = [other.__code__, scale.__code__]
+
+    def change():
+        codes.append(scale.__code__)
+        scale.__code__ = codes.pop(0)
+
+    return (lambda: scale(), change)
+
+
+def modes_stale_dict(device):
+    box = ModesHolder()
+
+    def change():
+        box.__dict__ = {"k": 5.0 - box.k}
+
+    return (lambda: box.k, change)
+
+
+def modes_stale_tensor(device):
+    t = torch.ones(8, device=device)
+
+    def change():
+        t.resize_(13 - t.shape[0])
+
+    return (lambda: float(t.shape[0]), change)
+
+
+MODES_STALE = {
+    "item": modes_stale_item,
+    "list_item": modes_stale_list_item,
+    "length": modes_stale_length,
+    "whole": modes_stale_whole,
+    "cell": modes_stale_cell,
+    "defaults": modes_stale_defaults,
+    "code": modes_stale_code,
+    "dict": modes_stale_dict,
+    "tensor": modes_stale_tensor,
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmStaleReads(TestCase):
+    """What a traced call read and something else then changed, inside the
+    same call and by no write of the call's own instructions, is not what a
+    later call finds: no region is formed with the value of that read."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def log(self, device, what, fn):
+        # Fresh state: what is read, and what the finalizer does to it.
+        global MODES_STALE_READ
+        MODES_STALE_READ, ModesDropped.change = MODES_STALE[what](device)
+        out = []
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            out.append((fn(x), MODES_STALE_READ()))
+        return out
+
+    @parametrize("what", list(MODES_STALE))
+    @isolated
+    def test_read_changed_by_a_finalizer_gives_no_region(self, device, what):
+        want = self.log(device, what, modes_stale_reading)
+        compiled = vm(modes_stale_reading, passes=EARLY)
+        self.assertEqual(self.log(device, what, compiled), want, atol=0, rtol=0)
+        name = modes_stale_reading.__name__
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        self.assertIn("refused", [r["state"] for r in rows], msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmStaleReads, globals())
+
+
 if __name__ == "__main__":
     run_tests()

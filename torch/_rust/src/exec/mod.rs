@@ -10,6 +10,7 @@ mod built;
 mod compilers;
 mod covered;
 pub mod effects;
+pub mod exact;
 pub mod ffi;
 pub mod graph;
 pub mod hist;
@@ -27,6 +28,7 @@ mod run;
 mod shown;
 mod spans;
 mod special;
+pub mod tensor_key;
 pub mod torch_ops;
 mod trampoline;
 pub mod types;
@@ -42,7 +44,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
-use crate::cfg::ir::{Annotations, BlockId, Cfg, Check, Exit, Lit, Op, Site, TensorSpec, Terminator, Training, ValueId};
+use crate::cfg::ir::{Annotations, BlockId, Cfg, Check, Exit, Lit, Op, Site, Terminator, Training, ValueId};
 use crate::cfg::opcodes::{self, Out};
 use crate::cfg::outline::Outline;
 
@@ -411,14 +413,15 @@ fn plain_tensor_types() -> [usize; 2] {
     })
 }
 
-pub(crate) unsafe fn is_plain_tensor(obj: *mut pyo3::ffi::PyObject) -> bool {
-    plain_tensor_types().contains(&(pyo3::ffi::Py_TYPE(obj) as usize))
+// torch.Size and torch.device, by address: the two classes of torch whose
+// instances a check compares by value (exact.rs).
+fn torch_value_types() -> [usize; 2] {
+    static TYPES: OnceLock<[usize; 2]> = OnceLock::new();
+    *TYPES.get_or_init(|| Python::attach(|py| ["Size", "device"].map(|n| py.import("torch").and_then(|m| m.getattr(n)).map_or(0, |t| t.as_ptr() as usize))))
 }
 
-// Which of the two a plain tensor is: Some(true) for an nn.Parameter, None
-// for an object of any other class.
-pub(crate) unsafe fn is_parameter(obj: *mut pyo3::ffi::PyObject) -> Option<bool> {
-    plain_tensor_types().iter().position(|t| *t == pyo3::ffi::Py_TYPE(obj) as usize).map(|k| k == 1)
+pub(crate) unsafe fn is_plain_tensor(obj: *mut pyo3::ffi::PyObject) -> bool {
+    plain_tensor_types().contains(&(pyo3::ffi::Py_TYPE(obj) as usize))
 }
 
 // What a frame of the code runs: the current Cfg, prepared.
@@ -1969,18 +1972,9 @@ pub(crate) fn parse_check_tuple(t: &Bound<'_, PyTuple>) -> PyResult<Parsed> {
         "no_torch_function_mode" => (None, Check::NoTorchFunctionMode),
         "no_forward_ad" => (None, Check::NoForwardAD),
         "no_saved_tensor_hooks" => (None, Check::NoSavedTensorHooks),
-        "requires_grad" => (arg()?, Check::RequiresGrad(t.get_item(2)?.extract()?)),
         "plain_tensor" => (arg()?, Check::PlainTensor),
-        "class" => (arg()?, Check::Parameter(unsafe { is_parameter(t.get_item(2)?.as_ptr()) }.ok_or_else(bad)?)),
         "null" => (arg()?, Check::Null),
-        "tensor" => {
-            let x = t.get_item(2)?;
-            let tensor: &crate::bindings::ffi::Tensor = x.extract()?;
-            let mut m = crate::bindings::ffi::TensorMeta::default();
-            crate::bindings::ffi::tensor_meta(tensor, &mut m);
-            let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes: tensor.sizes().to_vec(), strides: tensor.strides().to_vec() };
-            (arg()?, Check::TensorMeta(Box::new(spec)))
-        }
+        "tensor" => (arg()?, Check::Tensor(Box::new(unsafe { tensor_key::TensorKey::of(t.get_item(2)?.as_ptr()) }.ok_or_else(bad)?))),
         "value" => (arg()?, Check::Value(lit(&t.get_item(2)?).ok_or_else(bad)?)),
         "ints" => (arg()?, Check::Ints(t.get_item(2)?.extract()?, t.get_item(3)?.extract()?)),
         "is" => return Ok(Parsed::Is(t.get_item(1)?.extract()?, t.get_item(2)?.unbind())),
@@ -2049,20 +2043,7 @@ pub fn _add_block_checks(code: &Bound<'_, PyAny>, block: u32, checks: Vec<Bound<
         let check = match kind.as_str() {
             "grad_enabled" => (None, Check::GradEnabled(t.get_item(1)?.extract()?)),
             "requires_grad" => (param()?, Check::RequiresGrad(t.get_item(2)?.extract()?)),
-            "tensor" => {
-                let x = t.get_item(2)?;
-                let tensor: &crate::bindings::ffi::Tensor = x.extract()?;
-                let mut m = crate::bindings::ffi::TensorMeta::default();
-                crate::bindings::ffi::tensor_meta(tensor, &mut m);
-                let spec = TensorSpec {
-                    dtype: m.dtype,
-                    device_type: m.device_type,
-                    device_index: m.device_index,
-                    sizes: tensor.sizes().to_vec(),
-                    strides: tensor.strides().to_vec(),
-                };
-                (param()?, Check::TensorMeta(Box::new(spec)))
-            }
+            "tensor" => (param()?, Check::Tensor(Box::new(unsafe { tensor_key::TensorKey::of(t.get_item(2)?.as_ptr()) }.ok_or_else(|| bad(t))?))),
             "value" => (param()?, Check::Value(lit(&t.get_item(2)?).ok_or_else(|| bad(t))?)),
             "no_forward_ad" => (None, Check::NoForwardAD),
             "no_saved_tensor_hooks" => (None, Check::NoSavedTensorHooks),
@@ -2505,13 +2486,12 @@ pub fn _set_cfg_scalar_reads(on: bool) {
 /// A tree arg a region reads (exact lists, tuples and dicts, and registered
 /// pytree nodes, of tensors and immutable values), checked as the guard
 /// checks a tensor arg: the same structure, dict keys and pytree contexts,
-/// each tensor's exact type, dtype, device, sizes, strides and
-/// requires_grad, and each value's exact type and value.
+/// each tensor's key (exec/tensor_key.rs), and each value, key and context
+/// by exec/exact.rs (the same object, or exactly its class and its bits).
 #[pyclass(frozen)]
 pub struct TreeChecks {
     root: TreeNode,
-    types: Vec<Py<pyo3::types::PyType>>,
-    specs: Vec<(TensorSpec, bool)>,
+    keys: Vec<tensor_key::TensorKey>,
 }
 
 enum TreeNode {
@@ -2519,7 +2499,7 @@ enum TreeNode {
     Tuple(Vec<TreeNode>),
     Dict(Vec<(Py<PyAny>, TreeNode)>),
     Tensor(usize),
-    // An int, bool, str, bytes, None or torch.Size: by exact type and value.
+    // An int, bool, str, bytes, None or torch.Size: by exact::same.
     Value(Py<PyAny>),
     // A registered pytree node of exactly this type, flattened by its
     // flatten_fn to children and a context equal to this one.
@@ -2551,13 +2531,10 @@ impl TreeChecks {
                 return Ok(TreeNode::Pytree { ty: x.get_type().unbind(), flatten: flatten.unbind(), context: context.unbind(), kids });
             }
         }
-        let t: &crate::bindings::ffi::Tensor = x.extract()?;
-        let mut m = crate::bindings::ffi::TensorMeta::default();
-        crate::bindings::ffi::tensor_meta(t, &mut m);
-        self.types.push(x.get_type().unbind());
-        let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes: t.sizes().to_vec(), strides: t.strides().to_vec() };
-        self.specs.push((spec, t.requires_grad()));
-        Ok(TreeNode::Tensor(self.specs.len() - 1))
+        // Anything else has no key: no TreeChecks, and the Python walk decides.
+        let key = unsafe { tensor_key::TensorKey::of(x.as_ptr()) };
+        self.keys.push(key.ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("a leaf that is no plain strided tensor"))?);
+        Ok(TreeNode::Tensor(self.keys.len() - 1))
     }
 
     fn walk<'py>(&self, node: &TreeNode, x: &Bound<'py, PyAny>, out: &mut Vec<Bound<'py, PyAny>>) -> bool {
@@ -2566,24 +2543,20 @@ impl TreeChecks {
             TreeNode::List(kids) => x.cast_exact::<PyList>().is_ok_and(|l| l.len() == kids.len() && l.iter().zip(kids).all(|(y, k)| self.walk(k, &y, out))),
             TreeNode::Tuple(kids) => x.cast_exact::<PyTuple>().is_ok_and(|t| t.len() == kids.len() && t.iter().zip(kids).all(|(y, k)| self.walk(k, &y, out))),
             TreeNode::Dict(kids) => x.cast_exact::<PyDict>().is_ok_and(|d| {
-                d.len() == kids.len() && d.iter().zip(kids).all(|((k, v), (want, kid))| (k.is(want) || k.eq(want).unwrap_or(false)) && self.walk(kid, &v, out))
+                d.len() == kids.len() && d.iter().zip(kids).all(|((k, v), (want, kid))| (unsafe { exact::same(k.as_ptr(), want.as_ptr()) }) && self.walk(kid, &v, out))
             }),
             TreeNode::Tensor(i) => {
-                let (m, rg) = &self.specs[*i];
-                let ok = x.get_type().is(&self.types[*i])
-                    && unsafe { crate::bindings::ffi::tensor_by_type(x.as_ptr() as usize).as_ref() }.is_some_and(|t| {
-                        t.requires_grad() == *rg && crate::bindings::ffi::tensor_matches(t, m.dtype, m.device_type, m.device_index, &m.sizes, &m.strides)
-                    });
+                let ok = unsafe { self.keys[*i].holds(x.as_ptr()) };
                 if ok {
                     out.push(x.clone());
                 }
                 ok
             }
-            TreeNode::Value(want) => x.get_type().is(want.bind(x.py()).get_type()) && (x.is(want) || x.eq(want).unwrap_or(false)),
+            TreeNode::Value(want) => unsafe { exact::same(x.as_ptr(), want.as_ptr()) },
             TreeNode::Pytree { ty, flatten, context, kids } => {
                 x.get_type().is(ty)
                     && flatten.bind(x.py()).call1((x,)).and_then(|r| r.extract::<(Bound<'py, PyAny>, Bound<'py, PyAny>)>()).is_ok_and(|(children, ctx)| {
-                        ctx.eq(context).unwrap_or(false)
+                        (unsafe { exact::same(ctx.as_ptr(), context.as_ptr()) })
                             && children.len().is_ok_and(|n| n == kids.len())
                             && children.try_iter().is_ok_and(|it| it.zip(kids).all(|(y, k)| y.is_ok_and(|y| self.walk(k, &y, out))))
                     })
@@ -2606,7 +2579,7 @@ fn is_value_type(x: &Bound<'_, PyAny>) -> bool {
 impl TreeChecks {
     #[new]
     fn new(example: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let mut c = TreeChecks { root: TreeNode::Tuple(vec![]), types: vec![], specs: vec![] };
+        let mut c = TreeChecks { root: TreeNode::Tuple(vec![]), keys: vec![] };
         c.root = c.build(example)?;
         Ok(c)
     }
@@ -2630,7 +2603,7 @@ impl TreeChecks {
 
     /// The tensors in `x`, in order, if it matches; else None.
     fn leaves<'py>(&self, py: Python<'py>, x: &Bound<'py, PyAny>) -> PyResult<Option<Bound<'py, pyo3::types::PyList>>> {
-        let mut out = Vec::with_capacity(self.specs.len());
+        let mut out = Vec::with_capacity(self.keys.len());
         if !self.walk(&self.root, x, &mut out) {
             return Ok(None);
         }
@@ -2641,7 +2614,7 @@ impl TreeChecks {
 impl TreeChecks {
     // Whether `x` matches (see leaves).
     pub(crate) fn passes(&self, x: &Bound<'_, PyAny>) -> bool {
-        self.walk(&self.root, x, &mut Vec::with_capacity(self.specs.len()))
+        self.walk(&self.root, x, &mut Vec::with_capacity(self.keys.len()))
     }
 }
 
