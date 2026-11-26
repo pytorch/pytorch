@@ -2847,6 +2847,22 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "replace")
 
+    def bytearray_removeprefix(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "removeprefix")
+
+    def bytearray_removesuffix(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "removesuffix")
+
     def bytearray_translate(
         self,
         tx: "InstructionTranslatorBase",
@@ -2879,6 +2895,30 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "rjust")
 
+    def bytearray_strip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "strip")
+
+    def bytearray_lstrip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "lstrip")
+
+    def bytearray_rstrip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "rstrip")
+
     def bytearray_reduce(
         self,
         tx: "InstructionTranslatorBase",
@@ -2902,6 +2942,73 @@ class ByteArrayVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "expandtabs")
+
+    def bytearray_isalnum(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # The is*() predicates are METH_NOARGS like upper()/lower()/title(),
+        # so they share _bytearray_case_method, which calls the real method
+        # on the tracked contents and returns the resulting bool.
+        return self._bytearray_case_method(tx, "isalnum", args, kwargs)
+
+    def bytearray_isalpha(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isalpha", args, kwargs)
+
+    def bytearray_isascii(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isascii", args, kwargs)
+
+    def bytearray_isdigit(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isdigit", args, kwargs)
+
+    def bytearray_islower(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "islower", args, kwargs)
+
+    def bytearray_isspace(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isspace", args, kwargs)
+
+    def bytearray_istitle(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "istitle", args, kwargs)
+
+    def bytearray_isupper(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isupper", args, kwargs)
 
     tp_methods = {
         "__reduce__": Method(bytearray_reduce),
@@ -2928,12 +3035,25 @@ class ByteArrayVariable(VariableTracker):
         "capitalize": Method(bytearray_capitalize),
         "swapcase": Method(bytearray_swapcase),
         "replace": Method(bytearray_replace),
+        "removeprefix": Method(bytearray_removeprefix),
+        "removesuffix": Method(bytearray_removesuffix),
         "translate": Method(bytearray_translate),
         "center": Method(bytearray_center),
         "ljust": Method(bytearray_ljust),
         "rjust": Method(bytearray_rjust),
+        "strip": Method(bytearray_strip),
+        "lstrip": Method(bytearray_lstrip),
+        "rstrip": Method(bytearray_rstrip),
         "zfill": Method(bytearray_zfill),
         "expandtabs": Method(bytearray_expandtabs),
+        "isalnum": Method(bytearray_isalnum),
+        "isalpha": Method(bytearray_isalpha),
+        "isascii": Method(bytearray_isascii),
+        "isdigit": Method(bytearray_isdigit),
+        "islower": Method(bytearray_islower),
+        "isspace": Method(bytearray_isspace),
+        "istitle": Method(bytearray_istitle),
+        "isupper": Method(bytearray_isupper),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
