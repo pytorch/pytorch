@@ -9920,6 +9920,38 @@ class TestNNDeviceType(NNTestCase):
             device, antialias, align_corners, mode, memory_format
         )
 
+    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic", "lanczos"])
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("dtype", [torch.uint8, torch.float32])
+    @decorateIf(
+        unittest.skip("antialias is only supported for bilinear, bicubic and lanczos"),
+        lambda p: p["antialias"] and p["mode"] not in ("bilinear", "bicubic", "lanczos"),
+    )
+    @decorateIf(
+        unittest.skip("lanczos requires antialias=True and is CPU only"),
+        lambda p: p["mode"] == "lanczos" and (not p["antialias"] or torch.device(p["device"]).type != "cpu"),
+    )
+    @decorateIf(
+        unittest.skip("no uint8 kernel for this mode on this device"),
+        lambda p: p["dtype"] == torch.uint8 and torch.device(p["device"]).type != "cpu"
+        and p["mode"] not in ("nearest", "nearest-exact")
+        and not (torch.device(p["device"]).type == "mps" and p["mode"] == "bilinear" and not p["antialias"]),
+    )
+    def test_upsampling2d_channels_last_view_with_size1_batch(self, device, mode, antialias, dtype):
+        # Channels-last contiguous, but the size-1 batch dim has stride 3 rather than H * W * C.
+        x = torch.randint(0, 256, (31, 47, 3), dtype=torch.uint8, device=device).to(dtype).permute(2, 0, 1)[None]
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+        x_ref = torch.empty_like(x, memory_format=torch.channels_last).copy_(x)
+        for size in [(20, 30), (62, 94)]:
+            out = F.interpolate(x, size=size, mode=mode, antialias=antialias)
+            expected = F.interpolate(x_ref, size=size, mode=mode, antialias=antialias)
+            self.assertEqual(out, expected)
+            if dtype == torch.uint8 and torch.device(device).type == "cpu" and mode in ("bilinear", "bicubic", "lanczos"):
+                # x is recognized as channels-last, for the uint8 AVX2 / NEON kernels.
+                self.assertEqual(out.stride(), expected.stride())
+            else:
+                self.assertTrue(out.is_contiguous())
+
     @onlyCUDA
     @skipIfRocm
     @parametrize_test("align_corners", [True, False])
@@ -10213,11 +10245,11 @@ class TestNNDeviceType(NNTestCase):
         if non_contig is False:
             self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
 
-        # FIXME if-clause shows the current behaviour which is definitely unexpected.
-        # Ideally we want to fix it such that both the ui8 and f32 outputs are also channels_last
-        # See for more details: https://github.com/pytorch/pytorch/pull/100373
         if batch_size == 1 and check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
-            self.assertTrue(output_ui8.is_contiguous())
+            # Channels-last inputs whose size-1 batch dim has a non-standard stride are only recognized
+            # as channels-last for uint8 on CPU.
+            self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format) if torch.device(device).type == "cpu"
+                            else output_ui8.is_contiguous())
             self.assertTrue(output_f32.is_contiguous())
         else:
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
@@ -12122,6 +12154,140 @@ class TestNNDeviceType(NNTestCase):
                 d_input = second_order(dim, 1.0, bad)[0]
                 self.assertTrue(bool(d_input.isfinite().all()))
                 self.assertEqual(d_input, reference[0])
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_grid_sample_expanded_axis_beyond_int_range(self, device, dtype):
+        # A size-1 input expanded along one spatial axis to 2**31 + 1 elements
+        # stores one value but selects the 64-bit kernels. Such axes are not
+        # otherwise supported on CUDA: the coordinate helpers take int sizes.
+        # The bounds checks must use the same int sizes, so that a grid
+        # coordinate of -2 on that axis, which is outside the input, still reads
+        # zero padding (and has a zero gradient), as on CPU.
+        big = 2**31 + 1
+        bw2d = torch.ops.aten.grid_sampler_2d_backward.default
+        bw3d = torch.ops.aten.grid_sampler_3d_backward.default
+        for dims, axis in ((2, 0), (2, 1), (3, 0), (3, 1), (3, 2)):
+            spatial = [1] * dims
+            spatial[axis] = big
+            # Grid coordinates are ordered (x, y[, z]): the last spatial axis first.
+            point = [0.] * dims
+            point[dims - 1 - axis] = -2.
+            grid_cpu = torch.tensor(point, dtype=dtype).reshape((1,) * (dims + 1) + (dims,))
+            inp_cpu = torch.ones((1, 1) + (1,) * dims, dtype=dtype).expand(1, 1, *spatial)
+            inp = torch.ones((1, 1) + (1,) * dims, device=device, dtype=dtype).expand(1, 1, *spatial)
+            grad_output_cpu = torch.ones((1, 1) + (1,) * dims, dtype=dtype)
+            modes = (0, 1, 2) if dims == 2 else (0, 1)
+            fw = torch.grid_sampler_2d if dims == 2 else torch.grid_sampler_3d
+            bw = bw2d if dims == 2 else bw3d
+            for mode in modes:
+                with self.subTest(dims=dims, axis=axis, mode=mode):
+                    expected = fw(inp_cpu, grid_cpu, mode, 0, True)
+                    self.assertEqual(expected.item(), 0)
+                    actual = fw(inp, grid_cpu.to(device), mode, 0, True)
+                    self.assertEqual(actual.cpu(), expected)
+                    tail = (mode, 0, True, [False, True])
+                    expected_grid = bw(grad_output_cpu, inp_cpu, grid_cpu, *tail)[1]
+                    actual_grid = bw(grad_output_cpu.to(device), inp, grid_cpu.to(device), *tail)[1]
+                    self.assertEqual(actual_grid.cpu(), expected_grid)
+
+    @onlyCUDA
+    @largeTensorTest(lambda self, device, mode, input_requires_grad:
+                     (20 if input_requires_grad else 10) * 1024**3, device="cuda")
+    # Nearest grid-gradient-only calls are left out: their grid gradient is
+    # zero and the kernel reads no input, so no large offset is exercised.
+    @parametrize_test("mode,input_requires_grad", [(0, False), (0, True), (1, True)])
+    def test_grid_sample_3d_large_spatial_offset(self, device, mode, input_requires_grad):
+        # The last depth slab of this input starts at 2**31 elements, so the 3D
+        # kernels index in 64 bits and the spatial offsets of input-gradient
+        # scatters must not be computed in 32 bits. Forward and grid-gradient
+        # reads index the input directly in the kernel's index type; the
+        # bilinear grid-gradient-only case, with its forward check, is a
+        # control. The 8 GiB input is held once without grad_input and twice
+        # with it.
+        depth, height, width = 32769, 256, 256
+        inp = torch.zeros((1, 1, depth, height, width), device=device, dtype=torch.float32)
+        self.assertEqual((depth - 1) * inp.stride(2), 2**31)
+        reference = torch.zeros(1, 1, 5, 5, 5, dtype=torch.float32)
+        # Make the far-slab grid gradient nonzero, so dropped or incorrectly
+        # addressed input reads cannot accidentally pass.
+        for (z, y, x), value in (((0, 0, 0), 1.), ((-1, 0, 0), 3.), ((-1, 0, 1), 5.)):
+            reference[0, 0, z, y, x] = value
+            inp[0, 0, z, y, x] = value
+        grad_output = torch.tensor([[[[[1., 2.]]]]], dtype=torch.float32)
+        grid = torch.tensor([[[[[-1., -1., -1.], [-1., -1., 1.]]]]], dtype=torch.float32)
+        if mode == 0 and not input_requires_grad:
+            expected_out = torch.grid_sampler_3d(reference, grid, mode, 0, True)
+            self.assertNotEqual(expected_out[0, 0, 0, 0, 1].item(), 0)
+            actual_out = torch.grid_sampler_3d(inp, grid.to(device), mode, 0, True)
+            self.assertEqual(actual_out.cpu(), expected_out)
+        bw = torch.ops.aten.grid_sampler_3d_backward.default
+        tail = (mode, 0, True, [input_requires_grad, True])
+        expected = bw(grad_output, reference, grid, *tail)
+        if mode == 0:
+            self.assertNotEqual(expected[1][0, 0, 0, 1, 0].item(), 0)
+        actual = bw(grad_output.to(device), inp, grid.to(device), *tail)
+        if input_requires_grad:
+            self.assertEqual(actual[0][0, :, 0, 0, 0].cpu(), expected[0][0, :, 0, 0, 0])
+            self.assertEqual(actual[0][0, :, -1, 0, 0].cpu(), expected[0][0, :, -1, 0, 0])
+            self.assertEqual(actual[0].sum().cpu(), expected[0].sum())
+        else:
+            self.assertIsNone(actual[0])
+        expected[1][..., 0] *= (width - 1) / 4
+        expected[1][..., 1] *= (height - 1) / 4
+        expected[1][..., 2] *= (depth - 1) / 4
+        self.assertEqual(actual[1].cpu(), expected[1])
+
+    @onlyCUDA
+    @largeTensorTest(lambda self, device, mode, input_requires_grad:
+                     (20 if input_requires_grad else 10) * 1024**3, device="cuda")
+    # Nearest grid-gradient-only calls are left out: their grid gradient is
+    # zero and the kernel reads no input, so no large offset is exercised.
+    @parametrize_test("mode,input_requires_grad",
+                      [(0, False), (0, True), (1, True), (2, False), (2, True)])
+    def test_grid_sample_2d_large_spatial_offset(self, device, mode, input_requires_grad):
+        # The last row of this channels-last input starts at 2**31 elements, so
+        # the 2D kernels index in 64 bits and the spatial offsets of bicubic
+        # forward reads, input-gradient scatters and bicubic grid-gradient reads
+        # must not be computed in 32 bits. The bilinear grid-gradient-only case
+        # reads the input directly in the kernel's index type and is a control.
+        # The 8 GiB input is held once without grad_input and twice with it.
+        height, width = 32769, 65536
+        inp = torch.empty((1, 1, height, width), device=device, dtype=torch.float32,
+                          memory_format=torch.channels_last).zero_()
+        self.assertEqual((height - 1) * inp.stride(2), 2**31)
+        reference = torch.zeros(1, 1, 5, 5, dtype=torch.float32)
+        reference[0, :, 0, 0] = torch.tensor([1.])
+        reference[0, :, -1, 0] = torch.tensor([3.])
+        # Make the far-row bicubic grid gradient nonzero, so dropped or
+        # incorrectly addressed input reads cannot accidentally pass.
+        reference[0, :, -1, 1] = torch.tensor([5.])
+        inp[0, :, 0, 0] = reference[0, :, 0, 0].to(device)
+        inp[0, :, -1, 0] = reference[0, :, -1, 0].to(device)
+        inp[0, :, -1, 1] = reference[0, :, -1, 1].to(device)
+        grad_output = torch.tensor([[[[1., 2.]]]], dtype=torch.float32)
+        grid = torch.tensor([[[[-1., -1.], [-1., 1.]]]], dtype=torch.float32)
+        if mode == 2 and not input_requires_grad:
+            # Bicubic forward reads the far row through the same helper.
+            expected_out = torch.grid_sampler_2d(reference, grid, mode, 0, True)
+            self.assertNotEqual(expected_out[0, 0, 0, 1].item(), 0)
+            actual_out = torch.grid_sampler_2d(inp, grid.to(device), mode, 0, True)
+            self.assertEqual(actual_out.cpu(), expected_out)
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        tail = (mode, 0, True, [input_requires_grad, True])
+        expected = bw(grad_output, reference, grid, *tail)
+        if mode == 2:
+            self.assertNotEqual(expected[1][0, 0, 1, 0].item(), 0)
+        actual = bw(grad_output.to(device), inp, grid.to(device), *tail)
+        if input_requires_grad:
+            self.assertEqual(actual[0][0, :, 0, 0].cpu(), expected[0][0, :, 0, 0])
+            self.assertEqual(actual[0][0, :, -1, 0].cpu(), expected[0][0, :, -1, 0])
+            self.assertEqual(actual[0].sum().cpu(), expected[0].sum())
+        else:
+            self.assertIsNone(actual[0])
+        expected[1][..., 0] *= (width - 1) / 4
+        expected[1][..., 1] *= (height - 1) / 4
+        self.assertEqual(actual[1].cpu(), expected[1])
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
