@@ -318,26 +318,27 @@ void CuspyDecoder::worker_loop() {
   }
 }
 
-void CuspyDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
-  if (buf.valid_size == 0) {
-    return;
-  }
-  buffers_decoded_.fetch_add(1);
-  valid_bytes_.fetch_add(buf.valid_size);
+namespace {
 
-  // Accumulate locally (no lock during the record walk), then merge once.
-  // Grouped by kind -> layout signature so records sharing a layout stay
-  // together and fields never end up mismatched in length. Within this buffer a
-  // kind has a single layout (ppRecordLayouts is per kind), so cache its
-  // signature + layout.
+struct DecodedCuptiBuffer {
   std::map<uint32_t, std::map<CuptiLayoutKey, std::map<int, CuptiColumn>>>
-      local;
+      columns;
+  uint64_t max_sync_ns = 0;
+};
+
+DecodedCuptiBuffer decodeCuptiBuffer(
+    const uint8_t* data,
+    size_t valid_size,
+    const std::vector<CuptiRecordLayout>& layouts,
+    uint32_t fence_kind,
+    int fence_end_field) {
+  // A buffer has one layout per kind, so cache each layout and its signature.
+  DecodedCuptiBuffer result;
   std::map<uint32_t, const CuptiRecordLayout*> layout_by_kind;
   std::map<uint32_t, CuptiLayoutKey> key_by_kind;
-  uint64_t local_max_sync = 0;
   size_t pos = 0;
-  while (buf.valid_size - pos >= sizeof(uint32_t)) {
-    const auto* rec = buf.ptr + pos;
+  while (valid_size - pos >= sizeof(uint32_t)) {
+    const auto* rec = data + pos;
     uint32_t kind = 0;
     std::memcpy(&kind, rec, sizeof(kind));
     if (kind == 0x7fffffff) {
@@ -346,7 +347,7 @@ void CuspyDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
     auto cached = layout_by_kind.find(kind);
     const CuptiRecordLayout* layout = nullptr;
     if (cached == layout_by_kind.end()) {
-      for (const auto& cand : buf.layouts) {
+      for (const auto& cand : layouts) {
         if (cand.kind == kind) {
           if (cand.record_size >= sizeof(kind) &&
               std::ranges::none_of(cand.fields, [&](const auto& field) {
@@ -365,27 +366,40 @@ void CuspyDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
       layout = cached->second;
     }
     if (layout == nullptr || layout->record_size < sizeof(kind) ||
-        layout->record_size > buf.valid_size - pos) {
+        layout->record_size > valid_size - pos) {
       break; // missing layout or trailing partial record
     }
-    auto& kind_cols = local[kind][key_by_kind[kind]];
+    auto& kind_cols = result.columns[kind][key_by_kind[kind]];
     for (const auto& field : layout->fields) {
       CuptiColumn& col = kind_cols[field.field_id];
       col.field_size = field.size;
       const uint8_t* src = rec + field.offset;
       col.bytes.insert(col.bytes.end(), src, src + field.size);
       // Track the fence (SYNCHRONIZATION-END) timestamp for flush(sync).
-      if (kind == fence_kind_ && field.field_id == fence_end_field_ &&
+      if (kind == fence_kind && field.field_id == fence_end_field &&
           field.size == sizeof(uint64_t)) {
         uint64_t end_ns = 0;
         std::memcpy(&end_ns, src, sizeof(uint64_t));
-        if (end_ns > local_max_sync) {
-          local_max_sync = end_ns;
-        }
+        result.max_sync_ns = std::max(result.max_sync_ns, end_ns);
       }
     }
     pos += layout->record_size;
   }
+  return result;
+}
+
+} // namespace
+
+void CuspyDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
+  if (buf.valid_size == 0) {
+    return;
+  }
+  buffers_decoded_.fetch_add(1);
+  valid_bytes_.fetch_add(buf.valid_size);
+
+  // Accumulate locally (no lock during the record walk), then merge once.
+  auto [local, local_max_sync] = decodeCuptiBuffer(
+      buf.ptr, buf.valid_size, buf.layouts, fence_kind_, fence_end_field_);
 
   if (local_max_sync > 0) {
     uint64_t prev = max_sync_ns_.load();
@@ -428,34 +442,9 @@ double cuspyBenchDecode(
     size_t iters) {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   const auto* base = reinterpret_cast<const uint8_t*>(buffer_addr);
-  std::map<uint32_t, const CuptiRecordLayout*> by_kind;
-  for (const auto& l : layouts) {
-    by_kind[l.kind] = &l;
-  }
   auto t0 = std::chrono::steady_clock::now();
   for ([[maybe_unused]] const auto _ : c10::irange(iters)) {
-    // Fresh columns each iter, matching decode_buffer's per-buffer `local`.
-    std::map<uint32_t, std::map<int, CuptiColumn>> cols;
-    size_t pos = 0;
-    while (pos + sizeof(uint32_t) <= valid_size) {
-      uint32_t kind = *reinterpret_cast<const uint32_t*>(base + pos);
-      auto found = by_kind.find(kind);
-      if (found == by_kind.end()) {
-        break; // unknown kind: can't size it, stop (matches the Python walk)
-      }
-      const CuptiRecordLayout* layout = found->second;
-      if (pos + layout->record_size > valid_size) {
-        break; // trailing partial record
-      }
-      auto& kind_cols = cols[kind];
-      for (const auto& field : layout->fields) {
-        CuptiColumn& col = kind_cols[field.field_id];
-        col.field_size = field.size;
-        const uint8_t* src = base + pos + field.offset;
-        col.bytes.insert(col.bytes.end(), src, src + field.size);
-      }
-      pos += layout->record_size;
-    }
+    decodeCuptiBuffer(base, valid_size, layouts, 0, -1);
   }
   auto t1 = std::chrono::steady_clock::now();
   return std::chrono::duration<double>(t1 - t0).count();

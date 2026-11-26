@@ -2595,9 +2595,15 @@ Example::
     py::options options;
     options.disable_function_signatures();
     tcpStore.attr("__init__") = py::cpp_function(
-        [init](py::args args, py::kwargs kwargs) {
+        [init](
+            py::detail::value_and_holder& v_h,
+            const py::args& args,
+            const py::kwargs& kwargs) {
           try {
-            init(*args, **kwargs);
+            init(
+                py::handle(reinterpret_cast<PyObject*>(v_h.inst)),
+                *args,
+                **kwargs);
           } catch (const py::error_already_set& error) {
             if (error.matches(PyExc_TypeError)) {
               // @allow-raw-throw: Preserve TypeError without secret context.
@@ -2608,6 +2614,7 @@ Example::
           }
         },
         py::is_method(tcpStore),
+        py::detail::is_new_style_constructor(),
         py::name("__init__"),
         doc.c_str());
   }
