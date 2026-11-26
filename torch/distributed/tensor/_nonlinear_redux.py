@@ -5,8 +5,15 @@ from typing import cast
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
-from torch.distributed.tensor._op_schema import OutputSharding
-from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
+from torch._logging import LazyString
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._op_schema import OpSchema, OutputSharding
+from torch.distributed.tensor._redistribute import redistribute_local_tensor
+from torch.distributed.tensor._utils import (
+    _format_implicit_redistribution_msg,
+    compute_local_shape_and_global_offset,
+    ExplicitRedistributionContext,
+)
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Partial,
@@ -20,6 +27,16 @@ from torch.distributed.tensor.placement_types import (
 _ARGMINMAX_REDUCTION_OPS = {
     torch.ops.aten.argmax.default: torch.max,
     torch.ops.aten.argmin.default: torch.min,
+}
+
+# Mapping from any/all ops to the reduction that combines their local results
+_BOOL_REDUCTION_OPS = {
+    torch.ops.aten.any.default: "max",
+    torch.ops.aten.any.dim: "max",
+    torch.ops.aten.any.dims: "max",
+    torch.ops.aten.all.default: "min",
+    torch.ops.aten.all.dim: "min",
+    torch.ops.aten.all.dims: "min",
 }
 
 
@@ -303,3 +320,107 @@ def minmax_dim_handler(
         ),
         output_sharding.output_spec,
     )
+
+
+def _bool_reduction_plan(
+    op_call: torch._ops.OpOverload, schema: OpSchema, output_sharding: OutputSharding
+) -> tuple[OutputSharding, DTensorSpec | None]:
+    """
+    Returns the sharding to run any/all with and the Partial spec of its local
+    result, or None if no mesh dim is reduced locally.
+    """
+    from torch.distributed.tensor._ops._math_ops import _infer_reduction_dims
+
+    input_spec = cast(DTensorSpec, schema.args_schema[0])
+    output_spec = cast(DTensorSpec, output_sharding.output_spec)
+    redistribute_schema = output_sharding.redistribute_schema
+    if not output_sharding.needs_redistribute or redistribute_schema is None:
+        return output_sharding, None
+
+    target_spec = cast(DTensorSpec, redistribute_schema.args_schema[0])
+    partial = Partial(_BOOL_REDUCTION_OPS[op_call])
+    dim = schema.args_schema[1] if len(schema.args_schema) > 1 else None
+    reduced_dims = _infer_reduction_dims(dim, input_spec.ndim, op_call)
+    is_bool = cast(TensorMeta, input_spec.tensor_meta).dtype == torch.bool
+    input_placements = list(target_spec.placements)
+    partial_placements = list(output_spec.placements)
+    pairs = zip(input_spec.placements, target_spec.placements, strict=True)
+    for i, (src, dst) in enumerate(pairs):
+        if src == dst or not (dst.is_replicate() or dst.is_shard()):
+            continue
+        if isinstance(src, (Shard, _StridedShard)):
+            reduce_locally = reduced_dims is None or src.dim in reduced_dims
+        else:
+            reduce_locally = is_bool and src == partial
+        if reduce_locally:
+            input_placements[i] = src
+            partial_placements[i] = partial
+    if partial_placements == list(output_spec.placements):
+        return output_sharding, None
+
+    if tuple(input_placements) == input_spec.placements:
+        kept_spec = input_spec
+    else:
+        kept_spec = DTensorSpec(
+            input_spec.mesh,
+            tuple(input_placements),
+            tensor_meta=input_spec.tensor_meta,
+            use_strided_shard_as_shard_order=input_spec.use_strided_shard_as_shard_order,
+        )
+    sharding = OutputSharding(
+        output_spec=output_spec,
+        redistribute_schema=OpSchema(
+            redistribute_schema.op,
+            (kept_spec, *redistribute_schema.args_schema[1:]),
+            redistribute_schema.kwargs_schema,
+            schema_info=redistribute_schema.schema_info,
+        ),
+        needs_redistribute=kept_spec is not input_spec,
+        use_val_from_redistribute_schema=output_sharding.use_val_from_redistribute_schema,
+    )
+    partial_spec = DTensorSpec(
+        output_spec.mesh,
+        tuple(partial_placements),
+        tensor_meta=output_spec.tensor_meta,
+        use_strided_shard_as_shard_order=output_spec.use_strided_shard_as_shard_order,
+    )
+    return sharding, partial_spec
+
+
+def bool_reduction_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    """
+    Handler for the functional aten.any and aten.all overloads.
+
+    The any/all strategy only shards non-reduction dims, so sharding
+    propagation redistributes the input on mesh dims that shard a reduction
+    dim (an all-gather). This handler keeps those mesh dims, and bool Partial
+    inputs matching the op's max/min combine, as they are: the op reduces them
+    locally and only the reduced result is redistributed, from that Partial to
+    the output placements the strategy chose.
+    """
+    op_dispatcher = dtensor.DTensor._op_dispatcher
+    op_info = op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
+    output_sharding = cast(
+        OutputSharding,
+        op_dispatcher._propagate_op_sharding_dispatch_slow_path(
+            op_call, args, kwargs, op_info, try_cache=True
+        ),
+    )
+    schema = cast(OpSchema, op_info.schema)
+    sharding, partial_spec = _bool_reduction_plan(op_call, schema, output_sharding)
+    op_info.output_sharding = sharding
+    result = op_dispatcher._dispatch_get_local_results_slow_path(op_call, args, op_info)
+    output_spec = cast(DTensorSpec, sharding.output_spec)
+    mesh = op_info.compute_mesh
+    if partial_spec is not None and mesh._is_current_rank_part_of_mesh():
+        msg = LazyString(_format_implicit_redistribution_msg, schema)
+        ExplicitRedistributionContext.observe_redistribution(
+            partial_spec, output_spec, msg
+        )
+        local = cast(torch.Tensor, result)
+        result = redistribute_local_tensor(local, partial_spec, output_spec)
+    return op_dispatcher.wrap(result, output_spec)
