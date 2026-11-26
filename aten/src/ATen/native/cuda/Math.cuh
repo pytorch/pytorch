@@ -2372,7 +2372,20 @@ const auto hermite_polynomial_he_string = jiterator_stringify(
     } // hermite_polynomial_he_forward(T x, T n)
 ); // hermite_polynomial_he_string
 
-const auto laguerre_polynomial_l_string = jiterator_stringify(
+const auto polynomial_degree_string = jiterator_stringify(
+    template<typename T>
+    int64_t polynomial_degree(T n) {
+        if (n >= T(9223372036854775808.0)) {
+            return 9223372036854775807LL;
+        }
+        if (!(n >= T(-9223372036854775808.0))) {
+            return -9223372036854775807LL - 1;
+        }
+        return static_cast<int64_t>(n);
+    }
+);
+
+const auto laguerre_polynomial_l_string = polynomial_degree_string + jiterator_stringify(
     template<typename T>
     T laguerre_polynomial_l_forward(T x, int64_t n) {
         if (n < 0) {
@@ -2393,10 +2406,10 @@ const auto laguerre_polynomial_l_string = jiterator_stringify(
 
         T p = T(1.0);
         T q = T(1.0) - x;
-        T r;
+        T r = q;
 
         for (int64_t k = 1; (k < n) && !isnan(q); k++) {
-            r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
+            r = ((static_cast<uint64_t>(k) * 2 + (T(1.0) - x)) * q - k * p) / (k + 1);
             p = q;
             q = r;
         }
@@ -2406,11 +2419,11 @@ const auto laguerre_polynomial_l_string = jiterator_stringify(
 
     template<typename T>
     T laguerre_polynomial_l_forward(T x, T n) {
-        return laguerre_polynomial_l_forward(x, static_cast<int64_t>(n));
+        return laguerre_polynomial_l_forward(x, polynomial_degree(n));
     } // laguerre_polynomial_l_forward(T x, T n)
 ); // laguerre_polynomial_l_string
 
-const auto legendre_polynomial_p_string = jiterator_stringify(
+const auto legendre_polynomial_p_string = polynomial_degree_string + jiterator_stringify(
     template<typename T>
     T legendre_polynomial_p_forward(T x, int64_t n) {
         if (n < 0) {
@@ -2435,10 +2448,10 @@ const auto legendre_polynomial_p_string = jiterator_stringify(
 
         T p = T(1.0);
         T q = x;
-        T r;
+        T r = q;
 
         for (int64_t k = 1; (k < n) && !isnan(q); k++) {
-            r = ((k + k + 1) * x * q - k * p) / (k + 1);
+            r = ((static_cast<uint64_t>(k) * 2 + 1) * x * q - k * p) / (k + 1);
             p = q;
             q = r;
         }
@@ -2448,7 +2461,7 @@ const auto legendre_polynomial_p_string = jiterator_stringify(
 
     template<typename T>
     T legendre_polynomial_p_forward(T x, T n) {
-        return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
+        return legendre_polynomial_p_forward(x, polynomial_degree(n));
     } // legendre_polynomial_p_forward(T x, T n)
 ); // legendre_polynomial_p_string
 
