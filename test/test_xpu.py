@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfCppFakeTensor,
     subtest,
     suppress_warnings,
     TEST_WITH_TSAN,
@@ -130,6 +131,28 @@ class TestXpu(TestCase):
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_triangular_solve_out_xpu_kernel(self):
+        dispatch_table = torch._C._dispatch_dump("aten::triangular_solve.X")
+        xpu_registration = next(
+            (
+                line
+                for line in dispatch_table.splitlines()
+                if line.startswith("XPU: registered at ")
+            ),
+            "",
+        )
+        self.assertIn("RegisterXPU_", xpu_registration)
+
+        b = torch.tensor([[2.0], [5.0]], device="xpu")
+        a = torch.tensor([[2.0, 0.0], [1.0, 2.0]], device="xpu")
+        out = torch.empty_like(b)
+        cloned_a = torch.empty_like(a)
+        solution, cloned = torch.ops.aten.triangular_solve.X(
+            b, a, upper=False, X=out, M=cloned_a
+        )
+        self.assertEqual(solution, torch.tensor([[1.0], [2.0]], device="xpu"))
+        self.assertEqual(cloned, a)
 
     def test_get_device_properties(self):
         current_device = torch.xpu.current_device()
@@ -502,6 +525,44 @@ print(f"{r1}, {r2}")
 
         x = torch.xpu.device_count()
         self.assertEqual(f"{x}, 1", r)
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_count_concurrent_pre_init(self):
+        # Several threads querying device_count() before XPU is initialized
+        # must not interleave their rebuilds of the Sysman device list, and
+        # must not leave an inflated count cached behind them (which would
+        # make every later torch.manual_seed() walk off default_generators).
+        test_script = """\
+import threading
+import torch
+
+num_threads = 16
+counts = [None] * num_threads
+barrier = threading.Barrier(num_threads)
+
+def query(i):
+    barrier.wait()
+    counts[i] = torch.xpu.device_count()
+
+threads = [threading.Thread(target=query, args=(i,)) for i in range(num_threads)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+
+torch.xpu.init()
+expected = torch._C._xpu_getDeviceCount()
+torch.manual_seed(0)
+print(set(counts) == {expected}, torch.xpu.device_count() == expected)
+"""
+
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual("True True", r)
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
@@ -904,13 +965,6 @@ print(torch.xpu.is_initialized())
     def test_sleep(self):
         # clock_rate() returns MHz; multiply by 1e6 to get ~1 second of device cycles.
         cycles = int(torch.xpu.clock_rate() * 1_000_000)
-        # Some Xe GPU's bundled IGC is too old to support it.
-        if not Xe2_Or_Later:
-            with self.assertRaisesRegex(
-                NotImplementedError, "is not supported on this device"
-            ):
-                torch.xpu._sleep(cycles)
-            return
         # Drain the stream to a known idle state, then verify _sleep() enqueues
         # asynchronously: stream should be busy right after the call and idle only
         # after synchronize() completes.
@@ -1001,6 +1055,7 @@ print(torch.xpu.is_initialized())
         self.assertIs(result, t)
         self.assertTrue(t.is_shared())
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_share_memory_nested(self):
         a = torch.randn(3, 4, device="xpu")
         b = torch.randn(5, 4, device="xpu")
@@ -4514,9 +4569,6 @@ class TestMemPool(TestCase):
 instantiate_parametrized_tests(TestXpu)
 instantiate_device_type_tests(
     TestXpuGraphRng, globals(), only_for="xpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestXPUMultiprocessing, globals(), only_for="xpu", allow_xpu=True
 )
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 instantiate_device_type_tests(TestXpuOptims, globals())

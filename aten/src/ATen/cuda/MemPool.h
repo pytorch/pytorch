@@ -4,6 +4,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <memory>
+#include <optional>
 
 namespace at::cuda {
 
@@ -33,6 +34,9 @@ struct TORCH_CUDA_CPP_API MemPool {
   MempoolId_t id();
   int use_count();
   c10::DeviceIndex device();
+  // The caching allocator keeps a custom allocator only on the device of the
+  // pool. Returns this device, or nullopt if the pool has no custom allocator.
+  std::optional<c10::DeviceIndex> allocator_device();
   static MempoolId_t graph_pool_handle(bool is_user_created = true);
 
  private:
@@ -41,6 +45,27 @@ struct TORCH_CUDA_CPP_API MemPool {
   bool is_user_created_;
   MempoolId_t id_;
   c10::DeviceIndex device_;
+  bool has_allocator_;
+};
+
+// HostMemPool is a pool of pinned host memory in the CUDA host caching
+// allocator. A thread routes its pinned allocations to the pool with
+// at::HostAllocator::begin_allocate_current_thread_to_pool. Once the pool is
+// destroyed, no graph holds it and no thread is routed to it, its cached
+// memory is freed; what remains is freed by a later host empty_cache().
+struct TORCH_CUDA_CPP_API HostMemPool {
+  HostMemPool();
+  HostMemPool(const HostMemPool&) = delete;
+  HostMemPool(HostMemPool&&) = delete;
+  HostMemPool& operator=(const HostMemPool&) = delete;
+  HostMemPool& operator=(HostMemPool&&) = delete;
+  ~HostMemPool();
+
+  MempoolId_t id() const;
+  int use_count() const;
+
+ private:
+  MempoolId_t id_;
 };
 
 } // namespace at::cuda
