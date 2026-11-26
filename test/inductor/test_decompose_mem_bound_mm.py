@@ -32,16 +32,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def _decomposes_on(device) -> bool:
-    """Whether the decompose_mm_pass rewrites matmuls for *device*.
-
-    Mirrors should_decompose_mm/should_decompose_bmm, which only decompose on
-    cuda/xpu (cpu uses its own thresholds); other accelerator backends keep the
-    extern matmul, so the expected counters there are 0.
-    """
-    return torch.device(device).type in ("cuda", "xpu")
-
-
 class MyModule(torch.nn.Module):
     def __init__(self, n_input: int, n_output: int, has_bias: bool) -> None:
         super().__init__()
@@ -194,6 +184,13 @@ class TestDecomposeMemMMGeneric(_DecomposeMemMMMixin, TestCase):
 
 @preserves_unittest_skip_marks()
 class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
+    """Decomposition behavior on accelerator devices.
+
+    Expected counters are gated on cuda/xpu because
+    torch/_inductor/fx_passes/decompose_mem_bound_mm.py only rewrites matmuls on
+    those device types; other backends keep the extern matmul.
+    """
+
     hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
@@ -213,6 +210,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
     )
     @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
     def test_decompose_bmm(self, device, b, m, n, k, should_decompose):
+        device_type = torch.device(device).type
         torch._logging.set_logs(inductor=logging.DEBUG)
         mat1 = torch.randn(b, m, k, device=device).requires_grad_(True)
         mat2 = torch.randn(b, k, n, device=device).requires_grad_(True)
@@ -227,7 +225,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and _decomposes_on(device) else 0
+        expected_val = 1 if should_decompose and device_type in ("cuda", "xpu") else 0
         self.assertEqual(
             counters["inductor"]["decompose_bmm"],
             expected_val,
@@ -238,7 +236,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = 3 if should_decompose and _decomposes_on(device) else 0
+        expected_val = 3 if should_decompose and device_type in ("cuda", "xpu") else 0
         self.assertEqual(
             counters["inductor"]["decompose_bmm"],
             expected_val,
@@ -252,6 +250,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
     @parametrize("has_bias", [True, False])
     @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
     def test_decompose_linear(self, device, m, n, k, has_bias, should_decompose):
+        device_type = torch.device(device).type
         torch._logging.set_logs(inductor=logging.DEBUG)
         input = torch.randn(m, k, device=device).requires_grad_(True)
 
@@ -265,7 +264,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and _decomposes_on(device) else 0
+        expected_val = 1 if should_decompose and device_type in ("cuda", "xpu") else 0
         if has_bias:
             self.assertEqual(
                 counters["inductor"]["decompose_addmm"],
@@ -307,6 +306,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
     def test_decompose_linear_mixed_precision(
         self, device, m, n, k, has_bias, should_decompose
     ):
+        device_type = torch.device(device).type
         with torch.amp.autocast(
             device_type=torch.device(device).type, dtype=torch.bfloat16
         ):
@@ -323,7 +323,9 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = 1 if should_decompose and _decomposes_on(device) else 0
+            expected_val = (
+                1 if should_decompose and device_type in ("cuda", "xpu") else 0
+            )
             if has_bias:
                 self.assertEqual(
                     counters["inductor"]["decompose_addmm"],
@@ -355,6 +357,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
     @parametrize("has_bias", [True, False])
     @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
     def test_decompose_mm(self, device, m, n, k, has_bias, should_decompose):
+        device_type = torch.device(device).type
         torch._logging.set_logs(inductor=logging.DEBUG)
         mat1 = torch.randn(m, k, device=device).requires_grad_(True)
         mat2 = torch.randn(k, n, device=device).requires_grad_(True)
@@ -369,7 +372,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and _decomposes_on(device) else 0
+        expected_val = 1 if should_decompose and device_type in ("cuda", "xpu") else 0
         self.assertEqual(
             counters["inductor"]["decompose_mm"],
             expected_val,
@@ -381,7 +384,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = 1 if should_decompose and _decomposes_on(device) else 0
+        expected_val = 1 if should_decompose and device_type in ("cuda", "xpu") else 0
         self.assertEqual(
             counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
             expected_val,
@@ -405,6 +408,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
     def test_decompose_mm_mixed_precision(
         self, device, m, n, k, has_bias, should_decompose
     ):
+        device_type = torch.device(device).type
         with torch.amp.autocast(
             device_type=torch.device(device).type, dtype=torch.bfloat16
         ):
@@ -422,7 +426,9 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = 1 if should_decompose and _decomposes_on(device) else 0
+            expected_val = (
+                1 if should_decompose and device_type in ("cuda", "xpu") else 0
+            )
             self.assertEqual(
                 counters["inductor"]["decompose_mm"],
                 expected_val,
@@ -434,7 +440,9 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
             self.compare_parameters(module, traced)
             self.compare_gradients(module, traced)
 
-            expected_val = 1 if should_decompose and _decomposes_on(device) else 0
+            expected_val = (
+                1 if should_decompose and device_type in ("cuda", "xpu") else 0
+            )
             self.assertEqual(
                 counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
                 expected_val,
@@ -445,6 +453,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
     @parametrize("m,k,n, should_decompose", [(20480, 5, 2, True)])
     @parametrize("has_bias", [True, False])
     def test_dynamic_shape(self, device, m, n, k, has_bias, should_decompose):
+        device_type = torch.device(device).type
         torch._logging.set_logs(inductor=logging.DEBUG)
         input = torch.randn(m, k, device=device).requires_grad_(True)
 
@@ -458,7 +467,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and _decomposes_on(device) else 0
+        expected_val = 1 if should_decompose and device_type in ("cuda", "xpu") else 0
         if has_bias:
             self.assertEqual(
                 counters["inductor"]["decompose_addmm"],
@@ -472,7 +481,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         self.compare_gradients(module, traced)
 
         expected_val = 0
-        if _decomposes_on(device):
+        if device_type in ("cuda", "xpu"):
             expected_val = 1 if has_bias else 2
 
         self.assertEqual(
@@ -483,7 +492,8 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
     @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
     def test_realize_input(self, device):
-        if not _decomposes_on(device):
+        device_type = torch.device(device).type
+        if device_type not in ("cuda", "xpu"):
             self.skipTest(
                 f"kernel-count assertion covers cuda/xpu codegen only: {device}"
             )
@@ -533,6 +543,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
     )
     @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
     def test_dynamic_shape_decompose_addmm(self, device):
+        device_type = torch.device(device).type
         m, k, n = 19494144, 8, 8
         input = torch.randn(m, k, device=device).requires_grad_(False)
         weight = torch.randn(k, n, device=device).requires_grad_(False)
@@ -546,7 +557,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected = 1 if _decomposes_on(device) else 0
+        expected = 1 if device_type in ("cuda", "xpu") else 0
         self.assertEqual(
             counters["inductor"]["decompose_addmm"],
             expected,
