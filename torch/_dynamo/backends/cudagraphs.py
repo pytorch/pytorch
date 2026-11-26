@@ -125,10 +125,21 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
             return mut_skip
 
     # This backend never partitions, whatever Inductor's graph_partition says.
+    device_node_mapping = get_device_node_mapping(aot_model)
     if skip := check_multiple_devices_or_any_cpu_nodes(
-        get_device_node_mapping(aot_model), cpu_nodes_partitioned_out=False
+        device_node_mapping, cpu_nodes_partitioned_out=False
     ):
         return skip
+
+    device = next(iter(device_node_mapping))
+    # XPU doesn't support cond node currently
+    if device.type != "cuda":
+        for node in aot_model.graph.nodes:
+            if node.target in (
+                torch.ops.higher_order.cond,
+                torch.ops.higher_order.while_loop,
+            ):
+                return format_default_skip_message(f"incompatible op ({node.name})")
 
     if node := get_first_incompatible_cudagraph_node(aot_model):
         return format_default_skip_message(f"incompatible op ({node.name})")
