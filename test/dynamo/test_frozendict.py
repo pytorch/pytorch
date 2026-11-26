@@ -83,17 +83,19 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             fn(x, mapping),
         )
 
-    def test_input_subclass_keys_view(self):
+    def test_input_keys_view_owners(self):
         class Mapping(builtins.frozendict):
             pass
 
         def fn(x, view):
-            return x + len(view), tuple(view)
+            return x + len(view), bool(view), not view, tuple(view)
 
         x, view = torch.ones(1), Mapping(a=2).keys()
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, view), fn(x, view)
-        )
+        strict = torch.compile(fn, backend="eager", fullgraph=True)
+        for keys in ((), ("a",), ("a", "b"), ("b", "a"), ("c", "d")):
+            exact = builtins.frozendict.fromkeys(keys).keys()
+            self.assertEqual(strict(x, exact), fn(x, exact))
+        self.assertEqual(strict(x, view), fn(x, view))
 
     def test_input_subclass_inherited_get(self):
         class Mapping(builtins.frozendict):
