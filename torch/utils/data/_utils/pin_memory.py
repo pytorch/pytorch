@@ -15,13 +15,16 @@ from torch._utils import ExceptionWrapper
 from . import MP_STATUS_CHECK_INTERVAL
 
 
-def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device) -> None:
+def _pin_memory_loop(
+    in_queue, out_queue, device_id, done_event, device, pool=None
+) -> None:
     # This setting is thread local, and prevents the copy in pin_memory from
     # consuming all CPU cores.
     torch.set_num_threads(1)
 
     torch.multiprocessing._set_thread_name("pt_data_pin")
     torch.accelerator.set_device_index(device_id)
+    pin = pin_memory if pool is None else pool.pin
 
     def do_one_step() -> None:
         try:
@@ -31,7 +34,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device) -> None
         idx, data = r
         if not done_event.is_set() and not isinstance(data, ExceptionWrapper):
             try:
-                data = pin_memory(data, device)
+                data = pin(data, device)
             except Exception:
                 data = ExceptionWrapper(
                     where=f"in pin memory thread for device {device_id}"
