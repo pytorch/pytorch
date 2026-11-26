@@ -56,9 +56,12 @@ jobs:
           submodules: recursive
 
       - name: Bootstrap Python
-        shell: cmd
+        shell: bash
+        env:
+          PYTHON_ARCH: arm64
+          DESIRED_PYTHON: ${{ env.PYTHON_VERSION }}
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          source pytorch/.ci/wheel/windows/set_desired_python.sh
 
       - name: Parse ref
         id: parse-ref
@@ -147,9 +150,12 @@ jobs:
           submodules: recursive
 
       - name: Bootstrap Python
-        shell: cmd
+        shell: bash
+        env:
+          PYTHON_ARCH: arm64
+          DESIRED_PYTHON: ${{ env.PYTHON_VERSION }}
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          source pytorch/.ci/wheel/windows/set_desired_python.sh
 
       - name: Bootstrap Rust
         shell: cmd

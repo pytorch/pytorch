@@ -40,7 +40,9 @@ where python
 
 :: python install dependencies
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+if errorlevel 1 exit /b 1
+python -m pip install --only-binary=numpy -c "%~dp0requirements-build-constraints.txt" -r requirements.txt
+if errorlevel 1 exit /b 1
 :: DISTUTILS_USE_SDK should be set after psutil dependency
 set DISTUTILS_USE_SDK=1
 
@@ -51,6 +53,7 @@ sccache --show-stats
 
 :: Call PyTorch build script
 python -m build --wheel --no-isolation --outdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+if errorlevel 1 exit /b 1
 
 :: show sccache stats
 sccache --show-stats

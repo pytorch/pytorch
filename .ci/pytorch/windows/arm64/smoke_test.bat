@@ -11,6 +11,10 @@ exit /b 1
 call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
 if errorlevel 1 exit /b 1
 
+set "MATRIX_PYTHON_VERSION=%DESIRED_PYTHON%"
+python "%PYTORCH_ROOT%\.ci\pytorch\smoke_test\check_wheel_tags.py"
+if errorlevel 1 exit /b 1
+
 echo Running python rnn_smoke.py...
 python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\rnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1

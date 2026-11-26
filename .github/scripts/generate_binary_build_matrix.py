@@ -500,18 +500,7 @@ def generate_wheels_matrix(
             ):
                 continue
 
-            # TODO: Enable python 3.14 for rest
-            if os not in [
-                "linux",
-                "linux-aarch64",
-                "linux-s390x",
-                "macos-arm64",
-                "windows",
-                "windows-arm64",
-            ] and (python_version == "3.14" or python_version == "3.14t"):
-                continue
-
-            # TODO: Enable python 3.15 on non linux OSes
+            # TODO: Enable Python 3.15 on linux-s390x.
             if os not in [
                 "linux",
                 "linux-aarch64",
