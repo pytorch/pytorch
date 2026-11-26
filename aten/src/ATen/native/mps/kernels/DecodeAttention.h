@@ -568,3 +568,143 @@ INSTANTIATE_SDPA_VECTOR_TILES(half, INSTANTIATE_SDPA_VECTOR_PADDED);
 INSTANTIATE_SDPA_VECTOR_TILES(bfloat, INSTANTIATE_SDPA_VECTOR_PADDED);
 INSTANTIATE_SDPA_VECTOR_TILES(half, INSTANTIATE_SDPA_VECTOR_FLOAT_MASK);
 INSTANTIATE_SDPA_VECTOR_TILES(bfloat, INSTANTIATE_SDPA_VECTOR_FLOAT_MASK);
+
+// For wide heads and a short K sequence, one threadgroup computes the
+// weights for a query row, then stripes the output columns across its lanes.
+template <typename T>
+METAL_FUNC float4 sdpa_wide_load4(const device T* values) {
+  const auto packed = *reinterpret_cast<const device packed_vec<T, 4>*>(values);
+  return float4(float(packed.x), float(packed.y), float(packed.z), float(packed.w));
+}
+
+template <typename T, bool HasMask, bool IsCausal, typename MaskType>
+[[kernel,
+  max_total_threads_per_threadgroup(
+      kDecodeSimdgroups * c10::metal::simdgroup_size)]] void
+sdpa_vector_wide(
+    const device T* q [[buffer(0)]],
+    const device T* k [[buffer(1)]],
+    const device T* v [[buffer(2)]],
+    device T* out [[buffer(3)]],
+    const constant PrefillAttnParams* params [[buffer(4)]],
+    const constant PrefillAttnMaskParams* mask_params [[buffer(5)]],
+    const device MaskType* mask [[buffer(6)]],
+    device float* lse [[buffer(7)]],
+    uint thread_idx [[thread_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint group [[simdgroup_index_in_threadgroup]],
+    uint3 grid [[threadgroup_position_in_grid]]) {
+  using Packed4 = packed_vec<T, 4>;
+  constexpr uint simd_size = c10::metal::simdgroup_size;
+  constexpr uint threads = kDecodeSimdgroups * simd_size;
+  constexpr uint width = 4;
+  const uint keys = params->kL;
+  const uint dim = params->D;
+  const uint value_dim = params->Dv;
+  const uint splits = kDecodeSimdgroups / keys;
+  const uint key = group / splits;
+  const uint split = group % splits;
+  const uint kv_head = grid.y / params->gqa_factor;
+  q += grid.z * params->Q_strides[0] + grid.y * params->Q_strides[1] +
+      grid.x * params->Q_strides[2];
+  k += grid.z * params->K_strides[0] + kv_head * params->K_strides[1];
+  v += grid.z * params->V_strides[0] + kv_head * params->V_strides[1];
+  out += grid.z * params->O_strides[0] + grid.y * params->O_strides[1] +
+      grid.x * params->O_strides[2];
+
+  threadgroup float partial[kDecodeSimdgroups];
+  threadgroup float weights[kWideDecodeMaxKeys];
+  if (key < keys) {
+    const device T* key_row = k + key * params->K_strides[2];
+    uint column = (split * simd_size + lane) * width;
+    float4 acc(0.0f);
+    for (; column + width <= dim; column += splits * simd_size * width) {
+      acc = fma(sdpa_wide_load4(q + column), sdpa_wide_load4(key_row + column), acc);
+    }
+    for (; column < dim; ++column) {
+      acc.x = fma(float(q[column]), float(key_row[column]), acc.x);
+    }
+    const float dot = simd_sum((acc.x + acc.y) + (acc.z + acc.w));
+    if (lane == 0) {
+      partial[group] = dot;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (group == 0) {
+    float score = -INFINITY;
+    if (lane < keys) {
+      score = 0.0f;
+      for (uint i = 0; i < splits; ++i) {
+        score += partial[lane * splits + i];
+      }
+      score *= params->scale * M_LOG2E_F;
+      if IF_CONSTEXPR (IsCausal) {
+        score = lane <= grid.x ? score : -INFINITY;
+      }
+      if IF_CONSTEXPR (HasMask) {
+        const auto bias = mask[grid.z * mask_params->M_strides[0] +
+                               grid.y * mask_params->M_strides[1] +
+                               grid.x * mask_params->M_strides[2] +
+                               lane * mask_params->M_strides[3]];
+        if IF_CONSTEXPR (is_same_v<MaskType, bool>) {
+          score = bias ? score : -INFINITY;
+        } else {
+          score += mask_log2e(float(bias));
+        }
+      }
+    }
+    const float max_score = simd_max(score);
+    const bool empty_row = simd_all(score == -INFINITY);
+    const float numerator = empty_row ? 0.0f : fast::exp2(score - max_score);
+    const float denominator = simd_sum(numerator);
+    if (lane < keys) {
+      weights[lane] = empty_row ? 0.0f : numerator / denominator;
+    }
+    if (lse && lane == 0) {
+      const ulong offset = (ulong(grid.z) * params->H + grid.y) * params->qL + grid.x;
+      lse[offset] = empty_row ? INFINITY
+                              : (max_score + metal::log2(denominator)) * M_LN2_F;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  uint column = thread_idx * width;
+  for (; column + width <= value_dim; column += threads * width) {
+    float4 acc(0.0f);
+    for (uint i = 0; i < keys; ++i) {
+      const device T* value = v + i * params->V_strides[2] + column;
+      acc = fma(weights[i], sdpa_wide_load4(value), acc);
+    }
+    *reinterpret_cast<device Packed4*>(out + column) =
+        Packed4(T(acc.x), T(acc.y), T(acc.z), T(acc.w));
+  }
+  for (; column < value_dim; ++column) {
+    float acc = 0.0f;
+    for (uint i = 0; i < keys; ++i) {
+      acc = fma(weights[i], float(v[i * params->V_strides[2] + column]), acc);
+    }
+    out[column] = T(acc);
+  }
+}
+
+#define INSTANTIATE_SDPA_VECTOR_WIDE(dtype, hm, dc, mtype)                  \
+  instantiate_kernel(                                                     \
+      "sdpa_vector_wide_" #dtype "_hm" #hm "_dc" #dc "_mask" #mtype,         \
+      sdpa_vector_wide,                                                    \
+      dtype,                                                              \
+      hm,                                                                 \
+      dc,                                                                 \
+      mtype)
+
+#define INSTANTIATE_SDPA_VECTOR_WIDE_MASKS(dtype)       \
+  INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 0, 0, dtype);     \
+  INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 0, 1, dtype);     \
+  INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 1, 0, dtype);     \
+  INSTANTIATE_SDPA_VECTOR_WIDE(dtype, 1, 0, bool)
+
+INSTANTIATE_SDPA_VECTOR_WIDE_MASKS(float);
+INSTANTIATE_SDPA_VECTOR_WIDE_MASKS(half);
+INSTANTIATE_SDPA_VECTOR_WIDE_MASKS(bfloat);
+INSTANTIATE_SDPA_VECTOR_WIDE(half, 1, 0, float);
+INSTANTIATE_SDPA_VECTOR_WIDE(bfloat, 1, 0, float);

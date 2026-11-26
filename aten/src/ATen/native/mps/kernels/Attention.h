@@ -11,6 +11,7 @@
 // DecodeAttention.h instantiates the kernels for each of 32, 64, 96, 128, 256
 // and 512 (kDecodeTiles).
 C10_METAL_CONSTEXPR int kDecodeMaxQueries = 8;
+C10_METAL_CONSTEXPR int kWideDecodeMaxKeys = 16;
 C10_METAL_CONSTEXPR int kTwoPassMinKeys = 1024;
 C10_METAL_CONSTEXPR int kDecodeSimdgroups = 32;
 C10_METAL_CONSTEXPR int kDecodeBlocks = 32;
@@ -65,7 +66,7 @@ struct PrefillAttnParams {
   int kL; // key sequence length
   int gqa_factor; // num_q_heads / num_kv_heads
   float scale;
-  int Dv; // V/O columns per slab, <= the tile width
+  int Dv; // V/O columns assigned to this threadgroup
   // Strides (B, H, L) - element stride in last dim is assumed to be 1.
   // 64-bit: a batch/head stride is a product of the other dimensions and
   // overflows 32 bits on large inputs, and the mask qL stride is multiplied
