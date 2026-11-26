@@ -31,7 +31,7 @@ from ..pattern_matcher import (
     MatchResult,
     stable_topological_sort,
 )
-from ..utils import is_bf16x9_matmul, OPTIMUS_EXCLUDE_POST_GRAD
+from ..utils import get_dtype_size, is_bf16x9_matmul, OPTIMUS_EXCLUDE_POST_GRAD
 
 
 try:
@@ -79,25 +79,32 @@ default_graph_search_options = {
 graph_search_options = default_graph_search_options
 
 
-def _normalize_devices(devices: object) -> OrderedSet[str] | None:
+def _normalize_devices(
+    devices: object, context: str = "devices"
+) -> OrderedSet[str] | None:
     if devices is None:
         return None
     if isinstance(devices, (str, torch.device)):
         devices = (devices,)
     if not isinstance(devices, (list, tuple, AbstractSet, OrderedSet)):
         raise ValueError(
-            f"invalid devices {devices!r}: expected a device type, a torch.device, "
-            "or a sequence of them"
+            f"{context}: invalid devices {devices!r}: expected a device type, a "
+            "torch.device, or a sequence of them"
         )
     normalized = OrderedSet()
     for device in devices:
         if isinstance(device, torch.device):
             normalized.add(device.type)
         elif isinstance(device, str):
-            normalized.add(device.split(":", 1)[0])
+            for part in device.split(","):
+                part = part.strip()
+                if not part:
+                    raise ValueError(f"{context}: empty device in {device!r}")
+                normalized.add(part.split(":", 1)[0])
         else:
             raise ValueError(
-                f"invalid devices entry {device!r}: expected a device type or torch.device"
+                f"{context}: invalid devices entry {device!r}: expected a device "
+                "type or torch.device"
             )
     return normalized
 
@@ -563,9 +570,11 @@ class BatchLinearLHSFusion(BatchFusion):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._bound_symbols_cache: dict[torch.fx.Graph, OrderedSet] = {}
-        self._output_node_cache: dict[torch.fx.Graph, torch.fx.Node] = {}
-        self._devices = _normalize_devices(self.graph_search_options.get("devices"))
+        self._bound_symbols_graph: torch.fx.Graph | None = None
+        self._bound_symbols: OrderedSet = OrderedSet()
+        self._devices = _normalize_devices(
+            self.graph_search_options.get("devices"), "batch_linear_lhs"
+        )
         max_bytes = self.graph_search_options.get(
             "max_fuse_tensor_bytes_batch_linear_lhs"
         )
@@ -597,7 +606,7 @@ class BatchLinearLHSFusion(BatchFusion):
         symbols = free_symbols(section)
         if not symbols:
             return True
-        bound = self._bound_symbols_cache.get(graph)
+        bound = self._bound_symbols if self._bound_symbols_graph is graph else None
         if bound is None:
             # Placeholder bindings: SymInt placeholders and unbacked bindings
             # via the canonical helper, plus tensor inputs binding the dynamic
@@ -610,7 +619,8 @@ class BatchLinearLHSFusion(BatchFusion):
                 if isinstance(value, torch.Tensor):
                     bound |= free_symbols(list(value.shape))
                     bound |= free_symbols(list(value.stride()))
-            self._bound_symbols_cache[graph] = bound
+            self._bound_symbols_graph = graph
+            self._bound_symbols = bound
         return symbols <= bound
 
     @staticmethod
@@ -646,10 +656,7 @@ class BatchLinearLHSFusion(BatchFusion):
     def _reaches_user_visible_output(
         self, node: torch.fx.Node, graph: torch.fx.Graph
     ) -> bool:
-        output_node = self._output_node_cache.get(graph)
-        if output_node is None:
-            output_node = next(n for n in graph.nodes if n.op == "output")
-            self._output_node_cache[graph] = output_node
+        output_node = graph.output_node()
         args = output_node.args[0]
         if not isinstance(args, (tuple, list)):
             args = (args,)
@@ -901,7 +908,7 @@ class BatchLinearLHSFusion(BatchFusion):
                 if visible:
                     input_val = batch_input.meta["val"]  # type: ignore[union-attr]
                     out_dtype = torch.promote_types(input_val.dtype, weight_val.dtype)
-                    out_elem = torch.empty((), dtype=out_dtype).element_size()
+                    out_elem = get_dtype_size(out_dtype)
                     total_bytes += input_val.shape[0] * weight_val.shape[1] * out_elem
             if not statically_known_true(total_bytes <= max_bytes):
                 counters["inductor"]["batch_linear_lhs_declined"] += 1
@@ -2040,7 +2047,7 @@ def get_fusion_candidates(
 def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusionBase):
     stable_topological_sort(graph)  # type: ignore[arg-type]
     fused_set = OrderedSet[torch.fx.Node]()
-    declined = OrderedSet[torch.fx.Node]()
+    declined = OrderedSet()
     log_to_scuba = False
 
     for node in reversed(graph.nodes):  # type: ignore[arg-type]
@@ -2053,12 +2060,13 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             for subset in find_independent_subset_greedy(
                 candidate_nodes, rule.graph_search_options
             ):
-                if any(n in declined for n in subset):
-                    # A previous decline rejected these nodes; skip the
-                    # re-match and the full-ancestor walk for them.
+                subset_key = frozenset(subset)
+                if subset_key in declined:
+                    # This exact subset was declined; skip the re-match and
+                    # the full-ancestor walk for it.
                     continue
                 if rule.fuse(graph, subset) is False:
-                    declined.update(subset)
+                    declined.add(subset_key)
                     log.debug(
                         "%s declined a subset of %s nodes",
                         rule.__class__.__name__,
@@ -2081,10 +2089,6 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             if not isinstance(gm, torch.fx.GraphModule):
                 raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
             gm.recompile()
-        graph_str = gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        )
-
         name = f"optimus_{str(rule.__class__.__name__)}"
         if "MTIA" in name:
             name = f"cff_{str(rule.__class__.__name__)}"
@@ -2094,7 +2098,9 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 "name": name,
                 "encoding": "string",
             },
-            payload_fn=lambda: graph_str,
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
         )
 
 
@@ -2125,9 +2131,11 @@ def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
 
 
 def _option_matches_graph_devices(
-    options: dict[str, Any], graph_devices: OrderedSet[str]
+    options: dict[str, Any],
+    graph_devices: OrderedSet[str],
+    name: str = "devices",
 ) -> bool:
-    devices = _normalize_devices(options.get("devices"))
+    devices = _normalize_devices(options.get("devices"), name)
     if devices is None:
         return True
     return not graph_devices.isdisjoint(devices)
@@ -2190,20 +2198,29 @@ def group_batch_fusion_passes(
                 )
             post_grad_options[name] = config.pre_grad_fusion_options[name]
         # Device-scoped defaults must not pay for the search on other
-        # devices. The "devices" filter applies to every group/batch fusion
-        # option, not just batch_linear_lhs, and the scan is skipped entirely
-        # when no option is device-scoped.
-        if any("devices" in options for options in post_grad_options.values()):
-            graph_devices = OrderedSet()
-            for node in graph.nodes:
-                value = node.meta.get("val")
-                if isinstance(value, torch.Tensor):
-                    graph_devices.add(value.device.type)
-            post_grad_options = {
-                name: options
-                for name, options in post_grad_options.items()
-                if _option_matches_graph_devices(options, graph_devices)
-            }
+        # devices. The filter applies to every group/batch fusion option. The
+        # scan is skipped when no option is device-scoped, or when only
+        # batch_linear_lhs is device-scoped and the graph has no mm/addmm.
+        device_scoped = [
+            name for name, options in post_grad_options.items() if "devices" in options
+        ]
+        if device_scoped:
+            batch_only = all(name == "batch_linear_lhs" for name in device_scoped)
+            has_matmul = bool(
+                graph.find_nodes(op="call_function", target=aten.mm.default)
+                or graph.find_nodes(op="call_function", target=aten.addmm.default)
+            )
+            if not batch_only or has_matmul:
+                graph_devices = OrderedSet()
+                for node in graph.nodes:
+                    value = node.meta.get("val")
+                    if isinstance(value, torch.Tensor):
+                        graph_devices.add(value.device.type)
+                post_grad_options = {
+                    name: options
+                    for name, options in post_grad_options.items()
+                    if _option_matches_graph_devices(options, graph_devices, name)
+                }
         fbgemm_fusion_keys = [
             x
             for x in post_grad_options

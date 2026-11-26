@@ -328,7 +328,7 @@ def _resolve_pre_grad_fusion_options(
     for pass_name, options in fusion_options.items():
         # Same normalization as the post-grad "devices" filter, so the two
         # parsers accept the same values.
-        devices = _normalize_devices(options.get("devices"))
+        devices = _normalize_devices(options.get("devices"), pass_name)
         if devices is not None and example_device_types.isdisjoint(devices):
             continue
         resolved[pass_name] = {k: v for k, v in options.items() if k != "devices"}

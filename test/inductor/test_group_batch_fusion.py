@@ -671,6 +671,7 @@ class TestGroupBatchFusion(TestCase):
         # A bare string is a single device, not a substring to search for.
         self.assertTrue(_option_matches_graph_devices({"devices": "xpu"}, {"xpu"}))
         self.assertFalse(_option_matches_graph_devices({"devices": "xpu"}, {"xp"}))
+        self.assertTrue(_option_matches_graph_devices({"devices": "cpu,xpu"}, {"xpu"}))
         self.assertTrue(_option_matches_graph_devices({"devices": "xpu:0"}, {"xpu"}))
         self.assertTrue(
             _option_matches_graph_devices({"devices": torch.device("xpu")}, {"xpu"})
@@ -684,6 +685,8 @@ class TestGroupBatchFusion(TestCase):
         self.assertTrue(_option_matches_graph_devices({"devices": None}, {"cuda"}))
         with self.assertRaisesRegex(ValueError, "invalid devices 7"):
             _option_matches_graph_devices({"devices": 7}, {"cuda"})
+        with self.assertRaisesRegex(ValueError, "batch_linear_lhs: invalid devices 7"):
+            _option_matches_graph_devices({"devices": 7}, {"cuda"}, "batch_linear_lhs")
         with self.assertRaisesRegex(ValueError, "invalid devices entry"):
             _option_matches_graph_devices({"devices": ("xpu", 7)}, {"cuda"})
 
@@ -840,7 +843,12 @@ class TestGroupBatchFusion(TestCase):
         # remembered so the same subset is not walked and declined again.
         class M(torch.nn.Module):
             def forward(self, x, w1, w2, w3):
-                return torch.mm(x, w1.t()), torch.mm(x, w2.t()), torch.mm(x, w3.t())
+                outs = (
+                    torch.mm(x, w1.t()),
+                    torch.mm(x, w2.t()),
+                    torch.mm(x, w3.t()),
+                )
+                return (*outs, torch.stack(outs).sum(0))
 
         module = M().eval()
         x = torch.randn(32, 64)
@@ -882,6 +890,33 @@ class TestGroupBatchFusion(TestCase):
                 actual = torch.compile(module, fullgraph=True)(x, w1, w2)
             self.assertEqual(actual, expected)
             self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+        counters.clear()
+
+    def test_batch_linear_lhs_explicit_post_grad_options_fuse(self):
+        # The explicit post-grad entry wins and is the one that fuses: a pair
+        # fuses with min_fuse_set_size: 2 while the legacy pre-grad key asks 3.
+        class M(torch.nn.Module):
+            def forward(self, x, w1, w2):
+                return torch.mm(x, w1.t()), torch.mm(x, w2.t())
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        w1 = torch.randn(16, 64)
+        w2 = torch.randn(32, 64)
+        with torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "batch_linear_lhs": {"min_fuse_set_size": 3},
+            },
+            post_grad_fusion_options={
+                "batch_linear_lhs": {"min_fuse_set_size": 2},
+            },
+        ):
+            counters.clear()
+            with torch.no_grad():
+                expected = module(x, w1, w2)
+                actual = torch.compile(module, fullgraph=True)(x, w1, w2)
+            self.assertEqual(actual, expected)
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
         counters.clear()
 
     def test_batch_linear_lhs_default_options_fuse_fake_xpu_graph(self):
@@ -931,6 +966,30 @@ class TestGroupBatchFusion(TestCase):
         apply_group_batch_fusion(gm.graph, rule)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
         counters.clear()
+
+    def test_batch_linear_lhs_default_graph_device_filter_fake_graphs(self):
+        def f(x, w1, w2):
+            return torch.sigmoid(torch.mm(x, w1.t())), torch.sigmoid(
+                torch.mm(x, w2.t())
+            )
+
+        def build(device):
+            with FakeTensorMode():
+                fake_inputs = [
+                    torch.randn(32, 64, device=device),
+                    torch.randn(16, 64, device=device),
+                    torch.randn(32, 64, device=device),
+                ]
+                return make_fx(f)(*fake_inputs)
+
+        for device, expected in (("cpu", 0), ("xpu", 1)):
+            gm = build(device)
+            counters.clear()
+            torch._inductor.fx_passes.group_batch_fusion.group_batch_fusion_passes(
+                gm.graph, pre_grad=False
+            )
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], expected)
+            counters.clear()
 
     @parametrize("dynamic", [False, True])
     @torch._inductor.config.patch(

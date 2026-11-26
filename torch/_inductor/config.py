@@ -426,6 +426,9 @@ pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 # projections whose outputs reach the graph output; enabled in the shipped
 # default). The cap lives only in the shipped entry: a partial dict drops it. A
 # group whose fused bytes are not statically known is declined under a cap.
+# The devices key is applied by the graph-level post-grad filter to every
+# option; only batch_linear_lhs additionally checks it per node. Device
+# indices are ignored at graph level.
 post_grad_fusion_options: dict[str, dict[str, Any]] = {
     "batch_linear_lhs": {
         "devices": ("xpu",),
