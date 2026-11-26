@@ -2271,26 +2271,25 @@ def invoke_and_store_as_constant(
         source_name = tx.output.install_global_by_id(name, res)
         tx.output.update_co_names(source_name)
         source = ConstantSource(source_name)
-        has_tensor = True
     else:
         source_name = None
         source = ConstantSource(name)
-        has_tensor = any(isinstance(leaf, torch.Tensor) for leaf in tree_leaves(res))
-    if has_tensor:
-        # Unlike install_global_by_id names that _bind_unnamed_scopes can rebind
-        # at install time, a constant tensor's value cannot be recovered on
-        # precompile cache reload. Mark the frame as computing before bypassing
-        # so precompile capture does not silently skip it as non-computing.
-        if tx.output.package is not None:
-            tx.output.package.note_compute()
-        bypass_kwargs: dict[str, Any] = {"function_name": name}
-        if source_name is not None:
-            bypass_kwargs["global_name"] = source_name
+    if tx.output.package is not None and (
+        isinstance(res, torch.Tensor)
+        or any(isinstance(leaf, torch.Tensor) for leaf in tree_leaves(res))
+    ):
+        # Unlike `___unnamed_scope` namespaces, which `_bind_unnamed_scopes`
+        # re-resolves at install time, a constant tensor's value cannot be
+        # recovered on precompile cache reload. Mark the frame as computing
+        # before bypassing so precompile capture does not silently skip it.
+        tx.output.package.note_compute()
         tx.output.bypass_package(
-            f"Frame uses a constant-result tensor from `{name}`, which cannot be "
-            "restored across precompile cache loads. Return a Python value or "
+            f"Frame uses a tensor returned by `@torch._dynamo.assume_constant_result` "
+            f"function `{name}`, which cannot be restored across precompile cache "
+            "loads. Return non-tensor values (e.g., numbers or strings) or "
             "construct the tensor inside the compiled region instead.",
-            **bypass_kwargs,
+            function_name=name,
+            global_name=source_name,
         )
     return tx.output.register_attr_or_module(
         res,

@@ -850,7 +850,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(*make_args()), fn(*make_args()))
         self.assertTrue(
-            any("constant-result tensor" in line for line in logs.output)
+            any("assume_constant_result" in line for line in logs.output)
         )
         entry = package._codes[fn.__code__]
         self.assertTrue(entry.bypassed)
@@ -873,7 +873,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
             strict_compiled = torch._dynamo.optimize(counter, package=strict_package)(
                 fn
             )
-            with self.assertRaisesRegex(PackageError, "constant-result tensor"):
+            with self.assertRaisesRegex(PackageError, "assume_constant_result"):
                 strict_compiled(*make_args())
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
