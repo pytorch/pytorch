@@ -23,6 +23,7 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
+from torch._dynamo.variables.streams import StreamContextVariable
 from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -504,6 +505,30 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
 
         res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent(device="cpu"))
         self.assertEqual(res, torch.ones(2))
+
+    def test_stream_context_python_type_follows_device(self):
+        class FakeStreamContext:
+            pass
+
+        fake_module = types.ModuleType("torch.fakeaccel")
+        fake_module.StreamContext = FakeStreamContext
+
+        fake_stream = types.SimpleNamespace(
+            device=types.SimpleNamespace(type="fakeaccel"), user_object_index=0
+        )
+        cuda_stream = types.SimpleNamespace(
+            device=types.SimpleNamespace(type="cuda"), user_object_index=1
+        )
+
+        with patch.dict(sys.modules, {"torch.fakeaccel": fake_module}):
+            ctx_var = StreamContextVariable(fake_stream)
+            self.assertIs(ctx_var.python_type(), FakeStreamContext)
+            # a device without its own StreamContext class keeps the old
+            # behavior, and CUDA still resolves to the CUDA context
+            self.assertIs(
+                StreamContextVariable(cuda_stream).python_type(),
+                torch.cuda.StreamContext,
+            )
 
     @parametrize("holder_kind", ("list", "set", "attr"))
     def test_event_record_after_input_mutation_escapes_via_container(self, holder_kind):

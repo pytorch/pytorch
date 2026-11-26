@@ -1,4 +1,5 @@
 import collections
+import sys
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -374,6 +375,17 @@ class SymbolicStreamState:
         return id(stream.value)
 
 
+def _device_stream_context_type(stream: "StreamVariable") -> type:
+    # StreamContext classes are device specific (torch.cuda.StreamContext,
+    # torch.xpu.StreamContext, and out-of-tree equivalents), so resolve the
+    # wrapped stream's device module instead of hardcoding CUDA.  Falls back
+    # to the CUDA class when the device module exposes no StreamContext.
+    device_type = getattr(getattr(stream, "device", None), "type", None)
+    module = sys.modules.get(f"torch.{device_type}") if device_type else None
+    context_type = getattr(module, "StreamContext", None) if module else None
+    return context_type if context_type is not None else torch.cuda.StreamContext
+
+
 class StreamContextVariable(FxTracebackAnnotateVariable):
     """This represents torch.cuda.StreamContext"""
 
@@ -417,7 +429,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         return super().exit(tx, *args)
 
     def python_type(self) -> type:
-        return torch.cuda.StreamContext
+        return _device_stream_context_type(self.get_stream())
 
     def supports_graph_breaks(self) -> bool:
         return True
