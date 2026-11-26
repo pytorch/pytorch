@@ -74,6 +74,23 @@ class TestTypePromotionDevice(TestCase):
         int16_tensor = torch.tensor([1, 1, 1], dtype=torch.int16, device=device)
         uint8_tensor *= int16_tensor
 
+    # Shell dtypes such as float4_e2m1fn_x2 have no value conversions, so mixing one
+    # with another dtype must raise on every device instead of reinterpreting its
+    # bits inside a kernel.
+    def test_shell_dtype_promotion_raises(self, device):
+        x = torch.zeros(4, dtype=torch.uint8, device=device).view(torch.float4_e2m1fn_x2)
+        others = (True, 1, 0.5, torch.tensor(5, dtype=torch.uint8, device=device))
+        for other in others:
+            for op in (torch.eq, torch.ne):
+                with self.assertRaisesRegex(NotImplementedError, "is not supported"):
+                    op(x, other)
+        out = torch.empty(4, dtype=torch.float4_e2m1fn_x2, device=device)
+        with self.assertRaisesRegex(NotImplementedError, "is not supported"):
+            torch.add(torch.ones(4, device=device), 1, out=out)
+        # comparing two float4 tensors needs no conversion
+        self.assertTrue((x == x.clone()).all())
+
+
     @float_double_default_dtype
     def test_unsigned(self, device):
         dont_promote = torch.ones(3, dtype=torch.uint8, device=device) + 5
@@ -1185,7 +1202,7 @@ class TestTypePromotion(TestCase):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
 
-instantiate_device_type_tests(TestTypePromotionDevice, globals())
+instantiate_device_type_tests(TestTypePromotionDevice, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()

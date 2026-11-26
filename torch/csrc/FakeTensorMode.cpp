@@ -2,6 +2,7 @@
 #include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/PyInterpreter.h>
 
+#include <array>
 #include <mutex>
 #include <new>
 #include <type_traits>
@@ -129,6 +130,9 @@ static int cpp_fake_tensor_mode_init(
       config.attr("fake_tensor_allow_meta").cast<bool>(),
       config.attr("fake_tensor_allow_unsafe_data_ptr_access").cast<bool>(),
       config.attr("fake_tensor_propagate_real_tensors").cast<bool>());
+  mode->avoid_device_init_ = py::module::import("torch._subclasses.fake_tensor")
+                                 .attr("_avoid_device_init")()
+                                 .cast<bool>();
   mode->prefer_device_type_ = config.attr("fake_tensor_prefer_device_type")
                                   .cast<std::optional<std::string>>();
   if (creation_traceback != Py_None) {
@@ -189,7 +193,24 @@ static PyObject* get_mode_pyobject(PyObject* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* clear_non_cpu_constants(PyObject* self, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  getCppFakeTensorMode(self)->clear_non_cpu_constants();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static std::array<PyMethodDef, 2> mode_methods = {{
+    {"clear_non_cpu_constants", clear_non_cpu_constants, METH_NOARGS, nullptr},
+    {nullptr},
+}};
+
 static PyGetSetDef mode_properties[] = {
+    {"avoid_device_init",
+     get_mode_field<&c10::FakeTensorMode::avoid_device_init_>,
+     nullptr,
+     nullptr,
+     nullptr},
     {"_creation_traceback",
      get_mode_pyobject<&c10::FakeTensorMode::creation_traceback_>,
      nullptr,
@@ -215,9 +236,24 @@ static PyGetSetDef mode_properties[] = {
      set_mode_field<&c10::FakeTensorMode::allow_non_fake_inputs_>,
      nullptr,
      nullptr},
+    {"allow_fallback_kernels",
+     get_mode_field<&c10::FakeTensorMode::allow_fallback_kernels_>,
+     set_mode_field<&c10::FakeTensorMode::allow_fallback_kernels_>,
+     nullptr,
+     nullptr},
+    {"propagate_real_tensors",
+     get_mode_field<&c10::FakeTensorMode::propagate_real_tensors_>,
+     set_mode_field<&c10::FakeTensorMode::propagate_real_tensors_>,
+     nullptr,
+     nullptr},
     {"epoch",
      get_mode_field<&c10::FakeTensorMode::epoch_>,
      set_mode_field<&c10::FakeTensorMode::epoch_>,
+     nullptr,
+     nullptr},
+    {"allow_scalar_outputs",
+     get_mode_field<&c10::FakeTensorMode::allow_scalar_outputs_>,
+     set_mode_field<&c10::FakeTensorMode::allow_scalar_outputs_>,
      nullptr,
      nullptr},
     {"fake_tensor_converter",
@@ -260,7 +296,7 @@ PyTypeObject PyCppFakeTensorModeType = {
     offsetof(PyCppFakeTensorMode, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    nullptr, /* tp_methods */
+    mode_methods.data(), /* tp_methods */
     nullptr, /* tp_members */
     mode_properties, /* tp_getset */
     nullptr, /* tp_base */
