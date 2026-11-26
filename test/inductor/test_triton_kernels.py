@@ -69,7 +69,7 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
-from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
+from torch.testing._internal.common_utils import parametrize, skipIfWindows
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     GPU_TYPE,
@@ -6085,10 +6085,6 @@ def forward(self, arg0_1, arg1_1):
             self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
-    @skipIfXpu(
-        msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs, "
-        "https://github.com/pytorch/pytorch/pull/167786"
-    )
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     @parametrize("cpp_wrapper", [False, True])
@@ -6098,6 +6094,12 @@ def forward(self, arg0_1, arg1_1):
                 kernel_inline_asm_single_quotes
                 if quotes == "single"
                 else kernel_inline_asm_double_quotes
+            )
+        elif GPU_TYPE == "xpu":
+            kernel = (
+                kernel_inline_asm_xpu_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_xpu_double_quotes
             )
         else:
             kernel = (

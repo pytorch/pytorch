@@ -1048,6 +1048,48 @@ if has_triton(include_cpu=True):
         )
         tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
 
+    # Intel GPU vISA. The SIMD width (32) must match the Triton threads_per_warp.
+    @triton.jit
+    def kernel_inline_asm_xpu_double_quotes(
+        in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        data = tl.load(in_ptr + offsets, mask=offsets < numel)
+        cos_pow = tl.inline_asm_elementwise(
+            asm="""
+            cos (M1_NM, 32) $0(0,0)<1> $1(0,0)<1;1,0>
+            exp (M1_NM, 32) $0(0,0)<1> $0(0,0)<1;1,0>
+                """,
+            constraints=("=rw,rw"),
+            args=[data],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+        tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
+
+    @triton.jit
+    def kernel_inline_asm_xpu_single_quotes(
+        in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        data = tl.load(in_ptr + offsets, mask=offsets < numel)
+        cos_pow = tl.inline_asm_elementwise(
+            asm='''
+            // double quotes to pacify the linter """!!!"""
+            cos (M1_NM, 32) $0(0,0)<1> $1(0,0)<1;1,0>
+            exp (M1_NM, 32) $0(0,0)<1> $0(0,0)<1;1,0>
+                ''',
+            constraints=("=rw,rw"),
+            args=[data],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+        tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
+
     @triton.jit
     def add_kernel_with_boolean_param(
         in_ptr0,
