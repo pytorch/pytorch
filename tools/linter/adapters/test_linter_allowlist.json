@@ -569,7 +569,6 @@
   "test/test_futures.py",
   "test/test_gpu_trace.py",
   "test/test_hub.py",
-  "test/test_indexing.py",
   "test/test_jiterator.py",
   "test/test_legacy_vmap.py",
   "test/test_license.py",
