@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._library.opaque_object import CustomClassBase, register_custom_class
 
 
 if TYPE_CHECKING:
@@ -112,11 +113,381 @@ def _import_nccl_ep() -> Any:
     return _ep
 
 
-@dataclass(frozen=True, slots=True)
+class _NCCLEPObject(CustomClassBase):
+    """Keep a native EP object opaque to compiler tracing.
+
+    Routing updates mutate the native handle in place. Wrappers of one handle
+    share ``versions``; ``version`` is the update this wrapper observed, so
+    communication through a stale routing (e.g. a backward whose forward
+    predates an update) raises instead of using the new routes.
+    """
+
+    def __init__(self, value: Any = None, versions: list[int] | None = None):
+        self.value = value
+        self.versions = [0] if versions is None else versions
+        self.version = self.versions[0]
+
+    def native(self) -> Any:
+        if self.version != self.versions[0]:
+            raise RuntimeError(
+                "TokenSwitch routing was updated after this routing was created; "
+                "use the routing returned by update_routing, and do not update a "
+                "routing whose forward still needs its backward"
+            )
+        return self.value
+
+
+register_custom_class(_NCCLEPObject, typ="symbolic")
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class Routing:
-    handle: object
+    _opaque_handle: _NCCLEPObject
     topk_idx: torch.Tensor
-    layout: str = "flat"  # "flat" | "expert_major"
+    layout: str = "flat"
+
+    def __init__(self, handle: object, topk_idx: torch.Tensor, layout: str = "flat"):
+        opaque_handle = (
+            handle if isinstance(handle, _NCCLEPObject) else _NCCLEPObject(handle)
+        )
+        object.__setattr__(self, "_opaque_handle", opaque_handle)
+        object.__setattr__(self, "topk_idx", topk_idx)
+        object.__setattr__(self, "layout", layout)
+
+    @property
+    def handle(self) -> object:
+        return self._opaque_handle.value
+
+
+@torch.library.custom_op(
+    "_nccl_ep::create_routing",
+    mutates_args=(),
+    schema=(
+        "(torch.distributed._token_switch._NCCLEPObject group, Tensor topk_idx, "
+        "Tensor? per_expert_token_counts, str layout, SymInt alignment) -> "
+        "(torch.distributed._token_switch._NCCLEPObject, Tensor?)"
+    ),
+)
+def _create_routing_op(
+    group: _NCCLEPObject,
+    topk_idx: torch.Tensor,
+    per_expert_token_counts: torch.Tensor | None,
+    layout: str,
+    alignment: int,
+) -> tuple[_NCCLEPObject, torch.Tensor | None]:
+    ep = _import_nccl_ep()
+    native_layouts = {"flat": ep.Layout.FLAT, "expert_major": ep.Layout.EXPERT_MAJOR}
+    if layout not in native_layouts:
+        raise ValueError(f"Unsupported NCCL EP routing layout: {layout}")
+    # Native code writes the counts; clone so this functional op leaves its input intact.
+    counts = (
+        per_expert_token_counts.clone() if per_expert_token_counts is not None else None
+    )
+    handle = ep._NcclEpHandle.create(
+        group.native(), topk_idx, counts, native_layouts[layout], alignment
+    )
+    return _NCCLEPObject(handle), counts
+
+
+@_create_routing_op.register_fake
+def _create_routing_fake(group, topk_idx, per_expert_token_counts, layout, alignment):
+    counts = (
+        torch.empty_like(per_expert_token_counts)
+        if per_expert_token_counts is not None
+        else None
+    )
+    return _NCCLEPObject(), counts
+
+
+@torch.library.custom_op(
+    "_nccl_ep::update_routing",
+    mutates_args=(),
+    schema=(
+        "(torch.distributed._token_switch._NCCLEPObject handle, Tensor topk_idx, "
+        "Tensor? per_expert_token_counts) -> "
+        "(torch.distributed._token_switch._NCCLEPObject, Tensor?)"
+    ),
+)
+def _update_routing_op(handle, topk_idx, per_expert_token_counts):
+    counts = (
+        per_expert_token_counts.clone() if per_expert_token_counts is not None else None
+    )
+    handle.value.update(topk_idx, counts)
+    handle.versions[0] += 1
+    return _NCCLEPObject(handle.value, handle.versions), counts
+
+
+@_update_routing_op.register_fake
+def _update_routing_fake(handle, topk_idx, per_expert_token_counts):
+    counts = (
+        torch.empty_like(per_expert_token_counts)
+        if per_expert_token_counts is not None
+        else None
+    )
+    return _NCCLEPObject(), counts
+
+
+@torch.library.custom_op(
+    "_nccl_ep::dispatch_out",
+    mutates_args=("out_tokens", "out_topk_weights", "out_topk_idx"),
+)
+def _dispatch_op(
+    handle: _NCCLEPObject,
+    tokens: torch.Tensor,
+    topk_weights: torch.Tensor,
+    out_tokens: torch.Tensor,
+    out_topk_weights: torch.Tensor | None,
+    out_topk_idx: torch.Tensor | None,
+) -> None:
+    _import_nccl_ep()._nccl_ep_dispatch(
+        handle.native(),
+        tokens,
+        topk_weights,
+        out_tokens,
+        out_topk_weights,
+        out_topk_idx,
+    )
+
+
+@torch.library.custom_op("_nccl_ep::combine_out", mutates_args=("out_tokens",))
+def _combine_op(
+    handle: _NCCLEPObject,
+    expert_tokens: torch.Tensor,
+    out_tokens: torch.Tensor,
+) -> None:
+    _import_nccl_ep()._nccl_ep_combine(handle.native(), expert_tokens, out_tokens)
+
+
+@torch.library.custom_op(
+    "_nccl_ep::dispatch_backward_out", mutates_args=("out_tokens",)
+)
+def _dispatch_backward_op(
+    handle: _NCCLEPObject,
+    grad_tokens: torch.Tensor,
+    out_tokens: torch.Tensor,
+) -> None:
+    _import_nccl_ep()._nccl_ep_dispatch_backward(
+        handle.native(), grad_tokens, out_tokens
+    )
+
+
+@torch.library.custom_op(
+    "_nccl_ep::combine_backward_out",
+    mutates_args=("out_tokens", "out_topk_weights"),
+)
+def _combine_backward_op(
+    handle: _NCCLEPObject,
+    grad_tokens: torch.Tensor,
+    grad_topk_weights: torch.Tensor,
+    out_tokens: torch.Tensor,
+    out_topk_weights: torch.Tensor,
+) -> None:
+    _import_nccl_ep()._nccl_ep_combine_backward(
+        handle.native(), grad_tokens, grad_topk_weights, out_tokens, out_topk_weights
+    )
+
+
+@_dispatch_op.register_fake
+@_combine_op.register_fake
+@_dispatch_backward_op.register_fake
+@_combine_backward_op.register_fake
+def _out_op_fake(*args, **kwargs) -> None:
+    # Output metadata is already supplied by the caller's buffers.
+    return None
+
+
+@torch.library.custom_op(
+    "_nccl_ep::dispatch_async",
+    mutates_args=(),
+    schema=(
+        "(torch.distributed._token_switch._NCCLEPObject handle, Tensor tokens, "
+        "Tensor topk_weights, SymInt capacity, str layout) -> (Tensor, Tensor, Tensor?)"
+    ),
+)
+def _dispatch_async_op(
+    handle: _NCCLEPObject,
+    tokens: torch.Tensor,
+    topk_weights: torch.Tensor,
+    capacity: int,
+    layout: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    outputs = _dispatch_async_fake(handle, tokens, topk_weights, capacity, layout)
+    _import_nccl_ep()._nccl_ep_dispatch(
+        handle.native(),
+        tokens.contiguous(),
+        topk_weights.contiguous(),
+        *outputs,
+        async_op=True,
+    )
+    return outputs
+
+
+@_dispatch_async_op.register_fake
+def _dispatch_async_fake(
+    handle, tokens, topk_weights, capacity, layout, *, initialize_tokens=True
+):
+    if layout not in ("flat", "expert_major"):
+        raise ValueError(f"Unsupported NCCL EP dispatch layout: {layout}")
+    weights_shape = (
+        (capacity,) if layout == "expert_major" else (capacity, topk_weights.shape[1])
+    )
+    # Callers opting out must mask unused receive rows.
+    allocate_tokens = tokens.new_zeros if initialize_tokens else tokens.new_empty
+    return (
+        allocate_tokens(capacity, tokens.shape[1]),
+        topk_weights.new_zeros(weights_shape),
+        tokens.new_full((capacity, topk_weights.shape[1]), -1, dtype=torch.int64)
+        if layout == "flat"
+        else None,
+    )
+
+
+@torch.library.custom_op("_nccl_ep::combine_async", mutates_args=())
+def _combine_async_op(
+    handle: _NCCLEPObject,
+    expert_tokens: torch.Tensor,
+    num_tokens: int,
+    capacity: int,
+) -> torch.Tensor:
+    output = _combine_async_fake(handle, expert_tokens, num_tokens, capacity)
+    _import_nccl_ep()._nccl_ep_combine(
+        handle.native(), expert_tokens.contiguous(), output, async_op=True
+    )
+    return output
+
+
+@_combine_async_op.register_fake
+def _combine_async_fake(handle, expert_tokens, num_tokens, capacity):
+    # Native combine writes every source row, including zero-contribution rows.
+    return expert_tokens.new_empty(num_tokens, expert_tokens.shape[1])
+
+
+@torch.library.custom_op("_nccl_ep::dispatch_backward_async", mutates_args=())
+def _dispatch_backward_async_op(
+    handle: _NCCLEPObject,
+    grad_tokens: torch.Tensor,
+    capacity: int,
+    *,
+    initialize_tokens: bool = True,
+) -> torch.Tensor:
+    output = _dispatch_backward_async_fake(
+        handle, grad_tokens, capacity, initialize_tokens=initialize_tokens
+    )
+    _import_nccl_ep()._nccl_ep_dispatch_backward(
+        handle.native(), grad_tokens.contiguous(), output, async_op=True
+    )
+    return output
+
+
+@_dispatch_backward_async_op.register_fake
+def _dispatch_backward_async_fake(
+    handle, grad_tokens, capacity, *, initialize_tokens=True
+):
+    # Native dispatch writes routed rows; callers own unused receive rows.
+    allocate_tokens = (
+        grad_tokens.new_zeros if initialize_tokens else grad_tokens.new_empty
+    )
+    return allocate_tokens(capacity, grad_tokens.shape[1])
+
+
+@torch.library.custom_op("_nccl_ep::combine_backward_async", mutates_args=())
+def _combine_backward_async_op(
+    handle: _NCCLEPObject,
+    grad_tokens: torch.Tensor,
+    grad_topk_weights: torch.Tensor,
+    num_tokens: int,
+    top_k: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    outputs = _combine_backward_async_fake(
+        handle, grad_tokens, grad_topk_weights, num_tokens, top_k
+    )
+    _import_nccl_ep()._nccl_ep_combine_backward(
+        handle.native(),
+        grad_tokens.contiguous(),
+        grad_topk_weights.contiguous(),
+        *outputs,
+        async_op=True,
+    )
+    return outputs
+
+
+@_combine_backward_async_op.register_fake
+def _combine_backward_async_fake(
+    handle, grad_tokens, grad_topk_weights, num_tokens, top_k
+):
+    return (
+        grad_tokens.new_empty(num_tokens, grad_tokens.shape[1]),
+        grad_topk_weights.new_zeros(num_tokens, top_k),
+    )
+
+
+def _dispatch_async_setup_context(ctx, inputs, output):
+    handle, tokens, topk_weights, _, _ = inputs
+    ctx.handle = handle
+    ctx.num_tokens = tokens.shape[0]
+    ctx.top_k = topk_weights.shape[1]
+    ctx.capacity = output[0].shape[0]
+    ctx.needs_weight_grad = ctx.needs_input_grad[2]
+
+
+def _dispatch_async_backward(ctx, grad_tokens, grad_weights, grad_ids):
+    from torch.distributed._functional_collectives import wait_tensor
+
+    if not ctx.needs_weight_grad:
+        token_grads = _combine_async_op(
+            ctx.handle, grad_tokens.contiguous(), ctx.num_tokens, ctx.capacity
+        )
+        return None, wait_tensor(token_grads), None, None, None
+    if grad_weights is None:
+        raise NotImplementedError(
+            "TokenSwitch dispatch backward requires received topk_weights"
+        )
+    token_grads, weight_grads = _combine_backward_async_op(
+        ctx.handle,
+        grad_tokens.contiguous(),
+        grad_weights.contiguous(),
+        ctx.num_tokens,
+        ctx.top_k,
+    )
+    return None, wait_tensor(token_grads), wait_tensor(weight_grads), None, None
+
+
+def _combine_async_setup_context(ctx, inputs, output):
+    handle, expert_tokens, _, capacity = inputs
+    ctx.handle = handle
+    ctx.expert_rows = expert_tokens.shape[0]
+    ctx.expert_dtype = expert_tokens.dtype
+    ctx.capacity = max(capacity, ctx.expert_rows)
+
+
+def _combine_async_backward(ctx, grad_tokens):
+    from torch.distributed._functional_collectives import wait_tensor
+
+    expert_grads = _dispatch_backward_async_op(
+        ctx.handle, grad_tokens.to(ctx.expert_dtype).contiguous(), ctx.capacity
+    )
+    return None, wait_tensor(expert_grads)[: ctx.expert_rows], None, None
+
+
+_dispatch_async_op.register_autograd(
+    _dispatch_async_backward, setup_context=_dispatch_async_setup_context
+)
+_combine_async_op.register_autograd(
+    _combine_async_backward, setup_context=_combine_async_setup_context
+)
+
+# Communication and routing updates share native state without data edges, so
+# keep them in program order. Ordering also keeps them out of rematerialization.
+# Effects do not apply to the mutating *_out ops; a stale handle there raises.
+for _op in (
+    _create_routing_op,
+    _update_routing_op,
+    _dispatch_async_op,
+    _combine_async_op,
+    _dispatch_backward_async_op,
+    _combine_backward_async_op,
+):
+    _op.register_effect(torch.library.EffectType.ORDERED)
 
 
 class _DispatchAutograd(torch.autograd.Function):
@@ -139,6 +510,8 @@ class _DispatchAutograd(torch.autograd.Function):
         )
         ctx.ts = ts
         ctx.routing = routing
+        ctx.needs_weight_grad = ctx.needs_input_grad[3]
+        ctx.has_received_weights = out_topk_weights is not None
         return out_tokens, out_topk_weights, out_topk_idx
 
     @staticmethod
@@ -148,7 +521,13 @@ class _DispatchAutograd(torch.autograd.Function):
         grad_out_tokens: torch.Tensor,
         grad_out_topk_weights: torch.Tensor | None,
         grad_out_topk_idx: torch.Tensor | None,
-    ) -> tuple[None, None, torch.Tensor, torch.Tensor, None]:
+    ) -> tuple[None, None, torch.Tensor, torch.Tensor | None, None]:
+        if not ctx.has_received_weights or not ctx.needs_weight_grad:
+            grad_tokens = grad_out_tokens.new_zeros(
+                ctx.routing.topk_idx.shape[0], grad_out_tokens.shape[-1]
+            )
+            ctx.ts._combine(ctx.routing, grad_out_tokens.contiguous(), grad_tokens)
+            return None, None, grad_tokens, None, None
         if grad_out_topk_weights is None:
             raise NotImplementedError(
                 "TokenSwitch dispatch backward requires received topk_weights"
@@ -378,12 +757,10 @@ class TokenSwitch(abc.ABC):
 
 
 class TokenSwitchNCCL(TokenSwitch):
-    r"""Token switch backed by NCCL EP (:func:`ncclEpCreateGroup` / dispatch / combine).
+    """Token switch backed by NCCL EP (:func:`ncclEpCreateGroup` / dispatch / combine).
 
     The dispatch output layout is chosen per routing via
     :meth:`create_routing`'s ``layout`` argument.
-    All dispatch output buffers must have at least ``max_recv_tokens_per_rank``
-    rows, even when the actual receive count is smaller.
     """
 
     def __init__(
@@ -393,9 +770,20 @@ class TokenSwitchNCCL(TokenSwitch):
         max_dispatch_tokens_per_rank: int,
         max_recv_tokens_per_rank: int,
         max_token_bytes: int,
+        *,
+        ht_flow: str = "auto",
     ) -> None:
         self._ep = _import_nccl_ep()
         ep = self._ep
+        flow_map = {
+            "auto": ep.HtFlow.AUTO,
+            "push_pull": ep.HtFlow.PUSH_PULL,
+            "pull_push": ep.HtFlow.PULL_PUSH,
+        }
+        if ht_flow not in flow_map:
+            raise ValueError(
+                f"ht_flow must be one of {list(flow_map)}; got {ht_flow!r}"
+            )
 
         self._layout_map = {
             "flat": ep.Layout.FLAT,
@@ -409,7 +797,9 @@ class TokenSwitchNCCL(TokenSwitch):
             max_dispatch_tokens_per_rank,
             max_recv_tokens_per_rank,
             max_token_bytes,
+            flow_map[ht_flow],
         )
+        self._opaque_group = _NCCLEPObject(self._group)
 
     def close(self) -> None:
         """Release EP resources before destroying the process group.
@@ -453,11 +843,10 @@ class TokenSwitchNCCL(TokenSwitch):
         per_expert_token_counts: torch.Tensor | None = None,
         *,
         layout: str,
+        alignment: int = 1,
     ) -> Routing:
-        r"""Create expert routing for this phase; pass to :meth:`dispatch` / :meth:`combine`.
+        """Create expert routing for this phase; pass to :meth:`dispatch` / :meth:`combine`.
 
-        ``topk_idx`` must have dtype ``torch.int32`` or ``torch.int64``.
-        The NCCL EP handle retains an int64 copy of int32 indices.
         ``layout`` (required) controls the dispatch output memory layout:
         ``"flat"`` or ``"expert_major"``.
         """
@@ -465,13 +854,35 @@ class TokenSwitchNCCL(TokenSwitch):
             raise ValueError(
                 f"layout must be one of {list(self._layout_map)}; got {layout!r}"
             )
-        handle = self._ep._NcclEpHandle.create(
-            self._group,
+        handle, counts = _create_routing_op(
+            self._opaque_group,
             topk_idx,
             per_expert_token_counts,
-            self._layout_map[layout],
+            layout,
+            alignment,
         )
+        if per_expert_token_counts is not None:
+            per_expert_token_counts.copy_(counts)
         return Routing(handle=handle, topk_idx=topk_idx, layout=layout)
+
+    def update_routing(
+        self,
+        routing: Routing,
+        topk_idx: torch.Tensor,
+        per_expert_token_counts: torch.Tensor | None = None,
+    ) -> Routing:
+        """Refresh preallocated routing with the same token and top-k shape.
+
+        Create the routing before CUDA graph capture. Use the returned routing
+        for dispatch/combine, and keep it and its input storage alive for replay.
+        Do not update a handle while an earlier forward still needs its backward.
+        """
+        handle, counts = _update_routing_op(
+            routing._opaque_handle, topk_idx, per_expert_token_counts
+        )
+        if per_expert_token_counts is not None:
+            per_expert_token_counts.copy_(counts)
+        return Routing(handle=handle, topk_idx=topk_idx, layout=routing.layout)
 
     def _dispatch(
         self,
@@ -483,15 +894,14 @@ class TokenSwitchNCCL(TokenSwitch):
         out_topk_idx: torch.Tensor | None,
     ) -> None:
         capacity = self._max_recv_tokens_per_rank
-        for t in (out_tokens, out_topk_weights, out_topk_idx):
-            if t is not None and t.ndim > 0 and t.shape[0] < capacity:
+        for tensor in (out_tokens, out_topk_weights, out_topk_idx):
+            if tensor is not None and tensor.ndim > 0 and tensor.shape[0] < capacity:
                 raise ValueError(
                     f"NCCL EP dispatch outputs require at least {capacity} rows "
-                    f"(max_recv_tokens_per_rank), got {t.shape[0]}"
+                    f"(max_recv_tokens_per_rank), got {tensor.shape[0]}"
                 )
-
-        self._ep._nccl_ep_dispatch(
-            routing.handle,
+        _dispatch_op(
+            routing._opaque_handle,
             tokens,
             topk_weights,
             out_tokens,
@@ -505,8 +915,8 @@ class TokenSwitchNCCL(TokenSwitch):
         expert_tokens: torch.Tensor,
         out_tokens: torch.Tensor,
     ) -> None:
-        self._ep._nccl_ep_combine(
-            routing.handle,
+        _combine_op(
+            routing._opaque_handle,
             expert_tokens,
             out_tokens,
         )
@@ -517,9 +927,7 @@ class TokenSwitchNCCL(TokenSwitch):
         grad_tokens: torch.Tensor,
         out_expert_grads: torch.Tensor,
     ) -> None:
-        self._ep._nccl_ep_dispatch_backward(
-            routing.handle, grad_tokens, out_expert_grads
-        )
+        _dispatch_backward_op(routing._opaque_handle, grad_tokens, out_expert_grads)
 
     def _dispatch_backward(
         self,
@@ -529,12 +937,67 @@ class TokenSwitchNCCL(TokenSwitch):
         out_token_grads: torch.Tensor,
         out_topk_weight_grads: torch.Tensor,
     ) -> None:
-        self._ep._nccl_ep_combine_backward(
-            routing.handle,
+        _combine_backward_op(
+            routing._opaque_handle,
             grad_recv_tokens,
             grad_recv_topk_weights,
             out_token_grads,
             out_topk_weight_grads,
+        )
+
+    def dispatch(
+        self,
+        routing: Routing,
+        tokens: torch.Tensor,
+        topk_weights: torch.Tensor,
+        max_recv_tokens: int | None = None,
+        *,
+        out: tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]
+        | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+        if out is not None:
+            return super().dispatch(routing, tokens, topk_weights, out=out)
+        if max_recv_tokens is None:
+            raise ValueError("max_recv_tokens is required when out= is not provided")
+        if max_recv_tokens < self._max_recv_tokens_per_rank:
+            raise ValueError(
+                f"NCCL EP dispatch outputs require at least "
+                f"{self._max_recv_tokens_per_rank} rows (max_recv_tokens_per_rank), "
+                f"got {max_recv_tokens}"
+            )
+        from torch.distributed._functional_collectives import wait_tensor
+
+        received, weights, ids = _dispatch_async_op(
+            routing._opaque_handle,
+            tokens,
+            topk_weights,
+            max_recv_tokens,
+            routing.layout,
+        )
+        return (
+            wait_tensor(received),
+            wait_tensor(weights),
+            wait_tensor(ids) if ids is not None else None,
+        )
+
+    def combine(
+        self,
+        routing: Routing,
+        expert_tokens: torch.Tensor,
+        *,
+        out: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if out is not None:
+            return super().combine(routing, expert_tokens, out=out)
+        from torch.distributed._functional_collectives import wait_tensor
+
+        return wait_tensor(
+            _combine_async_op(
+                routing._opaque_handle,
+                expert_tokens,
+                routing.topk_idx.shape[0],
+                self._max_recv_tokens_per_rank,
+            )
         )
 
 
