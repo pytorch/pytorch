@@ -122,6 +122,8 @@ torch_string_c_str(StringHandle handle, const char** data);
 // The returned handle uses cuBLAS's default workspace unless ATen workspace
 // caching is explicitly enabled. Internal ATen operations restore the default
 // workspace before releasing their eager workspace allocations.
+// The handle is borrowed from PyTorch and must not be destroyed by the caller.
+// Use torch_get_current_cuda_blas_handle_v2 to control setup explicitly.
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_current_cuda_blas_handle(void** ret_handle);
 
@@ -408,6 +410,16 @@ AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_bool(
     const char* key,
     bool* ret_value,
     bool* ret_key_exists);
+
+#ifdef USE_CUDA
+// Returns a borrowed, PyTorch-owned BLAS handle in caller-owned output storage.
+// The caller must not destroy the handle. setup=true is equivalent to
+// torch_get_current_cuda_blas_handle.
+// setup is forwarded to at::cuda::getCurrentCUDABlasHandle. See its
+// implementation in ATen/cuda/CublasHandlePool.cpp for setup behavior.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_current_cuda_blas_handle_v2(bool setup, void** ret_handle);
+#endif // USE_CUDA
 
 // Returns whether torch.set_warn_always(True) is in effect.
 AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();
