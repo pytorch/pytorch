@@ -4828,17 +4828,6 @@ class SIMDScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
-    @staticmethod
-    def _check_same_graph_effects(kernels: list[Any]) -> None:
-        for kernel in kernels[1:]:
-            for attr in (
-                "removed_buffers",
-                "inplaced_to_remove",
-                "inplace_update_buffers",
-            ):
-                if getattr(kernel, attr) != getattr(kernels[0], attr):
-                    raise AssertionError(f"kernel versions differ in {attr}")
-
     def _dual_index_dtype_plan(
         self, features: list[SIMDKernelFeatures]
     ) -> _DualIndexDtypePlan | None:
@@ -4873,6 +4862,38 @@ class SIMDScheduling(BaseScheduling):
                 if patches:
                     merged_patches.update(patches)
         return merged_patches
+
+    @staticmethod
+    def _union_must_keep_buffers(kernels: list[Any]) -> OrderedSet[str] | None:
+        """Versions of a kernel built under different hints can make different
+        persistent or cooperative reduction choices, and so keep different stored
+        buffers (must_keep_buffers) and remove the others. Every version must write
+        the same buffers. If they remove different ones, return every buffer some
+        version keeps, to rebuild all versions keeping it; else None."""
+        first = kernels[0]
+        if all(
+            k.removed_buffers == first.removed_buffers
+            and k.inplaced_to_remove == first.inplaced_to_remove
+            for k in kernels[1:]
+        ):
+            return None
+        return OrderedSet(
+            name
+            for kernel in kernels
+            for leaf in leaf_kernels(kernel)
+            for name in leaf.must_keep_buffers
+        )
+
+    @staticmethod
+    def _check_same_graph_effects(kernels: list[Any]) -> None:
+        for kernel in kernels[1:]:
+            for attr in (
+                "removed_buffers",
+                "inplaced_to_remove",
+                "inplace_update_buffers",
+            ):
+                if getattr(kernel, attr) != getattr(kernels[0], attr):
+                    raise AssertionError(f"kernel versions differ in {attr}")
 
     def _should_build_int32_and_int64(
         self, kernel_features: SIMDKernelFeatures
@@ -4933,12 +4954,16 @@ class SIMDScheduling(BaseScheduling):
         node_schedule = kernel_features.node_schedule
         final_kernel: SIMDKernel | MultiKernelBase
         if (plan := self._dual_index_dtype_plan([kernel_features])) is not None:
-            int32_kernel = self._create_node_schedule_kernel(
-                kernel_features, torch.int32
+            build = functools.partial(
+                self._create_node_schedule_kernel, kernel_features
             )
-            int64_kernel = self._create_node_schedule_kernel(
-                kernel_features, torch.int64, plan.int64_hints
-            )
+            int32_kernel = build(torch.int32)
+            int64_kernel = build(torch.int64, plan.int64_hints)
+            keep = self._union_must_keep_buffers([int32_kernel, int64_kernel])
+            if keep is not None:
+                int32_kernel = build(torch.int32, must_keep_buffers=keep)
+                int64_kernel = build(torch.int64, plan.int64_hints, keep)
+            self._check_same_graph_effects([int32_kernel, int64_kernel])
             final_kernel = ConditionalMultiKernel(
                 [(plan.int32_condition, int32_kernel), (sympy.true, int64_kernel)]
             )
@@ -4989,6 +5014,7 @@ class SIMDScheduling(BaseScheduling):
         kernel_features: SIMDKernelFeatures,
         index_dtype: torch.dtype | None = None,
         optimization_hint_overrides: dict[sympy.Symbol, int] | None = None,
+        must_keep_buffers: OrderedSet[str] | None = None,
     ) -> SIMDKernel | BenchmarkedMultiKernel:
         """Build step of codegen_node_schedule: pick the tiling, create the kernel
         objects (one kernel, or a multi-kernel over several leaf kernels) and generate
@@ -5003,7 +5029,8 @@ class SIMDScheduling(BaseScheduling):
         from the sizes. optimization_hint_overrides replaces the hints that the
         heuristics read, here and when _define_node_schedule_kernels renders the
         kernels: tiling scores included, but not the memory-coalescing analysis, which
-        is computed before codegen.
+        is computed before codegen. must_keep_buffers are buffers the kernels must
+        write even if they could remove them (_union_must_keep_buffers).
         """
         with V.graph.sizevars.optimization_hint_overrides(optimization_hint_overrides):
             tiling, tiling_score = self.get_tiling_and_scores(
@@ -5026,6 +5053,8 @@ class SIMDScheduling(BaseScheduling):
                 kernel_features, [tiling], kernel_kwargs
             )
             for kernel in kernels:
+                if must_keep_buffers is not None:
+                    kernel.must_keep_buffers.update(must_keep_buffers)
                 self.codegen_node_schedule_with_kernel(
                     kernel_features.node_schedule, kernel
                 )
@@ -5475,32 +5504,43 @@ class SIMDScheduling(BaseScheduling):
             if plan is None
             else [(torch.int32, None), (torch.int64, plan.int64_hints)]
         )
-        kernels = []
-        for index_dtype, hints in versions:
-            kernel_kwargs: dict[str, Any] = {}
-            if (
-                node_info.features.indexing_node_schedule
-                is not node_info.features.node_schedule
-            ):
-                kernel_kwargs["override_cooperative_reduction"] = False
-            if index_dtype is not None:
-                kernel_kwargs["override_index_dtype"] = index_dtype
-            kernel_kwargs["optimization_hint_overrides"] = hints
-            self.kernel_type.apply_feature_required_overrides(
-                node_info.features, kernel_kwargs
-            )
-            apply_grid_split_kernel_kwargs(node_info.features, kernel_kwargs)
-            with sizevars.optimization_hint_overrides(hints):
-                kernel = self.kernel_type(
-                    node_info.tiling,
-                    features=node_info.features,
-                    tiling_scores=node_info.tiling_scores,
-                    **kernel_kwargs,
+
+        def build(must_keep_buffers: OrderedSet[str] | None) -> list[Any]:
+            kernels = []
+            for index_dtype, hints in versions:
+                kernel_kwargs: dict[str, Any] = {}
+                if (
+                    node_info.features.indexing_node_schedule
+                    is not node_info.features.node_schedule
+                ):
+                    kernel_kwargs["override_cooperative_reduction"] = False
+                if index_dtype is not None:
+                    kernel_kwargs["override_index_dtype"] = index_dtype
+                kernel_kwargs["optimization_hint_overrides"] = hints
+                self.kernel_type.apply_feature_required_overrides(
+                    node_info.features, kernel_kwargs
                 )
-                kernel._from_combo_codegen = True
-                kernel._is_first_combo_launch = is_first_combo_launch
-                self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
-            kernels.append(kernel)
+                apply_grid_split_kernel_kwargs(node_info.features, kernel_kwargs)
+                with sizevars.optimization_hint_overrides(hints):
+                    kernel = self.kernel_type(
+                        node_info.tiling,
+                        features=node_info.features,
+                        tiling_scores=node_info.tiling_scores,
+                        **kernel_kwargs,
+                    )
+                    kernel._from_combo_codegen = True
+                    kernel._is_first_combo_launch = is_first_combo_launch
+                    if must_keep_buffers is not None:
+                        kernel.must_keep_buffers.update(must_keep_buffers)
+                    self.codegen_node_schedule_with_kernel(
+                        node_info.node_schedule, kernel
+                    )
+                kernels.append(kernel)
+            return kernels
+
+        kernels = build(None)
+        if (keep := self._union_must_keep_buffers(kernels)) is not None:
+            kernels = build(keep)
         self._check_same_graph_effects(kernels)
         self._apply_kernel_graph_effects(
             kernels[0], node_info.node_schedule, only_gen_src_code
@@ -5831,11 +5871,13 @@ class SIMDScheduling(BaseScheduling):
         per_subkernel_blocks: bool,
         index_dtypes: list[torch.dtype | None] | None = None,
         hint_overrides: dict[sympy.Symbol, int] | None = None,
+        must_keep_buffers: list[OrderedSet[str] | None] | None = None,
     ) -> Any:
         """The build part of _build_combo_kernel, without its graph effects
         (_apply_kernel_graph_effects). index_dtypes forces each sub-kernel's index
         dtype (None: chosen from its sizes); hint_overrides replaces the hints the
-        build reads."""
+        build reads; must_keep_buffers are buffers each sub-kernel must write
+        (_union_must_keep_buffers)."""
         from .triton_combo_kernel import ComboKernel
 
         kernel = ComboKernel(
@@ -5857,6 +5899,8 @@ class SIMDScheduling(BaseScheduling):
                     override_index_dtype=index_dtypes[i] if index_dtypes else None,
                     optimization_hint_overrides=hint_overrides,
                 )
+                if must_keep_buffers and (keep := must_keep_buffers[i]) is not None:
+                    subkernel.must_keep_buffers.update(keep)
                 self.codegen_node_schedule_with_kernel(
                     node_info.node_schedule, kernel.create_sub_kernel(subkernel)
                 )
@@ -5875,18 +5919,29 @@ class SIMDScheduling(BaseScheduling):
         sub-kernels of a combo kernel are independent, so they do not depend on each
         other's effects."""
         versions = [(torch.int32, None), (torch.int64, plan.int64_hints)]
-        kernels = [
-            self._create_combo_kernel(
-                fusion_pns,
-                node_schedule_map,
-                enable_autotune,
-                mixed_sizes,
-                per_subkernel_blocks=False,
-                index_dtypes=[dtype if u else None for u in plan.unknown],
-                hint_overrides=hints,
-            )
-            for dtype, hints in versions
+
+        def build(keep: list[OrderedSet[str] | None] | None) -> list[Any]:
+            return [
+                self._create_combo_kernel(
+                    fusion_pns,
+                    node_schedule_map,
+                    enable_autotune,
+                    mixed_sizes,
+                    per_subkernel_blocks=False,
+                    index_dtypes=[dtype if u else None for u in plan.unknown],
+                    hint_overrides=hints,
+                    must_keep_buffers=keep,
+                )
+                for dtype, hints in versions
+            ]
+
+        kernels = build(None)
+        keep = [
+            self._union_must_keep_buffers([k.sub_kernels[i] for k in kernels])
+            for i in range(len(fusion_pns))
         ]
+        if any(k is not None for k in keep):
+            kernels = build(keep)
         for i, pn in enumerate(fusion_pns):
             self._check_same_graph_effects([k.sub_kernels[i] for k in kernels])
             self._apply_kernel_graph_effects(
