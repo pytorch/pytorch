@@ -2341,6 +2341,28 @@ def writes_returns_what_it_keeps(x, rate, side):
     return writes_tail(y, rate), WRITES_KEPT[side]
 
 
+class WritesLevelMine:
+    level = 0.0
+
+
+class WritesLevelTheirs:
+    level = 0.0
+
+
+def writes_guarded_store(holder, value):
+    try:
+        holder.level = value
+    except RuntimeError:
+        return False
+    return True
+
+
+def writes_through_a_guarded_store(x, rate, holder):
+    y = writes_work(x, rate)
+    writes_guarded_store(holder, rate * 4.0)
+    return writes_tail(y, rate)
+
+
 def writes_list_in_place(x, rate, box):
     y = writes_work(x, rate)
     items = box.items
@@ -2408,9 +2430,11 @@ class TestVmWrites(TestCase):
         except (ValueError, IndexError, RuntimeError) as e:
             return type(e).__name__
 
-    def compare(self, fn, device, mine, theirs, read, eager=None, before=None):
+    def compare(
+        self, fn, device, mine, theirs, read, eager=None, before=None, passes=EARLY
+    ):
         # Nine calls with three rates in turn: regions form on the fourth.
-        g = vm(fn, passes=EARLY)
+        g = vm(fn, passes=passes)
         x = torch.randn(4, device=device)
         for call in range(9):
             rate = (0.5, 0.75, 1.0)[call % 3]
@@ -2591,6 +2615,22 @@ class TestVmWrites(TestCase):
             self.assertIs(got[1], WRITES_KEPT["mine"], msg=f"call {call}")
         (row,) = (r for r in vm.regions(g) if r["state"] == "region")
         self.assertEqual(row["runs"], 9 - 3 - 1, msg=str(row))
+
+    @isolated
+    def test_store_the_vm_cannot_make_again_inside_a_handler(self, device):
+        # An attribute of a class is stored by C code a region cannot call
+        # again. The trace of the region is given up at that store: the
+        # function must not see an error there (its handler would swallow
+        # it and the store would be lost for that call).
+        with_effects = (*EARLY, vm.passes.Effects())
+        self.compare(
+            writes_through_a_guarded_store,
+            device,
+            WritesLevelMine,
+            WritesLevelTheirs,
+            lambda holder: holder.level,
+            passes=with_effects,
+        )
 
     def in_place(self, fn, device, name, read):
         mine, theirs = WritesBox(), WritesBox()
@@ -4199,6 +4239,35 @@ class TestVmManyRegions(TestCase):
         self.assertEqual(torch._rust._cfg_region_passed_over(), 0)
 
     @isolated
+    def test_loop_that_appends_to_a_list_of_its_caller_is_one_region(self, device):
+        # With the Effects pass the loop and its appends are one region:
+        # the appends are made again, in order, after the graph ran.
+        scales = [1.5, 0.5, 2.0, 0.25]
+        g = vm(many_noted, passes=(*EARLY, vm.passes.Effects()))
+        for call in range(9):
+            x = torch.randn(4, 8, device=device)
+            seen, expected = [], []
+            self.assertEqual(
+                g(scales, x, seen),
+                many_noted(scales, x, expected),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+            self.assertEqual(seen, expected, msg=f"call {call}")
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "many_noted" and r["state"] == "region"
+        )
+        self.assertEqual(
+            (row["kind"], row["variants"], row["runs"], row["misses"]),
+            ("span", 1, 9 - 3 - 1, {}),
+            msg=str(row),
+        )
+        self.assertEqual(row["effects"], [f"append {i} of a list" for i in range(4)])
+
+    @isolated
     def test_eighty_layer_and_shape_combinations_at_one_place(self, device):
         layers = [ManyLayer(k).to(device) for k in range(20)]
         g = vm_early(many_stack)
@@ -4825,6 +4894,496 @@ class TestVmPurity(TestCase):
 
 
 instantiate_device_type_tests(TestVmPurity, globals())
+
+
+class EffectsLast(torch.nn.Module):
+    """Keeps the last activation in a plain attribute."""
+
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.last = None
+
+    def forward(self, x):
+        h = torch.relu(self.lin(x))
+        self.last = h * 2
+        return (h + self.last).sum(-1).tanh() * 3
+
+    def state(self):
+        return self.last
+
+
+class EffectsItems(torch.nn.Module):
+    """Stores a dict item, appends to a list and deletes an item."""
+
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.cache = {"old": 1.0}
+        self.seen = []
+
+    def forward(self, x):
+        h = torch.relu(self.lin(x))
+        self.cache["h"] = h.sum(0)
+        self.seen.append(x.shape[0])
+        if "old" in self.cache:
+            del self.cache["old"]
+        return (h + self.cache["h"]).sum(-1).tanh() * 3
+
+    def state(self):
+        return (dict(self.cache), list(self.seen))
+
+
+class EffectsGrid(torch.nn.Module):
+    """A grid made anew when the input's size changes, kept on the module
+    with the size it is for (a detection layer does this)."""
+
+    def __init__(self):
+        super().__init__()
+        self.nx = self.ny = 0
+        self.grid = None
+
+    def make(self, nx, ny):
+        self.nx, self.ny = nx, ny
+        yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing="ij")
+        self.grid = torch.stack((xv, yv), 2).view(1, ny, nx, 2).float()
+
+    def forward(self, x):
+        ny, nx = x.shape[-2:]
+        if (self.nx, self.ny) != (nx, ny):
+            self.make(nx, ny)
+        p = x.view(1, 2, ny, nx).permute(0, 2, 3, 1)
+        return (torch.sigmoid(p) + self.grid.to(p.device)).exp().sum(-1) * 2
+
+    def state(self):
+        return (self.nx, self.ny, self.grid)
+
+
+class EffectsKeeps(torch.nn.Module):
+    """Keeps what it was given and every result it gave."""
+
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.given = None
+        self.history = []
+
+    def forward(self, x):
+        y = torch.relu(self.lin(x)).sin().cos().exp()
+        self.history.append(y)
+        self.given = x
+        return y
+
+    def state(self):
+        return (self.given, list(self.history))
+
+
+class EffectsRaises(torch.nn.Module):
+    """Stores a tensor and then factors a matrix that may not be positive
+    definite."""
+
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+        self.last = None
+
+    def forward(self, x, shift):
+        y = torch.tanh(self.lin(x))
+        self.last = y
+        factor = torch.linalg.cholesky(torch.outer(y, y) + shift)
+        return factor.diagonal().sum() + y.sum()
+
+
+class EffectsStep(torch.nn.Module):
+    """A training step that keeps its losses, with the backward behind the
+    stores."""
+
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.losses = []
+        self.last = None
+
+    def forward(self, x):
+        h = torch.tanh(self.lin(x))
+        loss = ((h - 1) ** 2).sum() + (h * 2).sum()
+        self.last = loss.detach()
+        self.losses.append(self.last)
+        loss.backward()
+        return loss.detach() + self.lin.weight.grad.sum()
+
+    def state(self):
+        return (self.last, list(self.losses), self.lin.weight.grad)
+
+
+class EffectsBranch(torch.nn.Module):
+    """Stores only from the call on at which `late` is set: the branch with
+    the stores is one no call before it took."""
+
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.late = False
+        self.kept = None
+        self.count = 0
+        self.notes = {}
+
+    def note(self, h):
+        if self.late:
+            self.kept = h
+            self.notes["rows"] = h.shape[0]
+            self.count = len(self.notes)
+        return h * 2
+
+    def forward(self, x):
+        return (self.note(torch.relu(self.lin(x))) + 1).cos().tanh()
+
+    def state(self):
+        return (self.late, self.kept, self.count, dict(self.notes))
+
+
+EFFECTS_TABLE: dict = {}
+
+
+def effects_into_a_global_dict(x):
+    y = (x.sin() * 2).cos().tanh().exp()
+    EFFECTS_TABLE["last"] = y
+    return y + EFFECTS_TABLE["last"]
+
+
+def effects_stores_into_a_tensor(x, k):
+    io = (x.sin() * 2).cos().tanh()
+    io[..., :2] = x[..., :2] * 3
+    io[..., :4] *= 0.5 + k
+    io[k] = 0.25 * k
+    return io.exp()
+
+
+class EffectsSlotted:
+    __slots__ = ("last",)
+
+
+def effects_into_a_slot(x, holder):
+    y = (x.sin() * 2).cos().tanh().exp()
+    holder.last = y
+    return y + 1
+
+
+def effects_takes_every_write(cfg: vm.Cfg) -> None:
+    """A cfg pass: every write goes into the region around it."""
+    for write in cfg.writes():
+        cfg.take_write(write)
+
+
+def effects_leaves_the_store(cfg: vm.Cfg) -> None:
+    """A cfg pass: the store in EffectsLast.forward stays a boundary."""
+    if cfg.qualname == "EffectsLast.forward":
+        for write in cfg.writes():
+            cfg.leave_write(write)
+
+
+EFFECTS_NET = None
+
+
+WITH_EFFECTS = (*vm.DEFAULT_PASSES, vm.passes.Effects())
+
+
+def effects_call(x):
+    """The whole call of the module a global names."""
+    return EFFECTS_NET(x)
+
+
+def effects_call_two(x, shift):
+    return EFFECTS_NET(x, shift)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmEffects(TestCase):
+    """A function whose tensor work writes to what outlives it (an attribute
+    of a module, a buffer, an item of a dict, a list) is one region: the
+    region runs the graph and then makes the writes again, in order, with
+    that call's values. Every call gives what eager gives and leaves what
+    eager leaves."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def run_both(
+        self, device, cls, inputs, calls=40, then=None, passes=None, after=None
+    ):
+        # The same module twice (one for eager), `calls` calls each on the
+        # default list and schedule (the regions start once the calls on the
+        # way to the module's work were seen to be pure); the rows at the end.
+        global EFFECTS_NET
+        torch.manual_seed(0)
+        mine, theirs = cls().to(device), cls().to(device)
+        theirs.load_state_dict(mine.state_dict())
+        EFFECTS_NET = mine
+        g = vm(effects_call, passes=WITH_EFFECTS if passes is None else passes)
+        for call in range(calls):
+            if then is not None:
+                then(call, mine, theirs)
+            x = inputs(call).to(device)
+            got = g(x)
+            self.assertEqual(got, theirs(x), atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(
+                mine.state(), theirs.state(), atol=0, rtol=0, msg=f"call {call}"
+            )
+            if after is not None:
+                after(call, mine, x, got)
+        return [r for r in vm.regions(g) if r["kind"] != "call"]
+
+    def one_region(self, rows, variants, effects):
+        regions = [r for r in rows if r["state"] == "region" and r["runs"]]
+        self.assertEqual(
+            len(regions),
+            1,
+            msg=str(
+                [
+                    (r["where"], r["state"], r["why"], r["variants"], r["runs"])
+                    for r in rows
+                ]
+            ),
+        )
+        (row,) = regions
+        self.assertEqual(
+            (row["variants"], dict(row["misses"])), (variants, {}), msg=str(row)
+        )
+        self.assertGreaterEqual(row["runs"], 8, msg=str(row))
+        for want in effects:
+            self.assertTrue(
+                any(want in e for e in row["effects"]), msg=f"{want}: {row['effects']}"
+            )
+
+    @isolated
+    def test_tensor_stored_in_an_attribute_every_call(self, device):
+        rows = self.run_both(device, EffectsLast, lambda call: torch.rand(4, 8))
+        self.one_region(rows, 1, ["setattr 'last'"])
+
+    @isolated
+    def test_dict_item_stored_list_appended_item_deleted(self, device):
+        # The first call deletes "old": the calls after it are another state
+        # of the dict, with a region of their own.
+        rows = self.run_both(device, EffectsItems, lambda call: torch.rand(4, 8))
+        self.one_region(rows, 1, ["setitem 'h'", "append"])
+
+    @isolated
+    def test_grid_made_anew_when_the_size_changes(self, device):
+        # Two sizes in turn: each call makes the grid again and stores it
+        # with its size; one region per size.
+        rows = self.run_both(
+            device, EffectsGrid, lambda call: torch.rand(2, 4 + call % 2, 6)
+        )
+        self.one_region(rows, 2, ["setattr 'nx'", "setattr 'ny'", "setattr 'grid'"])
+
+    @isolated
+    def test_what_is_written_is_the_object_the_program_wrote(self, device):
+        # The input stored in an attribute is the very object the caller
+        # passed, and the result appended to the list is the very object the
+        # call returns: a region writes what its code wrote, not a copy.
+        def after(call, mine, x, got):
+            self.assertIs(mine.given, x, msg=f"call {call}")
+            self.assertIs(mine.history[-1], got, msg=f"call {call}")
+
+        rows = self.run_both(
+            device, EffectsKeeps, lambda call: torch.rand(4, 8), after=after
+        )
+        self.one_region(rows, 1, ["append", "setattr 'given'"])
+
+    @isolated
+    def test_list_that_grows_on_every_call_is_one_region(self, device):
+        # Nothing of the list is read, so its growing is no other state:
+        # one region, traced once, runs every call from then on.
+        rows = self.run_both(
+            device, EffectsKeeps, lambda call: torch.rand(4, 8), calls=55
+        )
+        self.one_region(rows, 1, ["append"])
+        (row,) = (r for r in rows if r["state"] == "region" and r["runs"])
+        self.assertEqual(row["runs"], 30, msg=str(row))
+
+    @isolated
+    def test_region_that_raises_leaves_what_eager_leaves(self, device):
+        # On one call the matrix is not positive definite and the kernel
+        # raises, behind the store. A region makes its writes after its
+        # graph ran, so it has made none when the graph raises; the call is
+        # then no call of the region's and the code runs as written: it
+        # makes the store and the caller sees the kernel's own error.
+        global EFFECTS_NET
+        torch.manual_seed(0)
+        mine, theirs = EffectsRaises().to(device), EffectsRaises().to(device)
+        theirs.load_state_dict(mine.state_dict())
+        EFFECTS_NET = mine
+        g = vm(effects_call_two, passes=WITH_EFFECTS)
+        good, bad = torch.eye(4, device=device) * 10, torch.eye(4, device=device) * -100
+        for call in range(40):
+            x = torch.rand(4, device=device)
+            if call != 34:
+                self.assertEqual(
+                    g(x, good), theirs(x, good), atol=0, rtol=0, msg=f"call {call}"
+                )
+                self.assertEqual(
+                    mine.last, theirs.last, atol=0, rtol=0, msg=f"call {call}"
+                )
+                continue
+            with self.assertRaises(torch.linalg.LinAlgError) as ours:
+                g(x, bad)
+            with self.assertRaises(torch.linalg.LinAlgError) as eagers:
+                theirs(x, bad)
+            self.assertEqual(str(ours.exception), str(eagers.exception))
+            self.assertEqual(mine.last, theirs.last, atol=0, rtol=0)
+        rows = [r for r in vm.regions(g) if r["kind"] != "call"]
+        (row,) = (r for r in rows if r["state"] == "region" and r["runs"])
+        # The call that raised was no run of the region.
+        self.assertEqual(
+            (row["runs"], dict(row["misses"])),
+            (40 - 25 - 1, {"its graph raised": 1}),
+            msg=str(row),
+        )
+        self.assertEqual(
+            row["effects"], ["setattr 'last' of a EffectsRaises"], msg=str(row)
+        )
+
+    @isolated
+    def test_tensor_stored_in_a_slot(self, device):
+        mine, theirs = EffectsSlotted(), EffectsSlotted()
+        g = vm(effects_into_a_slot, passes=WITH_EFFECTS)
+        for call in range(40):
+            x = torch.rand(4, 8, device=device)
+            self.assertEqual(
+                g(x, mine),
+                effects_into_a_slot(x, theirs),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+            self.assertEqual(mine.last, theirs.last, atol=0, rtol=0, msg=f"call {call}")
+        self.one_region(
+            [r for r in vm.regions(g) if r["kind"] != "call"],
+            1,
+            ["setattr 'last' of a EffectsSlotted"],
+        )
+
+    @isolated
+    def test_pass_takes_writes_into_the_region(self, device):
+        # A pass list without Effects, and a cfg pass that takes each write.
+        passes = (*vm.DEFAULT_PASSES, effects_takes_every_write)
+        rows = self.run_both(
+            device, EffectsLast, lambda call: torch.rand(4, 8), passes=passes
+        )
+        self.one_region(rows, 1, ["setattr 'last'"])
+
+    @isolated
+    def test_pass_leaves_a_write_as_a_boundary(self, device):
+        # The default list, and a cfg pass that leaves the store where it
+        # is: no region holds it, and the work around it still runs in
+        # regions.
+        passes = (*WITH_EFFECTS, effects_leaves_the_store)
+        rows = self.run_both(
+            device, EffectsLast, lambda call: torch.rand(4, 8), passes=passes
+        )
+        regions = [r for r in rows if r["state"] == "region"]
+        self.assertEqual(
+            [r["effects"] for r in regions if r["effects"]], [], msg=str(regions)
+        )
+        self.assertGreaterEqual(sum(r["runs"] for r in regions), 8, msg=str(rows))
+
+    @isolated
+    def test_backward_behind_the_stores_runs_once(self, device):
+        # A backward is no part of a region: the region with the stores ends
+        # in front of it, and the engine runs once per call. Gradients add
+        # up over the calls, so a backward or a store made twice would show.
+        for passes in (
+            WITH_EFFECTS,
+            (*WITH_EFFECTS, vm.passes.Autograd(), vm.passes.Partition()),
+        ):
+            rows = self.run_both(
+                device, EffectsStep, lambda call: torch.rand(4, 8), passes=passes
+            )
+            self.assertGreaterEqual(
+                sum(r["runs"] for r in rows if r["effects"]), 8, msg=str(rows)
+            )
+
+    @isolated
+    def test_stores_in_a_branch_no_call_took_before(self, device):
+        # The calls that were observed never took the branch that stores.
+        # From call 30 on every call takes it: what it stores is stored on
+        # each of them, by the code as written or by a region that makes the
+        # writes again.
+        def then(call, mine, theirs):
+            mine.late = theirs.late = call >= 30
+
+        self.run_both(
+            device,
+            EffectsBranch,
+            lambda call: torch.rand(4 + call % 2, 8),
+            calls=50,
+            then=then,
+        )
+
+    @isolated
+    def test_item_stored_in_a_dict_a_global_names(self, device):
+        g = vm(effects_into_a_global_dict, passes=(*EARLY, vm.passes.Effects()))
+        for call in range(9):
+            x = torch.rand(4, 8, device=device)
+            got = g(x)
+            mine = EFFECTS_TABLE.pop("last")
+            self.assertEqual(
+                got, effects_into_a_global_dict(x), atol=0, rtol=0, msg=f"call {call}"
+            )
+            self.assertEqual(
+                mine, EFFECTS_TABLE.pop("last"), atol=0, rtol=0, msg=f"call {call}"
+            )
+        (row,) = (r for r in vm.regions(g) if r["state"] == "region")
+        self.assertEqual(
+            (row["runs"], row["effects"]),
+            (9 - 3 - 1, ["setitem 'last' of a dict"]),
+            msg=str(row),
+        )
+
+    @isolated
+    def test_without_the_pass_a_region_ends_in_front_of_a_store(self, device):
+        # No list of torch.vm names the pass: the store runs as written on
+        # every call, and no region has an effect.
+        for passes in (vm.DEFAULT_PASSES, vm.FAST):
+            self.assertFalse(any(isinstance(p, vm.passes.Effects) for p in passes))
+        rows = self.run_both(
+            device, EffectsLast, lambda call: torch.rand(4, 8), passes=vm.DEFAULT_PASSES
+        )
+        self.assertEqual(
+            [r["effects"] for r in rows if r["effects"]], [], msg=str(rows)
+        )
+        self.assertGreaterEqual(
+            sum(r["runs"] for r in rows if r["state"] == "region"), 8, msg=str(rows)
+        )
+
+    @isolated
+    def test_store_into_a_tensor_is_tensor_work_of_the_region(self, device):
+        # A subscript store into a tensor is operations on that tensor: the
+        # graph has them, and nothing is recorded as a write. With the pass
+        # such a store no longer ends the region. Three values of `k` in
+        # turn, a region for each.
+        g = vm(effects_stores_into_a_tensor, passes=(*EARLY, vm.passes.Effects()))
+        for call in range(12):
+            x = torch.rand(4, 8, device=device)
+            self.assertEqual(
+                g(x, call % 3),
+                effects_stores_into_a_tensor(x, call % 3),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "effects_stores_into_a_tensor" and r["kind"] != "call"
+        )
+        self.assertEqual(
+            (row["state"], row["variants"], row["runs"], row["effects"]),
+            ("region", 3, 12 - 3 - 3, []),
+            msg=str(row),
+        )
+
+
+instantiate_device_type_tests(TestVmEffects, globals())
 
 
 class TestVmWithoutRuntime(TestCase):

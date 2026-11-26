@@ -47,10 +47,20 @@
 //
 // Two kinds of entries are dropped rather than checked. One whose holder
 // doesn't hold what was read any more when the trace ends: the traced run
-// changed it itself, and a region's run only writes to what it made (a list
-// it builds, the object it constructs). And one whose holder nothing else
-// refers to: nothing can change it. Both keep the traced call's temporaries
-// from being kept alive, and from failing every check.
+// changed it itself, and it was something the run made (a list it builds,
+// the object it constructs). And one whose holder nothing else refers to:
+// nothing can change it. Both keep the traced call's temporaries from being
+// kept alive, and from failing every check.
+//
+// The writes of the traced run to what outlives it are recorded by writes.rs:
+// a region makes them again, in order, on every run. Here is what they mean
+// for the reads. What the run reads of an item after it wrote that item is
+// what it wrote, and no entry. What it read of a container (or an object)
+// before writing to it stays as it was read, so the region is entered only
+// in the state the trace found before its writes; a run that changes what
+// it read (a counter) therefore finds a state no later call has again, and
+// every call gets a region of its own until the place closes. A container
+// read whole after the run changed it is refused.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -103,6 +113,10 @@ pub(super) const UNCHECKED_OF_A_TENSOR: &[&str] = &[
 // Entries a region may have, and items a container read whole may have.
 const MAX_ENTRIES: usize = 1 << 15;
 const MAX_ITEMS: usize = 1 << 12;
+// A round of the sweep drops what only the records hold; what was held by
+// something a round dropped goes in the next (a call's arguments, held by the
+// cells of a closure, held by the closure).
+const SWEEP_ROUNDS: usize = 64;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Want {
@@ -142,6 +156,9 @@ struct Group {
     items: Vec<Item>,
     whole: Option<Whole>,
     len: Option<isize>,
+    // Read whole (or measured) after the traced run changed it.
+    late: bool,
+    late_at: String,
 }
 
 struct Typed {
@@ -212,6 +229,14 @@ struct Trace {
     seen: HashSet<(usize, usize)>,
     refused: Option<String>,
     count: usize,
+    // The items (holder, key) the traced run wrote (see writes.rs), and the
+    // containers it changed.
+    written: HashSet<(usize, usize)>,
+    changed: HashSet<usize>,
+    // The containers the trace keeps its own records in (which tensor is
+    // which proxy): what is read from them or written to them while the body
+    // runs (the entry of a tensor that died is taken out) is not the body's.
+    own: HashSet<usize>,
 }
 
 thread_local! {
@@ -339,7 +364,7 @@ unsafe fn want_of(o: *mut PyObject) -> Want {
     if exact_scalar(o) { Want::Equal } else { Want::Is }
 }
 
-unsafe fn own(o: *mut PyObject) -> Py<PyAny> {
+pub(super) unsafe fn own(o: *mut PyObject) -> Py<PyAny> {
     Py::from_borrowed_ptr(Python::assume_attached(), o)
 }
 
@@ -369,11 +394,11 @@ unsafe fn same(now: *mut PyObject, want: Want, value: Option<&Py<PyAny>>) -> boo
     }
 }
 
-unsafe fn tensor(o: *mut PyObject) -> bool {
+pub(super) unsafe fn tensor(o: *mut PyObject) -> bool {
     !tffi::tensor_by_type(o as usize).is_null()
 }
 
-unsafe fn text(o: *mut PyObject) -> String {
+pub(super) unsafe fn text(o: *mut PyObject) -> String {
     let mut n: ffi::Py_ssize_t = 0;
     let p = if ffi::PyUnicode_Check(o) != 0 { ffi::PyUnicode_AsUTF8AndSize(o, &mut n) } else { std::ptr::null() };
     if p.is_null() {
@@ -383,13 +408,13 @@ unsafe fn text(o: *mut PyObject) -> String {
     String::from_utf8_lossy(std::slice::from_raw_parts(p as *const u8, n as usize)).into_owned()
 }
 
-unsafe fn type_name(o: *mut PyObject) -> String {
+pub(super) unsafe fn type_name(o: *mut PyObject) -> String {
     std::ffi::CStr::from_ptr((*ffi::Py_TYPE(o)).tp_name).to_string_lossy().into_owned()
 }
 
 // The item of dict d at key k (borrowed), NULL if absent; no Python code runs
 // for a str or int key.
-unsafe fn dict_get(d: *mut PyObject, k: *mut PyObject) -> *mut PyObject {
+pub(super) unsafe fn dict_get(d: *mut PyObject, k: *mut PyObject) -> *mut PyObject {
     let x = ffi::PyDict_GetItemWithError(d, k);
     if x.is_null() && !ffi::PyErr_Occurred().is_null() {
         ffi::PyErr_Clear();
@@ -454,7 +479,7 @@ impl Group {
     }
 
     fn empty(&self) -> bool {
-        self.items.is_empty() && self.whole.is_none() && self.len.is_none()
+        self.items.is_empty() && self.whole.is_none() && self.len.is_none() && !self.late
     }
 }
 
@@ -507,7 +532,7 @@ impl Trace {
         let i = match self.group_of.get(&(holder as usize)) {
             Some(i) => *i,
             None => {
-                self.entries.groups.push(Group { holder: own(holder), kind, version: Cell::new(0), items: vec![], whole: None, len: None });
+                self.entries.groups.push(Group { holder: own(holder), kind, version: Cell::new(0), items: vec![], whole: None, len: None, late: false, late_at: String::new() });
                 self.group_of.insert(holder as usize, self.entries.groups.len() - 1);
                 self.entries.groups.len() - 1
             }
@@ -518,6 +543,10 @@ impl Trace {
     // The first read of an item is the one recorded: a later one that differs
     // is of something the traced run changed.
     unsafe fn item(&mut self, holder: *mut PyObject, kind: Holder, key: *mut PyObject, want: Want, value: *mut PyObject) {
+        // What the run wrote itself is what it reads back.
+        if self.written.contains(&(holder as usize, key as usize)) || self.own.contains(&(holder as usize)) {
+            return;
+        }
         let value = (!value.is_null() && matches!(want, Want::Is | Want::Equal)).then(|| own(value));
         if !self.seen.insert((holder as usize, key as usize)) {
             // `key in d` and then `d[key]`: the value is what is checked.
@@ -546,7 +575,14 @@ impl Trace {
     }
 
     unsafe fn whole(&mut self, holder: *mut PyObject, kind: Holder) {
-        if self.group_of.get(&(holder as usize)).is_some_and(|i| self.entries.groups[*i].whole.is_some()) {
+        if self.group_of.get(&(holder as usize)).is_some_and(|i| self.entries.groups[*i].whole.is_some()) || self.own.contains(&(holder as usize)) {
+            return;
+        }
+        if self.changed.contains(&(holder as usize)) {
+            let at = place();
+            let g = self.group(holder, kind);
+            g.late = true;
+            g.late_at = at;
             return;
         }
         let items = snapshot(holder, kind);
@@ -560,6 +596,16 @@ impl Trace {
     }
 
     unsafe fn length(&mut self, holder: *mut PyObject, kind: Holder) {
+        if self.own.contains(&(holder as usize)) {
+            return;
+        }
+        if self.changed.contains(&(holder as usize)) {
+            let at = place();
+            let g = self.group(holder, kind);
+            g.late = true;
+            g.late_at = at;
+            return;
+        }
         let n = size(holder, kind);
         let g = self.group(holder, kind);
         if g.len.is_none() && g.whole.is_none() {
@@ -763,7 +809,8 @@ impl Trace {
                 let n = text(name);
                 // `__dict__` too: the items read from the dict it gave are
                 // obj's for as long as obj has that dict.
-                if !ran && !value.is_null() && n != "__class__" && self.seen.insert((obj as usize, name as usize)) {
+                let written = self.written.contains(&(obj as usize, name as usize));
+                if !ran && !written && !value.is_null() && n != "__class__" && self.seen.insert((obj as usize, name as usize)) {
                     self.count += 1;
                     self.entries.reads.push(Read { obj: own(obj), name: Some(own(name)), want: want_of(value), value: Some(own(value)), at: place() });
                 }
@@ -819,6 +866,74 @@ fn builtins() -> &'static Builtins {
             dict_contains: at(c"dict.__dict__['__contains__']"),
         }
     })
+}
+
+// ---- For writes.rs: what the run's own writes mean for its reads -----------
+
+// The traced run is about to store or delete item `key` of `holder` (a dict,
+// a list, or for a slot the object itself): what it reads of that item from
+// here on is what it wrote, and no entry.
+pub(super) fn wrote_item(holder: *mut PyObject, key: *mut PyObject) {
+    with(|t| {
+        t.written.insert((holder as usize, key as usize));
+    });
+}
+
+// The traced run is about to change `container` (an item of it, or its
+// length): read whole or measured from here on, it is not what a later call
+// finds (see Group::late).
+pub(super) fn changed(container: *mut PyObject) {
+    with(|t| {
+        t.changed.insert(container as usize);
+    });
+}
+
+// A deletion of `d[key]` raises unless the key is there: that it is, is a
+// read.
+pub(super) unsafe fn needs_key(d: *mut PyObject, key: *mut PyObject) {
+    with(|t| t.dict_item(d, key, true));
+}
+
+// A store by index is in range for a list as long as this one: its length is
+// a read.
+pub(super) unsafe fn needs_length(list: *mut PyObject) {
+    with(|t| t.length(list, Holder::List));
+}
+
+// Drops the entries of the running trace that only its own records keep
+// alive (see sweep).
+pub(super) fn sweep_trace() {
+    TRACE.with_borrow_mut(|t| {
+        if let Some(t) = t {
+            unsafe { sweep(&mut t.entries) };
+            t.group_of = t.entries.groups.iter().enumerate().map(|(i, g)| (g.holder.as_ptr() as usize, i)).collect();
+        }
+    });
+}
+
+// Every reference the running trace's entries hold, reported to `hold`.
+pub(super) fn held_by_trace(hold: &mut impl FnMut(&Py<PyAny>)) {
+    TRACE.with_borrow(|t| {
+        if let Some(t) = t {
+            held(&t.entries, hold);
+        }
+    });
+}
+
+pub(super) fn owned(container: *mut PyObject) -> bool {
+    TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| t.own.contains(&(container as usize))))
+}
+
+/// These containers are the running trace's own (they live as long as it
+/// does): what the body's run reads from them or writes to them is neither a
+/// read nor a write of the body.
+#[pyfunction]
+pub fn _region_own(objs: Vec<Bound<'_, PyAny>>) {
+    TRACE.with_borrow_mut(|t| {
+        if let Some(t) = t {
+            t.own.extend(objs.iter().map(|o| o.as_ptr() as usize));
+        }
+    });
 }
 
 // A global load in a frame with these globals and builtins gave `value`.
@@ -1038,7 +1153,7 @@ unsafe impl Sync for Reads {}
 // all that held another (an instance and its __dict__, a temporary and what
 // it was made of).
 unsafe fn sweep(e: &mut Entries) {
-    for _ in 0..8 {
+    for _ in 0..SWEEP_ROUNDS {
         let mut mine: HashMap<usize, isize> = HashMap::new();
         held(e, &mut |o: &Py<PyAny>| *mine.entry(o.as_ptr() as usize).or_insert(0) += 1);
         // Judged before any entry is dropped: dropping one lets go of what
@@ -1226,7 +1341,7 @@ impl Reads {
         let i = match e.groups.iter().position(|g| g.holder.is(holder)) {
             Some(i) => i,
             None => {
-                e.groups.push(Group { holder: holder.clone().unbind(), kind: Holder::Dict, version: Cell::new(0), items: vec![], whole: None, len: None });
+                e.groups.push(Group { holder: holder.clone().unbind(), kind: Holder::Dict, version: Cell::new(0), items: vec![], whole: None, len: None, late: false, late_at: String::new() });
                 e.groups.len() - 1
             }
         };
@@ -1407,9 +1522,12 @@ pub fn _region_read_misses() -> u64 {
 
 /// The reads of the trace running on this thread, once its body is over:
 /// ``(Reads, None)``, or ``(None, why)`` when the trace depends on something
-/// no check covers. ``(None, None)`` if no trace is running.
+/// no check covers. ``(None, None)`` if no trace is running. ``given``: the
+/// containers among the region's arguments that it checks whole, by
+/// structure, before it is entered.
 #[pyfunction]
-pub fn _region_reads(py: Python<'_>) -> PyResult<(Option<Py<Reads>>, Option<String>)> {
+#[pyo3(signature = (given=vec![]))]
+pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(Option<Py<Reads>>, Option<String>)> {
     let Some(t) = TRACE.take() else { return Ok((None, None)) };
     if let Some(why) = t.refused {
         return Ok((None, Some(why)));
@@ -1436,12 +1554,27 @@ pub fn _region_reads(py: Python<'_>) -> PyResult<(Option<Py<Reads>>, Option<Stri
             let name = r.name.as_ref().map_or("?".into(), |n| text(n.as_ptr()));
             return Ok((None, Some(format!("it reads .{name} of a {}, which is another object on every read{}", type_name(r.obj.as_ptr()), r.at))));
         }
-        // What the traced run changed after reading it was its own.
-        e.reads.retain(|r| r.holds());
+        // A container the run read whole after changing it: what it holds
+        // on a later call is not what the trace saw, unless the run made it
+        // (swept above) or the region checks all of it as it is given (then
+        // what was read is that and the run's own writes).
+        if let Some(g) = e.groups.iter().find(|g| g.late && !given.iter().any(|x| x.as_ptr() == g.holder.as_ptr())) {
+            return Ok((None, Some(format!("it reads a {} whole after changing it{}", type_name(g.holder.as_ptr()), g.late_at))));
+        }
+        // What changed after the run read it, by other ways than the run's
+        // recorded writes, is no check. What the run read of a container (or
+        // an object's __dict__) it then wrote to stays as it was read: that
+        // is how a later call must find it for the region's writes to be the
+        // run's (the region writes to it again).
+        let wrote: HashSet<usize> = t.written.iter().map(|(h, _)| *h).chain(t.changed.iter().copied()).collect();
+        e.reads.retain(|r| r.holds() || r.name.as_ref().is_some_and(|n| t.written.contains(&(r.obj.as_ptr() as usize, n.as_ptr() as usize))));
         e.functions.retain(|f| f.holds());
         e.dicted.retain(|d| tr_instance_dict(d.obj.as_ptr()) == d.dict.as_ptr());
         for g in &mut e.groups {
             let (h, kind) = (g.holder.as_ptr(), g.kind);
+            if wrote.contains(&(h as usize)) {
+                continue;
+            }
             g.items.retain(|i| i.holds(h, kind));
             if g.whole.as_ref().is_some_and(|w| !w.holds(h, kind)) {
                 g.whole = None;

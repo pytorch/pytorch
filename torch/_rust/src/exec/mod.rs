@@ -22,6 +22,7 @@ mod spans;
 pub mod torch_ops;
 mod trampoline;
 pub mod types;
+pub mod writes;
 
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -1305,7 +1306,7 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
     TOP_NARGS.set(arg_slots(&unsafe { Bound::from_borrowed_ptr(py, c.code as *mut pyo3::ffi::PyObject) }));
     PURE_DEBUG_LINES.with_borrow_mut(|l| l.clone_from(&c.lines));
     IMPURE_NOW.with_borrow_mut(|m| m.clear());
-    let (mut movable, aten, pinnable, nulls) = observed_ops(py, &plan.prep, &blocks, Some(&current.prep.clones));
+    let (mut movable, aten, pinnable, nulls) = observed_ops(py, &plan.prep, c.code, &blocks, Some(&current.prep.clones));
     let mut cfg = (*plan.prep.cfg).clone();
     let (mut objects, mut calls) = (HashMap::new(), HashMap::new());
     for (v, (f, call)) in pinnable {
@@ -1337,13 +1338,19 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
     // Generators suspend in their frames, which a region can't replay.
     let spannable = block.is_none() && c.flags & (0x20 | 0x80 | 0x200) == 0;
     let none = HashSet::new();
-    let mut found = if SPANS.load(Ordering::Relaxed) && spannable { spans::find(py, &plan.prep, &movable, &current.prep.clones, &c.qualname, &[], &none) } else { vec![] };
+    let mut found = if SPANS.load(Ordering::Relaxed) && spannable { spans::find(py, &plan.prep, c.code, &movable, &current.prep.clones, &c.qualname, &[], &none) } else { vec![] };
     let hook = CFG_HOOK.lock().unwrap().as_ref().map(|h| h.clone_ref(py));
     let mut declared = HashSet::new();
     if let Some(hook) = hook.filter(|_| block.is_none()) {
         let view = cfg_view(py, c, &plan.prep, &movable, &found)?;
-        let (more, forced, split) = cfg_edits(&hook.call1(py, (view,))?.into_bound(py))?;
-        let changed = !more.is_empty() || !forced.is_empty() || !split.is_empty();
+        let (more, forced, split, writes_said) = cfg_edits(&hook.call1(py, (view,))?.into_bound(py))?;
+        if writes_said {
+            // A pass spoke of a write of this code (see writes.rs): what
+            // may sit in a region is judged again, with that.
+            movable = observed_ops(py, &plan.prep, c.code, &blocks, Some(&current.prep.clones)).0;
+            movable.extend(inlines.keys().copied());
+        }
+        let changed = writes_said || !more.is_empty() || !forced.is_empty() || !split.is_empty();
         declared = more.iter().filter_map(|v| plan.prep.cfg.instrs.get(v.idx())).filter(|i| is_call(&i.op)).map(|i| i.origin).collect();
         // What was said of them before the pass spoke no longer keeps
         // anything out of a region.
@@ -1354,7 +1361,7 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
         }
         movable.extend(more);
         if changed && spannable {
-            found = spans::find(py, &plan.prep, &movable, &current.prep.clones, &c.qualname, &forced, &split);
+            found = spans::find(py, &plan.prep, c.code, &movable, &current.prep.clones, &c.qualname, &forced, &split);
             if !SPANS.load(Ordering::Relaxed) {
                 let entries: HashSet<BlockId> = forced.iter().map(|(e, _)| *e).collect();
                 found.retain(|f| entries.contains(&f.entry));
@@ -1579,7 +1586,7 @@ impl Elisions<'_> {
         let base = unsafe { &*(&*clone.compiled.plans.lock().unwrap()[0] as *const Plan) };
         let bprep = &base.prep;
         let blocks: Vec<BlockId> = bprep.cfg.block_ids().collect();
-        let (movable, aten, pinnable, nulls) = observed_ops(py, bprep, &blocks, None);
+        let (movable, aten, pinnable, nulls) = observed_ops(py, bprep, clone.compiled.code, &blocks, None);
         let (btypes, beffects) = unsafe { (&*bprep.types.get(), &*bprep.effects.get()) };
         // Reads that ran no Python code and no torch op when observed (an
         // instance's attribute, a dict lookup): fine to copy in, since the
@@ -2084,6 +2091,7 @@ pub fn _cfg_misses(code: &Bound<'_, PyAny>, clone: Vec<u32>) -> PyResult<Vec<u32
 fn observed_ops(
     py: Python<'_>,
     prep: &Prepared,
+    code: usize,
     blocks: &[BlockId],
     clones: Option<&HashMap<ValueId, SiteClone>>,
 ) -> (
@@ -2154,7 +2162,7 @@ fn observed_ops(
             // and frames of pure callees (see pure_site) is movable whatever
             // it is, as long as it writes nothing itself.
             let pure = clones.filter(|_| PURE_CALLS.load(Ordering::Relaxed)).is_some_and(|clones| {
-                ins.op.can_raise() && pure_site(py, prep, *v, clones, &mut memo)
+                ins.op.can_raise() && pure_site(py, prep, code, *v, clones, &mut memo)
             });
             let ok = pure || match &ins.op {
                 Op::LoadLocal { .. }
@@ -2209,7 +2217,8 @@ fn observed_ops(
                 }
                 _ => false,
             };
-            if ok {
+            // What a cfg pass left as a boundary sits in no region.
+            if ok && !writes::left(code, ins.origin) {
                 out.insert(*v);
             }
             let replaceable = matches!(
@@ -2380,6 +2389,9 @@ fn cfg_view<'py>(py: Python<'py>, c: &Compiled, prep: &Prepared, movable: &HashS
             i.set_item("varies", effects.varies(Site::Instr(*v)))?;
             i.set_item("type", types.get(v.idx()).and_then(|t| t.ty.as_ref()).map(|t| t.to_string()))?;
             i.set_item("callee", callees.get(v).and_then(|f| f.get(py)))?;
+            let write = writes::view(py, prep, c.code, *v);
+            i.set_item("write", write.map(|w| w.0))?;
+            i.set_item("taken", write.is_some_and(|w| w.1))?;
             instrs.set_item(v.0, i)?;
         }
     }
@@ -2394,19 +2406,22 @@ fn cfg_view<'py>(py: Python<'py>, c: &Compiled, prep: &Prepared, movable: &HashS
 }
 
 // The edits a cfg pass returned: instrs to make movable, spans to make
-// (entry, exit) and blocks no span may hold.
+// (entry, exit), blocks no span may hold, and whether it spoke of a write
+// (which it has told writes.rs).
 #[allow(clippy::type_complexity)]
-fn cfg_edits(edits: &Bound<'_, PyAny>) -> PyResult<(Vec<ValueId>, Vec<(BlockId, Option<BlockId>)>, HashSet<BlockId>)> {
+fn cfg_edits(edits: &Bound<'_, PyAny>) -> PyResult<(Vec<ValueId>, Vec<(BlockId, Option<BlockId>)>, HashSet<BlockId>, bool)> {
     if edits.is_none() {
-        return Ok((vec![], vec![], HashSet::new()));
+        return Ok((vec![], vec![], HashSet::new(), false));
     }
     let movable: Vec<u32> = edits.get_item("movable")?.extract()?;
     let spans: Vec<(u32, Option<u32>)> = edits.get_item("spans")?.extract()?;
     let split: Vec<u32> = edits.get_item("split")?.extract()?;
+    let writes = edits.get_item("writes").is_ok_and(|w| w.len().is_ok_and(|n| n > 0));
     Ok((
         movable.into_iter().map(ValueId).collect(),
         spans.into_iter().map(|(e, x)| (BlockId(e), x.map(BlockId))).collect(),
         split.into_iter().map(BlockId).collect(),
+        writes,
     ))
 }
 
@@ -2438,7 +2453,7 @@ pub fn _set_cfg_pure_callables(fs: Vec<Py<PyAny>>) {
     *USER_PURE.lock().unwrap() = fs;
 }
 
-fn user_pure(f: *mut pyo3::ffi::PyObject) -> bool {
+pub(crate) fn user_pure(f: *mut pyo3::ffi::PyObject) -> bool {
     USER_PURE_ANY.load(Ordering::Relaxed) && USER_PURE.lock().unwrap().iter().any(|x| x.as_ptr() == f)
 }
 
@@ -2622,12 +2637,13 @@ fn sets_tensor_state(op: &str) -> bool {
 
 // Whether instr v of `body` writes to something that outlives the code it is
 // in: an attribute, a global, a name, a cell, or an item of a container that
-// `body` didn't build. A region replays tensor ops and what its trace's
-// outputs hold, nothing else, so a block with such a write must not become
-// one: the write would be made on the traced call alone.
-pub(crate) fn escaping_write(cfg: &crate::cfg::ir::Cfg, body: &[ValueId], v: ValueId) -> bool {
+// `body` didn't build. A region replays tensor ops, what its trace's outputs
+// hold and the stores and deletions of attributes and items that it takes
+// with it (see writes.rs); a block of `code` with another such write must
+// not become one: the write would be made on the traced call alone.
+pub(crate) fn escaping_write(cfg: &crate::cfg::ir::Cfg, code: usize, body: &[ValueId], v: ValueId) -> bool {
     let ins = &cfg[v];
-    if !writes(&ins.op) {
+    if !writes(&ins.op) || writes::taken_op(code, ins) {
         return false;
     }
     let built = |x: Option<&ValueId>| {
@@ -2642,12 +2658,12 @@ pub(crate) fn escaping_write(cfg: &crate::cfg::ir::Cfg, body: &[ValueId], v: Val
 
 // As escaping_write, for a span, which may change the containers it makes
 // (see spans.rs): a write to an attribute, a global or a name.
-pub(crate) fn escaping_store(op: &Op) -> bool {
-    matches!(op, Op::StoreAttr(_))
+pub(crate) fn escaping_store(code: usize, ins: &crate::cfg::ir::Instr) -> bool {
+    (matches!(ins.op, Op::StoreAttr(_) | Op::Bytecode { opcode: opcodes::DELETE_ATTR, .. }) && !writes::taken_op(code, ins))
         || matches!(
-            op,
+            ins.op,
             Op::Bytecode {
-                opcode: opcodes::STORE_GLOBAL | opcodes::DELETE_GLOBAL | opcodes::DELETE_ATTR | opcodes::STORE_NAME | opcodes::DELETE_NAME,
+                opcode: opcodes::STORE_GLOBAL | opcodes::DELETE_GLOBAL | opcodes::STORE_NAME | opcodes::DELETE_NAME,
                 ..
             }
         )
@@ -2999,7 +3015,7 @@ out += [torch.is_tensor, torch.is_floating_point, torch.is_grad_enabled, torch.i
 // and frames of its pure clone, and a call that entered no frame and ran no
 // torch op called a pure builtin or an in-graph torch function. memo: by
 // Compiled address and what the frame owns.
-fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<ValueId, SiteClone>, depth: u32, own: &Own, memo: &mut Memo) -> Result<(), String> {
+fn pure_instr(py: Python<'_>, prep: &Prepared, code: usize, v: ValueId, clones: &HashMap<ValueId, SiteClone>, depth: u32, own: &Own, memo: &mut Memo) -> Result<(), String> {
     let ins = &prep.cfg[v];
     let here = || format!("%{} {:?}", v.0, ins.op);
     // In a callee (depth > 0), its own cells, and containers it made, die
@@ -3029,7 +3045,10 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
             } => own_container(ins.args[0]),
             _ => false,
         };
-    if writes(&ins.op) && !local {
+    if writes::left(code, ins.origin) {
+        return Err(format!("{} is left as a boundary by a cfg pass", here()));
+    }
+    if writes(&ins.op) && !local && !writes::taken(prep, code, ins) {
         return Err(format!("{} writes", here()));
     }
     // An in-place operator on a container is a change to it, as a method of
@@ -3162,6 +3181,10 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
         Ok(())
     } else if plain_class(py, &f) {
         // A new object, whose __init__ (if Python's) entered a frame judged above.
+        Ok(())
+    } else if !partial && (writes::taken_call(code, ins.origin, &f) || writes::type_question(f.as_ptr())) {
+        // A write the region makes again, or what a module's store asks
+        // of a class on the way to it.
         Ok(())
     } else if depth > 0 && !partial && mutators().contains(&(f.as_ptr() as usize)) && ins.args.len() > 1 && own_container(ins.args[1]) {
         // A method changing a container this frame made (CALL's [method, self, ...]).
@@ -3308,8 +3331,8 @@ fn is_call(op: &Op) -> bool {
 }
 
 // Whether a site of the caller (instr v of `prep`) is pure (see pure_instr).
-fn pure_site(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<ValueId, SiteClone>, memo: &mut Memo) -> bool {
-    match pure_instr(py, prep, v, clones, 0, &Own { nargs: TOP_NARGS.get(), ..Own::default() }, memo) {
+fn pure_site(py: Python<'_>, prep: &Prepared, code: usize, v: ValueId, clones: &HashMap<ValueId, SiteClone>, memo: &mut Memo) -> bool {
+    match pure_instr(py, prep, code, v, clones, 0, &Own { nargs: TOP_NARGS.get(), ..Own::default() }, memo) {
         Ok(()) => true,
         Err(why) => {
             let effects = !effects_empty(prep, v);
@@ -3368,7 +3391,7 @@ fn pure_compiled(py: Python<'_>, c: &Compiled, own: Own, depth: u32, memo: &mut 
             return Ok(());
         }
         judged.push(b);
-        body.iter().filter(|v| !said(v)).try_for_each(|v| pure_instr(py, prep, *v, clones, depth, &own, memo))?;
+        body.iter().filter(|v| !said(v)).try_for_each(|v| pure_instr(py, prep, c.code, *v, clones, depth, &own, memo))?;
         let ok = effects.get(Site::Block(b)).iter().all(|(seq, _)| seq.iter().all(|e| matches!(e, effects::Effect::TorchOp { op, args } if !impure_op(op, args))));
         if ok { Ok(()) } else { Err(format!("bb{} has effects", b.0)) }
     });

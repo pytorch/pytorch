@@ -83,6 +83,10 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::_cfg_region_stats, m)?)?;
     m.add_function(wrap_pyfunction!(exec::region::_set_cfg_regions, m)?)?;
     m.add_function(wrap_pyfunction!(exec::region::_cfg_region_passed_over, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_own, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::writes::_region_writes, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::writes::_set_cfg_effects, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::writes::_cfg_write_site, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_plan_stats, m)?)?;
     m.add_function(wrap_pyfunction!(exec::region::_set_cfg_region_observe, m)?)?;
     m.add_function(wrap_pyfunction!(exec::region::_set_cfg_region_reads, m)?)?;

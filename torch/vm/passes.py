@@ -24,6 +24,7 @@ from torch.vm._graph import below_autocast, lower_to
 __all__ = [
     "Autograd",
     "BypassCold",
+    "Effects",
     "Elide",
     "Inductor",
     "LiftGuard",
@@ -99,6 +100,19 @@ class PureCalls(_Builtin):
 
     rounds: int = 5
     pure: tuple[Callable, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class Effects(_Builtin):
+    """Lets a region hold the writes of its code to objects that outlive it:
+    ``obj.attr = v`` (through whatever ``__setattr__`` the class has),
+    ``d[k] = v``, ``lst[i] = v``, ``lst.append(v)``, ``s.add(v)`` and the
+    deletions. The region's trace records each (the object, the operation,
+    the value) and every run of the region does them again, in order, after
+    its graph ran: no write is lost, and a run that raises has made none.
+    Without this pass a region ends in front of such a write. It is in no
+    list of this module: a list that wants it names it,
+    ``(*vm.DEFAULT_PASSES, vm.passes.Effects())``."""
 
 
 @dataclasses.dataclass(frozen=True)

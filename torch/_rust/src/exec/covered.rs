@@ -238,6 +238,11 @@ impl Drop for Trusted {
     }
 }
 
+// Whether a Trusted lives: what runs is under a call nobody looked into.
+pub fn trusted() -> bool {
+    TRUSTED.get() > 0
+}
+
 // Whether Dynamo puts calls of the Python function `f` of torch in its
 // graphs. Asking runs Python code: not the body's, and not on the executor.
 unsafe fn whole(py: Python<'_>, f: *mut PyObject) -> bool {
@@ -334,7 +339,7 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, unit: u32, callee: Option<
         return Ok(false);
     }
     let g = Bound::from_borrowed_ptr(py, g);
-    if shown::computes(&g) || effects::lru_cache_wrapper(g.as_ptr()) || super::plain_class(py, &g) {
+    if shown::computes(&g) || super::writes::type_question(g.as_ptr()) || effects::lru_cache_wrapper(g.as_ptr()) || super::plain_class(py, &g) {
         return Ok(false);
     }
     Err(format!("it calls {}, which no call before it called there", g.repr().map_or("?".into(), |r| r.to_string())))

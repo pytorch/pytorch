@@ -12,8 +12,10 @@ Analyses: ``blocks`` (each with its ``succs`` and ``preds``), ``calls()``,
 blocks the VM will trace as one region),
 ``loops()``, ``branches()``, ``collectives()``, ``effects(v)``,
 ``type_of(v)``. Edits: ``merge_across(call)`` lets a call sit in a region,
-``merge_blocks(entry, exit)`` makes a stretch of blocks one region, and
-``split(block)`` keeps a block out of any. The rest of the generic edits
+``merge_blocks(entry, exit)`` makes a stretch of blocks one region,
+``split(block)`` keeps a block out of any, and ``take_write(v)`` /
+``leave_write(v)`` say of one write (``writes()``) whether the region around
+it makes it again or ends in front of it. The rest of the generic edits
 (inlining, specializing, software-pipelining a loop, autograd regions) are
 declared but not implemented yet, and raise.
 
@@ -55,6 +57,12 @@ class CfgValue:
         self.line: int = data["line"]
         self.origin: int = data["origin"]
         self.movable: bool = data["movable"]
+        # How the instruction writes to an object, if it does ("store attr",
+        # "delete attr", "store item", "delete item", or "call" for a builtin
+        # such as list.append), and whether a region takes the write with it
+        # as things stand (see Cfg.writes).
+        self.write: str | None = data.get("write")
+        self.taken: bool = bool(data.get("taken"))
         # Why the VM does not take it for something that only computes (the
         # reason TORCH_RUST_PURE_DEBUG prints), if it judged it and said no.
         self.why: str | None = data.get("why")
@@ -232,6 +240,7 @@ class Cfg:
             "spans": [],
             "split": [],
             "opaque": [],
+            "writes": [],
         }
         self._values: dict[int, CfgValue] = {}
         self._blocks: dict[int, Block] = {}
@@ -341,6 +350,16 @@ class Cfg:
     def collectives(self) -> list[CfgValue]:
         return [v for v in self.values() if any("c10d" in e for e in v._effects)]
 
+    def writes(self) -> list[CfgValue]:
+        """The instructions that write to an object: a store or a deletion of
+        an attribute or an item, and a call of a builtin that writes
+        (``list.append``, ``set.add``, ``object.__setattr__``, ...).
+        ``v.write`` says which, and ``v.taken`` whether a region takes the
+        write with it: its trace records the write and every run makes it
+        again after the graph ran (``passes.Effects`` asks that of every
+        write; ``take_write`` and ``leave_write`` of one)."""
+        return [v for v in self.values() if v.write is not None]
+
     # Edits.
 
     def merge_across(
@@ -387,6 +406,29 @@ class Cfg:
         self._function()
         self._edits["split"].append(block.id)
         self.notes.append(f"split bb{block.id}")
+
+    def take_write(self, write: CfgValue) -> None:
+        """Takes ``write`` (one of ``writes()``) into the region around it,
+        whether or not the pass list has ``passes.Effects``: the region's
+        trace records the write (the object, the operation, the value) and
+        every run makes it again, in the code's order, after the graph ran.
+        What the VM cannot make again (a store by a C setter) still ends the
+        region."""
+        self._write(write, True)
+
+    def leave_write(self, write: CfgValue) -> None:
+        """Leaves ``write`` (one of ``writes()``) as a boundary: a region ends
+        in front of it and the instruction runs on every call, whatever the
+        pass list says of writes in general. In a function a region calls,
+        the call is then no part of the region either."""
+        self._write(write, False)
+
+    def _write(self, write: CfgValue, take: bool) -> None:
+        self._function()
+        if not isinstance(write, CfgValue) or write.write is None:
+            raise TypeError(f"{write!r} is no write (see Cfg.writes)")
+        self._edits["writes"].append((self.code, write.origin, take))
+        self.notes.append(f"{'take' if take else 'leave'}_write {write!r}")
 
     edit = _todo("edit")
     guard = _todo("guard")

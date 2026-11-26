@@ -78,7 +78,10 @@ unsafe extern "C" {
     pub fn tr_view_dict(o: *mut PyObject) -> *mut PyObject;
     pub fn tr_proxy_dict(o: *mut PyObject) -> *mut PyObject;
     pub fn tr_builtin_self(callable: *mut PyObject) -> *mut PyObject;
+    pub fn tr_descr_name(descr: *mut PyObject) -> *mut PyObject;
     pub fn tr_store_attr_kind(tp: *mut pyo3::ffi::PyTypeObject, name: *mut PyObject, generic: c_int, del: c_int) -> c_int;
+    pub fn tr_python_setitem(tp: *mut pyo3::ffi::PyTypeObject, del: c_int) -> c_int;
+    pub fn tr_slot_get(obj: *mut PyObject, name: *mut PyObject) -> *mut PyObject;
     pub fn tr_calls_builtin(callable: *mut PyObject) -> c_int;
 
     // CPython

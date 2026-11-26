@@ -48,6 +48,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.vm import _writes
 
 
 log = logging.getLogger(__name__)
@@ -505,7 +506,8 @@ def _plain_tree(x) -> bool:
 
 def _substitute(x, scalars, restore, n, locs, where):
     """x with each float leaf (in _walk's order) replaced by the next of
-    `scalars`: lists and dicts changed in place (undone from `restore`),
+    `scalars`: lists and dicts changed in place (undone from `restore`:
+    (container, key, what was there, what was put there)),
     tuples rebuilt. `n` counts leaves; `locs` gets (arg, leaf index) per
     float."""
     t = type(x)
@@ -518,7 +520,7 @@ def _substitute(x, scalars, restore, n, locs, where):
         for k, y in items:
             z = _substitute(y, scalars, restore, n, locs, (where[0], True))
             if z is not y:
-                restore.append((x, k, y))
+                restore.append((x, k, y, z))
                 x[k] = z
         return x
     if t is tuple:
@@ -953,6 +955,9 @@ class Trace:
     # what did not match.
     runs: int = 0
     misses: dict[str, int] = dataclasses.field(default_factory=dict)
+    # The writes the region does again on every run, in order, as text
+    # ("setattr .grid of a YOLOLayer").
+    effects: list[str] = dataclasses.field(default_factory=list)
 
 
 # The traces of this process, in the order they were made.
@@ -2535,8 +2540,8 @@ def trace_region(
     asked: bool = False,
 ):
     """Runs the block being traced (via torch._rust._region_body) and returns
-    (func, outputs, objects, checks, reads, quick checks, keys) for its
-    region, or None. A None before
+    (func, outputs, objects, checks, reads, quick checks, keys, writes) for
+    its region, or None. A None before
     the body ran leaves running it to the executor. A span's region (`span`)
     makes the checks itself. ``types``: what the VM recorded at each arg over
     the runs before (see torch.vm.Type). ``asked``: a span a cfg pass asked
@@ -2577,6 +2582,11 @@ def trace_region(
         )
 
     result: dict[str, Any] = {}
+    # The writes of the traced run to what outlives it (see torch/vm/_writes.py).
+    written = _writes.Written()
+    # The args as the call found them: a list among them may be one the body
+    # appends to, and what a region's place asks first is of the call's entry.
+    given = tuple(list(a) if type(a) is list else a for a in args)
     Backward = torch.autograd.function.BackwardCFunction
     if "__init__" in Backward.__dict__:
         raise AssertionError("expected BackwardCFunction to inherit __init__")
@@ -2632,6 +2642,7 @@ def trace_region(
                 for i, (a, p) in enumerate(zip(args, plan))
             )
         try:
+            _rust()._region_own(_writes.own(_tracer()))
             before = _contents(call_args)
             scalar_args = (
                 _ScalarArgs(_tracer().graph) if in_vm else contextlib.nullcontext()
@@ -2646,10 +2657,12 @@ def trace_region(
             # stands even if no region comes of it.
             result["repeatable"] = not backups
             backups.clear()
+            written.take(_rust()._region_writes(), _plain_result)
             # A comprehension's loop body adds to a container it was given
-            # (which purity doesn't see): a region would skip that.
+            # (which purity doesn't see): a region would skip that, unless
+            # the change is one of the writes it makes again.
             for x, items in before.values():
-                if _contents([x])[id(x)][1] != items:
+                if id(x) not in written.targets and _contents([x])[id(x)][1] != items:
                     result["refused"] = f"it changes a {type(x).__name__} it was given"
                     return []
             # A container that was there before the run is handed back as the
@@ -2661,11 +2674,14 @@ def trace_region(
             if span and _shared_container(outs, old):
                 result["refused"] = "its outputs share a container"
                 return []
+
+            def describe(o):
+                return _template(o, call_args, tensor_outs, objects, old)
+
             try:
-                result["outputs"] = [
-                    _template(o, call_args, tensor_outs, objects, old) for o in outs
-                ]
-            except _Refused as e:
+                result["outputs"] = [describe(o) for o in outs]
+                written.plan(outs, call_args, old, objects, describe, _shared_container)
+            except (_Refused, _writes.Unrepeatable) as e:
                 result["refused"] = str(e)
                 return []
             result["objects"] = objects
@@ -2673,8 +2689,14 @@ def trace_region(
             return tensor_outs
         finally:
             _scalar_state = None
-            for container, k, v in reversed(restore):
-                container[k] = v
+            for container, k, v, stand_in in reversed(restore):
+                # Only where the stand-in still is: a slot the body wrote to
+                # (or took out) keeps what the body left there.
+                try:
+                    if container[k] is stand_in:
+                        container[k] = v
+                except (KeyError, IndexError):
+                    pass
 
     Backward.__init__ = _refusing_init
     torch.autograd.Function.apply = classmethod(_tracing_apply)
@@ -2697,8 +2719,15 @@ def trace_region(
         torch.autograd.Function.apply = _function_apply
     stats["traced"] += 1
     # What the body read from outside its args (see exec/reads.rs).
-    reads, unchecked = _region_reads()
-    unchecked = unchecked or _lost(reads, result.get("held", ()))
+    reads, unchecked = _region_reads(_tree_holders(args, plan))
+    # A container the region hands back as it is, and an object it writes to
+    # and holds itself, are the right ones on a later call only if what the
+    # run read leads to them.
+    unchecked = (
+        unchecked
+        or _lost(reads, result.get("held", ()))
+        or written.unreachable(reads)
+    )
     if unchecked is not None:
         result.setdefault("refused", unchecked)
     if _DATA in state["specialized"]:
@@ -2799,6 +2828,7 @@ def trace_region(
         inputs=len(example),
         constants=len(consts),
         reads=reads,
+        effects=written.text,
         values=result.get("values", []),
     )
     for key in [key for key, entry in _made.items() if entry[0]() is None]:
@@ -2857,6 +2887,15 @@ def trace_region(
 
     # For _dropped.
     func.record = record  # type: ignore[attr-defined]
-    quick = _quick(args, plan, own_checks)
-    keys = _keys(args, plan, checks)
-    return func, result["outputs"], result["objects"], checks, reads, quick, keys
+    quick = _quick(given, plan, own_checks)
+    keys = _keys(given, plan, checks)
+    return (
+        func,
+        result["outputs"],
+        result["objects"],
+        checks,
+        reads,
+        quick,
+        keys,
+        written.templates,
+    )

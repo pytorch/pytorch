@@ -210,6 +210,7 @@ fn made_here(py: Python<'_>, prep: &Prepared, x: ValueId, made: &HashSet<ValueId
 pub fn find(
     py: Python<'_>,
     prep: &Prepared,
+    code: usize,
     movable: &HashSet<ValueId>,
     clones: &HashMap<ValueId, super::SiteClone>,
     qualname: &str,
@@ -241,7 +242,7 @@ pub fn find(
             && matches!(blk.term, Terminator::Jump(Exit::Block(_) | Exit::Return(_)) | Terminator::Branch { .. })
             && !body(b).iter().any(frame_state)
             // A region doesn't replay a store into an object or a namespace.
-            && !body(b).iter().any(|v| super::escaping_store(&cfg[*v].op))
+            && !body(b).iter().any(|v| super::escaping_store(code, &cfg[*v]))
             && (never(b)
                 || body(b).iter().all(|v| {
                     movable.contains(v)
@@ -402,7 +403,9 @@ pub fn find(
         let mut live_in: HashSet<u32> = live[&e].clone();
         let made: HashSet<ValueId> = r.iter().flat_map(|b| body(*b).iter().copied()).collect();
         let own = seen_blocks.iter().flat_map(|b| body(*b)).filter(|v| !movable.contains(v)).all(|v| match changed_container(py, prep, *v) {
-            Some(x) => made_here(py, prep, x, &made, &live_in, &mut HashSet::new()),
+            // A change the region records and makes again needn't be to a
+            // container of the span's own.
+            Some(x) => super::writes::taken_change(py, prep, code, *v) || made_here(py, prep, x, &made, &live_in, &mut HashSet::new()),
             None => true,
         });
         if !own {

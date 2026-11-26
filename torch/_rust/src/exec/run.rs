@@ -11,6 +11,7 @@ use crate::cfg::ir::*;
 
 use super::effects::{self, Recorder};
 use super::reads;
+use super::writes;
 use super::scalars;
 use super::ffi::*;
 use super::{Compiled, Prepared};
@@ -1370,7 +1371,8 @@ impl Act<'_> {
         // region: the version keeps running as it is, so the write is made
         // on every call, with that call's value.
         let body = &self.cfg[b].versions[vi].body;
-        let escapes = body.iter().any(|v| super::escaping_write(self.cfg, body, *v));
+        let code = self.c.map_or(0, |c| c.code);
+        let escapes = body.iter().any(|v| super::escaping_write(self.cfg, code, body, *v));
         if work < 2 || escapes {
             self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
             if let (Some(c), true) = (self.c, work > 0) {
@@ -1561,6 +1563,9 @@ impl Act<'_> {
             _ => None,
         };
         let Some(leave) = leave else {
+            // What the run wrote before it gave up is written again by the
+            // blocks, which run from the span's entry.
+            writes::undo();
             if debug {
                 let at = match &ended {
                     Some(Outcome::Stopped(x)) => format!("stopped at bb{}", x.0),
@@ -1765,6 +1770,9 @@ impl Act<'_> {
             if debug && let Err(e) = &traced {
                 eprintln!("region {name}: the body raised under tracing: {e}");
             }
+            // What it wrote before it raised is written again by the run
+            // that follows.
+            writes::undo();
             if again {
                 self.p.region_runs[b.idx()].store(0, std::sync::atomic::Ordering::Relaxed);
             } else {
@@ -1950,6 +1958,20 @@ impl Act<'_> {
         }
     }
 
+    // Reports the write the generic instruction `ins` is about to make (a
+    // subscript store or deletion, an attribute deletion) to the trace (see
+    // writes.rs).
+    unsafe fn note_write(&self, opcode: u8, oparg: u32, ins: &Instr) -> writes::Token {
+        use crate::cfg::opcodes::*;
+        let a = |k: usize| self.val(ins.args[k]);
+        match opcode {
+            STORE_SUBSCR => writes::store_item(a(1), a(2), a(0), None),
+            DELETE_SUBSCR => writes::store_item(a(0), a(1), std::ptr::null_mut(), None),
+            DELETE_ATTR => writes::store_attr(a(0), self.name(oparg), std::ptr::null_mut(), false),
+            _ => 0,
+        }
+    }
+
     // Reports what the generic instruction `ins` (just run; `ran`: it entered
     // a Python frame) read to the trace's reads (see reads.rs).
     unsafe fn note_read(&self, opcode: u8, oparg: u32, ins: &Instr, ran: bool) {
@@ -2085,7 +2107,12 @@ impl Act<'_> {
                 return Ok(());
             }
             Op::StoreAttr(n) => {
-                if ffi::PyObject_SetAttr(a(1), self.name(*n), a(0)) < 0 {
+                // A write the region makes again (see writes.rs).
+                let token = if self.reading { writes::store_attr(a(1), self.name(*n), a(0), false) } else { 0 };
+                refused_write(token)?;
+                let rc = ffi::PyObject_SetAttr(a(1), self.name(*n), a(0));
+                writes::done(token, rc >= 0);
+                if rc < 0 {
                     return Err(Exc::Error);
                 }
                 return Ok(());
@@ -2099,6 +2126,15 @@ impl Act<'_> {
                     // region's to check.
                     let _paused = reads::Recording::pause();
                     check(super::outside_executor(|| self.opaque_call(args, *argc as c_int, kw)))?
+                } else if self.reading && kw.is_null() && writes::writes_call(callee) {
+                    // C code that writes (object.__setattr__, list.append,
+                    // ...): a write the region makes again.
+                    let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                    let token = writes::write_call(callee, &all[if all[0].is_null() { 2 } else { 1 }..]);
+                    refused_write(token)?;
+                    let r = tr_call(args, *argc as c_int, kw);
+                    writes::done(token, !r.is_null());
+                    check(r)?
                 } else if self.reading && reads::reads_args(callee) {
                     let before = reads::frames();
                     let r = tr_call(args, *argc as c_int, kw);
@@ -2268,7 +2304,10 @@ impl Act<'_> {
                 };
                 let args = self.args(ins);
                 let before = if self.reading { reads::frames() } else { 0 };
+                let token = if self.reading { self.note_write(*opcode, *arg, ins) } else { 0 };
+                refused_write(token)?;
                 let rc = tr_generic(self.f, *opcode as c_int, *arg as c_int, args, out.as_mut_ptr());
+                writes::done(token, rc == 0);
                 if self.reading {
                     // An instruction that raised read its operands too (a
                     // key that isn't there): the exception is kept.
@@ -2315,4 +2354,15 @@ impl Act<'_> {
         self.set(v, obj);
         Ok(())
     }
+}
+
+// A write the trace could not make again (writes::REFUSED) is not made: the
+// trace ends here with an error of its own, and the code runs again as it
+// is.
+unsafe fn refused_write(token: writes::Token) -> Result<(), Exc> {
+    if token != writes::REFUSED {
+        return Ok(());
+    }
+    super::region::raise_refusal(pyo3::Python::assume_attached());
+    Err(Exc::Error)
 }

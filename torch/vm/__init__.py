@@ -394,6 +394,7 @@ class _Program:
             rust._set_cfg_pure_callables([getattr(f, "__func__", f) for f in pure])
             _pure_set = pure
         rust._set_cfg_spans("spans" in builtin)
+        rust._set_cfg_effects("effects" in builtin)
         rust._set_cfg_pass_hook(self._cfg_hook if self.cfg_passes else None)
         rust._set_cfg_scalar_reads(True)
         ri.block_pipeline = self.pipeline
@@ -423,6 +424,7 @@ class _Program:
             "spans": [],
             "split": [],
             "opaque": [],
+            "writes": [],
         }
         for p in self.cfg_passes:
             cfg = Cfg(self.fn, view)
@@ -444,6 +446,8 @@ class _Program:
             )
         for code, origin in edits["opaque"]:
             rust._cfg_opaque_site(code, origin, True)
+        for code, origin, take in edits["writes"]:
+            rust._cfg_write_site(code, origin, take)
         return edits
 
 
@@ -521,6 +525,8 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
     - ``ops``, ``inputs``, ``constants`` of the graph, ``variants`` (how many
       regions the place has: one per state it was traced in), ``reads`` (how
       many reads of state outside its arguments they are checked against);
+    - ``effects``: the writes to objects that outlive it which the region
+      does again on every run, in order (``"setattr 'grid' of a Layer"``);
     - ``values``: the float arguments its regions are checked on by value
       (``"arg 1 (float) == 0.5"``, one entry per value a region was traced
       for): those the code compared, hashed, converted or handed to C code
@@ -574,6 +580,7 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
                 "values": [],
                 "runs": 0,
                 "misses": {},
+                "effects": [],
                 "traces": [],
                 "notes": [],
             },
@@ -593,6 +600,7 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
             row["variants"] += 1
             row["values"].extend(v for v in t.values if v not in row["values"])
             row["runs"] += t.runs
+            row["effects"] = list(t.effects)
             for what, n in t.misses.items():
                 row["misses"][what] = row["misses"].get(what, 0) + n
             if t.reads is not None:
@@ -628,6 +636,7 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
             "values": [],
             "runs": 0,
             "misses": {},
+            "effects": [],
             "traces": [],
             "notes": [],
         }

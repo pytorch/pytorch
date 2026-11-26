@@ -736,6 +736,10 @@ pub struct RegionSpec {
     pub outputs: Vec<RegionOut>,
     // What RegionOut::Obj indexes.
     pub objects: Vec<pyo3::Py<pyo3::PyAny>>,
+    // The writes of the traced run to what outlives it, in order: each a
+    // call (RegionOut::Call) made for what it does, after the graph ran and
+    // before the outputs are handed on (see exec/writes.rs).
+    pub writes: Vec<RegionOut>,
     pub name: String,
     // What the trace read from outside its args (see exec/reads.rs): checked
     // before `func` is called.

@@ -231,27 +231,48 @@ PyObject* tr_partial_func(PyObject* callable) {
 // CALL: in = [method|NULL, self|callable, args...].
 // The function a call to `callable` runs, if it's a bound method, or the
 // descriptor of a bound slot wrapper or builtin method. Borrowed.
+// The method descriptor of `ml` among the classes tp inherits from, whichever
+// of them the name resolves to (`super().m` reaches one a subclass hides).
+static PyObject* tr_descr_of(
+    PyTypeObject* tp, PyMethodDef* ml, PyTypeObject* kind) {
+  PyObject* mro = tp->tp_mro;
+  if (mro == NULL || !PyTuple_Check(mro)) {
+    return NULL;
+  }
+  for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
+    PyObject* dict = PyType_GetDict((PyTypeObject*)PyTuple_GET_ITEM(mro, i));
+    if (dict == NULL) {
+      PyErr_Clear();
+      continue;
+    }
+    PyObject* d = PyDict_GetItemString(dict, ml->ml_name);
+    Py_DECREF(dict);
+    if (d != NULL && Py_IS_TYPE(d, kind) &&
+        ((PyMethodDescrObject*)d)->d_method == ml) {
+      return d;
+    }
+  }
+  return NULL;
+}
+
 PyObject* tr_bound_function(PyObject* callable) {
   if (Py_IS_TYPE(callable, &_PyMethodWrapper_Type)) {
     return (PyObject*)((tr_wrapperobject*)callable)->descr;
   }
   if (PyCFunction_Check(callable)) {
-    // Bound to an object (a method), or to a class (a classmethod).
+    // Bound to an object (a method), to a class (a classmethod), or to a
+    // class by its own class (`super().__instancecheck__` in a metaclass).
     PyObject* self = PyCFunction_GET_SELF(callable);
     if (self != NULL && !PyModule_Check(self)) {
-      int cls = PyType_Check(self);
       PyMethodDef* ml = ((PyCFunctionObject*)callable)->m_ml;
-      PyObject* name = PyUnicode_InternFromString(ml->ml_name);
-      PyObject* d = name == NULL
-          ? NULL
-          : _PyType_Lookup(cls ? (PyTypeObject*)self : Py_TYPE(self), name);
-      Py_XDECREF(name);
+      PyObject* d = NULL;
+      if (PyType_Check(self)) {
+        d = tr_descr_of((PyTypeObject*)self, ml, &PyClassMethodDescr_Type);
+      }
       if (d == NULL) {
-        PyErr_Clear();
-      } else if (
-          Py_IS_TYPE(
-              d, cls ? &PyClassMethodDescr_Type : &PyMethodDescr_Type) &&
-          ((PyMethodDescrObject*)d)->d_method == ml) {
+        d = tr_descr_of(Py_TYPE(self), ml, &PyMethodDescr_Type);
+      }
+      if (d != NULL) {
         return d;
       }
     }
@@ -2153,6 +2174,38 @@ int tr_store_attr_kind(PyTypeObject* tp, PyObject* name, int generic, int del_) 
     return !generic && Py_IS_TYPE(d, &PyProperty_Type) ? 0 : 2;
   }
   return tp->tp_dictoffset != 0 || PyType_HasFeature(tp, Py_TPFLAGS_MANAGED_DICT) ? 1 : 2;
+}
+
+// What the slot `name` of obj's class holds for obj (a new reference), or
+// NULL: nothing, or `name` is no slot. Runs no Python code.
+PyObject* tr_slot_get(PyObject* obj, PyObject* name) {
+  PyObject* d = _PyType_Lookup(Py_TYPE(obj), name);
+  if (d == NULL || !tr_is_slot(d)) {
+    return NULL;
+  }
+  PyObject* x = Py_TYPE(d)->tp_descr_get(d, obj, (PyObject*)Py_TYPE(obj));
+  if (x == NULL) {
+    PyErr_Clear();
+  }
+  return x;
+}
+
+// Whether subscript stores into (and deletions from) an instance of tp run
+// Python code of the class (its __setitem__ / __delitem__).
+int tr_python_setitem(PyTypeObject* tp, int del_) {
+  PyObject* special = PyUnicode_InternFromString(del_ ? "__delitem__" : "__setitem__");
+  PyObject* f = special == NULL ? NULL : _PyType_Lookup(tp, special);
+  Py_XDECREF(special);
+  if (f == NULL) {
+    PyErr_Clear();
+    return 0;
+  }
+  return PyFunction_Check(f);
+}
+
+// The name of a method or slot wrapper descriptor (borrowed).
+PyObject* tr_descr_name(PyObject* descr) {
+  return ((PyDescrObject*)descr)->d_name;
 }
 
 // The object a builtin method is bound to (borrowed), or NULL.

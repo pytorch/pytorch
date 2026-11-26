@@ -650,6 +650,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     REFUSAL.set(None);
     super::reads::begin();
     super::backward::ready();
+    super::writes::begin();
     let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span, types, asked)));
     super::reads::end();
     TRACING.set(false);
@@ -668,7 +669,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
         return Ok(None);
     }
     #[allow(clippy::type_complexity)]
-    let (func, outputs, objects, checks, reads, quick, keys): (
+    let (func, outputs, objects, checks, reads, quick, keys, writes): (
         Bound<'_, PyAny>,
         Vec<Bound<'_, PyAny>>,
         Vec<Bound<'_, PyAny>>,
@@ -676,7 +677,9 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
         Option<Py<super::reads::Reads>>,
         Vec<Bound<'_, PyTuple>>,
         Vec<Bound<'_, PyTuple>>,
+        Vec<Bound<'_, PyAny>>,
     ) = r.extract()?;
+    let writes = writes.iter().map(parse_out).collect::<PyResult<Vec<_>>>()?;
     let quick = quick.iter().map(parse_quick).collect::<PyResult<Vec<_>>>()?;
     let outputs = outputs.iter().map(parse_out).collect::<PyResult<Vec<_>>>()?;
     // A span's region makes the checks itself (func, and the quick ones).
@@ -689,6 +692,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
                 func: func.unbind(),
                 outputs,
                 objects: objects.into_iter().map(Bound::unbind).collect(),
+                writes,
                 name: name.to_string(),
                 reads,
                 quick,
@@ -946,6 +950,9 @@ pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Option<V
         }
         result.push(x);
     }
+    // The graph ran and every output is made: now the run's writes, in the
+    // order the trace made them (see writes.rs).
+    ok = ok && super::writes::replay(&spec.writes, &spec.objects, &|o| make(spec, o, args, &item, n));
     if outs != r {
         ffi::Py_DECREF(outs);
     }
