@@ -26,8 +26,8 @@
 #   as a set) appears on exactly one "# label:" line. When a list extends a
 #   sibling's, the shared labels come first and the distinguishing label last.
 # - A label line leaves out an oncall label when one of its module labels
-#   implies it; .github/label_to_label.yml records which modules imply which
-#   oncall.
+#   implies it; label_parents in OWNERSHIP.yaml records which labels imply
+#   which.
 # - Labels planned but not yet created on GitHub (issues can't be routed to
 #   them until they exist): module: tvm, module: operator benchmarks, module: mobile delegates, module: hipify, module: headeronly, module: github automation
 #
@@ -384,6 +384,7 @@
 # /torch/csrc/Exceptions.cpp
 # /torch/csrc/Exceptions.h
 # /torch/csrc/Export.h
+# /torch/csrc/FakeFallbackKernel.cpp
 # /torch/csrc/FakeTensorMode.cpp
 # /torch/csrc/FakeTensorMode.h
 # /torch/csrc/Generator.cpp
@@ -578,6 +579,7 @@
 # /test/test_pytree.py
 # /test/test_reductions.py
 # /test/test_rename_privateuse1_to_existing_device.py
+# /test/test_rounded_conversion.py
 # /test/test_scatter_gather_ops.py
 # /test/test_schema_check.py
 # /test/test_segment_reductions.py
@@ -917,15 +919,15 @@
 #
 # [profiler]
 # label: oncall: profiler
-# owner: @ryanzhang22 @scotts
+# owner: @ryanzhang22 @scotts @thomasywang
 # /test/cpp/profiler/test_profiler_collection.cpp
 # /test/profiler/
 # /test/test_throughput_benchmark.py
-/torch/autograd/profiler* @scotts @ryanzhang22
+/torch/autograd/profiler* @scotts @ryanzhang22 @thomasywang
 # /torch/autograd/profiler.py
 # /torch/autograd/profiler_legacy.py
 # /torch/autograd/profiler_util.py
-/torch/csrc/autograd/profiler* @scotts @ryanzhang22
+/torch/csrc/autograd/profiler* @scotts @ryanzhang22 @thomasywang
 # /torch/csrc/autograd/profiler.h
 # /torch/csrc/autograd/profiler_kineto.cpp
 # /torch/csrc/autograd/profiler_kineto.h
@@ -933,8 +935,8 @@
 # /torch/csrc/autograd/profiler_legacy.h
 # /torch/csrc/autograd/profiler_python.cpp
 # /torch/csrc/autograd/profiler_python.h
-/torch/csrc/profiler/ @scotts @ryanzhang22
-/torch/profiler/ @scotts @ryanzhang22
+/torch/csrc/profiler/ @scotts @ryanzhang22 @thomasywang
+/torch/profiler/ @scotts @ryanzhang22 @thomasywang
 #
 # [mobile_runtime]
 # label: oncall: mobile
@@ -959,20 +961,19 @@
 #
 # [infra_ci]
 # label: module: ci
-# owner: @atalman @georgehong @huydhn @jathu @malfet @zklaus
+# owner: @atalman @huydhn @malfet @zklaus
 /.ci/ @huydhn @atalman
-/.ci/pytorch/ @huydhn @georgehong @atalman @jathu
-/.ci/pytorch/build.sh @huydhn @georgehong @atalman @jathu @malfet @zklaus
-/.ci/pytorch/common-build.sh @huydhn @georgehong @atalman @jathu @malfet @zklaus
-/.ci/pytorch/macos-build.sh @huydhn @georgehong @atalman @jathu @malfet @zklaus
-/.ci/pytorch/win-arm64-build.ps1 @huydhn @georgehong @atalman @jathu @malfet @zklaus
-/.ci/pytorch/win-build.sh @huydhn @georgehong @atalman @jathu @malfet @zklaus
+/.ci/pytorch/build.sh @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/common-build.sh @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/macos-build.sh @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/win-arm64-build.ps1 @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/win-build.sh @huydhn @atalman @malfet @zklaus
 # label: module: ci, module: docker
 # owner: @atalman @huydhn @malfet
 /.ci/docker/ @atalman @huydhn @malfet
 # label: module: ci, module: inductor
-# owner: @Chillee @desertfire @eellison @jataylo @jeffdaily @jithunnair-amd @pruthvistony
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+# owner: @Chillee @desertfire @eellison @jataylo @jeffdaily @jithunnair-amd @pruthvistony @atalman @njriasan @warrendeng
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony @atalman @njriasan @warrendeng
 #
 # [infra_github_automation]
 # label: module: ci, module: github automation
@@ -1159,16 +1160,16 @@
 # /third_party/fbgemm
 # /third_party/flash-attention
 # /third_party/gemmlowp/
-# /third_party/ideep
 # /third_party/kleidiai
+# /third_party/oneDNN
 # /third_party/pthreadpool
 # /third_party/xnnpack.buck.bzl
 # /third_party/xnnpack_buck_shim.bzl
 # /third_party/xnnpack_src_defs.bzl
 # /third_party/xnnpack_wrapper_defs.bzl
 # label: oncall: profiler, module: third_party
-# owner: @ryanzhang22 @scotts
-/third_party/dynolog_headers/ @scotts @ryanzhang22
+# owner: @ryanzhang22 @scotts @thomasywang
+/third_party/dynolog_headers/ @scotts @ryanzhang22 @thomasywang
 # label: module: third_party, module: xpu
 # owner: @EikanWang @gujinghui
 /third_party/xpu.txt @EikanWang @gujinghui

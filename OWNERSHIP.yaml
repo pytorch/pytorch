@@ -11,8 +11,57 @@
 # CODEOWNERS rule (those handles get review requests); a bare path is a
 # commented rule. `section` is the CODEOWNERS section the group's paths are
 # written under; it is kept temporarily for scripts/codeowners/owners.py.
+#
+# `label_parents` maps a label to its parent label, so labels form a tree (e.g.
+# "module: inductor": "oncall: pt2"); labels not listed are roots. Labels must
+# exist on GitHub (tools/linter/adapters/pytorch_labels.json); a child may also be
+# a planned label. The generator writes one rule per parent into
+# .github/label_to_label.yml, and the label bot uses those rules to add the parent
+# whenever an issue gets the label.
 
 planned_labels: ["module: tvm", "module: operator benchmarks", "module: mobile delegates", "module: hipify", "module: headeronly", "module: github automation"]
+label_parents:
+  "module: dynamo": "oncall: pt2"
+  "module: inductor": "oncall: pt2"
+  "module: pt2-dispatcher": "oncall: pt2"
+  "oncall: export": "oncall: pt2"
+  "module: compiled autograd": "oncall: pt2"
+  "module: dynamic shapes": "oncall: pt2"
+  "module: flex attention": "oncall: pt2"
+  "module: compile-time": "oncall: pt2"
+  "module: tvm": "module: dynamo"
+  "module: pt2 optimizer": "module: dynamo"
+  "module: aotdispatch": "module: pt2-dispatcher"
+  "module: fakeTensor": "module: pt2-dispatcher"
+  "module: ProxyTensor": "module: pt2-dispatcher"
+  "module: higher order operators": "module: pt2-dispatcher"
+  "module: custom-operators": "module: pt2-dispatcher"
+  "module: functionalization": "module: pt2-dispatcher"
+  "module: library": "module: pt2-dispatcher"
+  "module: opcheck": "module: custom-operators"
+  "module: aotinductor": "oncall: export"
+  "module: nativert": "oncall: export"
+  "module: vmap": "module: functorch"
+  "module: c10d": "oncall: distributed"
+  "module: ddp": "oncall: distributed"
+  "module: fsdp": "oncall: distributed"
+  "module: dtensor": "oncall: distributed"
+  "module: tensorpipe": "oncall: distributed"
+  "oncall: distributed infra": "oncall: distributed"
+  "module: android": "oncall: mobile"
+  "module: ios": "oncall: mobile"
+  "module: mobile delegates": "oncall: mobile"
+  "module: vulkan": "oncall: mobile"
+  "module: cublas": "module: cuda"
+  "module: cudnn": "module: cuda"
+  "module: jiterator": "module: cuda"
+  "module: hipify": "module: rocm"
+  "module: nn.utils.parametrize": "module: nn"
+  "module: sdpa": "module: nn"
+  "module: headeronly": "module: abi"
+  "module: github automation": "module: ci"
+  "module: operator benchmarks": "module: benchmark"
+  "module: models": "module: benchmark"
 # CODEOWNERS section order (temporary, see above).
 sections:
   - core_aten_native_ops
@@ -508,17 +557,17 @@ ownership:
       - /aten/src/ATen/native/ao_sparse/: [salilsdesai, digantdesai, jianyuh]
   - name: profiler
     labels: ["oncall: profiler"]
-    owners: [ryanzhang22, scotts]
+    owners: [ryanzhang22, scotts, thomasywang]
     section: profiler
     paths:
       - /test/cpp/profiler/test_profiler_collection.cpp
       - /test/profiler/
       - /test/test_throughput_benchmark.py
-      - /torch/autograd/profiler*: [scotts, ryanzhang22]
+      - /torch/autograd/profiler*: [scotts, ryanzhang22, thomasywang]
       - /torch/autograd/profiler.py
       - /torch/autograd/profiler_legacy.py
       - /torch/autograd/profiler_util.py
-      - /torch/csrc/autograd/profiler*: [scotts, ryanzhang22]
+      - /torch/csrc/autograd/profiler*: [scotts, ryanzhang22, thomasywang]
       - /torch/csrc/autograd/profiler.h
       - /torch/csrc/autograd/profiler_kineto.cpp
       - /torch/csrc/autograd/profiler_kineto.h
@@ -526,8 +575,8 @@ ownership:
       - /torch/csrc/autograd/profiler_legacy.h
       - /torch/csrc/autograd/profiler_python.cpp
       - /torch/csrc/autograd/profiler_python.h
-      - /torch/csrc/profiler/: [scotts, ryanzhang22]
-      - /torch/profiler/: [scotts, ryanzhang22]
+      - /torch/csrc/profiler/: [scotts, ryanzhang22, thomasywang]
+      - /torch/profiler/: [scotts, ryanzhang22, thomasywang]
   - name: mobile
     labels: ["oncall: mobile"]
     owners: []
@@ -554,16 +603,15 @@ ownership:
       - /torch/csrc/jit/backends/
   - name: ci
     labels: ["module: ci"]
-    owners: [atalman, georgehong, huydhn, jathu, malfet, zklaus]
+    owners: [atalman, huydhn, malfet, zklaus]
     section: infra_ci
     paths:
       - /.ci/: [huydhn, atalman]
-      - /.ci/pytorch/: [huydhn, georgehong, atalman, jathu]
-      - /.ci/pytorch/build.sh: [huydhn, georgehong, atalman, jathu, malfet, zklaus]
-      - /.ci/pytorch/common-build.sh: [huydhn, georgehong, atalman, jathu, malfet, zklaus]
-      - /.ci/pytorch/macos-build.sh: [huydhn, georgehong, atalman, jathu, malfet, zklaus]
-      - /.ci/pytorch/win-arm64-build.ps1: [huydhn, georgehong, atalman, jathu, malfet, zklaus]
-      - /.ci/pytorch/win-build.sh: [huydhn, georgehong, atalman, jathu, malfet, zklaus]
+      - /.ci/pytorch/build.sh: [huydhn, atalman, malfet, zklaus]
+      - /.ci/pytorch/common-build.sh: [huydhn, atalman, malfet, zklaus]
+      - /.ci/pytorch/macos-build.sh: [huydhn, atalman, malfet, zklaus]
+      - /.ci/pytorch/win-arm64-build.ps1: [huydhn, atalman, malfet, zklaus]
+      - /.ci/pytorch/win-build.sh: [huydhn, atalman, malfet, zklaus]
   - name: docker_ci
     labels: ["module: ci", "module: docker"]
     owners: [atalman, huydhn, malfet]
@@ -572,10 +620,10 @@ ownership:
       - /.ci/docker/: [atalman, huydhn, malfet]
   - name: inductor_ci
     labels: ["module: ci", "module: inductor"]
-    owners: [Chillee, desertfire, eellison, jataylo, jeffdaily, jithunnair-amd, pruthvistony]
+    owners: [Chillee, desertfire, eellison, jataylo, jeffdaily, jithunnair-amd, pruthvistony, atalman, njriasan, warrendeng]
     section: infra_ci
     paths:
-      - /.ci/docker/ci_commit_pins/triton.txt: [desertfire, Chillee, eellison, jeffdaily, jataylo, jithunnair-amd, pruthvistony]
+      - /.ci/docker/ci_commit_pins/triton.txt: [desertfire, Chillee, eellison, jeffdaily, jataylo, jithunnair-amd, pruthvistony, atalman, njriasan, warrendeng]
   - name: github_automation_ci
     labels: ["module: ci", "module: github automation"]
     owners: [atalman, drisspg, huydhn, izaitsevfb, jeanschmidt]
@@ -778,8 +826,8 @@ ownership:
       - /third_party/fbgemm
       - /third_party/flash-attention
       - /third_party/gemmlowp/
-      - /third_party/ideep
       - /third_party/kleidiai
+      - /third_party/oneDNN
       - /third_party/pthreadpool
       - /third_party/xnnpack.buck.bzl
       - /third_party/xnnpack_buck_shim.bzl
@@ -787,10 +835,10 @@ ownership:
       - /third_party/xnnpack_wrapper_defs.bzl
   - name: third_party_profiler
     labels: ["oncall: profiler", "module: third_party"]
-    owners: [ryanzhang22, scotts]
+    owners: [ryanzhang22, scotts, thomasywang]
     section: third_party_backend_deps
     paths:
-      - /third_party/dynolog_headers/: [scotts, ryanzhang22]
+      - /third_party/dynolog_headers/: [scotts, ryanzhang22, thomasywang]
   - name: xpu_third_party
     labels: ["module: third_party", "module: xpu"]
     owners: [EikanWang, gujinghui]
@@ -1373,6 +1421,7 @@ ownership:
       - /torch/csrc/Exceptions.cpp
       - /torch/csrc/Exceptions.h
       - /torch/csrc/Export.h
+      - /torch/csrc/FakeFallbackKernel.cpp
       - /torch/csrc/FakeTensorMode.cpp
       - /torch/csrc/FakeTensorMode.h
       - /torch/csrc/Generator.cpp
@@ -1560,6 +1609,7 @@ ownership:
       - /test/test_pytree.py
       - /test/test_reductions.py
       - /test/test_rename_privateuse1_to_existing_device.py
+      - /test/test_rounded_conversion.py
       - /test/test_scatter_gather_ops.py
       - /test/test_schema_check.py
       - /test/test_segment_reductions.py
