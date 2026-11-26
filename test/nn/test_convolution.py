@@ -3379,6 +3379,18 @@ class TestConvolutionNNDevice(NNTestCase):
         grad2 = grad2 * scale
         self.assertEqual(grad1, grad2, atol=5e-2, rtol=5e-3)
 
+    @skipCUDAIfNoCudnn
+    @parametrize_test("kh,kw", [(64, 1), (63, 1), (31, 31)])
+    @parametrize_test("channels", [3, 8])
+    @parametrize_test("layout", [torch.contiguous_format, torch.channels_last])
+    def test_conv2d_depthwise_large_filter(self, device, kh, kw, channels, layout):
+        x = torch.randint(-2, 3, (32, channels, kh + 3, kw + 31), device=device)
+        x = x.float().contiguous(memory_format=layout)
+        w = torch.randint(-2, 3, (channels, 1, kh, kw), device=device).float()
+        out = F.conv2d(x, w, groups=channels)
+        self.assertEqual(out, F.conv2d(x.cpu(), w.cpu(), groups=channels))
+        self.assertTrue(out.is_contiguous(memory_format=layout))
+
     @onlyAccelerator
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("60GB", "cuda")
