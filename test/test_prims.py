@@ -349,6 +349,43 @@ class TestPrimsBasic(TestCase):
         self.assertEqual(result.device.type, "cpu")
         self.assertEqual(result.shape, (1,))
 
+    def test_run_and_save_rng_state_proxy_mode_respects_backend_registration(self):
+        # https://github.com/pytorch/pytorch/issues/206212
+        # Third-party backends register their own BackendSelect impl for the
+        # rng HOPs (torch_npu registers backend_select_with_npu).  The
+        # ProxyTorchDispatchMode impl must redispatch the HOP (with proxy
+        # tracing disabled) instead of calling the built-in backend selector
+        # directly, so that the registered impl is honored during make_fx
+        # tracing.
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        hop = torch._prims.rng_prims.run_and_save_rng_state
+        key = torch._C.DispatchKey.BackendSelect
+        builtin = hop.py_kernels[key]
+        called = []
+
+        def replacement(op, *args, **kwargs):
+            called.append(op)
+            return builtin(op, *args, **kwargs)
+
+        # Third-party backends register via py_kernels directly (HOP.py_impl
+        # refuses to override an existing registration), mirroring torch_npu.
+        hop.py_kernels[key] = replacement
+        try:
+            def f():
+                rng_state, out = hop(torch.ops.aten.rand.default, [10], device="cpu")
+                return out
+
+            gm = make_fx(f)()
+            self.assertTrue(
+                called,
+                "registered BackendSelect impl was bypassed by the "
+                "ProxyTorchDispatchMode impl of run_and_save_rng_state",
+            )
+            self.assertTrue(any(n.target is hop for n in gm.graph.nodes))
+        finally:
+            hop.py_kernels[key] = builtin
+
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
         self.assertEqual(torch.ops.prims.sin(r), torch.sin(r))
