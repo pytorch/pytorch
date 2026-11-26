@@ -1204,11 +1204,13 @@ class TestTritonHeuristicsBackendConfig(TestCase):
 
 
 @requires_triton()
+@instantiate_parametrized_tests
+@unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
 class TestTritonHeuristicsROCm(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @runOnRocm
-    def test_amd_special_config_args(self, device):
+    def test_amd_special_config_args(self):
         """
         waves_per_eu is an example of a special config arg on AMD; if it is explicitly specified
         in a config, the kwarg will exist in the kwargs but not in the function signature.
@@ -1228,13 +1230,13 @@ class TestTritonHeuristicsROCm(TestCase):
         def fn(x):
             return triton_sqr(x)
 
-        x = torch.randn(32, device=device)
+        x = torch.randn(32, device="cuda")
         ref = fn(x)
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
     @runOnRocm
-    def test_flex_default_configs_gated_on_arch_name(self, device):
+    def test_flex_default_configs_gated_on_arch_name(self):
         """A gfx target gets tuned flex defaults only if registered for them.
 
         get_device_capability() on ROCm reports the gfx major/minor, which
@@ -1315,7 +1317,7 @@ class TestTritonHeuristicsROCm(TestCase):
         ],
     )
     def test_rocm_prune_block_k_underfills_mfma(
-        self, device, arch, f16_count, int8_count, int8_kpack
+        self, arch, f16_count, int8_count, int8_kpack
     ):
         if not torch.version.hip:
             self.skipTest("ROCm-specific MFMA config pruning")
@@ -2060,11 +2062,12 @@ def get_hip_autotune_kernel_with_invalid_config():
 
 
 @requires_triton()
+@unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
 class TestHIPInvalidConfigHandling(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @runOnRocm
-    def test_benchmark_returns_inf_on_invalid_config(self, device):
+    def test_benchmark_returns_inf_on_invalid_config(self):
         from torch._inductor.runtime.benchmarking import TritonBenchmarker
 
         benchmarker = TritonBenchmarker()
@@ -2076,15 +2079,15 @@ class TestHIPInvalidConfigHandling(TestCase):
 
         result = benchmarker.benchmark(
             fn=failing_callable,
-            device=device,
+            device="cuda",
             is_vetted_benchmarking=True,
         )
         self.assertEqual(result, float("inf"))
 
     @runOnRocm
-    def test_autotune_skips_invalid_hip_config_and_succeeds(self, device):
+    def test_autotune_skips_invalid_hip_config_and_succeeds(self):
         numel = 1024 * 1024
-        x = torch.randn(numel, device=device, dtype=torch.float32)
+        x = torch.randn(numel, device="cuda", dtype=torch.float32)
         y = torch.empty_like(x)
 
         kernel = get_hip_autotune_kernel_with_invalid_config()
@@ -3094,9 +3097,6 @@ with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
         TestArgumentCloneAndRestore, globals(), allow_xpu=True
     )
     instantiate_device_type_tests(
-        TestTritonHeuristicsROCm, globals(), only_for=("cuda",)
-    )
-    instantiate_device_type_tests(
         TestCachingAutotunerPrecompileDriverSetup,
         globals(),
         allow_xpu=True,
@@ -3104,9 +3104,6 @@ with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
     instantiate_device_type_tests(TestCachingAutotunerPlugin, globals(), allow_xpu=True)
     instantiate_device_type_tests(TestDumpLaunchTensors, globals(), allow_xpu=True)
     instantiate_device_type_tests(TestRecheckAutotuneCache, globals(), allow_xpu=True)
-    instantiate_device_type_tests(
-        TestHIPInvalidConfigHandling, globals(), only_for=("cuda",)
-    )
     instantiate_device_type_tests(
         TestDynamicScaleRblockCacheInteraction,
         globals(),
