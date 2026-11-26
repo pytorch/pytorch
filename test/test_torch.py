@@ -7468,7 +7468,6 @@ class TestTorchDeviceType(TestCase):
             torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
             self.assertEqual([t.shape for t in out], [v.shape for v in views])
 
-    @skipIfXpu(msg="XPU split_with_sizes_copy.out still uses stride(dim) as the chunk size")
     def test_split_with_sizes_copy_out_non_canonical_layouts(self, device):
         def check(x, split_sizes, dim, out):
             torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
