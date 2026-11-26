@@ -437,13 +437,13 @@ See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
     input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
-    kernel_size: size of the pooling region. Can be a single number or a
+    kernel_size: size of the pooling region. Can be a single number, a single-element tuple or a
       tuple `(kT, kH, kW)`
-    stride: stride of the pooling operation. Can be a single number or a
+    stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`. Should be at most half
-      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
+      single number, a single-element tuple or a tuple `(padT, padH, padW)`.
+      Should be at most half of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
       Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
