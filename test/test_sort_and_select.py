@@ -27,11 +27,22 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
+    serialTest,
     skipIfTorchDynamo,
     slowTest,
     TEST_WITH_ROCM,
     TestCase,
 )
+
+
+def _topk_gather_order(x, kth, k, largest):
+    # Indices of an unsorted topk of the rows of x in gather order: indices strictly
+    # past the k-th value in ascending order, then the lowest indices equal to it.
+    cols = x.shape[-1]
+    pos = torch.arange(cols)
+    past = x > kth if largest else x < kth
+    order = torch.where(past, pos, torch.where(x == kth, cols + pos, 2 * cols))
+    return order.topk(k, largest=False).values % cols
 
 
 class TestSortAndSelect(TestCase):
@@ -911,10 +922,12 @@ class TestSortAndSelectDevice(TestCase):
         #
         # Exercise the k == slice_size boundary and a few neighbouring sizes,
         # in both largest=True and largest=False modes, with enough slices to
-        # flush out the bad case.
+        # flush out the bad case. On gfx1250, the 4097 slices of 400 and 512
+        # elements take this path for k > 16 (the wave select takes k <= 16).
         torch.manual_seed(0)
-        num_slices = 1024
-        for slice_size in (1, 33, 63, 64, 65, 71, 127, 128, 129, 255, 256):
+        cases = [(1024, s) for s in (1, 33, 63, 64, 65, 71, 127, 128, 129, 255, 256)]
+        cases += [(4097, 400), (4097, 512)]
+        for num_slices, slice_size in cases:
             iinfo = torch.iinfo(dtype)
             a = torch.randint(
                 iinfo.min,
@@ -936,6 +949,12 @@ class TestSortAndSelectDevice(TestCase):
                         vals,
                         ref,
                         lambda msg: f"{msg}\nvalue/index mismatch k={k} slice_size={slice_size} "
+                        f"dtype={dtype} largest={largest}",
+                    )
+                    self.assertEqual(
+                        vals.cpu(),
+                        a.cpu().topk(k, dim=1, largest=largest).values,
+                        lambda msg: f"{msg}\nvalues differ from CPU k={k} slice_size={slice_size} "
                         f"dtype={dtype} largest={largest}",
                     )
 
@@ -1442,12 +1461,190 @@ class TestSortAndSelectCUDA(TestCase):
                 self.assertEqual(top1, top2)
                 self.assertEqual(idx1, idx2)
 
+    @dtypes(torch.bfloat16, torch.float32)
+    def test_topk_long_slices(self, device, dtype):
+        # Long slices take the multi-block radix select. Each thread counts
+        # several items per radix pass there, which on gfx1250 selects the
+        # lane-private digit counts (4 to 7 items per thread on the many-slice
+        # shapes). Few distinct values force many ties.
+        def check(actual, expected, msg):
+            self.assertEqual(actual, expected, atol=0, rtol=0, msg=msg)
+
+        shapes = ((64, 307200, 240), (16, 81920, 20), (2000, 1024, 50), (900, 1800, 17))
+        for (rows, cols, k), high in product(shapes, (None, 1000)):
+            if high is None:
+                x = torch.randn(rows, cols, device=device, dtype=dtype)
+            else:
+                x = torch.randint(0, high, (rows, cols), device=device).to(dtype)
+            x_cpu = x.cpu()
+            shape_msg = f"{rows=} {cols=} {k=} {high=}"
+            for largest in (True, False):
+                expected_values = x_cpu.topk(k, largest=largest).values
+                kth = expected_values[:, -1:]
+                expected_idx = _topk_gather_order(x_cpu, kth, k, largest)
+                for sorted_, transposed in product((True, False), (False, True)):
+                    msg = f"{shape_msg} {largest=} {sorted_=} {transposed=}"
+                    kw = dict(largest=largest, sorted=sorted_)
+                    if transposed:
+                        # Same slices with a non-unit stride within the slice.
+                        values, idx = torch.topk(x.t().contiguous(), k, dim=0, **kw)
+                        values, idx = values.t(), idx.t()
+                    else:
+                        values, idx = torch.topk(x, k, **kw)
+                    check(values, x.gather(1, idx), msg)
+                    if sorted_:
+                        check(values.cpu(), expected_values, msg)
+                    else:
+                        self.assertEqual(idx.cpu(), expected_idx, msg=msg)
+
+    def _test_topk_multiblock_gather(self, device, dtype, shapes, highs):
+        def check(actual, expected, msg):
+            self.assertEqual(actual, expected, atol=0, rtol=0, msg=msg)
+
+        for (rows, cols, k), high in product(shapes, highs):
+            if high is None:
+                x = torch.randn(rows, cols, device=device, dtype=dtype)
+            else:
+                x = torch.randint(0, high, (rows, cols), device=device).to(dtype)
+            x_cpu = x.cpu()
+            shape_msg = f"{rows=} {cols=} {k=} {high=}"
+            # The same slices with a non-unit stride, and starting one element past an aligned address.
+            layouts = {"contiguous": x}
+            if rows != 81:
+                layouts["transposed"] = x.t().contiguous()
+                flat = torch.empty(rows * cols + 1, device=device, dtype=dtype)
+                misaligned = flat[1:].view(rows, cols)
+                layouts["misaligned"] = misaligned.copy_(x)
+            for largest in (True, False):
+                expected_values = x_cpu.topk(k, largest=largest).values
+                kth = expected_values[:, -1:]
+                expected_idx = _topk_gather_order(x_cpu, kth, k, largest)
+                for sorted_, (layout, inp) in product((True, False), layouts.items()):
+                    msg = f"{shape_msg} {largest=} {sorted_=} {layout=}"
+                    kw = dict(largest=largest, sorted=sorted_)
+                    if layout == "transposed":
+                        values, idx = torch.topk(inp, k, dim=0, **kw)
+                        values, idx = values.t(), idx.t()
+                    else:
+                        values, idx = torch.topk(inp, k, **kw)
+                    check(values, x.gather(1, idx), msg)
+                    if sorted_:
+                        check(values.cpu(), expected_values, msg)
+                        actual = idx.cpu().sort().values
+                        expected = expected_idx.sort().values
+                        self.assertEqual(actual, expected, msg=msg)
+                    else:
+                        self.assertEqual(idx.cpu(), expected_idx, msg=msg)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float64)
+    def test_topk_multiblock_gather(self, device, dtype):
+        # Long slices take the multi-block radix select, whose last pass writes each block's
+        # selected items at their rank in index order. A block reads rows of BLOCK_THREADS
+        # (256) consecutive items, one item per thread per row, so on gfx1250 each wave ranks a
+        # 32-item strip of every row. Rows are cut from the [81, 1216039] k=100 and
+        # [730, 150780] k=2500 cases; (3, 100003) ends partway through a row and through a
+        # wave's strip of it. Few distinct values put more items at the k-th value than fit in k.
+        shapes = [(8, 1216039, 100), (64, 150780, 2500), (3, 100003, 777)]
+        self._test_topk_multiblock_gather(device, dtype, shapes, (None, 4))
+
+    @serialTest()
+    @largeTensorTest("4GB", "cpu")
+    @dtypes(torch.float16)
+    def test_topk_multiblock_gather_full(self, device, dtype):
+        # The full [81, 1216039] k=100 case: blocks hold the most rows a block allows
+        # (MAX_ITEMS_PER_THREAD). The CPU reference needs about 2 GB.
+        self._test_topk_multiblock_gather(device, dtype, [(81, 1216039, 100)], (None,))
+
+    @dtypes(torch.float32, torch.bfloat16, torch.float16)
+    def test_topk_short_slices(self, device, dtype):
+        # Many short slices (on gfx1250 the wave select for k <= 16). Values include
+        # ties, -0.0 next to +0.0, NaN and denormals. Slices of up to 256 elements take the warp sort
+        # on ROCm: GTOp/LTOp order (-0.0 == +0.0, NaN above everything), sorted output.
+        # Elsewhere the radix select: radix-key order (+0.0 above -0.0), gather order.
+        def check(actual, expected, msg):
+            self.assertEqual(actual, expected, atol=0, rtol=0, equal_nan=True, msg=msg)
+
+        def radix_key(x):
+            bits = 32 if x.dtype == torch.float32 else 16
+            mask = (1 << bits) - 1
+            int_dtype = torch.int32 if bits == 32 else torch.int16
+            b = x.view(int_dtype).to(torch.int64) & mask
+            sign = b >> (bits - 1)
+            key = torch.where(sign == 1, b ^ mask, b ^ (1 << (bits - 1)))
+            return torch.where(torch.isnan(x), mask, key), mask
+
+        # Around the gfx1250 wave select's gates: 512 slices, slices of 4096 elements.
+        # Also k = 20 and 50 (on gfx1250 the warp sort for slices of 257 to 512 elements).
+        shapes = [(1000, 100), (4097, 256), (777, 300), (4097, 512)]
+        shapes += [(512, 4096), (511, 2048), (600, 4097), (9, 2000)]
+        kinds = ("randn", "ties", "zeros_nan", "signed_zeros", "denormals")
+        for (rows, cols), kind in product(shapes, kinds):
+            warp_sort = torch.version.hip is not None and cols <= 256
+            if kind == "denormals" and warp_sort:
+                # GTOp/LTOp compare floats, which the build may flush to zero.
+                continue
+            if kind == "randn":
+                x = torch.randn(rows, cols, device=device, dtype=dtype)
+            elif kind == "denormals":
+                tiny = torch.finfo(dtype).tiny / 4
+                ints = torch.randint(-3, 4, (rows, cols)).double()
+                x = (ints * tiny).to(dtype).to(device)
+            elif kind == "signed_zeros":
+                # -1.0, -0.0 and +0.0, so that the k-th value of the largest is a zero.
+                x = torch.randint(-1, 1, (rows, cols), device=device).to(dtype)
+                flip = (x == 0) & (torch.rand(rows, cols, device=device) < 0.5)
+                x = torch.where(flip, -x, x)
+            else:
+                x = torch.randint(-2, 3, (rows, cols), device=device).to(dtype)
+                if kind == "zeros_nan":
+                    x = torch.where(torch.rand(rows, cols, device=device) < 0.5, -x, x)
+                    if not warp_sort:
+                        x[torch.rand(rows, cols, device=device) < 0.05] = nan
+            for largest in (True, False):
+                if kind == "signed_zeros" and not largest:
+                    # +1.0, -0.0 and +0.0: the k-th value of the smallest is a zero.
+                    x = -x
+                x_cpu = x.cpu()
+                key, mask = radix_key(x_cpu)
+                if warp_sort:
+                    zero_key = radix_key(torch.zeros_like(x_cpu))[0]
+                    key = torch.where(x_cpu == 0, zero_key, key)
+                if not largest:
+                    key = mask - key
+                pos = torch.arange(cols)
+                sort_key = key * (cols + 1) + (cols - pos)
+                ranked_all = torch.argsort(sort_key, dim=1, descending=True)
+                for k in (1, 2, 3, 5, 8, 9, 16, 20, 50):
+                    ranked = ranked_all[:, :k]
+                    if warp_sort:
+                        expected_idx = ranked
+                    else:
+                        sel_key = key.gather(1, ranked)
+                        tie = sel_key == sel_key[:, -1:]
+                        tie_key = tie.to(torch.int64) * (cols + 1) + ranked
+                        expected_idx = ranked.gather(1, torch.argsort(tie_key, dim=1))
+                    for sorted_, transposed in product((False, True), (False, True)):
+                        msg = f"{rows=} {cols=} {kind=} {k=} {largest=} {sorted_=} {transposed=}"
+                        kw = dict(largest=largest, sorted=sorted_)
+                        if transposed:
+                            values, idx = torch.topk(x.t().contiguous(), k, dim=0, **kw)
+                            values, idx = values.t(), idx.t()
+                        else:
+                            values, idx = torch.topk(x, k, **kw)
+                        check(values, x.gather(1, idx), msg)
+                        if sorted_:
+                            actual = idx.cpu().sort().values
+                            expected = expected_idx.sort().values
+                            self.assertEqual(actual, expected, msg=msg)
+                        else:
+                            self.assertEqual(idx.cpu(), expected_idx, msg=msg)
+
     @dtypes(torch.bfloat16, torch.float16, torch.float32)
     def test_topk_deterministic_ties(self, device, dtype):
         # Single-block topk on ROCm once ordered tied values by warp arrival (#196177).
         # Slices longer than the block take the multi-round gather; few values force many ties.
         for (rows, cols), high in product(
-            ((256, 257), (256, 1024), (8, 3000), (8, 4097)), (4, 1000)
+            ((256, 257), (4097, 512), (256, 1024), (8, 3000), (8, 4097)), (4, 1000)
         ):
             x = torch.randint(0, high, (rows, cols), device=device).to(dtype)
             x_cpu = x.cpu()
@@ -1455,7 +1652,11 @@ class TestSortAndSelectCUDA(TestCase):
                 if k > cols:
                     continue
                 msg = f"{rows=} {cols=} {high=} {k=} {largest=} {sorted_=}"
-                _, idx = torch.topk(x, k, largest=largest, sorted=sorted_)
+                values, idx = torch.topk(x, k, largest=largest, sorted=sorted_)
+                self.assertEqual(values, x.gather(1, idx), atol=0, rtol=0, msg=msg)
+                if sorted_:
+                    expected = x_cpu.topk(k, largest=largest).values
+                    self.assertEqual(values.cpu(), expected, atol=0, rtol=0, msg=msg)
                 for _ in range(10):
                     rerun = torch.topk(x, k, largest=largest, sorted=sorted_)[1]
                     self.assertEqual(rerun, idx, msg=msg)
@@ -1464,12 +1665,8 @@ class TestSortAndSelectCUDA(TestCase):
                 idx_t = torch.topk(xt, k, dim=0, largest=largest, sorted=sorted_)[1]
                 self.assertEqual(idx_t.t(), idx, msg=msg)
                 if not sorted_:
-                    # Unsorted output is in gather order: indices strictly past the k-th value in
-                    # ascending order, then the lowest indices equal to it.
                     kth = x_cpu.topk(k, largest=largest).values[:, -1:]
-                    past = x_cpu > kth if largest else x_cpu < kth
-                    rank = torch.where(past, 0, torch.where(x_cpu == kth, 1, 2))
-                    expected = rank.sort(stable=True).indices[:, :k]
+                    expected = _topk_gather_order(x_cpu, kth, k, largest)
                     self.assertEqual(idx.cpu(), expected, msg=msg)
 
     @dtypes(
