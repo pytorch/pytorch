@@ -1285,15 +1285,17 @@ class LoopOrderingTest(TestCase):
 
     @requires_triton
     @requires_capabilities(Capability.dtype.fp8)
+    # can-gaa-hou asked to remove the unittest.skipIf form; Tam's review requires
+    # the sm89 protection to stay, so it is a CUDA-scoped skipIf here. Moving it
+    # to a dedicated sm90 capability needs a common_device_type change and is
+    # left to a follow-up PR.
+    @skipIf(not SM90OrLater, "sm89 errors out on this test", device_type="cuda")
     def test_fp8_cast_and_t(self, device):
         """
         This test repros the not able to fuses issue in
         https://github.com/pytorch/pytorch/issues/130015
         for fp8 cast and transpose
         """
-        # sm89 passes the fp8 capability gate but errors out on this test.
-        if torch.device(device).type == "cuda" and not SM90OrLater:
-            self.skipTest("sm89 errors out on this test")
 
         def f(x, scale):
             x = x * scale
