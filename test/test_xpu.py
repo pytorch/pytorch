@@ -965,13 +965,6 @@ print(torch.xpu.is_initialized())
     def test_sleep(self):
         # clock_rate() returns MHz; multiply by 1e6 to get ~1 second of device cycles.
         cycles = int(torch.xpu.clock_rate() * 1_000_000)
-        # Some Xe GPU's bundled IGC is too old to support it.
-        if not Xe2_Or_Later:
-            with self.assertRaisesRegex(
-                NotImplementedError, "is not supported on this device"
-            ):
-                torch.xpu._sleep(cycles)
-            return
         # Drain the stream to a known idle state, then verify _sleep() enqueues
         # asynchronously: stream should be busy right after the call and idle only
         # after synchronize() completes.
