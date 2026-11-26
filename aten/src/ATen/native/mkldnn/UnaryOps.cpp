@@ -41,32 +41,32 @@ Tensor& mkldnn_tanh_(Tensor& self) {
 namespace at::native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
-  ideep::tensor& x = itensor_from_mkldnn(self);
-  ideep::tensor y;
+  mkldnn::MkldnnMemory& x = memory_from_mkldnn(self);
+  mkldnn::MkldnnMemory y;
   mkldnn::eltwise_forward(
       x, y, dnnl::algorithm::eltwise_logistic, dnnl::prop_kind::forward);
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+  return new_with_mkldnn_memory(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
 
 Tensor& mkldnn_sigmoid_(Tensor& self) {
-  ideep::tensor& x = itensor_from_mkldnn(self);
+  mkldnn::MkldnnMemory& x = memory_from_mkldnn(self);
   mkldnn::eltwise_forward(
       x, x, dnnl::algorithm::eltwise_logistic, dnnl::prop_kind::forward);
   return self;
 }
 
 Tensor mkldnn_tanh(const Tensor& self) {
-  ideep::tensor& x = itensor_from_mkldnn(self);
-  ideep::tensor y;
+  mkldnn::MkldnnMemory& x = memory_from_mkldnn(self);
+  mkldnn::MkldnnMemory y;
   mkldnn::eltwise_forward(
       x, y, dnnl::algorithm::eltwise_tanh, dnnl::prop_kind::forward);
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+  return new_with_mkldnn_memory(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
 
 Tensor& mkldnn_tanh_(Tensor& self) {
-  ideep::tensor& x = itensor_from_mkldnn(self);
+  mkldnn::MkldnnMemory& x = memory_from_mkldnn(self);
   mkldnn::eltwise_forward(
       x, x, dnnl::algorithm::eltwise_tanh, dnnl::prop_kind::forward);
   return self;
