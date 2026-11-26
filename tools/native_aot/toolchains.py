@@ -35,6 +35,10 @@ Class attributes the driver scripts read:
     several kinds' artifacts.
 
 Export runs in stage 2, after torch is built, so a builder module may import torch.
+
+CUDA images are compressed at export through cuda.bindings.nvfatbin. CuTe exposes
+its raw cubin through --keep-cubin; its host ABI and other embedded images are
+retained. CUDA decompresses images on first load. Triton retains its CUDA-image artifact path.
 """
 
 from __future__ import annotations
@@ -43,6 +47,10 @@ import os
 import platform
 import re
 import shlex
+import tempfile
+from typing import Any
+
+from tools.native_aot.cuda_image import compress_cubin, compress_cute_embedded_cubin
 
 
 class Toolchain:
@@ -89,7 +97,15 @@ class Toolchain:
     def missing_runtimes(cls) -> list[str]:
         import importlib.util
 
-        return [m for m in cls.REQUIRED_RUNTIMES if importlib.util.find_spec(m) is None]
+        missing = []
+        for module in cls.REQUIRED_RUNTIMES:
+            try:
+                found = importlib.util.find_spec(module)
+            except (ModuleNotFoundError, ValueError):
+                found = None
+            if found is None:
+                missing.append(module)
+        return missing
 
     @classmethod
     def serves_backend(cls, backend: str) -> bool:
@@ -147,8 +163,8 @@ class CuteDslToolchain(Toolchain):
 
     # tvm_ffi: the JIT wrappers pass --enable-tvm-ffi, and cutlass imports it during
     # compile even though the exported ABI does not use it.
-    REQUIRED_RUNTIMES = ("cutlass", "tvm_ffi")
-    RUNTIME_DISTS = ("nvidia-cutlass-dsl", "apache-tvm-ffi")
+    REQUIRED_RUNTIMES = ("cutlass", "tvm_ffi", "cuda.bindings.nvfatbin")
+    RUNTIME_DISTS = ("nvidia-cutlass-dsl", "apache-tvm-ffi", "cuda-bindings")
     REQUIRED_BUILD_KEYS = ("fn", "fake_args", "tensor_args")
 
     # Rendered into the generated file's anonymous namespace, so the module handle,
@@ -234,17 +250,18 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                 )
             host_opt = f"--host-target '{self._HOST_TARGETS[machine]}'"
             opts = f"{opts} {host_opt}" if opts else host_opt
-        if arch:
-            # --gpu-arch outranks the CUTE_DSL_ARCH env var, so one process can
-            # export for several arches.
-            opts = f"{opts} --gpu-arch {arch}" if opts else f"--gpu-arch {arch}"
-            self._warm_up_exporter()
-        compiled = cute.compile(
-            b["fn"], *b["fake_args"], **({"options": opts} if opts else {})
-        )
-        compiled.export_to_c(
-            file_path=out_dir, file_name=b["prefix"], function_prefix=b["prefix"]
-        )
+        with tempfile.TemporaryDirectory() as dump_dir:
+            opts = f"{opts} --keep-cubin --dump-dir {shlex.quote(dump_dir)}"
+            if arch:
+                # --gpu-arch outranks the CUTE_DSL_ARCH env var, so one process can
+                # export for several arches.
+                opts = f"{opts} --gpu-arch {arch}"
+                self._warm_up_exporter()
+            compiled = cute.compile(b["fn"], *b["fake_args"], options=opts)
+            compress_cute_embedded_cubin(compiled, arch)
+            compiled.export_to_c(
+                file_path=out_dir, file_name=b["prefix"], function_prefix=b["prefix"]
+            )
         sidecar = {"tensor_args": b["tensor_args"]}
         if b.get("scalar_args"):
             sidecar["scalar_args"] = b["scalar_args"]
@@ -484,7 +501,7 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
 
 
 class TritonToolchain(Toolchain):
-    """Triton compiled to a raw cubin, launched by a driver-API launcher we generate
+    """Triton compiled to a compressed CUDA image, launched by a driver-API launcher
     rather than triton.tools.compile's C template, which would make torch_cuda
     link-depend on libcuda. Builder keys: REQUIRED_BUILD_KEYS, plus ``launch`` grid
     exprs over the named scalar args."""
@@ -495,8 +512,8 @@ class TritonToolchain(Toolchain):
     # Embedded in the generated .cpp, so nothing links; declared, since None is refused.
     link_exts = ()
     # Triton compiles the cubin, so its version decides what an artifact is.
-    REQUIRED_RUNTIMES = ("triton",)
-    RUNTIME_DISTS = ("triton",)
+    REQUIRED_RUNTIMES = ("triton", "cuda.bindings.nvfatbin")
+    RUNTIME_DISTS = ("triton", "cuda-bindings")
     # ATen's NVRTC table: dlopen'd, so torch never link-depends on libcuda. The same
     # wrapper every other cubin launcher in the tree uses (jiterator, nativert's Triton
     # kernel manager, inductor's static launcher).
@@ -507,7 +524,7 @@ class TritonToolchain(Toolchain):
         "#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>",
     )
 
-    REQUIRED_BUILD_KEYS = ("kernel_path", "kernel_name", "signature", "launch", "args")
+    REQUIRED_BUILD_KEYS = ("fn", "signature", "launch", "args")
 
     @staticmethod
     def _sm_number(arch: str) -> int:
@@ -562,7 +579,7 @@ class TritonToolchain(Toolchain):
 
     LAUNCHER_TMPL = """\
 namespace {{
-// {prefix}: raw cubin ({cubin_len} bytes), embedded, loaded per device on first use.
+// {prefix}: CUDA image ({cubin_len} bytes), loaded per device on first use.
 const unsigned char {prefix}_cubin[] = {{{cubin_bytes}}};
 CUfunction {prefix}_fn[C10_COMPILE_TIME_MAX_GPUS] = {{}};
 c10::once_flag {prefix}_once[C10_COMPILE_TIME_MAX_GPUS];
@@ -620,17 +637,14 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         import triton
         from triton.backends.compiler import GPUTarget
 
-        # An arbitrary path from the builder dict, not an importable module.
-        from torchgen.native_aot_decl import load_by_path
-
-        kernel_mod = load_by_path("kernel", b["kernel_path"])
-        kernel = getattr(kernel_mod, b["kernel_name"])
+        fn = b["fn"]
+        kernel: Any = getattr(fn, "jit_kernel", fn)
 
         sig = [s.strip() for s in b["signature"].split(",")]
         if len(sig) != len(kernel.arg_names):
             raise RuntimeError(
                 f"{b['prefix']}: signature has {len(sig)} entries but "
-                f"{b['kernel_name']} takes {len(kernel.arg_names)}: "
+                f"kernel takes {len(kernel.arg_names)}: "
                 f"{list(kernel.arg_names)}"
             )
 
@@ -685,8 +699,10 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                     f"{field.removesuffix('_size')}, which the generated launcher "
                     f"has no way to allocate"
                 )
+        image_arch = f"sm_{target.arch}{'a' if target.arch >= 90 else ''}"
+        image = compress_cubin(compiled.asm["cubin"], image_arch)
         with open(os.path.join(out_dir, b["prefix"] + ".cubin"), "wb") as f:
-            f.write(compiled.asm["cubin"])
+            f.write(image)
         return {
             "args": b["args"],
             "launch": b["launch"],

@@ -44,6 +44,9 @@ torch::stable::Device cuda_device(torch::headeronly::DeviceType::CUDA, 0);
 ```{doxygenfunction} torch::stable::empty
 ```
 
+```{doxygenfunction} torch::stable::empty_strided
+```
+
 ```{doxygenfunction} torch::stable::empty_like
 ```
 
@@ -57,6 +60,9 @@ torch::stable::Device cuda_device(torch::headeronly::DeviceType::CUDA, 0);
 ```
 
 ```{doxygenfunction} torch::stable::from_blob(void *data, torch::headeronly::IntHeaderOnlyArrayRef sizes, torch::headeronly::IntHeaderOnlyArrayRef strides, torch::stable::Device device, torch::headeronly::ScalarType dtype, int64_t storage_offset, torch::headeronly::Layout layout)
+```
+
+```{doxygenfunction} torch::stable::from_file
 ```
 
 **Example:**
@@ -91,6 +97,9 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::permute
 ```
 
+```{doxygenfunction} torch::stable::flip
+```
+
 ```{doxygenfunction} torch::stable::flatten
 ```
 
@@ -112,7 +121,28 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::narrow
 ```
 
+```{doxygenfunction} torch::stable::slice
+```
+
 ```{doxygenfunction} torch::stable::pad
+```
+
+```{doxygenfunction} torch::stable::roll
+```
+
+```{doxygenfunction} torch::stable::repeat_interleave(const torch::stable::Tensor&, int64_t, std::optional<int64_t>, std::optional<int64_t>)
+```
+
+```{doxygenfunction} torch::stable::repeat_interleave(const torch::stable::Tensor&, std::optional<int64_t>)
+```
+
+```{doxygenfunction} torch::stable::repeat_interleave(const torch::stable::Tensor&, const torch::stable::Tensor&, std::optional<int64_t>, std::optional<int64_t>)
+```
+
+```{doxygenfunction} torch::stable::expand
+```
+
+```{doxygenfunction} torch::stable::nonzero
 ```
 
 ## Device and Type Conversion
@@ -135,6 +165,12 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::copy_
+```
+
+```{doxygenfunction} torch::stable::index_fill_(const torch::stable::Tensor &self, int64_t dim, const torch::stable::Tensor &index, const torch::stable::Tensor &value)
+```
+
+```{doxygenfunction} torch::stable::index_fill_(const torch::stable::Tensor &self, int64_t dim, const torch::stable::Tensor &index, double value)
 ```
 
 ## Mathematical Operations
@@ -166,6 +202,9 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::sum_out
 ```
 
+```{doxygenfunction} torch::stable::add
+```
+
 ```{doxygenfunction} torch::stable::subtract
 ```
 
@@ -191,4 +230,22 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::masked_select
+```
+
+```{doxygenfunction} torch::stable::all(const torch::stable::Tensor&)
+```
+
+```{doxygenfunction} torch::stable::all(const torch::stable::Tensor&, int64_t, bool)
+```
+
+```{doxygenfunction} torch::stable::all(const torch::stable::Tensor&, std::optional<torch::headeronly::IntHeaderOnlyArrayRef>, bool)
+```
+
+```{doxygenfunction} torch::stable::equal
+```
+
+```{doxygenfunction} torch::stable::median(const torch::stable::Tensor&, int64_t, bool)
+```
+
+```{doxygenfunction} torch::stable::median(const torch::stable::Tensor&)
 ```

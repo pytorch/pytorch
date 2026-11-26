@@ -256,6 +256,17 @@ struct C10_API DeviceGuardImplInterface {
     return false;
   }
 
+  virtual uint64_t getStreamCaptureId(const Stream& /*stream*/) const {
+    return 0;
+  }
+
+  // Establish a device dependency on work already submitted to source.
+  // During capture the dependency must be represented in the same graph.
+  virtual void waitStream(const Stream& /*waiter*/, const Stream& /*source*/)
+      const {
+    TORCH_CHECK(false, "Backend doesn't support stream dependencies.");
+  }
+
   /**
    * Wait (by blocking the calling thread) until all the work previously
    * recorded on the event has completed running on the device.
@@ -471,6 +482,10 @@ inline bool hasDeviceGuardImpl(DeviceType type) {
   return device_guard_impl_registry[static_cast<size_t>(type)].load();
 }
 
+void C10_API ensureDeviceGuardSet(DeviceType type);
+
+[[deprecated(
+    "ensureCUDADeviceGuardSet is deprecated, use ensureDeviceGuardSet(DeviceType::CUDA) instead")]]
 void C10_API ensureCUDADeviceGuardSet();
 
 } // namespace impl

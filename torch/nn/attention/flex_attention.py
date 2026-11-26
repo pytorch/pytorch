@@ -13,8 +13,19 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, cast, Literal, NamedTuple, overload, TypeAlias, TypeVar
-from typing_extensions import deprecated, Never, NotRequired, Self, TypedDict
+from typing import (
+    Any,
+    cast,
+    Literal,
+    NamedTuple,
+    Never,
+    NotRequired,
+    overload,
+    Self,
+    TypeAlias,
+    TypeVar,
+)
+from typing_extensions import deprecated, TypedDict
 
 import torch
 from torch import Tensor
@@ -292,6 +303,14 @@ class FlexKernelOptions(TypedDict, total=False):
 
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
+
+    NUM_XCCS: NotRequired[int]
+    """Number of XCCs to remap the Triton forward and backward kernels' programs
+    across, so the blocks of one (batch, head) share an XCC's L2. Defaults to
+    the device's XCC count on gfx942 and gfx950 with ROCm 7.0+ and off
+    elsewhere; 0 or 1 disables it. Not used by the decode, FLASH or FLYDSL
+    kernels, and skipped when the flattened grid would not fit; may add a size
+    guard with dynamic shapes."""
 
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
@@ -2170,6 +2189,12 @@ def _apply_kernel_options(
                 f"Must be one of {valid_backends}"
             )
 
+    for name, num_xccs in kernel_options.items():
+        if name in ("NUM_XCCS", "fwd_NUM_XCCS", "bwd_NUM_XCCS") and (
+            type(num_xccs) is not int or num_xccs < 0
+        ):
+            raise ValueError(f"{name} must be a non-negative int, got {num_xccs!r}")
+
     kernel_options.setdefault("BACKEND", "AUTO")
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
@@ -2208,9 +2233,6 @@ def _apply_kernel_options(
         if any_inputs_on_cpu_device or any_inputs_on_mps_device:
             # CPU/MPS support inference only, no LSE/backward yet.
             # TODO: support CPU for training and return lse
-            kernel_options["OUTPUT_LOGSUMEXP"] = False
-        if any_inputs_on_mps_device:
-            # MPS supports inference only; backward / LSE not yet implemented
             kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     # If forward kernel needs to return max is decided by this rule internally.
@@ -2254,10 +2276,19 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
         raise NotImplementedError(
             "FlexAttention does not support backward on MPS. Please set the input requires_grad to False or use another device."
         )
-    supported_devices = {"cuda", "cpu", "xpu", "hpu", "mps"}
+    # Read the PrivateUse1 name per call: backends rename it after torch import.
+    supported_devices = {
+        "cuda",
+        "cpu",
+        "xpu",
+        "hpu",
+        "mps",
+        torch._C._get_privateuse1_backend_name(),
+    }
     if query.device.type not in supported_devices:
         raise ValueError(
-            "FlexAttention is only supported on CUDA, CPU, HPU, or MPS devices. "
+            "FlexAttention is only supported on CUDA, CPU, XPU, HPU, MPS, or "
+            "PrivateUse1 devices. "
             f"Found input tensors on {query.device.type} device."
         )
 
@@ -2307,7 +2338,8 @@ def _enforce_mem_layouts(
     gemm_precision = query.dtype
 
     should_enforce_mem_layout = (
-        gemm_precision in fp8_dtypes
+        query.device.type == "cuda"
+        and gemm_precision in fp8_dtypes
         and torch.version.cuda is not None
         and torch.cuda.get_device_capability("cuda") >= (8, 9)
         and torch.cuda.get_device_capability("cuda") < (10, 0)
