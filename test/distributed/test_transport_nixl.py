@@ -1000,6 +1000,71 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(self._receive(second), [(first.peer_id, b"x")])
         self.assertTrue(work.wait(timedelta(seconds=30)))
 
+    def test_cancel_notification_wait_while_transport_is_busy(self):
+        first, second = self.make_transport_pair()
+        first.send_notification(second.peer_id, b"kept").wait()
+        started, release, drained = (threading.Event() for _ in range(3))
+        poll = second._agent.get_new_notifs
+
+        def bind():
+            started.set()
+            release.wait(5)
+            return b"metadata"
+
+        def drain(**kwargs):
+            batch = poll(**kwargs)
+            drained.set()
+            return batch
+
+        async def run():
+            waiter = asyncio.create_task(second.wait_notifications_async(timeout=30))
+            await asyncio.sleep(0)  # Start the wait while bind owns the lock.
+            self.assertEqual(await second.wait_notifications_async(timeout=0), [])
+            release.set()
+            # Cancel after the native poll and before the asyncio waiter resumes.
+            self.assertTrue(drained.wait(5))
+            waiter.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await waiter
+
+        with (
+            ThreadPoolExecutor(max_workers=1) as executor,
+            patch.object(second._agent, "get_agent_metadata", side_effect=bind),
+            patch.object(second._agent, "get_new_notifs", side_effect=drain),
+        ):
+            owner = executor.submit(second.bind)
+            try:
+                self.assertTrue(started.wait(5))
+                asyncio.run(run())
+            finally:
+                release.set()
+            self.assertEqual(owner.result(), b"metadata")
+        self.assertEqual(
+            second.wait_notifications(timeout=0), [(first.peer_id, b"kept")]
+        )
+        self.assertEqual(second.wait_notifications(timeout=0), [])
+
+    def test_close_fails_pending_async_notification_wait(self):
+        _, receiver = self.make_transport_pair()
+
+        async def run():
+            waiter = asyncio.create_task(
+                receiver.wait_notifications_async(timeout=0.05)
+            )
+            await asyncio.sleep(0)
+            # A timed-out close still rejects pending waits.
+            with self.assertRaises(TimeoutError):
+                await receiver.close_async(timeout=0)
+            with self.assertRaisesRegex(RuntimeError, "closed"):
+                await waiter
+
+        with ThreadPoolExecutor(max_workers=1) as owner:
+            owner.submit(receiver._operation_lock.acquire).result()
+            try:
+                asyncio.run(run())
+            finally:
+                owner.submit(receiver._operation_lock.release).result()
+
     def test_one_blocked_waiter_polls_and_close_fails_all(self):
         first, second = self.make_transport_pair()
         drain = second._drain_notifications

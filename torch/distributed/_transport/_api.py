@@ -402,12 +402,15 @@ class Transport(ABC):
         deadline = None if timeout is None else loop.time() + timeout
         delay = 1e-6
         while True:
-            received = self.wait_notifications(timeout=0)
+            received = self._poll_notifications(wait=timeout != 0)
             if received or (deadline is not None and loop.time() >= deadline):
                 return received
             # Backends cannot signal arrivals to the loop, so poll with backoff.
             await asyncio.sleep(delay)
             delay = min(delay * 2, 1e-3)
+
+    def _poll_notifications(self, *, wait: bool) -> list[Notification]:
+        return self.wait_notifications(timeout=0)
 
     def _check_notification(self, payload: bytes) -> None:
         limit = self.max_notification_size()

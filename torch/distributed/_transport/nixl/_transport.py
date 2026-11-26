@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections import deque
 from concurrent.futures import Future as _ThreadFuture
 from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
@@ -130,7 +131,8 @@ class NIXLTransport(Transport):
         self._progress_cv = Condition(self._operation_lock)
         self._progress_thread: Thread | None = None
         self._notifying: set[_NIXLWork] = set()
-        self._received: list[Notification] = []
+        self._received: deque[list[Notification] | Exception] = deque()
+        self._async_poll_requested = False
         # Whether a wait_notifications caller is polling NIXL for the others.
         self._draining = False
         # Lifecycle: open -> closing -> closed. Closing rejects new operations and
@@ -165,7 +167,11 @@ class NIXLTransport(Transport):
         try:
             yield
         finally:
-            self._operation_lock.release()
+            try:
+                if self._async_poll_requested:
+                    self._stage_notifications()
+            finally:
+                self._operation_lock.release()
 
     @asynccontextmanager
     async def _locked_async(self, deadline: float):
@@ -176,7 +182,11 @@ class NIXLTransport(Transport):
         try:
             yield
         finally:
-            self._operation_lock.release()
+            try:
+                if self._async_poll_requested:
+                    self._stage_notifications()
+            finally:
+                self._operation_lock.release()
 
     def _call(self, operation: Any, timeout: float | None) -> Any:
         # NIXL metadata/registration APIs are synchronous. The deadline bounds
@@ -230,7 +240,6 @@ class NIXLTransport(Transport):
         This first takes the transport lock, which serializes NIXL calls, and
         waits up to the transport's default timeout for it whatever ``timeout``
         is, even ``timeout=0``, raising ``TimeoutError`` if it stays busy.
-        Returning early instead would let transfers starve asyncio waiters.
         """
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
@@ -240,8 +249,8 @@ class NIXLTransport(Transport):
                 self._ensure_open()
                 self._drain_notifications()
                 remaining = deadline - time.monotonic()
-                if self._received or remaining <= 0:
-                    received, self._received = self._received, []
+                received = self._take_notifications()
+                if received or remaining <= 0:
                     return received
                 if self._draining:
                     # One waiter polls at a time, so waiters do not compete with
@@ -264,12 +273,51 @@ class NIXLTransport(Transport):
                     self._draining = False
                     self._progress_cv.notify_all()
 
+    def _take_notifications(self) -> list[Notification]:
+        try:
+            batch = self._received.popleft()
+        except IndexError:
+            return []
+        if isinstance(batch, Exception):
+            raise batch
+        return batch
+
+    def _poll_notifications(self, *, wait: bool) -> list[Notification]:
+        self._ensure_open()
+        if self._received:
+            return self._take_notifications()
+        if self._operation_lock.acquire(blocking=False):
+            try:
+                self._async_poll_requested = False
+                self._ensure_open()
+                self._drain_notifications()
+            finally:
+                self._operation_lock.release()
+        elif wait:
+            # Ask the current native operation to stage one batch on release.
+            # If it already released the lock, the next asyncio poll can run.
+            self._async_poll_requested = True
+        return self._take_notifications()
+
+    def _stage_notifications(self) -> None:
+        self._async_poll_requested = False
+        if not self._closed and not self._closing:
+            try:
+                self._drain_notifications()
+            except Exception as error:
+                self._received.append(error)
+
     def _drain_notifications(self) -> None:
-        # Caller holds _operation_lock.
+        # Caller holds _operation_lock. Consumers can claim a staged batch
+        # without that lock; deque's append and popleft are thread-safe.
         notifications = self._agent.get_new_notifs(backends=[self._plugin])
-        for name, messages in notifications.items():
-            peer = _agent_name(name)
-            self._received += [Notification(peer, message) for message in messages]
+        if notifications:
+            batch = []
+            for name, messages in notifications.items():
+                peer = _agent_name(name)
+                batch.extend(Notification(peer, message) for message in messages)
+            if batch:
+                self._received.append(batch)
 
     def _start_progress(self) -> None:
         # Caller holds _operation_lock.
