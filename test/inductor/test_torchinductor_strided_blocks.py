@@ -3091,14 +3091,14 @@ class TritonHostSideTMAConfigTest(InductorTestCase):
             "triton.use_tensor_descriptor": False,
         }
     )
-    def test_enable_host_side_tma_without_prereqs_warns(self, device):
+    def test_enable_host_side_tma_without_prereqs_warns(self):
         # enable_host_side_tma only selects the descriptor flavor; without
         # use_tensor_descriptor + assume_aligned_inputs it has no effect and
         # should warn rather than silently no-op.
         def fn(x):
             return x + 1
 
-        x = torch.randn(1024, device=device)
+        x = torch.randn(1024, device="cuda")
         with self.assertWarnsRegex(UserWarning, "host-side TMA will be skipped"):
             result, code_list = run_and_get_code(torch.compile(fn), x)
         self.assertTrue(torch.allclose(result, fn(x)))
@@ -3165,12 +3165,6 @@ instantiate_device_type_tests(
     globals(),
     except_for=("cpu",),
     allow_xpu=True,
-)
-
-instantiate_device_type_tests(
-    TritonHostSideTMAConfigTest,
-    globals(),
-    only_for=("cuda",),
 )
 
 
