@@ -1201,6 +1201,7 @@ class TestIndexingDevice(TestCase):
 
     @onlyAccelerator
     @parametrize("accumulate", [False, subtest(True, decorators=[expectedFailureMPS])])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6084")  # fmt: skip
     def test_index_put_sorted_contiguous_size_one_stride(self, device, accumulate):
         # A size-1 dim may carry any stride and the tensor is still contiguous.
         # The sort-based kernel (used for accumulate=True and in deterministic

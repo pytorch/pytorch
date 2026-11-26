@@ -50,7 +50,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import dtypesIfMPS, dtypesIfXPU, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
-    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
+    onlyNativeDeviceTypes, deviceCountAtLeast, skipXPUIf, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, expectedFailureXPU, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric, toleranceOverride, tol
 from torch.testing import make_tensor
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -7864,7 +7864,10 @@ class TestNNDeviceType(NNTestCase):
     # (100, 256), and tall 32x32 weight and bias grad tiles with a column tail (300, 33). Every dtype accumulates in
     # float32, so float16 against a float32 CPU reference covers the kernels.
     @onlyAccelerator
-    @parametrize_test("shape", [(2, 20001), (2, 4097), (100, 256), (300, 33)])
+    @parametrize_test("shape", [
+        subtest((2, 20001), decorators=[skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6310")]),
+        (2, 4097), (100, 256), (300, 33),
+    ])
     def test_layer_norm_backward_shapes(self, device, shape):
         if torch.device(device).type == "xpu" and shape[-1] >= 8192:
             self.skipTest("https://github.com/intel/torch-xpu-ops/issues/6310")
@@ -9607,7 +9610,7 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad_cpu)
         self.assertEqual(x.grad.cpu(), x_cpu.grad)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.double, torch.float, torch.half, torch.bfloat16)
     # Below double, the device computes source coordinates in float and the
     # reference in double. The fp32 error is the coordinate rounding (up to ~3e-5 at large_plane)
@@ -9907,6 +9910,10 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureXPU  # XPU interpolate backward is nondeterministic (atomic add); intel/torch-xpu-ops#6206
     @onlyNativeDeviceTypes
     @decorateIf(
+        skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6206"),
+        lambda p: torch.device(p['device']).type == 'xpu' and p['mode'] != 'lanczos',
+    )
+    @decorateIf(
         unittest.skip('Lanczos mode is only supported on CPU'),
         lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type == 'cuda',
     )
@@ -9956,7 +9963,8 @@ class TestNNDeviceType(NNTestCase):
             else:
                 self.assertTrue(out.is_contiguous())
 
-    @onlyCUDA
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6318")
     @skipIfRocm
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
@@ -16511,7 +16519,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(res_cpu, res_device, exact_dtype=False)
         self.assertEqual(grad_cpu, grad_device)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float, torch.double)
     def test_CTCLoss_max_threads_launch_bounds(self, device, dtype):
         # Exercises maximum thread block sizes (768 for double, 1024 for float)
@@ -16559,7 +16567,7 @@ class TestNNDeviceType(NNTestCase):
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float, torch.double)
     @parametrize_test("case", [
         subtest(((40, 5, 4), [5, 8, 16, 12, 12], [40] * 5, False, False, False), name="small_path"),
@@ -17577,6 +17585,40 @@ class TestNNDeviceType(NNTestCase):
         for g, ge in zip(grads, grads_expected):
             self.assertEqual(g, ge)
 
+    @onlyAccelerator
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize_test("op", ["layer_norm", "rms_norm"])
+    def test_layer_norm_gamma_beta_backward_huge_M_cancellation(self, device, dtype, op):
+        # Two 32-row tiles contribute ~3.6e5 each to weight.grad[0] with opposite signs,
+        # leaving a small exact total. Partial sums rounded to dtype overflow fp16 (inf - inf)
+        # and swallow the remainder in bf16; fp32 accumulation must recover it.
+        M, N = 131072, 128
+        x = torch.zeros(M, N, dtype=dtype)
+        x[:, 0] = 1
+        grad_out = torch.zeros(M, N, dtype=dtype)
+        grad_out[:32, 0] = 1000
+        grad_out[32:64, 0] = -1000
+        grad_out[0, 0] = 1008
+        weight = torch.ones(N, dtype=dtype)
+        bias = torch.zeros(N, dtype=dtype) if op == "layer_norm" else None
+
+        grads = []
+        for dev, dt in ((device, dtype), ("cpu", torch.float64)):
+            w = weight.to(dev, dt).requires_grad_(True)
+            b = bias.to(dev, dt).requires_grad_(True) if bias is not None else None
+            # Keep rms_norm on the ATen kernels when a Python-native override is installed.
+            with torch.backends.python_native.operations_disabled("_fused_rms_norm", "_fused_rms_norm_backward"):
+                if op == "layer_norm":
+                    out = torch.nn.functional.layer_norm(x.to(dev, dt), [N], w, b, 1e-5)
+                else:
+                    out = torch.nn.functional.rms_norm(x.to(dev, dt), [N], w, 1e-5)
+                out.backward(grad_out.to(dev, dt))
+            grads.append((w.grad, b.grad if b is not None else None))
+        (dgamma, dbeta), (dgamma_ref, dbeta_ref) = grads
+        self.assertEqual(dgamma.cpu().double(), dgamma_ref, atol=1, rtol=1e-2)
+        if dbeta_ref is not None:
+            self.assertEqual(dbeta.cpu().double(), dbeta_ref, atol=1, rtol=1e-2)
+
 
 class TestNNCPU(NNTestCase):
     hw_classification = HardwareClassification.CPU
@@ -18567,40 +18609,6 @@ if __name__ == '__main__':
                 continue
             self.assertEqual(grad.shape, torch.Size(normalized_shape), f"{name}.grad")
             self.assertEqual(grad.cpu(), ref, f"{name}.grad", atol=1e-3, rtol=1e-3)
-
-    @onlyCUDA
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize_test("op", ["layer_norm", "rms_norm"])
-    def test_layer_norm_gamma_beta_backward_huge_M_cancellation(self, device, dtype, op):
-        # Two 32-row tiles contribute ~3.6e5 each to weight.grad[0] with opposite signs,
-        # leaving a small exact total. Partial sums rounded to dtype overflow fp16 (inf - inf)
-        # and swallow the remainder in bf16; fp32 accumulation must recover it.
-        M, N = 131072, 128
-        x = torch.zeros(M, N, dtype=dtype)
-        x[:, 0] = 1
-        grad_out = torch.zeros(M, N, dtype=dtype)
-        grad_out[:32, 0] = 1000
-        grad_out[32:64, 0] = -1000
-        grad_out[0, 0] = 1008
-        weight = torch.ones(N, dtype=dtype)
-        bias = torch.zeros(N, dtype=dtype) if op == "layer_norm" else None
-
-        grads = []
-        for dev, dt in ((device, dtype), ("cpu", torch.float64)):
-            w = weight.to(dev, dt).requires_grad_(True)
-            b = bias.to(dev, dt).requires_grad_(True) if bias is not None else None
-            # Keep rms_norm on the ATen kernels when a Python-native override is installed.
-            with torch.backends.python_native.operations_disabled("_fused_rms_norm", "_fused_rms_norm_backward"):
-                if op == "layer_norm":
-                    out = torch.nn.functional.layer_norm(x.to(dev, dt), [N], w, b, 1e-5)
-                else:
-                    out = torch.nn.functional.rms_norm(x.to(dev, dt), [N], w, 1e-5)
-                out.backward(grad_out.to(dev, dt))
-            grads.append((w.grad, b.grad if b is not None else None))
-        (dgamma, dbeta), (dgamma_ref, dbeta_ref) = grads
-        self.assertEqual(dgamma.cpu().double(), dgamma_ref, atol=1, rtol=1e-2)
-        if dbeta_ref is not None:
-            self.assertEqual(dbeta.cpu().double(), dbeta_ref, atol=1, rtol=1e-2)
 
 
 class TestFunctionalPickle(TestCase):

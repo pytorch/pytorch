@@ -602,11 +602,23 @@ class KernelTests(torch._inductor.test_case.TestCase):
     def test_namedtuple_constexpr_repr_containers(self, container, launcher):
         import collections
 
-        from triton_constexpr_configs import (
-            UserDefinedAttrsLikeConfig,
-            UserDefinedPydanticLikeConfig,
-            UserDefinedTritonKernelNestedConfig,
-        )
+        # The sibling helper resolves as a top-level module only when
+        # test/inductor itself is on sys.path (running the file directly);
+        # under pytest the file is imported as inductor.test_triton_kernels,
+        # so try the relative import first, like the other sibling imports
+        # in test/inductor.
+        try:
+            from .triton_constexpr_configs import (
+                UserDefinedAttrsLikeConfig,
+                UserDefinedPydanticLikeConfig,
+                UserDefinedTritonKernelNestedConfig,
+            )
+        except ImportError:
+            from triton_constexpr_configs import (  # @manual
+                UserDefinedAttrsLikeConfig,
+                UserDefinedPydanticLikeConfig,
+                UserDefinedTritonKernelNestedConfig,
+            )
 
         from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
         from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
@@ -6085,10 +6097,7 @@ def forward(self, arg0_1, arg1_1):
             self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
-    @skipIfXpu(
-        msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs, "
-        "https://github.com/pytorch/pytorch/pull/167786"
-    )
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6050")
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     @parametrize("cpp_wrapper", [False, True])

@@ -1155,12 +1155,16 @@ class AOTInductorTestsTemplate:
         new_output = runner_call(test_inputs)
         self.assertEqual(expected, new_output)
 
-    @skip_if_device(lambda device: device != "cuda", "requires CUDA")
+    @skip_if_device(
+        lambda device: device not in ("cuda", "xpu"), "requires CUDA or XPU"
+    )
+    @skip_if_device(lambda device: device == "xpu", "https://github.com/intel/torch-xpu-ops/issues/6317")  # fmt: skip
     @skipIfCachingAllocatorDisabled
     def test_failed_inactive_constant_folding_keeps_active_constants(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
-        if torch.cuda.get_allocator_backend() != "native":
+        if self.device not in ("cuda", "xpu"):
+            raise unittest.SkipTest("requires CUDA or XPU")
+        device_module = torch.get_device_module(self.device)
+        if self.device == "cuda" and device_module.get_allocator_backend() != "native":
             raise unittest.SkipTest("needs a memory fraction cap")
 
         class Model(torch.nn.Module):
@@ -1181,7 +1185,12 @@ class AOTInductorTestsTemplate:
             }
         ):
             so_path = AOTIRunnerUtil.legacy_compile(model, (x,))
-        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
+        runner_cls = (
+            torch._C._aoti.AOTIModelContainerRunnerCuda
+            if self.device == "cuda"
+            else torch._C._aoti.AOTIModelContainerRunnerXpu
+        )
+        runner = runner_cls(so_path, 1, self.device)
         expected = model(x)
         self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
         params = dict(model.named_parameters())
@@ -1195,21 +1204,21 @@ class AOTInductorTestsTemplate:
         # Leave too little memory for the 32 MB folded constant. The fold
         # allocates from a fresh pool, so it can't reuse cached blocks, which
         # the cap doesn't cover.
-        original_fraction = torch.cuda.get_per_process_memory_fraction()
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-        total = torch.cuda.get_device_properties(self.device).total_memory
-        fraction = (torch.cuda.memory_reserved() + (8 << 20)) / total
-        ooms = torch.cuda.memory_stats()["num_ooms"]
-        pool = torch.cuda.MemPool()
-        torch.cuda.set_per_process_memory_fraction(fraction)
+        original_fraction = device_module.get_per_process_memory_fraction()
+        device_module.synchronize()
+        device_module.empty_cache()
+        total = device_module.get_device_properties(self.device).total_memory
+        fraction = (device_module.memory_reserved() + (8 << 20)) / total
+        ooms = device_module.memory_stats()["num_ooms"]
+        pool = device_module.MemPool()
+        device_module.set_per_process_memory_fraction(fraction)
         try:
-            with self.assertRaises(RuntimeError), torch.cuda.use_mem_pool(pool):
+            with self.assertRaises(RuntimeError), device_module.use_mem_pool(pool):
                 runner.run_const_fold(True)
         finally:
-            torch.cuda.empty_cache()
-            torch.cuda.set_per_process_memory_fraction(original_fraction)
-        self.assertGreater(torch.cuda.memory_stats()["num_ooms"], ooms)
+            device_module.empty_cache()
+            device_module.set_per_process_memory_fraction(original_fraction)
+        self.assertGreater(device_module.memory_stats()["num_ooms"], ooms)
         self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
 
     @skip_if_device(lambda device: device == "mps", "MPS baseline mismatch")
@@ -2794,10 +2803,11 @@ class AOTInductorTestsTemplate:
         # layer's copy stays alive until the model returns.
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
-        if op == "sdpa" and (
-            self.device != "cuda" or not PLATFORM_SUPPORTS_FLASH_ATTENTION
+        if op == "sdpa" and not (
+            (self.device == "cuda" and PLATFORM_SUPPORTS_FLASH_ATTENTION)
+            or self.device == "xpu"
         ):
-            raise unittest.SkipTest("requires CUDA flash attention")
+            raise unittest.SkipTest("requires CUDA or XPU flash attention")
 
         b, s, d, n_heads = 8, 1024, 64, 8
 
