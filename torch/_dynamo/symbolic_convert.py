@@ -2640,10 +2640,10 @@ class InstructionTranslatorBase(
     def DELETE_GLOBAL(self, inst: Instruction) -> None:
         name = inst.argval
         target = self._global_variable(name)
-        self._delete_global(name, target)
+        self._delete_global(name, target, GlobalSource(name))
         self.output.side_effects.store_global(target, name, variables.DeletedVariable())
 
-    def _delete_global(self, name: str, target: VariableTracker) -> None:
+    def _delete_global(self, name: str, target: VariableTracker, source: Source) -> None:
         """Guard the name, raise what eager raises, and sync a dropped tensor."""
         side_effects = self.output.side_effects
         present = name in self.f_globals
@@ -2678,16 +2678,11 @@ class InstructionTranslatorBase(
             raise_name_error(self, name)
         self._maybe_sync_dealloc_attr(target, name)
         if present and not pending_on_target:
-            value = self.f_globals[name]
-            if isinstance(value, torch.Tensor):
-                tensor_var = self.output.input_source_to_var.get(GlobalSource(name))
-                if isinstance(tensor_var, TensorVariable):
-                    install_guard(
-                        DictGetItemSource(self._globals_dict_source, name).make_guard(
-                            GuardBuilder.ID_MATCH
-                        )
-                    )
-                    self._maybe_emit_sync_dealloc(tensor_var)
+            # The graph input already guards the tensor's runtime value, so an
+            # ID_MATCH guard would only force a recompile on each rebind.
+            tensor_var = self.output.input_source_to_var.get(source)
+            if isinstance(tensor_var, TensorVariable):
+                self._maybe_emit_sync_dealloc(tensor_var)
         # The delete is committed. Remember it so later module-object or
         # module-__dict__ accesses to the name graph-break instead of
         # racing the replayed delete. The entry keeps the dict alive so its
@@ -6734,7 +6729,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             super().DELETE_GLOBAL(inst)
             return
         name = inst.argval
-        _, fglobals_vt, _ = self.get_globals_source_and_value(name)
+        _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
         if getattr(
             getattr(fglobals_vt, "value", None), "__getattr__", None
         ) is not None or self.output.side_effects.has_pending_mutation_of_attr(
@@ -6755,7 +6750,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        self._delete_global(name, fglobals_vt)
+        self._delete_global(name, fglobals_vt, global_source)
         self.output.side_effects.store_attr(
             fglobals_vt, name, variables.DeletedVariable()
         )
