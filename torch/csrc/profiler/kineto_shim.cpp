@@ -505,6 +505,12 @@ void toggleCollectionDynamic(const bool enable) {
 #endif // USE_KINETO
 }
 
+void stopCollection() {
+#ifdef USE_KINETO
+  libkineto::api().activityProfiler().stopCollection();
+#endif // USE_KINETO
+}
+
 void startTrace() {
 #ifdef USE_KINETO
   libkineto::api().activityProfiler().startTrace();
