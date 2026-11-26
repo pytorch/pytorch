@@ -11,11 +11,13 @@ every instruction the engine knows), not over the cases somebody thought of.
 import ast
 import collections
 import contextlib
+import dis
 import enum
 import functools
 import glob
 import json
 import math
+import opcode
 import operator
 import os
 import re
@@ -38,6 +40,7 @@ from torch.testing._internal.common_utils import (
     _snapshot_fp32_precision,
     DeterministicGuard,
     HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
@@ -2370,7 +2373,12 @@ _WT_NOT_COVERED = ["torchvision.ops.nms", "torch.ops.torchvision.nms"]
 def _wt_bits(x):
     if isinstance(x, torch.Tensor):
         flat = x.detach().cpu().contiguous().reshape(-1)
-        return (str(x.dtype), tuple(x.shape), x.requires_grad, flat.view(torch.uint8).tolist())
+        return (
+            str(x.dtype),
+            tuple(x.shape),
+            x.requires_grad,
+            flat.view(torch.uint8).tolist(),
+        )
     if isinstance(x, (list, tuple)) and not isinstance(x, torch.Size):
         return [type(x).__name__] + [_wt_bits(v) for v in x]
     return (type(x).__name__, repr(x))
@@ -2405,14 +2413,20 @@ class TestVmWitness(TestCase):
     def test_a_declared_write_is_mapped_to_the_operand(self, device):
         a, b = self.pair(device)
         _, d = _witness(torch.Tensor.add_, a, b)
-        self.assertEqual((d["ops"], d["wrote"]), (["aten::add_.Tensor"], [(0, 0, 0, False)]))
+        self.assertEqual(
+            (d["ops"], d["wrote"]), (["aten::add_.Tensor"], [(0, 0, 0, False)])
+        )
         self.assertFalse(d["pure"])
         # By keyword; a member of a list; an operand written through a view
         # the kernel makes (found by its storage).
         _, d = _witness(torch.add, a, b, out=torch.empty_like(a))
-        self.assertEqual((d["ops"], d["wrote"]), (["aten::add.out"], [(0, 3, "out", False)]))
+        self.assertEqual(
+            (d["ops"], d["wrote"]), (["aten::add.out"], [(0, 3, "out", False)])
+        )
         _, d = _witness(torch._foreach_neg_, [a, b])
-        self.assertEqual([w[:3] for w in d["wrote"] if not w[3]], [(0, 0, (0, 0)), (0, 0, (0, 1))])
+        self.assertEqual(
+            [w[:3] for w in d["wrote"] if not w[3]], [(0, 0, (0, 0)), (0, 0, (0, 1))]
+        )
         _, d = _witness(torch.Tensor.fill_diagonal_, a, 1.0)
         self.assertEqual(d["wrote"][0], (0, 0, 0, False))
         self.assertEqual({w[2] for w in d["wrote"]}, {0})
@@ -2427,7 +2441,9 @@ class TestVmWitness(TestCase):
         gen = torch.Generator().manual_seed(0)
         x = torch.randn(4, 3, 5, 5, generator=gen).to(device)
         mean, var = torch.zeros(3, device=device), torch.ones(3, device=device)
-        _, d = _witness(torch.batch_norm, x, None, None, mean, var, True, 0.1, 1e-5, True)
+        _, d = _witness(
+            torch.batch_norm, x, None, None, mean, var, True, 0.1, 1e-5, True
+        )
         self.assertNotEqual(_wt_bits(mean), _wt_bits(torch.zeros(3, device=device)))
         # No schema declares that write: the measured table knows it, the witness cannot.
         self.assertEqual([w for w in d["wrote"] if w[2] is not None], [])
@@ -2436,22 +2452,43 @@ class TestVmWitness(TestCase):
     def test_draws(self, device):
         a, _ = self.pair(device)
         _, d = _witness(torch.dropout, a, 0.5, True)
-        self.assertEqual((d["ops"], d["drew"], d["pure"]), (["aten::dropout"], True, False))
+        self.assertEqual(
+            (d["ops"], d["drew"], d["pure"]), (["aten::dropout"], True, False)
+        )
         self.assertGreater(d["below"], 0)
         # The tag is given by the operator's name, not by what a call does.
         _, d = _witness(torch.dropout, a, 0.5, False)
-        self.assertEqual((d["ops"], d["drew"], d["below"]), (["aten::dropout"], True, 0))
+        self.assertEqual(
+            (d["ops"], d["drew"], d["below"]), (["aten::dropout"], True, 0)
+        )
         m = _WtMake(device)
-        args = (m.f(6, 3, 4), (m.f(2, 3, 5), m.f(2, 3, 5)), m.lstm(), True, 2, 0.5, True, False, False)
+        args = (
+            m.f(6, 3, 4),
+            (m.f(2, 3, 5), m.f(2, 3, 5)),
+            m.lstm(),
+            True,
+            2,
+            0.5,
+            True,
+            False,
+            False,
+        )
         _, d = _witness(torch._VF.lstm, *args)
-        self.assertEqual((d["ops"], d["drew"], d["opaque"]), (["aten::lstm.input"], True, False), d["why"])
+        self.assertEqual(
+            (d["ops"], d["drew"], d["opaque"]),
+            (["aten::lstm.input"], True, False),
+            d["why"],
+        )
         self.assertGreater(d["below"], 0)
 
     def test_value_reads(self, device):
         a, b = self.pair(device)
         r, d = _witness(torch.Tensor.item, a[0, 0])
         self.assertEqual(r, a[0, 0].item())
-        self.assertEqual((d["ops"], d["read_value"], d["read_value_top"]), (["aten::item"], True, True))
+        self.assertEqual(
+            (d["ops"], d["read_value"], d["read_value_top"]),
+            (["aten::item"], True, True),
+        )
         # aten::_local_scalar_dense, below aten::item.
         self.assertGreaterEqual(d["below"], 1)
         for fn, args, op in (
@@ -2461,7 +2498,9 @@ class TestVmWitness(TestCase):
             (torch.Tensor.__bool__, (a[0, 0],), "aten::is_nonzero"),
         ):
             _, d = _witness(fn, *args)
-            self.assertEqual((d["ops"], d["read_value_top"], d["pure"]), ([op], True, False))
+            self.assertEqual(
+                (d["ops"], d["read_value_top"], d["pure"]), ([op], True, False)
+            )
         # A read below the top-level operator (a kernel checking LAPACK's
         # status) is no value of the call's.
         _, d = _witness(torch.linalg.inv, a[:3, :3])
@@ -2486,7 +2525,9 @@ class TestVmWitness(TestCase):
             return torch.nn.functional.linear(a, w, bias).relu().sum(0)
 
         _, d = _witness(three)
-        self.assertEqual(d["ops"], ["aten::linear", "aten::relu", "aten::sum.dim_IntList"])
+        self.assertEqual(
+            d["ops"], ["aten::linear", "aten::relu", "aten::sum.dim_IntList"]
+        )
 
     def test_python_frames(self, device):
         a, b = self.pair(device)
@@ -2510,7 +2551,11 @@ class TestVmWitness(TestCase):
         self.assertEqual((d["entered_python"], d["pure"]), (True, False))
         _, d = _witness(torch.add, a.as_subclass(Sub), b)
         self.assertEqual((d["ops"][0], d["entered_python"]), ("aten::add.Tensor", True))
-        for fn, args in ((torch.add, (a, b)), (torch.Tensor.item, (a[0, 0],)), (len, ([a],))):
+        for fn, args in (
+            (torch.add, (a, b)),
+            (torch.Tensor.item, (a[0, 0],)),
+            (len, ([a],)),
+        ):
             _, d = _witness(fn, *args)
             self.assertFalse(d["entered_python"])
 
@@ -2530,7 +2575,10 @@ class TestVmWitness(TestCase):
 
         included, d = _witness(body)
         self.assertFalse(included)
-        self.assertEqual((d["ops"], d["drew"], d["read_value"]), (["aten::neg", "aten::exp"], False, False))
+        self.assertEqual(
+            (d["ops"], d["drew"], d["read_value"]),
+            (["aten::neg", "aten::exp"], False, False),
+        )
 
     def test_a_witness_inside_a_witness(self, device):
         a, _ = self.pair(device)
@@ -2548,11 +2596,17 @@ class TestVmWitness(TestCase):
                 return g
 
         _, d = _witness(Callback.apply, a)
-        self.assertEqual((inner[0]["ops"], inner[0]["drew"], inner[0]["entered_python"]), (["aten::dropout"], True, False))
+        self.assertEqual(
+            (inner[0]["ops"], inner[0]["drew"], inner[0]["entered_python"]),
+            (["aten::dropout"], True, False),
+        )
         # The one around it saw all that ran while it was open, and goes on
         # behind the inner one.
         self.assertEqual(d["ops"][:3], ["aten::neg", "aten::dropout", "aten::exp"])
-        self.assertEqual((d["drew"], d["entered_python"], d["below"] >= inner[0]["below"]), (True, True, True))
+        self.assertEqual(
+            (d["drew"], d["entered_python"], d["below"] >= inner[0]["below"]),
+            (True, True, True),
+        )
         self.assertFalse(torch._C._dispatch_tls_is_dispatch_key_included("PreDispatch"))
 
     def test_beside_the_recorder_of_effects(self, device):
@@ -2576,8 +2630,12 @@ class TestVmWitness(TestCase):
             torch._rust.set_print_torch_ops(False)
         # Top-level operators only, each once, and still behind the witness.
         printed = re.findall(r"torch op: ([\w:.]+)\(", out.getvalue())
-        self.assertEqual(printed, ["aten::neg", "aten::linear", "aten::add.Tensor", "aten::exp"])
-        self.assertEqual([d["ops"] for d in seen], [["aten::linear"], ["aten::add.Tensor"]])
+        self.assertEqual(
+            printed, ["aten::neg", "aten::linear", "aten::add.Tensor", "aten::exp"]
+        )
+        self.assertEqual(
+            [d["ops"] for d in seen], [["aten::linear"], ["aten::add.Tensor"]]
+        )
         self.assertGreater(seen[0]["below"], 0)
 
         # Then the executor, recording effects, inside the witness: when its
@@ -2614,28 +2672,45 @@ class TestVmWitness(TestCase):
         self.assertEqual(body(), (0, 0, False, True, False))
         self.assertEqual(_witness(body)[0], (0, 0, False, True, True))
         self.assertEqual(body(), (0, 0, False, True, False))
-        for fn in (torch._C._len_torch_dispatch_stack, torch._C._len_torch_function_stack):
+        for fn in (
+            torch._C._len_torch_dispatch_stack,
+            torch._C._len_torch_function_stack,
+        ):
             r, d = _witness(fn)
             self.assertEqual((r, d["entered_python"]), (0, False))
 
     def test_what_is_not_classified_is_everything(self, device):
         a, b = self.pair(device)
-        everything = {"opaque": True, "drew": True, "read_value": True, "read_value_top": True, "entered_python": True, "pure": False}
+        everything = {
+            "opaque": True,
+            "drew": True,
+            "read_value": True,
+            "read_value_top": True,
+            "entered_python": True,
+            "pure": False,
+        }
         # An operator outside aten: its tags say nothing.
         enter = torch._C._jit_get_operation("profiler::_record_function_enter_new")[0]
         _, d = _witness(enter, "x", None)
         self.assertEqual({k: d[k] for k in everything}, everything)
         self.assertIn("profiler::_record_function_enter_new", d["why"])
         # A result that is no tensor, from an operator on neither list.
-        _, d = _witness(torch.Tensor.is_coalesced, torch.sparse_coo_tensor(size=(2, 2), device=device))
+        _, d = _witness(
+            torch.Tensor.is_coalesced,
+            torch.sparse_coo_tensor(size=(2, 2), device=device),
+        )
         self.assertEqual({k: d[k] for k in everything}, everything)
         self.assertIn("aten::is_coalesced", d["why"])
         # A witness that cannot see: the key is excluded on this thread.
         with torch._C._DisableTorchDispatch():
             _, d = _witness(torch.add, a, b)
-        self.assertEqual({k: d[k] for k in everything} | {"ops": d["ops"]}, everything | {"ops": []})
+        self.assertEqual(
+            {k: d[k] for k in everything} | {"ops": d["ops"]}, everything | {"ops": []}
+        )
         # One the program blinds while it is open.
-        _, d = _witness(torch._C._dispatch_tls_set_dispatch_key_included, "PreDispatch", False)
+        _, d = _witness(
+            torch._C._dispatch_tls_set_dispatch_key_included, "PreDispatch", False
+        )
         self.assertEqual({k: d[k] for k in everything}, everything)
         self.assertFalse(torch._C._dispatch_tls_is_dispatch_key_included("PreDispatch"))
 
@@ -2647,11 +2722,23 @@ class TestVmWitness(TestCase):
         registered = set(torch._C._dispatch_get_all_op_names())
         found = collections.defaultdict(set)
         for schema in torch._C._jit_get_all_schemas():
-            full = schema.name + ("." + schema.overload_name if schema.overload_name else "")
-            tensors = all(re.fullmatch(r"(Optional\[)?(List\[)?Tensor\]*", str(r.type)) for r in schema.returns)
-            if tensors or not schema.name.startswith("aten::") or full not in registered:
+            full = schema.name + (
+                "." + schema.overload_name if schema.overload_name else ""
+            )
+            tensors = all(
+                re.fullmatch(r"(Optional\[)?(List\[)?Tensor\]*", str(r.type))
+                for r in schema.returns
+            )
+            if (
+                tensors
+                or not schema.name.startswith("aten::")
+                or full not in registered
+            ):
                 continue
-            overload = getattr(getattr(torch.ops.aten, schema.name[6:]), schema.overload_name or "default")
+            overload = getattr(
+                getattr(torch.ops.aten, schema.name[6:]),
+                schema.overload_name or "default",
+            )
             if torch.Tag.data_dependent_output in overload.tags:
                 found["tag"].add(schema.name)
             elif schema.name in reads:
@@ -2660,8 +2747,19 @@ class TestVmWitness(TestCase):
                 found["no data"].add(schema.name)
             else:
                 found["opaque"].add(schema.name[6:])
-        self.assertEqual(sorted(found["tag"]), ["aten::_local_scalar_dense", "aten::allclose", "aten::equal", "aten::item"])
-        self.assertEqual((sorted(found["reads"]), sorted(found["no data"])), (sorted(reads), sorted(no_data)))
+        self.assertEqual(
+            sorted(found["tag"]),
+            [
+                "aten::_local_scalar_dense",
+                "aten::allclose",
+                "aten::equal",
+                "aten::item",
+            ],
+        )
+        self.assertEqual(
+            (sorted(found["reads"]), sorted(found["no data"])),
+            (sorted(reads), sorted(no_data)),
+        )
         self.assertEqual(
             sorted(found["opaque"]),
             ["_cslt_sparse_mm_search", "_cudnn_attention_forward", "_cufft_get_plan_cache_max_size", "_cufft_get_plan_cache_size",
@@ -2684,8 +2782,14 @@ class TestVmWitness(TestCase):
                 for under in (False, True):
                     args, kwargs = make(_WtMake(device))
                     torch.manual_seed(0)
-                    r = _witness(fn, *args, **kwargs) if under else (fn(*args, **kwargs), None)
-                    results.append((_wt_bits(r[0]), _wt_bits([args, list(kwargs.values())]), r[1]))
+                    r = (
+                        _witness(fn, *args, **kwargs)
+                        if under
+                        else (fn(*args, **kwargs), None)
+                    )
+                    results.append(
+                        (_wt_bits(r[0]), _wt_bits([args, list(kwargs.values())]), r[1])
+                    )
                 self.assertEqual(results[0][:2], results[1][:2])
                 self.assertFalse(results[1][2]["opaque"], results[1][2]["why"])
 
@@ -2713,12 +2817,487 @@ class TestVmWitness(TestCase):
             )  # fmt: skip
             self.assertNotIn("aten::_native_multi_head_attention", d["ops"])
         lstm = torch.nn.LSTM(4, 6).to(device)
-        data, zeros = torch.randn(8, 4, generator=gen).to(device), torch.zeros(1, 4, 6, device=device)
+        data, zeros = (
+            torch.randn(8, 4, generator=gen).to(device),
+            torch.zeros(1, 4, 6, device=device),
+        )
         for sizes in ([4, 2, 2], [4, 3, 1]):
-            both(torch._VF.lstm, data, torch.tensor(sizes), (zeros, zeros), lstm._flat_weights, True, 1, 0.0, False, False)
+            both(
+                torch._VF.lstm,
+                data,
+                torch.tensor(sizes),
+                (zeros, zeros),
+                lstm._flat_weights,
+                True,
+                1,
+                0.0,
+                False,
+                False,
+            )
 
 
 instantiate_device_type_tests(TestVmWitness, globals())
+
+
+# The families of the rule table that are not written yet: an instruction
+# kind that is "later" names one of them, and the code that decided before
+# the table decides until that family is there.
+RULES_LATER = (
+    "torch",
+    "builtins",
+    "descriptors",
+    "classes",
+    "attributes",
+    "subscripts",
+    "iteration",
+    "functions",
+    "stores",
+    "recorder",
+)
+RULES_COLUMNS = {
+    "reads": (
+        "Slot",
+        "Constant",
+        "Global",
+        "Cell",
+        "Closure",
+        "Identity",
+        "Class",
+        "Text",
+        "Handled",
+        "Pending",
+    ),
+    "writes": r"None|Slot|Handled|Fills\(\d+\)",
+    "result": r"None|Lit|Entry|Slot|Part|Made|Pinned|Return|Operand\(\d+\)",
+    "enters": r"Never|Named|Foreign",
+    "scalars": r"None|Operand|Parts|Specialize",
+}
+# What the executor runs without asking anything (its inline path).
+RULES_INLINE = ("Const", "LoadLocal", "StoreLocal")
+# An instruction kind that the table stops, by the opcode that becomes it.
+RULES_LOWERED = {"LoadFromDictOrDeref": "LOAD_FROM_DICT_OR_DEREF"}
+
+RULES_K = "K = [2.0]"
+RULES_K_CHANGE = "K[0] = 5.0 if second else 2.0"
+RULES_MODULE = """import sys, types
+def module(k):
+    m = types.ModuleType('vm_rules_mod')
+    m.K = k
+    sys.modules['vm_rules_mod'] = m
+module(2.0)"""
+RULES_MODULE_CHANGE = "module(5.0 if second else 2.0)"
+RULES_MANAGER = """class Manager:
+    def __enter__(self):
+        return self.k
+    def __exit__(self, *exc):
+        return True
+CM = Manager()
+CM.k = 2.0"""
+RULES_MANAGER_CHANGE = "CM.k = 5.0 if second else 2.0"
+RULES_DRIVE = """try:
+    outer().send(None)
+except StopIteration as done:
+    k = done.value"""
+RULES_ASYNC_MANAGER = """class Manager:
+    async def __aenter__(self):
+        return self.k
+    async def __aexit__(self, *exc):
+        return False
+CM = Manager()
+CM.k = 2.0
+async def outer():
+    async with CM as v:
+        return v"""
+RULES_ASYNC_ITEMS = """class Items:
+    def __aiter__(self):
+        self.left = 1
+        return self
+    async def __anext__(self):
+        if not self.left:
+            raise StopAsyncIteration
+        self.left = 0
+        return K[0]
+async def outer():
+    async for v in Items():
+        got = v
+    return got"""
+RULES_MATCH = "match {}:\n    case {}:\n        k = {}\n    case _:\n        k = 1.0"
+
+# A program per stop of the rule table that Python source can make: (the
+# stops it holds, what the module has, the construct, which sets `k` in a
+# function with tensor work around it, what changes between calls, the state
+# the calls leave).
+RULES_STOPS = {
+    "match_class": (
+        ("MATCH_CLASS",),
+        "class Box:\n    k = 2.0\nBOX = Box()",
+        RULES_MATCH.format("BOX", "Box(k=v)", "v"),
+        "BOX.k = 5.0 if second else 2.0",
+        "None",
+    ),
+    "match_class_positional": (
+        ("MATCH_CLASS",),
+        "import dataclasses\n@dataclasses.dataclass\n"
+        "class DCls:\n    k: float = 2.0\nDC = DCls()",
+        RULES_MATCH.format("DC", "DCls(v)", "v"),
+        "DC.k = 5.0 if second else 2.0",
+        "None",
+    ),
+    "match_mapping": (
+        ("MATCH_MAPPING", "MATCH_KEYS"),
+        "D = {'k': 2.0}",
+        RULES_MATCH.format("D", "{'k': v}", "v"),
+        "D['k'] = 5.0 if second else 2.0",
+        "None",
+    ),
+    "match_sequence": (
+        ("MATCH_SEQUENCE", "GET_LEN"),
+        "S = [2.0, 1.0]",
+        RULES_MATCH.format("S", "[a, b]", "a * b"),
+        "S[0] = 5.0 if second else 2.0",
+        "None",
+    ),
+    "store_global": (
+        ("STORE_GLOBAL",),
+        "G = 2.0\nSTEP = [1.0]",
+        "global G\nG = G + STEP[0]\nk = G",
+        "STEP[0] = 3.0 if second else 1.0",
+        "G",
+    ),
+    "delete_global": (
+        ("DELETE_GLOBAL",),
+        "T = 2.0",
+        "global T\nk = T\ndel T",
+        "globals()['T'] = 5.0 if second else 2.0",
+        "'T' in globals()",
+    ),
+    "import_name": (
+        ("IMPORT_NAME",),
+        RULES_MODULE,
+        "import vm_rules_mod\nk = vm_rules_mod.K",
+        RULES_MODULE_CHANGE,
+        "None",
+    ),
+    "import_from": (
+        ("IMPORT_FROM",),
+        RULES_MODULE,
+        "from vm_rules_mod import K\nk = K",
+        RULES_MODULE_CHANGE,
+        "None",
+    ),
+    "with": (
+        ("BEFORE_WITH",),
+        RULES_MANAGER,
+        "with CM as k:\n    pass",
+        RULES_MANAGER_CHANGE,
+        "None",
+    ),
+    "with_raises": (
+        ("WITH_EXCEPT_START",),
+        RULES_MANAGER,
+        "with CM as k:\n    raise KeyError",
+        RULES_MANAGER_CHANGE,
+        "None",
+    ),
+    "class_statement": (
+        ("LOAD_BUILD_CLASS", "LOAD_NAME", "STORE_NAME"),
+        RULES_K,
+        "class Local:\n    k = K[0]\nk = Local.k",
+        RULES_K_CHANGE,
+        "None",
+    ),
+    "class_deletes_a_name": (
+        ("DELETE_NAME",),
+        RULES_K,
+        "class Local:\n    tmp = K[0]\n    k = tmp\n    del tmp\nk = Local.k",
+        RULES_K_CHANGE,
+        "None",
+    ),
+    "class_annotations": (
+        ("SETUP_ANNOTATIONS",),
+        RULES_K,
+        "class Local:\n    k: float = K[0]\nk = Local.k",
+        RULES_K_CHANGE,
+        "None",
+    ),
+    "class_reads_a_local": (
+        ("LOAD_LOCALS", "LoadFromDictOrDeref"),
+        RULES_K,
+        "base = K[0]\nclass Local:\n    k = base\nk = Local.k",
+        RULES_K_CHANGE,
+        "None",
+    ),
+    # CLEANUP_THROW is in the handler of every await: the program holds it,
+    # and only a throw() into the coroutine would run it.
+    "await": (
+        ("GET_AWAITABLE", "CLEANUP_THROW"),
+        RULES_K
+        + "\nasync def inner():\n    return K[0]\n"
+        + "async def outer():\n    return await inner()",
+        RULES_DRIVE,
+        RULES_K_CHANGE,
+        "None",
+    ),
+    "yield_from": (
+        ("GET_YIELD_FROM_ITER",),
+        RULES_K
+        + "\ndef inner():\n    yield K[0]\ndef outer():\n    yield from inner()",
+        "k = next(outer())",
+        RULES_K_CHANGE,
+        "None",
+    ),
+    "async_with": (
+        ("BEFORE_ASYNC_WITH",),
+        RULES_ASYNC_MANAGER,
+        RULES_DRIVE,
+        RULES_MANAGER_CHANGE,
+        "None",
+    ),
+    "async_for": (
+        ("GET_AITER", "GET_ANEXT", "END_ASYNC_FOR"),
+        RULES_K + "\n" + RULES_ASYNC_ITEMS,
+        RULES_DRIVE,
+        RULES_K_CHANGE,
+        "None",
+    ),
+    "except_star": (
+        ("CHECK_EG_MATCH", "CALL_INTRINSIC_2"),
+        RULES_K,
+        "try:\n    raise ExceptionGroup('g', [ValueError(K[0])])\n"
+        "except* ValueError as group:\n    k = group.exceptions[0].args[0]",
+        RULES_K_CHANGE,
+        "None",
+    ),
+    "failed_assert": (
+        ("LOAD_ASSERTION_ERROR",),
+        RULES_K,
+        "try:\n    assert K[0] < 0.0\nexcept AssertionError:\n    k = K[0]",
+        RULES_K_CHANGE,
+        "None",
+    ),
+    "type_parameter": (
+        ("CALL_INTRINSIC_1", "CALL_INTRINSIC_2"),
+        RULES_K,
+        "def same[T](a: T) -> T:\n    return a\nk = same(K[0])",
+        RULES_K_CHANGE,
+        "None",
+    ),
+}
+# The stops that have no program, and why.
+RULES_NOT_WRITTEN = {
+    "LOAD_FROM_DICT_OR_GLOBALS": "only under a type parameter in a class body",
+    "RESERVED": "no source compiles to it",
+    "INTERPRETER_EXIT": "no source compiles to it",
+}
+
+
+def rules_source(name):
+    _, setup, construct, change, state = RULES_STOPS[name]
+    body = "\n".join(f"    {line}" for line in construct.splitlines())
+    change = "\n".join(f"    {line}" for line in change.splitlines())
+    return (
+        f"import torch\n{setup}\n"
+        f"def f(x):\n    y = torch.sin(x) * 2.0 + torch.cos(x)\n{body}\n"
+        "    return (y * k + torch.tanh(y)).sum(-1)\n"
+        f"def change(second):\n{change}\n"
+        f"def state():\n    return {state}\n"
+    )
+
+
+def rules_opnames(code):
+    """The opcodes of a code object and of every code object in it."""
+    names = {i.opname for i in dis.get_instructions(code)}
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            names |= rules_opnames(const)
+    return names
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRulesOps(TestCase):
+    """The rule table has no row for "anything else". Every kind of
+    instruction of the executor and every opcode of CPython is a row (what it
+    does is a fact of its kind), an opcode that becomes such kinds, a stop
+    with its reason, or names the family of rules that will take it; an
+    opcode in none of these is refused. What the table stops runs under no
+    trace: a program that uses it computes what eager computes whatever
+    changes between its calls, and no region replaces the construct."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def statuses(self):
+        table = collections.defaultdict(list)
+        for name, status in torch._rust._rules_kinds():
+            table[name].append(status)
+        return table
+
+    def listed(self, table, name, lowered=True):
+        """Whether the table has an answer for `name` that is not a default."""
+        for status in table[name]:
+            how, _, rest = status.partition(":")
+            if how in ("row", "stop"):
+                return True
+            if how == "as" and lowered:
+                return all(
+                    self.listed(table, k, lowered=False) for k in rest.split(",")
+                )
+        later = [s.partition(":")[2] for s in table[name] if s.startswith("later:")]
+        return bool(later) and all(family in RULES_LATER for family in later)
+
+    def test_every_kind_and_opcode_is_listed(self):
+        table = self.statuses()
+        unlisted = sorted(n for n in table if not self.listed(table, n))
+        # The numbers that are no opcode of the executor's are refused.
+        self.assertTrue(all(re.fullmatch(r"<\d+>", n) for n in unlisted), unlisted)
+        for name in unlisted:
+            self.assertEqual(table[name], ["unlisted"])
+        for name, number in opcode.opmap.items():
+            with self.subTest(opcode=name):
+                if number >= opcode.MIN_PSEUDO_OPCODE:
+                    # The compiler's own: no code object holds one.
+                    continue
+                if name not in table:
+                    # Put in place by sys.monitoring: the executor does not
+                    # know them, and the table refuses the number.
+                    self.assertTrue(name.startswith("INSTRUMENTED_"))
+                    self.assertEqual(table[f"<{number}>"], ["unlisted"])
+                    continue
+                self.assertTrue(self.listed(table, name), table[name])
+        for kind in RULES_INLINE:
+            self.assertEqual(table[kind], ["row"])
+
+    def test_every_op_of_the_executor_is_a_kind(self):
+        path = os.path.join(CRATE, "cfg", "ir.rs")
+        if not os.path.exists(path):
+            self.skipTest("the executor's source is not beside the tests")
+        with open(path) as f:
+            text = re.sub(r"//[^\n]*", "", f.read())
+        body = re.search(r"pub enum Op \{(.*?)\n\}", text, re.DOTALL).group(1)
+        ops = set(re.findall(r"^    ([A-Z]\w*)", body, re.MULTILINE)) - {"Bytecode"}
+        table = self.statuses()
+        # An opcode's name is in capitals, a number's in brackets.
+        kinds = {n for n in table if not n.isupper() and not n.startswith("<")}
+        self.assertEqual(kinds, ops)
+        self.assertGreater(len(ops), 30)
+        for op in ops:
+            self.assertTrue(self.listed(table, op), op)
+
+    def test_the_dump_is_regular(self):
+        fields = {"row": 10, "stop": 4, "later": 4, "as": 4, "group": 4}
+        table = self.statuses()
+        seen = collections.Counter()
+        dumped = set()
+        for line in torch._rust._rules_dump().splitlines():
+            parts = line.split("\t")
+            with self.subTest(line=line):
+                self.assertIn(parts[0], fields)
+                self.assertEqual(len(parts), fields[parts[0]])
+                self.assertTrue(all(parts))
+                seen[parts[0]] += 1
+                if parts[0] == "group":
+                    continue
+                how, family, what, *rest = parts
+                self.assertIn(family, ("ops", *RULES_LATER))
+                dumped.add(
+                    (what, how if how in ("row", "stop") else f"{how}:{rest[0]}")
+                )
+                if how == "later":
+                    self.assertIn(rest[0], RULES_LATER)
+                if how in ("row", "stop"):
+                    # One sentence, or one reason.
+                    self.assertGreater(len(rest[-1]), 20)
+                if how != "row":
+                    continue
+                operands, reads, writes, result, enters, scalars, why = rest
+                self.assertRegex(operands, r"^(-|(-?\d+:\w+)(,-?\d+:\w+)*)$")
+                for read in reads.split(","):
+                    self.assertIn(read, ("-", *RULES_COLUMNS["reads"]))
+                for column, value in zip(
+                    ("writes", "result", "enters", "scalars"), rest[2:6]
+                ):
+                    self.assertRegex(value, f"^({RULES_COLUMNS[column]})$")
+                self.assertTrue(why.endswith("."), why)
+        # The dump is the table: every answer is a line, and no line more.
+        answers = {(n, s) for n, ss in table.items() for s in ss if s != "unlisted"}
+        self.assertEqual(dumped, answers)
+        self.assertGreater(seen["stop"], 30)
+        self.assertGreater(seen["row"], 30)
+        self.assertGreater(seen["group"], 6)
+
+    def test_a_group_is_a_list_of_exact_classes(self):
+        class Int(int):
+            pass
+
+        class Tensor(torch.Tensor):
+            pass
+
+        groups = torch._rust._rules_groups
+        for value in (1, 1.5, True, "a", b"a", None, ...):
+            self.assertEqual(groups(value), ["Immutable"], msg=repr(value))
+        self.assertEqual(groups([]), ["ExactList"])
+        self.assertEqual(groups(()), ["ExactTuple"])
+        self.assertEqual(groups({}), ["ExactDict"])
+        self.assertEqual(groups(set()), ["ExactSet"])
+        self.assertEqual(groups(torch.ones(1)), ["PlainTensor"])
+        self.assertEqual(groups(torch.nn.Parameter(torch.ones(1))), ["PlainTensor"])
+        # A subclass of a member is no member, nor is any other class.
+        Point = collections.namedtuple("Point", "x")
+        others = (Int(1), Tensor(), Point(1), collections.OrderedDict(), frozenset())
+        for value in (*others, 1j, object(), int, numpy.float64(1.0)):
+            self.assertEqual(groups(value), [], msg=repr(value))
+
+    def test_every_stop_has_a_program(self):
+        table = self.statuses()
+        stops = {
+            RULES_LOWERED.get(n, n).partition(" ")[0]
+            for n, statuses in table.items()
+            if "stop" in statuses and (n.isupper() or n in RULES_LOWERED)
+        }
+        written = {RULES_LOWERED.get(n, n) for p in RULES_STOPS.values() for n in p[0]}
+        self.assertEqual(stops, written | set(RULES_NOT_WRITTEN))
+        self.assertEqual(written & set(RULES_NOT_WRITTEN), set())
+        for name, program in RULES_STOPS.items():
+            held = rules_opnames(compile(rules_source(name), "<rules>", "exec"))
+            for stop in program[0]:
+                self.assertIn(RULES_LOWERED.get(stop, stop), held, msg=name)
+
+    @parametrize("name", list(RULES_STOPS))
+    @checks_isolated
+    def test_a_stopped_instruction_sits_in_no_region(self, name):
+        # Counted from the first trace on: which instructions traces met.
+        os.environ["TORCH_RUST_GATE_HIST"] = "1"
+        source = rules_source(name)
+        eager, traced = {}, {}
+        exec(compile(source, "<rules eager>", "exec"), eager)
+        exec(compile(source, "<rules vm>", "exec"), traced)
+        compiled = vm(traced["f"], passes=CHECKS_EARLY)
+        for call in range(13):
+            # The value the construct reads: A, then B, then A again.
+            second = 7 <= call < 10
+            eager["change"](second)
+            traced["change"](second)
+            torch.manual_seed(call)
+            x = torch.randn(4, 8)
+            want = checks_outcome(eager["f"], x)
+            got = checks_outcome(compiled, x)
+            self.assertIsInstance(want, torch.Tensor, msg=f"call {call}")
+            self.assertIsInstance(got, torch.Tensor, msg=f"call {call}: {got!r}")
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(traced["state"](), eager["state"](), msg=f"call {call}")
+        # A region is what a trace that was not refused ran. Every trace
+        # that met a stopped instruction was refused, for that instruction.
+        rows = torch._rust._gate_report()["rows"]
+        refusals = [
+            str(why)
+            for place in vm.regions(compiled)
+            for state, why in place.get("traces", ())
+            if state != "region"
+        ]
+        for stop in RULES_STOPS[name][0]:
+            met = sum(traces for _, what, _, traces, _, _ in rows if what == stop)
+            named = sum(f"no row for: {stop} " in why for why in refusals)
+            self.assertEqual(met, named, msg=f"{stop}: {refusals}")
 
 
 if __name__ == "__main__":

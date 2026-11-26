@@ -482,6 +482,7 @@ pub fn asks_unchecked(prep: &Prepared, v: ValueId) -> Option<&str> {
 // operands' types did.
 pub fn instr(py: Python<'_>, prep: &Prepared, v: ValueId, own: &Own) -> Result<(), String> {
     let ins = &prep.cfg[v];
+    super::rules::advice(&ins.op)?;
     let reads = |args: &[ValueId]| args.iter().try_for_each(|a| operand(py, prep, *a, Use::Read, own));
     let takes = |args: &[ValueId]| args.iter().try_for_each(|a| operand(py, prep, *a, Use::Take, own));
     match ins.op {

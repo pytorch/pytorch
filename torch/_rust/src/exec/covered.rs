@@ -99,7 +99,7 @@ use pyo3::prelude::*;
 use crate::cfg::ir::Instr;
 
 use super::ffi::*;
-use super::{Compiled, effects, kinds, raises, shown};
+use super::{Compiled, effects, kinds, raises, rules, shown};
 
 // The instructions of a code that some verdict covered, by code unit. Kept
 // in the code's own Compiled, for its clones too.
@@ -313,9 +313,8 @@ unsafe fn whole(py: Python<'_>, f: *mut PyObject) -> bool {
 }
 
 // Asked before instruction `ins` of `c` runs in a traced body (`under`: in a
-// frame under it); `operands`: the objects of its operands, if kinds.rs asks
-// about it, `callee`: what it calls, if it is a call, and `seen`: the callee
-// recorded for it.
+// frame under it); `operands`: the objects of its operands, `callee`: what it
+// calls, if it is a call, and `seen`: the callee recorded for it.
 pub unsafe fn step(c: Option<&Compiled>, under: bool, ins: &Instr, operands: &[*mut PyObject], callee: Option<*mut PyObject>, seen: Option<&effects::Callee>) -> Result<bool, String> {
     // Kept whatever is answered below (see filled).
     if let Some(o) = kinds::filled(&ins.op).and_then(|k| operands.get(k)) {
@@ -331,6 +330,17 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, ins: &Instr, operands: &[*
         raises::over();
         return Ok(false);
     }
+    // The rule table is asked before anything else (rules/mod.rs): what a
+    // family of it has taken over runs under a trace by a row only. A row
+    // takes nothing away from what is asked below.
+    let classes: Vec<rules::Class> = operands.iter().map(|o| rules::Class::of(*o)).collect();
+    if let rules::License::NoRow(why) = rules::license(&rules::ops::what(&ins.op, callee), &classes) {
+        AGAIN.set(false);
+        let at = c.map_or(String::new(), |c| format!(" at line {} of {}", c.line(ins.origin), c.qualname));
+        return Err(format!("it runs an instruction{at} that the engine's rules have no row for: {why}"));
+    }
+    // kinds.rs is asked about the instructions it names only.
+    let operands = if kinds::asked(&ins.op) { operands } else { &[] };
     let py = Python::assume_attached();
     let unit = ins.origin;
     // As the callee of a call is recorded (see slow_step).

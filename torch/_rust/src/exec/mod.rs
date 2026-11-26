@@ -25,6 +25,7 @@ mod raises;
 pub mod reads;
 pub mod region;
 mod rows;
+pub mod rules;
 pub mod scalars;
 mod run;
 mod shown;
@@ -2258,8 +2259,9 @@ fn observed_ops(
                 }
                 _ => false,
             };
-            // What a cfg pass left as a boundary sits in no region.
-            if ok && !writes::left(code, ins.origin) {
+            // What a cfg pass left as a boundary sits in no region, nor does
+            // what the rule table stops under a trace.
+            if ok && rules::advice(&ins.op).is_ok() && !writes::left(code, ins.origin) {
                 out.insert(*v);
             }
             let replaceable = matches!(
@@ -3051,6 +3053,8 @@ out += [torch.is_tensor, torch.is_floating_point, torch.is_grad_enabled, torch.i
 fn pure_instr(py: Python<'_>, prep: &Prepared, code: usize, v: ValueId, clones: &HashMap<ValueId, SiteClone>, depth: u32, own: &Own, memo: &mut Memo) -> Result<(), String> {
     let ins = &prep.cfg[v];
     let here = || format!("%{} {:?}", v.0, ins.op);
+    // What the rule table stops under a trace sits in no region.
+    rules::advice(&ins.op).map_err(|why| format!("{}: {why}", here()))?;
     // In a callee (depth > 0), its own cells, and containers it made, die
     // with its frame (unless it returns them, as a region rebuilds them).
     let own_cell = |slot: u32| free_index(&prep.cfg, slot).is_none();
