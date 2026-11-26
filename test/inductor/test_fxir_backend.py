@@ -45,7 +45,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.inductor_utils import patch_custom_fallback_pass
 from torch.utils._sympy.functions import FloorDiv
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton, has_triton_for_device
 
 
 aten = torch.ops.aten
@@ -206,7 +206,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
     def setUpClass(cls):
         super().setUpClass()
 
-        if not has_triton():
+        if not has_triton_for_device(cls.device_type):
             raise unittest.SkipTest("requires triton")
 
         # Register the FX backend, storing the default for later.
@@ -1225,7 +1225,7 @@ class AOTFxirTestCase(_FxirTestMixin, InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        if not has_triton():
+        if not has_triton_for_device(cls.device_type):
             raise unittest.SkipTest("requires triton")
         common.init_backend_registration()
         codegen = common.device_codegens.get(cls.device_type)
