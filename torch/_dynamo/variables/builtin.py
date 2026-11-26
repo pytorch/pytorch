@@ -864,8 +864,6 @@ class BuiltinVariable(TypeVariable):
     @functools.cache
     def _constant_fold_functions() -> set[Callable[..., Any]]:
         fns: set[Callable[..., Any]] = {
-            _string.formatter_parser,
-            _string.formatter_field_name_split,
             abs,
             all,
             any,
@@ -2161,11 +2159,14 @@ class BuiltinVariable(TypeVariable):
             fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
-            const_args = [a.as_python_constant() for a in args[1:]]
+            const_args, const_kwargs = self.unwrap_unspec_args_kwargs(
+                list(args[1:]), kwargs
+            )
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
                     *const_args,
+                    **const_kwargs,
                 )
             except Exception as exc:
                 # A class body that fails CPython's own validation (e.g. an
@@ -3021,22 +3022,43 @@ class BuiltinVariable(TypeVariable):
         return pynumber_invert(tx, a)
 
     @staticmethod
-    def has_pending_format_mutation(tx, field=None, names=_FORMAT_SLOTS):
+    def pending_format_slot(
+        tx: "InstructionTranslatorBase",
+        field: VariableTracker | None = None,
+        names: tuple[str, ...] = _FORMAT_SLOTS,
+    ) -> str | None:
         for owner, attrs in tx.output.side_effects.store_attr_mutations.items():
-            if not isinstance(
-                owner, UserDefinedClassVariable
-            ) or attrs.keys().isdisjoint(names):
+            if not isinstance(owner, UserDefinedClassVariable):
                 continue
-            if field is None:
-                return True
-            if type.__subclasscheck__(owner.value, field.python_type()):
-                if not isinstance(field, UserDefinedObjectVariable):
-                    return True
-                cls = field._class_vt(tx)
-                return not isinstance(cls, UserDefinedClassVariable) or any(
-                    cls.pending_setattr_owner(tx, name) is not None for name in names
+            for name in names:
+                if name not in attrs:
+                    continue
+                if field is not None and not type.__subclasscheck__(
+                    owner.value, field.python_type()
+                ):
+                    break
+                cls = (
+                    field._class_vt(tx)
+                    if isinstance(field, UserDefinedObjectVariable)
+                    else None
                 )
-        return False
+                if not isinstance(
+                    cls, UserDefinedClassVariable
+                ) or cls.pending_setattr_owner(tx, name):
+                    return name
+        return None
+
+    @staticmethod
+    def unsupported_format(
+        value: VariableTracker, slot: str = "", *, reason: str = ""
+    ) -> NoReturn:
+        detail = reason or f"pending class mutation: {slot or 'none'}"
+        unimplemented(
+            gb_type="Unsupported user-defined formatting",
+            context=f"{value.python_type_name()}, {detail}",
+            explanation="Dynamo cannot safely specialize this object's formatting behavior.",
+            hints=["Format this value outside the compiled region."],
+        )
 
     def _format_user_defined(
         self,
@@ -3044,98 +3066,162 @@ class BuiltinVariable(TypeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        value = args[0] if args else None
-        expanding = tx.f_code is polyfills.builtins._expand_format.__code__
-
-        def defer(field, conversion=None):
-            field = field.realize()
-            if isinstance(field, UserDefinedObjectVariable):
-                names = _FORMAT_SLOTS
-                if conversion is not None:
-                    conv = conversion.as_python_constant()
-                    names = _STR_SLOTS if conv == "s" else ("__repr__",)
-                if self.has_pending_format_mutation(tx, field, names):
-                    unsupported(field, True)
-                return ConstantVariable.create(not field.is_python_constant())
-            if isinstance(field, FakeIdVariable):
-                field.guard_as_python_constant()
-            return ConstantVariable.create(True)
-
-        def unsupported(value, mutated):
-            unimplemented(
-                gb_type="Unsupported user-defined formatting",
-                context=f"{value.python_type_name()}.__format__, pending class mutation: {mutated}",
-                explanation="Dynamo cannot safely specialize this object's formatting behavior.",
-                hints=["Format this value outside the compiled region."],
-            )
-
+        if not args:
+            return None
+        value = args[0]
         if self.fn is str.format:
-            if expanding or value is None or value.python_type() is not str:
+            if value.python_type() is not str:
                 return None
-            has_constant = any(
+            if any(
                 isinstance(v, UserDefinedObjectVariable) and v.is_python_constant()
                 for v in itertools.chain(args[1:], kwargs.values())
-            )
-            if has_constant or self.has_pending_format_mutation(
-                tx, names=(*_FORMAT_SLOTS, "__float__")
-            ):
-                from .builder import SourcelessBuilder
-
-                return SourcelessBuilder.create_internal_user_function(
-                    polyfills.builtins.str_format
-                ).call_function(tx, [variables.LambdaVariable(defer), *args], kwargs)
+            ) or self.pending_format_slot(tx, names=(*_FORMAT_SLOTS, "__float__")):
+                return self._expand_format(
+                    tx, value.guard_as_python_constant(), args[1:], kwargs
+                )
             return None
-        if value is None or kwargs or len(args) not in (1, 2):
+        if kwargs or len(args) > 2:
             return None
         spec = args[1] if len(args) == 2 else ConstantVariable.create("")
-        defer(value)  # validate mutations and identity-dependent hashes before folding
-        if isinstance(value, UserDefinedObjectVariable) and spec.python_type() is str:
-            cls_type = value.python_type()
-            lookup = value.lookup_class_mro_attr
-            formatter = lookup("__format__")
-            if isinstance(formatter, types.FunctionType):
-                return value.SLOT1(tx, "__format__", spec)
-            text = (
-                spec.guard_as_python_constant() if spec.is_python_constant() else None
-            )
-            constant = value.is_python_constant()
-            if not constant and formatter is object.__format__ and text == "":
+        return self._format_field(tx, value, spec, expanding=False)
+
+    def _format_field(self, tx, value, spec, *, expanding):
+        value = value.realize()
+        if isinstance(value, FakeIdVariable):
+            value.guard_as_python_constant()
+        if not isinstance(value, UserDefinedObjectVariable):
+            return None
+        if slot := self.pending_format_slot(tx, value):
+            self.unsupported_format(value, slot)
+        if spec.python_type() is not str:
+            return None
+        lookup = value.lookup_class_mro_attr
+        formatter = lookup("__format__")
+        if isinstance(formatter, types.FunctionType):
+            return value.SLOT1(tx, "__format__", spec)
+        text = spec.guard_as_python_constant() if spec.is_python_constant() else None
+        constant = value.is_python_constant()
+        if text == "" and formatter is object.__format__:
+            if not (constant or expanding):
                 return generic_str(tx, value)
-            if formatter is int.__format__ and (
-                text is None or text.endswith(tuple("eEfFgG%"))
-            ):
-                if self.has_pending_format_mutation(tx, value, ("__float__",)):
-                    unsupported(value, True)
-            if constant and text is not None:
-                for base in (int, float, str, object):
-                    if formatter is not base.__format__ or value.cls_source is None:
-                        continue
-                    names = ["__format__"]
-                    if not text:
-                        names.append("__str__")
-                    elif base is int and text[-1] in "eEfFgG%":
-                        # Floating-point presentations call PyNumber_Float on the integer.
-                        names.append("__float__")
-                    for name in names:
-                        source = mro_attr_source(tx, cls_type, value.cls_source, name)
-                        if source is None:
-                            break
-                        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-                        if name == "__str__":
-                            impl = lookup(name)
-                            if impl is base.__repr__ or impl is str.__str__:
-                                continue
-                            native = torch._C._dynamo.utils.is_instancemethod
-                            if base is not object or not native(impl):
-                                return generic_str(tx, value)
-                        if name == "__float__" and lookup(name) is not int.__float__:
-                            break
+        floating = formatter is int.__format__ and (
+            text is None or text.endswith(tuple("eEfFgG%"))
+        )
+        if floating and self.pending_format_slot(tx, value, ("__float__",)):
+            self.unsupported_format(value, "__float__")
+        if not constant or text is None:
+            return None
+        bases = (int, float, str, object)
+        base = next((b for b in bases if b.__format__ is formatter), None)
+        if base is None or value.cls_source is None:
+            self.unsupported_format(value)
+
+        def guarded_slot(name):
+            source = mro_attr_source(tx, value.python_type(), value.cls_source, name)
+            if source is None:
+                self.unsupported_format(value)
+            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            return lookup(name)
+
+        guarded_slot("__format__")
+        if not text:
+            impl = guarded_slot("__str__")
+            if impl is not base.__repr__ and impl is not str.__str__:
+                if base is not object or not torch._C._dynamo.utils.is_instancemethod(
+                    impl
+                ):
+                    return generic_str(tx, value)
+        elif floating and guarded_slot("__float__") is not int.__float__:
+            self.unsupported_format(value)
+        return None  # Use the ordinary constant-fold handler.
+
+    def _expand_format(self, tx, template, args, kwargs):
+        # CPython shares positional numbering across nested format specifications.
+        position = 0
+        auto, manual = "automatic field numbering", "manual field specification"
+        render = StringFormatVariable.create
+        literal_value = ConstantVariable.create
+        opaque = False
+        reason = "a deferred formatting callback precedes a user-defined operation"
+
+        def trace_hook(field, slot):
+            nonlocal opaque
+            if not isinstance(field, UserDefinedObjectVariable):
+                return False
+            if slot != "__format__":
+                slots = _STR_SLOTS if slot == "__str__" else (slot,)
+                if pending := self.pending_format_slot(tx, field, slots):
+                    self.unsupported_format(field, pending)
+            impl = field.lookup_class_mro_attr(slot)
+            if impl is object.__format__:
+                impl = field.lookup_class_mro_attr("__str__")
+            if impl is object.__str__:
+                impl = field.lookup_class_mro_attr("__repr__")
+            if type(impl) is types.FunctionType:
+                if getattr(impl, "_torchdynamo_disable", False):
+                    opaque = True
+                elif opaque:
+                    self.unsupported_format(field, reason=reason)
+                else:
+                    return True
+            return field.is_python_constant()
+
+        def expand(template, depth):
+            nonlocal position
+            if depth == 0:
+                raise ValueError("Max string recursion exceeded")
+            parts: list[VariableTracker] = []
+            for literal, name, spec, conv in _string.formatter_parser(template):
+                parts.append(literal_value(literal))
+                if name is None:
+                    continue
+                key, path = _string.formatter_field_name_split(name)
+                if key == "":
+                    if position is None:
+                        raise ValueError(f"cannot switch from {manual} to {auto}")
+                    key, position = position, position + 1
+                elif isinstance(key, int):
+                    if position:
+                        raise ValueError(f"cannot switch from {auto} to {manual}")
+                    position = None
+                if isinstance(key, int) and key >= len(args):
+                    raise IndexError(
+                        f"Replacement index {key} out of range for positional args tuple"
+                    )
+                field = args[key] if isinstance(key, int) else kwargs[key]
+                for is_attr, index in path:
+                    if opaque and isinstance(field, UserDefinedObjectVariable):
+                        self.unsupported_format(field, reason=reason)
+                    if is_attr:
+                        field = generic_getattr(tx, field, index)
                     else:
-                        return None  # use the ordinary constant-fold handler
-                unsupported(value, False)
-        if expanding:
-            return StringFormatVariable.create(tx, "{0:{1}}", [value, spec], {})
-        return None
+                        field = generic_getitem(tx, field, literal_value(index))
+                if conv in ("s", "r", "a"):
+                    field = field.realize()
+                    if isinstance(field, FakeIdVariable):
+                        field.guard_as_python_constant()
+                    if trace_hook(field, "__str__" if conv == "s" else "__repr__"):
+                        field = tx._convert_value(field, 1 if conv == "s" else 2)
+                        if conv == "a":
+                            codec = [
+                                literal_value(s) for s in ("ascii", "backslashreplace")
+                            ]
+                            encoded = field.call_method(tx, "encode", codec, {})
+                            field = encoded.call_method(tx, "decode", [], {})
+                    else:
+                        field = render(tx, "{!" + conv + "}", [field], {})
+                elif conv and conv != "\0":
+                    ("{!" + conv + "}").format(None)
+                fmt = expand(spec, depth - 1) if "{" in spec else literal_value(spec)
+                trace_hook(field, "__format__")
+                formatted = self._format_field(tx, field, fmt, expanding=True)
+                parts.append(formatted or render(tx, "{0:{1}}", [field, fmt], {}))
+            return render(tx, "{}" * len(parts), parts, {})
+
+        try:
+            return expand(template, 2)
+        except (ValueError, IndexError, KeyError) as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
 
     def call_format(
         self,
