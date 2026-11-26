@@ -1417,8 +1417,11 @@ class FxConverter:
         if not ir.is_node_sequence(kernel.inputs):
             raise AssertionError("kernel.inputs is not a node sequence")
         tensor_nodes = tuple(self._generate_buffer(arg) for arg in kernel.inputs)
-        if hasattr(kernel, "unflatten_args"):
-            args, _ = kernel.unflatten_args(tensor_nodes, kernel.constant_args)
+        # FallbackKernel, or an ExternKernelOut lowered from a custom op's out
+        # variant (its unflatten_args is None otherwise).
+        unflatten_args = getattr(kernel, "unflatten_args", None)
+        if unflatten_args is not None:
+            args, _ = unflatten_args(tensor_nodes, kernel.constant_args)
         else:
             args = tensor_nodes + tuple(kernel.constant_args)
 
