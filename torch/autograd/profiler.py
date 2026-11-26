@@ -23,6 +23,7 @@ from torch.autograd import (
     _kineto_step,
     _prepare_profiler,
     _ProfilerResult,
+    _stop_profiler_collection,
     _supported_activities,
     _toggle_collection_dynamic,
     DeviceType,
@@ -419,6 +420,11 @@ class profile:
         self._stats.profiler_enable_call_duration_us = int((t1 - t0) / 1000)
         self.profiling_start_time_ns = t1
 
+    def _stop_collection(self) -> None:
+        self.profiling_end_time_ns = perf_counter_ns()
+        _stop_profiler_collection()
+        _run_on_profiler_stop()
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
@@ -437,7 +443,9 @@ class profile:
         self.kineto_results = _disable_profiler()
         t1 = perf_counter_ns()
         self._stats.profiler_disable_call_duration_us = int((t1 - t0) / 1000)
-        self.profiling_end_time_ns = t0
+        # A window that _stop_collection() ended keeps its end.
+        if self.profiling_end_time_ns <= self.profiling_start_time_ns:
+            self.profiling_end_time_ns = t0
 
         _run_on_profiler_stop()
 
