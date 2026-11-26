@@ -5801,6 +5801,423 @@ class TestVmGivenUpFills(TestCase):
 instantiate_device_type_tests(TestVmGivenUpFills, globals())
 
 
+# A frame under a traced body that ends in a raise.
+
+
+class CaughtInner(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(8, 8))
+
+
+def caught_through(attend, m, x):
+    return attend(m, x)
+
+
+class CaughtOuter(torch.nn.Module):
+    def __init__(self, attend):
+        super().__init__()
+        self.inner = CaughtInner()
+        self.attend = attend
+
+    def forward(self, x):
+        h = caught_through(self.attend, self.inner, x)
+        return (h * 3).tanh() + h
+
+
+def caught_tail(y):
+    return (y.cos() + y).relu()
+
+
+def caught_hasattr(m, x):
+    y = (x @ m.weight).sin() * 2
+    if hasattr(m, "groups") and m.groups > 1:
+        y = y + m.groups
+    return caught_tail(y)
+
+
+def caught_getattr(m, x):
+    y = (x @ m.weight).sin() * 2
+    y = y * getattr(m, "groups", 0.5)
+    return caught_tail(y)
+
+
+class CaughtTable:
+    def __init__(self):
+        self.table = {"scale": 2.0}
+
+    def __getattr__(self, name):
+        table = self.__dict__["table"]
+        if name in table:
+            return table[name]
+        raise AttributeError(f"no {name}")
+
+
+CAUGHT_TABLE = CaughtTable()
+
+
+def caught_own(m, x):
+    y = (x @ m.weight).sin() * CAUGHT_TABLE.scale
+    y = y * getattr(CAUGHT_TABLE, "groups", 3.0)
+    return caught_tail(y)
+
+
+class CaughtItems:
+    """Iterated the old way: by __getitem__ until it raises IndexError."""
+
+    def __init__(self, items):
+        self.items = items
+
+    def __getitem__(self, i):
+        if i >= len(self.items):
+            raise IndexError(i)
+        return self.items[i]
+
+
+CAUGHT_ITEMS = CaughtItems([2.0, 3.0])
+
+
+def caught_sum(m, x):
+    y = (x @ m.weight).sin() * sum(CAUGHT_ITEMS)
+    return caught_tail(y)
+
+
+def caught_loop(m, x):
+    y = (x @ m.weight).sin() * 2
+    for s in CAUGHT_ITEMS:
+        y = y * s
+    return caught_tail(y)
+
+
+class CaughtCount:
+    def __init__(self, n):
+        self.n, self.i = n, 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.i >= self.n:
+            raise StopIteration(self.i)
+        self.i += 1
+        return float(self.i)
+
+
+def caught_next(m, x):
+    y = (x @ m.weight).sin() * 2
+    y = y + next(CaughtCount(getattr(m, "groups", 0)), 5.0)
+    return caught_tail(y)
+
+
+def caught_for(m, x):
+    y = (x @ m.weight).sin() * 2
+    for s in CaughtCount(getattr(m, "groups", 2)):
+        y = y * s
+    return caught_tail(y)
+
+
+def caught_by_the_code(m, x):
+    y = (x @ m.weight).sin() * 2
+    try:
+        y = y * m.groups
+    except AttributeError:
+        y = y - 1
+    return caught_tail(y)
+
+
+def caught_checks(m):
+    if "groups" not in m.__dict__:
+        raise ValueError("no groups")
+    return m.__dict__["groups"]
+
+
+def caught_from_a_call(m, x):
+    y = (x @ m.weight).sin() * 2
+    try:
+        y = y * caught_checks(m)
+    except ValueError:
+        y = y - 1
+    return caught_tail(y)
+
+
+def caught_and_read(m, x):
+    y = (x @ m.weight).sin() * 2
+    try:
+        y = y * caught_checks(m)
+    except ValueError as e:
+        y = y - len(str(e))
+    return caught_tail(y)
+
+
+def caught_puts(inner, where, value):
+    """Binds the name the forms look for in one place, or (None) nowhere."""
+    inner.__dict__.pop("groups", None)
+    CAUGHT_TABLE.table.pop("groups", None)
+    del CAUGHT_ITEMS.items[2:]
+    if "groups" in CaughtInner.__dict__:
+        del CaughtInner.groups
+    if where == "instance":
+        inner.groups = value
+    elif where == "class":
+        CaughtInner.groups = value
+    elif where == "table":
+        CAUGHT_TABLE.table["groups"] = value
+    elif where == "items":
+        CAUGHT_ITEMS.items.append(value)
+
+
+# What C code catches: (the form, where the name is bound on some calls, to
+# what, the operations of the one region).
+CAUGHT_BY_C = {
+    "hasattr_instance": (caught_hasattr, "instance", 2, 10),
+    "hasattr_class": (caught_hasattr, "class", 2, 10),
+    "getattr_instance": (caught_getattr, "instance", 2.0, 10),
+    "getattr_class": (caught_getattr, "class", 2.0, 10),
+    "own_getattr": (caught_own, "table", 7.0, 10),
+    "index_error": (caught_sum, "items", 5.0, 9),
+}
+
+# What stays out of a region: (the form, where, to what, whether the name is
+# there on the first calls too, what a trace says).
+CAUGHT_BY_THE_CODE = {
+    "load_attr": (caught_by_the_code, "instance", 2.0, False, None),
+    "from_a_call": (
+        caught_from_a_call,
+        "instance",
+        2.0,
+        True,
+        "the code's own handler",
+    ),
+    "and_read": (caught_and_read, "instance", 2.0, True, "the code's own handler"),
+    "loop": (caught_loop, "items", 5.0, False, None),
+    "next": (caught_next, "instance", 1, False, None),
+    "for": (caught_for, "instance", 3, False, None),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmCaughtRaises(TestCase):
+    """A frame that ends in `raise X(...)` under hasattr, getattr with a
+    default or a consumer of the old iteration protocol only computed if its
+    blocks did: C code catches the exception and the instruction goes on.
+    The code around it is one region, checked on what the frame looked for;
+    an exception that the program's own handler takes is none."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, fn, inner, where, value, device, first=False):
+        # The name is there on calls 10-13 and 22-25 (`first`: and on the
+        # first two, so that the code that finds it has run to its end).
+        outs = []
+        with torch.no_grad():
+            for call in range(30):
+                there = 10 <= call < 14 or 22 <= call < 26 or (first and call < 2)
+                caught_puts(inner, where if there else None, value)
+                torch.manual_seed(call)
+                outs.append(fn(torch.randn(4, 8, device=device)))
+        caught_puts(inner, None, value)
+        return outs
+
+    def same(self, got, want):
+        for call, (g, w) in enumerate(zip(got, want)):
+            self.assertEqual(g, w, atol=0, rtol=0, msg=f"call {call}")
+
+    @parametrize("form", list(CAUGHT_BY_C))
+    @isolated
+    def test_caught_by_c_code(self, device, form):
+        attend, where, value, ops = CAUGHT_BY_C[form]
+        torch.manual_seed(0)
+        model = CaughtOuter(attend).eval().to(device)
+        want = self.calls(model, model.inner, where, value, device)
+        compiled = vm(model, passes=EARLY)
+        self.same(self.calls(compiled, model.inner, where, value, device), want)
+        regions = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertEqual([r["ops"] for r in regions], [ops], msg=f"{regions}")
+        # One for the calls that lack the name, one for those that find it;
+        # the change is a miss each time.
+        self.assertEqual(regions[0]["variants"], 2, msg=f"{regions}")
+        self.assertGreaterEqual(regions[0]["runs"], 18, msg=f"{regions}")
+        self.assertGreaterEqual(sum(regions[0]["misses"].values()), 4, msg=f"{regions}")
+
+    @parametrize("form", list(CAUGHT_BY_THE_CODE))
+    @isolated
+    def test_not_caught_by_c_code(self, device, form):
+        attend, where, value, first, why = CAUGHT_BY_THE_CODE[form]
+        torch.manual_seed(0)
+        model = CaughtOuter(attend).eval().to(device)
+        want = self.calls(model, model.inner, where, value, device, first)
+        compiled = vm(model, passes=EARLY)
+        self.same(self.calls(compiled, model.inner, where, value, device, first), want)
+        rows = vm.regions(compiled)
+        # No region but the tail's.
+        regions = [r for r in rows if r["state"] == "region"]
+        self.assertTrue(all(r["ops"] <= 4 for r in regions), msg=f"{regions}")
+        if why is not None:
+            said = [w or "" for r in rows for _, w in r.get("traces", ())]
+            self.assertTrue(any(why in w for w in said), msg=f"{said}")
+
+
+instantiate_device_type_tests(TestVmCaughtRaises, globals())
+
+
+# Hooks registered while a module's code already runs as regions.
+
+
+class HookedNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.register_buffer("scale", torch.full((8,), 0.5))
+
+    def forward(self, x):
+        h = (self.lin(x).sin() * self.scale).cos()
+        return (h * 3).tanh() + h
+
+
+class HookedGrid(torch.nn.Module):
+    """Binds a buffer in its forward, as a detection head keeps its grid."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("grid", torch.zeros(2))
+
+    def forward(self, x):
+        self.grid = torch.tensor((x.shape[0], x.shape[1]), dtype=torch.float)
+        return (x.sin() * self.grid.sum() * 0.01).tanh().cos().exp()
+
+
+class HookedTwice(torch.nn.Module):
+    def forward(self, w):
+        return w * 2
+
+
+HOOKED_CALLS = []
+
+
+def hooked_counts(module, name, value):
+    HOOKED_CALLS.append((type(module).__name__, name))
+
+
+def hooked_plus_one(module, name, buffer):
+    return buffer + 1
+
+
+def hooked_forward(net):
+    return net.lin.register_forward_hook(lambda m, args, out: out + 1)
+
+
+def hooked_forward_pre(net):
+    return net.lin.register_forward_pre_hook(lambda m, args: (args[0] * 2,))
+
+
+def hooked_parametrized(net):
+    torch.nn.utils.parametrize.register_parametrization(
+        net.lin, "weight", HookedTwice()
+    )
+
+
+# What is registered between calls, and the miss the region then has.
+HOOKED_FORMS = {
+    "forward_hook": (hooked_forward, "read: a namespace or a container"),
+    "forward_pre_hook": (hooked_forward_pre, "read: a namespace or a container"),
+    "parametrization": (hooked_parametrized, "read: the class of an object"),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmModuleHooks(TestCase):
+    """The modules torch.fx builds for a region's graph are the engine's
+    own: the hooks a program registered for every module do not run for
+    them. And a hook or a parametrization put on a module whose code already
+    runs as regions is seen at the next call."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, net, fn, device, install=None, sizes=(4,)):
+        # `install` is called before call 10; what it put there is taken
+        # off before call 18.
+        outs, handle = [], None
+        for call in range(24):
+            if call == 10 and install is not None:
+                handle = install(net)
+            if call == 18 and install is not None:
+                if handle is not None:
+                    handle.remove()
+                else:
+                    torch.nn.utils.parametrize.remove_parametrizations(
+                        net.lin, "weight", leave_parametrized=False
+                    )
+            torch.manual_seed(call)
+            with torch.no_grad():
+                outs.append(
+                    fn(torch.randn(sizes[(call // 3) % len(sizes)], 8, device=device))
+                )
+        return outs
+
+    def same(self, got, want):
+        for call, (g, w) in enumerate(zip(got, want)):
+            self.assertEqual(g, w, atol=0, rtol=0, msg=f"call {call}")
+
+    @isolated
+    def test_buffer_hook_that_computes_registered_between_calls(self, device):
+        # The hook's own operator was recorded into the graph make_fx was
+        # finishing, for ever.
+        def install(net):
+            return torch.nn.modules.module.register_module_buffer_registration_hook(
+                hooked_plus_one
+            )
+
+        net, twin = HookedGrid().to(device), HookedGrid().to(device)
+        want = self.calls(twin, twin, device, install, sizes=(4, 5))
+        got = self.calls(net, vm(net, passes=EARLY), device, install, sizes=(4, 5))
+        self.same(got, want)
+        self.assertEqual(net.grid, twin.grid, atol=0, rtol=0)
+
+    @parametrize("what", ["buffer", "parameter"])
+    @isolated
+    def test_registration_hook_is_not_called_for_the_graph_s_modules(
+        self, device, what
+    ):
+        register = getattr(
+            torch.nn.modules.module, f"register_module_{what}_registration_hook"
+        )
+        handle = register(hooked_counts)
+        try:
+            torch.manual_seed(0)
+            net = HookedNet().eval().to(device)
+            want = self.calls(net, net, device)
+            eager = list(HOOKED_CALLS)
+            compiled = vm(net, passes=EARLY)
+            self.same(self.calls(net, compiled, device), want)
+        finally:
+            handle.remove()
+        self.assertEqual(region_runs(compiled), 20)
+        # The graph holds the layer's two parameters and the buffer.
+        self.assertEqual(HOOKED_CALLS, eager)
+
+    @parametrize("form", list(HOOKED_FORMS))
+    @isolated
+    def test_registered_between_calls(self, device, form):
+        install, miss = HOOKED_FORMS[form]
+        torch.manual_seed(0)
+        net = HookedNet().eval().to(device)
+        torch.manual_seed(0)
+        twin = HookedNet().eval().to(device)
+        want = self.calls(twin, twin, device, install)
+        compiled = vm(net, passes=EARLY)
+        self.same(self.calls(net, compiled, device, install), want)
+        # The region of the calls before runs again once the module is as
+        # it was; while it is not, every call is a miss of that region.
+        first = next(
+            r for r in vm.regions(compiled) if r["state"] == "region" and r["ops"] == 8
+        )
+        self.assertEqual(first["misses"], {miss: 8}, msg=f"{first}")
+        self.assertEqual(first["runs"], 12, msg=f"{first}")
+
+
+instantiate_device_type_tests(TestVmModuleHooks, globals())
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA")
 class TestVmCudaGraphs(TestCase):

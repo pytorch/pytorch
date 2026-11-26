@@ -81,6 +81,66 @@ counts: dict[str, int] = {}
 block_pipeline: Any = None
 
 _PLAIN = (torch.Tensor, torch.nn.Parameter)
+
+# The hooks a program registered for every module, by what is registered.
+_MODULE_HOOKS = (
+    torch.nn.modules.module._global_buffer_registration_hooks,
+    torch.nn.modules.module._global_module_registration_hooks,
+    torch.nn.modules.module._global_parameter_registration_hooks,
+)
+
+
+class _OwnModules:
+    """While entered, the hooks a program registered for every module
+    (``register_module_buffer_registration_hook`` and its two siblings) are
+    set aside: torch.fx puts a graph's constants on modules of its own with
+    ``register_buffer`` and ``setattr``, and those are no modules of the
+    program's. A hook called for one would run once more than in eager, and a
+    hook that computes (``buffer + 1``) while make_fx finishes a graph is
+    recorded into that graph, whose new constant is registered in turn,
+    without end. ``program()`` puts the hooks back while the program's own
+    code runs. The dicts are the program's: emptied and filled in place, in
+    their order, and a hook registered meanwhile stays."""
+
+    def __init__(self) -> None:
+        self.held: list[list[tuple[int, Callable]]] | None = None
+
+    def __enter__(self) -> "_OwnModules":
+        if any(_MODULE_HOOKS):
+            self.held = [list(hooks.items()) for hooks in _MODULE_HOOKS]
+            for hooks in _MODULE_HOOKS:
+                hooks.clear()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        held, self.held = self.held, None
+        if held is not None:
+            for hooks, items in zip(_MODULE_HOOKS, held):
+                late = list(hooks.items())
+                hooks.clear()
+                hooks.update(items)
+                hooks.update(late)
+
+    @contextlib.contextmanager
+    def program(self, root: torch.nn.Module):
+        """The program's code runs: its hooks are back, but for what fx
+        registers on ``root``, its own module, while that code runs (a
+        parameter the graph takes as a constant)."""
+        register = root.register_parameter
+
+        def quiet(name: str, param: torch.nn.Parameter | None) -> None:
+            with _OwnModules():
+                register(name, param)
+
+        object.__setattr__(root, "register_parameter", quiet)
+        self.__exit__()
+        try:
+            yield
+        finally:
+            self.__enter__()
+            object.__delattr__(root, "register_parameter")
+
+
 _SCALARS = (bool, int, float, type(None))
 _IMMUTABLE = (
     bool,
@@ -2889,7 +2949,21 @@ def trace_region(
     the body ran leaves running it to the executor. A span's region (`span`)
     makes the checks itself. ``types``: what the VM recorded at each arg over
     the runs before (see torch.vm.Type). ``asked``: a span a cfg pass asked
-    for (``merge_blocks``), a region however few ops it runs."""
+    for (``merge_blocks``), a region however few ops it runs. The modules
+    built on the way are the engine's own (see _OwnModules)."""
+    with _OwnModules() as own:
+        return _trace_region(own, name, args, unused, span, types, asked)
+
+
+def _trace_region(
+    own: _OwnModules,
+    name: str,
+    args: tuple[Any, ...],
+    unused: list[int],
+    span: bool,
+    types: list[Any] | None,
+    asked: bool,
+):
     _region_body, _region_reads = _rust()._region_body, _rust()._region_reads
 
     allow = os.environ.get("TORCH_RUST_REGION_ALLOW")
@@ -3002,7 +3076,8 @@ def trace_region(
             with scalar_args, _RefuseImpure(backups):
                 _trace_backups = backups
                 try:
-                    outs = _region_body(*call_args)
+                    with own.program(_tracer().root):
+                        outs = _region_body(*call_args)
                 finally:
                     _trace_backups = None
             # The executor goes on from where the body left off: what it did

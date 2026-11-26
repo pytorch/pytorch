@@ -325,6 +325,7 @@ pub fn begin() {
     builtins();
     super::made::clear();
     asked::init();
+    super::built::init();
     TRACE.set(Some(Trace { thread: tffi::region_thread_state(), ..Trace::default() }));
 }
 
@@ -1308,6 +1309,7 @@ pub unsafe fn truth(obj: *mut PyObject) {
 pub unsafe fn call(callee: *mut PyObject, args: &[*mut PyObject], result: *mut PyObject, ran: bool) {
     let raised = if result.is_null() { ffi::PyErr_GetRaisedException() } else { std::ptr::null_mut() };
     call_read(callee, args, result, ran);
+    built(callee, args, result);
     if !raised.is_null() {
         ffi::PyErr_SetRaisedException(raised);
     }
@@ -1336,6 +1338,24 @@ unsafe fn call_read(callee: *mut PyObject, args: &[*mut PyObject], result: *mut 
         }
         used(&all);
     }
+}
+
+// `callee`, which is no Python function, was handed `args` (positional, then
+// keyword values) and returned `result` (NULL: it raised) to the traced
+// run: what it built that the region's graph does not make refuses the
+// trace (built.rs).
+pub unsafe fn built(callee: *mut PyObject, args: &[*mut PyObject], result: *mut PyObject) {
+    if !result.is_null()
+        && let Some(why) = super::built::refusal(callee, args, result)
+    {
+        refuse(why);
+    }
+}
+
+// As built(), for a starred call: `args` is the starred operand and
+// `kwargs` the dict (or NULL).
+pub unsafe fn built_starred(callee: *mut PyObject, args: *mut PyObject, kwargs: *mut PyObject, result: *mut PyObject) {
+    built(callee, &super::built::spread(args, kwargs), result);
 }
 
 // A tensor the region's graph reads that is none of its arguments: a weight.

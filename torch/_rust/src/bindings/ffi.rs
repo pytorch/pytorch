@@ -68,6 +68,7 @@ pub mod ffi {
         fn tensor_is_cuda(t: &Tensor) -> bool;
         fn tensor_defined(t: &Tensor) -> bool;
         fn tensor_requires_grad(t: &Tensor) -> bool;
+        fn tensor_is_leaf(t: &Tensor) -> bool;
 
         fn tensor_meta(t: &Tensor, out: &mut TensorMeta);
         fn dtype_name(dtype: i8) -> String;

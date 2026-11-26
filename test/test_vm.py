@@ -906,6 +906,104 @@ def facts_of_the_program(x, t):
     return facts_work(x) + t * t.note
 
 
+def leaf_end(y, t):
+    return (y * t.sum()).tanh().cos().exp(), t
+
+
+def leaf_factory(x):
+    return leaf_end(x.sin() + 1, torch.zeros(2, device=x.device, requires_grad=True))
+
+
+def leaf_like(x):
+    return leaf_end(x.sin() + 1, torch.ones_like(x, requires_grad=True))
+
+
+def leaf_method(x):
+    return leaf_end(x.sin() + 1, x.new_full((2,), 0.5, requires_grad=True))
+
+
+def leaf_constructor(x):
+    return leaf_end(
+        x.sin() + 1, torch.tensor([0.5, 0.25], device=x.device, requires_grad=True)
+    )
+
+
+def leaf_starred(x):
+    size = (2,)
+    return leaf_end(
+        x.sin() + 1, torch.zeros(*size, device=x.device, requires_grad=True)
+    )
+
+
+LEAF_PARTIAL = functools.partial(torch.ones, requires_grad=True)
+
+
+def leaf_partial(x):
+    return leaf_end(x.sin() + 1, LEAF_PARTIAL(2, device=x.device))
+
+
+def leaf_made(x):
+    return torch.arange(2.0, device=x.device, requires_grad=True)
+
+
+def leaf_in_callee(x):
+    return leaf_end(x.sin() + 1, leaf_made(x))
+
+
+def leaf_none(x):
+    return leaf_end(x.sin() + 1, torch.zeros(2, device=x.device, requires_grad=False))
+
+
+CTOR_ITEMS = [0.5, 0.25]
+
+
+def ctor_end(y, t):
+    return (y * t.sum()).tanh().cos().exp()
+
+
+def ctor_tensor(x):
+    return ctor_end(x.sin() + 1, torch.tensor(CTOR_ITEMS, device=x.device))
+
+
+def ctor_keyword(x):
+    return ctor_end(x.sin() + 1, torch.tensor(data=CTOR_ITEMS, device=x.device))
+
+
+def ctor_starred(x):
+    args = (CTOR_ITEMS,)
+    return ctor_end(x.sin() + 1, torch.tensor(*args, device=x.device))
+
+
+def ctor_nested(x):
+    return ctor_end(
+        x.sin() + 1, torch.tensor([CTOR_ITEMS, (0.5, 0.25)], device=x.device)
+    )
+
+
+def ctor_new_tensor(x):
+    return ctor_end(x.sin() + 1, x.new_tensor(CTOR_ITEMS))
+
+
+def ctor_as_tensor(x):
+    return ctor_end(x.sin() + 1, torch.as_tensor(CTOR_ITEMS, device=x.device))
+
+
+def ctor_asarray(x):
+    return ctor_end(x.sin() + 1, torch.asarray(CTOR_ITEMS, device=x.device))
+
+
+def ctor_class(x):
+    return ctor_end(x.sin() + 1, torch.Tensor(CTOR_ITEMS).to(x.device))
+
+
+def ctor_typed_class(x):
+    return ctor_end(x.sin() + 1, torch.FloatTensor(CTOR_ITEMS).to(x.device))
+
+
+def ctor_new(x):
+    return ctor_end(x.sin() + 1, x.new(CTOR_ITEMS))
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmTensorFacts(TestCase):
     """A region finds a tensor by its class, dtype, device, sizes, strides
@@ -1024,6 +1122,145 @@ class TestVmTensorFacts(TestCase):
             "note",
             ops=None,
         )
+
+    @parametrize(
+        "fn",
+        (
+            leaf_factory,
+            leaf_like,
+            leaf_method,
+            leaf_constructor,
+            leaf_starred,
+            leaf_partial,
+            leaf_in_callee,
+        ),
+        name_fn=lambda fn: fn.__name__,
+    )
+    @isolated
+    def test_leaf_that_requires_grad_is_made_on_every_call(self, device, fn):
+        # The flag is set on what the factory made, by its binding and by no
+        # operator: a region's graph would make the tensor without it. The
+        # trace is refused, and every call hands out a leaf of its own that
+        # a backward reaches.
+        g = vm_early(fn)
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            (got, leaf), (want, leaf_eager) = g(x), fn(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(
+                (got.requires_grad, leaf.requires_grad, leaf.is_leaf),
+                (True, True, True),
+                msg=f"call {call}",
+            )
+            got.sum().backward()
+            want.sum().backward()
+            self.assertEqual(
+                leaf.grad, leaf_eager.grad, atol=0, rtol=0, msg=f"call {call}"
+            )
+        whys = [
+            why
+            for r in vm.regions(g)
+            if r["kind"] == "block"
+            for state, why in r["traces"]
+            if state == "refused"
+        ]
+        self.assertTrue(
+            any(
+                "it makes a tensor that requires grad, which a region makes without"
+                in why
+                for why in whys
+            ),
+            msg=str(whys),
+        )
+
+    @isolated
+    def test_tensor_made_without_requires_grad_is_in_a_region(self, device):
+        g = vm_early(leaf_none)
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            (got, made), (want, _) = g(x), leaf_none(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertFalse(got.requires_grad or made.requires_grad)
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "leaf_none" and r["kind"] == "block"
+        )
+        self.assertEqual(row["state"], "region", msg=str(row))
+        self.assertGreater(row["runs"], 3, msg=str(row))
+
+    @parametrize(
+        "fn",
+        (
+            ctor_tensor,
+            ctor_keyword,
+            ctor_starred,
+            ctor_nested,
+            ctor_new_tensor,
+            ctor_as_tensor,
+            ctor_asarray,
+            ctor_class,
+            ctor_typed_class,
+            ctor_new,
+        ),
+        name_fn=lambda fn: fn.__name__,
+    )
+    @isolated
+    def test_tensor_filled_from_a_list_that_comes_to_hold_tensors(self, device, fn):
+        # The list holds numbers while the calls are observed, and from the
+        # seventh call on two tensors, which are then written in place. C++
+        # reads the value of each tensor in the list with every mode off:
+        # no operator of a graph reads them, so the trace is refused.
+        global CTOR_ITEMS
+        CTOR_ITEMS = [0.5, 0.25]
+        g = vm_early(fn)
+        for call in range(16):
+            if call == 6:
+                CTOR_ITEMS = [torch.tensor(0.3), torch.tensor(0.4)]
+            if call >= 9:
+                CTOR_ITEMS[0].add_(1.0)
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        whys = [
+            why
+            for r in vm.regions(g)
+            if r["kind"] == "block"
+            for state, why in r["traces"]
+            if state == "refused"
+        ]
+        self.assertTrue(
+            any(
+                "it makes a tensor from the values of the tensors in a list" in why
+                for why in whys
+            ),
+            msg=str(whys),
+        )
+
+    @isolated
+    def test_tensor_filled_from_a_list_of_numbers_is_in_a_region(self, device):
+        global CTOR_ITEMS
+        CTOR_ITEMS = [0.5, 0.25]
+        g = vm_early(ctor_tensor)
+        for call in range(12):
+            if call in (6, 9):
+                CTOR_ITEMS[0] += 0.25
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            self.assertEqual(g(x), ctor_tensor(x), atol=0, rtol=0, msg=f"call {call}")
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "ctor_tensor" and r["kind"] == "block"
+        )
+        self.assertEqual((row["state"], row["variants"]), ("region", 3), msg=str(row))
+        self.assertGreater(row["runs"], 3, msg=str(row))
 
 
 instantiate_device_type_tests(TestVmTensorFacts, globals())

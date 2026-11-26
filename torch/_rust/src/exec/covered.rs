@@ -49,6 +49,10 @@
 //     off, and those frames are asked about as any other;
 //   - A TENSOR'S HASH, which C code runs for a key, is taken as the
 //     optimizer takes it: by the rule of the instruction that needed it;
+//   - A FRAME THAT ENDS IN A RAISE is judged by its blocks as one that
+//     returns, where the exception it made is caught by the C code that
+//     entered it; step() is Err at the first instruction asked about while
+//     the program still has such an exception (raises.rs);
 //   - OPERANDS OF A KIND NO VERDICT SAW. Before an instruction that takes
 //     the items of an operand, or changes it in place (kinds.rs says which),
 //     step() asks whether a verdict saw an operand of that class there, and
@@ -95,7 +99,7 @@ use pyo3::prelude::*;
 use crate::cfg::ir::Instr;
 
 use super::ffi::*;
-use super::{Compiled, effects, kinds, shown};
+use super::{Compiled, effects, kinds, raises, shown};
 
 // The instructions of a code that some verdict covered, by code unit. Kept
 // in the code's own Compiled, for its clones too.
@@ -213,6 +217,7 @@ pub fn place(tried: u32) {
     TRIED.set(tried);
     AGAIN.set(false);
     FILLED.with_borrow_mut(|f| f.clear());
+    raises::begin();
 }
 
 // The addresses of the containers that an instruction of the trace on this
@@ -228,6 +233,7 @@ pub fn filled() -> Vec<usize> {
 // that is observed again, so that its place is left open. Asked once per
 // failed trace.
 pub fn later() -> bool {
+    raises::over();
     AGAIN.replace(false)
 }
 
@@ -239,6 +245,7 @@ pub fn pending() -> bool {
 // Whether the frame of `c` that is about to run is observed: it runs the
 // plan that records, whatever else would run it.
 pub unsafe fn observes(c: &Compiled) -> bool {
+    raises::over();
     WANTED.load(Ordering::Relaxed) != 0 && own(c).covered.wanted.load(Ordering::Relaxed) != 0
 }
 
@@ -321,6 +328,7 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, ins: &Instr, operands: &[*
     // A trace that is refused already runs on to its end as the program
     // takes it (its handlers, its cleanup): nothing more is asked of it.
     if TRUSTED.get() > 0 || super::region::refused() {
+        raises::over();
         return Ok(false);
     }
     let py = Python::assume_attached();
@@ -331,6 +339,12 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, ins: &Instr, operands: &[*
     let call = f.filter(|_| partial.is_null()).map_or(std::ptr::null_mut(), |f| tr_type_function(f, 0));
     let g = f.map_or(std::ptr::null_mut(), |f| tr_bound_function(if !partial.is_null() { partial } else if call.is_null() { f } else { call }));
     let taker = !g.is_null() && shown::takes(g);
+    // An exception a frame under the body made and raised, which the
+    // program still has: no C code caught it (see raises.rs).
+    if let Some(why) = raises::asked(!g.is_null() && raises::class(g)) {
+        AGAIN.set(false);
+        return Err(why);
+    }
     // The class of an operand the instruction takes from or changes that
     // no verdict saw there.
     let unseen = |c: &Compiled| {

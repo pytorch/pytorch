@@ -101,6 +101,10 @@ bool tensor_requires_grad(const Tensor& t) {
   return t.requires_grad();
 }
 
+bool tensor_is_leaf(const Tensor& t) {
+  return t.is_leaf();
+}
+
 void tensor_meta(const Tensor& t, TensorMeta& out) noexcept {
   out.defined = t.defined();
   out.has_device = false;

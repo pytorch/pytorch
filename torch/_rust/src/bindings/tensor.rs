@@ -48,6 +48,10 @@ impl Tensor {
     pub fn requires_grad(&self) -> bool {
         ffi::tensor_requires_grad(self)
     }
+
+    pub fn is_leaf(&self) -> bool {
+        ffi::tensor_is_leaf(self)
+    }
 }
 
 impl<'a, 'py> FromPyObject<'a, 'py> for &'a Tensor {

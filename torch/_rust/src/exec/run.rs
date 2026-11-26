@@ -1988,8 +1988,9 @@ impl Act<'_> {
     }
 
     // Reports what the generic instruction `ins` (just run; `ran`: it entered
-    // a Python frame) read to the trace's reads (see reads.rs).
-    unsafe fn note_read(&self, opcode: u8, oparg: u32, ins: &Instr, ran: bool) {
+    // a Python frame; `result`: its one result, or NULL) read to the trace's
+    // reads (see reads.rs).
+    unsafe fn note_read(&self, opcode: u8, oparg: u32, ins: &Instr, ran: bool, result: *mut PyObject) {
         use crate::cfg::opcodes::*;
         let a = |k: usize| self.val(ins.args[k]);
         match opcode {
@@ -2015,6 +2016,8 @@ impl Act<'_> {
                     reads::called(a(0));
                     reads::starred(a(1));
                 }
+                let kwargs = if ins.args.len() > 2 { a(2) } else { std::ptr::null_mut() };
+                reads::built_starred(a(0), a(1), kwargs, result);
             }
             _ => {
                 let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
@@ -2180,7 +2183,14 @@ impl Act<'_> {
                     if self.reading {
                         reads::called(callee);
                     }
-                    check(tr_call(args, *argc as c_int, kw))?
+                    let r = tr_call(args, *argc as c_int, kw);
+                    if self.reading {
+                        // What a callable that is no builtin function (a
+                        // functools.partial of one, a class) handed out.
+                        let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                        reads::built(callee, &all[if all[0].is_null() { 2 } else { 1 }..], r);
+                    }
+                    check(r)?
                 }
             }
             Op::Binary(k) => {
@@ -2340,7 +2350,7 @@ impl Act<'_> {
                     // An instruction that raised read its operands too (a
                     // key that isn't there): the exception is kept.
                     let raised = if rc != 0 { pyo3::ffi::PyErr_GetRaisedException() } else { std::ptr::null_mut() };
-                    self.note_read(*opcode, *arg, ins, reads::frames() != before);
+                    self.note_read(*opcode, *arg, ins, reads::frames() != before, if rc == 0 && n == 1 { out[0] } else { std::ptr::null_mut() });
                     if !raised.is_null() {
                         pyo3::ffi::PyErr_SetRaisedException(raised);
                     }

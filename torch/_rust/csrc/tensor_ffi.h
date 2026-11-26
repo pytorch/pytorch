@@ -86,6 +86,7 @@ bool tensor_is_cpu(const Tensor& t);
 bool tensor_is_cuda(const Tensor& t);
 bool tensor_defined(const Tensor& t);
 bool tensor_requires_grad(const Tensor& t);
+bool tensor_is_leaf(const Tensor& t);
 
 // Defined by the cxx bridge (src/bindings/ffi.rs).
 struct TensorMeta;

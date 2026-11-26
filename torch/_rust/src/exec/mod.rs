@@ -6,6 +6,7 @@
 mod asked;
 pub mod autograd;
 mod backward;
+mod built;
 mod compilers;
 mod covered;
 pub mod effects;
@@ -16,6 +17,7 @@ mod kinds;
 mod live;
 mod made;
 pub mod overlap;
+mod raises;
 pub mod reads;
 pub mod region;
 mod rows;
@@ -974,6 +976,9 @@ unsafe extern "C" fn eval_frame(
     }
     if observed {
         covered::observed(c, matches!(outcome, run::Outcome::Return(_)));
+    }
+    if tracing && matches!(outcome, run::Outcome::Error) {
+        raises::left(c);
     }
     // What the frame held is dropped with no instr of the body running
     // (see reads.rs); then the caller's instr goes on.
@@ -3195,6 +3200,10 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, code: usize, v: ValueId, clones: 
         Ok(())
     } else if plain_class(py, &f) {
         // A new object, whose __init__ (if Python's) entered a frame judged above.
+        Ok(())
+    } else if depth > 0 && !partial && raises::made(prep, v, f.as_ptr()) {
+        // An exception that the frame is left with at once: where C code
+        // catches it, the frame has only computed (see raises.rs).
         Ok(())
     } else if !partial && (writes::taken_call(code, ins.origin, &f) || writes::type_question(f.as_ptr())) {
         // A write the region makes again, or what a module's store asks
