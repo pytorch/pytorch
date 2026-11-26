@@ -339,7 +339,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
     }
     return std::move(stream).str();
   };
-  auto gpu_subslice_count = [](const DeviceProp& prop) {
+  auto xe_core_count = [](const DeviceProp& prop) {
     return (prop.gpu_eu_count / prop.gpu_eu_count_per_subslice);
   };
   auto get_device_architecture = [](const DeviceProp& prop) {
@@ -394,7 +394,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       // TODO: Expose cache size by level when available from SYCL
       .def_readonly("last_level_cache_size", &DeviceProp::global_mem_cache_size)
-      .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
+      .def_property_readonly("gpu_subslice_count", xe_core_count)
+      .def_property_readonly("xe_core_count", xe_core_count)
       .def_property_readonly("architecture", get_device_architecture)
       .def_property_readonly("type", get_device_type)
       .def_property_readonly(
@@ -402,7 +403,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
           [](const DeviceProp& prop) -> XPUuuid { return XPUuuid(prop.uuid); })
       .def(
           "__repr__",
-          [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
+          [&get_device_type, &xe_core_count](const DeviceProp& prop) {
             std::ostringstream stream;
             stream << "_XpuDeviceProperties(name='" << prop.name
                    << "', platform_name='" << prop.platform_name << "', type='"
@@ -420,7 +421,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << ", memory_clock_rate=" << prop.memory_clock_rate
                    << "MHz, memory_bus_width=" << prop.memory_bus_width
                    << "-bit, gpu_eu_count=" << prop.gpu_eu_count
-                   << ", gpu_subslice_count=" << gpu_subslice_count(prop)
+                   << ", xe_core_count=" << xe_core_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
                    << ", max_num_sub_groups=" << prop.max_num_sub_groups
                    << ", sub_group_sizes=[" << prop.sub_group_sizes
@@ -430,9 +431,6 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << ", is_integrated_gpu=" << prop.is_integrated_gpu << ")";
             return std::move(stream).str();
           });
-  m.def("_xpu_isHistoryEnabled", []() {
-    return c10::xpu::XPUCachingAllocator::isHistoryEnabled();
-  });
 }
 
 static void registerXpuPluggableAllocator(PyObject* module) {
@@ -797,6 +795,9 @@ static void initXpuMethodBindings(PyObject* module) {
     return result;
   });
   m.def("_xpu_recordMemoryHistory", &torch::xpu::_record_memory_history);
+  m.def("_xpu_isHistoryEnabled", []() {
+    return c10::xpu::XPUCachingAllocator::isHistoryEnabled();
+  });
   m.def(
       "_xpu_beginAllocateCurrentThreadToPool",
       [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
