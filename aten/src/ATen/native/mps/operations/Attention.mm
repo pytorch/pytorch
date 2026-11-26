@@ -1,11 +1,9 @@
 #include <string>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <fmt/format.h>
-#include <algorithm>
 #include <optional>
 
 #include <ATen/ExpandUtils.h>
-#include <ATen/OpMathType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -19,15 +17,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
-#include <ATen/ops/_scaled_dot_product_efficient_attention_backward_native.h>
-#include <ATen/ops/_scaled_dot_product_efficient_attention_native.h>
-#include <ATen/ops/_softmax_backward_data.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/matmul.h>
-#include <ATen/ops/ones.h>
-#include <ATen/ops/sum.h>
 #endif
 
 namespace at {
@@ -61,7 +52,6 @@ static void sdpa_vector_fast_mps(const Tensor& q_,
                                  const Tensor& v_,
                                  const Tensor& out,
                                  const std::optional<Tensor>& mask_,
-                                 const std::optional<Tensor>& lse,
                                  bool is_causal,
                                  float scale_factor,
                                  int64_t bd) {
@@ -119,10 +109,8 @@ static void sdpa_vector_fast_mps(const Tensor& q_,
         mtl_setArgs<9>(
             computeEncoder, mask, std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
       }
-      mtl_setArgs<11>(computeEncoder,
-                      std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head},
-                      head_dims,
-                      lse);
+      mtl_setArgs<11>(
+          computeEncoder, std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head}, head_dims);
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
     }
   });
@@ -134,7 +122,6 @@ static void sdpa_vector_2pass_mps(const Tensor& q_,
                                   const Tensor& v_,
                                   const Tensor& out,
                                   const std::optional<Tensor>& mask_,
-                                  const std::optional<Tensor>& lse,
                                   bool is_causal,
                                   float scale_factor,
                                   int64_t bd) {
@@ -212,7 +199,7 @@ static void sdpa_vector_2pass_mps(const Tensor& q_,
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
       // 2nd pass
       [computeEncoder setComputePipelineState:sdpa_vector_pass2PSO];
-      mtl_setArgs(computeEncoder, intermediate, sums, maxs, out, head_dims[1], lse);
+      mtl_setArgs(computeEncoder, intermediate, sums, maxs, out, head_dims[1]);
       const auto pass2_group_dims = MTLSizeMake(blocks * c10::metal::simdgroup_size, 1, 1);
       [computeEncoder dispatchThreadgroups:MTLSizeMake(B, seq_len_q, 1) threadsPerThreadgroup:pass2_group_dims];
     }
@@ -236,7 +223,6 @@ static void sdpa_prefill_mps(const Tensor& q,
                              const Tensor& v,
                              const Tensor& out,
                              const std::optional<Tensor>& mask_,
-                             const std::optional<Tensor>& lse,
                              bool is_causal,
                              float scale) {
   using namespace mps;
@@ -311,8 +297,6 @@ static void sdpa_prefill_mps(const Tensor& q,
         .V_strides = {vs.stride(0), vs.stride(1), vs.stride(2)},
         .O_strides = {os.stride(0), os.stride(1), os.stride(2)},
     };
-    // Every V/O column launch computes the same row statistics; the first writes them.
-    const auto lse_ = v0 == 0 ? lse : std::nullopt;
     dispatch_sync_with_rethrow(mpsStream->queue(), ^{
       @autoreleasepool {
         auto computeEncoder = mpsStream->commandEncoder();
@@ -324,22 +308,21 @@ static void sdpa_prefill_mps(const Tensor& q,
         if (mask) {
           mtl_setArgs<6>(computeEncoder, *mask);
         }
-        mtl_setArgs<7>(computeEncoder, lse_);
         [computeEncoder dispatchThreadgroups:grid threadsPerThreadgroup:threadgroup];
       }
     });
   }
 }
 
-// Returns the output and, if compute_lse, the fp32 softmax logsumexp, shaped
-// like the output without its last dim.
-static std::tuple<Tensor, Tensor> sdpa_mps(const Tensor& query,
-                                           const Tensor& key_,
-                                           const Tensor& value_,
-                                           const std::optional<Tensor>& attn_mask,
-                                           bool is_causal,
-                                           std::optional<double> scale,
-                                           bool compute_lse) {
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
+                                                                  const Tensor& key_,
+                                                                  const Tensor& value_,
+                                                                  const std::optional<Tensor>& attn_mask,
+                                                                  double dropout_p,
+                                                                  bool is_causal,
+                                                                  const std::optional<Tensor>& dropout_mask,
+                                                                  std::optional<double> scale,
+                                                                  bool enable_gqa) {
   const auto dtype = query.scalar_type();
   TORCH_CHECK_NOT_IMPLEMENTED(
       c10::isFloatingType(dtype), "scaled_dot_product_attention for MPS does not support dtype ", dtype);
@@ -348,6 +331,7 @@ static std::tuple<Tensor, Tensor> sdpa_mps(const Tensor& query,
   TORCH_CHECK_VALUE(
       query.size(-1) == key_.size(-1) && key_.size(-2) == value_.size(-2),
       "scaled_dot_product_attention for MPS expects key to share the head dim with query and the sequence length with value");
+  TORCH_CHECK_NOT_IMPLEMENTED(dropout_p == 0.0f, "scaled_dot_product_attention for MPS does not support dropout.");
   TORCH_CHECK(!(is_causal && attn_mask.has_value()),
               "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
   // The kernels broadcast K/V across GQA groups via their gqa_factor parameter,
@@ -386,9 +370,7 @@ static std::tuple<Tensor, Tensor> sdpa_mps(const Tensor& query,
   };
   const auto q_ = expand_batch(zero_head_dim ? zero_column(query) : query);
   const auto k_ = expand_batch(zero_head_dim ? zero_column(key_) : key_);
-  // Likewise a zero V head dim still has a logsumexp, which the kernels only
-  // compute along with some output.
-  const auto v_ = expand_batch(value_.size(-1) == 0 && compute_lse ? zero_column(value_) : value_);
+  const auto v_ = expand_batch(value_);
 
   auto out_shape = batch_shape;
   out_shape.append({query.sym_size(-3), query.sym_size(-2), value_.sym_size(-1)});
@@ -408,9 +390,6 @@ static std::tuple<Tensor, Tensor> sdpa_mps(const Tensor& query,
   const int64_t q_len = q_.size(2), d = q_.size(3), dv = v_.size(3);
   const float scale_factor = sdp::calculate_scale(q_, scale).expect_float();
   auto out = at::empty({q_.size(0), q_.size(1), q_len, dv}, q_.options());
-  const auto lse = compute_lse
-      ? std::optional<Tensor>(at::empty({q_.size(0), q_.size(1), q_len}, q_.options().dtype(kFloat)))
-      : std::nullopt;
   // Decode forms uint32 offsets up to the first 1024 (kTwoPassMinKeys) keys of a head and advances pointers past them,
   // and pass 1 int32 offsets into its {B, H, qL, kDecodeBlocks, bd} partials; prefill takes 64-bit offsets.
   const auto fits_u32 = [](const Tensor& t, int64_t key_dim = -1) {
@@ -424,165 +403,17 @@ static std::tuple<Tensor, Tensor> sdpa_mps(const Tensor& query,
   const int64_t bd = q_len <= kDecodeMaxQueries && u32 ? decode_bucket(d, dv) : 0;
   if (out.numel() > 0 && bd > 0 && k_.size(2) >= kTwoPassMinKeys &&
       std::in_range<int32_t>(out.numel() / dv * kDecodeBlocks * bd)) {
-    sdpa_vector_2pass_mps(q_, k_, v_, out, mask, lse, is_causal, scale_factor, bd);
+    sdpa_vector_2pass_mps(q_, k_, v_, out, mask, is_causal, scale_factor, bd);
   } else if (out.numel() > 0 && bd > 0) {
-    sdpa_vector_fast_mps(q_, k_, v_, out, mask, lse, is_causal, scale_factor, bd);
+    sdpa_vector_fast_mps(q_, k_, v_, out, mask, is_causal, scale_factor, bd);
   } else if (out.numel() > 0) {
-    sdpa_prefill_mps(q_, k_, v_, out, mask, lse, is_causal, scale_factor);
+    sdpa_prefill_mps(q_, k_, v_, out, mask, is_causal, scale_factor);
   }
-  if (dv != value_.size(-1)) {
-    out = out.narrow(-1, 0, 0);
-  }
-  auto lse_shape = out_shape;
-  lse_shape.pop_back();
-  return {out.view_symint(out_shape), lse ? lse->view_symint(lse_shape) : Tensor()};
-}
-
-std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
-                                                                  const Tensor& key,
-                                                                  const Tensor& value,
-                                                                  const std::optional<Tensor>& attn_mask,
-                                                                  double dropout_p,
-                                                                  bool is_causal,
-                                                                  const std::optional<Tensor>& dropout_mask,
-                                                                  std::optional<double> scale,
-                                                                  bool enable_gqa) {
-  TORCH_CHECK_NOT_IMPLEMENTED(dropout_p == 0.0, "scaled_dot_product_attention for MPS does not support dropout.");
   // The attention weights are never materialized (nothing consumes them); an
   // empty tensor stands in, as the flash attention ops do for unrequested outputs.
-  return {std::get<0>(sdpa_mps(query, key, value, attn_mask, is_causal, scale, false)),
-          at::empty({0}, query.options())};
+  // TODO: implement the flash, efficient and math attention ops for MPS properly
+  // instead of routing them all through this op.
+  return {out.view_symint(out_shape), at::empty({0}, q_.options())};
 }
-
-std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_mps(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    const std::optional<Tensor>& attn_bias,
-    bool compute_log_sumexp,
-    double dropout_p,
-    bool is_causal,
-    std::optional<double> scale) {
-  TORCH_CHECK_NOT_IMPLEMENTED(dropout_p == 0.0, "scaled_dot_product_attention for MPS does not support dropout.");
-  auto [out, lse] = sdpa_mps(query, key, value, attn_bias, is_causal, scale, compute_log_sumexp);
-  if (!lse.defined()) {
-    auto shape = out.sym_sizes().vec();
-    shape.pop_back();
-    shape.back() = 0;
-    lse = at::empty_symint(shape, out.options().dtype(kFloat));
-  }
-  // Without dropout there is no RNG state; nothing reads these, so unlike CUDA they are left
-  // unfilled, which saves two kernel launches per call.
-  const auto options = query.options().dtype(kLong);
-  return {std::move(out), std::move(lse), at::empty({}, options), at::empty({}, options)};
-}
-
-// Rebuilds the attention weights with ATen ops from the scores and the forward's logsumexp.
-std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_backward_mps(
-    const Tensor& grad_out,
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    const Tensor& attn_mask,
-    const Tensor& /*out*/,
-    const Tensor& logsumexp,
-    const Tensor& /*philox_seed*/,
-    const Tensor& /*philox_offset*/,
-    double dropout_p,
-    std::array<bool, 4> grad_input_mask,
-    bool is_causal,
-    std::optional<double> scale) {
-  if (!grad_out.defined()) {
-    return {};
-  }
-  TORCH_CHECK_NOT_IMPLEMENTED(dropout_p == 0.0, "scaled_dot_product_attention for MPS does not support dropout.");
-  TORCH_CHECK_VALUE(logsumexp.dim() == grad_out.dim() - 1 && logsumexp.sym_size(-1) == grad_out.sym_size(-2),
-                    "scaled_dot_product_attention backward for MPS needs the logsumexp of a forward run with "
-                    "compute_log_sumexp=True");
-  const auto opmath = at::toOpMathType(query.scalar_type());
-  auto batch_dims = [](const Tensor& t) { return t.sym_sizes().slice(0, t.dim() - 3); };
-  auto batch_shape = at::infer_size_symdimvector(batch_dims(query), batch_dims(key));
-  batch_shape = at::infer_size_symdimvector(batch_shape, batch_dims(value));
-  // Like the forward kernels, K/V heads are shared by groups of query heads whether or not enable_gqa is set.
-  const auto groups = query.sym_size(-3) / key.sym_size(-3);
-  auto expand = [&](const Tensor& t, const c10::SymInt& reps) {
-    auto shape = batch_shape;
-    shape.append({t.sym_size(-3), reps, t.sym_size(-2), t.sym_size(-1)});
-    return t.to(opmath).unsqueeze(-3).expand_symint(shape).flatten(-4, -3);
-  };
-  auto reduce = [](const Tensor& grad, const Tensor& t, const c10::SymInt& reps) {
-    const auto heads = reps == 1 ? grad : grad.unflatten_symint(-3, {t.sym_size(-3), reps}).sum(-3);
-    return at::sum_to(heads, t.sym_sizes()).to(t.scalar_type());
-  };
-  const auto q = expand(query, 1);
-  const auto k = expand(key, groups);
-  const auto v = expand(value, groups);
-  const auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
-  // Scaling q rather than the scores keeps a zero head dim (infinite default scale) finite.
-  const auto q_scaled = q.mul(scale_factor);
-  const auto neg_inf = -std::numeric_limits<double>::infinity();
-  auto scores = at::matmul(q_scaled, k.mT());
-  if (is_causal) {
-    const auto causal =
-        at::ones_symint({scores.sym_size(-2), scores.sym_size(-1)}, scores.options().dtype(kBool)).triu(1);
-    scores.masked_fill_(causal, neg_inf);
-  } else if (attn_mask.defined() && attn_mask.scalar_type() == kBool) {
-    scores.masked_fill_(attn_mask.logical_not(), neg_inf);
-  } else if (attn_mask.defined()) {
-    scores.add_(attn_mask);
-  }
-  // A fully masked row has a +inf logsumexp, so its weights come out as 0 like _safe_softmax's.
-  const auto attn = scores.sub_(logsumexp.unsqueeze(-1)).exp_();
-  const auto grad = grad_out.to(opmath);
-  // Its row sums are taken from attn and grad @ v^T in opmath rather than from grad * out:
-  // out is rounded to the input dtype, which loses fp16 gradients to cancellation.
-  const auto grad_scores = at::_softmax_backward_data(at::matmul(grad, v.mT()), attn, -1, opmath);
-  return {grad_input_mask[0] ? reduce(at::matmul(grad_scores, k).mul(scale_factor), query, 1) : Tensor(),
-          grad_input_mask[1] ? reduce(at::matmul(grad_scores.mT(), q_scaled), key, groups) : Tensor(),
-          grad_input_mask[2] ? reduce(at::matmul(attn.mT(), grad), value, groups) : Tensor(),
-          grad_input_mask[3] ? at::sum_to(grad_scores, attn_mask.sym_sizes()).to(attn_mask.scalar_type()) : Tensor()};
-}
-
-// The Metal kernels above are exposed as the memory efficient attention backend
-// (arbitrary masks and their gradients, dv != d); anything they can not handle
-// (dropout) goes to the math backend.
-int64_t _fused_sdp_choice_mps(const Tensor& query,
-                              const Tensor& key,
-                              const Tensor& value,
-                              const std::optional<Tensor>& /*attn_mask*/,
-                              double dropout_p,
-                              bool /*is_causal*/,
-                              std::optional<double> /*scale*/,
-                              bool enable_gqa) {
-  auto& ctx = at::globalContext();
-  std::string_view reason;
-  if (!ctx.userEnabledMemEfficientSDP()) {
-    reason = "it is disabled";
-  } else if (dropout_p > 0.0) {
-    reason = "it does not support dropout";
-  } else if (!c10::isFloatingType(query.scalar_type())) {
-    reason = "it only supports floating point inputs";
-  } else if (query.dim() < 3 || key.dim() < 3 || value.dim() < 3) {
-    reason = "it requires inputs with a heads dimension";
-  } else if (key.sym_size(-3) != value.sym_size(-3)) {
-    reason = "key and value have different numbers of heads";
-  } else if (!enable_gqa && key.sym_size(-3) != 1 && query.sym_size(-3) != key.sym_size(-3)) {
-    // The kernels would broadcast K/V heads, while math only broadcasts a single one
-    reason = "query and key have different numbers of heads and enable_gqa is not set";
-  } else {
-    const auto order = ctx.sDPPriorityOrder();
-    const auto pos = [&](sdp::SDPBackend b) { return std::find(order.begin(), order.end(), b); };
-    if (!ctx.userEnabledMathSDP() || pos(sdp::SDPBackend::efficient_attention) < pos(sdp::SDPBackend::math)) {
-      return static_cast<int64_t>(sdp::SDPBackend::efficient_attention);
-    }
-  }
-  TORCH_CHECK(ctx.userEnabledMathSDP(),
-              "Memory efficient attention kernel not used because ",
-              reason,
-              ". No available kernel.  Aborting execution.");
-  return static_cast<int64_t>(sdp::SDPBackend::math);
-}
-
-REGISTER_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_mps)
 } // namespace native
 } // namespace at

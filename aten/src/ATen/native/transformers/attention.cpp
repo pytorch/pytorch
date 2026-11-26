@@ -33,6 +33,7 @@
 #include <ATen/ops/_nested_from_padded.h>
 #include <ATen/ops/_nested_tensor_softmax_with_shape.h>
 #include <ATen/ops/_scaled_dot_product_attention_math.h>
+#include <ATen/ops/_scaled_dot_product_attention_math_for_mps.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_native.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
@@ -876,9 +877,7 @@ Tensor scaled_dot_product_attention(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case SDPBackend::efficient_attention: {
-      // The Metal kernels take any strided, broadcastable mask; the padding and
-      // 4-D expansion here are for the CUDA kernels.
-      if (attn_mask.has_value() && query_device_type != DeviceType::MPS) {
+      if (attn_mask.has_value()) {
         attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);
       }
       bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(
@@ -893,6 +892,19 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(std::move(out_lse_softmax));
     }
     case SDPBackend::math: {
+      const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
+      if (query_device_type == c10::kMPS && !(at::GradMode::is_enabled() && any_inputs_require_grad)) {
+        return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
+            query_,
+            key,
+            value,
+            attn_mask,
+            dropout_p,
+            is_causal,
+            std::nullopt, /*dropout_mask*/
+            scale,
+            enable_gqa));
+      }
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,

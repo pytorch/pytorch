@@ -3907,7 +3907,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             fx_node.target
             == aten._scaled_dot_product_efficient_attention_backward.default
             and idx in (0, 5)
-            and (meta_val.is_cuda or meta_val.is_xpu)
         ):
             if len(stride_order) != 4:
                 raise AssertionError("expected: len(stride_order) == 4")
