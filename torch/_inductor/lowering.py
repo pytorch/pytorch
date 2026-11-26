@@ -1416,13 +1416,6 @@ def register_pointwise(
             if any(isinstance(arg, IRNode) and is_triton(arg) for arg in args):
                 if allow_alpha:
                     raise AssertionError("expected: not allow_alpha")
-                for arg in pytree.tree_leaves((args, kwargs)):
-                    if _is_tensor_irnode(arg) and is_triton(arg):
-                        arg.realize()
-                        V.graph.preserve_input_alignment(
-                            (arg.get_name(),),
-                            "native pointwise kernels require original input pointer alignment",
-                        )
                 return native_handler(*args, **kwargs)
             args, kwargs = transform_args(
                 list(args),
@@ -3236,6 +3229,16 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         def wrap_tensors(x):
             return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
 
+        storage_names = []
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if _is_tensor_irnode(arg) and is_triton(arg):
+                arg.realize()
+                storage_names.append(arg.get_name())
+        if storage_names:
+            V.graph.preserve_input_alignment(
+                storage_names,
+                "native kernels require original input pointer alignment",
+            )
         out = ir.FallbackKernel.create(kernel, *args, **kwargs)
         # The reinplace pass replaces the out-of-place overload with its
         # in-place equivalent, which returns () but retains the original

@@ -29,6 +29,7 @@ class NativeCalls(TorchDispatchMode):
         if func._schema.name in (
             "aten::special_laguerre_polynomial_l",
             "aten::special_legendre_polynomial_p",
+            "aten::sum",
         ):
 
             def encode(value):
@@ -52,6 +53,59 @@ class NativeCalls(TorchDispatchMode):
 
 class TestNativePointwise(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @parametrize("layout", ("contiguous", "transposed"))
+    @parametrize("dim", (None, -1))
+    @parametrize("numerics", ("default", "strict"))
+    def test_reused_native_sum_arguments(self, device, dtype, layout, dim, numerics):
+        output_dtype = (
+            torch.complex128
+            if dtype in (torch.float64, torch.complex128)
+            else torch.complex64
+        )
+        torch.manual_seed(0)
+        values = torch.randn(9, 1031, dtype=dtype, device=device)
+        values *= 2.0 ** torch.randint(-10, 10, values.shape, device=device)
+        calls = []
+        compilations = []
+
+        def fn(x):
+            return x.sum(dim=dim, dtype=output_dtype)
+
+        def backend(gm, inputs):
+            compilations.append(gm)
+            compiled = lookup_backend("inductor")(gm, inputs)
+
+            def execute(*args):
+                native = NativeCalls()
+                with native:
+                    result = compiled(*args)
+                calls.extend(native.calls)
+                return result
+
+            return execute
+
+        torch._dynamo.reset()
+        with config.patch(
+            numerics=numerics, fx_graph_cache=False, fx_graph_remote_cache=False
+        ):
+            compiled = torch.compile(fn, backend=backend, fullgraph=True)
+            for offset in (0, 1, 2):
+                base = torch.empty(values.numel() + 2, dtype=dtype, device=device)
+                x = base[offset : offset + values.numel()].view(values.shape)
+                x.copy_(values)
+                if layout == "transposed":
+                    x = x.t()
+                eager = NativeCalls()
+                with eager:
+                    expected = fn(x)
+                actual = compiled(x)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                self.assertEqual(len(eager.calls), 1)
+                self.assertEqual(calls, eager.calls)
+                calls.clear()
+        self.assertEqual(len(compilations), 1)
 
     @dtypes(torch.float32, torch.float64)
     @parametrize("op_name", ("laguerre_polynomial_l", "legendre_polynomial_p"))
