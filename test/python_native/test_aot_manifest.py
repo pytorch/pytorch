@@ -15,6 +15,10 @@ import unittest.mock as mock
 
 import torch
 from torch._native import aot_manifest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -22,7 +26,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyAccelerator
 
 
 # A minimal declaration module (contract: tools/native_aot/decl.py). covered_axes()
@@ -409,9 +412,7 @@ class TestEmbedDetectionDevice(TestCase):
         self.assertIn("LAZY_OK", proc.stdout)
 
 
-instantiate_device_type_tests(
-    TestEmbedDetectionDevice, globals(), allow_xpu=True
-)
+instantiate_device_type_tests(TestEmbedDetectionDevice, globals(), allow_xpu=True)
 
 instantiate_parametrized_tests(TestEmbeddedCoverage)
 
