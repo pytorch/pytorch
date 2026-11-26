@@ -626,10 +626,6 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
 class TestBucketingTraceAccelerator(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def setUp(self):
-        super().setUp()
-        self.device = self.get_primary_device()
-
     @onlyAccelerator
     @requires_triton()
     def test_fused_all_gather_unpack_handles_mixed_dtypes(self, device):
