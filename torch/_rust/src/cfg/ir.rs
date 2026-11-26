@@ -1089,11 +1089,11 @@ pub fn rpo_by(n: usize, start: usize, succs: impl Fn(usize) -> Vec<usize>) -> Ve
     post
 }
 
-const BINARY_OPS: [&str; 26] = [
+pub const BINARY_OPS: [&str; 26] = [
     "+", "&", "//", "<<", "@", "*", "%", "|", "**", ">>", "-", "/", "^", "+=", "&=", "//=", "<<=",
     "@=", "*=", "%=", "|=", "**=", ">>=", "-=", "/=", "^=",
 ];
-const COMPARE_OPS: [&str; 6] = ["<", "<=", "==", "!=", ">", ">="];
+pub const COMPARE_OPS: [&str; 6] = ["<", "<=", "==", "!=", ">", ">="];
 
 struct Printer<'a> {
     cfg: &'a Cfg,

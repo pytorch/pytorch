@@ -91,16 +91,35 @@ pub mod ffi {
 
 #[cxx::bridge(namespace = "torch::rust")]
 pub mod op_hook {
+    // See tensor_ident in op_hook.h.
+    #[derive(Default, Clone, Copy)]
+    struct TensorIdent {
+        tensor: usize,
+        storage: usize,
+    }
+
+    // An argument an op's schema says it writes: its position, and the tensor
+    // (a member of the list, for a list of tensors).
+    struct WitnessWrite {
+        arg: u32,
+        id: TensorIdent,
+    }
+
     unsafe extern "C++" {
         include!("torch/_rust/csrc/op_hook.h");
 
         fn op_hook_enable();
         fn op_hook_disable();
         fn op_hook_pause(paused: bool);
+        fn op_hook_witness(wanted: bool) -> bool;
+        fn op_hook_seeing() -> bool;
+        fn op_hook_depth() -> u32;
+        fn tensor_ident(py_obj: usize, out: &mut TensorIdent);
     }
 
     extern "Rust" {
         fn on_torch_op(op: &str, args: &str) -> Result<()>;
+        fn on_witness_op(name: &str, overload: &str, depth: u32, flags: u32, wrote: &[WitnessWrite]);
     }
 }
 
@@ -124,6 +143,7 @@ pub mod autograd {
 }
 
 use crate::exec::autograd::{node_apply, node_release, NodeState};
+use crate::exec::calls::witness::on_witness_op;
 use crate::exec::torch_ops::on_torch_op;
 
 pub use self::ffi::*;

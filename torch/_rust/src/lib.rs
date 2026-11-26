@@ -127,6 +127,13 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::autograd::_cfg_last_joint, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_autograd_blocks, m)?)?;
     m.add_function(wrap_pyfunction!(exec::torch_ops::set_print_torch_ops, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::_calls_make, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::_calls_run, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::_calls_text, m)?)?;
+    m.add_class::<exec::calls::List>()?;
+    m.add_function(wrap_pyfunction!(exec::calls::_witness, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::witness::_witness_names, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::witness::_witness_pause, m)?)?;
     m.add_function(wrap_pyfunction!(cfg::python::_cfg_opcodes, m)?)?;
     m.add_function(wrap_pyfunction!(cfg::python::_cfg_signature, m)?)?;
     Ok(())

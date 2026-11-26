@@ -8,6 +8,7 @@ mod asked;
 pub mod autograd;
 mod backward;
 mod built;
+pub mod calls;
 mod compilers;
 mod covered;
 pub mod effects;
@@ -841,6 +842,7 @@ unsafe extern "C" fn eval_frame(
     throwflag: c_int,
 ) -> *mut pyo3::ffi::PyObject {
     let prev: EvalFrameFn = std::mem::transmute(PREV_EVAL_FRAME.load(Ordering::Acquire));
+    calls::witness::frame_entered();
     if ACTIVE.get() == 0 {
         return prev(tstate, frame, throwflag);
     }
@@ -1033,6 +1035,29 @@ unsafe fn leave(
         tr_frame_exit(tstate, frame);
     }
     result
+}
+
+// Whether every Python frame entered in this interpreter now comes through
+// eval_frame. Needs the GIL.
+pub(crate) fn frames_hooked() -> bool {
+    unsafe { _PyInterpreterState_GetEvalFrameFunc(pyo3::ffi::PyInterpreterState_Get()) as usize == eval_frame as *const () as usize }
+}
+
+// Keeps the eval-frame hook installed without making this thread run its
+// frames on the executor.
+pub(crate) struct FramesHooked;
+
+impl FramesHooked {
+    pub(crate) fn new() -> Self {
+        live(true);
+        FramesHooked
+    }
+}
+
+impl Drop for FramesHooked {
+    fn drop(&mut self) {
+        live(false);
+    }
 }
 
 pub(crate) struct ExecGuard;
