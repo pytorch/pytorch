@@ -49,6 +49,15 @@
 //     off, and those frames are asked about as any other;
 //   - A TENSOR'S HASH, which C code runs for a key, is taken as the
 //     optimizer takes it: by the rule of the instruction that needed it;
+//   - OPERANDS OF A KIND NO VERDICT SAW. Before an instruction that takes
+//     the items of an operand, or changes it in place (kinds.rs says which),
+//     step() asks whether a verdict saw an operand of that class there, and
+//     treats one it did not as code no call ran: the verdict is asked
+//     again (of a frame under the body: on its code; of the body's own
+//     instruction: as the optimizer judges it, on what was observed until
+//     now), and unless it has seen the class by now and still passes the
+//     instruction, the trace is refused before the instruction runs and
+//     the code is observed again, within the same bound;
 //   - step() is Ok(true) for a call the optimizer takes at another's word
 //     without looking inside (a callable the pass list calls pure, a call a
 //     cfg pass made movable, a torch function another tracer keeps whole):
@@ -58,8 +67,8 @@
 //   - that a covered instruction does the same in another frame: a verdict
 //     is for what its frame owns (an __init__ on the object just made), and
 //     what is kept is per code, not per verdict;
-//   - that an instruction's operands are of the kinds seen (shown.rs judges
-//     those as observed);
+//   - that the operands an instruction only reads are of the kinds seen
+//     (kinds.rs asks about those it takes from or changes);
 //   - that the run as written takes the way the trace took (state may have
 //     changed in between): then nothing new is observed, and the bound is
 //     what ends it.
@@ -73,8 +82,10 @@ use pyo3::ffi;
 use pyo3::ffi::PyObject;
 use pyo3::prelude::*;
 
+use crate::cfg::ir::Instr;
+
 use super::ffi::*;
-use super::{Compiled, effects, shown};
+use super::{Compiled, effects, kinds, shown};
 
 // The instructions of a code that some verdict covered, by code unit. Kept
 // in the code's own Compiled, for its clones too.
@@ -83,6 +94,8 @@ pub struct Units {
     seen: Mutex<Vec<bool>>,
     // The callables a verdict saw called at a code unit.
     called: Mutex<HashMap<u32, Vec<Py<PyAny>>>>,
+    // The kinds of operands a verdict saw at a code unit.
+    shown: kinds::Shown,
     // While frames of the code are observed again: one more than the code
     // unit a trace was refused for (0: none), and how many more frames.
     wanted: AtomicU32,
@@ -125,21 +138,24 @@ unsafe fn own(c: &Compiled) -> &Compiled {
 }
 
 // The optimizer judged the instructions at `units` of c's code to only
-// compute, each with the callee its visits called, if it is a call that
-// recorded one. Kept with `c` as well: its code's own Compiled may not be
-// there yet.
-pub fn judged(c: &Compiled, units: impl Iterator<Item = (u32, Option<Py<PyAny>>)>) {
+// compute, each with the kinds of its operands, if it is one kinds.rs asks
+// about, and the callee its visits called, if it is a call that recorded
+// one. Kept with `c` as well: its code's own Compiled may not be there yet.
+pub fn judged(c: &Compiled, units: impl Iterator<Item = (u32, Option<kinds::Seen>, Option<Py<PyAny>>)>) {
     let py = unsafe { Python::assume_attached() };
-    let units: Vec<(u32, Option<Py<PyAny>>)> = units.collect();
+    let units: Vec<(u32, Option<kinds::Seen>, Option<Py<PyAny>>)> = units.collect();
     let o = unsafe { own(c) };
     for at in [Some(c), (!std::ptr::eq(o, c)).then_some(o)].into_iter().flatten() {
         let mut seen = at.covered.seen.lock().unwrap();
         let mut called = at.covered.called.lock().unwrap();
-        for (u, callee) in &units {
+        for (u, operands, callee) in &units {
             if seen.len() <= *u as usize {
                 seen.resize(*u as usize + 1, false);
             }
             seen[*u as usize] = true;
+            if let Some(operands) = operands {
+                at.covered.shown.add(*u, operands.clone());
+            }
             if let Some(f) = callee {
                 let known = called.entry(*u).or_default();
                 if !known.iter().any(|k| k.as_ptr() == f.as_ptr()) {
@@ -148,6 +164,13 @@ pub fn judged(c: &Compiled, units: impl Iterator<Item = (u32, Option<Py<PyAny>>)
             }
         }
     }
+}
+
+// The optimizer's verdict on one instruction of the code `c` runs passes it
+// with operands of these kinds; the instruction is the body's own, so what
+// the frames under a body may run of the code is as it was.
+pub fn shown(c: &Compiled, unit: u32, operands: kinds::Seen) {
+    c.covered.shown.add(unit, operands);
 }
 
 // Whether a verdict saw `g` called at code unit `unit` of c's code.
@@ -259,47 +282,73 @@ unsafe fn whole(py: Python<'_>, f: *mut PyObject) -> bool {
     known
 }
 
-// Asked before the instruction at code unit `unit` of `c` runs in a traced
-// body (`under`: in a frame under it); `callee`: what it calls, if it is a
-// call, and `seen`: the callee recorded for it.
-pub unsafe fn step(c: Option<&Compiled>, under: bool, unit: u32, callee: Option<*mut PyObject>, seen: Option<&effects::Callee>) -> Result<bool, String> {
+// Asked before instruction `ins` of `c` runs in a traced body (`under`: in a
+// frame under it); `operands`: the objects of its operands, if kinds.rs asks
+// about it, `callee`: what it calls, if it is a call, and `seen`: the callee
+// recorded for it.
+pub unsafe fn step(c: Option<&Compiled>, under: bool, ins: &Instr, operands: &[*mut PyObject], callee: Option<*mut PyObject>, seen: Option<&effects::Callee>) -> Result<bool, String> {
     // A trace that is refused already runs on to its end as the program
     // takes it (its handlers, its cleanup): nothing more is asked of it.
     if TRUSTED.get() > 0 || super::region::refused() {
         return Ok(false);
     }
     let py = Python::assume_attached();
+    let unit = ins.origin;
+    // As the callee of a call is recorded (see slow_step).
+    let f = callee.filter(|f| !f.is_null());
+    let partial = f.map_or(std::ptr::null_mut(), |f| tr_partial_func(f));
+    let call = f.filter(|_| partial.is_null()).map_or(std::ptr::null_mut(), |f| tr_type_function(f, 0));
+    let g = f.map_or(std::ptr::null_mut(), |f| tr_bound_function(if !partial.is_null() { partial } else if call.is_null() { f } else { call }));
+    let taker = !g.is_null() && shown::takes(g);
+    // The class of an operand the instruction takes from or changes that
+    // no verdict saw there.
+    let unseen = |c: &Compiled| {
+        let at = |c: &Compiled| c.covered.shown.unseen(unit, &ins.op, operands, taker);
+        if operands.is_empty() { None } else { at(c).and_then(|_| at(own(c))) }
+    };
+    // The body's own instructions are those the optimizer put in it.
+    let covered = !under || c.is_some_and(|c| has(c, unit));
+    let mut kind = c.filter(|_| covered).and_then(unseen);
     // A Python kernel of an aten op is part of the op (see pure_indirect).
-    if under
-        && let Some(c) = c
+    if let Some(c) = c
         && !c.filename.contains("/torch/_native/")
-        && !has(c, unit)
+        && (!covered || kind.is_some())
     {
         // A tensor's hash (`id(self)`): the optimizer takes it by a rule
         // of the instruction that C code entered it for (the key of a read
         // the region is checked on: see pure_instr), not by a verdict on
         // its code, which says for `id` what a region may not depend on.
-        if c.qualname.ends_with("Tensor.__hash__") && c.filename.contains("/torch/") {
+        if !covered && c.qualname.ends_with("Tensor.__hash__") && c.filename.contains("/torch/") {
             return Ok(false);
         }
         // Torch's hand-over to the trace's function mode is covered as it
         // is.
-        if let Some(block) = super::hand_over(c, unit) {
-            judged(c, block.into_iter().map(|u| (u, None)));
+        if !covered && let Some(block) = super::hand_over(c, unit) {
+            judged(c, block.into_iter().map(|u| (u, None, None)));
             return Ok(false);
         }
         let units = &own(c).covered;
-        let more = units.more.load(Ordering::Relaxed);
+        let more = under && units.more.load(Ordering::Relaxed);
         // Judged now, if its frames ran since: asking runs no code of the
-        // body's.
+        // body's. The body's own instruction is judged as the optimizer
+        // judged it, on what was observed until now.
+        let mut why = None;
         let verdict = if more {
             Some(false)
         } else {
             let _paused = super::reads::Recording::pause();
-            super::outside_executor(|| super::judge(py, c))
+            if under {
+                super::outside_executor(|| super::judge(py, c))
+            } else {
+                why = super::outside_executor(|| super::judge_site(py, c, unit, &ins.op)).err();
+                Some(why.is_none())
+            }
         };
-        if verdict != Some(true) || !has(c, unit) {
-            let none = units.seen.lock().unwrap().is_empty() && c.covered.seen.lock().unwrap().is_empty();
+        if verdict == Some(true) && (!under || has(c, unit)) {
+            kind = unseen(c);
+        }
+        if verdict != Some(true) || (under && !has(c, unit)) || kind.is_some() {
+            let none = kind.is_none() && units.seen.lock().unwrap().is_empty() && c.covered.seen.lock().unwrap().is_empty();
             let line = if none || c.line(unit) == 0 { String::new() } else { format!("line {} of ", c.line(unit)) };
             // The place's run as written comes to this code next: its
             // frames are observed, and the place is traced again.
@@ -312,11 +361,16 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, unit: u32, callee: Option<
                 units.frames.store(FRAMES, Ordering::Relaxed);
             }
             AGAIN.set(again);
-            let what = format!("it runs {line}{}, which no call before it ran", c.qualname);
+            let what = match &kind {
+                Some(k) => format!("it runs {line}{} on a {k}, which no call before it showed there", c.qualname),
+                None => format!("it runs {line}{}, which no call before it ran", c.qualname),
+            };
             return Err(if again {
                 format!("{what} (trace {nth} of {LATER}: that code is observed as the place runs as written, then the place is traced again)")
             } else if more {
                 format!("{what}, and which did more than compute when it was observed")
+            } else if let Some(why) = why {
+                format!("{what}, and as it was observed since: {why}")
             } else if verdict == Some(false) {
                 what
             } else {
@@ -324,11 +378,9 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, unit: u32, callee: Option<
             });
         }
     }
-    let Some(f) = callee.filter(|f| !f.is_null()) else { return Ok(false) };
-    // As the callee of a call is recorded (see slow_step).
-    let partial = tr_partial_func(f);
-    let call = if partial.is_null() { tr_type_function(f, 0) } else { std::ptr::null_mut() };
-    let g = tr_bound_function(if !partial.is_null() { partial } else if call.is_null() { f } else { call });
+    if g.is_null() {
+        return Ok(false);
+    }
     if super::user_pure(g) || c.is_some_and(|c| c.declared.lock().unwrap().contains(&unit)) {
         return Ok(true);
     }
@@ -338,8 +390,10 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, unit: u32, callee: Option<
     if seen.and_then(|s| s.get(py)).is_some_and(|s| s.as_ptr() == g) || c.is_some_and(|c| called(c, unit, g)) {
         return Ok(false);
     }
+    // (What a partial holds for a builtin that takes items is not among the
+    // call's operands.)
     let g = Bound::from_borrowed_ptr(py, g);
-    if shown::computes(&g) || super::writes::type_question(g.as_ptr()) || effects::lru_cache_wrapper(g.as_ptr()) || super::plain_class(py, &g) {
+    if (shown::computes(&g) && (partial.is_null() || !taker)) || super::writes::type_question(g.as_ptr()) || effects::lru_cache_wrapper(g.as_ptr()) || super::plain_class(py, &g) {
         return Ok(false);
     }
     Err(format!("it calls {}, which no call before it called there", g.repr().map_or("?".into(), |r| r.to_string())))

@@ -3,6 +3,7 @@
 // of CPython's bytecode loop. Anything it can't run faithfully fails hard with
 // an exception rather than falling back to CPython.
 
+mod asked;
 pub mod autograd;
 mod backward;
 mod compilers;
@@ -11,6 +12,7 @@ pub mod effects;
 pub mod ffi;
 pub mod graph;
 pub mod joint;
+mod kinds;
 mod live;
 mod made;
 pub mod overlap;
@@ -20,6 +22,7 @@ pub mod scalars;
 mod run;
 mod shown;
 mod spans;
+mod special;
 pub mod torch_ops;
 mod trampoline;
 pub mod types;
@@ -3416,7 +3419,12 @@ fn pure_compiled(py: Python<'_>, c: &Compiled, own: Own, depth: u32, memo: &mut 
         // What a traced body may run of this code (see covered.rs).
         let callees = unsafe { &*prep.callees.get() };
         let callee = |v: &ValueId| callees.get(v).and_then(|k| k.get(py)).map(|f| f.unbind());
-        covered::judged(c, judged.iter().flat_map(|b| cfg[*b].versions.first()).flat_map(|ver| ver.body.iter()).map(|v| (cfg[*v].origin, callee(v))));
+        let unit = |v: &ValueId| {
+            let f = callee(v);
+            let taker = f.as_ref().is_some_and(|f| shown::takes(f.as_ptr()));
+            (cfg[*v].origin, kinds::seen(prep, *v, taker), f)
+        };
+        covered::judged(c, judged.iter().flat_map(|b| cfg[*b].versions.first()).flat_map(|ver| ver.body.iter()).map(unit));
     }
     memo.insert(key, r.clone());
     r
@@ -3432,6 +3440,27 @@ fn judge(py: Python<'_>, c: &Compiled) -> Option<bool> {
     let code = unsafe { Bound::from_borrowed_ptr(py, c.code as *mut pyo3::ffi::PyObject) };
     let own = Own { nargs: arg_slots(&code), free: vec![], fresh_self: false };
     Some(pure_compiled(py, c, own, 1, &mut HashMap::new()).is_ok())
+}
+
+// Judges the instruction of `c`'s code that the one at code unit `unit` with
+// op `op` was lowered to, as the optimizer judges a site of the code it
+// optimizes (see pure_site), from what the frames did until now. Ok tells
+// covered.rs the kinds its operands were seen to have.
+fn judge_site(py: Python<'_>, c: &Compiled, unit: u32, op: &Op) -> Result<(), String> {
+    let first = unsafe { &*(&*c.plans.lock().unwrap()[0] as *const Plan) };
+    let prep = &first.prep;
+    let cfg = &prep.cfg;
+    let body = cfg.block_ids().filter_map(|b| cfg[b].versions.first()).flat_map(|ver| ver.body.iter().copied());
+    let v = body.into_iter().find(|v| cfg[*v].origin == unit && cfg[*v].op == *op).ok_or("it is no instruction of the code as written")?;
+    let code = unsafe { Bound::from_borrowed_ptr(py, c.code as *mut pyo3::ffi::PyObject) };
+    let own = Own { nargs: arg_slots(&code), ..Own::default() };
+    pure_instr(py, prep, c.code, v, &c.plan().prep.clones, 0, &own, &mut HashMap::new())?;
+    let callees = unsafe { &*prep.callees.get() };
+    let taker = callees.get(&v).and_then(|k| k.get(py)).is_some_and(|f| shown::takes(f.as_ptr()));
+    if let Some(operands) = kinds::seen(prep, v, taker) {
+        covered::shown(c, unit, operands);
+    }
+    Ok(())
 }
 
 // The block of the Cfg a code was converted to (its first Plan's) that holds

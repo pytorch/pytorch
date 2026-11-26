@@ -241,6 +241,13 @@ pub fn computes(f: &Bound<'_, PyAny>) -> bool {
     torch_computes(f) || is_builtin(f)
 }
 
+// Whether `f` is a builtin that takes the items of what it is handed, makes
+// an iterator over it, or calls it.
+pub fn takes(f: *mut ffi::PyObject) -> bool {
+    let (t, at) = (tables(), f as usize);
+    t.takers.contains(&at) || t.callers.contains(&at)
+}
+
 // What is shown of the objects of class `tp`: for types.rs, when it first
 // sees an object of the class. No Python code runs.
 pub unsafe fn class_flags(tp: *mut ffi::PyTypeObject) -> u8 {

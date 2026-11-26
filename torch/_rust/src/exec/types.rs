@@ -276,6 +276,28 @@ impl Kind {
     }
 }
 
+impl Kind {
+    // Whether obj (not NULL) is of this kind, as absorb takes it, with
+    // nothing joined in.
+    unsafe fn is(&self, obj: *mut PyObject) -> bool {
+        match self {
+            Kind::Null => false,
+            Kind::None => obj == ffi::Py_None(),
+            Kind::Bool(_) => ffi::PyBool_Check(obj) != 0,
+            Kind::Int(_) => ffi::PyLong_CheckExact(obj) != 0,
+            Kind::Float => ffi::PyFloat_CheckExact(obj) != 0,
+            Kind::Str(_) => ffi::PyUnicode_CheckExact(obj) != 0,
+            Kind::Tensor(t) => t.class.of_obj(obj) && tensor_by_type(obj as usize).as_ref().is_some(),
+            Kind::Tuple(_) | Kind::VarTuple(_) => ffi::PyTuple_CheckExact(obj) != 0,
+            Kind::List(_) => ffi::PyList_CheckExact(obj) != 0,
+            Kind::Set(_) => ffi::PySet_CheckExact(obj) != 0,
+            Kind::FrozenSet(_) => ffi::PyFrozenSet_CheckExact(obj) != 0,
+            Kind::Dict(_) => ffi::PyDict_CheckExact(obj) != 0,
+            Kind::Object(c) => c.of_obj(obj),
+        }
+    }
+}
+
 fn absorb_len(i: &mut Interval, is: bool, len: impl FnOnce() -> isize) -> bool {
     if is {
         *i = i.join(Interval::exact(len() as i64));
@@ -297,6 +319,12 @@ impl Ty {
             Ty::Union(alts) => Some(alts),
             Ty::Any => None,
         }
+    }
+
+    // Whether obj (not NULL) is of a kind seen here; of a value with too
+    // many kinds to keep, none is.
+    pub unsafe fn saw(&self, obj: *mut PyObject) -> bool {
+        self.kinds().is_some_and(|ks| ks.iter().any(|k| k.is(obj)))
     }
 
     unsafe fn absorb_in(&mut self, obj: *mut PyObject, in_tuple: bool) {
@@ -436,6 +464,22 @@ unsafe fn kind(obj: *mut PyObject, in_tuple: bool) -> Kind {
         return Kind::Dict(Interval::exact(ffi::PyDict_Size(obj) as i64));
     }
     Kind::Object(Class::of(obj))
+}
+
+// Whether what C code does to obj (not NULL) goes by its class: it is no
+// number, string, None, tuple, frozenset or tensor, and no exact list, set
+// or dict unless `changed` (those are changed in place, and only read by an
+// iterator of their own).
+pub unsafe fn by_class(obj: *mut PyObject, changed: bool) -> bool {
+    match kind(obj, true) {
+        Kind::Object(_) => true,
+        Kind::List(_) | Kind::Set(_) | Kind::Dict(_) => changed,
+        _ => false,
+    }
+}
+
+pub unsafe fn class_name(obj: *mut PyObject) -> String {
+    std::ffi::CStr::from_ptr((*ffi::Py_TYPE(obj)).tp_name).to_string_lossy().into_owned()
 }
 
 unsafe fn int_interval(obj: *mut PyObject) -> Interval {

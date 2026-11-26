@@ -117,6 +117,23 @@ pub(super) fn wanted(code: usize, origin: u32) -> bool {
     ALL.load(Ordering::Relaxed)
 }
 
+// Whether the pass list takes some write into a region.
+fn taking() -> bool {
+    ALL.load(Ordering::Relaxed) || (SITES_ANY.load(Ordering::Relaxed) && SITES.lock().unwrap().iter().any(|(_, take)| *take))
+}
+
+// The traced run is about to change `container`. Where no write is taken, a
+// region's run changes only containers it made itself (the optimizer lets
+// no other change into a region): what it then reads of one is its own, as
+// it was before there were writes to record. Where writes are taken the
+// container may be one that was there before: reads.rs is told (see its
+// Group::late).
+fn changes(container: *mut PyObject) {
+    if taking() {
+        reads::changed(container);
+    }
+}
+
 // Whether `f` is type.__instancecheck__ or type.__subclasscheck__, asked
 // where the pass list takes some write. A store through nn.Module's
 // __setattr__ ends in them (`isinstance(value, Parameter)`, whose metaclass
@@ -124,8 +141,7 @@ pub(super) fn wanted(code: usize, origin: u32) -> bool {
 // class of its argument and nothing else. Without a taken write they stay
 // what they are to the optimizer: C code it has no rule for.
 pub(super) fn type_question(f: *mut PyObject) -> bool {
-    let some = ALL.load(Ordering::Relaxed) || (SITES_ANY.load(Ordering::Relaxed) && SITES.lock().unwrap().iter().any(|(_, take)| *take));
-    some && unsafe {
+    taking() && unsafe {
         ffi::Py_TYPE(f) == &raw mut ffi::PyMethodDescr_Type
             && (*(f as *mut ffi::PyDescrObject)).d_type == &raw mut ffi::PyType_Type
             && matches!(reads::text(tr_descr_name(f)).as_str(), "__instancecheck__" | "__subclasscheck__")
@@ -414,7 +430,7 @@ pub unsafe fn store_item(container: *mut PyObject, key: *mut PyObject, value: *m
             reads::needs_key(container, key);
         }
         reads::wrote_item(container, key);
-        reads::changed(container);
+        changes(container);
         let set = called.as_ref().filter(|_| !del).unwrap_or(&w.dict_setitem);
         let delete = called.as_ref().filter(|_| del).unwrap_or(&w.dict_delitem);
         return store(container, key, value, reads::dict_get(container, key), (set, &w.dict_setitem), (delete, &w.dict_delitem));
@@ -434,7 +450,7 @@ pub unsafe fn store_item(container: *mut PyObject, key: *mut PyObject, value: *m
         // The index is in range for a list as long as this one.
         reads::needs_length(container);
         reads::wrote_item(container, key);
-        reads::changed(container);
+        changes(container);
         return if del { push(&w.list_delitem, container, &[key], Some((&w.list_insert, vec![key, old]))) } else { push(&w.list_setitem, container, &[key, value], Some((&w.list_setitem, vec![key, old]))) };
     }
     if how.is_none() && tr_python_setitem(ffi::Py_TYPE(container), del as std::ffi::c_int) != 0 {
@@ -476,7 +492,7 @@ pub unsafe fn write_call(callee: *mut PyObject, args: &[*mut PyObject]) -> Token
     } else if all.first().is_some_and(|x| reads::owned(*x)) {
         0
     } else if is(&w.list_append) && all.len() == 2 && ffi::PyList_Check(all[0]) != 0 {
-        reads::changed(all[0]);
+        changes(all[0]);
         push(&w.list_append, all[0], &[all[1]], Some((&w.list_pop, vec![])))
     } else if (is(&w.set_add) || is(&w.set_discard)) && all.len() == 2 && ffi::PySet_Check(all[0]) != 0 {
         let had = ffi::PySet_Contains(all[0], all[1]);
@@ -485,7 +501,7 @@ pub unsafe fn write_call(callee: *mut PyObject, args: &[*mut PyObject]) -> Token
             ffi::PyErr_Clear();
             return 0;
         }
-        reads::changed(all[0]);
+        changes(all[0]);
         let add = is(&w.set_add);
         let undo = if add == (had == 1) { None } else if add { Some((&w.set_discard, vec![all[1]])) } else { Some((&w.set_add, vec![all[1]])) };
         push(if add { &w.set_add } else { &w.set_discard }, all[0], &[all[1]], undo)

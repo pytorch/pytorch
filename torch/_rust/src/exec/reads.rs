@@ -27,6 +27,15 @@
 //     dict the object has;
 //   - a call of a functools.partial: its function and arguments, and its
 //     keywords whole;
+//   - a question about a class (isinstance, issubclass, type(obj), and what
+//     a metaclass's own methods end in): the object's class, the order that
+//     class resolves its bases in, the metaclass of the class asked about,
+//     and for a class with ABCMeta's machinery abc's counter of
+//     registrations (see asked.rs);
+//   - an object of a Python class handed to a builtin or to an instruction
+//     the interpreter implements in C (float(obj), `obj == 1`, f"{obj}"):
+//     the object's class, and what the class has under each name C code
+//     resolves (see special.rs);
 //   - any other instruction or builtin handed a dict, a list, a set or a dict
 //     view (iterating it, unpacking it, slicing it, zip, sorted, ...): the
 //     whole content, in order (an OrderedDict's own order, which is not the
@@ -72,8 +81,10 @@ use pyo3::ffi;
 use pyo3::ffi::PyObject;
 use pyo3::prelude::*;
 
+use super::asked;
 use super::ffi::*;
 use super::overlap::Overlap;
+use super::special;
 use crate::bindings::ffi as tffi;
 use crate::cfg::ir::TensorSpec;
 
@@ -171,6 +182,12 @@ struct Typed {
     class: Py<PyAny>,
 }
 
+// A class and the tuple it resolves its bases in.
+struct Mro {
+    class: Py<PyAny>,
+    mro: Py<PyAny>,
+}
+
 struct Class {
     class: Py<PyAny>,
     // The class's version tag when it last held.
@@ -215,12 +232,17 @@ struct Entries {
     reads: Vec<Read>,
     functions: Vec<Function>,
     dicted: Vec<Dicted>,
+    mros: Vec<Mro>,
+    // abc's counter of registrations when a class with ABCMeta's machinery
+    // was asked about.
+    abc: Option<u64>,
 }
 
 impl Entries {
     fn len(&self) -> usize {
         let groups: usize = self.groups.iter().map(|g| g.items.len() + g.whole.as_ref().map_or(0, |w| w.items.len()) + usize::from(g.len.is_some())).sum();
-        groups + self.typed.len() + self.classes.iter().map(|c| c.names.len()).sum::<usize>() + self.reads.len() + self.functions.len() + self.dicted.len()
+        let asked = self.mros.len() + usize::from(self.abc.is_some());
+        groups + self.typed.len() + self.classes.iter().map(|c| c.names.len()).sum::<usize>() + self.reads.len() + self.functions.len() + self.dicted.len() + asked
     }
 }
 
@@ -293,6 +315,7 @@ pub fn begin() {
     // Looked up here, outside the executor: not a read of the body's.
     builtins();
     super::made::clear();
+    asked::init();
     TRACE.set(Some(Trace { thread: tffi::region_thread_state(), ..Trace::default() }));
 }
 
@@ -541,6 +564,16 @@ impl Class {
     }
 }
 
+impl Mro {
+    // The same classes in the same order: bases bound back make an equal
+    // tuple, not the same one.
+    unsafe fn holds(&self) -> bool {
+        let (now, was) = ((*(self.class.as_ptr() as *mut ffi::PyTypeObject)).tp_mro, self.mro.as_ptr());
+        let n = ffi::PyTuple_GET_SIZE(was);
+        now == was || (!now.is_null() && ffi::PyTuple_GET_SIZE(now) == n && (0..n).all(|i| ffi::PyTuple_GET_ITEM(now, i) == ffi::PyTuple_GET_ITEM(was, i)))
+    }
+}
+
 impl Function {
     // Three fields of the function object: no attribute is looked up.
     unsafe fn holds(&self) -> bool {
@@ -692,6 +725,27 @@ impl Trace {
         } else if !bound {
             self.used(tr_builtin_self(o), true);
         }
+        self.handed(o);
+    }
+
+    // C code was handed `o`: what it does with an object of a Python class
+    // is what the class says (see special.rs). The object's class by
+    // identity, and what the class has under each name C code resolves. A
+    // tensor's class is the guard's; a class that cannot change needs none.
+    unsafe fn handed(&mut self, o: *mut PyObject) {
+        let tp = ffi::Py_TYPE(o);
+        if tr_type_immutable(tp) != 0 || tensor(o) {
+            return;
+        }
+        if self.seen.insert((o as usize, 0)) {
+            self.count += 1;
+            self.entries.typed.push(Typed { obj: own(o), class: own(tp as *mut PyObject) });
+        }
+        if self.seen.insert((tp as usize, usize::MAX - 1)) {
+            for name in special::names() {
+                self.looked(tp, *name as *mut PyObject);
+            }
+        }
     }
 
     // obj's class decides what `name` gives: obj's class by identity, and
@@ -734,6 +788,64 @@ impl Trace {
         };
         self.count += 1;
         self.entries.classes[i].names.push((own(name), None));
+    }
+
+    // The traced run asked a question about a class (see asked.rs): what the
+    // answer depends on besides the operands themselves.
+    unsafe fn asked(&mut self, q: asked::Question) {
+        let class_name = ffi::PyUnicode_InternFromString(c"__class__".as_ptr());
+        let getattribute = ffi::PyUnicode_InternFromString(c"__getattribute__".as_ptr());
+        if class_name.is_null() || getattribute.is_null() {
+            ffi::PyErr_Clear();
+            self.refused = Some("a name could not be made".into());
+            return;
+        }
+        let of = if q.instance { ffi::Py_TYPE(q.subject) } else { q.subject as *mut ffi::PyTypeObject };
+        if !q.instance && ffi::PyType_Check(q.subject) == 0 {
+            self.refused = Some(format!("it asks issubclass of a {}, which is no class", type_name(q.subject)));
+        } else if q.instance && tensor(q.subject) {
+            // Which class a tensor is of, the guard says.
+            self.looked(of, class_name);
+            self.looked(of, getattribute);
+        } else if q.instance && !q.against.is_null() && asked::answers_class_itself(q.subject, of, class_name, getattribute) {
+            self.refused = Some(format!("it asks isinstance of a {}, which answers .__class__ itself", type_name(q.subject)));
+        } else if q.instance {
+            self.typed(q.subject, class_name);
+            self.looked(of, getattribute);
+        }
+        ffi::Py_DECREF(class_name);
+        ffi::Py_DECREF(getattribute);
+        if self.refused.is_some() || q.against.is_null() {
+            return;
+        }
+        if tr_type_immutable(of) == 0 && self.seen.insert((of as usize, usize::MAX)) {
+            self.count += 1;
+            self.entries.mros.push(Mro { class: own(of as *mut PyObject), mro: own((*of).tp_mro) });
+        }
+        let special = if q.instance { c"__instancecheck__" } else { c"__subclasscheck__" };
+        let mut against = vec![];
+        asked::members(q.against, &mut against);
+        let mut abstract_ = q.abstract_;
+        for c in against {
+            if ffi::PyType_Check(c) == 0 {
+                self.special(c, special);
+                continue;
+            }
+            abstract_ |= asked::abstract_(c);
+            // Which metaclass decides, and what it has as the method.
+            let name = ffi::PyUnicode_InternFromString(special.as_ptr());
+            if !name.is_null() {
+                self.typed(c, name);
+                ffi::Py_DECREF(name);
+            }
+        }
+        if abstract_ {
+            let now = asked::token();
+            if self.entries.abc.is_some_and(|was| was != now) {
+                self.refused = Some("a class was registered with an ABC while it was traced".into());
+            }
+            self.entries.abc = Some(now);
+        }
     }
 
     // A frame of the function `f` starts under the traced body. Its
@@ -1151,6 +1263,9 @@ unsafe fn call_read(callee: *mut PyObject, args: &[*mut PyObject], result: *mut 
     } else if f == b.len && all.len() == 1 {
         truth(all[0]);
     } else {
+        if let Some(q) = asked::question(f, &all).or_else(|| asked::question(callee as usize, &all)) {
+            with(|t| t.asked(q));
+        }
         used(&all);
     }
 }
@@ -1255,6 +1370,10 @@ fn held(e: &Entries, hold: &mut impl FnMut(&Py<PyAny>)) {
         hold(&d.obj);
         hold(&d.dict);
     }
+    for m in &e.mros {
+        hold(&m.class);
+        hold(&m.mro);
+    }
     for g in &e.groups {
         hold(&g.holder);
         for i in &g.items {
@@ -1312,6 +1431,10 @@ impl Reads {
             ok
         }) {
             "a class"
+        } else if !e.mros.iter().all(|m| m.holds()) {
+            "the bases of a class"
+        } else if e.abc.is_some_and(|was| asked::token() != was) {
+            "a class registered with an ABC"
         } else if let Some(i) = e.groups.iter().position(|g| !passes(g)) {
             self.hot.set(i);
             "a namespace or a container"
@@ -1649,6 +1772,12 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
     unsafe {
         if let Some(c) = e.typed.iter().find(|c| ffi::Py_TYPE(c.obj.as_ptr()) as *mut PyObject != c.class.as_ptr()) {
             return Ok((None, Some(format!("the class of a {} changed while it was traced", type_name(c.obj.as_ptr())))));
+        }
+        if let Some(m) = e.mros.iter().find(|m| !m.holds()) {
+            return Ok((None, Some(format!("the bases of {} changed while it was traced", std::ffi::CStr::from_ptr((*(m.class.as_ptr() as *mut ffi::PyTypeObject)).tp_name).to_string_lossy()))));
+        }
+        if e.abc.is_some_and(|was| asked::token() != was) {
+            return Ok((None, Some("a class was registered with an ABC while it was traced".into())));
         }
         // fx has put back what it bound on nn.Module: what the classes have
         // now is what the body's own code saw.

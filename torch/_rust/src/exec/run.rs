@@ -1934,16 +1934,19 @@ impl Act<'_> {
                     super::outside_executor(|| self.exec(v, ins))
                 }
             }
-            _ if self.reading => match super::covered::step(self.c, self.under_body, ins.origin, callee, (*self.p.callees.get()).get(&v)) {
-                Ok(trusted) => {
-                    let _trusted = trusted.then(super::covered::Trusted::enter);
-                    self.exec(v, ins)
+            _ if self.reading => {
+                let operands: Vec<*mut PyObject> = if super::kinds::asked(&ins.op) { ins.args.iter().map(|x| self.val(*x)).collect() } else { vec![] };
+                match super::covered::step(self.c, self.under_body, ins, &operands, callee, (*self.p.callees.get()).get(&v)) {
+                    Ok(trusted) => {
+                        let _trusted = trusted.then(super::covered::Trusted::enter);
+                        self.exec(v, ins)
+                    }
+                    Err(why) => {
+                        super::region::refuse(pyo3::Python::assume_attached(), &why, super::covered::pending());
+                        Err(Exc::Error)
+                    }
                 }
-                Err(why) => {
-                    super::region::refuse(pyo3::Python::assume_attached(), &why, super::covered::pending());
-                    Err(Exc::Error)
-                }
-            },
+            }
             _ => self.exec(v, ins),
         }
     }

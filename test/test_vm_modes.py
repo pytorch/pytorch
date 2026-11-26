@@ -38,6 +38,7 @@ import subprocess
 import sys
 import time
 import traceback
+import types
 import unittest
 import weakref
 
@@ -2274,6 +2275,326 @@ class TestVmMadeContainers(TestCase):
 
 
 instantiate_device_type_tests(TestVmMadeContainers, globals())
+
+
+# What the kinds tests iterate, unpack, test membership in or compute with:
+# of one kind on the calls that are observed, of another later.
+MODES_KIND = None
+MODES_KIND_ITEMS = {"source": None}
+MODES_KIND_MODULE = types.ModuleType("modes_kind_module")
+
+
+class ModesCounts:
+    """Iterated as a list of two floats is, by a method written in Python
+    that counts its calls."""
+
+    def __init__(self):
+        self.items, self.iterated = [2.0, 3.0], 0
+
+    def __iter__(self):
+        self.iterated += 1
+        return iter(self.items)
+
+
+class ModesTensor(torch.Tensor):
+    pass
+
+
+def modes_kind_work(x, k=2.0):
+    return ((x.sin() * k).cos() + 1).tanh().exp()
+
+
+def modes_kind_iterated(x):
+    for v in MODES_KIND:
+        x = ((x * v).sin() + 1).cos().tanh()
+    return modes_kind_work(x)
+
+
+def modes_kind_of_a_module(x):
+    for v in MODES_KIND_MODULE.source:
+        x = ((x * v).sin() + 1).cos().tanh()
+    return modes_kind_work(x)
+
+
+def modes_kind_of_a_dict(x):
+    for v in MODES_KIND_ITEMS["source"]:
+        x = ((x * v).sin() + 1).cos().tanh()
+    return modes_kind_work(x)
+
+
+def modes_kind_of_a_cell():
+    source = None
+
+    def put(value):
+        nonlocal source
+        source = value
+
+    def iterated(x):
+        for v in source:
+            x = ((x * v).sin() + 1).cos().tanh()
+        return modes_kind_work(x)
+
+    return iterated, put
+
+
+def modes_kind_in_a_callee(x):
+    return modes_kind_iterated(x) * 2
+
+
+def modes_kind_unpacked(x):
+    a, b = MODES_KIND
+    return modes_kind_work(x, a + b)
+
+
+def modes_kind_member(x):
+    return modes_kind_work(x, 2.0 + (3.0 in MODES_KIND))
+
+
+def modes_kind_starred(x):
+    items = [*MODES_KIND]
+    return modes_kind_work(x, 2.0 + len(items))
+
+
+def modes_kind_summed(x):
+    return modes_kind_work(x, sum(MODES_KIND, 2.0))
+
+
+def modes_kind_sliced(x):
+    for v in itertools.islice(MODES_KIND, 2):
+        x = ((x * v).sin() + 1).cos().tanh()
+    return modes_kind_work(x)
+
+
+def modes_kind_grown(x):
+    items = MODES_KIND
+    items += (4.0,)
+    return modes_kind_work(x, 2.0 + len(items))
+
+
+def modes_kind_keyed(x):
+    return modes_kind_work(x, MODES_KIND["k"])
+
+
+def modes_kind_multiplied(x):
+    return modes_kind_work(x) * MODES_KIND
+
+
+def modes_kind_divided(x):
+    return modes_kind_work(x, MODES_KIND / 2 + MODES_KIND // 2 + MODES_KIND % 2)
+
+
+def modes_kind_asked(x):
+    return modes_kind_work(x, 2.0 + (MODES_KIND is None) + bool(MODES_KIND))
+
+
+def modes_kind_global(value):
+    global MODES_KIND
+    MODES_KIND = value
+
+
+def modes_two():
+    return [2.0, 3.0]
+
+
+def modes_two_iterator():
+    return iter([2.0, 3.0])
+
+
+# name: (the function, what puts its operand in place, the operand on the
+# calls that are observed, the operand of the other kind). The first group
+# takes the items of the operand or changes it in place; the second only
+# reads it or computes with it.
+MODES_KINDS = {
+    "iterator": (modes_kind_iterated, modes_kind_global, modes_two, modes_two_iterator),
+    "generator": (
+        modes_kind_iterated,
+        modes_kind_global,
+        modes_two,
+        lambda: (v for v in [2.0, 3.0]),
+    ),
+    "deque": (
+        modes_kind_iterated,
+        modes_kind_global,
+        modes_two,
+        lambda: collections.deque([2.0, 3.0]),
+    ),
+    "count": (
+        modes_kind_sliced,
+        modes_kind_global,
+        modes_two,
+        lambda: itertools.count(2.0),
+    ),
+    "module_attribute": (
+        modes_kind_of_a_module,
+        lambda v: setattr(MODES_KIND_MODULE, "source", v),
+        modes_two,
+        modes_two_iterator,
+    ),
+    "dict_item": (
+        modes_kind_of_a_dict,
+        lambda v: MODES_KIND_ITEMS.update(source=v),
+        modes_two,
+        modes_two_iterator,
+    ),
+    "closure_cell": (*modes_kind_of_a_cell(), modes_two, modes_two_iterator),
+    "callee_iterator": (
+        modes_kind_in_a_callee,
+        modes_kind_global,
+        modes_two,
+        modes_two_iterator,
+    ),
+    "callee_generator": (
+        modes_kind_in_a_callee,
+        modes_kind_global,
+        modes_two,
+        lambda: (v for v in [2.0, 3.0]),
+    ),
+    "unpacked": (modes_kind_unpacked, modes_kind_global, modes_two, modes_two_iterator),
+    "member": (modes_kind_member, modes_kind_global, modes_two, modes_two_iterator),
+    "starred": (modes_kind_starred, modes_kind_global, modes_two, modes_two_iterator),
+    "summed": (modes_kind_summed, modes_kind_global, modes_two, modes_two_iterator),
+    "list_grown_in_place": (
+        modes_kind_grown,
+        modes_kind_global,
+        lambda: (2.0, 3.0),
+        modes_two,
+    ),
+    "python_class": (modes_kind_iterated, modes_kind_global, modes_two, ModesCounts),
+    "tensor_subclass": (
+        modes_kind_multiplied,
+        modes_kind_global,
+        lambda: torch.ones(8),
+        lambda: torch.ones(8).as_subclass(ModesTensor),
+    ),
+    "parameter": (
+        modes_kind_multiplied,
+        modes_kind_global,
+        lambda: torch.ones(8),
+        lambda: torch.nn.Parameter(torch.ones(8)),
+    ),
+    "defaultdict": (
+        modes_kind_keyed,
+        modes_kind_global,
+        lambda: {"k": 2.0},
+        lambda: collections.defaultdict(lambda: 2.0),
+    ),
+    "int_for_float": (modes_kind_divided, modes_kind_global, lambda: 3.0, lambda: 3),
+    "numpy_for_float": (
+        modes_kind_divided,
+        modes_kind_global,
+        lambda: 3.0,
+        lambda: __import__("numpy").float64(3.0),
+    ),
+    "bool_for_int": (modes_kind_divided, modes_kind_global, lambda: 1, lambda: True),
+    "none_for_object": (modes_kind_asked, modes_kind_global, object, lambda: None),
+}
+# The cases whose operand of the other kind is one the instruction takes
+# from or changes: no region may run that instruction.
+MODES_KINDS_TAKEN = (
+    "iterator",
+    "generator",
+    "count",
+    "module_attribute",
+    "dict_item",
+    "callee_iterator",
+    "callee_generator",
+    "unpacked",
+    "member",
+    "starred",
+    "summed",
+    "list_grown_in_place",
+)
+# The cases with no region for another reason: the loop of a closure is in
+# none today, a method written in Python is code no call ran, and a deque is
+# of no class that is shown to be only read.
+MODES_KINDS_NO_REGION = ("closure_cell", "python_class", "tensor_subclass", "deque")
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmKinds(TestCase):
+    """An instruction of a traced body takes the items of an operand, or
+    changes it in place, only if a call before the trace showed an operand
+    of that class there: a trace that comes to another is given up before
+    the instruction runs, and the place is observed and judged with it."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def left(self, value):
+        if isinstance(value, ModesCounts):
+            return value.iterated
+        if isinstance(value, itertools.count):
+            return next(value)
+        if (
+            isinstance(value, (torch.Tensor, float, int, type(None)))
+            or type(value) is object
+        ):
+            return None
+        return list(value)
+
+    def calls(self, fn, put, a, b, other, device):
+        out = []
+        for call in range(40):
+            put(b if other(call) else a)
+            torch.manual_seed(call)
+            x = torch.rand(3, 8, device=device)
+            try:
+                y = fn(x)
+                out.append((type(y).__name__, y.detach().as_subclass(torch.Tensor)))
+            except Exception as e:
+                out.append((type(e).__name__, str(e)))
+        return out, self.left(a), self.left(b)
+
+    # The other kind from the call that is traced on, on calls the region
+    # would run, and on the calls that are observed.
+    ORDERS = {
+        "traced": lambda call: call >= 3,
+        "run": lambda call: 10 <= call < 20,
+        "observed": lambda call: call < 3,
+    }
+
+    @parametrize(
+        "case,order",
+        [
+            *[(case, "traced") for case in MODES_KINDS],
+            *[
+                (case, order)
+                for case in ("iterator", "generator", "callee_iterator")
+                for order in ("run", "observed")
+            ],
+        ],
+        name_fn=lambda case, order: f"{case}_{order}",
+    )
+    @isolated
+    def test_operand_of_a_kind_no_call_showed(self, device, case, order):
+        if case == "numpy_for_float" and not TEST_NUMPY:
+            self.skipTest("needs numpy")
+        fn, put, make_a, make_b = MODES_KINDS[case]
+        on = lambda v: v.to(device) if isinstance(v, torch.Tensor) else v  # noqa: E731
+        other = self.ORDERS[order]
+        want = self.calls(fn, put, on(make_a()), on(make_b()), other, device)
+        compiled = vm(fn, passes=EARLY)
+        got = self.calls(compiled, put, on(make_a()), on(make_b()), other, device)
+        for call, (w, g) in enumerate(zip(want[0], got[0])):
+            self.assertEqual(g, w, atol=0, rtol=0, msg=f"call {call}")
+        self.assertEqual(got[1:], want[1:], msg="what is left of the operands")
+        rows = [r for r in vm.regions(compiled) if r["function"] == fn.__qualname__]
+        if order != "traced":
+            return
+        if case in MODES_KINDS_TAKEN:
+            # The place is refused with the class it came to.
+            why = [r.get("why") or "" for r in rows if r["state"] == "refused"]
+            self.assertTrue(
+                any("which no call before it showed there" in w for w in why),
+                msg=f"{rows}",
+            )
+        elif case not in MODES_KINDS_NO_REGION:
+            self.assertTrue(
+                any(r["state"] == "region" and r.get("runs") for r in rows),
+                msg=f"{rows}",
+            )
+
+
+instantiate_device_type_tests(TestVmKinds, globals())
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")

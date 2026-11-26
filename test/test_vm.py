@@ -2912,6 +2912,65 @@ def reads_moves(table):
     return switch
 
 
+class ReadsPlain:
+    pass
+
+
+class ReadsPlainChild(ReadsPlain):
+    pass
+
+
+class ReadsApart:
+    pass
+
+
+class ReadsApartChild(ReadsApart):
+    pass
+
+
+class ReadsOpenMeta(type):
+    def __instancecheck__(cls, instance):
+        return cls.open
+
+
+class ReadsOpen(metaclass=ReadsOpenMeta):
+    open = False
+
+
+class ReadsMasked:
+    """An object that answers __class__ with something else than its type."""
+
+    shown = int
+
+    @property
+    def __class__(self):
+        return self.shown
+
+
+class ReadsNumber:
+    """What builtins and operators ask an object of a Python class."""
+
+    def __float__(self):
+        return 0.25
+
+    def __format__(self, spec):
+        return "ab"
+
+    def __lt__(self, other):
+        return False
+
+
+class ReadsNumberChild(ReadsNumber):
+    def __float__(self):
+        return 0.75
+
+    def __format__(self, spec):
+        return "abc"
+
+    def __lt__(self, other):
+        return True
+
+
 class ReadsConfig:
     bias = 1.0
 
@@ -3420,6 +3479,307 @@ class TestVmReads(TestCase):
             return y
 
         self.alternating(device, reads_through(weighted), reads_moves(table))
+
+    def asked(self, device, answer, change):
+        # Ten calls of a function that branches on `answer()`, `change()`
+        # before the seventh: each gives what eager gives. The block's row.
+        fn = reads_through(lambda y: y * 3 if answer() else y - 1)
+        g = vm(fn, passes=EARLY)
+        for call in range(10):
+            if call == 6:
+                change()
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        rows = [
+            r
+            for r in vm.regions(g)
+            if r["function"].endswith("outer") and r["kind"] == "block"
+        ]
+        self.assertEqual(len(rows), 1, msg=str(rows))
+        return rows[0]
+
+    @isolated
+    def test_class_registered_with_an_abc_between_calls(self, device):
+        # Which classes an ABC was told of is state only C code sees: a
+        # region with such a question is entered while abc's counter of
+        # registrations is the one of its trace (an import that registers
+        # a class moves it as well: how many regions there are is not said).
+        thing = ReadsPlain()
+        row = self.asked(
+            device,
+            lambda: isinstance(thing, collections.abc.Sized),
+            lambda: collections.abc.Sized.register(ReadsPlain),
+        )
+        self.assertEqual(row["state"], "region", msg=str(row))
+        self.assertGreater(row["runs"], 0, msg=str(row))
+        self.assertIn(
+            "read: a class registered with an ABC", row["misses"], msg=str(row)
+        )
+
+    @isolated
+    def test_subclass_registered_with_an_abc_between_calls(self, device):
+        row = self.asked(
+            device,
+            lambda: issubclass(ReadsPlainChild, (int, collections.abc.Sized)),
+            lambda: collections.abc.Sized.register(ReadsPlain),
+        )
+        self.assertEqual(row["state"], "region", msg=str(row))
+        self.assertIn(
+            "read: a class registered with an ABC", row["misses"], msg=str(row)
+        )
+
+    @isolated
+    def test_class_registered_with_another_abc_between_calls(self, device):
+        # The counter is one for all ABCs: a miss, and the same answer.
+        thing = ReadsPlain()
+        row = self.asked(
+            device,
+            lambda: isinstance(thing, collections.abc.Sized),
+            lambda: collections.abc.Container.register(ReadsApart),
+        )
+        self.assertEqual(row["state"], "region", msg=str(row))
+        self.assertGreater(row["runs"], 0, msg=str(row))
+        self.assertIn(
+            "read: a class registered with an ABC", row["misses"], msg=str(row)
+        )
+
+    @isolated
+    def test_class_of_an_object_asked_by_isinstance(self, device):
+        thing = ReadsApart()
+        self.alternating(
+            device,
+            reads_through(
+                lambda y: y * 3 if isinstance(thing, ReadsApartChild) else y - 1
+            ),
+            lambda second: setattr(
+                thing, "__class__", ReadsApartChild if second else ReadsApart
+            ),
+        )
+
+    @isolated
+    def test_class_of_an_object_asked_by_type(self, device):
+        thing = ReadsApart()
+        self.alternating(
+            device,
+            reads_through(lambda y: y * 3 if type(thing) is ReadsApartChild else y - 1),
+            lambda second: setattr(
+                thing, "__class__", ReadsApartChild if second else ReadsApart
+            ),
+        )
+
+    @isolated
+    def test_bases_of_the_class_of_an_object(self, device):
+        thing = ReadsApartChild()
+        self.alternating(
+            device,
+            reads_through(lambda y: y * 3 if isinstance(thing, ReadsPlain) else y - 1),
+            lambda second: setattr(
+                ReadsApartChild, "__bases__", (ReadsPlain,) if second else (ReadsApart,)
+            ),
+        )
+
+    @isolated
+    def test_bases_of_a_class_asked_by_issubclass(self, device):
+        self.alternating(
+            device,
+            reads_through(
+                lambda y: y * 3 if issubclass(ReadsApartChild, ReadsPlain) else y - 1
+            ),
+            lambda second: setattr(
+                ReadsApartChild, "__bases__", (ReadsPlain,) if second else (ReadsApart,)
+            ),
+        )
+
+    @isolated
+    def test_metaclass_that_answers_isinstance_in_python(self, device):
+        # The metaclass's method is a frame under the trace: what it reads
+        # is read as anywhere else.
+        thing = ReadsPlain()
+        self.alternating(
+            device,
+            reads_through(lambda y: y * 3 if isinstance(thing, ReadsOpen) else y - 1),
+            lambda second: setattr(ReadsOpen, "open", second),
+        )
+
+    @isolated
+    def test_object_that_answers_its_class_itself(self, device):
+        # isinstance asks such an object's __class__ when its type says no:
+        # what a property answers from is not the question's to check.
+        thing = ReadsMasked()
+        row = self.asked(
+            device,
+            lambda: isinstance(thing, ReadsPlain),
+            lambda: setattr(thing, "shown", ReadsPlain),
+        )
+        self.assertEqual(row["state"], "refused", msg=str(row))
+        self.assertIn("answers .__class__ itself", row["why"])
+
+    @isolated
+    def test_list_the_run_made_and_changed_is_its_own_without_a_pass_that_takes_writes(
+        self, device
+    ):
+        # SGD with momentum over lists of tensors appends its buffers to a
+        # list it made and hands the list to a foreach operator: a read of
+        # what the run itself built, not of state that a later call finds
+        # changed.
+        def make():
+            torch.manual_seed(0)
+            net = torch.nn.Linear(8, 8).to(device)
+            return net, torch.optim.SGD(
+                net.parameters(), lr=0.1, momentum=0.9, foreach=True
+            )
+
+        def step(net, opt, x):
+            opt.zero_grad()
+            loss = net(x).square().mean()
+            loss.backward()
+            opt.step()
+            return loss
+
+        (net, opt), (twin, twin_opt) = make(), make()
+        g = vm(step, passes=EARLY)
+        for call in range(10):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(
+                g(net, opt, x), step(twin, twin_opt, x), msg=f"call {call}"
+            )
+        self.assertEqual(net.weight, twin.weight)
+        whys = [
+            str(r["why"]) for r in vm.regions(g) if "_multi_tensor_sgd" in r["function"]
+        ]
+        self.assertTrue(whys)
+        self.assertEqual([why for why in whys if "after changing it" in why], [])
+
+    @isolated
+    def test_class_of_an_object_handed_to_a_builtin(self, device):
+        thing = ReadsNumber()
+        self.alternating(
+            device,
+            reads_through(lambda y: y * float(thing)),
+            lambda second: setattr(
+                thing, "__class__", ReadsNumberChild if second else ReadsNumber
+            ),
+        )
+
+    @isolated
+    def test_method_bound_anew_on_the_class_of_an_object_handed_to_a_builtin(
+        self, device
+    ):
+        thing, methods = (
+            ReadsNumber(),
+            (vars(ReadsNumber)["__float__"], vars(ReadsNumberChild)["__float__"]),
+        )
+        self.alternating(
+            device,
+            reads_through(lambda y: y * float(thing)),
+            lambda second: setattr(ReadsNumber, "__float__", methods[second]),
+        )
+
+    @isolated
+    def test_method_added_to_the_class_of_an_object_handed_to_a_builtin(self, device):
+        # Without a __bool__ (or a __len__) of its class an object is true.
+        def never(self):
+            return False
+
+        def switch(second):
+            if second:
+                ReadsPlain.__bool__ = never
+            elif "__bool__" in vars(ReadsPlain):
+                del ReadsPlain.__bool__
+
+        thing = ReadsPlain()
+        self.alternating(device, reads_through(lambda y: y * (2 + bool(thing))), switch)
+
+    @isolated
+    def test_class_of_an_object_under_an_operator(self, device):
+        thing = ReadsNumber()
+        self.alternating(
+            device,
+            reads_through(lambda y: y * (2 + (thing < 1))),
+            lambda second: setattr(
+                thing, "__class__", ReadsNumberChild if second else ReadsNumber
+            ),
+        )
+
+    @isolated
+    def test_class_of_an_object_in_a_format_string(self, device):
+        thing = ReadsNumber()
+        self.alternating(
+            device,
+            reads_through(lambda y: y * len(f"{thing}")),
+            lambda second: setattr(
+                thing, "__class__", ReadsNumberChild if second else ReadsNumber
+            ),
+        )
+
+    def handed_row(self, g):
+        rows = [
+            r
+            for r in vm.regions(g)
+            if r["function"].endswith("outer") and r["kind"] == "block"
+        ]
+        self.assertEqual(len(rows), 1, msg=str(rows))
+        return rows[0]
+
+    @isolated
+    def test_module_handed_to_a_builtin_keeps_its_region_across_another_trace(
+        self, device
+    ):
+        # A trace binds nn.Module's __call__ and __getattr__ to its own and
+        # puts them back, which moves the version tag of every module class:
+        # the class is compared by what its names give, and still holds.
+        def later(x):
+            return (x.sin() * 2).cos().tanh().exp()
+
+        import torch._rust_inductor as ri
+
+        ri.COUNT = True
+        net = torch.nn.Linear(8, 8).to(device)
+        fn = reads_through(lambda y: net(y) if callable(net) else y)
+        g, h = vm(fn, passes=EARLY), vm(later, passes=EARLY)
+        runs = []
+        for call in range(10):
+            x = torch.randn(4, 8, device=device)
+            if call == 6:
+                self.assertEqual(h(x), later(x), atol=0, rtol=0)
+                self.assertEqual(h(x), later(x), atol=0, rtol=0)
+                traced = ri.stats["traced"]
+            before = region_runs()
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+            runs.append(region_runs() - before)
+        self.assertIn(
+            "region",
+            [r["state"] for r in vm.regions(h) if r["function"].endswith("later")],
+        )
+        # No check of the region fails. (The place is traced once more when
+        # another function starts on the VM, with or without a module in
+        # it: two regions, and a run on every call but the two traced.)
+        row = self.handed_row(g)
+        self.assertEqual((row["state"], row["misses"]), ("region", {}), msg=str(row))
+        self.assertEqual(
+            (row["variants"], row["runs"], ri.stats["traced"] - traced),
+            (2, 5, 1),
+            msg=str(row),
+        )
+        self.assertEqual(runs[7:], [1, 1, 1], msg=str(row))
+        self.assertGreater(row["reads"], 100, msg=str(row))
+
+    @isolated
+    def test_object_of_a_class_that_cannot_change_is_no_read(self, device):
+        # A tensor's class is the guard's; a float, a tuple and a range are
+        # of classes nothing can be bound on.
+        fn = reads_through(
+            lambda y: abs(y) * max(1.5, 2.5) + sum((0.25, 0.5)) + len(range(3))
+        )
+        g = vm(fn, passes=EARLY)
+        for call in range(8):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        row = self.handed_row(g)
+        self.assertEqual(
+            (row["state"], row["variants"], row["runs"]), ("region", 1, 4), msg=str(row)
+        )
+        self.assertLess(row["reads"], 50, msg=str(row))
 
 
 instantiate_device_type_tests(TestVmReads, globals())
