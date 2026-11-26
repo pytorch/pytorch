@@ -1742,7 +1742,12 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             x.add_(1)
             return y + c
 
-        with fresh_cache():
+        with (
+            fresh_cache(),
+            torch._functorch.config.patch(
+                enable_autograd_cache=True, strict_autograd_cache=True
+            ),
+        ):
             torch._dynamo.reset()
             opt_f = torch.compile(f, backend="inductor", fullgraph=True)
 
@@ -1761,6 +1766,26 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 f(b2_ref[:4], torch.zeros(4), b2_ref[2:6]),
             )
             self.assertEqual(b2, b2_ref)
+
+            # Reset Dynamo so the next call loads from AOTAutogradCache, and
+            # verify the cached entry re-installs the STORAGE_OFFSET guard.
+            torch._dynamo.reset()
+            opt_f = torch.compile(f, backend="inductor", fullgraph=True)
+            b1_hit = torch.arange(8.0)
+            b1_hit_ref = b1_hit.clone()
+            self.assertEqual(
+                opt_f(b1_hit[:4], torch.zeros(4), b1_hit[0:4]),
+                f(b1_hit_ref[:4], torch.zeros(4), b1_hit_ref[0:4]),
+            )
+            self.assertEqual(b1_hit, b1_hit_ref)
+
+            b2_after_hit = torch.arange(8.0)
+            b2_after_hit_ref = b2_after_hit.clone()
+            self.assertEqual(
+                opt_f(b2_after_hit[:4], torch.zeros(4), b2_after_hit[2:6]),
+                f(b2_after_hit_ref[:4], torch.zeros(4), b2_after_hit_ref[2:6]),
+            )
+            self.assertEqual(b2_after_hit, b2_after_hit_ref)
 
     def test_inputs_overlapping_with_mutation_stress(self):
         # Stress test for StorageOverlap guard.

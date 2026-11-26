@@ -42,7 +42,6 @@ from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
     AOTDispatchSubclassWrapper,
-    AOTSyntheticBaseWrapper,
     CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
@@ -395,17 +394,6 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         """
         Perform any preparations to make the result ready for serialization.
         """
-        for wrapper in self.dispatch_wrappers:
-            if (
-                isinstance(wrapper, AOTSyntheticBaseWrapper)
-                and wrapper.has_concrete_storage_offset_guards
-            ):
-                from .autograd_cache import BypassAOTAutogradCache
-
-                raise BypassAOTAutogradCache(
-                    "Cannot cache graph with synthetic-base inputs that depend "
-                    "on concrete storage offsets."
-                )
         self.compiled_fw.pre_save()
         if self.compiled_bw is not None:
             self.compiled_bw.pre_save()

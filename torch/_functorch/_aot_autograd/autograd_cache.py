@@ -557,6 +557,36 @@ def _get_custom_estimator_solver_uuids(
     return runtime_estimator_uuid, solver_uuid
 
 
+def _collect_aliased_input_storage_offsets(
+    example_inputs: Sequence[Any],
+) -> tuple[tuple[tuple[int, int], ...], ...]:
+    from torch.multiprocessing.reductions import StorageWeakRef
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+    storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
+    for i, inp in enumerate(example_inputs):
+        if not isinstance(inp, torch.Tensor) or is_traceable_wrapper_subclass(inp):
+            continue
+        try:
+            storage_ref = StorageWeakRef(inp.untyped_storage())
+        except Exception:
+            continue
+        storage_ref_to_idx[storage_ref].append(i)
+
+    aliased_offsets: list[tuple[tuple[int, int], ...]] = []
+    for indices in storage_ref_to_idx.values():
+        if len(indices) <= 1:
+            continue
+        group_offsets = tuple(
+            (idx, offset)
+            for idx in indices
+            if isinstance(offset := example_inputs[idx].storage_offset(), int)
+        )
+        if group_offsets:
+            aliased_offsets.append(group_offsets)
+    return tuple(aliased_offsets)
+
+
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -644,6 +674,12 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         # _save_config_ignore) since they're not serializable. We must access the
         # config module directly to get the patched runtime values.
         self.custom_estimator_solver_uuids = _get_custom_estimator_solver_uuids(config)
+        # extract_tensor_metadata_for_cache_key zeroes storage_offset, which is
+        # safe for non-aliased inputs, but AOTSyntheticBaseWrapper bakes concrete
+        # storage offsets into synthetic-base views when inputs share storage.
+        self.aliased_input_storage_offsets = _collect_aliased_input_storage_offsets(
+            example_inputs
+        )
         self._init_fx_graph_hash_details(gm, example_inputs, fx_config)
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
