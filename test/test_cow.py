@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda_python_bindings,
     run_tests,
     skipIfRocm,
+    subtest,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TestCase,
@@ -89,6 +90,7 @@ def _capture_ancestors(stream):
             pending.extend(int(parent) for parent in parents)
     return ancestors
 
+
 class TestCOWDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -160,6 +162,39 @@ class TestCOWDevice(TestCase):
                 self.assertEqual(y, inp + (0 if pointer else 1))
                 self.assertEqual(out, (inp + (0 if pointer else 1)) * 2)
 
+    @parametrize("captured", [False, True])
+    @parametrize(
+        "lazy_read",
+        [
+            False,
+            subtest(True, decorators=[expectedFailureXPU]),
+        ],  # https://github.com/intel/torch-xpu-ops/issues/6411
+    )
+    def test_steal_waits_for_readers(self, device, captured, lazy_read):
+        if captured and not (torch.device(device).type == "cuda" and TEST_CUDA_GRAPH):
+            raise unittest.SkipTest("requires CUDA graph support")
+        mod = _device_mod(device)
+        with _streams(device, 3) as (a, b, c):
+            inp = torch.ones(1024, device=device)
+            with _capture(a, captured) as graph:
+                x = inp + 0
+                y = x._lazy_clone()
+                ptr = x.const_data_ptr()
+                b.wait_stream(a)
+                c.wait_stream(a)
+                with mod.stream(b):
+                    _device_sleep(device, 10_000_000)
+                    out = x._lazy_clone() if lazy_read else x * 2
+                a.wait_stream(b)
+                del x
+                with mod.stream(c):
+                    y.add_(1)
+                a.wait_stream(c)
+            self.assertEqual(y.const_data_ptr(), ptr)
+            for _ in _replays(graph, captured, inp):
+                self.assertEqual(out, inp if lazy_read else inp * 2)
+                self.assertEqual(y, inp + 1)
+
 
 @unittest.skipUnless(TEST_CUDA_GRAPH, "requires CUDA graph support")
 @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires native allocator stream metadata")
@@ -218,30 +253,6 @@ class TestCOWCudaOnly(TestCase):
             self.assertEqual(x, torch.ones_like(x))
             self.assertEqual(y, x)
             self.assertEqual(late, torch.full_like(late, 3))
-
-    @parametrize("captured", [False, True])
-    @parametrize("lazy_read", [False, True])
-    def test_steal_waits_for_readers(self, device, captured, lazy_read):
-        with _streams(device, 3) as (a, b, c):
-            inp = torch.ones(1024, device=device)
-            with _capture(a, captured) as graph:
-                x = inp + 0
-                y = x._lazy_clone()
-                ptr = x.const_data_ptr()
-                b.wait_stream(a)
-                c.wait_stream(a)
-                with torch.cuda.stream(b):
-                    torch.cuda._sleep(10_000_000)
-                    out = x._lazy_clone() if lazy_read else x * 2
-                a.wait_stream(b)
-                del x
-                with torch.cuda.stream(c):
-                    y.add_(1)
-                a.wait_stream(c)
-            self.assertEqual(y.const_data_ptr(), ptr)
-            for _ in _replays(graph, captured, inp):
-                self.assertEqual(out, inp if lazy_read else inp * 2)
-                self.assertEqual(y, inp + 1)
 
     @parametrize("captured", [False, True])
     @parametrize("read_before_clone", [False, True])
@@ -559,7 +570,7 @@ class TestCOWFallbackDevice(TestCase):
             with self.assertRaisesRegex(RuntimeError, "FakeTensors"):
                 getattr(torch._C, name)(x)
 
-    @expectedFailureXPU
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/6411
     def test_clone_on_another_stream(self, device):
         mod = _device_mod(device)
         a = mod.current_stream(device)
@@ -574,6 +585,7 @@ class TestCOWFallbackDevice(TestCase):
         self.assertEqual(x, torch.ones_like(x))
         self.assertEqual(y, torch.full_like(y, 2))
 
+
 class TestCOWFallbackCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -587,9 +599,13 @@ class TestCOWFallbackCudaOnly(TestCase):
         self.assertEqual(y, torch.ones_like(y))
 
 
-instantiate_device_type_tests(TestCOWDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(
+    TestCOWDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 instantiate_device_type_tests(TestCOWCudaOnly, globals(), only_for="cuda")
-instantiate_device_type_tests(TestCOWFallbackDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(
+    TestCOWFallbackDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 instantiate_device_type_tests(TestCOWFallbackCudaOnly, globals(), only_for="cuda")
 
 
