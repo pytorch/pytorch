@@ -65,33 +65,6 @@ def async_execution(fn):
         >>> )
         >>> print(ret)  # prints tensor([3., 3.])
 
-        When combined with TorchScript decorators, this decorator must be the
-        outmost one.
-
-        >>> from torch import Tensor
-        >>> from torch.futures import Future
-        >>> from torch.distributed import rpc
-        >>>
-        >>> # omitting setup and shutdown RPC
-        >>>
-        >>> # On all workers
-        >>> @torch.jit.script
-        >>> def script_add(x: Tensor, y: Tensor) -> Tensor:
-        >>>     return x + y
-        >>>
-        >>> @rpc.functions.async_execution
-        >>> @torch.jit.script
-        >>> def async_add(to: str, x: Tensor, y: Tensor) -> Future[Tensor]:
-        >>>     return rpc.rpc_async(to, script_add, (x, y))
-        >>>
-        >>> # On worker0
-        >>> ret = rpc.rpc_sync(
-        >>>     "worker1",
-        >>>     async_add,
-        >>>     args=("worker2", torch.ones(2), 1)
-        >>> )
-        >>> print(ret)  # prints tensor([2., 2.])
-
         When combined with static or class method, this decorator must be the
         inner one.
 

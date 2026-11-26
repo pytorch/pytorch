@@ -459,7 +459,6 @@ struct KinetoObserverContext : public at::ObserverContext {
     c10::approx_time_t end_time_{
         std::numeric_limits<c10::approx_time_t>::min()};
 
-    bool allow_tf32_cublas_;
     std::unique_ptr<perf_counters_t> counters_;
     collective_meta_t* collective_meta_{};
   };
@@ -476,11 +475,9 @@ struct KinetoObserverContext : public at::ObserverContext {
   // down and event_ freed, so the exit drops without touching event_.
   uint64_t session_generation_{0};
 
-  // True if begin_op pushed an external correlation id for this op. The
-  // matching pop must run on every exit path (including teardown /
-  // stale-session early exits), or the id leaks onto the device profiling
-  // backend's per-thread correlation stack, which is not reset across profiler
-  // sessions.
+  // True if begin_op pushed an external correlation id for this op. Every exit
+  // path pops it to keep the backend's per-thread correlation stack balanced,
+  // except global exits after the exit hook, since Kineto may be destroyed.
   bool pushed_correlation_id_{false};
 };
 
@@ -526,6 +523,8 @@ class InputOutputEncoder final {
       tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_strides_;
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
+  AppendOnlyList<c10::TypePtr, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+      scalar_list_types_;
 };
 
 using perf_profiler_t = torch::profiler::impl::linux_perf::PerfProfiler;
@@ -635,6 +634,13 @@ class TORCH_API ThreadLocalSubqueue {
     // ProfilerState::KINETO_GPU_FALLBACK or
     // ProfilerState::KINETO_PRIVATEUSE1_FALLBACK
     AppendOnlyList<FallbackPair, BlockSize> device_fallback_;
+
+    // Read once per profiling session and reported for every op. Changing the
+    // setting during a session isn't reflected in its events.
+    bool allow_tf32_cublas_ =
+        at::globalContext().float32Precision(
+            at::Float32Backend::CUDA,
+            at::Float32Op::MATMUL) == at::Float32Precision::TF32;
   } torch_ops_;
 
   // reportBackendEventToActiveKinetoProfiler
@@ -663,6 +669,7 @@ class TORCH_API ThreadLocalSubqueue {
 class TORCH_API RecordQueue {
  public:
   RecordQueue(ProfilerConfig config, std::set<ActivityType> activities);
+  ~RecordQueue();
 
   bool tracePython() const;
   bool getPythonGcEvents() const;
