@@ -2,11 +2,14 @@
 
 #include <torch/headeronly/cuda/KernelUtils.h>
 #include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/complex.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/TypeSafeSignMath.h>
 
 #include <cuda_runtime.h>
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -50,6 +53,36 @@ template <typename scalar_t, typename index_t>
 __global__ void specialized_add_kernel(scalar_t* out, index_t numel) {
   torch::headeronly::fastSpecializedAtomicAdd(
       out, index_t{0}, numel, static_cast<scalar_t>(1));
+}
+
+__global__ void complex_math_kernel(float* out) {
+  const torch::headeronly::complex<float> z(1.0f, 0.5f);
+  float sum = 0.0f;
+
+  sum += torch::headeronly::acos(z).real();
+  sum += torch::headeronly::acosh(z).real();
+  sum += torch::headeronly::asin(z).real();
+  sum += torch::headeronly::asinh(z).real();
+  sum += torch::headeronly::atan(z).real();
+  sum += torch::headeronly::atanh(z).real();
+  sum += torch::headeronly::cos(z).real();
+  sum += torch::headeronly::cosh(z).real();
+  sum += torch::headeronly::exp(z).real();
+  sum += torch::headeronly::expm1(z).real();
+  sum += torch::headeronly::log(z).real();
+  sum += torch::headeronly::log10(z).real();
+  sum += torch::headeronly::log1p(z).real();
+  sum += torch::headeronly::log2(z).real();
+  sum += torch::headeronly::pow(z, z).real();
+  sum += torch::headeronly::pow(z, 2.0f).real();
+  sum += torch::headeronly::pow(2.0f, z).real();
+  sum += torch::headeronly::sin(z).real();
+  sum += torch::headeronly::sinh(z).real();
+  sum += torch::headeronly::sqrt(z).real();
+  sum += torch::headeronly::tan(z).real();
+  sum += torch::headeronly::tanh(z).real();
+
+  out[0] = sum;
 }
 
 // Scatters +1 into each of `indices` of a `numel`-element tensor starting
@@ -166,6 +199,39 @@ void testVectorizedBounds() {
   EXPECT_FALSE(wasWritten(out[buf_numel - 1])) << "wrote past the end";
 }
 
+template <typename scalar_t>
+__global__ void signbit_kernel(const scalar_t* in, bool* out, int n) {
+  const int i = threadIdx.x;
+  if (i < n) {
+    out[i] = torch::headeronly::_signbit(in[i]);
+  }
+}
+
+template <typename scalar_t>
+void testSignbit(scalar_t neg_nan) {
+  const std::vector<scalar_t> in = {
+      scalar_t(-1.0f), scalar_t(-0.0f), scalar_t(0.0f), scalar_t(1.0f), neg_nan};
+  const int n = static_cast<int>(in.size());
+  scalar_t* d_in = nullptr;
+  bool* d_out = nullptr;
+  CUDA_ASSERT_OK(cudaMalloc(&d_in, n * sizeof(scalar_t)));
+  CUDA_ASSERT_OK(cudaMalloc(&d_out, n * sizeof(bool)));
+  CUDA_ASSERT_OK(cudaMemcpy(
+      d_in, in.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));
+  signbit_kernel<scalar_t><<<1, n>>>(d_in, d_out, n);
+  CUDA_ASSERT_OK(cudaGetLastError());
+  CUDA_ASSERT_OK(cudaDeviceSynchronize());
+  bool out[5];
+  CUDA_ASSERT_OK(cudaMemcpy(out, d_out, sizeof(out), cudaMemcpyDeviceToHost));
+  cudaFree(d_in);
+  cudaFree(d_out);
+  EXPECT_TRUE(out[0]);
+  EXPECT_TRUE(out[1]);
+  EXPECT_FALSE(out[2]);
+  EXPECT_FALSE(out[3]);
+  EXPECT_TRUE(out[4]);
+}
+
 // A paired neighbour must keep its value, including the sign of -0.0.
 template <typename scalar_t>
 void testPairedNeighbourUnchanged() {
@@ -184,6 +250,16 @@ void testPairedNeighbourUnchanged() {
 }
 
 } // namespace
+
+TEST(TestSignbit, Device) {
+  SKIP_IF_NO_CUDA();
+  using torch::headeronly::BFloat16;
+  using torch::headeronly::Half;
+  testSignbit<float>(-std::numeric_limits<float>::quiet_NaN());
+  testSignbit<double>(-std::numeric_limits<double>::quiet_NaN());
+  testSignbit<Half>(Half(0xFE00, Half::from_bits()));
+  testSignbit<BFloat16>(BFloat16(0xFFC0, BFloat16::from_bits()));
+}
 
 TEST(TestFastAtomicAdd, ScatterAdd) {
   SKIP_IF_NO_CUDA();
@@ -245,5 +321,18 @@ TEST(TestFastAtomicAdd, FastSpecializedAtomicAdd) {
   float host = -1.0f;
   CUDA_ASSERT_OK(cudaMemcpy(&host, d, sizeof(float), cudaMemcpyDeviceToHost));
   EXPECT_EQ(host, 1.0f);
+  cudaFree(d);
+}
+
+TEST(TestComplexMath, DeviceBranches) {
+  SKIP_IF_NO_CUDA();
+  float* d = nullptr;
+  CUDA_ASSERT_OK(cudaMalloc(&d, sizeof(float)));
+  complex_math_kernel<<<1, 1>>>(d);
+  CUDA_ASSERT_OK(cudaGetLastError());
+  CUDA_ASSERT_OK(cudaDeviceSynchronize());
+  float host = std::numeric_limits<float>::quiet_NaN();
+  CUDA_ASSERT_OK(cudaMemcpy(&host, d, sizeof(float), cudaMemcpyDeviceToHost));
+  EXPECT_TRUE(std::isfinite(host));
   cudaFree(d);
 }

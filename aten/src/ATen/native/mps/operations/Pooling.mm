@@ -427,19 +427,26 @@ static PoolSizes process_pool_sizes(const Tensor& input,
                    dilation_opt.has_value() ? std::make_optional(dilation_expanded) : std::nullopt);
 }
 
-static void fill_pool_size_strides(PoolingParams<5>& params,
-                                   const Tensor& input,
-                                   const Tensor& output,
-                                   const std::optional<Tensor>& indices_opt) {
-  const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
+static void fill_pool_params(PoolingParams<5>& params,
+                             const Tensor& input,
+                             const Tensor& output,
+                             const int32_t pooling_dims,
+                             const std::string& op_name,
+                             const bool supports_64bit = false,
+                             const std::optional<Tensor>& indices_opt = std::nullopt) {
+  TORCH_CHECK_NOT_IMPLEMENTED(supports_64bit || (canUse32BitIndexMath(input) && canUse32BitIndexMath(output)),
+                              op_name,
+                              ": MPS does not support tensors that require 64-bit indexing");
+  params.dims = static_cast<int32_t>(input.dim());
+  params.pooling_dims = pooling_dims;
+  params.channels_last = input.suggest_memory_format() == MemoryFormat::ChannelsLast;
   for (const auto dim : c10::irange(input.dim())) {
     params.input_sizes[dim] = c10::safe_conv<int32_t, int64_t>(input.size(dim), "int32_t");
     params.input_strides[dim] = input.stride(dim);
     params.output_sizes[dim] = c10::safe_conv<int32_t, int64_t>(output.size(dim), "int32_t");
     params.output_strides[dim] = output.stride(dim);
-    if (indices.defined()) {
-      params.indices_sizes[dim] = c10::safe_conv<int32_t, int64_t>(indices.size(dim), "int32_t");
-      params.indices_strides[dim] = indices.stride(dim);
+    if (indices_opt) {
+      params.indices_strides[dim] = indices_opt->stride(dim);
     }
   }
 }
@@ -454,16 +461,55 @@ static bool adaptive_pool_needs_int64(const Tensor& input, const Tensor& output,
   return false;
 }
 
+template <typename... ExtraArgs>
+static void launch_mps_pool_kernel(const std::string& kernel_name,
+                                   const std::string& index_suffix,
+                                   const Tensor& arg0,
+                                   const Tensor& arg1,
+                                   IntArrayRef grid,
+                                   const PoolingParams<5>& params,
+                                   const std::string& op_name,
+                                   const ExtraArgs&... extra_args) {
+  if (c10::multiply_integers(grid) == 0) {
+    return;
+  }
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto PSO = lib.getPipelineStateForFunc(kernel_name + scalarToMetalTypeString(arg0) + index_suffix);
+
+      getMPSProfiler().beginProfileKernel(PSO, op_name, {arg0, arg1}, mpsStream);
+      [computeEncoder setComputePipelineState:PSO];
+      mtl_setArgs(computeEncoder, arg0, arg1, params, extra_args...);
+
+      mtl_dispatch3DJob(computeEncoder, PSO, grid[0], grid.size() > 1 ? grid[1] : 1, grid.size() > 2 ? grid[2] : 1);
+      getMPSProfiler().endProfileKernel(PSO, mpsStream);
+    }
+  });
+}
+
+// A pool2d_dense thread computes pool2d_tile_rows rows, of pool2d_s1_tile_cols columns with stride 1 along W in NCHW
+static void launch_pool2d_dense_kernel(const std::string& kernel_name,
+                                       const Tensor& input,
+                                       const Tensor& output,
+                                       const PoolingParams<5>& params,
+                                       const std::string& op_name) {
+  const bool use_s1 = !params.channels_last && params.stride[1] == 1 && params.kernel_size[1] > 1;
+  const auto kw = use_s1 ? std::min(params.kernel_size[1], pool2d_s1_max_kw) : 0;
+  const auto N = params.dims == 4 ? output.size(0) : 1, C = output.size(-3);
+  const auto H = ceil_div<int64_t>(output.size(-2), pool2d_tile_rows);
+  const auto W = ceil_div<int64_t>(output.size(-1), use_s1 ? pool2d_s1_tile_cols : 1);
+  const auto layout = params.channels_last ? "nhwc_" : fmt::format("nchw_k{}_", kw);
+  const auto grid = params.channels_last ? std::array{C, W, N * H} : std::array{W, H, N * C};
+  launch_mps_pool_kernel(kernel_name + layout, "", input, output, grid, params, op_name);
+}
+
 static void launch_max_pool_kernel(const Tensor& input,
                                    const Tensor& output,
                                    const std::optional<Tensor>& indices_opt,
                                    const PoolingParams<5>& params,
                                    const std::string& op_name) {
-  const auto numThreads = output.numel();
-  if (numThreads == 0) {
-    return;
-  }
-
   const auto memory_format = input.suggest_memory_format();
   const bool channels_last = memory_format == MemoryFormat::ChannelsLast;
   const auto dims = params.dims;
@@ -473,58 +519,26 @@ static void launch_max_pool_kernel(const Tensor& input,
   const bool is_dense = !params.adaptive && params.pooling_dims == 2 && input.is_contiguous(memory_format) &&
       output.is_contiguous(memory_format) && (!indices_opt || indices_opt->is_contiguous(memory_format)) &&
       std::in_range<int32_t>(plane_numel);
-  const auto kw = params.kernel_size[1];
-  // With indices the dense kernel is already bound by the int64 writes
-  const bool use_s1 = is_dense && !channels_last && !params.return_indices && params.stride[0] == 1 &&
-      params.stride[1] == 1 && params.dilation[1] == 1;
-  std::string kernel_name;
-  if (use_s1) {
-    kernel_name = fmt::format(
-        "max_pool2d_s1_nchw_k{}_{}", kw == 2 || kw == 3 || kw == 5 ? kw : 0, scalarToMetalTypeString(input));
-  } else if (is_dense) {
-    kernel_name = fmt::format("max_pool2d_dense_{}{}_{}",
-                              channels_last ? "nhwc" : "nchw",
-                              params.return_indices ? "_idx" : "",
-                              scalarToMetalTypeString(input));
-  } else {
-    const bool use_32bit = canUse32BitIndexMath(input) && canUse32BitIndexMath(output) &&
-        (!indices_opt || canUse32BitIndexMath(*indices_opt)) &&
-        !(params.adaptive && adaptive_pool_needs_int64(input, output, params.pooling_dims));
-    kernel_name = fmt::format("max_pool{}_{}", use_32bit ? "" : "_i64", scalarToMetalTypeString(input));
+  // For dilated rows pool2d_dense is the faster kernel only with stride 1
+  const bool stride1 = params.stride[0] == 1 && params.stride[1] == 1;
+  const bool tiled_dilation = params.dilation[1] == 1 && (params.dilation[0] == 1 || stride1);
+  if (is_dense && !params.return_indices && tiled_dilation) {
+    const auto name = params.dilation[0] == 1 ? "max_pool2d_" : "max_pool2d_dilated_";
+    return launch_pool2d_dense_kernel(name, input, output, params, op_name);
   }
-
-  MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto maxPoolPSO = lib.getPipelineStateForFunc(kernel_name);
-
-      getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input}, mpsStream);
-      [computeEncoder setComputePipelineState:maxPoolPSO];
-      mtl_setArgs(computeEncoder, input, output, indices_opt, params);
-
-      if (!is_dense) {
-        mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
-      } else {
-        const int64_t N = dims == 4 ? params.output_sizes[0] : 1;
-        const int64_t C = params.output_sizes[dims - 3];
-        const int64_t OH = params.output_sizes[dims - 2];
-        const int64_t OW = params.output_sizes[dims - 1];
-        if (use_s1) {
-          mtl_dispatch3DJob(computeEncoder,
-                            maxPoolPSO,
-                            ceil_div<int64_t>(OW, max_pool2d_s1_tile_cols),
-                            ceil_div<int64_t>(OH, max_pool2d_s1_tile_rows),
-                            N * C);
-        } else if (channels_last) {
-          mtl_dispatch3DJob(computeEncoder, maxPoolPSO, C, OW, N * OH);
-        } else {
-          mtl_dispatch3DJob(computeEncoder, maxPoolPSO, OW, OH, N * C);
-        }
-      }
-      getMPSProfiler().endProfileKernel(maxPoolPSO, mpsStream);
-    }
-  });
+  if (is_dense) {
+    const auto N = dims == 4 ? output.size(0) : 1, C = output.size(-3), OH = output.size(-2), OW = output.size(-1);
+    using namespace std::string_view_literals;
+    const auto name =
+        fmt::format("max_pool2d_dense_{}{}_", channels_last ? "nhwc"sv : "nchw"sv, indices_opt ? "_idx"sv : ""sv);
+    const auto grid = channels_last ? std::array{C, OW, N * OH} : std::array{OW, OH, N * C};
+    return launch_mps_pool_kernel(name, "", input, output, grid, params, op_name, indices_opt);
+  }
+  const bool use_32bit = canUse32BitIndexMath(input) && canUse32BitIndexMath(output) &&
+      (!indices_opt || canUse32BitIndexMath(*indices_opt)) &&
+      !(params.adaptive && adaptive_pool_needs_int64(input, output, params.pooling_dims));
+  const auto name = use_32bit ? "max_pool_" : "max_pool_i64_";
+  launch_mps_pool_kernel(name, "", input, output, output.numel(), params, op_name, indices_opt);
 }
 
 static void max_pool_with_indices_out_mps_template(const Tensor& output,
@@ -537,7 +551,7 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
                                                    bool ceil_mode,
                                                    const int32_t pooling_dims,
                                                    const std::string& op_name) {
-  auto [dims, output_size, kernel_size, stride, padding, dilation_opt] =
+  auto [_, output_size, kernel_size, stride, padding, dilation_opt] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, _dilation, ceil_mode, pooling_dims, op_name);
   TORCH_INTERNAL_ASSERT(dilation_opt.has_value());
   auto dilation = dilation_opt.value();
@@ -552,13 +566,8 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
 
   const std::optional<Tensor> indices_arg = return_indices ? std::make_optional(indices) : std::nullopt;
 
-  PoolingParams<5> params;
-
-  params.dims = dims;
-  params.pooling_dims = pooling_dims;
-  params.return_indices = return_indices;
-  params.adaptive = false;
-  fill_pool_size_strides(params, input, output, indices_arg);
+  PoolingParams<5> params{.return_indices = return_indices};
+  fill_pool_params(params, input, output, pooling_dims, op_name, true, indices_arg);
 
   memcpy(params.kernel_size.data(), kernel_size.data(), pooling_dims * sizeof(int32_t));
   memcpy(params.stride.data(), stride.data(), pooling_dims * sizeof(int32_t));
@@ -573,15 +582,8 @@ static void adaptive_max_pool_out_mps_template(const Tensor& output,
                                                const Tensor& input,
                                                const int32_t pooling_dims,
                                                const std::string& op_name) {
-  const auto dims = static_cast<int32_t>(input.dim());
-
-  PoolingParams<5> params;
-
-  params.dims = dims;
-  params.pooling_dims = pooling_dims;
-  params.return_indices = true;
-  params.adaptive = true;
-  fill_pool_size_strides(params, input, output, indices);
+  PoolingParams<5> params{.return_indices = true, .adaptive = true};
+  fill_pool_params(params, input, output, pooling_dims, op_name, true, indices);
 
   for (const auto dim : c10::irange(pooling_dims)) {
     params.kernel_size[dim] = 0;
@@ -740,174 +742,6 @@ static void max_unpool_out_mps_template(const Tensor& input,
   });
 }
 
-static void avg_pool2d_template(const Tensor& input,
-                                const Tensor& output,
-                                const std::optional<Tensor>& grad_output_opt,
-                                IntArrayRef kernel_size,
-                                IntArrayRef stride,
-                                IntArrayRef padding,
-                                IntArrayRef dilation,
-                                bool ceil_mode,
-                                bool count_include_pad,
-                                const std::optional<int64_t> divisor_override,
-                                const std::string& op_name) {
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
-  const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
-  const bool is_backward_pass = grad_output.defined();
-  const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
-
-  // custom divisor isn't supported natively in avgPooling2DWithSourceTensor().
-  // For Float input type, we work around it by multiplying divisor after avgPooling2D.
-  // However, for Long type, the accumulated error when multiplying the divisor
-  // would produce results that mismatch CPU results.
-  if (use_divisor && input.scalar_type() == ScalarType::Long) {
-    TORCH_WARN_ONCE("MPS: passing divisor to Average Pooling op with int64 input is ",
-                    "not supported on MPS backend. ",
-                    "Falling back on CPU. This may have performance implications.");
-    if (!is_backward_pass) {
-      output.copy_(at::avg_pool2d(
-          input.to("cpu"), kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override));
-    } else {
-      output.copy_(at::avg_pool2d_backward(grad_output.to("cpu"),
-                                           input.to("cpu"),
-                                           kernel_size,
-                                           stride,
-                                           padding,
-                                           ceil_mode,
-                                           count_include_pad,
-                                           divisor_override));
-    }
-    return;
-  }
-
-  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
-    MPSGraph* mpsGraph = cachedGraph.graph();
-    const int64_t ndims = input.ndimension();
-    MPSShape* paddingShape = nil;
-    MPSGraphTensor* paddedTensor = cachedGraph.inputTensor;
-
-    // workaround for issue #103039644: mismatching MPS vs. CPU results
-    // when both ceilMode and includeZeroPadToAverage are True
-    const bool explicit_padding = count_include_pad && ceil_mode;
-    if (explicit_padding) {
-      std::vector<NSNumber*> padVec(ndims, @(0));
-      padVec[ndims - 1] = @(padding.size() == 1 ? padding[0] : padding[1]);
-      padVec[ndims - 2] = @(ndims > 3 ? padding[0] : 0);
-      paddingShape = [NSArray arrayWithObjects:padVec.data() count:ndims];
-      paddedTensor = [mpsGraph padTensor:cachedGraph.inputTensor
-                         withPaddingMode:MPSGraphPaddingModeZero
-                             leftPadding:paddingShape
-                            rightPadding:paddingShape
-                           constantValue:0.0
-                                    name:nil];
-      paddedTensor = [mpsGraph identityWithTensor:paddedTensor name:nil];
-    } else {
-      desc.includeZeroPadToAverage = count_include_pad;
-    }
-    if (use_divisor) {
-      desc.includeZeroPadToAverage = YES;
-    }
-
-    if (!is_backward_pass) {
-      MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DWithSourceTensor:paddedTensor descriptor:desc name:nil];
-      if (cachedGraph.divisorTensor) {
-        // workaround: custom divisor isn't supported by MPS backend, so we scale manually
-        return
-            [mpsGraph multiplicationWithPrimaryTensor:avgPoolTensor
-                                      secondaryTensor:mps::castMPSTensor(
-                                                          mpsGraph, cachedGraph.divisorTensor, [avgPoolTensor dataType])
-                                                 name:nil];
-      } else {
-        return avgPoolTensor;
-      }
-    } else { // backward pass
-      MPSGraphTensor* scaledGradTensor = cachedGraph.gradOutputTensor;
-      if (cachedGraph.divisorTensor) {
-        scaledGradTensor = [mpsGraph
-            multiplicationWithPrimaryTensor:cachedGraph.gradOutputTensor
-                            secondaryTensor:mps::castMPSTensor(
-                                                mpsGraph, cachedGraph.divisorTensor, [scaledGradTensor dataType])
-                                       name:nil];
-      }
-      MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DGradientWithGradientTensor:scaledGradTensor
-                                                                          sourceTensor:paddedTensor
-                                                                            descriptor:desc
-                                                                                  name:nil];
-      if (explicit_padding) {
-        return [mpsGraph padGradientWithIncomingGradientTensor:avgPoolTensor
-                                                  sourceTensor:cachedGraph.inputTensor
-                                                   paddingMode:MPSGraphPaddingModeZero
-                                                   leftPadding:paddingShape
-                                                  rightPadding:paddingShape
-                                                          name:nil];
-
-      } else {
-        return avgPoolTensor;
-      }
-    }
-  };
-
-  pool2d_template(input,
-                  output,
-                  std::nullopt,
-                  grad_output_opt,
-                  kernel_size,
-                  stride,
-                  padding,
-                  {1, 1},
-                  ceil_mode,
-                  count_include_pad,
-                  divisor_override,
-                  pooling_op_block,
-                  op_name);
-}
-
-static void fill_avg_pool_params(AvgPoolingParams<5>& params,
-                                 const Tensor& input,
-                                 const Tensor& output,
-                                 const int32_t pooling_dims,
-                                 const std::string& op_name) {
-  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input) && canUse32BitIndexMath(output),
-                              op_name,
-                              ": MPS does not support tensors that require 64-bit indexing");
-  params.dims = static_cast<int32_t>(input.dim());
-  params.pooling_dims = pooling_dims;
-  for (const auto dim : c10::irange(input.dim())) {
-    params.input_sizes[dim] = c10::safe_conv<int32_t, int64_t>(input.size(dim), "int32_t");
-    params.input_strides[dim] = c10::safe_conv<int32_t, int64_t>(input.stride(dim), "int32_t");
-    params.output_sizes[dim] = c10::safe_conv<int32_t, int64_t>(output.size(dim), "int32_t");
-    params.output_strides[dim] = c10::safe_conv<int32_t, int64_t>(output.stride(dim), "int32_t");
-  }
-}
-
-template <typename... ExtraArgs>
-static void launch_avg_pool_kernel(const std::string& kernel_name,
-                                   const std::string& index_suffix,
-                                   const Tensor& arg0,
-                                   const Tensor& arg1,
-                                   const int64_t numThreads,
-                                   const AvgPoolingParams<5>& params,
-                                   const std::string& op_name,
-                                   const ExtraArgs&... extra_args) {
-  if (numThreads == 0) {
-    return;
-  }
-  MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto PSO = lib.getPipelineStateForFunc(kernel_name + scalarToMetalTypeString(arg0) + index_suffix);
-
-      getMPSProfiler().beginProfileKernel(PSO, op_name, {arg0, arg1}, mpsStream);
-      [computeEncoder setComputePipelineState:PSO];
-      mtl_setArgs(computeEncoder, arg0, arg1, params, extra_args...);
-
-      mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
-      getMPSProfiler().endProfileKernel(PSO, mpsStream);
-    }
-  });
-}
-
 static void avg_pool_out_mps_template(const Tensor& output,
                                       const Tensor& input,
                                       IntArrayRef _kernel_size,
@@ -918,26 +752,39 @@ static void avg_pool_out_mps_template(const Tensor& output,
                                       std::optional<int64_t> divisor_override,
                                       const int32_t pooling_dims,
                                       const std::string& op_name) {
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
-  auto [dims, output_size, kernel_size, stride, padding, _] =
+  const auto dtype = input.scalar_type();
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      dtype == kLong || isFloatingType(dtype), "\"", op_name, "\" not implemented for '", dtype, "'");
+  auto [_, output_size, kernel_size, stride, padding, __] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, std::nullopt, ceil_mode, pooling_dims, op_name);
 
   const auto memory_format = input.suggest_memory_format();
-  output.resize_(output_size, memory_format);
+  const bool is_2d = pooling_dims == 2;
+  if (!is_2d) {
+    output.resize_(output_size, memory_format);
+  }
 
-  AvgPoolingParams<5> params{};
-  fill_avg_pool_params(params, input, output, pooling_dims, op_name);
-  params.count_include_pad = count_include_pad;
-  params.has_divisor_override = divisor_override.has_value();
+  PoolingParams<5> params{.count_include_pad = count_include_pad, .has_divisor_override = divisor_override.has_value()};
+  fill_pool_params(params, input, output, pooling_dims, op_name, is_2d);
   if (divisor_override.has_value()) {
-    params.divisor_override = c10::safe_conv<int32_t, int64_t>(divisor_override.value(), "int32_t");
+    params.divisor_override = is_2d ? *divisor_override : c10::safe_conv<int32_t>(*divisor_override, "int32_t");
   }
 
   memcpy(params.kernel_size.data(), kernel_size.data(), pooling_dims * sizeof(int32_t));
   memcpy(params.stride.data(), stride.data(), pooling_dims * sizeof(int32_t));
   memcpy(params.padding.data(), padding.data(), pooling_dims * sizeof(int32_t));
 
-  launch_avg_pool_kernel("avg_pool_", "_i32", input, output, output.numel(), params, op_name);
+  const bool use_32bit = canUse32BitIndexMath(input) && canUse32BitIndexMath(output);
+  if (is_2d && use_32bit && input.is_contiguous(memory_format) && output.is_contiguous(memory_format)) {
+    return launch_pool2d_dense_kernel("avg_pool2d_", input, output, params, op_name);
+  }
+  // Outputs of 2^32 or more elements need a second grid axis
+  int64_t rows = 1;
+  for (int64_t dim = 0; !std::in_range<uint32_t>(output.numel() / rows); dim++) {
+    rows *= output.size(dim);
+  }
+  launch_mps_pool_kernel(
+      "avg_pool_", use_32bit ? "_i32" : "_i64", input, output, {output.numel() / rows, rows}, params, op_name);
 }
 
 static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
@@ -951,20 +798,32 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
                                                std::optional<int64_t> divisor_override,
                                                const int32_t pooling_dims,
                                                const std::string& op_name) {
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
+  const bool is_2d = pooling_dims == 2;
+  const auto dtype = input.scalar_type(), grad_dtype = grad_output.scalar_type();
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      supportedFloatingType(dtype) || (is_2d && dtype == kLong), "\"", op_name, "\" not implemented for '", dtype, "'");
+  TORCH_CHECK_TYPE(grad_dtype == dtype, op_name, ": expected grad_output of dtype ", dtype, ", got ", grad_dtype);
 
   auto [dims, _, kernel_size, stride, padding, __] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, std::nullopt, ceil_mode, pooling_dims, op_name);
+  for (const auto dim : c10::irange(pooling_dims)) {
+    const auto window_end = input.size(dim - pooling_dims) + padding[dim] + kernel_size[dim] - 1;
+    TORCH_CHECK_NOT_IMPLEMENTED(window_end <= std::numeric_limits<int32_t>::max(),
+                                op_name,
+                                ": MPS does not support pooling windows reaching past INT_MAX");
+  }
 
   const auto memory_format = input.suggest_memory_format();
-  grad_input.resize_(input.sizes(), memory_format);
-  grad_input.fill_(0);
+  if (!is_2d) {
+    grad_input.resize_(input.sizes(), memory_format);
+    grad_input.fill_(0);
+  }
 
   // See Note [Enabling Deterministic Operations]
   // The operation is normally nondeterministic because of atomic accumulation
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
-  bool serial = at::globalContext().deterministicAlgorithms();
+  const bool serial = !is_2d && at::globalContext().deterministicAlgorithms();
   if (serial && input.scalar_type() != kFloat) {
     Tensor grad_input_float = at::empty({0}, grad_input.options().dtype(kFloat));
     avg_pool_backward_out_mps_template(grad_input_float,
@@ -982,25 +841,39 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
     return;
   }
 
-  AvgPoolingParams<5> params{};
-  fill_avg_pool_params(params, grad_input, grad_output, pooling_dims, op_name);
-  params.count_include_pad = count_include_pad;
-  params.has_divisor_override = divisor_override.has_value();
+  PoolingParams<5> params{.count_include_pad = count_include_pad, .has_divisor_override = divisor_override.has_value()};
+  fill_pool_params(params, grad_input, grad_output, pooling_dims, op_name, is_2d);
   if (divisor_override.has_value()) {
-    params.divisor_override = c10::safe_conv<int32_t, int64_t>(divisor_override.value(), "int32_t");
+    params.divisor_override = is_2d ? *divisor_override : c10::safe_conv<int32_t>(*divisor_override, "int32_t");
   }
 
   memcpy(params.kernel_size.data(), kernel_size.data(), pooling_dims * sizeof(int32_t));
   memcpy(params.stride.data(), stride.data(), pooling_dims * sizeof(int32_t));
   memcpy(params.padding.data(), padding.data(), pooling_dims * sizeof(int32_t));
 
+  if (is_2d) {
+    const auto N = dims == 4 ? grad_input.size(0) : 1, C = grad_input.size(-3), H = grad_input.size(-2);
+    const auto W = ceil_div<int64_t>(grad_input.size(-1), pool2d_backward_tile_cols);
+    const auto max_batches = std::numeric_limits<uint32_t>::max() / std::max<int64_t>(params.channels_last ? H : C, 1);
+    for (int64_t n = 0; n < N; n += max_batches) {
+      const auto batches = std::min(max_batches, N - n);
+      launch_mps_pool_kernel("avg_pool2d_backward_",
+                             offsetsFitIn<int32_t>(grad_input, grad_output) ? "" : "_i64",
+                             N > max_batches ? grad_input.narrow(0, n, batches) : grad_input,
+                             N > max_batches ? grad_output.narrow(0, n, batches) : grad_output,
+                             params.channels_last ? IntArrayRef{C, W, batches * H} : IntArrayRef{W, H, batches * C},
+                             params,
+                             op_name);
+    }
+    return;
+  }
   const auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims, serial);
-  launch_avg_pool_kernel(
+  launch_mps_pool_kernel(
       "avg_pool_backward_", serial ? "_serial" : "", grad_input, grad_output, numThreads, params, op_name);
 }
 
 // For 2 pooling dims, adaptive pooling with divisible sizes is regular pooling (or its gradient, when upsampling)
-// with kernel_size == stride, for which MPSGraph is faster than the adaptive Metal kernels
+// with kernel_size == stride, whose dense 2D kernels are faster than the adaptive ones
 static void adaptive_avg_pool_out_mps_template(const Tensor& output,
                                                const Tensor& input,
                                                const int32_t pooling_dims,
@@ -1028,9 +901,8 @@ static void adaptive_avg_pool_out_mps_template(const Tensor& output,
       return;
     }
   }
-  AvgPoolingParams<5> params{};
-  fill_avg_pool_params(params, input, output, pooling_dims, op_name);
-  params.adaptive = true;
+  PoolingParams<5> params{.adaptive = true};
+  fill_pool_params(params, input, output, pooling_dims, op_name);
   const auto index_suffix = adaptive_pool_needs_int64(input, output, pooling_dims) ? "_i64" : "_i32";
   // A simdgroup per output pays off for windows large enough to amortize it and wide enough to keep its lanes busy
   int64_t window_size = 1;
@@ -1039,11 +911,11 @@ static void adaptive_avg_pool_out_mps_template(const Tensor& output,
   }
   constexpr int64_t simd_width = 32;
   if (input.size(-1) >= 16 * output.size(-1) && window_size >= 1024) {
-    launch_avg_pool_kernel(
+    launch_mps_pool_kernel(
         "adaptive_avg_pool_simd_", index_suffix, input, output, output.numel() * simd_width, params, op_name);
     return;
   }
-  launch_avg_pool_kernel("avg_pool_", index_suffix, input, output, output.numel(), params, op_name);
+  launch_mps_pool_kernel("avg_pool_", index_suffix, input, output, output.numel(), params, op_name);
 }
 
 static void adaptive_avg_pool_backward_out_mps_template(const Tensor& grad_input,
@@ -1071,9 +943,8 @@ static void adaptive_avg_pool_backward_out_mps_template(const Tensor& grad_input
       return;
     }
   }
-  AvgPoolingParams<5> params{};
-  fill_avg_pool_params(params, grad_input, grad_output, pooling_dims, op_name);
-  params.adaptive = true;
+  PoolingParams<5> params{.adaptive = true};
+  fill_pool_params(params, grad_input, grad_output, pooling_dims, op_name);
   const auto index_suffix = adaptive_pool_needs_int64(grad_input, grad_output, pooling_dims) ? "_i64" : "_i32";
   auto scaled_grad = at::empty(grad_output.sizes(), grad_output.options().dtype(kFloat));
   int64_t num_ranges = 0;
@@ -1081,7 +952,7 @@ static void adaptive_avg_pool_backward_out_mps_template(const Tensor& grad_input
     num_ranges += grad_input.size(dim);
   }
   auto out_ranges = at::empty({num_ranges, 2}, grad_output.options().dtype(kInt));
-  launch_avg_pool_kernel("adaptive_avg_pool_backward_scale_",
+  launch_mps_pool_kernel("adaptive_avg_pool_backward_scale_",
                          index_suffix,
                          grad_output,
                          scaled_grad,
@@ -1092,7 +963,7 @@ static void adaptive_avg_pool_backward_out_mps_template(const Tensor& grad_input
   for (const auto dim : c10::irange(grad_output.dim())) {
     params.output_strides[dim] = c10::safe_conv<int32_t, int64_t>(scaled_grad.stride(dim), "int32_t");
   }
-  launch_avg_pool_kernel("adaptive_avg_pool_backward_",
+  launch_mps_pool_kernel("adaptive_avg_pool_backward_",
                          index_suffix,
                          grad_input,
                          scaled_grad,
@@ -1464,30 +1335,16 @@ TORCH_IMPL_FUNC(avg_pool2d_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& output) {
-  if (ceil_mode) {
-    mps::avg_pool_out_mps_template(output,
-                                   input,
-                                   {kH, kW},
-                                   {dH, dW},
-                                   {padH, padW},
-                                   ceil_mode,
-                                   count_include_pad,
-                                   divisor_override,
-                                   /*pooling_dims=*/2,
-                                   "avg_pool3d");
-  } else {
-    mps::avg_pool2d_template(input,
-                             output,
-                             std::nullopt,
-                             {kH, kW},
-                             {dH, dW},
-                             {padH, padW},
-                             {1, 1},
-                             ceil_mode,
-                             count_include_pad,
-                             divisor_override,
-                             "avg_pool2d");
-  }
+  mps::avg_pool_out_mps_template(output,
+                                 input,
+                                 {kH, kW},
+                                 {dH, dW},
+                                 {padH, padW},
+                                 ceil_mode,
+                                 count_include_pad,
+                                 divisor_override,
+                                 /*pooling_dims=*/2,
+                                 "avg_pool2d");
 }
 
 TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps)
@@ -1500,17 +1357,17 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& gradInput) {
-  mps::avg_pool2d_template(input,
-                           gradInput,
-                           gradOutput,
-                           kernel_size,
-                           stride,
-                           padding,
-                           {1, 1},
-                           ceil_mode,
-                           count_include_pad,
-                           divisor_override,
-                           "avg_pool2d_backward");
+  mps::avg_pool_backward_out_mps_template(gradInput,
+                                          input,
+                                          gradOutput,
+                                          kernel_size,
+                                          stride,
+                                          padding,
+                                          ceil_mode,
+                                          count_include_pad,
+                                          divisor_override,
+                                          /*pooling_dims=*/2,
+                                          "avg_pool2d_backward");
 }
 
 TORCH_IMPL_FUNC(avg_pool3d_out_mps)

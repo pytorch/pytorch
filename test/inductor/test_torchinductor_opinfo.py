@@ -301,7 +301,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64, f16},
     "tan": {f16},
-    "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {
         b8,
@@ -552,6 +551,9 @@ inductor_override_kwargs["cuda"] = {
     ("index_reduce.amax", f64): {"check_gradient": False},
     ("index_reduce.amax", f32): {"check_gradient": False},
     ("index_reduce.amax", f16): {"check_gradient": False},
+    # The fp16 sample has ties, and which tied index gets which gradient is
+    # implementation-defined (it differs between ATen and the small-k decomposition).
+    ("topk", f16): {"check_gradient": False},
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
     ("_unsafe_masked_index", f16): {
         "reference_in_float": True,
@@ -1262,9 +1264,16 @@ def get_sort_assert_equal_fn(args, kwargs):
     return get_sort_argsort_assert_equal_fn(False, args, kwargs)
 
 
+def get_topk_assert_equal_fn(args, kwargs):
+    # topk's tie order is implementation-defined, so compare like an unstable sort.
+    dim = kwargs.get("dim", args[2] if len(args) > 2 else -1)
+    return get_sort_argsort_assert_equal_fn(False, args, {"dim": dim})
+
+
 CUSTOM_ASSERT_EQUALS_FNS = {
     "argsort": get_argsort_assert_equal_fn,
     "sort": get_sort_assert_equal_fn,
+    "topk": get_topk_assert_equal_fn,
 }
 
 

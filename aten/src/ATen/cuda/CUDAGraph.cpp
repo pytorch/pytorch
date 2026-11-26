@@ -135,6 +135,9 @@ void CUDAGraph::retain_pool(MempoolId_t pool) {
   }
   c10::cuda::CUDACachingAllocator::createOrIncrefPool(capture_dev_, pool);
   record_retained_pool(pool);
+  if (at::getHostAllocator(at::kCUDA)->retain_pool(pool)) {
+    retained_host_mempool_ids_.push_back(pool);
+  }
 }
 
 template <>
@@ -158,6 +161,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   TORCH_CHECK(!has_graph_exec_ && !has_graph_ && !allocated_pool_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, call reset() or create a new instance.");
+  // The host allocator rejects this too, but only after the device allocator
+  // has been routed to the pool, so check before any state changes.
+  TORCH_CHECK(
+      !at::getHostAllocator(at::kCUDA)->is_host_mem_pool(pool),
+      "Pool (", pool.first, ", ", pool.second,
+      ") belongs to a HostMemPool and cannot be used as a graph capture pool");
 
   capture_mode_ = capture_mode;
 
@@ -379,7 +388,8 @@ void CUDAGraph::instantiate() {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
-#if !defined(USE_ROCM)
+  // HIP before ROCm 10.2 rejects combined instantiate flags with hipErrorInvalidValue.
+#if !defined(USE_ROCM) || ROCM_VERSION >= 100200
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
                                                 cudaGraphInstantiateFlagAutoFreeOnLaunch | cudaGraphInstantiateFlagUseNodePriority));
@@ -446,6 +456,14 @@ cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
   return graph_exec_;
 }
 
+void CUDAGraph::set_raw_cuda_graph_exec(cudaGraphExec_t graph_exec) {
+  TORCH_CHECK(capture_ended_, "capture_end() must have been called before setting a graph executable");
+  TORCH_CHECK(keep_graph_, "set_raw_cuda_graph_exec() requires keep_graph=True");
+  TORCH_CHECK(has_graph_, "set_raw_cuda_graph_exec() requires a retained cudaGraph_t");
+  graph_exec_ = graph_exec;
+  has_graph_exec_ = graph_exec != nullptr;
+}
+
 void CUDAGraph::reset() {
   // These checks warn instead of throwing: reset() is called from the
   // destructor, and at least one CI build refuses to compile with a throwing
@@ -492,7 +510,14 @@ void CUDAGraph::reset() {
       c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, pool);
     }
     retained_mempool_ids_.clear();
+    // The graph's own pool first, as above: blocks that its capture kept in a
+    // retained pool are then reclaimed while that pool is still referenced,
+    // and releasing the pool can free them.
     at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
+    for (const auto& pool : retained_host_mempool_ids_) {
+      at::getHostAllocator(at::kCUDA)->release_pool(pool);
+    }
+    retained_host_mempool_ids_.clear();
     capture_ended_ = false;
     allocated_pool_ = false;
   }
