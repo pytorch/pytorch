@@ -3181,7 +3181,12 @@ except RuntimeError as e:
 
         with self.assertStableATenError(
             RuntimeError,
+            # Runtime predates the shim: dlsym returns null, so we fall back to
+            # the same simple call-site message as the non-stable check.
             regex_before=simple_re,
+            # Runtime has the shim: the dynamic lookup succeeds and we get the
+            # detailed error retrieved across the C ABI boundary, wrapped with the
+            # "(originally from ...)" annotation naming the failing shim call.
             regex_after=(
                 r"^The size of tensor a \(\d\) must match the size of "
                 r"tensor b \(\d\) at non-singleton dimension \d"
