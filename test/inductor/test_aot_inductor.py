@@ -13852,6 +13852,7 @@ class TestCppWrapperFallbackProfiling(TestCase):
                     FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
 
     @unittest.skipIf(not SM90OrLater, "CUTLASS mm templates require SM90+")
+    @unittest.skipIf(TEST_WITH_ROCM, "CUTLASS backend is not supported on HIP")
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(
         sys.platform not in ["linux", "win32"],

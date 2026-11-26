@@ -163,6 +163,7 @@ class SymmetricMMTest(TestCase):
 
         self._check_symmetric_compile(fn, x, uses_quack=True)
 
+    @skipIfNoCuteDSL
     def test_quack_grouped_symmetric_mm(self, device):
         if torch.cuda.get_device_capability(device)[0] not in (10, 11):
             self.skipTest("requires SM100 or SM110")

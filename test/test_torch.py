@@ -1929,6 +1929,15 @@ class TestTorchDeviceType(TestCase):
 
     @onlyAccelerator
     @largeTensorTest('49GB')
+    # Under Inductor, autotuning the in-place cumsum kernel copies the 24GiB mutated
+    # buffer to pinned host memory (rounded up to a 32GiB block) while ~44GiB of device
+    # memory is reserved. On the Windows ROCm UMA iGPU device and pinned memory share
+    # system RAM and the commit limit, so the pinned allocation fails with
+    # hipErrorOutOfMemory unless nothing else is running. hipMemGetInfo over-reports
+    # free memory on this iGPU, so largeTensorTest does not skip it.
+    @skipIfTorchInductor("Inductor autotune pins a 32GiB host copy on top of ~44GiB reserved "
+                         "device memory, exceeding shared RAM on the UMA iGPU",
+                         condition=TEST_WITH_TORCHINDUCTOR and IS_WINDOWS and TEST_WITH_ROCM)
     def test_cumsum_64bit_indexing(self, device):
         b = torch.ones(2 * 4096 * 8, 100000, dtype=torch.float, device=device)
         b /= 100000
