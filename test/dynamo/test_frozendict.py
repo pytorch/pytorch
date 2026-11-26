@@ -80,20 +80,24 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             fn(x, mapping),
         )
 
-    def test_input_subclass_keys_view(self):
+    def test_input_keys_view_owners(self):
         class Mapping(builtins.frozendict):
             pass
 
         def fn(x, view):
-            return x + len(view), tuple(view)
+            return x + len(view), bool(view), not view, tuple(view)
 
         x, view = torch.ones(1), Mapping(a=2).keys()
+        strict = torch.compile(fn, backend="eager", fullgraph=True)
+        for keys in ((), ("a",), ("a", "b"), ("b", "a"), ("c", "d")):
+            exact = builtins.frozendict.fromkeys(keys).keys()
+            self.assertEqual(strict(x, exact), fn(x, exact))
         self.assertEqual(torch.compile(fn, backend="eager")(x, view), fn(x, view))
         torch._dynamo.reset()
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "Unsupported dictionary view owner"
         ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x, view)
+            strict(x, view)
 
     @parametrize("key_type", [float, complex, tuple, frozenset])
     def test_input_nan_key_identity_guard(self, key_type):

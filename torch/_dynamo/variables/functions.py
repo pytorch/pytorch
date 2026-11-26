@@ -78,6 +78,7 @@ from ..source import (
     get_item_source_base,
     GetItemSource,
     ImportSource,
+    is_constant_source,
     is_from_skip_guard_source,
     TypeSource,
 )
@@ -106,6 +107,7 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     store_attr_mutation,
+    unmodeled_get,
     unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
@@ -649,7 +651,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     @classmethod
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
-        install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
+        if not is_constant_source(source):
+            install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
 
     def __init__(
@@ -897,6 +900,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        # func_memberlist marks these READONLY; reads keep the existing path.
+        "__globals__": Member(unmodeled_get, readonly_setter),
+        "__builtins__": Member(unmodeled_get, readonly_setter),
     }
 
     tp_getset = {
@@ -2508,6 +2514,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        # func_memberlist marks these READONLY; reads keep the existing path.
+        "__globals__": Member(unmodeled_get, readonly_setter),
+        "__builtins__": Member(unmodeled_get, readonly_setter),
     }
 
     tp_getset = {
