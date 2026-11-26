@@ -30,6 +30,22 @@ binary_configs_broadcast = op_bench.config_list(
     tags=["short"],
 )
 
+# Contiguous elementwise on CUDA at shapes from a recommendation model.
+binary_configs_vectorized = op_bench.config_list(
+    attr_names=["in_one", "in_two"],
+    attrs=[
+        [[17750, 1536], [17750, 1536]],
+        [[7500, 1536], [7500, 1536]],
+        [[17750, 8192], [17750, 8192]],
+        [[142, 1536], [142, 1536]],
+    ],
+    cross_product_configs={
+        "device": ["cuda"],
+        "dtype": [torch.bfloat16, torch.float],
+    },
+    tags=["vectorized"],
+)
+
 
 class BinaryOpBcastBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_one, in_two, dtype, device, op_func):
@@ -44,7 +60,33 @@ class BinaryOpBcastBenchmark(op_bench.TorchBenchmarkBase):
 
 
 op_bench.generate_pt_tests_from_op_list(
-    binary_ops_bcast_list, binary_configs_broadcast, BinaryOpBcastBenchmark
+    binary_ops_bcast_list,
+    binary_configs_broadcast + binary_configs_vectorized,
+    BinaryOpBcastBenchmark,
+)
+
+# Comparison with a wider input than output on CUDA.
+binary_ops_compare_list = op_bench.op_list(
+    attr_names=["op_name", "op_func"],
+    attrs=[["ne", torch.ne]],
+)
+
+binary_configs_compare_vectorized = op_bench.config_list(
+    attr_names=["in_one", "in_two"],
+    attrs=[
+        [[142000], [142000]],
+    ],
+    cross_product_configs={
+        "device": ["cuda"],
+        "dtype": [torch.int64],
+    },
+    tags=["vectorized"],
+)
+
+op_bench.generate_pt_tests_from_op_list(
+    binary_ops_compare_list,
+    binary_configs_compare_vectorized,
+    BinaryOpBcastBenchmark,
 )
 
 

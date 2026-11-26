@@ -84,9 +84,24 @@ if TEST_SCIPY:
 _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
 
+def _check_contiguous_elementwise(test, device, dtype, sizes):
+    # Contiguous add, mul, clamp_min and a compare (bool output), plus a strided
+    # add (non-vectorized kernel), exactly against CPU.
+    def check(actual, expected):
+        test.assertEqual(actual, expected, atol=0, rtol=0)
+
+    for size in sizes:
+        a = make_tensor((size,), dtype=dtype, device="cpu", low=-8, high=8)
+        b = make_tensor((size,), dtype=dtype, device="cpu", low=-8, high=8)
+        a_d, b_d = a.to(device), b.to(device)
+        check(a_d + b_d, a + b)
+        check(a_d * b_d, a * b)
+        check(torch.clamp_min(a_d, 4), torch.clamp_min(a, 4))
+        check(a_d > b_d, a > b)
+        check(a_d[::2] + b_d[::2], a[::2] + b[::2])
+
+
 # TODO: update to use opinfos consistently
-
-
 @instantiate_parametrized_tests
 class TestBinaryUfuncs(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -2023,6 +2038,15 @@ class TestBinaryUfuncsDevice(TestCase):
             c = a + b
             for x, y, z in zip(a.tolist(), b.tolist(), c.tolist()):
                 self.assertEqual(x + y, z)
+
+    @onlyAccelerator
+    @dtypes(torch.bfloat16, torch.half, torch.float, torch.uint8, torch.int64)
+    def test_vectorized_elementwise_block_boundaries(self, device, dtype):
+        # Contiguous sizes around the vectorized kernel's block tile (256 threads
+        # with 4 to 32 elements per thread depending on the GPU and dtype), with
+        # full blocks, a short remainder and a long remainder.
+        sizes = [4095, 4096, 4097, 8191, 8192, 8193, 3 * 8192 + 17, (1 << 20) + 5]
+        _check_contiguous_elementwise(self, device, dtype, sizes)
 
     # Tests that device tensors on different devices cannot be used in the same
     # binary operation, and that device "scalars" cannot be used in the same
@@ -4866,6 +4890,20 @@ class TestChebyshevNanPropagationDevice(TestCase):
 
 class TestBinaryUfuncsCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    @skipCUDAIfNotRocm
+    @dtypes(torch.bfloat16, torch.half, torch.float, torch.uint8, torch.int64)
+    def test_vectorized_elementwise_multi_vector_threshold(self, device, dtype):
+        # Sizes on both sides of launch_vectorized_kernel's gfx1250 two-vector
+        # threshold t, and last-block remainders of 4 * 256 and 4 * 256 + 1, the
+        # edge of its rule for 16 and 32 elements per thread. 32768 and 256
+        # mirror kMultiVectorMinNumelPerCU and num_threads() in CUDALoops.cuh.
+        props = torch.cuda.get_device_properties(device)
+        if "gfx1250" not in props.gcnArchName:
+            self.skipTest("the two-vector path is gfx1250-only")
+        t = 32768 * props.multi_processor_count
+        sizes = [t - 1, t, t + 1024, t + 1025, t + 3077]
+        _check_contiguous_elementwise(self, device, dtype, sizes)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_copysign_nan_sign(self, device, dtype):

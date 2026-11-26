@@ -27,6 +27,16 @@ configs_long = op_bench.cross_product_configs(
     tags=["long"],
 )
 
+# Contiguous where on CUDA at a recommendation model's shape.
+configs_vectorized = op_bench.config_list(
+    attr_names=["cond_shape", "input_shape", "other_shape"],
+    attrs=[
+        [(17750, 1536), (17750, 1536), (17750, 1536)],
+    ],
+    cross_product_configs={"device": ["cuda"], "dtype": [torch.float]},
+    tags=["vectorized"],
+)
+
 
 class WhereBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, cond_shape, input_shape, other_shape, dtype, device):
@@ -44,7 +54,8 @@ class WhereBenchmark(op_bench.TorchBenchmarkBase):
         return torch.where(condition, input, other)
 
 
-op_bench.generate_pt_test(configs_short + configs_long, WhereBenchmark)
+configs = configs_short + configs_long + configs_vectorized
+op_bench.generate_pt_test(configs, WhereBenchmark)
 
 
 if __name__ == "__main__":
