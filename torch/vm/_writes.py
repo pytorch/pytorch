@@ -137,16 +137,22 @@ class Written:
                 if _stored(name, target, values[0]) is values[1]:
                     how(target, *real)
 
-    def plan(self, outs, args, old, objects, describe, shared) -> None:
+    def plan(self, outs, args, old, objects, describe, shared, made) -> None:
         """Fills ``templates``, ``text`` and ``pinned`` (appending what the
         templates refer to to ``objects``, as ``describe`` does). ``outs``:
-        the outputs of the traced run, which the region builds too."""
+        the outputs of the traced run, which the region builds too.
+        ``made(x)``: whether the run made the list, dict or set ``x``."""
         values = [v for _, _, vs in self.recorded for v in vs]
         if shared([*outs, *values], old):
             raise Unrepeatable("a container the run made is held in two places")
         built = _built([*outs, *values], old)
         for how, target, vs in self.recorded:
             if id(target) in built:
+                continue
+            # A container the run made and hands to nobody (the list a loop
+            # collects tensors in for one operator call): nothing of the
+            # write outlives the run.
+            if isinstance(target, (list, dict, set)) and made(target):
                 continue
             inside = isinstance(target, (list, dict, set)) and type(old.get(id(target))) is tuple
             if inside or any(target is a for a in args):

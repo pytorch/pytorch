@@ -2712,7 +2712,8 @@ def trace_region(
 
             try:
                 result["outputs"] = [describe(o) for o in outs]
-                written.plan(outs, call_args, old, objects, describe, _shared_container)
+                made = _rust()._region_made
+                written.plan(outs, call_args, old, objects, describe, _shared_container, made)
             except (_Refused, _writes.Unrepeatable) as e:
                 result["refused"] = str(e)
                 return []

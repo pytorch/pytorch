@@ -525,6 +525,41 @@ class TestVmTracedTensors(TestCase):
             self.assertEqual(r["misses"], {}, msg=str(r))
             self.assertEqual([v for v in r["values"] if not v.endswith(decay)], [])
 
+    @isolated
+    def test_foreach_sgd_step_with_momentum_is_a_region(self, device):
+        # The foreach form collects the momentum buffers in a list it makes,
+        # appends to and hands to its operators: a write to a list the run
+        # made and hands to nobody is no write of the region.
+        def make():
+            torch.manual_seed(0)
+            layers = [torch.nn.Linear(64, 64), torch.nn.Tanh(), torch.nn.Linear(64, 8)]
+            net = torch.nn.Sequential(*layers).to(device)
+            opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9, foreach=True)
+
+            def step(x):
+                opt.zero_grad(set_to_none=True)
+                loss = net(x).square().mean()
+                loss.backward()
+                opt.step()
+                return loss.detach()
+
+            return net, step
+
+        (net, step), (eager_net, eager_step) = make(), make()
+        compiled = vm(step, passes=EARLY)
+        for call in range(12):
+            x = torch.randn(8, 64, device=device)
+            got, want = compiled(x), eager_step(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        weights, expected = list(net.parameters()), list(eager_net.parameters())
+        self.assertEqual(weights, expected, atol=0, rtol=0)
+        rows = [r for r in vm.regions(compiled) if "_multi_tensor_sgd" in r["where"]]
+        rows = [r for r in rows if r["state"] != "not movable"]
+        steps = [r for r in rows if r["state"] == "region" and r["runs"]]
+        self.assertTrue(steps, msg=str(rows))
+        for r in steps:
+            self.assertEqual(r["misses"], {}, msg=str(r))
+
 
 instantiate_device_type_tests(TestVmTracedTensors, globals())
 
