@@ -29,7 +29,11 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+    skipIf,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -570,7 +574,7 @@ class TestIndexingSimplificationGeneric(InductorTestCase):
 class TestIndexingSimplificationAccelerator(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
     def test_int8_unpack(self, device):
         @torch.compile
         def f(x):
@@ -591,7 +595,7 @@ class TestIndexingSimplificationAccelerator(InductorTestCase):
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
     def test_int8_unpack_dynamic_shape(self, device):
         @torch.compile(dynamic=True)
         def f(x):
@@ -609,7 +613,7 @@ class TestIndexingSimplificationAccelerator(InductorTestCase):
         # pointwise-cat view instead of loading from s*x1 + x0//2.
         self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
     def test_floordiv_div_sympy_is_integer_bug(self, device):
         def foo(arg0, arg1, arg2, arg3, arg4, sentinel):
             t0 = arg0
@@ -1383,7 +1387,7 @@ class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
 class ReductionInvariantIndexingTests(InductorTestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @parametrize("persistent_reductions", [False, True])
     def test_reduction_invariant_masked_index_load(self, device, persistent_reductions):
         def fn(index, source0, source1, value0, value1):
@@ -1429,7 +1433,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
                 "for r0_offset in tl.range"
             ).run(kernel)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @parametrize("row_dtype", [torch.float32, torch.bfloat16, torch.bool])
     def test_reduction_invariant_masked_load_dtypes(self, device, row_dtype):
         def fn(row, value0, value1):
@@ -1464,7 +1468,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             REDUCTION_INVARIANT_X_LOAD
         ).run(kernel)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @config.patch(force_disable_caches=True)
     def test_reduction_invariant_load_direct_reduction(self, device):
         def fn(row0, row1):
@@ -1488,7 +1492,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             kernels[0]
         )
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @parametrize("persistent_reductions", [False, True])
     def test_reduction_invariant_indirect_load(self, device, persistent_reductions):
         def fn(index, source, value0, value1):
@@ -1527,7 +1531,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         else:
             FileCheck().check("for r0_offset in tl.range").run(kernel)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @config.patch(
         {
             "force_disable_caches": True,
@@ -1562,7 +1566,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             "tl.store"
         ).check_regex(indirect_load).run(reduction_kernels[0])
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @config.patch(
         {
             "force_disable_caches": True,
@@ -1589,7 +1593,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             "\n".join(kernels)
         )
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @parametrize("persistent_reductions", [False, True])
     @config.patch(
         {
@@ -1631,7 +1635,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(REDUCTION_INVARIANT_YX_LOAD).run(kernels[0])
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @config.patch(
         {
             "benchmark_combo_kernel": False,
@@ -1687,7 +1691,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             REDUCTION_INVARIANT_YX_LOAD
         ).run(code[0])
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @config.patch(
         {
@@ -1748,7 +1752,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             REDUCTION_INVARIANT_X_LOAD
         ).check_regex(REDUCTION_INVARIANT_X_LOAD).run(code[0])
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @parametrize("pointwise_dependency", ["address", "predicate"])
     @config.patch(
         {
@@ -1813,7 +1817,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             reduction_kernels[0]
         )
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @config.patch(force_disable_caches=True)
     def test_reduction_dependent_pointer_keeps_masked_index_load_dense(self, device):
         def fn(index, source, left):
@@ -1834,7 +1838,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(r"tl\.load\([^\n]*r0_[^\n]*R0_BLOCK").run(kernels[0])
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @config.patch(force_disable_caches=True)
     def test_reduction_dependent_mask_keeps_masked_index_load_dense(self, device):
         def fn(index, source, value):
@@ -1855,7 +1859,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(DENSE_X_INDEX_LOAD).run(kernels[0])
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @config.patch(
         {
             "force_disable_caches": True,
@@ -1881,7 +1885,7 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         self.assertEqual(1, len(kernels))
         FileCheck().check_regex(DENSE_X_INDEX_LOAD).run(kernels[0])
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCUDAIf(not HAS_TRITON, "requires triton")
     @parametrize("dense_indexing", [False, True])
     @config.patch(
         {
