@@ -3465,6 +3465,446 @@ class StrictNumericsCompileTest(TestCase):
             ).as_strided((3, 3), (stride, 1))
             self.assertEqual(gm(tensor, known), stride**2 + known**2)
 
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("two_dimensions", (False, True))
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_addr_unbacked_strides(self, device, dtype, numerics, two_dimensions):
+        def fn(mask1, mask2):
+            m = torch.nonzero(mask1).shape[0]
+            n = torch.nonzero(mask2).shape[0] if two_dimensions else 3
+            x = torch.empty_strided((m, n), (1, m), device=device, dtype=dtype)
+            x.fill_(0.5)
+            a = torch.ones(m, device=device, dtype=dtype)
+            b = torch.ones(n, device=device, dtype=dtype)
+            out = torch.addr(x, a, b, beta=0, alpha=2.3)
+            return out, out + 1, out.stride()
+
+        counter = CompileCounterWithBackend("inductor")
+        metrics.reset()
+        with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+            compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+            for m in (0, 1, 2):
+                for n in (0, 1, 2) if two_dimensions else (3,):
+                    mask1 = torch.arange(4, device=device) < m
+                    mask2 = torch.arange(4, device=device) < n
+                    expected = fn(mask1, mask2)
+                    actual = compiled(mask1, mask2)
+                    self._assert_bitwise_equal(actual[:2], expected[:2])
+                    self.assertEqual(actual[0].stride(), expected[0].stride())
+                    self.assertEqual(actual[2], expected[2])
+                    self.assertEqual(actual[2], actual[0].stride())
+        self.assertEqual(counter.frame_count, 1)
+        self.assertGreater(metrics.generated_kernel_count, 0)
+
+        if not two_dimensions:
+            from torch._inductor.fx_passes.pre_grad import _preserve_symbolic_strides
+            from torch._subclasses.fake_tensor import FakeTensorMode
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+            from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+            # Input producers must read the incoming geometry before mutations.
+            for symbolic_shape in (False, True):
+                for mutation, args in (("transpose_", (0, 1)), ("unsqueeze_", (0,))):
+                    shape_env = ShapeEnv()
+                    u = shape_env.create_unbacked_symint()
+                    torch._check(u >= 3)
+                    mode = FakeTensorMode(shape_env=shape_env)
+                    with mode:
+                        fake = torch.empty_strided(
+                            (3, u if symbolic_shape else 3),
+                            (u, 1),
+                            device=device,
+                            dtype=dtype,
+                        )
+                    graph = torch.fx.Graph()
+                    x = graph.placeholder("x")
+                    mutated = graph.call_method(mutation, (x, *args))
+                    query = graph.call_method("stride", (mutated,))
+                    graph.output(query)
+                    gm = torch.fx.GraphModule({}, graph)
+                    FakeTensorProp(gm, mode=mode).propagate(fake)
+                    self.assertEqual(x.meta["val"].stride()[1], 1)
+                    with config.patch(numerics=numerics):
+                        _preserve_symbolic_strides(gm)
+                    graph.lint()
+                    gm.recompile()
+                    nodes = list(graph.nodes)
+                    for node in nodes:
+                        if node.target in (
+                            torch.ops.aten.sym_stride.int,
+                            torch.ops.aten.sym_size.int,
+                        ):
+                            self.assertLess(nodes.index(node), nodes.index(mutated))
+                    for count in (3, 5):
+                        tensor = torch.empty_strided(
+                            (3, count if symbolic_shape else 3),
+                            (count, 1),
+                            device=device,
+                            dtype=dtype,
+                        )
+                        expected = (
+                            (1, count)
+                            if mutation == "transpose_"
+                            else (3 * count, count, 1)
+                        )
+                        self.assertEqual(gm(tensor), expected)
+                        self.assertEqual(tensor.stride(), expected)
+
+            for mutation, args in (("transpose_", (0, 1)), ("unsqueeze_", (0,))):
+                mode = FakeTensorMode(shape_env=ShapeEnv())
+                with mode:
+                    fake = torch.empty((3, 4), device=device, dtype=dtype)
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                producer = graph.call_function(torch.ops.aten.nonzero.default, (x,))
+                mutated = graph.call_method(mutation, (producer, *args))
+                query = graph.call_method("stride", (mutated,))
+                graph.output(query)
+                gm = torch.fx.GraphModule({}, graph)
+                FakeTensorProp(gm, mode=mode).propagate(fake)
+                self.assertTrue(producer.meta["unbacked_bindings"])
+                with config.patch(numerics=numerics):
+                    _preserve_symbolic_strides(gm)
+                graph.lint()
+                gm.recompile()
+                nodes = list(graph.nodes)
+                for node in nodes:
+                    if node.target == torch.ops.aten.sym_size.int:
+                        self.assertLess(nodes.index(producer), nodes.index(node))
+                        self.assertLess(nodes.index(node), nodes.index(mutated))
+                for count in (3, 5, 9):
+                    tensor = torch.zeros((3, 4), device=device, dtype=dtype)
+                    tensor.view(-1)[:count] = 1
+                    expected = getattr(tensor.nonzero(), mutation)(*args).stride()
+                    self.assertEqual(gm(tensor), expected)
+
+            csr = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse_csr()
+            for tensor in (csr, csr.to("meta"), FakeTensorMode().from_tensor(csr)):
+                shape_env = ShapeEnv()
+                symbol = shape_env.create_unbacked_symint()
+                graph = torch.fx.Graph()
+                graph.placeholder("s").meta["val"] = symbol
+                graph.placeholder("csr").meta["val"] = tensor
+                result = graph.materialize_symints((symbol + 1,))
+                graph.output(result)
+                graph.lint()
+                gm = torch.fx.GraphModule({}, graph)
+                self.assertEqual(gm(7, csr), [8])
+
+            from itertools import permutations
+
+            combinations = [
+                ("shared", (0, 1)),
+                ("shared", (1, 0)),
+                ("floor", (0, 1)),
+                ("floor", (1, 0)),
+            ]
+            combinations += [
+                (kind, order)
+                for kind in ("overcomplete", "scaled", "symbolic")
+                for order in permutations(range(3))
+            ]
+            for kind, order in combinations:
+                shape_env = ShapeEnv()
+                mode = FakeTensorMode(shape_env=shape_env)
+                u, v, w, scale, weight = [
+                    shape_env.create_unbacked_symint() for _ in range(5)
+                ]
+                for symbol in (u, v, w):
+                    torch._check(symbol >= 3)
+                torch._check(u > v)
+                torch._check(scale >= 0)
+                torch._check(weight >= 0)
+                if kind in ("shared", "floor"):
+                    producers = (u + v if kind == "shared" else u // 2 + v, u + w)
+                elif kind == "symbolic":
+                    producers = (
+                        scale * u + v,
+                        u + scale * v,
+                        (scale + 2) * u + (scale + 3) * v,
+                    )
+                else:
+                    producers = (u + v, u - v, u + 2 * v)
+                    if kind == "scaled":
+                        producers = tuple(scale * producer for producer in producers)
+                producers = tuple(producers[i] for i in order)
+                values = (
+                    sum(producers),
+                    producers[0] - producers[1],
+                    scale * producers[0] + weight * sum(producers[1:]),
+                )
+                with mode:
+                    fake = torch.empty_strided(
+                        (3,) * len(producers), producers, device=device, dtype=dtype
+                    )
+                graph = torch.fx.Graph()
+                graph.placeholder("x").meta["val"] = fake
+                graph.placeholder("scale").meta["val"] = scale
+                graph.placeholder("weight").meta["val"] = weight
+                graph.output(tuple(graph.materialize_symints(values)))
+                graph.lint()
+                gm = torch.fx.GraphModule({}, graph)
+                self.assertTrue(
+                    all(
+                        node.meta.get("val") is not None
+                        for node in graph.nodes
+                        if node.op == "call_function"
+                    )
+                )
+                for concrete in ((7, 3, 4, 2, 3), (8, 4, 5, 3, 2), (9, 5, 6, 0, 1)):
+                    substitutions = {
+                        symbol.node.expr: value
+                        for symbol, value in zip((u, v, w, scale, weight), concrete)
+                    }
+                    strides = tuple(
+                        int(producer.node.expr.subs(substitutions))
+                        for producer in producers
+                    )
+                    x = torch.empty_strided(
+                        (3,) * len(producers), strides, device=device, dtype=dtype
+                    )
+                    expected = tuple(
+                        int(value.node.expr.subs(substitutions)) for value in values
+                    )
+                    self.assertEqual(gm(x, concrete[3], concrete[4]), expected)
+
+            # Independently known terms belong in the reconstructed remainder.
+            import operator
+
+            for known_term in ("identity", "square", "floor"):
+                shape_env = ShapeEnv()
+                u, k = [shape_env.create_unbacked_symint() for _ in range(2)]
+                torch._check(u >= 3)
+                torch._check(k >= 3)
+                extra = (
+                    k
+                    if known_term == "identity"
+                    else k * k
+                    if known_term == "square"
+                    else k // 2
+                )
+                mode = FakeTensorMode(shape_env=shape_env)
+                with mode:
+                    fake = torch.empty(
+                        (2 * (u + k + extra) + 3,), device=device, dtype=dtype
+                    ).as_strided((3, 3), (u + k, 1))
+                # These symbols were bound before entering this nested graph.
+                shape_env.pending_fresh_unbacked_symbols.clear()
+                graph = torch.fx.Graph()
+                tensor = graph.placeholder("x")
+                scalar = graph.placeholder("k")
+                stride = graph.call_method("stride", (tensor, 0))
+                term = scalar
+                if known_term != "identity":
+                    term = graph.call_function(
+                        operator.mul if known_term == "square" else operator.floordiv,
+                        (scalar, scalar if known_term == "square" else 2),
+                    )
+                summed = graph.call_function(operator.add, (stride, term))
+                view = graph.call_function(
+                    torch.ops.aten.as_strided.default, (tensor, (3, 3), (summed, 1))
+                )
+                query = graph.call_method("stride", (view, 0))
+                graph.output(query)
+                gm = torch.fx.GraphModule({}, graph)
+                FakeTensorProp(gm, mode=mode).propagate(fake, k)
+                with config.patch(numerics=numerics):
+                    _preserve_symbolic_strides(gm)
+                graph.lint()
+                gm.recompile()
+                nodes = list(graph.nodes)
+                for node in nodes:
+                    if node.target == torch.ops.aten.sym_stride.int:
+                        self.assertLess(nodes.index(tensor), nodes.index(node))
+                        self.assertLess(nodes.index(node), nodes.index(view))
+                    elif node.target in (
+                        operator.add,
+                        operator.mul,
+                        operator.floordiv,
+                        operator.pow,
+                    ):
+                        self.assertLess(nodes.index(scalar), nodes.index(node))
+                for unknown, known in ((16, 4), (7, 3), (9, 5)):
+                    tensor = torch.empty(256, device=device, dtype=dtype).as_strided(
+                        (3, 3), (unknown + known, 1)
+                    )
+                    extra = (
+                        known
+                        if known_term == "identity"
+                        else known * known
+                        if known_term == "square"
+                        else known // 2
+                    )
+                    self.assertEqual(gm(tensor, known), unknown + known + extra)
+
+            for target, dim, keyword, result_type in (
+                ("stride", None, False, tuple),
+                ("stride", 0, False, int),
+                ("stride", 0, True, int),
+                (torch.ops.aten.sym_stride.default, None, False, list),
+                (torch.ops.aten.sym_stride.default, None, True, list),
+                (torch.ops.aten.sym_stride.int, 0, False, int),
+                (torch.ops.aten.sym_stride.int, 0, True, int),
+                (torch.ops.aten.sym_stride.int, -2, False, int),
+                (torch.ops.aten.sym_stride.int, -1, False, int),
+            ):
+                shape_env = ShapeEnv()
+                mode = FakeTensorMode(shape_env=shape_env)
+                u = shape_env.create_unbacked_symint()
+                torch._check(u >= 0)
+                with mode:
+                    fake = torch.empty_strided(
+                        (3, 3), (u, 1), device=device, dtype=dtype
+                    )
+                graph = torch.fx.Graph()
+                tensor = graph.placeholder("x")
+                args = (tensor,) if dim is None or keyword else (tensor, dim)
+                kwargs = {"dim": dim} if dim is not None and keyword else {}
+                if isinstance(target, str):
+                    query = graph.call_method(target, args, kwargs)
+                else:
+                    if keyword:
+                        args = ()
+                        kwargs["self"] = tensor
+                    query = graph.call_function(target, args, kwargs)
+                graph.output(query)
+                gm = torch.fx.GraphModule({}, graph)
+                FakeTensorProp(gm, mode=mode).propagate(fake)
+                with config.patch(numerics=numerics):
+                    _preserve_symbolic_strides(gm)
+                gm.graph.lint()
+                gm.recompile()
+                for count in (0, 1, 5):
+                    x = torch.empty_strided(
+                        (3, 3), (count, 1), device=device, dtype=dtype
+                    )
+                    expected = (
+                        list(x.stride())
+                        if result_type is list
+                        else x.stride()
+                        if dim is None
+                        else x.stride(dim)
+                    )
+                    actual = gm(x)
+                    self.assertIs(type(actual), result_type)
+                    self.assertEqual(actual, expected)
+
+            # Branch inputs can expose whole stride expressions without
+            # exposing the individual symbols needed by their view strides.
+            def cond_fn(mask1, mask2, mask3, predicate, source, view):
+                u = torch.nonzero(mask1).shape[0]
+                torch._check(u >= 3)
+                stride1 = 1
+                if source in (
+                    "sum",
+                    "two_sources",
+                    "mixed_sign",
+                    "shared_leading",
+                    "floor_composite",
+                ):
+                    v = torch.nonzero(mask2).shape[0]
+                    torch._check(v >= 3)
+                    stride0 = u + v
+                    if source in (
+                        "two_sources",
+                        "mixed_sign",
+                        "shared_leading",
+                        "floor_composite",
+                    ):
+                        w = torch.nonzero(mask3).shape[0]
+                        torch._check(w >= 3)
+                        if source == "mixed_sign":
+                            torch._check(u > v)
+                            torch._check(v > w)
+                            stride0, stride1 = u - v, v - w
+                        elif source in ("shared_leading", "floor_composite"):
+                            stride1 = u + w
+                            if source == "floor_composite":
+                                stride0 = u // 2 + v
+                        else:
+                            stride1 = w + v
+                elif source == "negative":
+                    stride0 = u - 1
+                elif source == "scaled_positive":
+                    stride0 = 2 * u + 1
+                elif source == "scaled_negative":
+                    stride0 = 3 * u - 2
+                elif source == "nonlinear":
+                    stride0 = u * u + 1
+                else:
+                    stride0 = u + (source == "positive")
+                x = torch.empty_strided(
+                    (3, 3), (stride0, stride1), device=device, dtype=dtype
+                )
+                x.fill_(0.5)
+
+                def view_stride(t):
+                    if view == "transpose":
+                        return t.t().stride(1)
+                    if view == "slice":
+                        return t[::2].stride(0)
+                    if view == "diagonal":
+                        return t.diagonal().stride(0)
+                    if view == "select":
+                        return t.select(1, 0).stride(0)
+                    if view == "unfold":
+                        return t.unfold(0, 1, 2).stride(0)
+                    if view == "reshape":
+                        return t[::2, 0].reshape(2, 1).stride(0)
+                    return t.stride(0)
+
+                def true_branch(t):
+                    return torch.ones((view_stride(t),), device=device, dtype=dtype)
+
+                def false_branch(t):
+                    return torch.ones((view_stride(t),), device=device, dtype=dtype) + 1
+
+                return torch.cond(predicate, true_branch, false_branch, (x,))
+
+            scenarios = (
+                ("bare", "input"),
+                ("positive", "input"),
+                ("positive", "transpose"),
+                ("positive", "slice"),
+                ("positive", "diagonal"),
+                ("negative", "unfold"),
+                ("scaled_positive", "reshape"),
+                ("scaled_negative", "slice"),
+                ("sum", "slice"),
+                ("nonlinear", "unfold"),
+                ("two_sources", "diagonal"),
+                ("mixed_sign", "diagonal"),
+                ("shared_leading", "diagonal"),
+                ("floor_composite", "diagonal"),
+                ("negative", "select"),
+            )
+            for source, view in scenarios:
+                torch._dynamo.reset()
+                counter = CompileCounterWithBackend("inductor")
+                with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+                    compiled = torch.compile(
+                        cond_fn, backend=counter, fullgraph=True, dynamic=True
+                    )
+                    for count in (3, 4, 5):
+                        counts = (
+                            (count + 4, count + 2, count)
+                            if source == "mixed_sign"
+                            else (count, 8 - count, count)
+                        )
+                        if source in ("shared_leading", "floor_composite"):
+                            counts = (count, 8 - count, (5, 3, 4)[count - 3])
+                        masks = tuple(
+                            torch.arange(10, device=device) < n for n in counts
+                        )
+                        for predicate in (False, True):
+                            pred = torch.tensor(predicate, device=device)
+                            expected = cond_fn(*masks, pred, source, view)
+                            actual = compiled(*masks, pred, source, view)
+                            self.assertEqual(actual.shape, expected.shape)
+                            self._assert_bitwise_equal(actual, expected)
+                self.assertEqual(counter.frame_count, 1)
+
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_mv_computed_matrix_layout(self, device, dtype, numerics):
@@ -3485,7 +3925,7 @@ class StrictNumericsCompileTest(TestCase):
             expected = torch.view_as_real(expected)
         self._assert_bitwise_equal(actual, expected)
 
-    @dtypes(torch.float32)
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_mvlgamma_unbacked_size(self, device, dtype, numerics):
         def fn(x):
@@ -3501,10 +3941,12 @@ class StrictNumericsCompileTest(TestCase):
             )
             self.assertIn("@triton.jit", "\n".join(codes))
             actual_grad = torch.autograd.grad(result, x, grad)[0]
-        # Unbacked geometry retains the existing decomposition; this checks
-        # compilation and ordinary numerical agreement, not exact-bit equivalence.
-        self.assertEqual(result, expected)
-        self.assertEqual(actual_grad, expected_grad)
+        if numerics == "strict":
+            self._assert_bitwise_equal(result, expected)
+            self._assert_bitwise_equal(actual_grad, expected_grad)
+        else:
+            self.assertEqual(result, expected)
+            self.assertEqual(actual_grad, expected_grad)
 
     @skipIfNoCuteDSL
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
@@ -3642,6 +4084,20 @@ class StrictNumericsCompileTest(TestCase):
         with self.assertRaisesRegex(Exception, "overflow"):
             compiled(x)
 
+    @dtypes(torch.float32, torch.float64, torch.int16)
+    @parametrize("op_name", ("bessel_j0", "bessel_j1", "bessel_y0", "bessel_y1"))
+    def test_generated_bessel_denominator_order(self, device, dtype, op_name):
+        x = torch.tensor(
+            [-100, -20, -10, -6, -5, -4, -2, -1, 0, 1, 2, 4, 5, 6, 10, 20, 100],
+            device=device,
+            dtype=dtype,
+        )
+        fn = getattr(torch.special, op_name)
+        metrics.reset()
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": "strict"})(x)
+        self._assert_bitwise_equal(actual, fn(x))
+        self.assertEqual(metrics.generated_fallback_kernel_count, 0)
+
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("op_name", ("i0", "i1"))
@@ -3715,10 +4171,159 @@ class StrictNumericsCompileTest(TestCase):
 
         self._check_bitwise(fn, x, numerics=numerics)
 
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    @parametrize(
+        "operation",
+        (
+            "binary_cross_entropy",
+            "binary_cross_entropy_forward",
+            "soft_margin",
+            "smooth_l1",
+            "mse",
+        ),
+    )
+    def test_loss_intermediate_rounding(
+        self, device, dtype, numerics, upcast, operation
+    ):
+        if dtype in (torch.float16, torch.bfloat16):
+            x = _exhaustive_16bit(dtype, device)
+        else:
+            if operation in ("binary_cross_entropy", "binary_cross_entropy_forward"):
+                values = [0.0, 1e-12, 0.1, 0.5, 1.0]
+            elif operation == "soft_margin":
+                values = [-104.0, -50.0, -20.0, -1.0, -0.0, 0.0, 1.0, 20.0, 50.0, 104.0]
+            else:
+                values = [-10.0, -5.0, -1.0, -0.0, 0.0, 1.0, 5.0, 10.0]
+            bounds = torch.tensor(values, device=device, dtype=dtype)
+            x = torch.cat(
+                (
+                    _min_max_specials(dtype, device).repeat(128),
+                    bounds,
+                    torch.nextafter(bounds, torch.full_like(bounds, -float("inf"))),
+                    torch.nextafter(bounds, torch.full_like(bounds, float("inf"))),
+                    torch.linspace(
+                        values[0], values[-1], 257, device=device, dtype=dtype
+                    ),
+                )
+            )
+        if operation in ("binary_cross_entropy", "binary_cross_entropy_forward"):
+            x = x[(x >= 0) & (x <= 1)]
+            grad, target = x.roll(1) - 0.5, x.flip(0)
+        elif operation == "soft_margin":
+            grad, target = x.roll(1), torch.ones_like(x)
+        elif operation == "mse":
+            grad, target = x.roll(1), x.flip(0)
+        else:
+            grad, target = x.roll(1), torch.zeros_like(x)
+
+        def fn(grad, x, target):
+            if operation == "mse":
+                result = torch.ops.aten.mse_loss_backward.default(grad, x, target, 0)
+                return result, result.double()
+            if operation == "smooth_l1":
+                result = torch.ops.aten.smooth_l1_loss_backward.default(
+                    grad, x, target, 0, 5.0
+                )
+                large = torch.ops.aten.smooth_l1_loss_backward.default(
+                    grad, x, target, 0, 1e100
+                )
+                return result, result.double(), large, large.double()
+            if operation == "binary_cross_entropy_forward":
+                result = torch.ops.aten.binary_cross_entropy.default(x, target, None, 0)
+                weighted = torch.ops.aten.binary_cross_entropy.default(
+                    x, target, grad, 0
+                )
+                return result, result.double(), weighted, weighted.double()
+            if operation == "soft_margin":
+                result = torch.ops.aten.soft_margin_loss_backward.default(
+                    grad, x, target, 0
+                )
+                return result, result.double()
+            result = torch.ops.aten.binary_cross_entropy_backward.default(
+                grad, x, target, None, 0
+            )
+            weighted = torch.ops.aten.binary_cross_entropy_backward.default(
+                grad, x, target, target, 0
+            )
+            return result, result.double(), weighted, weighted.double()
+
+        self._check_bitwise(fn, grad, x, target, numerics=numerics, upcast=upcast)
+        if operation in ("smooth_l1", "mse") and dtype == torch.float64:
+            nans = _min_max_specials(dtype, device)[-4:].repeat(384)
+            offset_grad = torch.cat((nans[:1], nans.roll(1)))[1:]
+
+            def cloned_fn(grad, x, target):
+                return fn(grad.clone(), x, target)
+
+            for target in (torch.zeros_like(nans), nans.roll(2)):
+                strided_target = torch.stack((target, target), dim=1)[:, 0]
+                for grad, current_target in (
+                    (nans.roll(1), target),
+                    (offset_grad, target),
+                    (nans.roll(1), strided_target),
+                ):
+                    self._check_bitwise(
+                        fn, grad, nans, current_target, numerics=numerics, upcast=upcast
+                    )
+                self._check_bitwise(
+                    cloned_fn,
+                    offset_grad,
+                    nans,
+                    target,
+                    numerics=numerics,
+                    upcast=upcast,
+                )
+        if operation == "soft_margin" and dtype == torch.float64:
+            nans = _min_max_specials(dtype, device)[-4:].repeat(256)
+
+            def cloned_fn(grad, x, target):
+                return torch.ops.aten.soft_margin_loss_backward.default(
+                    grad.clone(), x, target, 0
+                )
+
+            offset_grad = torch.cat((nans[:1], nans.roll(1)))[1:]
+            self._check_bitwise(
+                cloned_fn,
+                offset_grad,
+                nans,
+                torch.ones_like(nans),
+                numerics=numerics,
+                upcast=upcast,
+            )
+
+            def reduced_fn(grad, x, target):
+                return tuple(
+                    torch.ops.aten.soft_margin_loss_backward.default(grad, x, target, r)
+                    for r in (1, 2)
+                )
+
+            self._check_bitwise(
+                reduced_fn,
+                nans.roll(1),
+                nans,
+                torch.ones_like(nans),
+                numerics=numerics,
+                upcast=upcast,
+            )
+
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
-    @parametrize("operation", ("cast", "cube"))
+    @parametrize(
+        "operation",
+        (
+            "cast",
+            "cube",
+            "mse",
+            "soft_margin",
+            "smooth_l1",
+            "huber",
+            "huber_backward",
+            "binary_cross_entropy_with_logits",
+        ),
+    )
     def test_narrow_intermediate_rounding(
         self, device, dtype, numerics, upcast, operation
     ):
@@ -3733,7 +4338,67 @@ class StrictNumericsCompileTest(TestCase):
             x = _exhaustive_16bit(dtype, device)
 
         def fn(x):
-            result = x.to(dtype) if operation == "cast" else x.pow(3)
+            if operation == "cast":
+                result = x.to(dtype)
+            elif operation == "cube":
+                result = x.pow(3)
+            elif operation == "mse":
+                result = torch.ops.aten.mse_loss.default(x, x.flip(0), 0)
+            elif operation == "soft_margin":
+                result = torch.ops.aten.soft_margin_loss.default(
+                    x, torch.ones_like(x), 0
+                )
+            elif operation == "binary_cross_entropy_with_logits":
+                target, weight, pos_weight = x.flip(0), x.roll(1), x.roll(2)
+                results = tuple(
+                    torch.ops.aten.binary_cross_entropy_with_logits.default(
+                        x, target, w, p, 0
+                    )
+                    for w, p in (
+                        (None, None),
+                        (weight, None),
+                        (None, pos_weight),
+                        (weight, pos_weight),
+                    )
+                )
+                return results, tuple(result.double() for result in results)
+            elif operation == "smooth_l1":
+                tiny = torch.finfo(dtype).tiny * torch.finfo(dtype).eps
+                result = torch.ops.aten.smooth_l1_loss.default(x, x.flip(0), 0, 0.7)
+                small = torch.ops.aten.smooth_l1_loss.default(x, x.flip(0), 0, tiny)
+                large = torch.ops.aten.smooth_l1_loss.default(x, x.flip(0), 0, 1e100)
+                return (
+                    result,
+                    result.double(),
+                    small,
+                    small.double(),
+                    large,
+                    large.double(),
+                )
+            else:
+                tiny = torch.finfo(dtype).tiny * torch.finfo(dtype).eps
+                if operation == "huber":
+                    result = torch.ops.aten.huber_loss.default(x, x.flip(0), 0, 0.7)
+                    small = torch.ops.aten.huber_loss.default(x, x.flip(0), 0, tiny)
+                    large = torch.ops.aten.huber_loss.default(x, x.flip(0), 0, 1e100)
+                else:
+                    result = torch.ops.aten.huber_loss_backward.default(
+                        x.roll(1), x, x.flip(0), 0, 0.7
+                    )
+                    small = torch.ops.aten.huber_loss_backward.default(
+                        x.roll(1), x, x.flip(0), 0, tiny
+                    )
+                    large = torch.ops.aten.huber_loss_backward.default(
+                        x.roll(1), x, x.flip(0), 0, 1e100
+                    )
+                return (
+                    result,
+                    result.double(),
+                    small,
+                    small.double(),
+                    large,
+                    large.double(),
+                )
             return result, result.double()
 
         self._check_bitwise(fn, x, numerics=numerics, upcast=upcast)
@@ -3786,65 +4451,466 @@ class StrictNumericsCompileTest(TestCase):
         self.assertIn("@triton.jit", "\n".join(code))
         self._assert_bitwise_equal(actual, fn(x, y))
 
-    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("op_name", ("addcmul", "addcdiv"))
     @parametrize("numerics", ("strict_pointwise", "strict"))
-    @torch._dynamo.config.patch(specialize_float=False)
-    def test_addcdiv_options_gradients(self, device, dtype, numerics):
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_addc_options_gradients(self, device, dtype, op_name, numerics):
         inputs = [
             torch.randn(512, device=device, dtype=dtype, requires_grad=True)
             for _ in range(3)
         ]
         grad = torch.randn_like(inputs[0])
+        op = getattr(torch, op_name)
 
         def fn(a, b, c, value):
-            return torch.addcdiv(a, b, c, value=value)
+            if isinstance(value, torch.Tensor):
+                value = value.item()
+            return op(a, b, c, value=value)
 
         compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
-        for value in (0.7, 0.6, -0.7):
-            expected = torch.autograd.grad(fn(*inputs, value), inputs, grad)
-            actual = torch.autograd.grad(compiled(*inputs, value), inputs, grad)
+        for value in (0.7, 0.6, -0.7, 1.0):
+            expected = fn(*inputs, value)
+            actual, codes = run_and_get_code(compiled, *inputs, value)
+            if value == 0.7:
+                self.assertIn("@triton.jit", "\n".join(codes))
+            expected_grad = torch.autograd.grad(expected, inputs, grad)
+            actual_grad = torch.autograd.grad(actual, inputs, grad)
+            self._assert_bitwise_equal((actual, actual_grad), (expected, expected_grad))
+
+        if dtype == torch.float64:
+            values = _min_max_specials(dtype, device)
+            triples = torch.cartesian_prod(values, values, values).t().contiguous()
+            # Put every triple in both full 1024-element CUDA blocks and the tail.
+            aligned = tuple(torch.cat((t.repeat(3)[:2048], t)) for t in triples)
+            misaligned = tuple(
+                torch.empty(t.numel() + 1, device=device, dtype=dtype)[1:]
+                for t in aligned
+            )
+            for out, inp in zip(misaligned, aligned):
+                out.copy_(inp)
+            layouts = (
+                aligned,
+                tuple(t.reshape(3, -1).t() for t in aligned),
+                misaligned,
+                tuple(torch.stack((t, t), dim=1)[:, 0] for t in aligned),
+            )
+            scalars = torch.cat(
+                (
+                    torch.tensor(
+                        [1.0, 0.0, 0.25, float("inf"), -float("inf")], dtype=dtype
+                    ),
+                    values[-4:].cpu(),
+                )
+            )
+            for inputs in layouts:
+                torch._dynamo.reset()
+                compiled = torch.compile(
+                    fn, fullgraph=True, options={"numerics": numerics}
+                )
+                for sample, scalar in enumerate(scalars):
+                    actual, codes = run_and_get_code(compiled, *inputs, scalar)
+                    if sample == 0:
+                        self.assertIn("@triton.jit", "\n".join(codes))
+                    self._assert_bitwise_equal(actual, fn(*inputs, scalar))
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_gaussian_nll_variance_validation(self, device, dtype):
+        x = torch.tensor([0.125, 0.25, 0.5], dtype=dtype, device=device)
+        target = torch.full_like(x, 0.25)
+        var = torch.tensor(
+            [-0.0, torch.finfo(dtype).tiny / 2, 1.0],
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+
+        def fn(x, target, var):
+            return torch.nn.functional.gaussian_nll_loss(
+                x, target, var, full=True, eps=0.125, reduction="none"
+            )
+
+        def unused_loss(x, target, var):
+            fn(x, target, var)
+            return x
+
+        original_var = var.detach().clone()
+        expected = fn(x, target, var)
+        expected_grad = torch.autograd.grad(expected, var, torch.ones_like(expected))[0]
+        bad_var = torch.full_like(var, -1, requires_grad=True)
+        for partition in (False, True):
+            options = {
+                "numerics": "strict_pointwise",
+                "triton.cudagraphs": True,
+                "graph_partition": partition,
+            }
+            compiled = torch.compile(fn, fullgraph=True, options=options)
+            actual, code = run_and_get_code(compiled, x, target, var)
             self._assert_bitwise_equal(actual, expected)
+            self._assert_bitwise_equal(
+                torch.autograd.grad(actual, var, torch.ones_like(actual))[0],
+                expected_grad,
+            )
+            self._assert_bitwise_equal(var.detach(), original_var)
+            with self.assertRaisesRegex(ValueError, "var has negative entry/entries"):
+                compiled(x, target, bad_var)
+            self.assertIn("@triton.jit", "\n".join(code))
 
-    @dtypes(torch.float64)
+            compiled_unused = torch.compile(
+                unused_loss, fullgraph=True, options=options
+            )
+            self._assert_bitwise_equal(compiled_unused(x, target, var), x)
+            with self.assertRaisesRegex(ValueError, "var has negative entry/entries"):
+                compiled_unused(x, target, bad_var)
+
+        def summed_loss(var):
+            return fn(x, target, var).sum()
+
+        grad = torch.func.grad(summed_loss)
+        expected_func_grad = grad(var)
+        compositions = (
+            torch.compile(grad, backend="eager", fullgraph=True),
+            torch.func.grad(
+                torch.compile(summed_loss, backend="eager", fullgraph=True)
+            ),
+        )
+        for compiled_grad in compositions:
+            self._assert_bitwise_equal(compiled_grad(var), expected_func_grad)
+            with self.assertRaisesRegex(ValueError, "var has negative entry/entries"):
+                compiled_grad(bad_var)
+
+    @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize("upcast", (False, True))
-    def test_fused_mul_nan_payload(self, device, dtype, numerics, upcast):
-        values = _min_max_specials(dtype, device)
-        nans = values[-4:]
-        a = nans.repeat_interleave(values.numel())
-        b = values.repeat(nans.numel())
+    def test_cuda_scalar_opmath(self, device, dtype, numerics):
+        x = torch.cat(
+            (
+                torch.tensor(
+                    [1.0078125, 2.599609375, 1.458984375], dtype=dtype, device=device
+                ),
+                _min_max_specials(dtype, device),
+            )
+        )
+        scalars = (
+            0.9189385332046727,
+            0.0,
+            -0.0,
+            float("inf"),
+            -float("inf"),
+            float("nan"),
+            -float("nan"),
+        )
 
-        def fn(a, b):
-            computed = -b.rsqrt()
-            return a * computed, computed * a
+        def fn(x):
+            arithmetic = tuple(
+                op(a, b, alpha=alpha)
+                for scalar in scalars
+                for op in (torch.add, torch.sub)
+                for a, b in ((x, scalar), (scalar, x))
+                for alpha in (1.0, 0.25)
+            )
+            products = tuple(
+                a * b for scalar in scalars for a, b in ((x, scalar), (scalar, x))
+            )
+            return *arithmetic, *products
 
+        for upcast in (False, True):
+            actual, code = run_and_get_code(
+                torch.compile(
+                    fn,
+                    fullgraph=True,
+                    options={
+                        "numerics": numerics,
+                        "triton.codegen_upcast_to_fp32": upcast,
+                    },
+                ),
+                x,
+            )
+            expected = fn(x)
+            self.assertEqual(tuple(t.dtype for t in actual), (dtype,) * len(expected))
+            self._assert_bitwise_equal(actual, expected)
+            self.assertIn("@triton.jit", "\n".join(code))
+
+    @dtypes(
+        torch.bfloat16,
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.int8,
+        torch.uint8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_negative_input_storage(self, device, dtype, numerics):
+        """Check negative storage and queries throughout kernel construction."""
+        from unittest.mock import patch
+
+        def fn(x, y):
+            old = x.resolve_neg()
+            padded = tuple(
+                torch.nn.functional.pad(x, (1, 1), value=value)
+                for value in (2, 0.0, -0.0)
+            )
+            x.add_(1)
+            return old, x, x + y, x.view_as(x), *padded
+
+        values = _pointwise_edge_values(dtype).to(device)
+        values = torch.cat((values, values[:1])).repeat(32)
         compiled = torch.compile(
             fn,
             fullgraph=True,
-            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+            options={"numerics": numerics, "triton.cudagraphs": True},
         )
-        result, codes = run_and_get_code(compiled, a, b)
-        self.assertIn("@triton.jit", "\n".join(codes))
-        self._assert_bitwise_equal(result, fn(a, b))
-        for scalar in (float("nan"), -float("nan"), 0.7):
-            self._assert_bitwise_equal(compiled(scalar, nans), fn(scalar, nans))
+        for call_index, offset in enumerate((0, 1, 0)):
+            base = torch.empty(values.numel() + offset, device=device, dtype=dtype)[
+                offset:
+            ]
+            base.copy_(values)
+            expected_base = base.clone()
+            y = torch.full_like(base, 2)
+            x = base._neg_view()
+            expected = fn(expected_base._neg_view(), y)
+            if call_index == 0:
+                with patch(
+                    "torch.accelerator.max_memory_allocated",
+                    side_effect=torch.accelerator.memory_allocated,
+                ):
+                    actual, code = run_and_get_code(compiled, x, y)
+                self.assertIn("@triton.jit", "\n".join(code))
+            else:
+                actual = compiled(x, y)
+            self._assert_bitwise_equal(actual, expected)
+            self._assert_bitwise_equal(base, expected_base)
+            self.assertIs(actual[1], x)
+            self.assertTrue(torch._C._is_alias_of(actual[3], x))
+            self.assertEqual(
+                [v.is_neg() for v in actual], [v.is_neg() for v in expected]
+            )
 
-    @dtypes(torch.float64)
-    @parametrize("numerics", ("strict_pointwise", "strict"))
-    def test_fused_sub_nan_payload(self, device, dtype, numerics):
-        values = _min_max_specials(dtype, device)
-        nans = values[-4:]
-        a = nans.repeat_interleave(values.numel())
-        b = values.repeat(nans.numel())
+        if dtype.is_floating_point:
 
-        def fn(a, b):
-            computed = -b.rsqrt()
-            return a - computed, computed - a
+            def read(x):
+                return x.clone() + x.resolve_neg() + x * 2
 
-        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
-        result, codes = run_and_get_code(compiled, a, b)
-        self.assertIn("@triton.jit", "\n".join(codes))
-        self.assertTrue(_outputs_equal(result, fn(a, b)))
+            base = torch.randn(512, device=device, dtype=dtype, requires_grad=True)
+            x = base._neg_view()
+            grad = torch.randn_like(x)
+            expected = read(x)
+            actual = torch.compile(
+                read, fullgraph=True, options={"numerics": numerics}
+            )(x)
+            self._assert_bitwise_equal(actual, expected)
+            self._assert_bitwise_equal(
+                torch.autograd.grad(actual, x, grad),
+                torch.autograd.grad(expected, x, grad),
+            )
+
+            def local_mutation(a):
+                allocation = a.clone()
+                view = allocation._neg_view()
+                old = view.clone()
+                with torch.no_grad():
+                    view.mul_(2)
+                return old * old + view * view, allocation
+
+            base = torch.tensor(
+                [-0.0, 0.0, 1.0, -1.0], dtype=dtype, device=device, requires_grad=True
+            )
+            expected_base = base.detach().clone().requires_grad_()
+            upstream = torch.full_like(base, 2.25)
+            actual = torch.compile(
+                local_mutation, fullgraph=True, options={"numerics": numerics}
+            )(base)
+            expected = local_mutation(expected_base)
+            self._assert_optional_output_gradients(
+                actual, expected, base, expected_base, upstream
+            )
+            allocation_grad = base.detach().clone()
+            original_grad = allocation_grad.clone()
+            self._assert_bitwise_equal(
+                torch.autograd.grad(actual[1], base, allocation_grad)[0],
+                torch.autograd.grad(expected[1], expected_base, allocation_grad)[0],
+            )
+            self._assert_bitwise_equal(base, expected_base)
+            self._assert_bitwise_equal(allocation_grad, original_grad)
+
+            base = base.detach().clone()
+            base[2] = float("nan")
+            base.requires_grad_()
+            expected_base = base.detach().clone().requires_grad_()
+
+            def independent_outputs(a, b, unbind):
+                if unbind:
+                    parts = b.unbind()
+                    return (
+                        a.clone()._neg_view(),
+                        a.sigmoid() + parts[0].clone(),
+                        parts[1].clone(),
+                    )
+                view = a.clone()._neg_view()
+                # GELU backward includes registered prims in the cached recipe.
+                # Repeated sin factors need distinct native owners. Power-zero
+                # derivatives may be saved forward and still need absence pruning.
+                if dtype == torch.float64:
+                    return view**0, view**0, torch.nn.functional.gelu(b)
+                call = torch.sin if dtype == torch.float32 else torch.clone
+                return call(view), call(view), torch.nn.functional.gelu(b)
+
+            from torch._inductor.utils import fresh_cache
+
+            with (
+                fresh_cache(),
+                config.patch(fx_graph_cache=True, force_disable_caches=False),
+                torch._functorch.config.patch(
+                    enable_autograd_cache=True, enable_remote_autograd_cache=False
+                ),
+            ):
+                backward_compiler = torch.compile(backend="eager", fullgraph=True)
+                optional_upstream = torch.stack((upstream * 0, upstream * 0), dim=-1)[
+                    :, 0
+                ]._neg_view()
+                for unbind, cache_hit in itertools.product(
+                    (False, True), (False, True)
+                ):
+                    torch._dynamo.reset()
+                    hits = counters["aot_autograd"]["autograd_cache_hit"]
+                    b = base.detach().clone()
+                    if unbind:
+                        b = b.repeat(2, 1)
+                    b.requires_grad_()
+                    expected_b = b.detach().clone().requires_grad_()
+                    actual = torch.compile(
+                        independent_outputs,
+                        fullgraph=True,
+                        options={"numerics": numerics},
+                    )(base, b, unbind)
+                    expected = independent_outputs(expected_base, expected_b, unbind)
+                    self._assert_bitwise_equal(actual, expected)
+                    weights = tuple(torch.full_like(t, 2.25) for t in actual)
+                    self._assert_bitwise_equal(
+                        torch.autograd.grad(
+                            actual, (base, b), weights, retain_graph=True
+                        ),
+                        torch.autograd.grad(
+                            expected,
+                            (expected_base, expected_b),
+                            weights,
+                            retain_graph=True,
+                        ),
+                    )
+                    # The active unbind needs a local sibling zero while the
+                    # shared sigmoid and independent clone keep absent gradients.
+                    self._assert_optional_output_gradients(
+                        actual,
+                        expected,
+                        (base, b),
+                        (expected_base, expected_b),
+                        optional_upstream,
+                        selected=2,
+                        backward_compiler=backward_compiler if cache_hit else None,
+                    )
+                    # Selecting only the clone leaves the whole multi-output
+                    # unbind group inactive, so its input gradient must be None.
+                    self._assert_optional_output_gradients(
+                        actual,
+                        expected,
+                        (base, b),
+                        (expected_base, expected_b),
+                        optional_upstream,
+                        backward_compiler=backward_compiler if cache_hit else None,
+                    )
+                    if cache_hit:
+                        self.assertGreater(
+                            counters["aot_autograd"]["autograd_cache_hit"], hits
+                        )
+            self._assert_bitwise_equal((base, b), (expected_base, expected_b))
+            self._assert_bitwise_equal(upstream, torch.full_like(base, 2.25))
+
+        if dtype == torch.float16:
+            # Templates query negative inputs before the scheduler is initialized.
+            a = torch.ones((128, 128), device=device, dtype=dtype)
+            compiled = torch.compile(
+                torch.mm,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                },
+            )
+            actual, codes = run_and_get_code(compiled, a, a.clone())
+            self.assertIn("tl.dot(", "\n".join(codes))
+            self._assert_bitwise_equal(actual, a @ a)
+
+        if dtype == torch.float32:
+            from torch._inductor.compile_fx import compile_fx
+            from torch._inductor.lowering import fallback_handler, lowerings
+
+            # Fresh fallback storage must not be reused with its lazy neg flag.
+            with torch.library._scoped_library(
+                "strict_numerics_test", "FRAGMENT"
+            ) as lib:
+                lib.define("fresh_neg(Tensor x) -> Tensor")
+                lib.impl(
+                    "fresh_neg",
+                    lambda x: x.clone()._neg_view(),
+                    "CompositeExplicitAutograd",
+                )
+                torch.library.register_fake(
+                    "strict_numerics_test::fresh_neg",
+                    lambda x: torch.empty_like(x)._neg_view(),
+                    lib=lib,
+                )
+
+                def fresh_fallback(x):
+                    return -torch.ops.strict_numerics_test.fresh_neg(x)
+
+                x = torch.arange(1, 513, device=device, dtype=dtype)
+                actual = torch.compile(
+                    fresh_fallback, fullgraph=True, options={"numerics": numerics}
+                )(x)
+                expected = fresh_fallback(x)
+                self._assert_bitwise_equal(actual, expected)
+                self.assertEqual(actual.is_neg(), expected.is_neg())
+
+            def fallback_views(x):
+                a, b = torch.ops.aten.split.Tensor(x._neg_view(), 512)
+                return a, b, a + 1, b + 2
+
+            def backend(gm, args):
+                return compile_fx(gm, args, decompositions={})
+
+            forced = {
+                op: fallback_handler(op, add_to_fallback_set=False)
+                for op in (
+                    torch.ops.aten._neg_view.default,
+                    torch.ops.aten.split.Tensor,
+                )
+            }
+            with (
+                patch.dict(lowerings, forced),
+                config.patch(
+                    {
+                        "numerics": numerics,
+                        "fx_graph_cache": False,
+                        "triton.cudagraphs": True,
+                    }
+                ),
+            ):
+                compiled = torch.compile(
+                    fallback_views, backend=backend, fullgraph=True
+                )
+                for offset in (0, 1, 0):
+                    x = torch.arange(1024 + offset, device=device, dtype=dtype)[offset:]
+                    expected = fallback_views(x)
+                    actual = compiled(x)
+                    self._assert_bitwise_equal(actual, expected)
+                    self.assertEqual(
+                        [t.is_neg() for t in actual], [t.is_neg() for t in expected]
+                    )
+                    for tensor in actual[:2]:
+                        self.assertTrue(torch._C._is_alias_of(tensor, x))
 
     @dtypes(torch.float32, torch.float64)
     @parametrize("axis", (None, 1))
