@@ -2676,9 +2676,18 @@ class InstructionTranslatorBase(
                 raise_name_error(self, name)
         elif not present:
             raise_name_error(self, name)
-        # A pre-existing global's tensor is not covered: syncing its dealloc
-        # would need a guard on the tensor identity, which is not tracked.
         self._maybe_sync_dealloc_attr(target, name)
+        if present and not pending_on_target:
+            value = self.f_globals[name]
+            if isinstance(value, torch.Tensor):
+                tensor_var = self.output.input_source_to_var.get(GlobalSource(name))
+                if isinstance(tensor_var, TensorVariable):
+                    install_guard(
+                        DictGetItemSource(self._globals_dict_source, name).make_guard(
+                            GuardBuilder.ID_MATCH
+                        )
+                    )
+                    self._maybe_emit_sync_dealloc(tensor_var)
         # The delete is committed. Remember it so later module-object or
         # module-__dict__ accesses to the name graph-break instead of
         # racing the replayed delete. The entry keeps the dict alive so its

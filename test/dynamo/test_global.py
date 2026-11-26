@@ -945,6 +945,29 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x + 2)
             self.assertEqual(globals()["_dg_a"], 2)
 
+    def test_delete_global_preexisting_tensor_calls_sync_dealloc(self):
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+        from torch._dynamo.variables import TensorVariable
+
+        name = "_dg_preexisting_tensor"
+        with mock.patch.dict(globals(), {name: torch.ones(2, 2)}):
+
+            def fn(x):
+                global _dg_preexisting_tensor
+                y = _dg_preexisting_tensor + 1
+                del _dg_preexisting_tensor
+                return y + x
+
+            x = torch.ones(2, 2)
+            with mock.patch.object(
+                InstructionTranslatorBase,
+                "_maybe_emit_sync_dealloc",
+                autospec=True,
+            ) as emit:
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(emit.call_count, 1)
+            self.assertIsInstance(emit.call_args.args[1], TensorVariable)
+
     def test_delete_missing_global_read_after_caught_failed_del(self):
         with mock.patch.dict(globals()):
 

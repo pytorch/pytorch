@@ -3469,9 +3469,6 @@ class <lambda>(torch.nn.Module):
             self.assertIn("record_event", graph_str)
             self.assertNotIn(_name, globals())
 
-    # The deleted pre-existing tensor's dealloc is not synced: tracking its
-    # identity would need a guard on the tensor, which globals do not carry.
-    @unittest.expectedFailure
     def test_del_global_preexisting_tensor_sync_dealloc(self, device):
         def fn(x, y):
             global _stream_del_global_preexisting
