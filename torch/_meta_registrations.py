@@ -127,13 +127,18 @@ def meta_addr(self, vec1, vec2, *, beta=1, alpha=1):
             ),
             lambda: f"cannot safely convert {type(scalar)} to {dtype}",
         )
-    args = _maybe_broadcast(self, vec1.reshape(shape[0], 1), vec2)
+    vec1 = vec1.reshape(shape[0], 1)
+    empty_vec1 = shape[0] == 0
+    if isinstance(empty_vec1, torch.SymBool):
+        # Native reshape gives empty vectors contiguous strides.
+        empty = torch.sym_ite(empty_vec1, 1, 0)
+        vec1 = vec1.as_strided(
+            vec1.shape, tuple(s + empty * (1 - s) for s in vec1.stride())
+        )
+    args = (self, vec1, vec2)
     utils.check_same_device(*args, allow_cpu_scalar_tensors=False)
     # Native addr's differently ranked inputs bypass TensorIterator's fast setup.
-    perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(
-        *args, allow_fast_path=False
-    )
-    strides = (1, shape[0]) if perm == [1, 0] else make_contiguous_strides_for(shape)
+    strides = utils.compute_elementwise_output_strides(*args, allow_fast_path=False)
     return self.new_empty_strided(shape, strides, dtype=dtype)
 
 
@@ -2986,6 +2991,25 @@ def calc_conv_nd_return_shape(
 
 def is_channels_last(ten):
     return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
+
+
+@register_meta(aten.batch_norm_update_stats.default)
+def meta_batch_norm_update_stats(input, running_mean, running_var, momentum):
+    torch._check(input.dim() >= 2)
+    torch._check(input.numel() > 0)
+    torch._check(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    )
+    if device_hint(input) == "cpu":
+        dtype = input.dtype
+        for running in (running_mean, running_var):
+            if running is not None and running.dtype != input.dtype:
+                dtype = running.dtype
+    else:
+        torch._check((running_mean is None) == (running_var is None))
+        dtype = utils.get_computation_dtype(input.dtype)
+    shape = (input.shape[1],)
+    return input.new_empty(shape, dtype=dtype), input.new_empty(shape, dtype=dtype)
 
 
 @register_meta(aten.miopen_batch_norm.default)
