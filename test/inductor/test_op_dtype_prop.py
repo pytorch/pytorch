@@ -3,7 +3,6 @@ import importlib
 import os
 import re
 import sys
-import unittest
 
 import torch
 from torch._dynamo.utils import disable_cache_limit
@@ -17,6 +16,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import HardwareClassification, parametrize
+from torch.testing._internal.inductor_utils import requires_triton
 from torch.utils._triton import has_triton
 
 
@@ -117,7 +117,7 @@ class TestCase(InductorTestCase):
             out_c = torch.compile(run, dynamic=True)(op.get_op(), args, kwargs)
             self.assertEqual(out, out_c)
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @parametrize("upcast_to_fp32", [False, True])
     @config.patch("triton.use_block_ptr", True)
     def test_codegen_upcast_to_fp32(self, device, upcast_to_fp32):
@@ -132,7 +132,7 @@ class TestCase(InductorTestCase):
             fp32_cast_in_code = "to(tl.float32)" in code
             self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
     @parametrize("scan_func", [torch.cumsum, torch.cumprod])
     @parametrize("input_dtype", [torch.float16, torch.bfloat16])
@@ -156,7 +156,7 @@ class TestCase(InductorTestCase):
             self.assertTrue(".to(tl.float32)" in code)
             self.assertEqual(func(*inps), func_opt(*inps))
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @parametrize("fp8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     @config.patch("triton.use_block_ptr", True)
     def test_fp8_scan_upcasts_regardless_of_config(self, device, fp8_dtype):
@@ -176,7 +176,7 @@ class TestCase(InductorTestCase):
         code = run_and_get_triton_code(func_opt, inp)
         self.assertTrue(".to(tl.float32)" in code)
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
     @parametrize(
         "reduction_func",
@@ -205,7 +205,7 @@ class TestCase(InductorTestCase):
             self.assertTrue(".to(tl.float32)" in code)
             self.assertEqual(func(*inps), func_opt(*inps))
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @parametrize("upcast_to_fp32", [False, True])
     @parametrize("persistent", [False, True])
     @parametrize("input_dtype", [torch.float16, torch.bfloat16])
@@ -236,7 +236,7 @@ class TestCase(InductorTestCase):
         source = "\n".join(code)
         self.assertEqual("for r0_offset in" in source, not persistent)
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @parametrize("persistent", [False, True])
     @parametrize("reduction_name", ["min", "max", "argmin", "argmax"])
     @parametrize("input_dtype", [torch.float16, torch.bfloat16, torch.int32])
@@ -268,7 +268,7 @@ class TestCase(InductorTestCase):
         if not input_dtype.is_floating_point:
             self.assertNotIn(".to(tl.float32)", source)
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @parametrize("op_name", OpDtypeSupport.supported_dtypes)
     @parametrize("load_upcast_to_fp32", [False, True])
     @parametrize("input_dtype", [torch.float16, torch.bfloat16])
@@ -447,7 +447,7 @@ class TestCase(InductorTestCase):
         num_downcasts = code.count(f".to({triton_type(dtype)})")
         self.assertEqual(num_downcasts, 0 if upcast_to_fp32 else 1)
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
     def test_unbacked_float_uses_fp64_signature(self, device):
@@ -475,7 +475,7 @@ class TestCase(InductorTestCase):
         self.assertIn("'ks0': 'fp64'", code)
         self.assertIn(".to(tl.float32)", code)
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_shape_assert", True)
     def test_index_expr_ks_arg_dtype_int(self, device):
@@ -498,7 +498,7 @@ class TestCase(InductorTestCase):
         self.assertIn("'ks0': 'i64'", code)
         self.assertIn(".to(tl.int32)", code)
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_shape_assert", True)
     def test_index_expr_ks_arg_dtype_float(self, device):
@@ -522,7 +522,7 @@ class TestCase(InductorTestCase):
         self.assertTrue(torch.allclose(result, expected))
         self.assertIn(".to(tl.float32)", code)
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_shape_assert", True)
@@ -540,7 +540,7 @@ class TestCase(InductorTestCase):
         self.assertIn("triton_helpers.randint64", code)
         self.assertIn(".to(tl.int64)", code)
 
-    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_triton()
     @parametrize("dynamic", [True, False])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_int64_symint_not_downcast_to_int32_index_expr(self, device, dynamic):
