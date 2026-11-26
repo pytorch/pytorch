@@ -1806,6 +1806,9 @@ void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> grou
                     "Dispatch grid ",
                     length,
                     " exceeds 2^32 - 1 threads along one axis");
+  if (length == 0) {
+    return;
+  }
   const auto max_tg_size = getMaxThreadsPerThreadgroup();
   const auto group_size_val = group_size.value_or(std::min(length, max_tg_size));
   TORCH_CHECK_VALUE(group_size_val <= max_tg_size, "Threadgroup size exceeds ", max_tg_size, " limit");
@@ -1816,28 +1819,30 @@ void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::Optional
   TORCH_CHECK(!length.empty() && length.size() < 4, "Dispatch dimensions must be less than 3 and non-empty");
   TORCH_CHECK(!group_size.has_value() || group_size->size() == length.size(),
               "size and group_size must have same number of dimensions");
+  if (length.size() == 1) {
+    return dispatch(length[0], group_size.has_value() ? std::optional(group_size->at(0)) : std::nullopt);
+  }
   // thread_position_in_grid is at most 32-bit per axis; Metal silently truncates larger grids
   TORCH_CHECK_VALUE(
       std::all_of(length.begin(), length.end(), [](auto dim) { return dim <= std::numeric_limits<uint32_t>::max(); }),
       "Dispatch grid ",
       c10::Join("x", length),
       " exceeds 2^32 - 1 threads along one axis");
+  if (std::find(length.begin(), length.end(), 0) != length.end()) {
+    return;
+  }
+  const auto dim = [](c10::ArrayRef<uint64_t> v, size_t i) -> NSUInteger { return i < v.size() ? v[i] : 1; };
   // A (max, 1, 1) threadgroup leaves a grid that is narrow along x on tiny threadgroups, so pack the outer axes
-  if (!group_size.has_value() && length[0] > 0) {
-    return mtl_dispatch3DJob(
-        encoder, cps, length[0], length.size() > 1 ? length[1] : 1, length.size() > 2 ? length[2] : 1);
+  if (!group_size.has_value()) {
+    return mtl_dispatch3DJob(encoder, cps, length[0], dim(length, 1), dim(length, 2));
   }
   const auto max_tg_size = getMaxThreadsPerThreadgroup();
-  const auto group_size_length = group_size.has_value() ? group_size->size() : 0;
-  auto tg_size = MTLSizeMake(group_size_length > 0 ? group_size->at(0) : max_tg_size,
-                             group_size_length > 1 ? group_size->at(1) : 1,
-                             group_size_length > 2 ? group_size->at(2) : 1);
+  auto tg_size = MTLSizeMake(group_size->at(0), dim(*group_size, 1), dim(*group_size, 2));
   TORCH_CHECK_VALUE(tg_size.width * tg_size.height * tg_size.depth <= max_tg_size,
                     "Threadgroup size exceeds ",
                     max_tg_size,
                     " limit");
-  [encoder dispatchThreads:MTLSizeMake(length[0], length.size() > 1 ? length[1] : 1, length.size() == 3 ? length[2] : 1)
-      threadsPerThreadgroup:tg_size];
+  [encoder dispatchThreads:MTLSizeMake(length[0], dim(length, 1), dim(length, 2)) threadsPerThreadgroup:tg_size];
 }
 
 void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
