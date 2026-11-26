@@ -3069,8 +3069,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.xpu.is_available",
         "torch.xpu.is_bf16_supported",
         "torch.xpu.is_initialized",
-        "torch.xpu.memory.caching_allocator_alloc",
-        "torch.xpu.memory.caching_allocator_delete",
         "torch.xpu.memory.empty_cache",
         "torch.xpu.memory.max_memory_allocated",
         "torch.xpu.memory.max_memory_reserved",
