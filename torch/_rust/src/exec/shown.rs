@@ -11,6 +11,16 @@
 //! call of that callable, and nothing is pure because another tracer's table
 //! lists it.
 //!
+//! A callee that ran operators is no exception to (2): the operators say
+//! what a call did only where the callee is the dispatcher's own way to them,
+//! one of torch's C functions or tensor methods, a tensor class called with
+//! data (torch.Tensor, torch.FloatTensor) or the `_op` of an operator
+//! object of torch.ops (`runs_operators`). Any other C callee may have done
+//! more than run them: a node of the autograd graph that is called binds a
+//! leaf's .grad. The autograd engine's own call is the named case
+//! (exec/backward.rs, asked first in `pure_instr` for its reason); these
+//! tables decide for every callee, and for that one the same.
+//!
 //! Given: an instruction of a profiled Cfg that entered no frame of Python
 //! code (those are judged from their own code), and the kinds its operands
 //! were seen to have (exec/types.rs).
@@ -61,6 +71,9 @@ pub const CALLS: u8 = 8;
 // A dict that puts in a key it is read for and lacks (a defaultdict): its
 // other reads are a dict's.
 pub const DEFAULTS: u8 = 16;
+// An operator object of torch.ops: its `_op` is the dispatcher's call of the
+// operator.
+pub const OPS: u8 = 32;
 
 struct Tables {
     // C-implemented classes, by address: what is shown of their objects.
@@ -82,6 +95,9 @@ struct Tables {
     readers: HashSet<usize>,
     // Builtins that read an item by its key.
     subscripts: HashSet<usize>,
+    // torch's C functions and tensor methods, whatever their names, and its
+    // tensor classes.
+    operators: HashSet<usize>,
     // `id`, and the hashes: their result is which object the operand is.
     ids: HashSet<usize>,
     hashes: HashSet<usize>,
@@ -90,7 +106,7 @@ struct Tables {
 const TABLES: &std::ffi::CStr = c"
 import builtins, collections, contextvars, functools, itertools, math, operator, re, types, typing
 import torch
-R, I, C, D = 1, 4, 8, 16
+R, I, C, D, O = 1, 4, 8, 16, 32
 classes = {}
 def put(flags, *cs):
     for c in cs:
@@ -108,6 +124,7 @@ put(R, tuple, frozenset, str, bytes, range, list, dict, set, type({}.keys()), ty
     type(torch._C._VariableFunctions), types.FrameType, contextvars.ContextVar,
     *[c for c in vars(builtins).values() if isinstance(c, type) and issubclass(c, BaseException)])
 put(D, collections.defaultdict)
+put(R | O, torch._ops.OpOverload, torch._ops.OpOverloadPacket)
 put(C, type, type(len), type(str.join), type(int.__add__), type((1).__add__), type(dict.__dict__['fromkeys']), functools.partial,
     type(torch.Tensor), type(functools.lru_cache(lambda: 0)))
 iterators = [iter([]), iter(()), iter({}), iter({}.values()), iter({}.items()), iter(set()), iter(''), iter(b''),
@@ -146,10 +163,14 @@ def computes(name):
     inplace = name.endswith('_') and not dunder
     listed = name in state or name in unchecked
     return not inplace and not listed and not name.startswith(('_set', 'set_', '__set', '__del', '__i'))
-torch_ = []
-for space in (torch._C._VariableFunctions, torch._C._nn, torch._C._linalg, torch._C._fft, torch._C._special, torch._C._sparse):
-    torch_ += [getattr(space, n) for n in dir(space) if computes(n) and callable(getattr(space, n, None))]
-torch_ += [f for n, f in vars(torch._C.TensorBase).items() if callable(f) and computes(n) and n not in ('__new__', '__init__')]
+spaces = (torch._C._VariableFunctions, torch._C._nn, torch._C._linalg, torch._C._fft, torch._C._special, torch._C._sparse)
+def named(ok):
+    out = [getattr(s, n) for s in spaces for n in dir(s) if ok(n) and callable(getattr(s, n, None))]
+    return out + [f for n, f in vars(torch._C.TensorBase).items() if callable(f) and ok(n) and n not in ('__new__', '__init__')]
+torch_ = named(computes)
+# All of them, the in-place ones too: what a call of one that ran operators did is those operators. And the
+# classes whose call makes a tensor of what it is handed, as torch.tensor does (torch.Tensor, torch.FloatTensor).
+operators = named(lambda name: True) + [torch.Tensor, *torch._tensor_classes]
 ";
 
 static T: OnceLock<Tables> = OnceLock::new();
@@ -181,7 +202,7 @@ fn tables() -> &'static Tables {
             }
             // The tables refer to their objects by address: kept for good.
             std::mem::forget(g.clone().unbind());
-            Tables { classes, c_members: set("c_members"), takers: set("takers"), callers: set("callers"), makers: set("lazy"), any: set("any_"), torch: set("torch_"), readers: set("readers"), ids: set("ids"), hashes: set("hashes"), subscripts: set("subscripts") }
+            Tables { classes, c_members: set("c_members"), takers: set("takers"), callers: set("callers"), makers: set("lazy"), any: set("any_"), torch: set("torch_"), readers: set("readers"), ids: set("ids"), hashes: set("hashes"), subscripts: set("subscripts"), operators: set("operators") }
         })
     })
 }
@@ -196,6 +217,22 @@ pub fn torch_computes(f: &Bound<'_, PyAny>) -> bool {
 pub fn is_builtin(f: &Bound<'_, PyAny>) -> bool {
     let (t, at) = (tables(), f.as_ptr() as usize);
     super::pure_builtins().contains(&at) || t.readers.contains(&at) || t.any.contains(&at) || t.ids.contains(&at) || t.hashes.contains(&at)
+}
+
+// Whether call `v` of the C callable `f`, which ran operators, did what
+// those operators say and no more: `f` is one of torch's own C functions,
+// tensor methods or tensor classes, or the `_op` of an operator object of
+// torch.ops.
+pub fn runs_operators(prep: &Prepared, v: ValueId, f: &Bound<'_, PyAny>) -> bool {
+    if tables().operators.contains(&(f.as_ptr() as usize)) {
+        return true;
+    }
+    let cfg = &prep.cfg;
+    let operator = |x: ValueId| kinds(prep, x).is_some_and(|ks| ks.iter().all(|k| matches!(k, Kind::Object(c) if c.shown() & OPS != 0)));
+    cfg[v].args.iter().take(2).any(|a| match cfg[*a].op {
+        Op::LoadAttr(n) | Op::LoadMethod(n) => cfg.names[n as usize] == "_op" && operator(cfg[*a].args[0]),
+        _ => false,
+    })
 }
 
 // Whether `f` is in one of the engine's tables of callables that only
@@ -222,7 +259,7 @@ pub unsafe fn class_flags(tp: *mut ffi::PyTypeObject) -> u8 {
         match t.classes.get(&(base as usize)) {
             Some(f) => {
                 flags &= f;
-                more |= f & (ITER | CALLS | DEFAULTS);
+                more |= f & (ITER | CALLS | DEFAULTS | OPS);
             }
             None if python_defined(base as *mut ffi::PyTypeObject, t) => {}
             None => return 0,

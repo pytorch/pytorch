@@ -30,6 +30,7 @@ import ctypes
 import functools
 import gc
 import itertools
+import operator
 import os
 import subprocess
 import sys
@@ -1313,6 +1314,24 @@ def modes_keyed_by_weights(x):
     return ((y * k + 1).cos().tanh().exp() * 2).sin()
 
 
+# A C callable that runs operators and is none of torch's own functions:
+# autograd's engine, which also adds to .grad. The backward of prod asks for
+# a size that depends on the data, which a trace gives up at.
+def modes_backward(x):
+    MODES_W.grad = None
+    loss = (MODES_W * x).prod() + (MODES_W * x).sum()
+    loss.backward(retain_graph=True)
+    return loss.detach(), MODES_W.grad.clone()
+
+
+# A node of the autograd graph that is called: AccumulateGrad clones what
+# it is handed (an operator) and binds the clone as its leaf's .grad.
+def modes_node_called(x, node):
+    y = ((x * 2 + 1).sin() * x).cos()
+    node(y.sum(0))
+    return (y + 1).tanh()
+
+
 MODES_ENDS = [
     modes_unpack,
     modes_listed,
@@ -1344,12 +1363,30 @@ def modes_padded(x):
     return modes_around(torch.nn.functional.pad(x, (0, 1))[:, 1:], 2.0)
 
 
+# C callables that are torch's own way to the operators they ran and are no
+# function of torch's namespaces: the operator module's function for `@`,
+# and a tensor class called with data.
+def modes_matmul_function(x):
+    return modes_around(x, operator.matmul(x, x.t()).sum())
+
+
+def modes_legacy_constructor(x):
+    return modes_around(x, torch.FloatTensor([1.0, 2.0]).sum())
+
+
+def modes_tensor_class(x):
+    return modes_around(x, torch.Tensor([1.0, 2.0]).sum())
+
+
 MODES_STAYS = [
     modes_made_zip,
     modes_made_generator,
     modes_made_enumerate,
     modes_logs_usage,
     modes_padded,
+    modes_matmul_function,
+    modes_legacy_constructor,
+    modes_tensor_class,
 ]
 
 
@@ -1399,6 +1436,38 @@ class TestVmEffects(TestCase):
         self.assertGreater(region_runs(compiled), 0)
         places = [r for r in vm.regions(compiled) if r["state"] == "region"]
         self.assertEqual(len(places), 1)
+
+    @isolated
+    def test_c_callee_that_ran_an_operator_and_was_not_recorded(self, device):
+        # What the call did besides, the operator does not say: it ends the
+        # region, and the leaf has its .grad after every call.
+        leaves = [torch.ones(8, device=device, requires_grad=True) for _ in range(2)]
+        ours, eagers = ((t * 1).grad_fn.next_functions[0][0] for t in leaves)
+        compiled = vm(modes_node_called, passes=EARLY)
+        for call in range(9):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            leaves[0].grad = leaves[1].grad = None
+            got, want = compiled(x, ours), modes_node_called(x, eagers)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(leaves[0].grad, leaves[1].grad, atol=0, rtol=0)
+        rows = [r for r in vm.regions(compiled) if r["function"] == "modes_node_called"]
+        calls = [r["state"] for r in rows if r["kind"] == "call"]
+        self.assertEqual(calls, ["not movable"], msg=str(rows))
+
+    @isolated
+    def test_c_callee_that_ran_operators_and_is_in_no_table(self, device):
+        # The autograd engine, the named case: what its call did besides
+        # running operators, they do not say. It ends the region, and is
+        # made once on every call.
+        modes_reset(device)
+        MODES_W.requires_grad_(True)
+        compiled = vm(modes_backward, passes=EARLY)
+        for call in range(9):
+            torch.manual_seed(call)
+            x = torch.randn(8, device=device)
+            want = modes_backward(x)
+            self.assertEqual(compiled(x), want, atol=0, rtol=0, msg=f"call {call}")
 
     @isolated
     def test_defaultdict_read_for_keys_that_are_there(self, device):

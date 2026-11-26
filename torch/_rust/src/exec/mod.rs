@@ -2127,9 +2127,10 @@ fn observed_ops(
                         // Or ran nothing observable (a predicate): pinnable
                         // too, though its result isn't a tensor.
                         let quiet = !seqs.is_empty() && seqs.iter().all(|(seq, _)| seq.is_empty());
-                        // A call that ran nothing is one only of a callable
-                        // the engine's own tables have (see shown.rs).
-                        if (!one_op && !shown::computes(&f)) || first.as_deref().is_some_and(sets_tensor_state) {
+                        // A call is one only of a callable the engine's
+                        // own tables have, whatever it ran (see shown.rs).
+                        let listed = if one_op { shown::runs_operators(prep, *v, &f) } else { shown::computes(&f) };
+                        if !listed || first.as_deref().is_some_and(sets_tensor_state) {
                             continue;
                         }
                         calls.push((*v, f.unbind(), (one_op || quiet).then(|| if one_op { args() } else { None }), false));
@@ -2891,7 +2892,7 @@ out += [dict.get, dict.items, dict.keys, dict.values, dict.__getitem__, dict.__c
         str.format, str.join, str.split, str.startswith, str.endswith, str.replace, str.lower,
         str.upper, str.strip, str.rsplit, str.partition, str.rpartition]
 out += [getattr(math, n) for n in ('sqrt', 'log', 'exp', 'ceil', 'floor', 'prod', 'isfinite', 'isnan', 'log2', 'pow')]
-out += [getattr(operator, n) for n in ('getitem', 'add', 'mul', 'sub', 'truediv', 'floordiv', 'index', 'neg')]
+out += [getattr(operator, n) for n in ('getitem', 'add', 'mul', 'sub', 'truediv', 'floordiv', 'matmul', 'index', 'neg')]
 import _abc, types, bisect, itertools, functools
 # Every method of the immutable builtin types, and the reads of the others.
 for t in (str, bytes, tuple, frozenset, int, float, complex, bool, range, slice):
@@ -2995,7 +2996,10 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
         return Ok(());
     }
     let callees = unsafe { &*prep.callees.get() };
-    // The autograd engine, whatever its runs did (see backward.rs).
+    // The autograd engine (see backward.rs): the named case of the rule at
+    // the end of this function, that a C callee in none of the tables ends
+    // the region whatever it ran. Asked first for its reason, and so that
+    // no pass list declares it pure; the tables answer the same.
     if is_call(&ins.op) && callees.get(&v).and_then(|c| c.get(py)).is_some_and(|f| unsafe { backward::is(f.as_ptr()) }) {
         return Err(format!("{} runs a backward, which writes .grad and frees the graph it went through", here()));
     }
@@ -3063,9 +3067,6 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
     {
         return shown::builtin(py, prep, v, &f, via_partial, own).map_err(|e| format!("{} called {}: {e}", here(), f.repr().map_or("?".into(), |r| r.to_string())));
     }
-    if torch_ops {
-        return Ok(());
-    }
     let Some(f) = callees.get(&v).and_then(|c| c.get(py)) else {
         let ran = unsafe { &*prep.types.get() }.get(v.idx()).is_some_and(|t| t.ty.is_some());
         let what = match callees.get(&v) {
@@ -3085,6 +3086,10 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
         // One of torch's own functions that only compute, which returned
         // without running an operator (a dropout in eval mode, a cast to
         // the dtype the tensor has).
+        Ok(())
+    } else if torch_ops && shown::runs_operators(prep, v, &f) {
+        // The dispatcher's own way to the operators that ran, which were
+        // judged above: the call did what they say.
         Ok(())
     } else if partial && indirect && f.is_instance_of::<pyo3::types::PyFunction>() {
         // A Python function, whose frames were judged above.
