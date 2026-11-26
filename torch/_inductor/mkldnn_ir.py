@@ -5,7 +5,11 @@ from typing import Any, Optional
 import sympy
 
 import torch
-from torch._prims_common import make_channels_last_strides_for, StrideType
+from torch._prims_common import (
+    make_channels_last_strides_for,
+    StrideType,
+    suggest_memory_format,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .ir import (
@@ -204,17 +208,23 @@ def _prepare_convolution_fusion_create(
     # this tensor is considered as channels first and the output will be in contiguous format.
     # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
     dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
-    if (
-        dynamic_shapes or get_device_type(x) == "xpu"
-    ) and is_contiguous_storage_and_layout(x):
-        output_stride: StrideType = FlexibleLayout.contiguous_strides(output_size)
-    # Currently we don't support channel last for the situation that stride of input's batch dim is 0,
-    # eg. input_size = (1, 1280, 64, 64), but input_stride=(0, 1, 81920, 1280).
-    # So we use NCHW here instead.
-    # Different with cpu, cpu conv always use channels_last for convolution when weight is prepacked,
-    # but xpu does not do the prepack, so the problem exposed here is only for xpu.
-    # TODO support channels_last for such zero stride input.
-    elif get_device_type(x) == "xpu" and x.get_stride()[0] == 0:
+    output_stride: StrideType
+    if get_device_type(x) == "xpu":
+        # Without weight prepack the XPU kernel picks the layout itself, with
+        # xpu_conv_use_channels_last: channels last if the input or the weight is.
+        # The input check matters for strides that require_stride_order cannot
+        # change (size-1 dims, e.g. a 1-channel input or a zero batch stride).
+        with V.graph.fake_mode:
+            x_format = suggest_memory_format(ir_node_to_tensor(x))
+        channels_last_formats = (torch.channels_last, torch.channels_last_3d)
+        if (
+            x_format in channels_last_formats
+            or suggest_memory_format(weight_fake) in channels_last_formats
+        ):
+            output_stride = make_channels_last_strides_for(output_size)
+        else:
+            output_stride = FlexibleLayout.contiguous_strides(output_size)
+    elif dynamic_shapes and is_contiguous_storage_and_layout(x):
         output_stride = FlexibleLayout.contiguous_strides(output_size)
     else:
         output_stride = make_channels_last_strides_for(output_size)

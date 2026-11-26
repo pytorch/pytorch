@@ -337,6 +337,47 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         self.device = device
         self._test_conv_unary_base(dim=5)
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_conv_input_strides_fixed_by_size1_dims(self, device):
+        # Conv inputs whose strides require_stride_order cannot change because of
+        # size-1 dims: a zero batch stride after permute -> LayerNorm -> permute
+        # (ConvNeXt), and a 1-channel input. The predicted output layout must match
+        # the one the conv kernel produces.
+        self.device = device
+
+        class PermuteLayerNormConv(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.perm = (0, 2, 3, 1) if dim == 4 else (0, 2, 3, 4, 1)
+                self.back = (0, 3, 1, 2) if dim == 4 else (0, 4, 1, 2, 3)
+                self.ln = torch.nn.LayerNorm(16)
+                conv = torch.nn.Conv2d if dim == 4 else torch.nn.Conv3d
+                self.conv = conv(16, 16, 3, padding=1, groups=16)
+
+            def forward(self, x):
+                return self.conv(self.ln(x.permute(self.perm)).permute(self.back))
+
+        for dim, case in itertools.product(
+            (4, 5), ("permute_layer_norm", "one_channel")
+        ):
+            cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
+            spatial = (12, 12) if dim == 4 else (6, 6, 6)
+            if case == "permute_layer_norm":
+                mod, c = PermuteLayerNormConv(dim), 16
+            else:
+                conv = torch.nn.Conv2d if dim == 4 else torch.nn.Conv3d
+                mod, c = conv(1, 16, 3, padding=1), 1
+            mod = mod.eval().to(memory_format=cl_format)
+            v = torch.randn(1, c, *spatial).to(memory_format=cl_format)
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
+                )
+
+            self._test_common(mod, (v,), matcher_check_fn)
+
     def _test_conv_transpose_unary_base(self, dim=4):
         if dim != 4 and dim != 5:
             raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
