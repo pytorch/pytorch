@@ -7,6 +7,7 @@ import torch
 from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_runtime
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
+    expectedFailureXPU,
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
@@ -27,21 +28,35 @@ TEST_CUDAMALLOCASYNC = TEST_CUDA and (
 )
 
 
+def _device_mod(device):
+    return getattr(torch, torch.device(device).type)
+
+
+def _device_sleep(device, cycles=10_000_000):
+    mod = _device_mod(device)
+    if hasattr(mod, "_sleep"):
+        mod._sleep(cycles)
+    elif hasattr(mod, "sleep"):
+        mod.sleep(cycles)
+
+
 @contextlib.contextmanager
 def _streams(device, count=2):
-    current = torch.cuda.current_stream(device)
-    streams = [torch.cuda.Stream(device=device) for _ in range(count)]
-    with torch.cuda.stream(streams[0]):
+    mod = _device_mod(device)
+    current = mod.current_stream(device)
+    streams = [mod.Stream(device=device) for _ in range(count)]
+    with mod.stream(streams[0]):
         yield streams
     current.wait_stream(streams[0])
 
 
 @contextlib.contextmanager
 def _capture(stream=None, enabled=True):
+    if not enabled:
+        yield None
+        return
     graph = torch.cuda.CUDAGraph()
-    with (
-        torch.cuda.graph(graph, stream=stream) if enabled else contextlib.nullcontext()
-    ):
+    with torch.cuda.graph(graph, stream=stream):
         yield graph
 
 
@@ -99,6 +114,8 @@ class TestCOWDevice(TestCase):
 
     @parametrize("captured", [False, True])
     def test_readonly_sharing(self, device, captured):
+        if captured and not (torch.device(device).type == "cuda" and TEST_CUDA_GRAPH):
+            raise unittest.SkipTest("requires CUDA graph support")
         with _streams(device, 1) as (a,):
             existing = torch.ones(8, device=device)._lazy_clone()
             with _capture(a, captured) as graph:
@@ -539,12 +556,14 @@ class TestCOWFallbackDevice(TestCase):
             with self.assertRaisesRegex(RuntimeError, "FakeTensors"):
                 getattr(torch._C, name)(x)
 
+    @expectedFailureXPU
     def test_clone_on_another_stream(self, device):
-        a = torch.cuda.current_stream(device)
-        b = torch.cuda.Stream(device=device)
+        mod = _device_mod(device)
+        a = mod.current_stream(device)
+        b = mod.Stream(device=device)
         x = torch.ones(1024, device=device)
         b.wait_stream(a)
-        with torch.cuda.stream(b):
+        with mod.stream(b):
             y = x._lazy_clone()
             self.assertFalse(torch._C._is_cow_tensor(y))
             y.add_(1)
