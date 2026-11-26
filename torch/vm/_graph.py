@@ -13,6 +13,7 @@ import torch
 import torch.fx
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.vm._bound import BoundLowering
+from torch.vm._examples import Examples, raw
 from torch.vm._types import Interval, TensorType, Varies
 
 
@@ -600,12 +601,21 @@ def replace_segment(
 
 def run_until(gm: torch.fx.GraphModule, node: torch.fx.Node) -> Any:
     """``node``'s value in the traced run (the block's graphs are pure, so
-    rerunning them changes nothing)."""
-    inputs = gm.meta.get("vm_example_inputs")
+    rerunning them changes nothing).
+
+    The value is computed from the traced run's inputs, the region's weights
+    among them. In a region that has weights, asking for it therefore makes
+    what the pass list returns the output for these weights only: regions
+    with the same graph and other weights (the layers of one class) no
+    longer share it, and the pass list runs once for each of them."""
+    inputs = raw(gm)
     if not inputs:
         raise ValueError(
             "run_until needs the graph the VM gave the pass, while the pass runs (it carries the traced run's inputs until the passes are done)"
         )
+    examples = gm.meta.get("vm_example_inputs")
+    if isinstance(examples, Examples):
+        examples.weights_read()
     result: dict[str, Any] = {}
 
     class Until(torch.fx.Interpreter):

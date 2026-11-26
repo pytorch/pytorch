@@ -2053,6 +2053,158 @@ class TestVmNestedTensors(TestCase):
 instantiate_device_type_tests(TestVmNestedTensors, globals())
 
 
+def modes_typed(x, t):
+    return ((x.sin() * t).cos() + 1).tanh().exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmTypeOf(TestCase):
+    """vm.type_of gives an intermediate node's type also when the region has
+    an input that is no tensor."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @isolated
+    def test_intermediate_of_a_region_with_a_float_input(self, device):
+        types = []
+
+        def looks(gm: torch.fx.GraphModule, input_types) -> torch.fx.GraphModule:
+            tanh = torch.ops.aten.tanh.default
+            node = next(n for n in gm.graph.nodes if n.target is tanh)
+            types.append((input_types, vm.type_of(gm, input_types, node)))
+            return gm
+
+        compiled = vm(modes_typed, passes=(*EARLY, looks))
+        for call in range(8):
+            torch.manual_seed(call)
+            x, t = torch.rand(3 + call % 2, 8, device=device), 0.5 + call
+            self.assertEqual(compiled(x, t), modes_typed(x, t), atol=0, rtol=0)
+        # (One graph for each of the two sizes.)
+        self.assertGreater(len(types), 0)
+        for input_types, of_tanh in types:
+            self.assertEqual(
+                [type(t) for t in input_types], [vm.TensorType, vm.FloatType]
+            )
+            # The first size was 3 and 4 on the calls before the trace.
+            self.assertEqual([(d.lo, d.hi) for d in of_tanh.dims], [(3, 4), (8, 8)])
+        self.assertGreater(region_runs(compiled), 0)
+
+
+instantiate_device_type_tests(TestVmTypeOf, globals())
+
+
+class ModesScales(torch.nn.Module):
+    def __init__(self, k):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.full((8,), 1.0 + k / 16))
+
+
+def modes_scales(layers, x, seen):
+    for layer in layers:
+        x = (x * layer.weight).tanh().cos().sin() + x
+        # (The loop is no region: its body is one, for each layer.)
+        seen.append(1)
+    return x
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmPassExamples(TestCase):
+    """What a pass list makes of a graph is shared by the regions with that
+    graph until a pass is handed the VALUE of a weight: through the input
+    type, out of the traced run's inputs, or as a value computed from them."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize(
+        "how,runs",
+        [
+            ("returns_the_graph", 1),
+            ("reads_an_input_and_the_length", 1),
+            ("returns_the_graph_the_inductor_pass_lowered", 1),
+            ("const_of_the_type", 6),
+            ("indexed", 6),
+            ("sliced", 6),
+            ("iterated", 6),
+            ("run_until", 6),
+        ],
+        name_fn=lambda how, runs: how,
+    )
+    @isolated
+    def test_output_of_a_pass_that_was_handed_a_weight_is_not_shared(
+        self, device, how, runs
+    ):
+        ran = []
+
+        def a_pass(gm, input_types):
+            ran.append(1)
+            examples = gm.meta["vm_example_inputs"]
+            i = next(i for i, t in enumerate(input_types) if t.is_const)
+            if how.startswith("returns_the_graph"):
+                return gm
+            if how == "reads_an_input_and_the_length":
+                self.assertEqual(len(examples), len(input_types))
+                self.assertEqual(examples[1 - i].shape, (4, 8))
+                return gm
+            if how == "const_of_the_type":
+                weight = input_types[i].const
+            elif how == "indexed":
+                weight = examples[i]
+            elif how == "sliced":
+                weight = examples[i:][0]
+            elif how == "iterated":
+                weight = list(examples)[i]
+            else:
+                placeholder = list(gm.graph.find_nodes(op="placeholder"))[i]
+                weight = vm.run_until(gm, placeholder)
+            run = gm.forward
+
+            # Computes with the weight the pass saw, whatever it is handed.
+            def with_weight(*inputs):
+                return run(*inputs[:i], weight, *inputs[i + 1 :])
+
+            return vm.lower_to(gm, with_weight)
+
+        layers = [ModesScales(k).to(device) for k in range(6)]
+        # (The Inductor pass is handed the weights too: for their sizes.)
+        lowered = [vm.passes.Inductor()] if how.endswith("lowered") else []
+        compiled = vm(modes_scales, passes=(*EARLY, *lowered, a_pass))
+        with torch.no_grad():
+            for call in range(8):
+                torch.manual_seed(call)
+                x = torch.randn(4, 8, device=device)
+                want, got = modes_scales(layers, x, []), compiled(layers, x, [])
+                # (A compiled kernel rounds as it does: no exact comparison.)
+                exact = {} if lowered else {"atol": 0, "rtol": 0}
+                self.assertEqual(got, want, msg=f"call {call}", **exact)
+        self.assertEqual(len(ran), runs)
+
+    def test_what_the_inputs_say_to_a_pass_that_takes_them_for_a_list(self, device):
+        from torch.vm._examples import Examples
+
+        read = []
+        examples = Examples(
+            [torch.ones(2, device=device), 0.5], frozenset({0}), lambda: read.append(1)
+        )
+        for text in (repr(examples), self.raised(lambda: examples + [])):
+            self.assertIn("list(examples)", text)
+            self.assertIn("input_types[i].const", text)
+            self.assertIn("bind=", text)
+        self.assertIn("by position", self.raised(lambda: examples["weight"]))
+        with self.assertRaises(TypeError):
+            torch.stack(examples)
+        self.assertEqual((examples[1], len(examples), read), (0.5, 2, []))
+        self.assertEqual(torch.stack(list(examples)[:1]).shape, (1, 2))
+        self.assertEqual(read, [1])
+
+    def raised(self, f):
+        with self.assertRaises(TypeError) as caught:
+            f()
+        return str(caught.exception)
+
+
+instantiate_device_type_tests(TestVmPassExamples, globals())
+
+
 MODES_LAYERS = torch.nn.ModuleList([torch.nn.Linear(8, 8) for _ in range(6)]).eval()
 
 

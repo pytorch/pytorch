@@ -9,6 +9,7 @@ from typing import Any
 
 import torch
 import torch.fx
+from torch.vm._examples import raw
 
 
 @dataclasses.dataclass(frozen=True)
@@ -478,7 +479,8 @@ def type_of(
     if not isinstance(val, torch.Tensor):
         raise TypeError(f"{node} isn't a tensor ({type(val).__name__})")
     t = dataclasses.replace(exact(val), requires_grad=Varies)
-    if all(s.exact for it in input_types if it.dims is not None for s in it.dims):
+    tensors = [it for it in input_types if isinstance(it, TensorType)]
+    if all(s.exact for it in tensors if it.dims is not None for s in it.dims):
         return t
     lo, hi = (_propagate(gm, input_types, at).get(node) for at in ("lo", "hi"))
     if (
@@ -517,8 +519,18 @@ def _propagate(
 
     try:
         with mode:
-            args: list[torch.Tensor] = []
-            for t in input_types:
+            args: list[Any] = []
+            seen = raw(gm) or [None] * len(input_types)
+            for t, was in zip(input_types, seen):
+                if isinstance(t, FloatType):
+                    # A float input: the value the trace specialized on, else
+                    # the traced call's (the sizes do not follow a float that
+                    # the trace did not specialize on).
+                    value = was if t.value is None else t.value
+                    if not isinstance(value, float):
+                        raise ValueError("no value for a float input")
+                    args.append(value)
+                    continue
                 const = t._const
                 if const is not None:
                     args.append(mode.from_tensor(const))

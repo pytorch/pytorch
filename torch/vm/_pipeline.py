@@ -28,6 +28,7 @@ import torch
 import torch.fx
 from torch.vm import _guards
 from torch.vm._bound import bind_versions, BoundLowering
+from torch.vm._examples import Examples, raw
 from torch.vm._graph import below_autocast, copy_graph_module, direct, specialize_floats
 from torch.vm._types import exact, TensorType, Type
 
@@ -72,7 +73,12 @@ class Report:
     input_types: list[Type]
     versions: list[Version] = dataclasses.field(default_factory=list)
     notes: list[str] = dataclasses.field(default_factory=list)
+    # A pass read a weight's value: what the passes made is for these
+    # weights only.
     const_read: bool = False
+
+    def weight_read(self) -> None:
+        self.const_read = True
 
 
 def _name(p: Any) -> str:
@@ -137,12 +143,19 @@ class Pipeline:
             name = f"{name} #{sum(1 for k in self.reports if k.startswith(name))}"
         report = Report(name, input_types)
         self.reports[name] = report
-        for t in input_types:
-            if isinstance(t, TensorType) and t.is_const:
-                t._on_const = lambda: setattr(report, "const_read", True)
+        weights = frozenset(
+            i
+            for i, t in enumerate(input_types)
+            if isinstance(t, TensorType) and t.is_const
+        )
+        for i in weights:
+            input_types[i]._on_const = report.weight_read
         # The traced run's tensors, for the passes: every graph a pass is
-        # given, and what it makes of it, refers to this one list.
-        examples = gm.meta["vm_example_inputs"] = list(inputs)
+        # given, and what it makes of it, refers to this one object. A pass
+        # that takes a weight out of it has read the weight's value.
+        examples = gm.meta["vm_example_inputs"] = Examples(
+            list(inputs), weights, report.weight_read
+        )
         gm.meta["vm_stage"] = "forward"
         gm.meta["vm_const_inputs"] = [
             p.name
@@ -170,7 +183,7 @@ class Pipeline:
         # The graphs live as long as the function. Kept with them, the tensors
         # of the one call that was traced would too: the batch, every gradient
         # an optimizer's region was handed.
-        del examples[:]
+        examples.clear()
         for v in versions:
             v.gm.meta.pop("vm_example_inputs", None)
         report.versions = versions
@@ -207,7 +220,7 @@ class Pipeline:
                 raise TypeError(
                     f"a block pass returns a GraphModule, not {type(new).__name__} (vm.lower_to wraps a callable)"
                 )
-            lifted = _guards.lift(new, gm.meta["vm_example_inputs"])
+            lifted = _guards.lift(new, raw(gm))
         except Exception as e:
             report.notes.append(
                 f"{_name(p)} ({stage}): raised {type(e).__name__}: {e}; dropped"
@@ -255,21 +268,33 @@ class Pipeline:
         def compile(g, ins):
             # AOT Autograd hands the joint graph's inputs as (primals, tangents).
             nested = stage == "joint" and all(isinstance(x, (list, tuple)) for x in ins)
-            examples = [x for part in ins for x in part] if nested else list(ins)
-            g.meta.update(vm_example_inputs=examples, vm_stage=stage)
+            flat = [x for part in ins for x in part] if nested else list(ins)
             types = [
                 input_types[i]
                 if stage != "backward" and i < len(input_types)
                 else exact(x)
-                for i, x in enumerate(examples)
+                for i, x in enumerate(flat)
             ]
+            # Which inputs of a backward graph come from a weight is not
+            # known: every tensor of it counts as one.
+            weights = (
+                None
+                if stage == "backward"
+                else frozenset(
+                    i
+                    for i, t in enumerate(types)
+                    if isinstance(t, TensorType) and t.is_const
+                )
+            )
+            examples = Examples(flat, weights, report.weight_read)
+            g.meta.update(vm_example_inputs=examples, vm_stage=stage)
             for p in passes:
                 out = self._apply(p, g, types, ins, report, stage)
                 if out is not None:
                     g = out[0]
                     report.notes.append(f"{_name(p)} ran on the {stage} graph")
             # For the passes only, as the region's own (see __call__).
-            del examples[:]
+            examples.clear()
             g.meta.pop("vm_example_inputs", None)
             return direct(g) or g
 

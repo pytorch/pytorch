@@ -18,6 +18,7 @@ from typing import Any
 
 import torch
 from torch.vm._cfg import Cfg
+from torch.vm._examples import raw
 from torch.vm._graph import below_autocast, lower_to
 
 
@@ -232,7 +233,7 @@ class Inductor:
         from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 
         stage = gm.meta.get("vm_stage", "forward")
-        inputs = gm.meta["vm_example_inputs"]
+        inputs = raw(gm)
         if stage == "joint":
             raise TypeError(
                 "Inductor can't compile a joint graph: put it after vm.passes.Partition()"

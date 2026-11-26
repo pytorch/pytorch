@@ -59,6 +59,7 @@ from typing import Any
 
 import torch
 from torch.vm._cfg import CannotGuard
+from torch.vm._examples import raw
 from torch.vm._guards import Check
 
 
@@ -75,7 +76,7 @@ class Unwritten(Check):
     def place(self, gm, node):
         # Now, before the pass reads the weight.
         placeholders = list(gm.graph.find_nodes(op="placeholder"))
-        examples = gm.meta.get("vm_example_inputs") or []
+        examples = raw(gm)
         weights = gm.meta.get("vm_const_inputs", ())
         if node not in placeholders or node.name not in weights:
             raise CannotGuard(f"{self!r} on {node.name}: it goes on a weight")
