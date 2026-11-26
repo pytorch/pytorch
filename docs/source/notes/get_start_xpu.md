@@ -13,7 +13,7 @@
 | Supported OS | Validated Hardware |
 |---|---|
 | Windows 11 & Ubuntu 24.04/26.04 & WSL2 Ubuntu 24.04/26.04 | Intel® Arc™ A-Series Graphics (CodeName: Alchemist)<br>Intel® Arc™ B-Series Graphics (CodeName: Battlemage)<br>Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)<br>Intel® Core™ Ultra Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)<br>Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
-| Windows 11 & Ubuntu 26.04 & WSL2 Ubuntu 24.04/26.04 | Intel® Core™ Ultra Mobile Processors (Series 3) with Intel® Arc™ Graphics (CodeName: Panther Lake) |
+| Windows 11 & Ubuntu 26.04 & WSL2 Ubuntu 24.04/26.04 | Intel® Core™ Ultra Mobile Processors (Series 3) with Intel® Arc™ Graphics (CodeName: Panther Lake)<br>Intel® Core™ Ultra Desktop Processors (Series 4) with Intel® Arc™ Graphics (CodeName: Nova Lake S) |
 
 Intel GPUs support (Prototype) is ready from PyTorch\* 2.5 for Intel® Client GPUs and Intel® Data Center GPU Max Series on both Linux and Windows, which brings Intel GPUs and the SYCL\* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
 
