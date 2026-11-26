@@ -2708,6 +2708,16 @@ class TestPoolingNNMpsOnly(NNTestCase):
         recomputed = F.max_pool2d(x, *args)
         self.assertEqual(torch.autograd.grad(recomputed.sum(), x)[0], zeros)
 
+    @parametrize_test("return_indices", [False, True])
+    def test_max_pool2d_empty_width_window(self, device, return_indices):
+        x = torch.ones((1, 1, 2, 1), device=device, requires_grad=True)
+        result = F.max_pool2d(
+            x, (2, 2), 1, (0, 1), (1, 2), return_indices=return_indices
+        )
+        output = result[0] if return_indices else result
+        self.assertEqual(output, torch.full_like(output, -inf))
+        self.assertEqual(torch.autograd.grad(output.sum(), x)[0], torch.zeros_like(x))
+
     # Max: verify against unfold+amax. (Avg int is implementation-defined.)
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
     def test_adaptive_max_pool2d_int_input_mps(self, device, dtype):

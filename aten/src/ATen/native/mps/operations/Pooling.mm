@@ -590,14 +590,27 @@ static void avg_max_pool_backward_out_mps_impl(const Tensor& grad_input,
 
   auto [dims, _, kernel_size, stride, padding, dilation] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, dilation_opt, ceil_mode, pooling_dims, op_name);
+  bool has_empty_window = false;
   for (const auto dim : c10::irange(pooling_dims)) {
-    const auto span = dilation ? effective_kernel_size<int64_t>(kernel_size[dim], (*dilation)[dim]) : kernel_size[dim];
-    const auto window_end = input.size(dim - pooling_dims) + padding[dim] + span - 1;
+    const auto step = dilation ? (*dilation)[dim] : 1;
+    const auto span = effective_kernel_size<int64_t>(kernel_size[dim], step);
+    const auto input_size = input.size(dim - pooling_dims);
+    const auto window_end = input_size + padding[dim] + span - 1;
     TORCH_CHECK_NOT_IMPLEMENTED(window_end <= std::numeric_limits<int32_t>::max(),
                                 op_name,
                                 ": MPS does not support pooling windows reaching past INT_MAX");
     // Max backward only needs the dilated span to find candidate outputs.
     kernel_size[dim] = c10::safe_conv<int32_t>(span, "int32_t");
+    if (indices && step > input_size) {
+      // With padding <= kernel_size / 2, an axis with an empty window
+      // has just one output. Check its first nonnegative tap.
+      const auto first = (step - padding[dim] % step) % step;
+      has_empty_window |= first >= std::min(span - padding[dim], input_size);
+    }
+  }
+  if (has_empty_window) {
+    grad_input.zero_();
+    return;
   }
 
   const auto memory_format = input.suggest_memory_format();
