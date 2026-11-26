@@ -11,6 +11,7 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
+#include <c10/util/overflows.h>
 #include <cmath>
 #include <iostream>
 #include <utility>
@@ -798,7 +799,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
-      if (c == FP_NORMAL || c == FP_ZERO) {
+      if ((c == FP_NORMAL || c == FP_ZERO) && !c10::overflows<int64_t>(d)) {
         int64_t i = static_cast<int64_t>(d);
         if (static_cast<double>(i) == d) {
           return out << i << '.';
@@ -906,7 +907,9 @@ IValue IValue::deepcopy(
     case IValue::Tag::Tensor: {
       const at::Tensor& src_tensor = toTensor();
       copy = device.has_value() && !src_tensor.device().is_meta()
-          ? IValue(src_tensor.to(*device))
+          // non_blocking must be false: deepcopy never synchronizes the copy.
+          ? IValue(
+                src_tensor.to(*device, /*non_blocking=*/false, /*copy=*/true))
           : IValue(src_tensor.clone());
     } break;
     case IValue::Tag::Tuple: {

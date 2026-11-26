@@ -55,6 +55,9 @@ def _fake_cute_compile():
         seen["options"] = kwargs.get("options")
         return types.SimpleNamespace(export_to_c=lambda **kw: None)
 
+    def record_compression_arch(compiled: Any, arch: str | None) -> None:
+        seen["compression_arch"] = arch
+
     fake_cute = types.ModuleType("cutlass.cute")
     # cast: a ModuleType instance has no declared attributes, so plain assignment
     # fails type checking (idiom from test/test_utils.py).
@@ -66,6 +69,9 @@ def _fake_cute_compile():
             sys.modules, {"cutlass": fake_cutlass, "cutlass.cute": fake_cute}
         ),
         mock.patch.object(toolchains.CuteDslToolchain, "_warm_up_exporter"),
+        mock.patch.object(
+            toolchains, "compress_cute_embedded_cubin", record_compression_arch
+        ),
     ):
         yield seen
 
@@ -251,6 +257,7 @@ class TestExportJobs(unittest.TestCase):
                     b["options"] = opts
                 tc.export(b, "/tmp", arch="sm_90a")
                 self.assertTrue(seen["options"].endswith("--gpu-arch sm_90a"))
+                self.assertEqual(seen["compression_arch"], "sm_90a")
                 if opts:
                     self.assertTrue(seen["options"].startswith(opts))
             # No arch: the detect-from-device path must not inject --gpu-arch.
@@ -258,6 +265,44 @@ class TestExportJobs(unittest.TestCase):
                 {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}, "/tmp"
             )
             self.assertNotIn("--gpu-arch", seen["options"] or "")
+            self.assertIsNone(seen["compression_arch"])
+
+        if importlib.util.find_spec("cutlass") is None:
+            return
+        import struct
+
+        from cutlass._mlir import ir
+        from tools.native_aot import cuda_image
+
+        cubin = b"\x7fELFfake"
+        data = struct.pack("<IHHQ", 0xBA55ED50, 1, 16, 16 + len(cubin))
+        data += struct.pack("<HHIQ", 2, 0, 16, len(cubin)) + cubin
+        escaped = "".join(f"\\{byte:02X}" for byte in data)
+        array = f"!llvm.array<{len(data)} x i8>"
+        for result in (cubin, b"x"):
+            with self.subTest(result=result), ir.Context():
+                module = ir.Module.parse(f"""module {{
+llvm.mlir.global private constant @image("{escaped}") : {array}
+llvm.func @use() -> !llvm.ptr {{
+%0 = llvm.mlir.addressof @image : !llvm.ptr
+%1 = llvm.getelementptr %0[0, 0] : (!llvm.ptr) -> !llvm.ptr, {array}
+    llvm.return %1 : !llvm.ptr
+}}
+}}""")
+                image, function = module.body.operations
+                gep = function.regions[0].blocks[0].operations[1]
+                compiled = types.SimpleNamespace(__cubin__=cubin, ir_module=module)
+                with mock.patch.object(
+                    cuda_image, "compress_cubin", return_value=result
+                ):
+                    cuda_image.compress_cute_embedded_cubin(compiled, "sm_100")
+                expected = data if result is cubin else result
+                value = ir.StringAttr(image.attributes["value"]).value_bytes
+                self.assertEqual(value, expected)
+                n = len(expected)
+                dtype = ir.TypeAttr.get(ir.Type.parse(f"!llvm.array<{n} x i8>"))
+                self.assertEqual(image.attributes["global_type"], dtype)
+                self.assertEqual(gep.attributes["elem_type"], dtype)
 
     def test_cutedsl_export_pins_the_host_isa(self):
         # Unpinned, the DSL follows the build machine's CPU, so an AVX512 builder's
@@ -271,8 +316,12 @@ class TestExportJobs(unittest.TestCase):
         with _fake_cute_compile() as seen:
             tc.export(dict(b), "/tmp", arch="sm_90a")
             self.assertIn(f"--host-target '{pin}'", seen["options"])
+            self.assertEqual(seen["options"].count("--host-target"), 1)
             tc.export(dict(b, options="--host-target 'llvm -mcpu=neoverse-n1'"), "/tmp")
-            self.assertEqual(seen["options"], "--host-target 'llvm -mcpu=neoverse-n1'")
+            self.assertEqual(
+                tc._declared_host_target(seen["options"]), "llvm -mcpu=neoverse-n1"
+            )
+            self.assertEqual(seen["options"].count("--host-target"), 1)
 
     def test_export_refuses_an_unpinned_machine(self) -> None:
         # Falling back to the DSL default would target the builder's CPU, which is the
@@ -736,7 +785,7 @@ class TestArch(unittest.TestCase):
             self.assertIsNone(export._detected_arch())
 
     def test_archs_from_cuda_arch_list(self):
-        # These expectations come from top-k's ARCHS plus the compatibility rules,
+        # These expectations come from the declaration plus the compatibility rules,
         # not from suffixes in the build's supported-device list.
         f = export.archs_from_cuda_arch_list
         cases = (
@@ -751,9 +800,12 @@ class TestArch(unittest.TestCase):
             ("10.0;10.0a", ["sm_100f"]),
             ("10.0a;9.0", ["sm_100f", "sm_90"]),
         )
-        for arch_list, targets in cases:
-            with self.subTest(arch_list=arch_list):
-                self.assertEqual(f(arch_list), targets)
+        with tempfile.TemporaryDirectory() as ops:
+            _write_fake_decl(ops)
+            with mock.patch.object(export, "OPS_DIR", ops):
+                for arch_list, targets in cases:
+                    with self.subTest(arch_list=arch_list):
+                        self.assertEqual(f(arch_list), targets)
 
     def test_build_arch_parser_does_not_choose_op_targets(self):
         f = export.build_arches_from_cuda_arch_list
@@ -1017,30 +1069,36 @@ def _fake_triton(**metadata):
     cast(Any, fake_triton).compile = fake_compile
     cast(Any, fake_triton).compiler = fake_compiler
     cast(Any, fake_triton).runtime = _Poisoned("triton.runtime")
-    with mock.patch.dict(
-        sys.modules,
-        {
-            "triton": fake_triton,
-            "triton.compiler": fake_compiler,
-            "triton.backends.compiler": fake_backends_compiler,
-        },
+
+    def fake_compress_cubin(data: bytes, arch: str) -> bytes:
+        seen["compression_arch"] = arch
+        return data[:4]
+
+    with (
+        mock.patch.dict(
+            sys.modules,
+            {
+                "triton": fake_triton,
+                "triton.compiler": fake_compiler,
+                "triton.backends.compiler": fake_backends_compiler,
+            },
+        ),
+        mock.patch.object(toolchains, "compress_cubin", fake_compress_cubin),
     ):
         yield seen
 
 
 class TestTritonExport(unittest.TestCase):
-    _KERNEL = "class _Fn:\n    arg_names = ('A_ptr', 'M', 'BLOCK')\nkern = _Fn()\n"
+    _KERNEL = types.SimpleNamespace(arg_names=("A_ptr", "M", "BLOCK"))
 
     @contextlib.contextmanager
-    def _exported(self, arch, signature="*fp32:16, i32, 64", **metadata):
+    def _exported(self, arch, signature="*fp32:16, i32, 64", wrapped=False, **metadata):
         with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "kernel.py")
-            with open(path, "w") as f:
-                f.write(self._KERNEL)
             b = {
                 "prefix": "fake_bmm_f32",
-                "kernel_path": path,
-                "kernel_name": "kern",
+                "fn": types.SimpleNamespace(jit_kernel=self._KERNEL)
+                if wrapped
+                else self._KERNEL,
                 "signature": signature,
                 "launch": {"grid_x": "M"},
                 "num_warps": 8,
@@ -1057,10 +1115,11 @@ class TestTritonExport(unittest.TestCase):
         ):
             self.assertEqual(seen["target"], ("cuda", 100, 32))
             self.assertEqual(seen["options"].get("arch"), "sm100")
+            self.assertEqual(seen["compression_arch"], "sm_100a")
             self.assertEqual(extra["symbol"], "_fake_kernel")
             self.assertEqual((extra["shared"], extra["block_x"]), (256, 8 * 32))
             with open(os.path.join(d, "fake_bmm_f32.cubin"), "rb") as f:
-                self.assertEqual(f.read(), b"\x7fELF-fake")
+                self.assertEqual(f.read(), b"\x7fELF")
 
     def test_hopper_target_overrides_blackwell_environment(self):
         with (
@@ -1069,22 +1128,28 @@ class TestTritonExport(unittest.TestCase):
         ):
             self.assertEqual(seen["target"], ("cuda", 90, 32))
             self.assertEqual(seen["options"].get("arch"), "sm90")
+            self.assertEqual(seen["compression_arch"], "sm_90a")
 
-    def test_divisibility_hints_leave_the_signature_and_constants_split_out(self):
-        with self._exported("sm_90") as (_, _extra, seen):
-            self.assertEqual(seen["src"]["signature"], {"A_ptr": "*fp32", "M": "i32"})
-            self.assertEqual(seen["src"]["constexprs"], {"BLOCK": 64})
-
-    def test_a_divisibility_hint_reaches_the_compiler_as_an_attr(self):
+    def test_signatures_preserve_types_constants_and_alignment(self):
         # Dropped from the signature and not passed on, the hint would be inert and
         # the SASS generically addressed -- measured ~7x slower on bmm. The key is an
         # index into the kernel's full parameter list, constexprs included, which is
         # how ast_to_ttir sizes the table it looks them up in.
-        with self._exported("sm_90", signature="*fp32:16, i32:16, 64") as (_, _e, seen):
-            self.assertEqual(
-                seen["src"]["attrs"],
-                {(0,): [["tt.divisibility", 16]], (1,): [["tt.divisibility", 16]]},
-            )
+        for wrapped in (False, True):
+            with (
+                self.subTest(wrapped=wrapped),
+                self._exported(
+                    "sm_90", signature="*fp32:16, i32:16, 64", wrapped=wrapped
+                ) as (_, _extra, seen),
+            ):
+                self.assertEqual(
+                    seen["src"]["signature"], {"A_ptr": "*fp32", "M": "i32"}
+                )
+                self.assertEqual(seen["src"]["constexprs"], {"BLOCK": 64})
+                self.assertEqual(
+                    seen["src"]["attrs"],
+                    {(0,): [["tt.divisibility", 16]], (1,): [["tt.divisibility", 16]]},
+                )
 
     def test_the_compiled_warp_count_wins_over_the_requested_one(self):
         # Warp specialization raises it (ttg.total-num-warps), and the launcher's
@@ -1101,8 +1166,12 @@ class TestTritonExport(unittest.TestCase):
     def test_a_signature_that_does_not_match_the_kernel_is_refused(self):
         # Silently, the entries would pair with the wrong parameters: every attr key
         # and baked constant lands on a neighbour.
-        with self.assertRaisesRegex(RuntimeError, "signature has 2 entries"):
-            with self._exported("sm_90", signature="*fp32:16, i32"):
+        for wrapped in (False, True):
+            with (
+                self.subTest(wrapped=wrapped),
+                self.assertRaisesRegex(RuntimeError, "signature has 2 entries"),
+                self._exported("sm_90", signature="*fp32:16, i32", wrapped=wrapped),
+            ):
                 pass
 
     def test_a_kernel_that_wants_scratch_is_refused(self):
@@ -2391,6 +2460,14 @@ class TestSourceClosureAndRuntimes(unittest.TestCase):
 
 
 class TestToolchainRegistry(unittest.TestCase):
+    def test_missing_parent_runtime_is_reported(self) -> None:
+        class MissingRuntime(toolchains.Toolchain):
+            REQUIRED_RUNTIMES = ("_native_aot_missing_test_package.bindings",)
+
+        self.assertEqual(
+            MissingRuntime.missing_runtimes(), list(MissingRuntime.REQUIRED_RUNTIMES)
+        )
+
     def test_cutedsl_registered(self):
         self.assertIn("cutedsl", toolchains.TOOLCHAINS)
 
@@ -2399,7 +2476,7 @@ class TestToolchainRegistry(unittest.TestCase):
         # collection, so the registration is what a triton declaration stands on.
         tc = toolchains.get_toolchain("triton")
         self.assertEqual((tc.kind, tc.artifact_exts), ("triton", (".cubin",)))
-        self.assertEqual(tc.REQUIRED_RUNTIMES, ("triton",))
+        self.assertEqual(tc.REQUIRED_RUNTIMES, ("triton", "cuda.bindings.nvfatbin"))
 
     def test_unknown_kind_raises(self):
         with self.assertRaisesRegex(RuntimeError, "unknown toolchain kind"):
@@ -3294,6 +3371,7 @@ class TestShouldRun(unittest.TestCase):
             # The DISTRIBUTIONS, which is what pip takes...
             self.assertIn("nvidia-cutlass-dsl", msg)
             self.assertIn("apache-tvm-ffi", msg)
+            self.assertIn("cuda-bindings>=13.2,<14", msg)
             # ...which kind is short of what...
             self.assertIn("cutedsl needs cutlass", msg)
             # ...whose build it is, since a ROCm one demands nothing...
@@ -5754,6 +5832,13 @@ class TestOrphanCheckIsCalled(unittest.TestCase):
 
 
 class TestModulePathOrder(unittest.TestCase):
+    def test_gzip_roundtrip_from_script_directory(self) -> None:
+        code = "import gzip; print(gzip.decompress(gzip.compress(b'payload')).decode())"
+        output = subprocess.check_output(
+            [sys.executable, "-c", code], cwd=os.path.dirname(_TOOLS_FILE)
+        )
+        self.assertEqual(output, b"payload\n")
+
     def test_the_repo_root_is_appended_never_prepended(self):
         # The repo root's torch/ SOURCE tree shadows the installed wheel if inserted.
         for mod in ("build_stage2.py", "export.py", "gen_aot_lib.py"):

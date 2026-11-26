@@ -41,14 +41,25 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import override, Self, TypedDict
+from typing import (
+    Any,
+    cast,
+    Generic,
+    Literal,
+    NoReturn,
+    NotRequired,
+    Self,
+    TYPE_CHECKING,
+    TypeVar,
+)
+from typing_extensions import override, TypedDict
 
 import torch
 import torch._library.opaque_object as opaque_object
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import (
+    DeviceInterface,
     get_interface_for_device,
     get_registered_device_interfaces,
 )
@@ -63,6 +74,7 @@ from torch._inductor import config, config_comms, exc, metrics
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
     custom_backend_passes,
+    device_op_overrides_dict,
     init_backend_registration,
 )
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
@@ -106,6 +118,7 @@ from torch._inductor.utils import (
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
     fp32_matmul_precision_key,
+    get_cpp_wrapper_header_device,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -157,6 +170,8 @@ T = TypeVar("T")
 
 class SystemDeviceInfo(TypedDict):
     name: str | None
+    # The XCC count depends on the compute partition mode, not on the arch.
+    xcc_count: NotRequired[int | None]
 
 
 class SystemVersionInfo(TypedDict, total=False):
@@ -355,6 +370,7 @@ class CacheBase:
                 version_info["cuda"] = torch.version.cuda
             else:
                 device_info["name"] = device_properties.gcnArchName
+                device_info["xcc_count"] = getattr(device_properties, "xcc_count", None)
                 version_info["hip"] = torch.version.hip
             hash_input["device"] = device_info
         except (AssertionError, RuntimeError):
@@ -671,6 +687,15 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     meta = extract_tensor_metadata(t)
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+
+    # compile-on-one-rank: the index is the compiling rank's, and every rank is on
+    # its own accelerator, so keeping it here means no rank can ever hit another's
+    # cache entry. This is the only place the device index reaches the key -- the
+    # graph hashed alongside it is the AOT one, which is already device-agnostic.
+    from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+    if _coor_device_index_is_current(meta.device):
+        meta = dataclasses.replace(meta, device=torch.device(meta.device.type))
 
     return meta
 
@@ -1065,16 +1090,6 @@ def torch_key() -> bytes:
         from libfb.py import parutil
 
         return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
-
-
-# Bound at import so tests that mock.patch torch_key/triton_key don't break it.
-_cache_key_prefetchers = (torch_key.prefetch, triton_key.prefetch)  # type: ignore[attr-defined]
-
-
-def prefetch_cache_keys() -> None:
-    """Start computing torch_key and triton_key in a background thread."""
-    for prefetch in _cache_key_prefetchers:
-        prefetch()
 
 
 def get_inductor_root() -> str:
@@ -1569,20 +1584,21 @@ class FxGraphHashDetails:
                     device_types.add(factory_device)
         return device_types
 
-    @classmethod
-    def _mm_template_allow_tf32(
-        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
+    @staticmethod
+    def _template_allow_tf32(
+        device_types: OrderedSet[str],
+        allow_tf32: Callable[[type[DeviceInterface]], bool],
     ) -> tuple[tuple[str, bool], ...]:
         # NotImplementedError means this device has no DeviceInterface.
-        # allow_tf32() itself is not caught: a broken implementation should
+        # allow_tf32 itself is not caught: a broken implementation should
         # fail the compile instead of being cached as ALLOW_TF32=False.
         flags: list[tuple[str, bool]] = []
-        for device_type in sorted(cls._graph_device_types(gm, example_inputs)):
+        for device_type in sorted(device_types):
             try:
                 iface = get_interface_for_device(device_type)
             except NotImplementedError:
                 continue
-            flags.append((device_type, bool(iface.allow_tf32())))
+            flags.append((device_type, bool(allow_tf32(iface))))
         return tuple(flags)
 
     def __init__(
@@ -1709,6 +1725,7 @@ class FxGraphHashDetails:
         self.provenance_tracking_to_timeline = (
             config.trace.provenance_tracking_to_timeline
         )
+        self.provenance_profiler_markers = config.trace.provenance_profiler_markers
 
         # Factory ops with dtype=None are lowered using the ambient default dtype,
         # so cached code compiled under one default dtype is not valid under another.
@@ -1724,7 +1741,15 @@ class FxGraphHashDetails:
         # precision string is already in cuda_matmul_settings; this records the
         # resolved flag for every device in the graph so other backends
         # invalidate the FX graph cache when their flag changes.
-        self.mm_template_allow_tf32 = self._mm_template_allow_tf32(gm, example_inputs)
+        device_types = self._graph_device_types(gm, example_inputs)
+        self.mm_template_allow_tf32 = self._template_allow_tf32(
+            device_types, lambda iface: iface.allow_tf32()
+        )
+        # The conv templates follow DeviceInterface.conv_allow_tf32, which no
+        # other field here covers.
+        self.conv_template_allow_tf32 = self._template_allow_tf32(
+            device_types, lambda iface: iface.conv_allow_tf32()
+        )
 
         # compile-on-one-rank changes wrapper and kernel codegen (runtime device
         # resolution, DeviceProperties(index=None)) even for graphs that contain no
@@ -1793,6 +1818,13 @@ class FxGraphHashDetails:
 
         # Register inductor backends and custom passes and get their UUIDs.
         init_backend_registration()
+        from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+        shim_tables = {"": inductor_fallback_ops}
+        for device, overrides in device_op_overrides_dict.items():
+            if (ops := overrides.get_aten_c_shim_ops()) is not None:
+                shim_tables[device] = dict(ops)
+        self.aten_c_shim_ops = json.dumps(shim_tables, sort_keys=True)
         self.custom_backend_passes = tuple(
             map(self._get_custom_pass_detail, custom_backend_passes.values())
         )
@@ -1964,57 +1996,67 @@ class GuardedCache(Generic[T]):
         remote_cache: RemoteCache[JsonDataTy] | None,
         key: str,
     ) -> Generator[tuple[T, bytes, bool], None, None]:
+        """
+        Yield (entry, pickled_content, is_local) for every entry stored under
+        `key`: all local entries first, then the remote one, if any. Entries that
+        fail to load are logged and skipped.
+        """
         if local:
-            subdir = cls._get_tmp_dir_for_key(key)
-            try:
-                names = sorted(os.listdir(subdir))
-            except FileNotFoundError:
-                # Nothing was ever written for this key, or another process cleared
-                # the cache out from under us. The local cache root is shared across
-                # processes, so checking os.path.exists() first would only narrow the
-                # race, not close it. Either way there are no candidates: a miss.
-                names = []
-            except OSError:
-                # Anything else (a bad mode on the cache dir, a dead mount) is not a
-                # race and is worth surfacing, but it still leaves no candidates.
-                log.warning(
-                    "%s unable to list cache entries", cls.__name__, exc_info=True
-                )
-                names = []
-            for path in names:
-                if path.startswith("."):
-                    continue  # Skip temp files from concurrent write_atomic() calls
-                try:
-                    with open(os.path.join(subdir, path), "rb") as f:
-                        content = f.read()
-                        yield pickle.loads(content), content, True
-                except FileNotFoundError:
-                    continue  # Raced with a concurrent cache clear
-                except Exception:
-                    log.warning(
-                        "%s unable to load compiled graph",
-                        cls.__name__,
-                        exc_info=True,
-                    )
-
+            yield from cls._iterate_local_candidates(key)
         if remote_cache:
+            yield from cls._iterate_remote_candidates(remote_cache, key)
+
+    @classmethod
+    def _iterate_local_candidates(
+        cls: type[GuardedCache[T]], key: str
+    ) -> Generator[tuple[T, bytes, bool], None, None]:
+        subdir = cls._get_tmp_dir_for_key(key)
+        try:
+            names = sorted(os.listdir(subdir))
+        except FileNotFoundError:
+            # Nothing was ever written for this key, or another process cleared
+            # the cache out from under us. The local cache root is shared across
+            # processes, so checking os.path.exists() first would only narrow the
+            # race, not close it. Either way there are no candidates: a miss.
+            names = []
+        except OSError:
+            # Anything else (a bad mode on the cache dir, a dead mount) is not a
+            # race and is worth surfacing, but it still leaves no candidates.
+            log.warning("%s unable to list cache entries", cls.__name__, exc_info=True)
+            names = []
+        for path in names:
+            if path.startswith("."):
+                continue  # Skip temp files from concurrent write_atomic() calls
             try:
-                if (cache_data := remote_cache.get(key)) is not None:
-                    if not isinstance(cache_data, dict):
-                        raise AssertionError(
-                            f"Expected dict from remote cache, got {type(cache_data)}"
-                        )
-                    data = cache_data["data"]
-                    if not isinstance(data, (str, bytes)):
-                        raise AssertionError(
-                            f"Expected str or bytes for cache data, got {type(data)}"
-                        )
-                    content = base64.b64decode(data)
-                    yield pickle.loads(content), content, False
+                with open(os.path.join(subdir, path), "rb") as f:
+                    content = f.read()
+                    yield pickle.loads(content), content, True
+            except FileNotFoundError:
+                continue  # Raced with a concurrent cache clear
             except Exception:
                 log.warning(
                     "%s unable to load compiled graph", cls.__name__, exc_info=True
                 )
+
+    @classmethod
+    def _iterate_remote_candidates(
+        cls: type[GuardedCache[T]], remote_cache: RemoteCache[JsonDataTy], key: str
+    ) -> Generator[tuple[T, bytes, bool], None, None]:
+        try:
+            if (cache_data := remote_cache.get(key)) is not None:
+                if not isinstance(cache_data, dict):
+                    raise AssertionError(
+                        f"Expected dict from remote cache, got {type(cache_data)}"
+                    )
+                data = cache_data["data"]
+                if not isinstance(data, (str, bytes)):
+                    raise AssertionError(
+                        f"Expected str or bytes for cache data, got {type(data)}"
+                    )
+                content = base64.b64decode(data)
+                yield pickle.loads(content), content, False
+        except Exception:
+            log.warning("%s unable to load compiled graph", cls.__name__, exc_info=True)
 
     @classmethod
     def find_guarded_entry(
@@ -2037,16 +2079,14 @@ class GuardedCache(Generic[T]):
             hints: List of symint hints paired with evaluate_guards
 
         Returns:
-            A tuple of (graph, pickled_content) if found, or (None, None) if not found
+            A tuple of (entry, pickled_content, cache_info). entry and
+            pickled_content are None if no candidate passed its guards.
         """
         graph = None
         pickled_content = None
         result_status = "full_miss"
         sample_guards_expr = None
         in_local = False
-
-        # Iterate over any entries in the subdir for this key and evaluate
-        # guards to determine whether there's a hit.
 
         for candidate, content, in_local in cls.iterate_over_candidates(
             local, remote_cache, key
@@ -2055,28 +2095,20 @@ class GuardedCache(Generic[T]):
                 raise AssertionError(
                     f"Cache candidate {type(candidate)} missing 'guards_expr' attribute"
                 )
-            if not candidate.guards_expr:  # type: ignore[attr-defined]
-                # No guards to evaluate, so this is a hit.
-                graph = candidate
-                pickled_content = content
-                result_status = "hit"
-                break
-
-            # Evaluate the guard expression in the current context.
-            # If there's not a cache hit, we don't want the evaluation to
-            # affect the current env, e.g., cause the creation of new guards,
-            # so we evaluate with the hints instead of the symbols.
-            hit = bool(evaluate_guards(candidate.guards_expr, hints))  # type: ignore[attr-defined]
-            if hit:
-                graph = candidate
-                pickled_content = content
-                result_status = "hit"
-                sample_guards_expr = candidate.guards_expr
-                break
-            else:
-                # At least one guard missed, log this
-                result_status = "guard_miss"
-                sample_guards_expr = candidate.guards_expr
+            guards_expr = candidate.guards_expr  # type: ignore[attr-defined]
+            if guards_expr:
+                # If there's not a cache hit, we don't want the evaluation to
+                # affect the current env, e.g., cause the creation of new guards,
+                # so we evaluate with the hints instead of the symbols.
+                sample_guards_expr = guards_expr
+                if not evaluate_guards(guards_expr, hints):
+                    result_status = "guard_miss"
+                    continue
+            # No guards to evaluate, or they all passed: a hit.
+            graph = candidate
+            pickled_content = content
+            result_status = "hit"
+            break
 
         info: CacheInfo = {"cache_status_detailed": result_status}
         if sample_guards_expr is not None:
@@ -2372,12 +2404,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # Validate extern_libs (e.g. libdevice) match the current env.
         if graph.extern_libs_key is not None:
-            try:
-                backend = torch.utils._triton.triton_backend()
-                current = torch.utils._triton._extern_libs_key(backend)
-            except Exception:
-                current = None
-            if current != graph.extern_libs_key:
+            if FxGraphCache._current_extern_libs_key() != graph.extern_libs_key:
                 cache_info["cache_status_detailed"] = "guard_miss"
                 return None, cache_info
 
@@ -2395,6 +2422,18 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             )
 
         return FxGraphCache.cache_hit_post_compile(graph, cache_info, constants)
+
+    @staticmethod
+    def _current_extern_libs_key() -> str | None:
+        """
+        Fingerprint of the extern libs (e.g. libdevice) the current Triton backend
+        links against, or None if it can't be computed (e.g. no Triton backend).
+        """
+        try:
+            backend = torch.utils._triton.triton_backend()
+            return torch.utils._triton._extern_libs_key(backend)
+        except Exception:
+            return None
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
@@ -2437,13 +2476,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
         )
-        try:
-            backend = torch.utils._triton.triton_backend()
-            compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
-                backend
-            )
-        except Exception:
-            pass
+        if (extern_libs_key := FxGraphCache._current_extern_libs_key()) is not None:
+            compiled_graph.extern_libs_key = extern_libs_key
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 
@@ -3001,7 +3035,7 @@ class AotCodeCompiler:
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
-                consts: bytes | bytearray, align_bytes: int, symbol_prefix: str
+                consts: bytes | bytearray, align_bytes: int
             ) -> tuple[str, str]:
                 consts_size = len(consts)
                 asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
@@ -3013,7 +3047,9 @@ class AotCodeCompiler:
 ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 const_cpp = asan_attr
                 const_cpp += f"alignas({align_bytes}) extern "
-                const_cpp += f"unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
+                const_cpp += (
+                    f"unsigned char _binary_constants_bin_start[{consts_size}] = {{\t\n"
+                )
                 count_bytes = 0
                 for c in consts:
                     const_cpp += f"{c}, "
@@ -3021,7 +3057,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                     if count_bytes % 16 == 0:
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
-                const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
+                const_cpp += f"alignas({align_bytes}) extern unsigned char * _binary_constants_bin_end;\t\n"
                 return const_cpp, "weights.cpp"
 
             def get_zero_consts_asm_code(
@@ -3080,9 +3116,7 @@ end
                         ALIGN_BYTES, symbol_prefix
                     )
                 else:
-                    consts_code, code_ext = format_consts_to_cpp(
-                        consts, ALIGN_BYTES, symbol_prefix
-                    )
+                    consts_code, code_ext = format_consts_to_cpp(consts, ALIGN_BYTES)
 
             _, consts_s = write(
                 consts_code,
@@ -3999,7 +4033,7 @@ def _get_cpp_prefix_header(device: str) -> str | None:
 def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     """Given a device type (and optionally whether we're in AOT Inductor mode), returns
     the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":", maxsplit=1)[0]
+    base_device = get_cpp_wrapper_header_device(device.split(":", maxsplit=1)[0])
     is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
     return (
         "torch/csrc/inductor/"
@@ -4029,12 +4063,16 @@ class CppCodeCache:
     # Shared by subclasses and never cleared: a key hashes the source and build
     # command, and every miss rewrites its entry for the current cache directory.
     _binary_paths: dict[str, str] = {}
+    # Each kernel's relocatable key, by its host key: computed only for a capture or
+    # a replay, once per kernel.
+    _relocatable_keys: dict[str, str] = {}
 
     @staticmethod
     def cache_clear() -> None:
         from torch.compiler._runtime_cache import clear_cpp_kernels
 
         CppCodeCache.cache.clear()
+        CppCodeCache._relocatable_keys.clear()
         clear_cpp_kernels()
 
     cpp_compile_command_flags: dict[str, Any] = {}
@@ -4146,9 +4184,37 @@ class CppCodeCache:
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
 
-        key, main_path = write(
-            main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
+        from torch.compiler._runtime_cache import (
+            capturing,
+            has_frozen_cpp_kernel,
+            has_frozen_cpp_kernels,
+            record_cpp_kernel,
+            restore_cpp_kernel,
         )
+
+        # With optimized code, the main source is only compiled, so its command
+        # line lacks the flags that reach only the link.
+        link_flags = (
+            " " + " ".join(config.cpp.extra_ldflags) if config.cpp.extra_ldflags else ""
+        )
+
+        # Both keys come from here; only the command line passed in differs.
+        def kernel_key(cmd_line: str) -> str:
+            return get_hash(
+                main_code.strip(), f"{optimized_code} {cmd_line}{link_flags}"
+            )
+
+        key, main_path = write(main_code, "main.cpp", key=kernel_key(main_cmd_line))
+
+        # The key a capture freezes this kernel's binary under, and a replay finds it
+        # by, on a host that may put torch elsewhere. The source and any cache-dir
+        # path in the command stay in it (see _relocatable_command_line). The binary
+        # itself stays under key, which this host's paths tell apart.
+        def relocatable_key() -> str:
+            if key not in cls._relocatable_keys:
+                relocated = _relocatable_command_line(main_cmd_line)
+                cls._relocatable_keys[key] = kernel_key(relocated)
+            return cls._relocatable_keys[key]
 
         # Don't bother writing if the argument is empty.
         if optimized_code:
@@ -4160,12 +4226,9 @@ class CppCodeCache:
             optimized_path = os.devnull
 
         if key not in cls.cache:
-            from torch.compiler._runtime_cache import (
-                has_frozen_cpp_kernel,
-                restore_cpp_kernel,
-            )
             from torch.utils._filelock import FileLock
 
+            replaying = has_frozen_cpp_kernels()
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Future[Any] | None = None
             lib = None
@@ -4175,7 +4238,7 @@ class CppCodeCache:
             if (
                 config.cpp_cache_precompile_headers
                 and not _IS_WINDOWS
-                and not has_frozen_cpp_kernel(key)
+                and not (replaying and has_frozen_cpp_kernel(relocatable_key()))
             ):
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
@@ -4241,7 +4304,8 @@ class CppCodeCache:
                 )
 
             cls._binary_paths[key] = binary_path
-            restore_cpp_kernel(key, binary_path)
+            if replaying:
+                restore_cpp_kernel(relocatable_key(), binary_path)
 
             def load_fn() -> Any:
                 nonlocal lib
@@ -4267,14 +4331,61 @@ class CppCodeCache:
 
             cls.cache[key] = load_fn
 
-        from torch.compiler._runtime_cache import record_cpp_kernel
-
-        record_cpp_kernel(key, cls._binary_paths[key], cls.cache[key])
+        # Checked only now, so a capture that opened while the kernel loaded has it.
+        if capturing():
+            record_cpp_kernel(relocatable_key(), cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
     @classmethod
     def load(cls, *args: Any, **kwargs: Any) -> Any:
         return cls.load_async(*args, **kwargs)()
+
+
+def _relocatable_command_line(cmd: str) -> str:
+    """Key a C++ build by what it compiles, not by where this host put torch.
+
+    A precompile replay looks a frozen binary up by this key on a host that may
+    extract torch somewhere else. The torch trees are the ones torch's own -I and -L
+    flags point into: cpp_extension's, which follows torch_parent, and
+    cpp_builder's, which follows this package, when they differ. A tree is only
+    replaced as whole path components. The install path also told torch builds
+    apart, so torch_key() stands in for it. torch_key() hashes the version and the
+    Python sources but not the C++ headers or libraries, which is why this key only
+    names a frozen binary: what this host builds is stored under the key with its
+    own paths. A replay restores a frozen binary to that location too, so the
+    capture and replay hosts must run the same torch build.
+
+    Only these trees move. The Inductor cache dir stays in the key, and so does
+    the kernel's source, which the key also hashes. A path into the cache dir is
+    recorded as is in the binary, whether the command links a library there (the
+    Halide runtime, CUTLASS or CK kernels) or the source names a file there (a GPU
+    cpp_wrapper wrapper's cubin path). So a replay whose cache dir is at the same
+    path restores such a kernel, which then needs those files there, and one whose
+    cache dir is elsewhere rebuilds it. The Python, compiler, CUDA and other SDK
+    paths stay too, even when they sit next to torch, so the hosts must keep those
+    at the same paths, as a packaged job whose torch is extracted per launch next
+    to a fixed interpreter does.
+    """
+    from torch._inductor import cpp_builder
+    from torch.utils import cpp_extension
+
+    # get_command_line() normalizes the separators, so normalize the roots the same.
+    torch_trees = OrderedSet(
+        normalize_path_separator(path)
+        for path in (cpp_extension._TORCH_PATH, cpp_builder._TORCH_PATH)
+    )
+    # A tree starts a path (after a separator, a quote, or a -I or -L flag) and ends
+    # a path component.
+    start = r"(?:^|(?<=[\s'\":;,=])|(?<=-I)|(?<=-L))"
+    end = r"(?=[/\\\s'\":;,=]|$)"
+    # Longest first, so a tree nested in another is replaced before its parent.
+    for tree in sorted(torch_trees, key=len, reverse=True):
+        if len(tree) > 1:
+            cmd = re.sub(start + re.escape(tree) + end, "<torch>", cmd)
+    # The builder quotes a path only when it needs quoting, which says where this
+    # host put torch, not what it builds.
+    cmd = re.sub(r"(['\"])(<torch>[^'\"\s]*)\1", r"\2", cmd)
+    return f"{cmd} torch_key={torch_key().hex()}"
 
 
 def _worker_compile_cpp(
@@ -5027,6 +5138,18 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
 def touch(filename: str) -> None:
     with open(filename, "a"):
         pass
+
+
+def exec_from_cache_file(code: str, name: str) -> dict[str, Any]:
+    """Exec ``code`` as module ``name`` from a file in the cache dir, which a
+    module-level Triton kernel needs: @triton.jit reads its source back from it."""
+    # write() keeps a file already at its path, so key on the exact text (not the
+    # stripped default) and apart from PyCodeCache's modules, which may be hand-edited:
+    # the file the kernels read their lines from must hold exactly the code being run.
+    _, path = write(code, "py", key=get_hash(code, "exec_from_cache_file"))
+    namespace: dict[str, Any] = {"__name__": name, "__file__": path}
+    exec(compile(code, path, "exec"), namespace)
+    return namespace
 
 
 @clear_on_fresh_cache
