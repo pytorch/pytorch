@@ -21,7 +21,12 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 from torch.utils.cpp_extension import (
     CUDA_HOME,
     get_cxx_compiler,
@@ -38,6 +43,8 @@ if not IS_WINDOWS:
 
     class FunctionVersionCompatibilityTest(TestCase):
         """Test that all function files require PyTorch 2.10+."""
+
+        hw_classification = HardwareClassification.GENERIC
 
         @classmethod
         def setUpClass(cls):

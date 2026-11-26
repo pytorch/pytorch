@@ -153,16 +153,12 @@ class ContextWrappingVariable(VariableTracker):
         ):
             raise AssertionError(f"expected a function variable, got {type(args[0])}")
 
-        return self._wrap_function(args[0], tx)
+        return self._wrap_function(args[0])
 
     # noqa: RVT001
-    def _wrap_function(
-        self, fn: VariableTracker, tx: "InstructionTranslatorBase"
-    ) -> VariableTracker:
+    def _wrap_function(self, fn: VariableTracker) -> VariableTracker:
         if isinstance(fn, NestedUserFunctionVariable):
-            result = WrappedNestedUserFunctionVariable(fn, self, tx)
-            tx.output.side_effects.track_attribute_mutation_new(result)
-            return result
+            return WrappedNestedUserFunctionVariable(fn, self)
         elif isinstance(fn, SkipFunctionVariable):
             return WrappedSkipFunctionVariable(fn, self)
         elif isinstance(
@@ -1763,10 +1759,13 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         super().__init__(
             target_values=(target_values_tuple,), initial_values=None, **kwargs
         )
+        # Save the raw override rather than the resolved value so that exiting
+        # leaves a previously unset key unset.
+        entries = torch._dynamo.config._config  # type: ignore[attr-defined]
         # pyrefly: ignore [implicit-any]
         initial_values_dict = {}
         for key, _ in target_values_tuple:
-            initial_values_dict[key] = torch._dynamo.config.__getattr__(key)  # type: ignore[attr-defined]
+            initial_values_dict[key] = entries[key].user_override.get()
         self.initial_values = (tuple(initial_values_dict.items()),)
 
     def _call_func(self, tx: "InstructionTranslatorBase", values: Any) -> None:

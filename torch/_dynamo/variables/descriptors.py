@@ -20,9 +20,8 @@ from torch._C._dynamo import get_type_tp_name
 from torch._guards import Source
 
 from .. import graph_break_hints, variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import create_call_function
 from ..exc import (
-    get_dynamo_observed_exception,
     raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
@@ -30,10 +29,10 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, TypeMROSource, TypeSource
-from ..utils import is_tensor_base_attr_getter, is_torch_class, istype
+from ..utils import is_tensor_base_attr_getter, is_torch_class
 from .base import (
+    _compute_slotdefs,
     AsPythonConstantNotImplementedError,
-    AttributeMutationNew,
     GetSet,
     getset_build,
     getset_load_or_build,
@@ -45,18 +44,15 @@ from .base import (
     store_attr_mutation,
     type_qualified_name,
     unmodeled_setter,
+    ValueMutationNew,
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .functions import (
-    BaseUserFunctionVariable,
-    LocalGeneratorFunctionVariable,
-    NestedUserFunctionVariable,
-    UserFunctionVariable,
-    UserMethodVariable,
-)
-from .object_protocol import python_constant_repr_impl
-from .user_defined import UserDefinedObjectVariable
+from .dicts import ConstDictVariable
+from .functions import BaseUserFunctionVariable, UserMethodVariable
+from .hashable import HashableTracker
+from .object_protocol import mro_lookup, python_constant_repr_impl
+from .user_defined import setattr_hackcheck, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -121,6 +117,33 @@ def descr_repr(
     return VariableTracker.build(
         tx, f"<{kind} '{name}' of '{get_type_tp_name(objclass)}' objects>"
     )
+
+
+def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
+    if py_type is object:
+        return variables.VariableTracker
+    if py_type is type:
+        return variables.TypeVariable
+
+    from .base import VariableTrackerMeta
+
+    for subclass in VariableTrackerMeta.all_subclasses:
+        cpython_type = getattr(subclass, "_cpython_type", None)
+        if cpython_type is None:
+            continue
+        types = cpython_type if isinstance(cpython_type, tuple) else (cpython_type,)
+        if py_type not in types:
+            continue
+        # A SymNodeVariable also models int/float/bool, but other classes'
+        # impls fold constants and cannot run on a symbolic value.
+        if isinstance(vt, variables.SymNodeVariable) and not isinstance(vt, subclass):
+            continue
+        return subclass
+    # An exact py_type instance has no Python overrides, so its own VT's slots
+    # are py_type's C slots, e.g. SymNodeVariable for int.__neg__ on a SymInt.
+    if vt.python_type() is py_type:
+        return type(vt)
+    return None
 
 
 class DescriptorVariable(VariableTracker):
@@ -222,11 +245,27 @@ class WrapperDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        name, objclass = self.descriptor.__name__, self.descriptor.__objclass__
+        if not issubclass(obj.python_type(), objclass):
+            raise_type_error(
+                tx,
+                f"descriptor '{name}' requires a '{objclass.__name__}' object "
+                f"but received a '{obj.python_type_name()}'",
+            )
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
+        obj = obj.realize()
+        if name in ("__setattr__", "__delattr__"):
+            setattr_hackcheck(tx, obj, self.descriptor)
+        # The VT class modeling objclass, e.g. ConstDictVariable for
+        # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
+        vt_cls = _vt_cls_modeling(obj, objclass)
+        sd = _compute_slotdefs(objclass).get(name)
+        if vt_cls is not None and sd is not None:
+            impl = getattr(vt_cls, sd.impl)
+            return sd.wrapper(obj, tx, impl, rest, kwargs)
         return self.owner.call_method(
             tx, self.descriptor.__name__, [obj, *rest], kwargs
         )
@@ -234,14 +273,14 @@ class WrapperDescriptorVariable(DescriptorVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> "WrapperDescriptorVariable | MethodWrapperVariable":
         # Mirrors wrapperdescr_get which calls PyWrapper_New to produce
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
-        if obj.is_constant_none():
+        if obj is None:
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
@@ -298,8 +337,13 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         "__self__": Member(lambda s, tx: s.obj, readonly_setter),
     }
 
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.as_python_constant()
+    def get_real_python_backed_value(self) -> object:
+        # The owner may be backed by a real object without being a constant
+        # (e.g. an lru_cache wrapper).
+        obj_value = self.obj.get_real_python_backed_value()
+        if obj_value is NO_SUCH_SUBOBJ:
+            return NO_SUCH_SUBOBJ
+        return self.descriptor.__get__(obj_value, type(obj_value))
 
     def is_python_constant(self) -> bool:
         return self.obj.is_python_constant()
@@ -424,31 +468,37 @@ class MethodDescriptorVariable(DescriptorVariable):
                 tx, f"unbound method {self.descriptor.__qualname__}() needs an argument"
             )
         obj, *rest = args
-        name = self.descriptor.__name__
+        name, objclass = self.descriptor.__name__, self.descriptor.__objclass__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj = obj.realize()
-        if isinstance(obj, UserDefinedObjectVariable):
-            base_methods = obj._base_methods
-            if base_methods is not None and self.descriptor in base_methods:
-                return obj.call_base_method(tx, name, rest, kwargs)
-        method = obj.lookup_tp_method(name)
-        if method is not None:
-            result = method(obj, tx, name, rest, kwargs)
-            if result is not None:
-                return result
-        return self.owner.call_method(tx, name, [obj, *rest], kwargs)
+
+        if vt_cls := _vt_cls_modeling(obj, objclass):
+            if meth := vt_cls._lookup_tp_table(name, "tp_methods"):
+                result = meth(obj, tx, name, rest, kwargs)
+                if result is not None:
+                    return result
+        if mro_lookup(obj.python_type(), name) is self.descriptor:
+            # Nothing overrides it, so name lookup reaches the same C method.
+            return obj.call_method(tx, name, rest, kwargs)
+        unimplemented(
+            gb_type="Unbound method descriptor call with unmodeled owner",
+            context=f"{self.descriptor.__qualname__}({obj}, ...)",
+            explanation=f"Dynamo has no model of {objclass.__qualname__}.{name} for a "
+            f"{obj.python_type().__qualname__} receiver.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors method_get which calls PyCFunction_NewEx to produce a
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
-        if obj.is_constant_none():
+        if obj is None:
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
@@ -579,6 +629,18 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
 
     def python_type(self) -> type:
         return types.BuiltinMethodType
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        # builtin_function_or_method has no __getattr__ and no instance __dict__.
+        msg = f"'builtin_function_or_method' object has no attribute '{name}'"
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[msg],
+            kwargs={"name": ConstantVariable.create(name), "obj": self},
+        )
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
@@ -748,13 +810,15 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> BoundBuiltinMethodVariable:
         # classmethod_get binds the C method to the class (ignoring obj),
         # producing a builtin_function_or_method via PyCMethod_New.
         # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
+        if obj is not None and owner.is_constant_none():
+            owner = obj.tp_getattro_impl(tx, "__class__")
         owner_type = owner.python_type()
         if not issubclass(owner_type, type):
             raise_type_error(
@@ -795,117 +859,63 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
                 f"descriptor '{self.descriptor.__name__}' of "
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
-        bound = self.tp_descr_get_impl(tx, ConstantVariable.create(None), args[0])
+        bound = self.tp_descr_get_impl(tx, None, args[0])
         return bound.call_function(tx, args[1:], kwargs)
 
 
-def _get_wrapped_metadata_owner(
-    tx: "InstructionTranslatorBase", descriptor: VariableTracker
-) -> VariableTracker:
-    if istype(descriptor, UserMethodVariable):
-        descriptor = descriptor.im_func
-    if istype(descriptor, UserFunctionVariable):
-        descriptor = descriptor._get_mutation_owner(tx)
-    return descriptor
+# sm_init/cm_init run functools_wraps(), which copies these off the wrapped
+# callable into the descriptor's instance dict, skipping the ones it does not
+# have. The instance dict is read before the type's own attribute of the same
+# name, so e.g. staticmethod(f).__doc__ is f.__doc__, not staticmethod.__doc__.
+# Dynamo resolves them through the traced callable: materializing the descriptor
+# to read that dict would rebuild the callable, which is inexact for synthesized
+# functions (NestedUserFunctionVariable) and unavailable for wrapper VTs.
+# https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1090-L1117
+_WRAPS_COPIED_ATTRS = frozenset(
+    ("__module__", "__name__", "__qualname__", "__doc__", "__annotations__")
+)
 
 
-def _copy_wrapped_attributes(
-    tx: "InstructionTranslatorBase", descriptor: VariableTracker
-) -> dict[str, VariableTracker]:
+def _lookup_wraps_copied_attr(
+    tx: "InstructionTranslatorBase",
+    descriptor: VariableTracker,
+    name: str,
+) -> VariableTracker | None:
+    if name not in _WRAPS_COPIED_ATTRS:
+        return None
     from .object_protocol import generic_getattr
 
-    if descriptor.source and descriptor.python_type() in (staticmethod, classmethod):
-        install_guard(
-            AttrSource(descriptor.source, "__dict__").make_guard(
-                GuardBuilder.DICT_KEYS_MATCH
-            )
-        )
-    owner = _get_wrapped_metadata_owner(tx, descriptor)
-    wrapped = (
-        NO_SUCH_SUBOBJ
-        if isinstance(
-            descriptor,
-            (
-                NestedUserFunctionVariable,
-                LocalGeneratorFunctionVariable,
-                ClassMethodVariable,
-                StaticMethodVariable,
-                UserDefinedObjectVariable,
-                variables.UserDefinedClassVariable,
-            ),
-        )
-        else descriptor.get_real_python_backed_value()
-    )
-    result = {}
-    if wrapped is not NO_SUCH_SUBOBJ:
-        # Read runtime metadata, including functools.wraps updates, rather
-        # than the original name and doc in the function's code object.
-        for name, value in staticmethod(cast(Any, wrapped)).__dict__.items():
-            if (
-                name == "__annotations__"
-                and isinstance(owner, BaseUserFunctionVariable)
-            ) or tx.output.side_effects.has_pending_mutation_of_attr(owner, name):
-                result[name] = generic_getattr(tx, owner, name)
-            else:
-                result[name] = VariableTracker.build(
-                    tx, value, owner.source and AttrSource(owner.source, name)
-                )
-        return result
-    attrs = ("__module__", "__name__", "__qualname__", "__doc__")
-    if sys.version_info < (3, 14):
-        attrs += ("__annotations__",)
-    for name in attrs:
-        try:
-            result[name] = generic_getattr(tx, descriptor, name)
-        except get_dynamo_observed_exception(AttributeError):
-            tx.exn_vt_stack.clear_current_exception()
-    return result
+    return generic_getattr(tx, descriptor, name)
 
 
-def _reconstruct_wrapped_attributes(
-    codegen: "PyCodegen",
-    descriptor: VariableTracker,
-    attributes: dict[str, VariableTracker],
-) -> None:
-    # The reconstructed callable may already reflect later metadata writes.
-    side_effects = codegen.tx.output.side_effects
-    owner = _get_wrapped_metadata_owner(codegen.tx, descriptor)
-    custom_getters = isinstance(
-        descriptor,
-        (
-            StaticMethodVariable,
-            UserDefinedObjectVariable,
-            variables.UserDefinedClassVariable,
-        ),
-    ) and bool(side_effects.store_attr_mutations.get(descriptor))
-    if custom_getters:
-        # Restore the full snapshot when getters can change its keys or order.
-        codegen.dup_top()
-        codegen.append_output(codegen.create_load_attr("__dict__"))
-        codegen.load_method("clear")
-        codegen.call_method(0)
-        codegen.append_output(create_instruction("POP_TOP"))
-        codegen.clear_tos()
-    for name, value in attributes.items():
-        annotations_changed = name == "__annotations__" and (
-            (
-                isinstance(owner, NestedUserFunctionVariable)
-                and owner.annotations is not value
-            )
-            or (
-                isinstance(owner, UserFunctionVariable)
-                and value.source != (owner.source and AttrSource(owner.source, name))
-            )
-        )
-        if (
-            custom_getters
-            or annotations_changed
-            or side_effects.has_pending_mutation_of_attr(owner, name)
-        ):
-            codegen.dup_top()
-            codegen(value)
-            codegen.extend_output(codegen.rot_n(2))
-            codegen.store_attr(name)
+class StaticMethodDictVariable(ConstDictVariable):
+    def __init__(
+        self,
+        items: dict[VariableTracker, VariableTracker]
+        | dict[HashableTracker, VariableTracker],
+        *,
+        owner: "StaticMethodVariable | None" = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, **kwargs)
+        # An escaping __dict__ also keeps the descriptor allocation live.
+        self.owner = owner
+
+    @classmethod
+    def create(
+        cls,
+        owner: "StaticMethodVariable",
+        items: dict[VariableTracker, VariableTracker],
+    ) -> "StaticMethodDictVariable":
+        return cls(items, owner=owner, mutation_type=ValueMutationNew())
+
+    def clone(self, **kwargs: Any) -> VariableTracker:
+        # Tree mapping creates a separate dictionary, as does dict.copy().
+        return super().clone(owner=None, **kwargs)
+
+    def is_python_constant(self) -> bool:
+        # The runtime dictionary belongs to the descriptor and can escape.
+        return self.owner is None and super().is_python_constant()
 
 
 class StaticMethodVariable(VariableTracker):
@@ -925,6 +935,21 @@ class StaticMethodVariable(VariableTracker):
         "__wrapped__": Member(lambda s, _: s.descriptor, readonly_setter),
     }
 
+    tp_getset = {
+        "__dict__": GetSet(lambda s, tx: s.get_instance_dict(tx), unmodeled_setter),
+        "__isabstractmethod__": GetSet(
+            lambda s, tx: s.is_abstract(tx), readonly_setter
+        ),
+    }
+    if sys.version_info >= (3, 14):
+        for attr in ("__annotations__", "__annotate__"):
+            tp_getset[attr] = GetSet(
+                lambda s, tx, name=attr: s.get_lazy_metadata(tx, name),
+                lambda s, tx, value, name=attr: s.set_instance_attribute(
+                    tx, name, value
+                ),
+            )
+
     def __init__(
         self,
         descriptor: VariableTracker,
@@ -932,74 +957,46 @@ class StaticMethodVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.value = value
         self.descriptor = descriptor
-        self.initial_dict: dict[str, VariableTracker] = {}
+        self.value = value
+        self.instance_dict: ConstDictVariable | None = None
 
     @classmethod
     def create(
-        cls, tx: "InstructionTranslatorBase", descriptor: VariableTracker
+        cls, tx: "InstructionTranslatorBase", fn: VariableTracker
     ) -> "StaticMethodVariable":
-        result = cls(descriptor, mutation_type=AttributeMutationNew())
-        tx.output.side_effects.track_attribute_mutation_new(result)
-        result.initial_dict = _copy_wrapped_attributes(tx, descriptor)
-        return result
-
-    def get_real_python_backed_value(self) -> object:
-        return self.value if self.value is not None else NO_SUCH_SUBOBJ
-
-    def get_initial_instance_dict(self) -> dict[str, VariableTracker] | None:
-        return self.initial_dict if self.value is None else None
-
-    def reconstruct_for_side_effects(self, codegen: "PyCodegen") -> bool:
-        self.reconstruct(codegen)
-        return True
-
-    def _is_abstract(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import generic_getattr, generic_is_true
-
-        value = generic_getattr(
-            tx, self.descriptor, "__isabstractmethod__", ConstantVariable.create(False)
-        )
-        return generic_is_true(tx, value)
-
-    def _get_wrapped_attr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
         from .object_protocol import generic_getattr
 
-        return self.get_dict_vt(tx).getitem_or_default(
-            name,
-            lambda: generic_getattr(
-                tx, _get_wrapped_metadata_owner(tx, self.descriptor), name
-            ),
-        )
-
-    def _set_wrapped_attr(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        value: VariableTracker | None,
-    ) -> None:
-        attrs = self.get_dict_vt(tx)
-        if value is None:
-            if not attrs.contains(name):
-                msg = f"'staticmethod' object has no attribute '{name}'"
-                raise_observed_exception(AttributeError, tx, args=[msg])
-            attrs.delitem(name)
-        else:
-            attrs.setitem(name, value)
-
-    tp_getset = {
-        "__dict__": GetSet(lambda s, tx: s.get_dict_vt(tx), unmodeled_setter),
-        "__isabstractmethod__": GetSet(_is_abstract, readonly_setter),
-    }
-    if sys.version_info >= (3, 14):
-        for attr in ("__annotations__", "__annotate__"):
-            tp_getset[attr] = GetSet(
-                lambda s, tx, name=attr: s._get_wrapped_attr(tx, name),
-                lambda s, tx, value, name=attr: s._set_wrapped_attr(tx, name, value),
-            )
+        result = cls(fn)
+        tx.output.side_effects.track_attribute_mutation_new(result)
+        # Arbitrary wrapped objects can run Python when metadata is read.
+        # Their constructor still runs when the descriptor is reconstructed.
+        try:
+            fn_type = fn.python_type()
+        except NotImplementedError:
+            return result
+        if fn_type not in (
+            types.FunctionType,
+            types.BuiltinFunctionType,
+            types.MethodType,
+            type(None),
+        ):
+            return result
+        attrs = ("__module__", "__name__", "__qualname__", "__doc__")
+        if sys.version_info < (3, 14):
+            attrs += ("__annotations__",)
+        items = {}
+        for name in attrs:
+            if fn_type in (types.FunctionType, types.MethodType):
+                # These slots exist even when Dynamo cannot reconstruct the
+                # function to answer hasattr(), for example for a closure.
+                value = generic_getattr(tx, fn, name)
+            else:
+                value = generic_getattr(tx, fn, name, NO_SUCH_SUBOBJ)
+            if value is not NO_SUCH_SUBOBJ:
+                items[ConstantVariable.create(name)] = value
+        result.instance_dict = StaticMethodDictVariable.create(result, items)
+        return result
 
     @classmethod
     def from_descriptor(
@@ -1025,56 +1022,80 @@ class StaticMethodVariable(VariableTracker):
     def python_type(self) -> type:
         return staticmethod
 
-    def as_python_constant(self) -> staticmethod:  # type: ignore[type-arg]
-        if self.value is not None and self.dict_vt is None:
-            return self.value
-        # New descriptors have runtime identity; the real object also cannot
-        # represent pending mutations once its instance dict is tracked.
-        return super().as_python_constant()
+    def get_real_python_backed_value(self) -> object:
+        return self.value if self.value is not None else NO_SUCH_SUBOBJ
+
+    def get_instance_dict(self, tx: "InstructionTranslatorBase") -> ConstDictVariable:
+        if self.instance_dict is None:
+            if (
+                self.value is None
+                or self.source is None
+                or type(self.value.__dict__) is not dict
+            ):
+                unimplemented(
+                    gb_type="Unsupported staticmethod instance dictionary",
+                    context=str(self),
+                    explanation="Dynamo cannot track this staticmethod instance dictionary.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            value = VariableTracker.build(
+                tx,
+                self.value.__dict__,
+                AttrSource(self.source, "__dict__"),
+                realize=True,
+            )
+            if not isinstance(value, ConstDictVariable):
+                raise AssertionError("expected a staticmethod instance dictionary")
+            self.instance_dict = value
+        self.instance_dict.install_dict_order_guard(tx)
+        return self.instance_dict
+
+    def is_abstract(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import generic_getattr, generic_is_true
+
+        value = generic_getattr(
+            tx, self.descriptor, "__isabstractmethod__", ConstantVariable.create(False)
+        )
+        return generic_is_true(tx, value)
+
+    def get_lazy_metadata(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        from .object_protocol import generic_getattr
+
+        value = self.lookup_instance_dict(tx, name)
+        if value is None:
+            value = generic_getattr(tx, self.descriptor, name)
+            self.set_instance_attribute(tx, name, value)
+        return value
 
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
-        attrs = self.get_dict_vt(tx)
-        return attrs.getitem(name) if attrs.contains(name) else None
+        attrs = self.get_instance_dict(tx)
+        key = ConstantVariable.create(name)
+        if attrs.sq_contains_impl(tx, key).as_python_constant():
+            return attrs.mp_subscript_impl(tx, key)
+        return None
 
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
-        raise_observed_exception(
-            AttributeError,
-            tx,
-            args=[f"'staticmethod' object has no attribute '{name}'"],
-        )
+        raise_attribute_error(tx, f"'staticmethod' object has no attribute '{name}'")
 
-    def call_method(
+    def set_instance_attribute(
         self,
         tx: "InstructionTranslatorBase",
         name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
+        value: VariableTracker | None,
     ) -> VariableTracker:
-        if name in ("__setattr__", "__delattr__"):
-            if kwargs:
-                raise_type_error(tx, f"wrapper {name}() takes no keyword arguments")
-            nargs = 2 if name == "__setattr__" else 1
-            if len(args) != nargs:
-                msg = " expected 2 arguments" if nargs == 2 else "expected 1 argument"
-                raise_type_error(tx, f"{msg}, got {len(args)}")
-            if not issubclass(args[0].python_type(), str):
-                raise_type_error(
-                    tx,
-                    f"attribute name must be string, not '{args[0].python_type_name()}'",
-                )
-            attr = args[0].as_python_constant()
-            value = args[1] if name == "__setattr__" else None
-            getset = self.lookup_tp_getset_member(attr)
-            if getset is not None:
-                getset.setter(self, tx, value)
-            else:
-                self._set_wrapped_attr(tx, attr, value)
-            return ConstantVariable.create(None)
-        return super().call_method(tx, name, args, kwargs)
+        attrs = self.get_instance_dict(tx)
+        key = ConstantVariable.create(name)
+        if value is None and not attrs.sq_contains_impl(tx, key).as_python_constant():
+            raise_attribute_error(
+                tx, f"'staticmethod' object has no attribute '{name}'"
+            )
+        return attrs.mp_ass_subscript_impl(tx, key, value)
 
     def call_function(
         self,
@@ -1095,16 +1116,13 @@ class StaticMethodVariable(VariableTracker):
         return self.descriptor
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        # Rebuild the descriptor around the traced callable rather than
-        # restoring an original object, which may wrap an unrealized closure.
-        # Descriptor-path instances are consumed by tp_descr_get_impl and do not
-        # escape, so this effectively only serves values built by user code.
+        # Sourced descriptors load from their original source. Allocate a new
+        # descriptor before replaying the dictionary so cycles can refer to it.
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", "staticmethod")
         )
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
-        _reconstruct_wrapped_attributes(codegen, self.descriptor, self.initial_dict)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .object_protocol import generic_repr
@@ -1131,38 +1149,13 @@ class ClassMethodVariable(VariableTracker):
         "__wrapped__": Member(lambda s, _: s.descriptor, readonly_setter),
     }
 
-    def _get_lazy_annotation(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        unimplemented(
-            gb_type="classmethod lazy annotation access",
-            context=f"{self}",
-            explanation="Reading classmethod annotation attributes caches the value "
-            "in its instance dictionary. Dynamo does not model that mutation.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-
-    tp_getset: dict[str, GetSet] = {}
-    if sys.version_info >= (3, 14):
-        for attr in ("__annotations__", "__annotate__"):
-            tp_getset[attr] = GetSet(_get_lazy_annotation, unmodeled_setter)
-
-    def __init__(
-        self,
-        descriptor: VariableTracker,
-        value: classmethod | None = None,  # type: ignore[type-arg]
-        **kwargs: Any,
-    ) -> None:
+    def __init__(self, descriptor: VariableTracker, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
-        self.value = value
-        self.copied_attrs: dict[str, VariableTracker] = {}
 
     @staticmethod
-    def create(
-        tx: "InstructionTranslatorBase", fn: VariableTracker
-    ) -> "ClassMethodVariable":
-        result = ClassMethodVariable(fn)
-        result.copied_attrs = _copy_wrapped_attributes(tx, fn)
-        return result
+    def create(fn: VariableTracker) -> "ClassMethodVariable":
+        return ClassMethodVariable(fn)
 
     @classmethod
     def from_descriptor(
@@ -1180,7 +1173,6 @@ class ClassMethodVariable(VariableTracker):
         return ClassAttrClassMethodVariable(  # noqa: RVT001
             name,
             VariableTracker.build(tx, descriptor.__func__, func_source, realize=True),
-            value=descriptor,
             source=source,
         )
 
@@ -1195,41 +1187,12 @@ class ClassMethodVariable(VariableTracker):
         return classmethod
 
     def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
-        if self.value is not None:
-            return self.value
-        result = classmethod(self.descriptor.as_python_constant())
-        result.__dict__.clear()
-        for name, value in self.copied_attrs.items():
-            result.__dict__[name] = value.as_python_constant()
-        return result
+        return classmethod(self.descriptor.as_python_constant())
 
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
-        if self.value is not None:
-            if self.source:
-                install_guard(
-                    AttrSource(self.source, "__dict__").make_guard(
-                        GuardBuilder.DICT_KEYS_MATCH
-                    )
-                )
-            if name not in self.value.__dict__:
-                return None
-            return VariableTracker.build(
-                tx,
-                self.value.__dict__[name],
-                self.source and AttrSource(self.source, name),
-            )
-        return self.copied_attrs.get(name)
-
-    def call_getattr_fallback(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker | None:
-        raise_observed_exception(
-            AttributeError,
-            tx,
-            args=[f"'classmethod' object has no attribute '{name}'"],
-        )
+        return _lookup_wraps_copied_attr(tx, self.descriptor, name)
 
     def _bound_source(
         self, owner: VariableTracker, func: BaseUserFunctionVariable
@@ -1244,7 +1207,7 @@ class ClassMethodVariable(VariableTracker):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # cm_descr_get binds the wrapped function to the class.
@@ -1275,13 +1238,12 @@ class ClassMethodVariable(VariableTracker):
         return UserMethodVariable(func, owner, source=bound_source)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # See StaticMethodVariable.reconstruct.
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", "classmethod")
         )
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
-        if self.value is None:
-            _reconstruct_wrapped_attributes(codegen, self.descriptor, self.copied_attrs)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return python_constant_repr_impl(self, tx)
@@ -1357,13 +1319,13 @@ class MemberDescriptorVariable(DescriptorVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
-        if obj.is_constant_none():
+        if obj is None:
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         from .object_protocol import _UnhandledDescriptorError
@@ -1531,7 +1493,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors getset_get which calls the C getter function.
@@ -1541,7 +1503,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to tp_getattro_impl for
         # proxy-based VTs like TensorVariable.
-        if obj.is_constant_none():
+        if obj is None:
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Prefer the VT's declarative table when it models this attribute
