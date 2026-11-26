@@ -4137,8 +4137,8 @@ def smooth_l1_loss(
                                    'sum': the output will be summed. 'none': no reduction will be applied.
                                    Default: 'mean'.
         beta (float, optional): Specifies the threshold at which to change from the squared
-            term to the L1 term in the loss calculation. This value must be positive.
-            Default: 1.0.
+            term to the L1 term in the loss calculation. This value must be non-negative.
+            When beta is 0, this is equivalent to L1 loss. Default: 1.0.
 
     Returns:
         Tensor: L1 loss (optionally weighted).
