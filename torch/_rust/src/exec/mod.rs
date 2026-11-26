@@ -14,6 +14,7 @@ pub mod reads;
 pub mod region;
 pub mod scalars;
 mod run;
+mod shown;
 mod spans;
 pub mod torch_ops;
 mod trampoline;
@@ -1244,6 +1245,7 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
         None => plan.prep.cfg.block_ids().collect(),
     };
     PURE_DEBUG_CODE.with_borrow_mut(|q| *q = format!("{}@{}", c.qualname, c.depth));
+    TOP_NARGS.set(arg_slots(&unsafe { Bound::from_borrowed_ptr(py, c.code as *mut pyo3::ffi::PyObject) }));
     PURE_DEBUG_LINES.with_borrow_mut(|l| l.clone_from(&c.lines));
     IMPURE_NOW.with_borrow_mut(|m| m.clear());
     let (mut movable, aten, pinnable, nulls) = observed_ops(py, &plan.prep, &blocks, Some(&current.prep.clones));
@@ -2124,6 +2126,11 @@ fn observed_ops(
                         // Or ran nothing observable (a predicate): pinnable
                         // too, though its result isn't a tensor.
                         let quiet = !seqs.is_empty() && seqs.iter().all(|(seq, _)| seq.is_empty());
+                        // A call that ran nothing is one only of a callable
+                        // the engine's own tables have (see shown.rs).
+                        if (!one_op && !shown::computes(&f)) || first.as_deref().is_some_and(sets_tensor_state) {
+                            continue;
+                        }
                         calls.push((*v, f.unbind(), (one_op || quiet).then(|| if one_op { args() } else { None }), false));
                     }
                     false
@@ -2539,9 +2546,16 @@ fn impure_op(op: &str, args: &str) -> bool {
         op,
         "aten::_local_scalar_dense" | "aten::is_nonzero" | "aten::item" | "aten::equal" | "aten::allclose" | "aten::_assert_async" | "aten::_assert_async.msg"
     ) || op.starts_with("c10d::")
+        || sets_tensor_state(op)
         || op.starts_with("_c10d_functional::")
         || op.starts_with("aten::_local_scalar_dense")
         || op.starts_with("aten::is_nonzero")
+}
+
+// Torch ops that change of a tensor what no graph computes: where autograd
+// stops, which memory it is on.
+fn sets_tensor_state(op: &str) -> bool {
+    matches!(op, "aten::detach_" | "aten::set_" | "aten::resize_" | "aten::resize_as_") || op.starts_with("aten::set_.")
 }
 
 // Whether instr v of `body` writes to something that outlives the code it is
@@ -2661,9 +2675,10 @@ fn cell_stores(cfg: &crate::cfg::ir::Cfg, slot: u32, own: &Own) -> Option<Vec<Va
     Some(cfg.instrs.iter().filter(|i| matches!(i.op, Op::StoreDeref { slot: s } if s == slot)).map(|i| i.args[0]).collect())
 }
 
-// What the cells of a generator site v resumed as `func` hold (see Own):
-// those of the call in this frame that made it, found from v's args.
-fn resumed_free(py: Python<'_>, prep: &Prepared, v: ValueId, func: &str, own: &Own) -> Vec<Free> {
+// The call in this frame that made the generator site v resumed as `func`,
+// found from v's args: what the generator's cells hold are that call's
+// (see Own).
+fn resumed_maker(prep: &Prepared, v: ValueId, func: &str) -> Option<ValueId> {
     let cfg = &prep.cfg;
     let effects = unsafe { &*prep.effects.get() };
     let mut todo: Vec<(ValueId, u32)> = cfg[v].args.iter().map(|a| (*a, 0)).collect();
@@ -2677,7 +2692,7 @@ fn resumed_free(py: Python<'_>, prep: &Prepared, v: ValueId, func: &str, own: &O
                     seq.iter().any(|e| matches!(e, effects::Effect::Frame { func: f, how: effects::How::Direct } if &**f == func))
                 });
                 if made {
-                    return callee_free(py, prep, x, own);
+                    return Some(x);
                 }
             }
             Op::GetIter => todo.push((cfg[x].args[0], d + 1)),
@@ -2691,7 +2706,7 @@ fn resumed_free(py: Python<'_>, prep: &Prepared, v: ValueId, func: &str, own: &O
             _ => {}
         }
     }
-    vec![]
+    None
 }
 
 // What the cells of the callee of call v hold (see Own), if it's a closure
@@ -2897,7 +2912,7 @@ out += [getattr(torch._C, n) for n in (
     '_get_native_aot_enabled', '_is_tracing', '_get_tracing_state', '_has_torch_function',
     '_has_torch_function_unary', '_has_torch_function_variadic', '_is_torch_function_enabled',
     '_is_torch_function_mode_enabled', '_get_cudnn_enabled', '_get_privateuse1_backend_name',
-    '_are_functorch_transforms_active') if hasattr(torch._C, n)]
+    '_are_functorch_transforms_active', '_get_deterministic_algorithms') if hasattr(torch._C, n)]
 out += [torch.is_tensor, torch.is_floating_point, torch.is_grad_enabled, torch.is_autocast_enabled,
         torch.get_default_dtype, torch.Size, torch.device, torch._C._get_tracing_state,
         torch.Tensor.size, torch.Tensor.dim, torch.Tensor.numel, torch.Tensor.stride,
@@ -2997,7 +3012,10 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
                 // A generator's frame (one the site made, if pure).
                 effects::Effect::Frame { func, how: effects::How::Resume } => {
                     let code = effects::code_named(py, func).ok_or_else(|| format!("{} resumed {func}: its code is unknown", here()))?;
-                    pure_code(py, &code, resumed_free(py, prep, v, func, own), depth, memo).map_err(|e| format!("{} resumed {func}: {e}", here()))?;
+                    let made = resumed_maker(prep, v, func);
+                    let free = made.map_or(vec![], |x| callee_free(py, prep, x, own));
+                    let first = made.is_some_and(|x| shown::genexpr_over_made(py, prep, x, func, own));
+                    pure_code_as(py, &code, free, first, depth, memo).map_err(|e| format!("{} resumed {func}: {e}", here()))?;
                 }
             }
         }
@@ -3008,19 +3026,35 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
         // the code's own Compiled, which runs the other frames.
         return match clones.get(&v) {
             Some(cl) if cl.compiled.auto_optimized.load(Ordering::Relaxed) => {
-                let own = Own { nargs: arg_slots(cl.code.bind(py)), free: callee_free(py, prep, v, own), fresh_self: false };
+                let first = shown::genexpr_over_made(py, prep, v, &func, own);
+                let own = Own { nargs: arg_slots(cl.code.bind(py)), free: callee_free(py, prep, v, own), fresh_self: first };
                 pure_compiled(py, &cl.compiled, own, depth + 1, memo).map_err(|e| format!("{} -> {}: {e}", here(), cl.compiled.qualname))
             }
-            Some(cl) => pure_code(py, cl.code.bind(py), callee_free(py, prep, v, own), depth, memo).map_err(|e| format!("{} -> {} (own): {e}", here(), cl.compiled.qualname)),
+            Some(cl) => {
+                let first = shown::genexpr_over_made(py, prep, v, &func, own);
+                pure_code_as(py, cl.code.bind(py), callee_free(py, prep, v, own), first, depth, memo).map_err(|e| format!("{} -> {} (own): {e}", here(), cl.compiled.qualname))
+            }
             None => {
                 let callees = unsafe { &*prep.callees.get() };
                 let code = callees.get(&v).and_then(|c| c.get(py)).and_then(|f| f.getattr("__code__").ok()).or_else(|| effects::code_named(py, &func));
                 let code = code.ok_or_else(|| format!("{} entered {func} but has no clone", here()))?;
-                pure_code(py, &code, callee_free(py, prep, v, own), depth, memo).map_err(|e| format!("{} -> {func} (own): {e}", here()))
+                let first = shown::genexpr_over_made(py, prep, v, &func, own);
+                pure_code_as(py, &code, callee_free(py, prep, v, own), first, depth, memo).map_err(|e| format!("{} -> {func} (own): {e}", here()))
             }
         };
     }
-    if !is_call(&ins.op) || torch_ops {
+    // What C code did to the operands (see shown.rs): of an instruction
+    // that is no call, and of a builtin whether or not torch ops ran in it.
+    if !is_call(&ins.op) {
+        return shown::instr(py, prep, v, own).map_err(|e| format!("{} has for an operand {e}", here()));
+    }
+    let via_partial = callees.get(&v).and_then(|c| c.via()) == Some(effects::Via::Partial);
+    if let Some(f) = callees.get(&v).and_then(|c| c.get(py))
+        && shown::is_builtin(&f)
+    {
+        return shown::builtin(py, prep, v, &f, via_partial, own).map_err(|e| format!("{} called {}: {e}", here(), f.repr().map_or("?".into(), |r| r.to_string())));
+    }
+    if torch_ops {
         return Ok(());
     }
     let Some(f) = callees.get(&v).and_then(|c| c.get(py)) else {
@@ -3038,7 +3072,10 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
     // Through a functools.partial, `f` is what the partial calls, and the
     // instr's args aren't f's alone.
     let partial = callees.get(&v).and_then(|c| c.via()) == Some(effects::Via::Partial);
-    if pure_builtins().contains(&(f.as_ptr() as usize)) || is_in_graph(&f) {
+    if shown::torch_computes(&f) {
+        // One of torch's own functions that only compute, which returned
+        // without running an operator (a dropout in eval mode, a cast to
+        // the dtype the tensor has).
         Ok(())
     } else if partial && indirect && f.is_instance_of::<pyo3::types::PyFunction>() {
         // A Python function, whose frames were judged above.
@@ -3055,6 +3092,12 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
     } else {
         Err(format!("{} called {}", here(), f.repr().map_or("?".into(), |r| r.to_string())))
     }
+}
+
+thread_local! {
+    // How many frame slots the arguments of the code being optimized take:
+    // what is in them is not its own (see Own).
+    static TOP_NARGS: Cell<usize> = const { Cell::new(0) };
 }
 
 thread_local! {
@@ -3085,10 +3128,6 @@ pub fn _cfg_impure() -> Vec<(String, i32, String)> {
 
 // Whether the frames of `code` were only seen computing, judged from its own
 // Compiled (which must have run).
-fn pure_code(py: Python<'_>, code: &Bound<'_, PyAny>, free: Vec<Free>, depth: u32, memo: &mut Memo) -> Result<(), String> {
-    pure_code_as(py, code, free, false, depth, memo)
-}
-
 fn pure_code_as(py: Python<'_>, code: &Bound<'_, PyAny>, free: Vec<Free>, fresh_self: bool, depth: u32, memo: &mut Memo) -> Result<(), String> {
     let c = unsafe { lookup(code) }.map_err(|e| e.to_string())?;
     if !c.auto_optimized.load(Ordering::Relaxed) {
@@ -3193,7 +3232,7 @@ fn is_call(op: &Op) -> bool {
 
 // Whether a site of the caller (instr v of `prep`) is pure (see pure_instr).
 fn pure_site(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<ValueId, SiteClone>, memo: &mut Memo) -> bool {
-    match pure_instr(py, prep, v, clones, 0, &Own::default(), memo) {
+    match pure_instr(py, prep, v, clones, 0, &Own { nargs: TOP_NARGS.get(), ..Own::default() }, memo) {
         Ok(()) => true,
         Err(why) => {
             let effects = !effects_empty(prep, v);
@@ -3291,7 +3330,15 @@ fn is_leaf(f: &Bound<'_, PyAny>) -> bool {
         _ => false,
     });
     let effects = unsafe { &*first.prep.effects.get() };
-    !writes && effects.sites().all(|(seqs, varies)| !varies && seqs.iter().flat_map(|(seq, _)| seq).all(|e| matches!(e, effects::Effect::TorchOp { .. })))
+    // A call in it that ran nothing is one of a callable the engine's own
+    // tables have: no operator is no sign of no effect (see shown.rs).
+    let callees = unsafe { &*first.prep.callees.get() };
+    let quiet_known = first.prep.cfg.instrs.iter().enumerate().all(|(i, ins)| {
+        let v = ValueId(i as u32);
+        let ran_nothing = effects.get(Site::Instr(v)).iter().all(|(seq, _)| seq.is_empty());
+        !is_call(&ins.op) || !ran_nothing || callees.get(&v).is_none() || callees.get(&v).and_then(|c| c.get(f.py())).is_some_and(|g| shown::computes(&g))
+    });
+    !writes && quiet_known && effects.sites().all(|(seqs, varies)| !varies && seqs.iter().flat_map(|(seq, _)| seq).all(|e| matches!(e, effects::Effect::TorchOp { .. })))
 }
 
 // Whether `f` is torch._C._has_torch_function{,_unary,_variadic}.
@@ -3424,6 +3471,7 @@ pub fn call_with_cfg_execution<'py>(
     kwargs: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     trampoline::init(func.py())?;
+    shown::ready();
     region::next_call();
     let _guard = ExecGuard::new();
     let _ops = (RECORD.load(Ordering::Relaxed) || torch_ops::printing()).then(torch_ops::OpHookGuard::new);

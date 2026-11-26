@@ -8,6 +8,7 @@
 #include <c10/core/AutogradState.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/impl/COW.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include "torch_rust/src/bindings/ffi.rs.h"
@@ -179,6 +180,15 @@ std::uint64_t region_thread_state() {
   s = (s << 3) | (ctx.deterministicAlgorithms() ? 4u : 0u) |
       (ctx.deterministicAlgorithmsWarnOnly() ? 2u : 0u) |
       (ctx.deterministicFillUninitializedMemory() ? 1u : 0u);
+  // What a program reads through torch.backends and torch.autograd and a
+  // kernel is picked by: a region is for the flags of its trace.
+  s = (s << 6) | (ctx.userEnabledCuDNN() ? 32u : 0u) |
+      (ctx.benchmarkCuDNN() ? 16u : 0u) | (ctx.deterministicCuDNN() ? 8u : 0u) |
+      (ctx.userEnabledMkldnn() ? 4u : 0u) |
+      (torch::autograd::AnomalyMode::is_enabled() ? 2u : 0u) |
+      (torch::autograd::AnomalyMode::should_check_nan() ? 1u : 0u);
+  s = (s << 2) |
+      (static_cast<std::uint64_t>(ctx.float32MatmulPrecision()) & 0x3u);
   return s;
 }
 

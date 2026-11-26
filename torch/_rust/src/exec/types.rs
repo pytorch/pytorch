@@ -78,13 +78,24 @@ pub struct Class {
     // tp_name, which for a heap type points into its name str.
     name_ptr: usize,
     name: String,
+    // What is shown of its objects (see exec/shown.rs), found when the
+    // first one was seen.
+    shown: u8,
 }
 
 impl Class {
     unsafe fn of(obj: *mut PyObject) -> Self {
         let tp = ffi::Py_TYPE(obj);
         let name = std::ffi::CStr::from_ptr((*tp).tp_name).to_string_lossy().into_owned();
-        Class { ptr: tp as usize, name_ptr: (*tp).tp_name as usize, name }
+        Class { ptr: tp as usize, name_ptr: (*tp).tp_name as usize, name, shown: super::shown::class_flags(tp) }
+    }
+
+    pub fn shown(&self) -> u8 {
+        self.shown
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn is(&self, tp: *const ffi::PyTypeObject) -> bool {

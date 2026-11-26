@@ -10,13 +10,23 @@ derived from them while nothing wrote to them (vm.Unwritten). And of how a
 call's tensors share memory: what is made of a region's graph runs only on
 calls whose tensors overlap as the traced call's did. And of gradients: a
 region with one input is differentiated, and a detach inside a region stops
-the gradient on every list and can be named by a pattern.
+the gradient on every list and can be named by a pattern. And of what C
+code does to an operand: it is taken to have no effect only for the kinds of
+operand the engine lists, so an iterator from outside, a C callable handed
+to a builtin, a setter of torch's state and a defaultdict end a region; and
+id() and hash() give which object their operand is on every call. And of
+state a region reads without a check of its own: the backend flags are part
+of the thread state a region is for, no region is traced or entered under a
+torch function mode, and a method that tells of a tensor what a region does
+not check ends the region also where it is taken from the class.
 """
 
+import collections
 import contextlib
 import ctypes
 import functools
 import gc
+import itertools
 import os
 import subprocess
 import sys
@@ -32,6 +42,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     HardwareClassification,
     parametrize,
     run_tests,
@@ -1136,6 +1147,357 @@ class TestVmUnwritten(TestCase):
 
 
 instantiate_device_type_tests(TestVmUnwritten, globals())
+
+
+def modes_around(x, k):
+    # Four operations in front of the construct under test and four behind.
+    return (((x.sin() * 2).cos() + 1).tanh() * k + 1).cos().tanh().exp()
+
+
+class ModesBox:
+    def __init__(self):
+        self.n = 0.0
+
+
+# State that outlives a call, made anew by modes_reset.
+MODES_IT = MODES_KEPT = MODES_W = MODES_BOX = MODES_SEEN = None
+
+
+def modes_reset(device):
+    global MODES_IT, MODES_KEPT, MODES_W, MODES_BOX, MODES_SEEN
+    MODES_IT = iter([float(i) for i in range(64)])
+    MODES_KEPT = [3.0, 1.0, 2.0]
+    MODES_W = torch.ones(8, device=device)
+    MODES_BOX = ModesBox()
+    MODES_SEEN = collections.defaultdict(float)
+
+
+def modes_state():
+    left = MODES_IT.__length_hint__()
+    flags = (torch.is_grad_enabled(), MODES_W.requires_grad)
+    return left, list(MODES_KEPT), flags, MODES_BOX.n, sorted(MODES_SEEN)
+
+
+# C code takes items from an iterator that outlives the call.
+def modes_unpack(x):
+    (k,) = itertools.islice(MODES_IT, 1)
+    return modes_around(x, k)
+
+
+def modes_listed(x):
+    return modes_around(x, list(itertools.islice(MODES_IT, 2))[1])
+
+
+def modes_summed(x):
+    return modes_around(x, sum(itertools.islice(MODES_IT, 2)))
+
+
+def modes_starred(x):
+    return modes_around(x, max(*itertools.islice(MODES_IT, 2)))
+
+
+def modes_zipped(x):
+    return modes_around(x, dict(zip("a", MODES_IT))["a"])
+
+
+# A builtin calls a C callable that changes something.
+def modes_mapped(x):
+    list(map(MODES_KEPT.append, [1.5]))
+    return modes_around(x, len(MODES_KEPT))
+
+
+def modes_keyed(x):
+    sorted([1.5], key=MODES_KEPT.append)
+    return modes_around(x, len(MODES_KEPT))
+
+
+def modes_sentinel(x):
+    for _ in iter(MODES_KEPT.pop, 1.0):
+        break
+    MODES_KEPT.extend([4.0, 5.0])
+    return modes_around(x, len(MODES_KEPT))
+
+
+# A call sets state and runs no operator a graph would record.
+def modes_grad_mode(x):
+    torch._C._set_grad_enabled(False)
+    return modes_around(x, 2.0)
+
+
+def modes_requires_grad(x):
+    MODES_W.requires_grad_(True)
+    return modes_around(x, 2.0)
+
+
+def modes_attribute(x):
+    object.__setattr__(MODES_BOX, "n", MODES_BOX.n + 1.0)
+    return modes_around(x, MODES_BOX.n)
+
+
+def modes_detached(x):
+    h = x * MODES_W
+    h.detach_()
+    return modes_around(h, 2.0)
+
+
+# Reading a key a defaultdict lacks puts the key in.
+def modes_missing(x):
+    return modes_around(x, MODES_SEEN[len(MODES_SEEN)] + len(MODES_SEEN))
+
+
+# Items taken from iterators the function makes itself: no effect.
+def modes_made_zip(x):
+    k = 0.0
+    for u, v in zip(MODES_KEPT, (0.5, 0.25, 2.0)):
+        k = k + u * v
+    return modes_around(x, k)
+
+
+def modes_made_generator(x):
+    return modes_around(x, sum(u * 2 for u in MODES_KEPT) + max(MODES_KEPT))
+
+
+def modes_made_enumerate(x):
+    k = sum(i * u for i, u in enumerate(MODES_KEPT))
+    return modes_around(x, k + len(list(reversed(MODES_KEPT))))
+
+
+MODES_ENDS = [
+    modes_unpack,
+    modes_listed,
+    modes_summed,
+    modes_starred,
+    modes_zipped,
+    modes_mapped,
+    modes_keyed,
+    modes_sentinel,
+    modes_grad_mode,
+    modes_requires_grad,
+    modes_attribute,
+    modes_detached,
+    modes_missing,
+]
+
+
+# Every torchvision operator begins by telling a telemetry hook, once per
+# process and key, that it was used. A region exists only after its code ran
+# as written, so the report was made, and no program reads it.
+def modes_logs_usage(x):
+    torch._C._log_api_usage_once("test_vm_modes.modes_logs_usage")
+    return modes_around(x, 2.0)
+
+
+# torch.nn.functional.pad asks whether deterministic algorithms are on: a
+# flag of the thread state every region is checked on.
+def modes_padded(x):
+    return modes_around(torch.nn.functional.pad(x, (0, 1))[:, 1:], 2.0)
+
+
+MODES_STAYS = [
+    modes_made_zip,
+    modes_made_generator,
+    modes_made_enumerate,
+    modes_logs_usage,
+    modes_padded,
+]
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmEffects(TestCase):
+    """What C code does to an operand has no effect only for the kinds of
+    operand the engine lists (see exec/shown.rs): everything else ends the
+    region, and the program's state is eager's after every call."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def log(self, device, fn, grad):
+        # Nine calls from a fresh state: what each returned and left behind.
+        modes_reset(device)
+        out = []
+        try:
+            for call in range(9):
+                torch.set_grad_enabled(True)
+                MODES_W.requires_grad_(grad)
+                torch.manual_seed(call)
+                x = torch.randn(4, 8, device=device, requires_grad=grad)
+                y = fn(x)
+                out.append((y.detach(), y.requires_grad, modes_state()))
+        finally:
+            torch.set_grad_enabled(True)
+        return out
+
+    def both(self, device, fn):
+        grad = fn is modes_detached
+        want = self.log(device, fn, grad)
+        compiled = vm(fn, passes=EARLY)
+        self.assertEqual(self.log(device, compiled, grad), want, atol=0, rtol=0)
+        return compiled
+
+    @parametrize("fn", MODES_ENDS, name_fn=lambda fn: fn.__name__[6:])
+    @isolated
+    def test_effect_of_c_code_is_made_on_every_call(self, device, fn):
+        self.both(device, fn)
+
+    @parametrize("fn", MODES_STAYS, name_fn=lambda fn: fn.__name__[6:])
+    @isolated
+    def test_what_has_no_effect_stays_in_a_region(self, device, fn):
+        # Iterators the function makes itself, a builtin of the table that
+        # asks nothing of its arguments, a read of state regions are checked
+        # on: one region for the function.
+        compiled = self.both(device, fn)
+        self.assertGreater(region_runs(compiled), 0)
+        places = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertEqual(len(places), 1)
+
+
+instantiate_device_type_tests(TestVmEffects, globals())
+
+
+def modes_work(x):
+    return ((x.sin() * 2).cos() + 1).tanh().exp()
+
+
+def modes_id(x):
+    return modes_work(x), id(x)
+
+
+def modes_hash(x):
+    return modes_work(x), hash(x)
+
+
+def modes_id_as_key(x):
+    return modes_work(x), {id(x): 1}
+
+
+def modes_id_of_made(x):
+    y = modes_work(x)
+    return y, id(y)
+
+
+def modes_dunder_hash(x):
+    return modes_work(x), x.__hash__()
+
+
+def modes_id_of_list(x, items):
+    return modes_work(x) + len(items), id(items)
+
+
+def modes_id_of_read(x):
+    return modes_work(x), id(MODES_BOX)
+
+
+MODES_WHICH = [
+    modes_id,
+    modes_hash,
+    modes_id_as_key,
+    modes_id_of_made,
+    modes_dunder_hash,
+    modes_id_of_list,
+    modes_id_of_read,
+]
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmIdentity(TestCase):
+    """id() and hash() have no effect, but what they give is which object
+    their operand is: the call's own, not the traced call's. They stay in a
+    region only where the region is found by that object."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("fn", MODES_WHICH, name_fn=lambda fn: fn.__name__[6:])
+    @isolated
+    def test_which_object_is_this_calls(self, device, fn):
+        modes_reset(device)
+        compiled = vm(fn, passes=EARLY)
+        for call in range(9):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            args = (x, [1, 2]) if fn is modes_id_of_list else (x,)
+            want, got = fn(*args), compiled(*args)
+            msg = f"call {call}"
+            self.assertEqual(got[0], want[0], atol=0, rtol=0, msg=msg)
+            # Of a tensor the call makes: the one the call returned.
+            which = id(got[0]) if fn is modes_id_of_made else want[1]
+            self.assertEqual(got[1], which, msg=msg)
+        self.assertGreater(region_runs(compiled), 0)
+
+
+instantiate_device_type_tests(TestVmIdentity, globals())
+
+
+class ModesAddsOne(torch.overrides.TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        out = func(*args, **(kwargs or {}))
+        return out + 1 if func is torch.Tensor.cos else out
+
+
+# No branch on what is read: the read is in the block of the operations.
+def modes_reads_flag(x):
+    return modes_around(x, (3.0, 2.0)[bool(torch.backends.cudnn.enabled)])
+
+
+# A flag the thread state had before: its reader is a builtin of the table.
+def modes_reads_deterministic(x):
+    on = torch.are_deterministic_algorithms_enabled()
+    return modes_around(x, (3.0, 2.0)[on])
+
+
+# The method is taken from the class: no attribute of a tensor is loaded.
+def modes_asks_the_class(x):
+    return modes_around(x, 1.0 + torch.Tensor.storage_offset(x))
+
+
+def modes_under_a_mode(x):
+    return modes_around(x, 2.0)
+
+
+MODES_READS = [
+    modes_reads_flag,
+    modes_reads_deterministic,
+    modes_asks_the_class,
+    modes_under_a_mode,
+]
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmStateRead(TestCase):
+    """State a program reads and a region has no check of its own for: a
+    call made in another state is not served by a region of the first."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def log(self, device, fn, what):
+        # Six calls in the first state, three in the other, three in the
+        # first again.
+        out = []
+        for call in range(12):
+            other = 6 <= call < 9
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            stack = contextlib.ExitStack()
+            if what is modes_reads_flag:
+                stack.enter_context(torch.backends.cudnn.flags(enabled=not other))
+            elif what is modes_reads_deterministic:
+                stack.enter_context(DeterministicGuard(other))
+            elif what is modes_asks_the_class and other:
+                # The same values, further into a storage.
+                x = torch.cat([x, x])[4:]
+            elif what is modes_under_a_mode and other:
+                stack.enter_context(ModesAddsOne())
+            with stack:
+                out.append(fn(x).detach())
+        return out
+
+    @parametrize("fn", MODES_READS, name_fn=lambda fn: fn.__name__[6:])
+    @isolated
+    def test_call_in_another_state_is_eagers(self, device, fn):
+        want = self.log(device, fn, fn)
+        compiled = vm(fn, passes=EARLY)
+        self.assertEqual(self.log(device, compiled, fn), want, atol=0, rtol=0)
+
+
+instantiate_device_type_tests(TestVmStateRead, globals())
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")

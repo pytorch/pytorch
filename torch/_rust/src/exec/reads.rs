@@ -59,10 +59,13 @@ use crate::cfg::ir::TensorSpec;
 
 // What a tensor answers about itself that a region neither checks nor
 // computes, so that a trace that asks is refused: what autograd keeps on it,
-// which memory and which object it is, how often it was written. A region
-// finds a tensor argument by its class, dtype, device, sizes, strides and
-// requires_grad alone, and makes the tensors of its block anew.
-const UNCHECKED_OF_A_TENSOR: &[&str] = &[
+// which memory and which object it is, how often it was written, and the
+// marks a region does not look at (conjugate, negative, zero, names,
+// coalesced). A region finds a tensor argument by its class, dtype, device,
+// sizes, strides and requires_grad alone, and makes the tensors of its block
+// anew. The one list of these: exec/shown.rs takes the methods among them
+// out of torch's functions that only compute.
+pub(super) const UNCHECKED_OF_A_TENSOR: &[&str] = &[
     "grad",
     "grad_fn",
     "_grad",
@@ -82,6 +85,11 @@ const UNCHECKED_OF_A_TENSOR: &[&str] = &[
     "is_pinned",
     "is_inference",
     "_is_view",
+    "is_conj",
+    "is_neg",
+    "_is_zerotensor",
+    "has_names",
+    "is_coalesced",
     "__dict__",
 ];
 
@@ -995,6 +1003,9 @@ impl Reads {
         };
         let why = if tffi::region_thread_state() != self.thread {
             "thread state"
+        } else if tffi::torch_function_mode_active() {
+            // The mode is to see the program's own calls: a region makes none.
+            "a torch function mode"
         } else if e.groups.get(self.hot.get()).is_some_and(|g| !passes(g)) {
             "a namespace or a container"
         } else if e.typed.iter().any(|t| ffi::Py_TYPE(t.obj.as_ptr()) as *mut PyObject != t.class.as_ptr()) {
