@@ -77,6 +77,10 @@ FROM cuda as cuda13.4
 RUN bash ./install_cuda.sh 13.4
 ENV DESIRED_CUDA=13.4
 
+FROM cuda as cuda13.5
+RUN bash ./install_cuda.sh 13.5
+ENV DESIRED_CUDA=13.5
+
 FROM base as rocm
 ARG PYTORCH_ROCM_ARCH
 ARG ROCM_VERSION

@@ -31,6 +31,7 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Eltwise.h>
 
 namespace at::native {
 
@@ -40,11 +41,11 @@ Tensor mkldnn_relu(const Tensor& input) {
         "mkldnn_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
-  const ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::tensor y;
-  ideep::eltwise_forward::compute(
-      x, y, ideep::algorithm::eltwise_relu, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+  const mkldnn::MkldnnMemory& x = memory_from_mkldnn(input);
+  mkldnn::MkldnnMemory y;
+  mkldnn::eltwise_forward(
+      x, y, dnnl::algorithm::eltwise_relu, dnnl::prop_kind::forward_training, /*alpha*/ 0.0);
+  return new_with_mkldnn_memory(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
                                  input.options().device_opt());
 }
 
@@ -54,19 +55,19 @@ Tensor& mkldnn_relu_(Tensor& input) {
         "mkldnn_relu_: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
-  ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::eltwise_forward::compute(
-      x, x, ideep::algorithm::eltwise_relu, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+  mkldnn::MkldnnMemory& x = memory_from_mkldnn(input);
+  mkldnn::eltwise_forward(
+      x, x, dnnl::algorithm::eltwise_relu, dnnl::prop_kind::forward_training, /*alpha*/ 0.0);
   return input;
 }
 
 Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, const Scalar& threshold) {
-  ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::tensor grady = itensor_from_mkldnn(grad_output);
-  ideep::tensor gradx;
-  ideep::eltwise_backward::compute(x, grady, gradx,
-      ideep::algorithm::eltwise_relu, /*alpha*/ 0.0);
-  return new_with_itensor_mkldnn(std::move(gradx),
+  mkldnn::MkldnnMemory& x = memory_from_mkldnn(input);
+  mkldnn::MkldnnMemory grady = memory_from_mkldnn(grad_output);
+  mkldnn::MkldnnMemory gradx;
+  mkldnn::eltwise_backward(x, grady, gradx,
+      dnnl::algorithm::eltwise_relu, /*alpha*/ 0.0);
+  return new_with_mkldnn_memory(std::move(gradx),
                                  optTypeMetaToScalarType(grad_output.options().dtype_opt()),
                                  grad_output.options().device_opt());
 }

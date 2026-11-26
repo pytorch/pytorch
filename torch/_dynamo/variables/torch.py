@@ -65,6 +65,7 @@ from ..device_interface import (
     get_registered_device_interfaces,
 )
 from ..exc import (
+    CompileOnOneRankUnsupported,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -119,7 +120,7 @@ from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
 )
-from .lists import ListVariable, SizeVariable, TupleVariable
+from .lists import ListVariable, RangeVariable, SizeVariable, TupleVariable
 from .object_protocol import (
     mro_lookup,
     pynumber_index,
@@ -209,7 +210,6 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
         torch.cuda.use_mem_pool,
-        torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback.annotate,
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback._dynamo_region_activation_memory_budget,
@@ -676,8 +676,7 @@ class BaseTorchVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        result = hasattr(self.value, name)
-        return VariableTracker.build(tx, result)
+        return VariableTracker.build(tx, hasattr(self.value, name))  # type: ignore[return-value]
 
     def can_constant_fold_through(self) -> bool:
         if self.value in constant_fold_functions:
@@ -703,6 +702,7 @@ class BaseTorchVariable(VariableTracker):
             return True
 
         module = getattr(self.value, "__module__", None)
+        # handle_prod preserves start aliases and tracked iterator consumption.
         return self.value is not math.prod and module in ("math", "cmath")
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -765,10 +765,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False)
-        elif self.value in (
-            torch.cuda.use_mem_pool,
-            torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
-        ):
+        elif self.value is torch.cuda.use_mem_pool:
             unexpected_kwargs = [k for k in kwargs if k not in ("pool", "device")]
             if unexpected_kwargs:
                 raise_type_error(
@@ -1430,8 +1427,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
             if kwargs or not any(
-                isinstance(arg, (UserDefinedObjectVariable, variables.SymNodeVariable))
-                for arg in args
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
             ):
                 return None
 
@@ -1453,25 +1449,31 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             iterable = args[0]
             start = kwargs.get("start", ConstantVariable.create(1))
-            if isinstance(iterable, (ListVariable, TupleVariable)) and (
-                iterable.python_type() in (list, tuple)
+            if isinstance(
+                iterable, (ListVariable, TupleVariable, RangeVariable)
+            ) and any(
+                iterable.python_type() is cls
+                for cls in (list, tuple, range, torch.Size)
             ):
                 if not iterable.items:
                     return start
-                if all(
-                    isinstance(value, ConstantVariable)
-                    for value in (*iterable.items, start)
+                is_range = isinstance(iterable, RangeVariable)
+                if (is_range or isinstance(start, ConstantVariable)) and all(
+                    isinstance(value, ConstantVariable) for value in iterable.items
                 ):
                     try:
-                        result = math.prod(
-                            iterable.as_python_constant(),
-                            start=start.as_python_constant(),
-                        )
+                        values = iterable.as_python_constant()
+                        if not values:
+                            return start
+                        if isinstance(start, ConstantVariable):
+                            result = math.prod(values, start=start.as_python_constant())
+                            return VariableTracker.build(tx, result)
                     except (OverflowError, TypeError, ValueError) as exc:
                         raise_observed_exception(type(exc), tx, args=list(exc.args))
-                    return VariableTracker.build(tx, result)
                 if (
-                    iterable.is_proxy()
+                    not is_range
+                    and not isinstance(iterable, SizeVariable)
+                    and iterable.is_proxy()
                     and start.is_proxy()
                     and not check_unspec_or_constant_args(args, kwargs)
                 ):
@@ -2031,6 +2033,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and tf_state.in_torch_function_mode()
             ):
                 return VariableTracker.build(tx, True)
+            if not tf_state.torch_function_subclass_enabled:
+                return VariableTracker.build(tx, False)
             elems = (
                 unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
@@ -3168,7 +3172,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-                stream_var = tx.symbolic_stream_state.cur_stream(device)
+                stream_var = tx.symbolic_stream_state.cur_stream(device, tx=tx)
                 stream_variable_cls = _get_stream_variable_cls(self.value)
                 if stream_variable_cls is not None and not isinstance(
                     stream_var, stream_variable_cls
@@ -3181,7 +3185,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         source=stream_var.source,
                     )
                 return stream_var
-            except Unsupported:
+            except (CompileOnOneRankUnsupported, Unsupported):
                 raise
             except Exception as e:
                 unimplemented(

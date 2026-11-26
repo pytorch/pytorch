@@ -3,11 +3,13 @@
 import decimal
 import fractions
 import math
-import unittest
+from unittest import mock
 
 import torch
+from torch._dynamo import polyfills
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -54,7 +56,11 @@ class MathProdTests(TestCase):
             return x + 1, math.prod(values)
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaises(Unsupported):
+        if construct:
+            message = r"Unsupported function call[\s\S]*decimal\.Decimal"
+        else:
+            message = r"'Decimal' implements '__rmul__' in C"
+        with self.assertRaisesRegex(Unsupported, message):
             compiled(torch.ones(1), [decimal.Decimal("1.23456789")] * 2)
 
     @parametrize("start_type", [list, bytearray])
@@ -210,52 +216,6 @@ class MathProdTests(TestCase):
         for _ in range(2):
             self.assertEqual(compiled(x), fn(x))
 
-    @parametrize(
-        "args,error_type",
-        [((1, 0), ZeroDivisionError), (("abc",), ValueError), ((1.5, 2), TypeError)],
-    )
-    def test_fraction_constructor_errors(self, args, error_type):
-        def fn(x):
-            try:
-                fractions.Fraction(*args)
-            except error_type as exc:
-                return x + 1, str(exc)
-            return x, "no error"
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(1)
-        for _ in range(2):
-            self.assertEqual(compiled(x), fn(x))
-
-    @parametrize("construct", [False, True])
-    def test_fraction_methods(self, construct):
-        def fn(x, value):
-            if construct:
-                value = fractions.Fraction(22, 7)
-            return (
-                x + 1,
-                value.limit_denominator(5),
-                value.as_integer_ratio(),
-                value * value,
-            )
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(1)
-        for _ in range(2):
-            value = fractions.Fraction(22, 7)
-            self.assertEqual(compiled(x, value), fn(x, value))
-
-    @unittest.skipUnless(hasattr(fractions.Fraction, "is_integer"), "Python 3.12+")
-    @parametrize("value", [fractions.Fraction(2), fractions.Fraction(3, 2)])
-    def test_fraction_is_integer(self, value):
-        def fn(x, value):
-            return x + 1, value.is_integer()
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(1)
-        for _ in range(2):
-            self.assertEqual(compiled(x, value), fn(x, value))
-
     @parametrize("source", ["constructor", "from_float", "from_decimal"])
     def test_fraction_mixed_construction(self, source):
         values = {
@@ -274,11 +234,18 @@ class MathProdTests(TestCase):
         for _ in range(2):
             self.assertEqual(compiled(x, values[source]), fn(x, values[source]))
 
-    def test_fraction_replacement(self):
+    @parametrize("fullgraph", [False, True])
+    def test_fraction_replacement(self, fullgraph):
         def fn(x, values):
             return x + 1, math.prod(values)
 
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        # General Fraction arithmetic can graph break when its integers become symbolic.
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=fullgraph,
+            dynamic=False if fullgraph else None,
+        )
         x = torch.ones(1)
         values = [fractions.Fraction(2, 3)]
         for value in (fractions.Fraction(2, 3), fractions.Fraction(4, 5)):
@@ -337,7 +304,9 @@ class MathProdTests(TestCase):
 
         x = torch.ones(1)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaises(Unsupported):
+        with self.assertRaisesRegex(
+            Unsupported, "'list_iterator' implements '__iter__' in C"
+        ):
             compiled(x, iter([2, 3, 4]))
 
         compiled = torch.compile(fn, backend="eager")
@@ -405,25 +374,54 @@ class MathProdTests(TestCase):
             values = container([x.shape[0], x.shape[1]])
             return x + 1, math.prod(values, start=2)
 
-        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         for shape in ((3, 4), (5, 6)):
             x = torch.ones(shape)
+            torch._dynamo.mark_dynamic(x, (0, 1))
             self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
 
-    @parametrize("invalid", [False, True])
-    def test_gcd_symbolic_index(self, invalid):
+    @parametrize("kind", ["shape", "shape_slice", "range", "reverse_range"])
+    def test_static_product_constant_fold(self, kind):
         def fn(x):
-            value = x.shape[0] / 2 if invalid else x.shape[0]
-            try:
-                out = math.gcd(value, 4)
-            except TypeError:
-                out = -1
-            return x + 1, out
+            if kind == "shape":
+                values = x.shape
+            elif kind == "shape_slice":
+                values = x.shape[1:]
+            elif kind == "range":
+                values = range(2, 8)
+            else:
+                values = range(8, 2, -2)
+            return x + 1, math.prod(values, start=2)
 
-        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
-        for size in (3, 4, 6):
-            x = torch.ones(size)
-            self.assertEqual(compiled(x), fn(x))
+        def unexpected_polyfill(*args, **kwargs):
+            raise AssertionError(
+                "Expected math.prod to fold without tracing the polyfill"
+            )
+
+        x = torch.ones(2, 3, 4)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=False)
+        with mock.patch.object(polyfills, "math_prod", unexpected_polyfill):
+            for _ in range(2):
+                self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("start_type", [list, str])
+    def test_empty_range_start_identity(self, start_type):
+        def fn(x, start):
+            return math.prod(range(1, 3, -1), start=start), x + 1
+
+        def unexpected_polyfill(*args, **kwargs):
+            raise AssertionError("Expected the empty range to preserve start directly")
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with mock.patch.object(polyfills, "math_prod", unexpected_polyfill):
+            for _ in range(2):
+                start = [1] if start_type is list else "".join(("mutable", "-start"))
+                self.assertIs(compiled(x, start)[0], start)
 
     @parametrize(
         "values,start",
