@@ -669,6 +669,7 @@ class TORCH_API ThreadLocalSubqueue {
 class TORCH_API RecordQueue {
  public:
   RecordQueue(ProfilerConfig config, std::set<ActivityType> activities);
+  ~RecordQueue();
 
   bool tracePython() const;
   bool getPythonGcEvents() const;

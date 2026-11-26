@@ -21,8 +21,8 @@ struct deconv_forward_params {
   Attr op_attr;
   Attr bias_attr;
   // Keep {dnnl_arg, tensor} pairs of scales and zero points for primitive execution
-  std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_scales = nullptr;
-  std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_zero_points =
+  std::shared_ptr<std::unordered_map<int, MkldnnMemory>> all_scales = nullptr;
+  std::shared_ptr<std::unordered_map<int, MkldnnMemory>> all_zero_points =
       nullptr;
 };
 
@@ -33,11 +33,11 @@ struct deconv_forward_params {
 // Only <true, true> is instantiated.
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_transpose_forward_compute(
-    const ideep::tensor& src,
-    const ideep::tensor& weights, // dim: {o, i[, d], h, w}
-    const ideep::tensor& bias,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights, // dim: {o, i[, d], h, w}
+    const MkldnnMemory& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    MkldnnMemory& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -51,7 +51,7 @@ void convolution_transpose_forward_compute(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8);
+    const lowp_kind alowp_kind = u8s8);
 
 // Ported from ideep::convolution_transpose_forward::prepare (int8).
 // Prepare for int8
@@ -59,11 +59,11 @@ void convolution_transpose_forward_compute(
 // Channels-last is inferred from the src and weights descriptors.
 void convolution_transpose_forward_prepare(
     deconv_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights, // dim: {o, i[, d], h, w}
-    const ideep::tensor& bias,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights, // dim: {o, i[, d], h, w}
+    const MkldnnMemory& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    MkldnnMemory& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -77,7 +77,7 @@ void convolution_transpose_forward_prepare(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8);
+    const lowp_kind alowp_kind = u8s8);
 
 // Ported from ideep::convolution_transpose_forward::compute (prepared params).
 // Compute with params from convolution_transpose_forward_prepare.
@@ -88,10 +88,10 @@ void convolution_transpose_forward_prepare(
 template <bool reorder_src, bool reorder_weight>
 void convolution_transpose_forward_compute(
     const deconv_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst);
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst);
 
 // Ported from ideep::convolution_transpose_forward::compute_v3 (with bias).
 // 2-in-1 Compute for fp32
@@ -101,11 +101,11 @@ void convolution_transpose_forward_compute(
 // Only <true, true> is instantiated.
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_transpose_forward_compute_v3(
-    const ideep::tensor& src,
-    const ideep::tensor& weights, // dim: {o, i[, d], h, w}
-    const ideep::tensor& bias,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights, // dim: {o, i[, d], h, w}
+    const MkldnnMemory& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    MkldnnMemory& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -124,10 +124,10 @@ void convolution_transpose_forward_compute_v3(
 // Only <true, true> is instantiated.
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_transpose_forward_compute_v3(
-    const ideep::tensor& src,
-    const ideep::tensor& weights, // dim: {o, i[, d], h, w}
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights, // dim: {o, i[, d], h, w}
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    MkldnnMemory& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -147,7 +147,7 @@ void convolution_transpose_forward_compute_v3(
 ///                   it is true, giving ATen's layout.
 /// Instantiated for <true, true>, <false, true> and <true, false>.
 template <bool is_channels_last = false, bool transposed = true>
-ideep::tensor::desc convolution_transpose_forward_expected_weights_desc(
+MkldnnMemory::desc convolution_transpose_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims, // [i, o, ...]
     dnnl::memory::data_type dtype = dnnl::memory::data_type::f32,
     const dnnl::memory::dims& strides = {1, 1},
@@ -162,10 +162,10 @@ ideep::tensor::desc convolution_transpose_forward_expected_weights_desc(
 
 // Ported from ideep::convolution_transpose_backward_data::compute_v3.
 void convolution_transpose_backward_data_compute_v3(
-    const ideep::tensor& diff_dst,
-    const ideep::tensor& weights, // dim: {o, i[, d], h, w}
+    const MkldnnMemory& diff_dst,
+    const MkldnnMemory& weights, // dim: {o, i[, d], h, w}
     const dnnl::memory::dims& diff_src_dims,
-    ideep::tensor& diff_src,
+    MkldnnMemory& diff_src,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -178,11 +178,11 @@ void convolution_transpose_backward_data_compute_v3(
 // Ported from ideep::convolution_transpose_backward_weights::compute_v3 (with
 // bias).
 void convolution_transpose_backward_weights_compute_v3(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& diff_dst,
     const dnnl::memory::dims& diff_weights_dims, // dim: {i, o[, d], h, w}
-    ideep::tensor& diff_weights, // dim: {i, o[, d], h, w}
-    ideep::tensor& diff_bias,
+    MkldnnMemory& diff_weights, // dim: {i, o[, d], h, w}
+    MkldnnMemory& diff_bias,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -195,10 +195,10 @@ void convolution_transpose_backward_weights_compute_v3(
 // Ported from ideep::convolution_transpose_backward_weights::compute_v3
 // (without bias).
 void convolution_transpose_backward_weights_compute_v3(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& diff_dst,
     const dnnl::memory::dims& diff_weights_dims, // dim: {i, o[, d], h, w}
-    ideep::tensor& diff_weights, // dim: {i, o[, d], h, w}
+    MkldnnMemory& diff_weights, // dim: {i, o[, d], h, w}
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
