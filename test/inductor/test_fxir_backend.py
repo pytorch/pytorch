@@ -43,12 +43,9 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.inductor_utils import (
-    HAS_GPU,
-    patch_custom_fallback_pass,
-    requires_gpu,
-)
+from torch.testing._internal.inductor_utils import patch_custom_fallback_pass
 from torch.utils._sympy.functions import FloorDiv
+from torch.utils._triton import has_triton
 
 
 aten = torch.ops.aten
@@ -62,7 +59,7 @@ except ImportError:
         SwitchModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
     )
 
-if HAS_GPU:
+if has_triton():
     import triton
     import triton.language as tl
 
@@ -80,6 +77,37 @@ test_config = {
 class _FxirTestMixin:
     def _count_ops(self, gm: torch.fx.GraphModule, target: Callable) -> int:
         return len(gm.graph.find_nodes(op="call_function", target=target))
+
+    @staticmethod
+    def _get_assert_nodes(gm: torch.fx.GraphModule) -> set[torch.fx.Node]:
+        """Collect assertion nodes and all their transitive input dependencies
+        that are used exclusively by assertion subgraphs."""
+        assert_nodes: set[torch.fx.Node] = set(
+            gm.graph.find_nodes(op="call_function", target=torch._check)
+        )
+        for target in (
+            torch._assert,
+            aten._assert_async.msg,
+            aten._assert_scalar.default,
+            assert_alignment,
+            assert_size_stride,
+            assert_tensor_metadata,
+        ):
+            assert_nodes.update(gm.graph.find_nodes(op="call_function", target=target))
+        changed = True
+        while changed:
+            changed = False
+            for node in list(assert_nodes):
+                for arg in node.args:
+                    if (
+                        hasattr(arg, "op")
+                        and arg.op == "call_function"
+                        and arg not in assert_nodes
+                        and all(u in assert_nodes for u in arg.users)
+                    ):
+                        assert_nodes.add(arg)
+                        changed = True
+        return assert_nodes
 
     def _run_and_capture_graphs(self, opt, args) -> torch.fx.GraphModule:
         gms = []
@@ -106,6 +134,7 @@ class _FxirTestMixin:
         expected_num_triton_kernels: int = 1,
         metadata_only: bool = False,
         compile_kwargs: dict | None = None,
+        check_assertions: bool = False,
     ):
         if compile_kwargs is None:
             compile_kwargs = {}
@@ -131,6 +160,17 @@ class _FxirTestMixin:
             )
 
         self.assertTrue(same(ref, result))
+
+        # Verify all non-assertion, non-triton call_function nodes have metadata.
+        for gm in gms:
+            assert_nodes = self._get_assert_nodes(gm) if check_assertions else set()
+            for node in gm.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target != triton_kernel_wrapper_mutation
+                    and node not in assert_nodes
+                ):
+                    self.assertTrue(node.meta.get("val", None) is not None)
 
         return gms
 
@@ -158,12 +198,16 @@ class _FxirTestMixin:
             return gm
 
 
+@config.patch(test_config)
 class FxirTestCase(_FxirTestMixin, InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+
+        if not has_triton():
+            raise unittest.SkipTest("requires triton")
 
         # Register the FX backend, storing the default for later.
         common.init_backend_registration()
@@ -184,11 +228,11 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         common.device_codegens[cls.device_type] = cls._default_backend
 
     def test_basic(self, device):
-        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=device) for _ in range(2)]
         self._compile_and_check(torch.add, args)
 
     def test_standard_kernel_omits_empty_launch_kwargs(self, device):
-        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(torch.add, args)
         (triton_node,) = gm.graph.find_nodes(
             op="call_function", target=triton_kernel_wrapper_mutation
@@ -202,7 +246,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
 
     @config.patch(size_asserts=True)
     def test_size_assert_check_nodes(self, device):
-        args = [torch.randn(4, 8, device=self.device) for _ in range(2)]
+        args = [torch.randn(4, 8, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(torch.add, args, check_assertions=True)
 
         self.assertEqual(self._count_ops(gm, assert_size_stride), 2)
@@ -210,15 +254,15 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
     @config.patch(size_asserts=True)
     @parametrize("invalid_input", (0, 1))
     @parametrize("invalid", ("extra_rank", "missing_rank", "size", "stride"))
-    def test_size_assert_rejects_invalid_metadata(self, invalid_input, invalid):
-        args = [torch.randn(4, 8, device=self.device) for _ in range(2)]
+    def test_size_assert_rejects_invalid_metadata(self, device, invalid_input, invalid):
+        args = [torch.randn(4, 8, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(torch.add, args, check_assertions=True)
         self.assertEqual(gm(*args), torch.add(*args))
         args[invalid_input] = {
-            "extra_rank": torch.randn(4, 8, 1, device=self.device),
-            "missing_rank": torch.tensor(1.0, device=self.device),
-            "size": torch.randn(4, 16, device=self.device),
-            "stride": torch.randn(4, 16, device=self.device)[:, ::2],
+            "extra_rank": torch.randn(4, 8, 1, device=device),
+            "missing_rank": torch.tensor(1.0, device=device),
+            "size": torch.randn(4, 16, device=device),
+            "stride": torch.randn(4, 16, device=device)[:, ::2],
         }[invalid]
         with self.assertRaisesRegex(AssertionError, "input"):
             gm(*args)
@@ -226,16 +270,16 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
     @config.patch(size_asserts=True)
     def test_size_assert_ignores_size_one_strides(self, device):
         """Like assert_size_stride, the stride of a size-1 dim is not checked."""
-        args = [torch.randn(1, 8, device=self.device) for _ in range(2)]
+        args = [torch.randn(1, 8, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(torch.add, args, check_assertions=True)
 
-        restrided = [torch.randn(8, 1, device=self.device).t() for _ in range(2)]
+        restrided = [torch.randn(8, 1, device=device).t() for _ in range(2)]
         (out,) = gm(*restrided)
         self.assertEqual(out.flatten(), torch.add(*restrided).flatten())
 
     @config.patch(size_asserts=True)
     def test_size_assert_skips_empty_inputs(self, device):
-        args = [torch.randn(0, 8, device=self.device) for _ in range(2)]
+        args = [torch.randn(0, 8, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(
             torch.add, args, expected_num_triton_kernels=0, check_assertions=True
         )
@@ -243,7 +287,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
 
     @config.patch(size_asserts=True)
     def test_extern_size_assert_checks_output_metadata(self, device):
-        args = (torch.randn(8, device=self.device),)
+        args = (torch.randn(8, device=device),)
         with patch_custom_fallback_pass(lambda node: node.target == aten.sin.default):
             (gm,) = self._compile_and_check(
                 torch.sin, args, expected_num_triton_kernels=0, check_assertions=True
@@ -257,7 +301,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         in the FX graph. Like PythonWrapperCodegen.codegen_input_nan_asserts(),
         nan_asserts checks for both NaN and Inf.
         """
-        args = [torch.randn(4, 8, device=self.device) for _ in range(2)]
+        args = [torch.randn(4, 8, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(torch.add, args, check_assertions=True)
 
         self.assertGreaterEqual(self._count_ops(gm, aten.isnan.default), 2)
@@ -267,7 +311,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
     @config.patch(nan_asserts=True)
     def test_nan_assert_precedes_kernel(self, device):
         """NaN checks stay in program order instead of moving to the graph end."""
-        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(torch.add, args, check_assertions=True)
 
         order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
@@ -286,54 +330,54 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
 
     @config.patch(nan_asserts=True)
     def test_nan_assert_fails_on_nan(self, device):
-        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(torch.add, args, check_assertions=True)
 
-        nan_input = torch.full((8,), float("nan"), device=self.device)
+        nan_input = torch.full((8,), float("nan"), device=device)
         with self.assertRaises(AssertionError):
             gm(nan_input, args[1])
 
     @config.patch(nan_asserts=True)
     def test_nan_assert_fails_on_inf(self, device):
-        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(torch.add, args, check_assertions=True)
 
-        inf_input = torch.full((8,), float("inf"), device=self.device)
+        inf_input = torch.full((8,), float("inf"), device=device)
         with self.assertRaises(AssertionError):
             gm(inf_input, args[1])
 
     @config.patch(nan_asserts=True)
     def test_nan_assert_checks_extern_output(self, device):
-        args = [torch.ones(2, 2, device=self.device) for _ in range(2)]
+        args = [torch.ones(2, 2, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(
             torch.mm, args, expected_num_triton_kernels=0, check_assertions=True
         )
-        overflowing = torch.full((2, 2), 1e38, device=self.device)
+        overflowing = torch.full((2, 2), 1e38, device=device)
         self.assertTrue(torch.isinf(torch.mm(overflowing, overflowing)).all())
         with self.assertRaises(AssertionError):
             gm(overflowing, overflowing)
 
     @config.patch(alignment_asserts_inputs=True)
     def test_alignment_assert_accepts_aligned_rejects_unaligned(self, device):
-        args = (torch.randn(8, device=self.device),)
+        args = (torch.randn(8, device=device),)
         (gm,) = self._compile_and_check(torch.sin, args, check_assertions=True)
         self.assertEqual(self._count_ops(gm, assert_alignment), 1)
         self.assertEqual(gm(*args), torch.sin(*args))
-        unaligned = torch.randn(9, device=self.device)[1:]
+        unaligned = torch.randn(9, device=device)[1:]
         self.assertNotEqual(unaligned.data_ptr() % 16, 0)
         with self.assertRaisesRegex(AssertionError, "input"):
             gm(unaligned)
 
     @config.patch(nan_asserts=True)
     @parametrize("value, kind", ((float("nan"), "NaN"), (float("inf"), "Inf")))
-    def test_nan_assert_precedes_input_mutation(self, value, kind):
+    def test_nan_assert_precedes_input_mutation(self, device, value, kind):
         def foo(x):
             x.zero_()
             return x
 
-        args = (torch.ones(8, device=self.device),)
+        args = (torch.ones(8, device=device),)
         (gm,) = self._compile_and_check(foo, args, check_assertions=True)
-        invalid = torch.full((8,), value, device=self.device)
+        invalid = torch.full((8,), value, device=device)
         with self.assertRaises(AssertionError):
             gm(invalid)
         check = torch.isnan if kind == "NaN" else torch.isinf
@@ -346,7 +390,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             indices = torch.nonzero(x)
             return indices.new_ones((indices.size(0), 2))
 
-        args = (torch.tensor([0, 1, 0, 1], device=self.device),)
+        args = (torch.tensor([0, 1, 0, 1], device=device),)
         gms = self._run_and_capture_graphs(torch.compile(foo), args)
 
         self.assertTrue(
@@ -362,8 +406,8 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             return value + 1
 
         args = (
-            torch.tensor(True, device=self.device),
-            torch.randn(8, device=self.device),
+            torch.tensor(True, device=device),
+            torch.randn(8, device=device),
         )
         with patch_custom_fallback_pass(fallback_assert_async):
             (gm,) = self._compile_and_check(foo, args, check_assertions=True)
@@ -375,8 +419,8 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         Test that we allocate on a device type instead of a specific index.
         """
         # Pass in a tensor on an indexed device.
-        device_runtime = getattr(torch, self.device)
-        indexed_device = torch.device(self.device, device_runtime.current_device())
+        device_runtime = getattr(torch, device)
+        indexed_device = torch.device(device, device_runtime.current_device())
         args = [torch.randn(8, device=indexed_device) for _ in range(2)]
         (gm,) = self._compile_and_check(torch.add, args)
         (empty_strided,) = gm.graph.find_nodes(
@@ -392,7 +436,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         def foo(x, y):
             return x.sum() + y.sum()
 
-        args = [torch.randn(length, device=self.device) for length in [517, 1029]]
+        args = [torch.randn(length, device=device) for length in [517, 1029]]
         self._compile_and_check(foo, args, expected_num_triton_kernels=2)
 
     def test_free(self, device):
@@ -404,7 +448,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             w = x.sum() + y
             return z.sum() + w.sum()
 
-        args = [torch.randn(length, device=self.device) for length in [517, 1029, 123]]
+        args = [torch.randn(length, device=device) for length in [517, 1029, 123]]
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=3)
 
         # Check the generated code for frees.
@@ -419,9 +463,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         def foo(x, y):
             return x @ y + y.sum()
 
-        args = [
-            torch.randn(size, device=self.device) for size in [(129, 129), (129, 1)]
-        ]
+        args = [torch.randn(size, device=device) for size in [(129, 129), (129, 1)]]
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Check for the extern kernel
@@ -438,9 +480,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         def foo(x, y):
             return x @ y + y.sum()
 
-        args = [
-            torch.randn(size, device=self.device) for size in [(129, 129), (129, 1)]
-        ]
+        args = [torch.randn(size, device=device) for size in [(129, 129), (129, 1)]]
         self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
     def test_fallback(self, device):
@@ -449,11 +489,11 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         """
 
         def foo(x):
-            batch1 = torch.randn(2, 3, 5, device=self.device)
-            batch2 = torch.randn(2, 5, 4, device=self.device)
+            batch1 = torch.randn(2, 3, 5, device=device)
+            batch2 = torch.randn(2, 5, 4, device=device)
             return torch.addbmm(x, batch1, batch2)
 
-        args = (torch.randn(3, 4, device=self.device),)
+        args = (torch.randn(3, 4, device=device),)
 
         # Since the program has a random output, just check metadata.
         # Don't check for an exact value.
@@ -473,9 +513,9 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             return out + y
 
         args = (
-            torch.randn(4, 8, device=self.device),
-            torch.tensor([1, 2, 3, 4], device=self.device),
-            torch.randn(10, 8, device=self.device),
+            torch.randn(4, 8, device=device),
+            torch.tensor([1, 2, 3, 4], device=device),
+            torch.randn(10, 8, device=device),
         )
         (gm,) = self._compile_and_check(foo, args, compile_kwargs={"dynamic": True})
 
@@ -492,7 +532,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         def foo(x, y):
             return torch.cat((x, y)) + 1
 
-        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=device) for _ in range(2)]
         self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
     def test_cat_views(self, device):
@@ -506,7 +546,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             c = torch.cat((a, b)).clone()
             return a, b, c
 
-        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=2)
 
         def get_offset(node: torch.fx.Node) -> int:
@@ -530,12 +570,10 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         length = 8
 
         def foo(x):
-            y, z = tuple(
-                torch.arange(length // 2, device=self.device) for _ in range(2)
-            )
+            y, z = tuple(torch.arange(length // 2, device=device) for _ in range(2))
             return x + torch.cat((y, z))
 
-        args = [torch.randn(length, device=self.device)]
+        args = [torch.randn(length, device=device)]
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Expect a single allocation, even though eager mode would use 2.
@@ -549,10 +587,10 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         length = 8
 
         def foo(x):
-            y, z = tuple(torch.randn(length // 2, device=self.device) for _ in range(2))
+            y, z = tuple(torch.randn(length // 2, device=device) for _ in range(2))
             return x + torch.cat((y, z))
 
-        args = [torch.randn(length, device=self.device)]
+        args = [torch.randn(length, device=device)]
 
         # Since this test generates random numbers, check metadata only.
         (gm,) = self._compile_and_check(
@@ -571,7 +609,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         def foo(x, y):
             return torch.reshape(x + y, (8,))
 
-        args = [torch.randn((2, 4), device=self.device) for _ in range(2)]
+        args = [torch.randn((2, 4), device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Check for as_strided. We map ReinterpretView to this.
@@ -588,7 +626,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             n = x.shape[0]
             return x.narrow(0, n // 2, n // 2).contiguous() + 1
 
-        args = [torch.randn(16, 4, device=self.device)]
+        args = [torch.randn(16, 4, device=device)]
         (gm,) = self._compile_and_check(
             foo, args, compile_kwargs={"dynamic": True}, metadata_only=True
         )
@@ -618,7 +656,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         def foo(x):
             return x.reshape((2, 5))
 
-        args = (torch.randn(10, device=self.device),)
+        args = (torch.randn(10, device=device),)
         with patch_custom_fallback_pass(always_fallback):
             (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
@@ -639,7 +677,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             top, idx = torch.topk(x, 2, largest=False)
             return top + 1, idx * 2
 
-        args = [torch.randn(8, device=self.device)]
+        args = [torch.randn(8, device=device)]
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=2)
 
         # Check for multiple kernel outputs via getitems.
@@ -655,7 +693,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         Test duplicated inputs. This will collapse into a single input in the GM.
         """
 
-        args = [torch.randn(4, device=self.device)] * 2
+        args = [torch.randn(4, device=device)] * 2
         (gm,) = self._compile_and_check(torch.add, args, expected_num_triton_kernels=1)
 
         num_placeholders = len(gm.graph.find_nodes(op="placeholder"))
@@ -666,10 +704,10 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         Test a program with a backward pass.
         """
 
-        x = torch.ones(5, device=self.device)  # input tensor
-        y = torch.zeros(3, device=self.device)  # expected output
-        w = torch.randn(5, 3, requires_grad=True, device=self.device)
-        b = torch.randn(3, requires_grad=True, device=self.device)
+        x = torch.ones(5, device=device)  # input tensor
+        y = torch.zeros(3, device=device)  # expected output
+        w = torch.randn(5, 3, requires_grad=True, device=device)
+        b = torch.randn(3, requires_grad=True, device=device)
 
         def foo(x, y):
             z = torch.matmul(x, w) + b
@@ -697,13 +735,11 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
 
                 return compiled_fn
 
-        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=device) for _ in range(2)]
         custom_backend = common.DeviceCodegen(
             TritonScheduling, CustomWrapperCodegen, None
         )
-        with unittest.mock.patch.dict(
-            common.device_codegens, {self.device: custom_backend}
-        ):
+        with unittest.mock.patch.dict(common.device_codegens, {device: custom_backend}):
             func = torch.add
             opt = torch.compile(func)
             result = opt(*args)
@@ -723,7 +759,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
 
         def get_input():
             full_size = (16, 8)
-            full = torch.randn(full_size, device=self.device)
+            full = torch.randn(full_size, device=device)
             view = torch.as_strided(full, static_dims, full.stride())
             return view
 
@@ -769,7 +805,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             "pad_outputs": True,
         }
     )
-    def test_dynamic_shapes_with_padding(self, shape):
+    def test_dynamic_shapes_with_padding(self, device, shape):
         """
         Test a graph with dynamic shapes with padding.
         """
@@ -777,7 +813,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         def get_input(shape):
             pad_size = list(shape)
             pad_size[-1] = ((shape[-1] + 7) // 8) * 8
-            pad = torch.randn(pad_size, dtype=torch.float32, device=self.device)
+            pad = torch.randn(pad_size, dtype=torch.float32, device=device)
             view = torch.as_strided(pad, shape, pad.stride())
             return view
 
@@ -809,9 +845,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         Test dynamic shapes where a kernel's size arg is precomputed.
         """
         func = torch.add
-        args = [
-            torch.randn(shape, device=self.device) for shape in [(7, 12, 9), (7, 1, 1)]
-        ]
+        args = [torch.randn(shape, device=device) for shape in [(7, 12, 9), (7, 1, 1)]]
         (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
 
         # Check for the precomputed size arg.
@@ -826,7 +860,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         """
 
         func = torch.add
-        args = [torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]]
+        args = [torch.randn(shape, device=device) for shape in [(7, 12), (7, 1)]]
         (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
 
         # Check for the precomputed size arg.
@@ -845,9 +879,9 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
 
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
-    def test_debug(self, mock_output_code):
+    def test_debug(self, device, mock_output_code):
         # Compile in debug mode.
-        args = [torch.randn(11, device=self.device) for _ in range(2)]
+        args = [torch.randn(11, device=device) for _ in range(2)]
         self._compile_and_check(torch.sub, args)
 
         # Check the output code for a Triton kernel call.
@@ -861,7 +895,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         "const",
         (1, 1.5),
     )
-    def test_export_const_placeholder(self, const):
+    def test_export_const_placeholder(self, device, const):
         """
         Test that we can compile a graph coming from torch.export with a constant input.
         """
@@ -870,7 +904,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             def forward(self, x, y):
                 return x - y
 
-        args = (torch.randn(8, device=self.device), const)
+        args = (torch.randn(8, device=device), const)
         mod = TestModule()
         export_gm = torch.export.export(mod, args).module()
 
@@ -894,8 +928,8 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             return torch.ops.aten.scatter(input_, dim, index, src)
 
         length = 8
-        index = torch.randint(length, (length,), device=self.device)
-        input_ = torch.randn(length, device=self.device)
+        index = torch.randint(length, (length,), device=device)
+        input_ = torch.randn(length, device=device)
         with DeterministicGuard(True):
             (gm,) = self._compile_and_check(
                 foo,
@@ -912,8 +946,8 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         Test the deterministic fallback for index_put.
         """
         length = 8
-        out, values = [torch.randn(length, device=self.device) for _ in range(2)]
-        indices = (torch.randint(length, (length,), device=self.device),)
+        out, values = [torch.randn(length, device=device) for _ in range(2)]
+        indices = (torch.randint(length, (length,), device=device),)
         accumulate = True
         with DeterministicGuard(True):
             (gm,) = self._compile_and_check(
@@ -937,8 +971,8 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             return out + 1
 
         length = 8
-        out, src = [torch.randn(length, device=self.device) for _ in range(2)]
-        index = torch.randint(length, (length,), device=self.device)
+        out, src = [torch.randn(length, device=device) for _ in range(2)]
+        index = torch.randint(length, (length,), device=device)
         (gm,) = self._compile_and_check(
             foo, (out, index, src), expected_num_triton_kernels=2
         )
@@ -947,7 +981,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         self.assertEqual(self._count_ops(gm, fallback_op), 1)
 
     @parametrize("pred", (False, True))
-    def test_cond_subgraph(self, pred: bool):
+    def test_cond_subgraph(self, device, pred: bool):
         """
         Test a model with subgraphs.
         """
@@ -955,8 +989,8 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         def foo(pred, x):
             return torch.cond(pred, torch.cos, torch.sin, [x]) + 1
 
-        x = torch.randn((2, 3), device=self.device)
-        pred_tensor = torch.tensor([pred], device=self.device)
+        x = torch.randn((2, 3), device=device)
+        pred_tensor = torch.tensor([pred], device=device)
         gm = self._compile_and_check(
             foo, [pred_tensor, x], expected_num_triton_kernels=3
         )[-1]
@@ -969,9 +1003,9 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
 
     @parametrize("idx", (0, 1, 2))
-    def test_switch_subgraph(self, idx: int):
-        x = torch.randn((2, 3), device=self.device)
-        idx_tensor = torch.tensor(idx, device=self.device)
+    def test_switch_subgraph(self, device, idx: int):
+        x = torch.randn((2, 3), device=device)
+        idx_tensor = torch.tensor(idx, device=device)
         model = SwitchModels.Simple()
         gm = self._compile_and_check(
             model, [idx_tensor, x], expected_num_triton_kernels=4
@@ -993,7 +1027,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
 
     @parametrize("pred", (False, True))
-    def test_cond_no_operands(self, pred: bool):
+    def test_cond_no_operands(self, device, pred: bool):
         """
         Test torch.cond when the subgraphs take no inputs.
         """
@@ -1001,7 +1035,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         length = 8
 
         def true_fn():
-            return torch.zeros(length, device=self.device)
+            return torch.zeros(length, device=device)
 
         def false_fn():
             return true_fn() + 5
@@ -1009,33 +1043,12 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         def foo(pred):
             return torch.cond(pred, true_fn, false_fn, ())
 
-        pred_tensor = torch.tensor([pred], device=self.device)
+        pred_tensor = torch.tensor([pred], device=device)
         self._compile_and_check(foo, [pred_tensor], expected_num_triton_kernels=2)
-
-    def test_cpp_raises(self, device):
-        """
-        Test the C++ CPU backend. C++ kernels are not yet supported, so for now check
-        that we get the expected exception.
-        """
-
-        def foo(x, y):
-            return x + y * 5
-
-        device = torch.device("cpu")
-        args = [torch.randn(5, device=device) for _ in range(2)]
-
-        cpp_backend = common.DeviceCodegen(CppScheduling, WrapperFxCodegen, None)
-        with (
-            unittest.mock.patch.dict(
-                common.device_codegens, {device.type: cpp_backend}
-            ),
-            self.assertRaisesRegex(BackendCompilerFailed, "Triton"),
-        ):
-            self._compile_and_check(foo, args)
 
     @parametrize("enable_tuning", (False, True))
     @parametrize("use_dynamic_shapes", (False, True))
-    def test_autotune(self, use_dynamic_shapes: bool, enable_tuning: bool):
+    def test_autotune(self, device, use_dynamic_shapes: bool, enable_tuning: bool):
         orig_run = torch._inductor.runtime.triton_heuristics.CachingAutotuner.run
         called = False
 
@@ -1044,7 +1057,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             called = True
             return orig_run(*args, **kwargs)
 
-        args = [torch.randn(8, device=self.device) for _ in range(2)]
+        args = [torch.randn(8, device=device) for _ in range(2)]
 
         with (
             config.patch("triton.autotune_at_compile_time", enable_tuning),
@@ -1071,8 +1084,8 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
     def test_autotune_skips_kernels_with_device_asserts(self, device):
         # Tuning runs kernels on zeros. There the gather reads row 64 of 64, and
         # launching it would trip its device-side bounds assert.
-        w = torch.randn(64, 32, device=self.device)
-        idx = torch.full((128,), -64, device=self.device)
+        w = torch.randn(64, 32, device=device)
+        idx = torch.full((128,), -64, device=device)
         tuner = torch._inductor.runtime.triton_heuristics.CachingAutotuner
         with unittest.mock.patch.object(
             tuner, "run", autospec=True, side_effect=tuner.run
@@ -1108,11 +1121,11 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
             return output
 
-        args = [torch.randn(32, device=self.device) for _ in range(2)]
+        args = [torch.randn(32, device=device) for _ in range(2)]
         self._compile_and_check(add, args)
 
     @parametrize("constexpr_first", (False, True))
-    def test_custom_triton_constexpr_launch_grid(self, constexpr_first: bool):
+    def test_custom_triton_constexpr_launch_grid(self, device, constexpr_first: bool):
         """
         Test a user kernel whose constexpr arg is smaller than its grid.
         The launcher omits constexprs, so they must not displace the other
@@ -1149,7 +1162,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
                 add_kernel_constexpr_last[grid](x, y, output, n_elements, BLOCK_SIZE=4)
             return output
 
-        args = [torch.randn(32, device=self.device) for _ in range(2)]
+        args = [torch.randn(32, device=device) for _ in range(2)]
         (gm,) = self._compile_and_check(add, args)
         (triton_node,) = gm.graph.find_nodes(
             op="call_function", target=triton_kernel_wrapper_mutation
@@ -1165,7 +1178,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
         def foo(x):
             return x[0:2:2].T[3:].squeeze(0)
 
-        args = [torch.rand([4, 4, 4, 4], device=self.device)]
+        args = [torch.rand([4, 4, 4, 4], device=device)]
         self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
     def test_fallback_tuple_constant_arg(self, device):
@@ -1179,7 +1192,7 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
             return torch.permute(x, (0, 2, 1))
 
         # Use complex64 to force permute to become a fallback op
-        args = [torch.randn(2, 3, 4, dtype=torch.complex64, device=self.device)]
+        args = [torch.randn(2, 3, 4, dtype=torch.complex64, device=device)]
 
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
@@ -1209,28 +1222,139 @@ class FxirTestCase(_FxirTestMixin, InductorTestCase):
 class AOTFxirTestCase(_FxirTestMixin, InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if not has_triton():
+            raise unittest.SkipTest("requires triton")
+        common.init_backend_registration()
+        codegen = common.device_codegens.get(cls.device_type)
+        if codegen is None or codegen.fx_wrapper_codegen is None:
+            raise unittest.SkipTest(
+                f"No FX wrapper backend registered for device {cls.device_type}"
+            )
+
     def check(
-        self, model, inp, dynamic_shapes=None, strict=False, check_fn=same
+        self,
+        model,
+        inp,
+        dynamic_shapes=None,
+        strict=False,
+        check_fn=same,
+        options=None,
+        check_assertions=False,
     ) -> torch.fx.GraphModule:
         with torch.no_grad():
             ep = torch.export.export(
                 model, inp, dynamic_shapes=dynamic_shapes, strict=strict
             )
             gm = torch._inductor.aot_compile(
-                ep.module(), inp, options={"fx_wrapper": True, **test_config}
+                ep.module(),
+                inp,
+                options={"fx_wrapper": True, **test_config, **(options or {})},
             )
             # Flatten args for fx_wrapper gm
             flat_args, _ = pytree.tree_flatten(inp)
             self.assertTrue(check_fn(model(*inp), gm(*flat_args)))
 
+            assert_nodes = self._get_assert_nodes(gm) if check_assertions else set()
             for node in gm.graph.nodes:
                 if (
                     node.op == "call_function"
                     and node.target != triton_kernel_wrapper_mutation
+                    and node not in assert_nodes
                 ):
                     self.assertTrue(node.meta.get("val", None) is not None)
 
             return gm
+
+    def test_size_assert_rejects_invalid_metadata(self, device):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inp = tuple(torch.ones(4, 8, device=device) for _ in range(2))
+        gm = self.check(M(), inp, options={"size_asserts": True}, check_assertions=True)
+        self.assertEqual(gm(*inp), M()(*inp))
+        for index in range(2):
+            with self.subTest(index=index):
+                invalid = list(inp)
+                invalid[index] = torch.ones(4, 16, device=device)
+                with self.assertRaisesRegex(AssertionError, "input"):
+                    gm(*invalid)
+
+    def test_extern_size_assert_preserves_dtype_check(self, device):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x)
+
+        x = torch.randn(8, device=device)
+        with patch_custom_fallback_pass(lambda node: node.target == aten.sin.default):
+            gm = self.check(
+                M(), (x,), options={"size_asserts": True}, check_assertions=True
+            )
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertEqual(gm(x), M()(x))
+        with self.assertRaisesRegex(RuntimeError, "expected dtype"):
+            gm(x.double())
+
+    def test_extern_size_assert_preserves_symbolic_expressions(self, device):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(torch.cat((x, x, x[:1])))
+
+        with patch_custom_fallback_pass(lambda node: node.target == aten.sin.default):
+            gm = self.check(
+                M(),
+                (torch.randn(4, device=device),),
+                dynamic_shapes=({0: Dim("length", min=2)},),
+                options={"size_asserts": True},
+                check_assertions=True,
+            )
+        for size in (3, 7):
+            x = torch.randn(size, device=device)
+            self.assertEqual(gm(x), M()(x))
+
+    @parametrize("value", (0x7FC00000, 0x7F800000))
+    def test_output_nan_assert_without_input_or_kernel_check(self, device, value):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.view(torch.float32)
+
+        x = torch.full((8,), 0x3F800000, dtype=torch.int32, device=device)
+        gm = self.check(M(), (x,), options={"nan_asserts": True}, check_assertions=True)
+        self.assertFalse(
+            gm.graph.find_nodes(
+                op="call_function", target=triton_kernel_wrapper_mutation
+            )
+        )
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertEqual(gm(x), M()(x))
+        invalid = torch.full((8,), value, dtype=torch.int32, device=device)
+        with self.assertRaises(AssertionError):
+            gm(invalid)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scalar_assert_rejects_negative_count(self, device):
+        class M(torch.nn.Module):
+            def forward(self, x, count):
+                n = count.item()
+                torch._check(n >= 0)
+                return x + n
+
+        x = torch.ones(8, device=device)
+        count = torch.tensor(2, device=device)
+        gm = self.check(
+            M(),
+            (x, count),
+            options={"scalar_asserts": True},
+            check_assertions=True,
+        )
+        self.assertEqual(gm(x, count), M()(x, count))
+        with self.assertRaisesRegex(RuntimeError, r"u\d+ >= 0"):
+            gm(x, torch.tensor(-1, device=device))
 
     def test_aoti_fx_add(self, device):
         class M(torch.nn.Module):
@@ -1240,7 +1364,6 @@ class AOTFxirTestCase(_FxirTestMixin, InductorTestCase):
         inp = (torch.ones(3, device=device), torch.ones(3, device=device))
         self.check(M(), inp)
 
-    @requires_gpu()
     @parametrize(
         "input_dtype,dtype",
         (
@@ -1250,13 +1373,13 @@ class AOTFxirTestCase(_FxirTestMixin, InductorTestCase):
         ),
     )
     @parametrize("offset", (0, 16))
-    def test_reinterpret_dtype_view(self, input_dtype, dtype, offset):
+    def test_reinterpret_dtype_view(self, device, input_dtype, dtype, offset):
         class M(torch.nn.Module):
             def forward(self, x):
                 return x.view(dtype)[offset : offset + 32].reshape(2, 16)
 
         # Citrine C3: create inputs directly on the test device.
-        x = torch.arange(64, dtype=input_dtype, device=self.device)
+        x = torch.arange(64, dtype=input_dtype, device=device)
         model = M()
         gm = self.check(
             model, (x,), check_fn=lambda ref, res: same(ref.float(), res.float())
@@ -1276,22 +1399,20 @@ class AOTFxirTestCase(_FxirTestMixin, InductorTestCase):
         (output,) = gm.graph.find_nodes(op="output")
         self.assertEqual(output.args[0].meta["val"].dtype, dtype)
 
-    @requires_gpu()
     @parametrize("offset", (0, 16))
-    def test_reinterpret_dtype_view_extern_kernel(self, offset):
+    def test_reinterpret_dtype_view_extern_kernel(self, device, offset):
         class M(torch.nn.Module):
             def forward(self, x, y):
                 view = x.view(torch.bfloat16)[offset : offset + 32].reshape(2, 16)
                 return torch.mm(view, y)
 
-        x = torch.arange(64, dtype=torch.float16, device=self.device)
-        y = torch.ones(16, 16, dtype=torch.bfloat16, device=self.device)
+        x = torch.arange(64, dtype=torch.float16, device=device)
+        y = torch.ones(16, 16, dtype=torch.bfloat16, device=device)
         gm = self.check(M(), (x, y))
 
         (mm,) = gm.graph.find_nodes(op="call_function", target=torch.ops.aten.mm.out)
         self.assertEqual(mm.args[0].meta["val"].dtype, torch.bfloat16)
 
-    @requires_gpu()
     def test_aoti_fx_parallel_compile_reloads_triton_kernel(self, device):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -2021,7 +2142,5 @@ instantiate_device_type_tests(
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
-    from torch.utils._triton import has_triton
 
-    if has_triton():
-        run_tests(needs="filelock")
+    run_tests(needs="filelock")
