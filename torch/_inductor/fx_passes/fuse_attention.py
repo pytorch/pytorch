@@ -939,6 +939,31 @@ def _sfdp_replacement_30(query, key, value, inv_scale):
     )
 
 
+def _sfdp_pattern_31(query, key, value, attn_mask, scale_factor):
+    # pattern 14 with mul(scale_factor) instead of div(inv_scale)
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    return (
+        (torch.matmul(q, k.transpose(-2, -1)).mul(scale_factor) + attn_mask)
+        .softmax(dim=-1)
+        .matmul(v)
+    )
+
+
+def _sfdp_replacement_31(query, key, value, attn_mask, scale_factor):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=query.dtype),
+        dropout_p=0.0,
+        is_causal=False,
+        scale=scale_factor,
+    )
+
+
 @functools.lru_cache(None)
 def _warn_tf32_disabled() -> None:
     perf_hint_log.info(
@@ -946,6 +971,10 @@ def _warn_tf32_disabled() -> None:
         "Skipping pattern matching to fused flash-attention. "
         "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
     )
+
+
+def _scale_value(scale):
+    return scale.meta.get("val") if isinstance(scale, torch.fx.Node) else scale
 
 
 def _is_supported_scale(scale) -> bool:
@@ -958,16 +987,32 @@ def _is_supported_scale(scale) -> bool:
     # TODO: the scalar behind a tensorified SymFloat scale (e.g. head_dim**0.5
     # under dynamic shapes) could be recovered from the aten.scalar_tensor node
     # to keep the fusion - tracked in #194444.
-    if isinstance(scale, torch.fx.Node):
-        scale = scale.meta.get("val")
-    return isinstance(scale, (float, int, torch.SymInt))
+    return isinstance(_scale_value(scale), (float, int, torch.SymInt))
 
 
-def _sfdp_params_check(match):
+def _is_zero_scale(scale) -> bool:
+    # Gated for the replacements that invert the scale into SDPA's scale
+    # argument: computing 1.0 / scale in Python raises on a concrete zero.
+    # Patterns 2, 4, 28 multiply and 29/30 square the scale, so they are not
+    # gated. A SymInt scale skips == 0 (that would install a guard) in favor
+    # of its best-effort hint, so an unbacked, hint-less scale falls through
+    # as not zero; and because patterns 3/12 name their scale kwarg
+    # inv_scale_factor instead of inv_scale, the div-node operand check in
+    # _sfdp_extra_check is their only guard.
+    scale = _scale_value(scale)
+    if isinstance(scale, torch.SymInt):
+        hint = scale.node.hint
+        return isinstance(hint, (int, float)) and hint == 0
+    return isinstance(scale, (float, int)) and scale == 0
+
+
+def _sfdp_params_check(match, *, reject_zero_scale=False):
     if not all(k in match.kwargs for k in ("query", "key", "value")):
         raise AssertionError("expected query, key, value in match.kwargs")
     inv_scale = match.kwargs.get("inv_scale")
     if inv_scale is not None and not _is_supported_scale(inv_scale):
+        return False
+    if reject_zero_scale and _is_zero_scale(inv_scale):
         return False
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
@@ -1014,7 +1059,11 @@ def _sfdp_params_check(match):
 
 
 def _sfdp_extra_check(
-    scale_factor_op=None, fp32_upcast_softmax=False, math_path_only=False
+    scale_factor_op=None,
+    fp32_upcast_softmax=False,
+    math_path_only=False,
+    *,
+    reject_zero_scale=False,
 ):
     def fn(match):
         if math_path_only and "query" in match.kwargs:
@@ -1032,7 +1081,9 @@ def _sfdp_extra_check(
             # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
             if not _is_supported_scale(scale_factor_node.args[1]):
                 return False
-        return _sfdp_params_check(match)
+            if reject_zero_scale and _is_zero_scale(scale_factor_node.args[1]):
+                return False
+        return _sfdp_params_check(match, reject_zero_scale=reject_zero_scale)
 
     return fn
 
@@ -1060,19 +1111,8 @@ def partialize_and_update_signature(func, **kwargs):
     return wrapper
 
 
-def _get_sfdp_patterns(input_device: torch.device | None = None):
+def _get_sfdp_patterns(device: str):
     from .joint_graph import patterns
-
-    if input_device:
-        device = str(input_device)
-    else:
-        if torch.cuda.is_available():
-            # workaround https://github.com/pytorch/pytorch/issues/97894
-            device = "cuda"
-        elif torch.xpu.is_available():
-            device = "xpu"
-        else:
-            device = "cpu"
 
     # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
@@ -1151,7 +1191,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_1,
                 [g(), g(), g(), c()],
                 {},
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_2,
@@ -1165,7 +1205,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_3,
                 [g(), g(), g(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_4,
@@ -1179,56 +1219,56 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_5,
                 [g(), g(), g(), b()],
                 s,
-                _sfdp_params_check,
+                _sfdp_extra_check(reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_6,
                 _sfdp_replacement_6,
                 [g(), g(), g(), b()],
                 sd,
-                _sfdp_params_check,
+                _sfdp_extra_check(reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_7,
                 _sfdp_replacement_7,
                 [g(), g(), g()],
                 sd,
-                _sfdp_params_check,
+                _sfdp_extra_check(reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_8,
                 _sfdp_replacement_8,
                 [g(), g(), g()],
                 s,
-                _sfdp_params_check,
+                _sfdp_extra_check(reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_9,
                 _sfdp_replacement_9,
                 [g(), g(), g()],
                 sd,
-                _sfdp_params_check,
+                _sfdp_extra_check(reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_10,
                 _sfdp_replacement_10,
                 [g(), g(), g()],
                 s,
-                _sfdp_params_check,
+                _sfdp_extra_check(reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_11,
                 _sfdp_replacement_11,
                 [g(), g(), g(), c()],
                 {},
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_12,
                 _sfdp_replacement_12,
                 [g(), g(), g(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_13,
@@ -1242,63 +1282,63 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_14,
                 [g(), g(), g(), m(), c()],
                 {},
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_15,
                 _sfdp_replacement_15,
                 [g(), g(), g(), m_2d(), c()],
                 {},
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g(), g(), g(), m(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
                 [g(), g(), g(), m_2d(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g(), g(), g(), m_bool()],
                 sd,
-                _sfdp_params_check,
+                _sfdp_extra_check(reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
                 sd,
-                _sfdp_params_check,
+                _sfdp_extra_check(reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_19,
                 _sfdp_replacement_19,
                 [g(), g(), g(), b_bool(), b_float()],
                 sd,
-                _sfdp_params_check,
+                _sfdp_extra_check(reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_20,
                 _sfdp_replacement_20,
                 [g(), g(), g(), m_2d()],
                 sd,
-                _sfdp_params_check,
+                _sfdp_extra_check(reject_zero_scale=True),
             ),
             (
                 _sfdp_pattern_21,
@@ -1426,6 +1466,20 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 s,
                 _sfdp_extra_check(aten.mul.Scalar),
             ),
+            (
+                _sfdp_pattern_31,
+                _sfdp_replacement_31,
+                [g(), g(), g(), m(), c()],
+                {},
+                _sfdp_extra_check(aten.mul.Tensor),
+            ),
+            (
+                _sfdp_pattern_31,
+                _sfdp_replacement_31,
+                [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
+                {},
+                _sfdp_extra_check(aten.mul.Tensor),
+            ),
         ]
         mask_fp32_patterns = ["pattern_16"]
         if dtype == torch.half:
@@ -1436,7 +1490,9 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g(), g(), g(), m_float(), c()],
                     d,
-                    _sfdp_extra_check(aten.div.Tensor, math_path_only=True),
+                    _sfdp_extra_check(
+                        aten.div.Tensor, math_path_only=True, reject_zero_scale=True
+                    ),
                 )
             )
             candidates.append(
@@ -1445,7 +1501,9 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
                     d,
-                    _sfdp_extra_check(aten.div.Tensor, math_path_only=True),
+                    _sfdp_extra_check(
+                        aten.div.Tensor, math_path_only=True, reject_zero_scale=True
+                    ),
                 )
             )
 
@@ -1518,6 +1576,6 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
 
 
 @functools.cache
-def _sfdp_init(input_device: torch.device | None = None):
-    for key, register_replacement_kwargs in _get_sfdp_patterns(input_device):
+def _sfdp_init(device: str):
+    for key, register_replacement_kwargs in _get_sfdp_patterns(device):
         gen_register_replacement(key, **register_replacement_kwargs)
