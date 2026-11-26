@@ -278,8 +278,8 @@ C10_HOST_DEVICE inline scalar_t zeta_series(scalar_t x, scalar_t q) {
   b = zero;
   while ((i < 9) || (a <= acc_t{9.0})) {
     i += 1;
-    a += one;
-    b = normalized ? std::exp(-x * std::log1p((a - static_cast<acc_t>(q)) / q))
+    a = normalized ? static_cast<acc_t>(q) + i : a + one;
+    b = normalized ? std::exp(-x * std::log1p(static_cast<acc_t>(i) / q))
                    : ::pow(a, -x);
     s += b;
     if ((-MACHEP * s < b) && (b < MACHEP * s)) {
@@ -647,50 +647,70 @@ inline Half calc_digamma(Half a) {
   return calc_digamma(static_cast<float>(a));
 }
 
-C10_HOST_DEVICE inline double polygamma_log_scale(double n, double q) {
+C10_HOST_DEVICE inline double polygamma_log_scale(
+    int64_t order,
+    double q,
+    double q_low) {
+  const auto integer = static_cast<uint64_t>(order);
+  const double high = static_cast<double>(integer >> 32) * 4294967296.0;
+  const double low = static_cast<double>(integer & 0xffffffff);
+  const double n = high + low;
+  const double n_low = (high - n) + low;
   if (n >= 32.0 && q >= n * 0.25 && q <= n * 0.5) {
     // Combine Stirling's scale without subtracting large logarithms.
     const double e_hi = 2.718281828459045;
     const double e_lo = 1.4456468917292502e-16;
     double residual = std::fma(-e_hi, q, n);
+    residual += n_low;
     residual = std::fma(-e_lo, q, residual);
+    residual = std::fma(-e_hi, q_low, residual);
+    residual = std::fma(-e_lo, q_low, residual);
     double delta = residual / (e_hi * q);
     double inverse = 1.0 / n;
     double square = inverse * inverse;
     double correction = inverse *
         (1.0 / 12.0 -
          square * (1.0 / 360.0 - square * (1.0 / 1260.0 - square / 1680.0)));
-    return n * std::log1p(delta) + 0.5 * std::log(n) - std::log(q) +
-        0.91893853320467274178 + correction;
+    return n * std::log1p(delta) + n_low * std::log1p(delta) +
+        0.5 * std::log(n) - std::log(q) + 0.91893853320467274178 + correction;
   }
   return std::lgamma(n + 1.0) - (n + 1.0) * std::log(q);
 }
 
 template <typename scalar_t, bool is_cuda = false>
-inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
+inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int64_t n) {
   // already blocked if n <= 1
   const auto one = scalar_t{1};
   const auto log_gamma = std::lgamma(static_cast<scalar_t>(n) + one);
   const auto gamma = std::exp(log_gamma);
-  const auto exponent = static_cast<scalar_t>(static_cast<int64_t>(n) + 1);
+  const auto exponent = static_cast<scalar_t>(static_cast<double>(n) + 1.0);
   const auto sign = (n % 2) ? one : -one;
+  if (std::isfinite(x) && x < scalar_t{0} && x != std::floor(x) &&
+      std::isinf(gamma)) {
+    const double fraction = static_cast<double>(x) - std::floor(x);
+    if (n % 2 || fraction != 0.5) {
+      return n % 2 || fraction > 0.5
+          ? std::numeric_limits<scalar_t>::infinity()
+          : -std::numeric_limits<scalar_t>::infinity();
+    }
+  }
   const auto value = zeta<scalar_t, is_cuda>(exponent, x);
   if (std::isfinite(x)) {
-    using acc_t = acc_type<scalar_t, is_cuda>;
-    acc_t positive = static_cast<acc_t>(x);
+    double coordinate = static_cast<double>(x);
+    double coordinate_low = 0.0;
     if (x < scalar_t{0} && x != std::floor(x) && n % 2 == 0 &&
         (std::floor(x) + std::ceil(x)) == (x + x)) {
-      positive = acc_t{1} - positive;
+      coordinate = 1.0 - static_cast<double>(x);
+      coordinate_low = (1.0 - coordinate) - static_cast<double>(x);
     }
-    if (positive > acc_t{0} &&
+    if (coordinate > 0.0 &&
         (std::isinf(gamma) || value < std::numeric_limits<scalar_t>::min() ||
          std::isnan(value))) {
-      const double power = static_cast<double>(static_cast<int64_t>(n) + 1);
-      const double coordinate = static_cast<double>(positive);
+      const double power = static_cast<double>(n) + 1.0;
       const double normalized =
           zeta_series<double, is_cuda, true>(power, coordinate);
       const double log_scale =
-          polygamma_log_scale(static_cast<double>(n), coordinate);
+          polygamma_log_scale(n, coordinate, coordinate_low);
       return static_cast<scalar_t>(
           sign * std::exp(log_scale + std::log(normalized)));
     }

@@ -1915,6 +1915,51 @@ class TestUnaryUfuncs(TestCase):
 class TestNativePolygammaNumerics(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.float32)
+    def test_polygamma_reflected_coordinate_precision(self, device, dtype):
+        x = torch.tensor(-8388607.5, device=device, dtype=dtype)
+        expected = torch.tensor(-0.0014508652966469526, device=device, dtype=dtype)
+        self.assertEqual(torch.polygamma(22802602, x), expected, atol=0, rtol=1e-5)
+
+    @dtypes(torch.float64)
+    def test_polygamma_reflected_coordinate_double_precision(self, device, dtype):
+        x = torch.tensor(-4503599627370495.5, device=device, dtype=dtype)
+        expected = torch.tensor(-6.526404762613034e-8, device=device, dtype=dtype)
+        self.assertEqual(torch.polygamma(12242053029736148, x), expected, atol=0, rtol=1e-12)
+
+    @dtypes(torch.bfloat16, torch.float32, torch.float64)
+    def test_polygamma_int64_order_precision(self, device, dtype):
+        x = torch.tensor(1152921504606846976.0, device=device, dtype=dtype)
+        expected = torch.tensor(5.721986471507503e-9, device=device, dtype=dtype)
+        self.assertEqual(torch.polygamma(3133965575612453543, x), expected, atol=0, rtol=2 * torch.finfo(dtype).eps)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("order", (256, 2048, 16777216, 9223372036854775806, 9223372036854775807))
+    def test_polygamma_integer_order_parity(self, device, dtype, order):
+        x = torch.tensor([-1.75, -1.25], device=device, dtype=dtype)
+        values = [math.inf, math.inf] if order % 2 else [-math.inf, math.inf]
+        expected = torch.tensor(values, device=device, dtype=dtype)
+        self.assertEqual(torch.polygamma(order, x), expected)
+
+    @dtypes(torch.float64)
+    @parametrize("order", (2147483648, 4294967296, 9007199254740992, 9223372036854775807))
+    def test_polygamma_int64_order_finite(self, device, dtype, order):
+        inputs = {
+            2147483648: 790015084.3510504,
+            4294967296: 1580030168.7021008,
+            9007199254740992: 3313563428353948.0,
+            9223372036854775807: 3.393088950634443e18,
+        }
+        references = {
+            2147483648: -0.0001574225751854272,
+            4294967296: -0.0001113145623444198,
+            9007199254740992: -5.669937532338715e-8,
+            9223372036854775807: 4.127275873978224e-145,
+        }
+        x = torch.tensor(inputs[order], device=device, dtype=dtype)
+        expected = torch.tensor(references[order], device=device, dtype=dtype)
+        self.assertEqual(torch.polygamma(order, x), expected, atol=0, rtol=1e-12)
+
     @dtypes(torch.float32, torch.float64)
     @parametrize("order", (2, 4))
     def test_polygamma_near_negative_half_integer(self, device, dtype, order):

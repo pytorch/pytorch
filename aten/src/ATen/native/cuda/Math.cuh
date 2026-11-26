@@ -327,8 +327,8 @@ const auto zeta_string = jiterator_stringify(
     b = zero;
     while ((i < 9) || (a <= T{9.0})) {
       i += 1;
-      a += one;
-      b = normalized ? exp(-x * log1p((a - q) / q)) : pow(a, -x);
+      a = normalized ? q + i : a + one;
+      b = normalized ? exp(-x * log1p(static_cast<T>(i) / q)) : pow(a, -x);
       s += b;
       if ((-MACHEP * s < b) && (b < MACHEP * s)) {
         return s;
@@ -508,44 +508,59 @@ const auto lgamma_string = jiterator_stringify(
 ); // lgamma_string
 
 const auto polygamma_string = zeta_string + jiterator_stringify(
-  double polygamma_log_scale(double n, double q) {
+  double polygamma_log_scale(int64_t order, double q, double q_low) {
+    const auto integer = static_cast<uint64_t>(order);
+    const double high = static_cast<double>(integer >> 32) * 4294967296.0;
+    const double low = static_cast<double>(integer & 0xffffffff);
+    const double n = high + low;
+    const double n_low = (high - n) + low;
     if (n >= 32.0 && q >= n * 0.25 && q <= n * 0.5) {
       // Combine Stirling's scale without subtracting large logarithms.
       const double e_hi = 2.718281828459045;
       const double e_lo = 1.4456468917292502e-16;
       double residual = fma(-e_hi, q, n);
+      residual += n_low;
       residual = fma(-e_lo, q, residual);
+      residual = fma(-e_hi, q_low, residual);
+      residual = fma(-e_lo, q_low, residual);
       double delta = residual / (e_hi * q);
       double inverse = 1.0 / n;
       double square = inverse * inverse;
       double correction = inverse * (1.0 / 12.0 - square *
           (1.0 / 360.0 - square * (1.0 / 1260.0 - square / 1680.0)));
-      return n * log1p(delta) + 0.5 * log(n) - log(q) + 0.91893853320467274178 + correction;
+      return n * log1p(delta) + n_low * log1p(delta) + 0.5 * log(n) - log(q) + 0.91893853320467274178 + correction;
     }
     return lgamma(n + 1.0) - (n + 1.0) * log(q);
   }
 
   template <typename T>
-  T polygamma(T x, int n) {
+  T polygamma(T x, int64_t n) {
     // already blocked if n <= 1
     const auto one = T{1};
     const T log_gamma = lgamma(static_cast<T>(n) + one);
     const T gamma = exp(log_gamma);
-    const T exponent = static_cast<T>(static_cast<int64_t>(n) + 1);
+    const T exponent = static_cast<T>(static_cast<double>(n) + 1.0);
     const T sign = (n % 2) ? one : -one;
+    if (isfinite(x) && x < T(0) && x != floor(x) && isinf(gamma)) {
+        double fraction = static_cast<double>(x) - floor(x);
+        if (n % 2 || fraction != 0.5) {
+            return n % 2 || fraction > 0.5 ? T(INFINITY) : -T(INFINITY);
+        }
+    }
     const T value = zeta<T>(exponent, x);
     const T min_normal = sizeof(T) == sizeof(float)
         ? T(1.1754943508222875e-38) : T(2.2250738585072014e-308);
     if (isfinite(x)) {
-        T positive = x;
+        double coordinate = static_cast<double>(x);
+        double coordinate_low = 0.0;
         if (x < T(0) && x != floor(x) && n % 2 == 0 && (floor(x) + ceil(x)) == (x + x)) {
-            positive = one - x;
+            coordinate = 1.0 - static_cast<double>(x);
+            coordinate_low = (1.0 - coordinate) - static_cast<double>(x);
         }
-        if (positive > T(0) && (isinf(gamma) || value < min_normal || isnan(value))) {
-            double power = static_cast<double>(static_cast<int64_t>(n) + 1);
-            double coordinate = static_cast<double>(positive);
+        if (coordinate > 0.0 && (isinf(gamma) || value < min_normal || isnan(value))) {
+            double power = static_cast<double>(n) + 1.0;
             double normalized = zeta_series<double, true>(power, coordinate);
-            double log_scale = polygamma_log_scale(static_cast<double>(n), coordinate);
+            double log_scale = polygamma_log_scale(n, coordinate, coordinate_low);
             return sign * static_cast<T>(exp(log_scale + log(normalized)));
         }
     }

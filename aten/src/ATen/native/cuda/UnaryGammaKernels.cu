@@ -94,7 +94,7 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
       at::ScalarType::BFloat16,
         iter.common_dtype(), "polygamma_cuda", [&]() {
           gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
-            return calc_polygamma<scalar_t, /*is_cuda=*/true>(a, static_cast<int>(n));
+            return calc_polygamma<scalar_t, /*is_cuda=*/true>(a, n);
           });
         });
 #endif // AT_USE_JITERATOR()
