@@ -332,6 +332,132 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
+    @unittest.skipIf(torch.version.hip is not None, "wide-cat rules are CUDA only")
+    @requires_gpu_and_triton
+    @config.patch(fx_graph_cache=False)
+    def test_cat_innermost_dim_many_gather_inputs(self):
+        def f(*args):
+            idxs, tables = args[:6], args[6:]
+            cols = [torch.nn.functional.embedding(i, t) for i, t in zip(idxs, tables)]
+            return torch.cat(cols, dim=1).to(torch.bfloat16)
+
+        n = 2**16
+        inp = [TI(n, mx=16, dtype=torch.int64) for _ in range(6)]
+        inp += [T(16, 32) for _ in range(6)]
+        expected = f(*inp)
+
+        def pointwise_cat_selects(**patches):
+            torch._dynamo.reset()
+            with config.patch(patches):
+                out, code = run_and_get_code(torch.compile(f), *inp)
+            self.assertEqual(out, expected, atol=0, rtol=0)
+            src = "".join(code)
+            return src.count("tl.where")
+
+        on = {"wide_cat_and_tiled_reductions": True}
+        off = {"wide_cat_and_tiled_reductions": False}
+        # Each input is computed into its own bf16 slice: no masked select chain.
+        self.assertEqual(pointwise_cat_selects(**on), 0)
+        self.assertGreaterEqual(pointwise_cat_selects(**off), 5)
+        self.assertGreaterEqual(
+            pointwise_cat_selects(**on, max_pointwise_cat_inputs_innermost_dim=None), 5
+        )
+        # Small cats keep the single fused kernel.
+        self.assertGreaterEqual(
+            pointwise_cat_selects(**on, pointwise_cat_innermost_dim_min_numel=2**30),
+            5,
+        )
+
+    @unittest.skipIf(torch.version.hip is not None, "wide-cat rules are CUDA only")
+    @requires_gpu_and_triton
+    @config.patch(fx_graph_cache=False, wide_cat_and_tiled_reductions=True)
+    def test_cat_innermost_dim_narrow_inputs(self):
+        # Narrow inputs join a neighbor's slice instead of getting a kernel that
+        # writes a few bytes per row.
+        widths = [64, 1, 1, 64, 64, 1, 64]
+
+        def f(*args):
+            idxs, tables = args[: len(widths)], args[len(widths) :]
+            cols = [torch.nn.functional.embedding(i, t) for i, t in zip(idxs, tables)]
+            return torch.cat(cols, dim=1).to(torch.bfloat16)
+
+        n = 2**16
+        inp = [TI(n, mx=16, dtype=torch.int64) for _ in widths]
+        inp += [T(16, w) for w in widths]
+        out, code = run_and_get_code(torch.compile(f), *inp)
+        self.assertEqual(out, f(*inp), atol=0, rtol=0)
+        self.assertLessEqual("".join(code).count("@triton.jit"), 4)
+
+    def test_cat_innermost_dim_rules_cuda_only(self):
+        from torch._inductor.lowering import innermost_cat_rules_supported
+
+        with patch.object(torch.version, "hip", None):
+            self.assertFalse(innermost_cat_rules_supported(torch.device("cuda")))
+        with config.patch(wide_cat_and_tiled_reductions=True):
+            self.assertFalse(innermost_cat_rules_supported(torch.device("cpu")))
+            self.assertFalse(innermost_cat_rules_supported(None))
+            with patch.object(torch.version, "hip", "6.4.0"):
+                self.assertFalse(innermost_cat_rules_supported(torch.device("cuda")))
+            with patch.object(torch.version, "hip", None):
+                self.assertTrue(innermost_cat_rules_supported(torch.device("cuda")))
+
+    @requires_gpu_and_triton
+    @unittest.skipIf(torch.version.hip is None, "ROCm only")
+    @config.patch(fx_graph_cache=False, wide_cat_and_tiled_reductions=True)
+    def test_cat_innermost_dim_rocm_keeps_pointwise_cat(self):
+        # With the flag on, ROCm must still keep the single pointwise cat.
+        widths = [32, 1, 32, 32, 32, 32]
+
+        def f(*args):
+            idxs, tables = args[: len(widths)], args[len(widths) :]
+            cols = [torch.nn.functional.embedding(i, t) for i, t in zip(idxs, tables)]
+            return torch.cat(cols, dim=1).to(torch.bfloat16)
+
+        n = 2**16
+        inp = [TI(n, mx=16, dtype=torch.int64) for _ in widths]
+        inp += [T(16, w) for w in widths]
+        out, code = run_and_get_code(torch.compile(f), *inp)
+        self.assertEqual(out, f(*inp), atol=0, rtol=0)
+        src = "".join(code)
+        self.assertGreaterEqual(src.count("tl.where"), 5)
+
+    @requires_gpu_and_triton
+    @config.patch(fx_graph_cache=False, wide_cat_and_tiled_reductions=True)
+    def test_cat_innermost_dim_plain_inputs_stay_pointwise(self):
+        def f(*args):
+            return torch.cat([a.sigmoid() for a in args], dim=1).to(torch.bfloat16)
+
+        inp = [T(2**16, 64) for _ in range(6)]
+        out, code = run_and_get_code(torch.compile(f), *inp)
+        self.assertEqual(out, f(*inp))
+        self.assertGreaterEqual("".join(code).count("tl.where"), 5)
+
+    @requires_gpu_and_triton
+    @config.patch(fx_graph_cache=False)
+    def test_cat_sink_convert_element_type_only_wide_cats(self):
+        # A cast after a cat that does not take the wide-cat ConcatKernel rule
+        # (two inputs here, one of them also an output) is lowered as without
+        # the flag: same kernels, same values.
+        def f(x):
+            p = torch.nn.functional.pad(x, (0, 6))
+            return p, torch.cat([p, p.pow(2)], dim=1).to(torch.bfloat16)
+
+        x = T(64, 250)
+
+        def compiled_code(flag):
+            torch._dynamo.reset()
+            with config.patch(wide_cat_and_tiled_reductions=flag):
+                out, code = run_and_get_code(torch.compile(f), x)
+            self.assertEqual(out, f(x), atol=0, rtol=0)
+            return "".join(code)
+
+        on, off = compiled_code(True), compiled_code(False)
+        self.assertEqual(on.count("@triton.jit"), off.count("@triton.jit"))
+        self.assertEqual(on.count("tl.store"), off.count("tl.store"))
+        # opt-in: sink into every float cat (values unchanged)
+        with config.patch(cat_sink_convert_element_type_all_cats=True):
+            compiled_code(True)
+
     def test_index(self):
         def f(a, b):
             return a[b]
@@ -782,6 +908,41 @@ class TilingTests(TestCase):
 
         inp = (T(10, 10, 10), T(10, 10, 10), T(10, 10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """4000""")
+
+
+class ReductionTilingTests(TestCase):
+    @requires_gpu_and_triton
+    @config.patch(fx_graph_cache=False)
+    def test_tile_reductions_without_prefer_nd_tiling(self):
+        # q is contiguous along the reduction dim, the value tensor along the
+        # pointwise head dim: only a tiled reduction reads both coalesced.
+        def f(q, kt):
+            return (q * kt.permute(2, 0, 1)).sum(-1)
+
+        q, kt = T(24, 512, 96), T(512, 96, 24)
+        expected = f(q, kt)
+
+        def reduction_kernels(**patches):
+            torch._dynamo.reset()
+            with config.patch(patches):
+                out, code = run_and_get_code(torch.compile(f), q, kt)
+            self.assertEqual(out, expected)
+            return [
+                k
+                for k in "".join(code).split("@triton.jit")
+                if "def triton_red" in k or "def triton_per" in k
+            ]
+
+        tiled = reduction_kernels(
+            **{"triton.tile_reductions": True, "wide_cat_and_tiled_reductions": True}
+        )
+        self.assertTrue(tiled and all("ynumel" in k for k in tiled))
+        for patches in (
+            {"triton.tile_reductions": False, "wide_cat_and_tiled_reductions": True},
+            {"triton.tile_reductions": True, "wide_cat_and_tiled_reductions": False},
+        ):
+            untiled = reduction_kernels(**patches)
+            self.assertTrue(untiled and all("ynumel" not in k for k in untiled))
 
 
 class MinCutPartitioningTests(TestCase):

@@ -1234,6 +1234,40 @@ max_pointwise_cat_inputs = 8
 # force concat to be generated as a pointwise op with masked loads
 force_pointwise_cat = False
 
+# Wide innermost-dim cats and tiled reductions (off by default). Enables:
+# - wide innermost-dim cats lowered as a ConcatKernel: a pointwise cat evaluates
+#   every input's masked load and index math for each output element. Along the
+#   innermost dim, with more than max_pointwise_cat_inputs_innermost_dim inputs,
+#   at least pointwise_cat_innermost_dim_min_gather_inputs gather inputs and
+#   pointwise_cat_innermost_dim_min_numel elements, the cat is lowered as a
+#   ConcatKernel instead (each input computed into its own slice) when it would
+#   only be a horizontal fusion of copies;
+# - convert_element_type(cat(xs)) -> cat([convert_element_type(x)]) for exactly
+#   those cats (cat_sink_convert_element_type), so each slice is written in the
+#   target dtype instead of materializing the cat and converting it again;
+# - triton.tile_reductions without triton.prefer_nd_tiling: reductions (only)
+#   take the ND tilings, pointwise kernels keep the coalescing analysis.
+# CUDA only (not ROCm) for the cat rules.
+wide_cat_and_tiled_reductions: bool = (
+    os.environ.get("TORCHINDUCTOR_WIDE_CAT_AND_TILED_REDUCTIONS", "0") == "1"
+)
+# Innermost-dim cats with more inputs than this take the ConcatKernel rule; None
+# disables it.
+max_pointwise_cat_inputs_innermost_dim: int | None = 4
+# Smaller cats keep the single fused kernel (launch overhead dominates).
+pointwise_cat_innermost_dim_min_numel = 2**20
+# Narrower inputs stay in a pointwise cat with a neighbor slice.
+pointwise_cat_innermost_dim_min_slice_bytes = 64
+# Only cats with this many gather (indirect-indexing) inputs: cats of plain
+# pointwise inputs are already near bandwidth-bound as one kernel.
+pointwise_cat_innermost_dim_min_gather_inputs = 3
+# Sink a float -> float convert_element_type into the cats that take the
+# ConcatKernel rule above. Values are unchanged (the conversion is elementwise).
+cat_sink_convert_element_type = True
+# Sink it into every float cat instead. Off: it also changes how cats that are
+# not wide are lowered, which speeds up some graphs and slows down others.
+cat_sink_convert_element_type_all_cats = False
+
 # Lower a cat input that is all of an already-laid-out computed buffer through
 # ConcatKernel, so its copy can fuse into the producer instead of being re-read
 # by a pointwise cat. Off by default: profitability depends on the destination

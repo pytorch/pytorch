@@ -52,7 +52,12 @@ from ..fx_utils import (
     same_tensor_meta,
 )
 from ..kernel.symmetric_mm import quack_symmetric_mm
-from ..lowering import lowerings as L
+from ..lowering import (
+    innermost_cat_rules_supported,
+    innermost_cat_slice_groups,
+    innermost_concat_kernel,
+    lowerings as L,
+)
 from ..pattern_matcher import (
     _return_true,
     Arg,
@@ -1341,6 +1346,95 @@ def pointless_cumsum_replacement(
     match.nodes = [match.output_node()]
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, list(shape))
+
+
+_GATHER_OPS = OrderedSet(
+    [
+        aten.embedding.default,
+        aten.index.Tensor,
+        aten.index_select.default,
+        aten.gather.default,
+        aten._unsafe_index.Tensor,
+    ]
+)
+
+
+def _fx_has_gather(n: object, budget: list[int]) -> bool:
+    """A gather reached from ``n`` through pointwise ops and views (what Inductor
+    inlines into a pointwise cat input)."""
+    if not isinstance(n, torch.fx.Node) or n.op != "call_function" or budget[0] <= 0:
+        return False
+    budget[0] -= 1
+    if n.target in _GATHER_OPS:
+        return True
+    t = n.target
+    if not isinstance(t, torch._ops.OpOverload) or not (
+        torch.Tag.pointwise in t.tags or t.is_view
+    ):
+        return False
+    return any(_fx_has_gather(a, budget) for a in n.all_input_nodes)
+
+
+def _is_cat_convert_sink(match: Match) -> bool:
+    """Only cats that can take the wide innermost-dim ConcatKernel rule
+    (lowering.innermost_cat_slice_groups); others keep their own lowering."""
+    if not config.cat_sink_convert_element_type:
+        return False
+    cat_node = next(n for n in match.nodes if n.target is aten.cat.default)
+    cvt_node = match.output_node()
+    cat_val = cat_node.meta["val"]
+    if not innermost_cat_rules_supported(cat_val.device):
+        return False
+    src, dst = cat_val.dtype, cvt_node.meta["val"].dtype
+    if not (src.is_floating_point and dst.is_floating_point and src != dst):
+        return False
+    if config.cat_sink_convert_element_type_all_cats:
+        return True
+    inputs = cat_node.args[0]
+    dim = cat_node.args[1] if len(cat_node.args) > 1 else cat_node.kwargs.get("dim", 0)
+    if not isinstance(inputs, (list, tuple)) or not isinstance(dim, int):
+        return False
+    max_inputs = config.max_pointwise_cat_inputs_innermost_dim
+    if max_inputs is None or len(inputs) <= max_inputs:
+        return False
+    if dim % cat_val.dim() != cat_val.dim() - 1:
+        return False
+    if not statically_known_true(
+        cat_val.numel() >= config.pointwise_cat_innermost_dim_min_numel
+    ):
+        return False
+    gathers = sum(_fx_has_gather(x, [64]) for x in inputs)
+    return gathers >= config.pointwise_cat_innermost_dim_min_gather_inputs
+
+
+@register_lowering_pattern(
+    CallFunction(
+        prims.convert_element_type.default,
+        CallFunction(aten.cat.default, Arg(), Arg(), _users=1),
+        Arg(),
+    ),
+    extra_check=_is_cat_convert_sink,
+)
+def cat_convert_sink(match: Match, inputs, dim, dtype):
+    """
+    convert_element_type(cat(xs, dim), dtype) -> cat([convert_element_type(x, dtype)], dim)
+    for cats that lower as a wide innermost-dim ConcatKernel; any other cat is
+    lowered exactly as without this pattern.
+
+    The cat dtype is applied first, so each element is rounded exactly as before.
+    """
+    cat_node = next(n for n in match.nodes if n.target is aten.cat.default)
+    cat_dtype = cat_node.meta["val"].dtype
+    cvt = L[prims.convert_element_type.default]
+    sunk = [cvt(cvt(x, cat_dtype), dtype) for x in inputs]
+    if config.cat_sink_convert_element_type_all_cats:
+        return L[aten.cat](sunk, dim)
+    groups = innermost_cat_slice_groups(sunk, dim, dtype)
+    if groups is not None:
+        return innermost_concat_kernel(groups, dim)
+    with V.graph.set_current_node(cat_node), V.set_current_node(cat_node):
+        cat = L[aten.cat](inputs, dim)
+    return cvt(cat, dtype)
 
 
 _cat_1 = CallFunction(aten.cat, Arg(), 1, _users=2)
