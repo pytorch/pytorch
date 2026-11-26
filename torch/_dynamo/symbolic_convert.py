@@ -6677,17 +6677,17 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # If the global scope matches that of the root frame, use handler in
             # root frame instruction translator, to enforce consistency.
             super()._load_global(inst)
-        elif name not in self.f_globals:
-            self.load_builtin(inst)
-        else:
-            _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
+            return
+        _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
+        if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
             if self._global_deleted_in_trace(fglobals_vt, name):
                 return self.load_builtin(inst)
-            if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
-                self.push(self.output.side_effects.load_attr(fglobals_vt, name))
-            else:
-                value = self.f_globals[name]
-                self.push(VariableTracker.build(self, value, global_source))
+            self.push(self.output.side_effects.load_attr(fglobals_vt, name))
+            return
+        if name not in self.f_globals:
+            return self.load_builtin(inst)
+        value = self.f_globals[name]
+        self.push(VariableTracker.build(self, value, global_source))
 
     def STORE_GLOBAL(self, inst: Instruction) -> None:
         if self.output.global_scope is self.f_globals:

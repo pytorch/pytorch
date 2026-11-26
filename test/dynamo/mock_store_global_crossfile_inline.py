@@ -30,6 +30,14 @@ def store_then_delete_missing_fn():
     del store_then_delete_missing_value
 
 
+def store_delete_store_read_missing_fn(x):
+    global store_delete_store_read_missing_value
+    store_delete_store_read_missing_value = 1
+    del store_delete_store_read_missing_value
+    store_delete_store_read_missing_value = 2
+    return x + store_delete_store_read_missing_value
+
+
 def store_then_delete_multi_stream_tensor_fn(x, y, device):
     global store_then_delete_multi_stream_tensor_value
     s = torch.Stream(device=device)

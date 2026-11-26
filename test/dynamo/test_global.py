@@ -945,6 +945,24 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x + 2)
             self.assertEqual(globals()["_dg_a"], 2)
 
+    def test_delete_global_created_then_store_read_inlined(self):
+        with crossfile_globals() as mod:
+            name = "store_delete_store_read_missing_value"
+
+            def fn(x):
+                try:
+                    return mod.store_delete_store_read_missing_fn(x)
+                except NameError:
+                    return x - 1
+
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), x + 2)
+            mod.__dict__.pop(name, None)
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 2)
+            self.assertEqual(mod.__dict__[name], 2)
+
     def test_delete_missing_global_read_after_caught_failed_del(self):
         with mock.patch.dict(globals()):
 
