@@ -220,6 +220,10 @@ TORCH_API void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities);
 
+// Stops collecting in the current Kineto profiling session and ends its trace
+// now. disableProfiler() later processes what was collected.
+TORCH_API void stopProfilerCollection();
+
 // Toggles Python stack tracing in the current Kineto profiling session. CPU and
 // device activity collection are unaffected. Only stopping is supported so far.
 TORCH_API void togglePythonCollectionDynamic(bool enable);
