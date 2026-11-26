@@ -74,10 +74,51 @@ def _capture_ancestors(stream):
             pending.extend(int(parent) for parent in parents)
     return ancestors
 
+class TestCOWDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("resize_to_zero", [False, True])
+    def test_resize_cow_storage(self, device, resize_to_zero):
+        x = torch.ones(8, device=device)
+        y = x._lazy_clone()
+        storage = y.untyped_storage()
+        if resize_to_zero:
+            storage.resize_(0)
+        storage.resize_(64)
+        if resize_to_zero:
+            y.fill_(1)
+        self.assertFalse(torch._C._is_cow_tensor(y))
+        self.assertNotEqual(y.const_data_ptr(), x.const_data_ptr())
+        self.assertEqual(y.sum(), 8)
+        storage.resize_(128)
+        z = y._lazy_clone()
+        y.add_(1)
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(z, x)
+        self.assertEqual(y, torch.full_like(y, 2))
+
+    @parametrize("captured", [False, True])
+    def test_readonly_sharing(self, device, captured):
+        with _streams(device, 1) as (a,):
+            existing = torch.ones(8, device=device)._lazy_clone()
+            with _capture(a, captured) as graph:
+                self.assertTrue(torch._C._is_cow_tensor(existing))
+                x = torch.ones(1024, device=device)
+                y = x._lazy_clone()
+                z = y._lazy_clone()
+                out = z * 2
+            if captured:
+                graph.replay()
+            self.assertEqual(x.const_data_ptr(), y.const_data_ptr())
+            self.assertEqual(x.const_data_ptr(), z.const_data_ptr())
+            self.assertTrue(torch._C._is_cow_tensor(y))
+            self.assertTrue(torch._C._is_cow_tensor(z))
+            self.assertEqual(out, torch.full_like(out, 2))
+
 
 @unittest.skipUnless(TEST_CUDA_GRAPH, "requires CUDA graph support")
 @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires native allocator stream metadata")
-class TestCOW(TestCase):
+class TestCOWCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @deviceCountAtLeast(2)
@@ -111,24 +152,6 @@ class TestCOW(TestCase):
                 self.assertEqual(_capture_ancestors(a), before)
             graph.replay()
             self.assertEqual(out, torch.ones_like(out))
-
-    @parametrize("captured", [False, True])
-    def test_readonly_sharing(self, device, captured):
-        with _streams(device, 1) as (a,):
-            existing = torch.ones(8, device=device)._lazy_clone()
-            with _capture(a, captured) as graph:
-                self.assertTrue(torch._C._is_cow_tensor(existing))
-                x = torch.ones(1024, device=device)
-                y = x._lazy_clone()
-                z = y._lazy_clone()
-                out = z * 2
-            if captured:
-                graph.replay()
-            self.assertEqual(x.const_data_ptr(), y.const_data_ptr())
-            self.assertEqual(x.const_data_ptr(), z.const_data_ptr())
-            self.assertTrue(torch._C._is_cow_tensor(y))
-            self.assertTrue(torch._C._is_cow_tensor(z))
-            self.assertEqual(out, torch.full_like(out, 2))
 
     @parametrize("captured", [False, True])
     @parametrize("pointer", [False, True])
@@ -175,26 +198,6 @@ class TestCOW(TestCase):
             self.assertEqual(x, torch.ones_like(x))
             self.assertEqual(y, x)
             self.assertEqual(late, torch.full_like(late, 3))
-
-    @parametrize("resize_to_zero", [False, True])
-    def test_resize_cow_storage(self, device, resize_to_zero):
-        x = torch.ones(8, device=device)
-        y = x._lazy_clone()
-        storage = y.untyped_storage()
-        if resize_to_zero:
-            storage.resize_(0)
-        storage.resize_(64)
-        if resize_to_zero:
-            y.fill_(1)
-        self.assertFalse(torch._C._is_cow_tensor(y))
-        self.assertNotEqual(y.const_data_ptr(), x.const_data_ptr())
-        self.assertEqual(y.sum(), 8)
-        storage.resize_(128)
-        z = y._lazy_clone()
-        y.add_(1)
-        self.assertEqual(x, torch.ones_like(x))
-        self.assertEqual(z, x)
-        self.assertEqual(y, torch.full_like(y, 2))
 
     @parametrize("captured", [False, True])
     @parametrize("lazy_read", [False, True])
@@ -524,8 +527,8 @@ class TestCOW(TestCase):
             self.assertEqual(compiled(x), fn(x))
 
 
-class TestCOWFallback(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestCOWFallbackDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("name", ["_is_cow_tensor", "_cow_record_done"])
     def test_fake_tensor_unsupported(self, device, name):
@@ -549,6 +552,9 @@ class TestCOWFallback(TestCase):
         self.assertEqual(x, torch.ones_like(x))
         self.assertEqual(y, torch.full_like(y, 2))
 
+class TestCOWFallbackCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipUnless(TEST_CUDAMALLOCASYNC, "requires an allocator without metadata")
     def test_unknown_allocator_uses_eager_copy(self, device):
         x = torch.ones(1024, device=device)
@@ -559,8 +565,11 @@ class TestCOWFallback(TestCase):
         self.assertEqual(y, torch.ones_like(y))
 
 
-instantiate_device_type_tests(TestCOW, globals(), only_for="cuda")
-instantiate_device_type_tests(TestCOWFallback, globals(), only_for="cuda")
+instantiate_device_type_tests(TestCOWDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestCOWCudaOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(TestCOWFallbackDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestCOWFallbackCudaOnly, globals(), only_for="cuda")
+
 
 if __name__ == "__main__":
     run_tests()
