@@ -412,10 +412,17 @@ wrapper_noop_set_seed_decorator = patch(
     wrapper_noop_set_seed,
 )
 
+# Overrides that follow from the operator's own contract rather than from any
+# backend's capabilities, so they hold on every device. `empty*` returns
+# uninitialized memory and `randn` draws from an RNG the compiled and the eager
+# path do not share, so neither has a value an eager reference could be compared
+# against; `nn.functional.rrelu`'s backward is itself random. These entries used
+# to be duplicated verbatim under "cpu", "cuda" and "xpu", which turned a
+# property of the operators into a device allowlist: a device not named there
+# compared values that are undefined by definition. Keep them in one place.
+#
 # key can be either op_name, or (op_name, dtype)
-inductor_override_kwargs = defaultdict(dict)
-
-inductor_override_kwargs["cpu"] = {
+inductor_override_kwargs_all_devices = {
     # the return value of empty is undefined
     "empty": {"assert_equal": False},
     "empty_permuted": {"assert_equal": False},
@@ -425,6 +432,13 @@ inductor_override_kwargs["cpu"] = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     "nn.functional.rrelu": {"check_gradient": False},
+}
+
+# Device-specific overrides, applied on top of the device-independent ones above.
+# key can be either op_name, or (op_name, dtype)
+inductor_override_kwargs = defaultdict(dict)
+
+inductor_override_kwargs["cpu"] = {
     ("nn.functional.multilabel_soft_margin_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.002,
@@ -469,15 +483,6 @@ if IS_LINUX and IS_ARM64:
     )
 
 inductor_override_kwargs["cuda"] = {
-    # the return value of empty is undefined
-    "empty": {"assert_equal": False},
-    "empty_permuted": {"assert_equal": False},
-    "empty_like": {"assert_equal": False},
-    "new_empty": {"assert_equal": False},
-    "empty_strided": {"assert_equal": False},
-    "new_empty_strided": {"assert_equal": False},
-    "randn": {"assert_equal": False},
-    "nn.functional.rrelu": {"check_gradient": False},
     ("cross", f16): {"reference_in_float": True},
     ("linalg.cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
@@ -595,15 +600,6 @@ inductor_override_kwargs["cuda"] = {
 }
 
 inductor_override_kwargs["xpu"] = {
-    # the return value of empty is undefined
-    "empty": {"assert_equal": False},
-    "empty_permuted": {"assert_equal": False},
-    "empty_like": {"assert_equal": False},
-    "new_empty": {"assert_equal": False},
-    "empty_strided": {"assert_equal": False},
-    "new_empty_strided": {"assert_equal": False},
-    "randn": {"assert_equal": False},
-    "nn.functional.rrelu": {"check_gradient": False},
     # XPU
     # Mirrors the CUDA override from #189872; the fp16 backward gap is the
     # same eager-vs-inductor intermediate-precision difference on XPU.
@@ -1518,6 +1514,10 @@ class TestInductorOpInfo(TestCase):
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 
         overridden_kwargs = {}
+        overridden_kwargs.update(inductor_override_kwargs_all_devices.get(op_name, {}))
+        overridden_kwargs.update(
+            inductor_override_kwargs_all_devices.get((op_name, dtype), {})
+        )
         overridden_kwargs.update(
             inductor_override_kwargs.get(device_type, {}).get(op_name, {})
         )
