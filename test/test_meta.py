@@ -913,12 +913,19 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
 }
 
-# Same contract as CUDA: the XPU kernel returns an empty (0,) buffer while the meta
-# decomposition follows the CPU full-size buffer (see log_sigmoid_forward in
-# torch/_decomp/decompositions.py).
 meta_dispatch_device_expected_failures['xpu'] = {
-    aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
-    aten.log_sigmoid_forward.output: {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
+    # The log_sigmoid_forward decomposition picks the buffer shape from
+    # self.is_cuda or self.is_xpu, which are both False for a meta tensor, so the
+    # meta buffer keeps the input shape while the real XPU kernel returns shape (0,),
+    # exactly as on CUDA above. Affects
+    #   test_dispatch_meta_outplace_nn_functional_logsigmoid
+    #   test_dispatch_symbolic_meta_outplace_nn_functional_logsigmoid
+    #   test_dispatch_meta_outplace_nn_functional_multilabel_soft_margin_loss
+    #   test_dispatch_symbolic_meta_outplace_nn_functional_multilabel_soft_margin_loss
+    # (multilabel_soft_margin_loss calls log_sigmoid).
+    # https://github.com/intel/torch-xpu-ops/issues/5020
+    aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},  # https://github.com/intel/torch-xpu-ops/issues/5020
+    aten.log_sigmoid_forward.output: {bf16, f16, f64, f32},  # https://github.com/intel/torch-xpu-ops/issues/5020
 }
 
 meta_dispatch_device_skips['cpu'] = {

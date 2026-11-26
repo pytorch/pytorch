@@ -32,7 +32,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_device_type import (
     onlyCPU, onlyCUDA, onlyNativeDeviceTypes, onlyOn, disablecuDNN,
     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
-    skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
+    skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, skipXPUIf, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
 )
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
@@ -12328,6 +12328,11 @@ op_db: list[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       # test_reference_numerics_large_acosh_xpu_complex64 and its _refs variant
+                       # produce inf where the reference is finite
+                       DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
+                                    'TestUnaryUfuncs', 'test_reference_numerics_large',  # issues/2257
+                                    device_type='xpu', dtypes=[torch.cfloat]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
@@ -13045,7 +13050,7 @@ op_db: list[OpInfo] = [
                        ),
                        DecorateInfo(
                            toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
-                           'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cpu'
+                           'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=('cpu', 'xpu')
                        ),
                        precisionOverride({torch.bfloat16: 1e-2}),
                    ],
@@ -13088,6 +13093,11 @@ op_db: list[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       # test_reference_numerics_large_asinh_xpu_complex32/complex64/complex128 and
+                       # their _refs variants produce inf where the reference is finite
+                       DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
+                                    'TestUnaryUfuncs', 'test_reference_numerics_large',  # issues/2257
+                                    device_type='xpu', dtypes=[torch.chalf, torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
@@ -14877,7 +14887,7 @@ op_db: list[OpInfo] = [
            decorators=[
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                            device_type=('cuda', 'xpu'), active_if=not SM53OrLater),
+                            device_type='cuda', active_if=not SM53OrLater),
                # ROCm intermittently fails the test with standard atol/rtol
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
                             'TestCommon', 'test_noncontiguous_samples', device_type=('cuda', 'xpu'),
@@ -17577,17 +17587,15 @@ op_db: list[OpInfo] = [
         dtypesIfCUDA=custom_types(torch.float16)
         if not SM80OrLater
         else custom_types(torch.float16, torch.bfloat16),
+        dtypesIfXPU=custom_types(torch.float16, torch.bfloat16),
+        backward_dtypesIfXPU=custom_types(torch.float16, torch.bfloat16),
         supports_out=False,
         has_nondeterministic_output=True,
         supports_autograd=True,
         supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
         check_batched_forward_grad=False,
-        decorators=[
-            # https://github.com/intel/torch-xpu-ops/issues/2853
-            skipXPU,
-            skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention"),
-        ],
+        decorators=[skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
         skips=(
             # Checking the scalar value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type=('cuda', 'xpu')),
@@ -17629,7 +17637,8 @@ op_db: list[OpInfo] = [
         skip_cow_input_backward=True,
         decorators=[
             skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
-            skipXPU],
+            # aten::_efficient_attention_forward is not implemented on XPU
+            skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5809")],
         skips=(
             # Checking the scaler value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type=('cuda', 'xpu')),
@@ -19547,6 +19556,12 @@ op_db: list[OpInfo] = [
                          # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                          DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                          DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large'),
+                         # test_reference_numerics_normal_polygamma_polygamma_n_4_xpu_float16 returns inf
+                         # where the reference is finite
+                         DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
+                                      'TestUnaryUfuncs', 'test_reference_numerics_normal',  # issues/2257
+                                      device_type='xpu', dtypes=[torch.half],
+                                      active_if=lambda p, n_=n_: n_ == 4),
                      ),
                      sample_kwargs=lambda device, dtype, input: ({'n': n_}, {'n': n_}),
                      # polygamma functions have multiple singularities at x having non-positive integer value
@@ -20735,6 +20750,9 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo('histogram',
            dtypes=floating_types(),
            dtypesIfCUDA=_dispatch_dtypes(),  # histogram is only implemented on CPU
+           # XPU has no histogram kernel either, but the op falls back to CPU, so the
+           # float dtypes do work there.
+           dtypesIfXPU=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_histogram,
            supports_autograd=False,
            skips=(
@@ -20750,7 +20768,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                # Not Implemented on XLA.
                DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla'),
                # Align dtypes with CUDA for fallback ops
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='xpu'),
            ),
            decorators=(
                DecorateInfo(
@@ -23464,6 +23481,11 @@ python_ref_db = [
             DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
                          'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                          device_type='xpu', dtypes=[torch.complex64]),
+            # test_reference_numerics_large__refs_acosh_xpu_complex64 produces inf
+            # where the reference is finite
+            DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
+                         'TestUnaryUfuncs', 'test_reference_numerics_large',  # issues/2257
+                         device_type='xpu', dtypes=[torch.cfloat]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_normal',
                          device_type='cuda', dtypes=[torch.cdouble],
@@ -23502,7 +23524,7 @@ python_ref_db = [
                 'TestUnaryUfuncs', device_type='cuda'),
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cpu'
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=('cpu', 'xpu')
             ),
             precisionOverride({torch.bfloat16: 1e-2}),
         ],
@@ -23525,6 +23547,11 @@ python_ref_db = [
             DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
                          'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                          device_type='xpu', dtypes=[torch.complex64]),
+            # test_reference_numerics_large__refs_asinh_xpu_complex32/complex64/complex128
+            # produce inf where the reference is finite
+            DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
+                         'TestUnaryUfuncs', 'test_reference_numerics_large',  # issues/2257
+                         device_type='xpu', dtypes=[torch.chalf, torch.cfloat, torch.cdouble]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -24886,12 +24913,12 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # dropout is not comparable. On CUDA/ROCm the aten-executor result
+            # dropout is not comparable. On CUDA/ROCm/XPU the aten-executor result
             # for complex happens to match eager (unexpected success vs the xfail
             # below), unlike MPS where it stays non-comparable, so skip complex
             # there rather than xfail. XPU complex64 has the same behavior.
             DecorateInfo(unittest.skip("dropout is not comparable"), 'TestCommon',
-                         'test_python_ref_executor', device_type='cuda',
+                         'test_python_ref_executor', device_type=('cuda', 'xpu'),
                          dtypes=(torch.complex64, torch.complex128)),
             DecorateInfo(unittest.skip("dropout is not comparable"), 'TestCommon',
                          'test_python_ref_executor', device_type='xpu',
@@ -25117,8 +25144,11 @@ python_ref_db = [
         validate_view_consistency=False,
         skips=(
             # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
+            # On XPU the same _local_scalar_dense tracing error occurs:
+            # https://github.com/intel/torch-xpu-ops/issues/5848
             DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type=("cuda", "xpu")
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                device_type=("cuda", "xpu")  # https://github.com/intel/torch-xpu-ops/issues/5848
             ),
         ),
     ),
@@ -25512,7 +25542,7 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32,), device_type='cuda',
+                dtypes=(torch.complex32,), device_type="cuda",
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!

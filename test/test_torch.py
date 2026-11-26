@@ -7475,7 +7475,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
             torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5661")
     def test_split_with_sizes_copy_out(self, device):
         shape = (30, 40, 50)
         x = torch.rand(*shape, device=device)
@@ -7954,6 +7953,12 @@ class TestTorchCUDA(TestCase):
         with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
             s1.copy_(s0)
 
+
+# Tests that must hold on every accelerator, not just CUDA.
+class TestTorchAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    exact_dtype = True
+
     def test_split_with_sizes_copy_out(self, device):
         shape = (30, 40, 50)
         x = torch.rand(*shape, device=device)
@@ -7969,19 +7974,20 @@ class TestTorchCUDA(TestCase):
             views = x.split_with_sizes(split_sizes, dim=dim)
             expects = [v.clone() for v in views]
 
-            # Test with cuda graph
+            # Test with an accelerator graph
             out = [torch.zeros_like(v) for v in views]
             for expect, t in zip(expects, out):
                 if expect.numel() != 0:
                     self.assertFalse(expect.eq(t).all().item())
 
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
+            g = torch.accelerator.Graph()
+            with torch.get_device_module(device).graph(g):
                 torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
 
             g.replay()
             for expect, t in zip(expects, out):
                 self.assertTrue(expect.eq(t).all().item())
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -12415,6 +12421,7 @@ instantiate_device_type_tests(TestViewOps, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTensorDeviceOps, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTorchDeviceType, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTorchCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(TestTorchAccelerator, globals(), except_for='cpu', allow_xpu=True)
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
 instantiate_device_type_tests(TestTorchCPU, globals(), only_for="cpu")
 instantiate_parametrized_tests(TestTorch)

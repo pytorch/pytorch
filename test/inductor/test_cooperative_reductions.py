@@ -33,7 +33,7 @@ class TestVarianceReductionHeuristic(TestCase):
 
     def _dtypes(self):
         dtypes = [torch.float16]
-        if torch.cuda.is_bf16_supported():
+        if torch.get_device_module(GPU_TYPE).is_bf16_supported():
             dtypes.append(torch.bfloat16)
         return dtypes
 
