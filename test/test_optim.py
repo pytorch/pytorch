@@ -2736,8 +2736,7 @@ class TestOptimRenewed(TestCase):
         from torch.optim import Adam, AdamW
 
         optim_cls = optim_info.optim_cls
-        # Muon only accepts 2D parameters.
-        model = torch.nn.Linear(5, 5, bias=False)
+        model = torch.nn.Linear(5, 5, bias=optim_cls.__name__ != "Muon")
         model.to(dtype=dtype, device=device)
         inpt = torch.rand(2, 5, dtype=dtype, device=device)
 
