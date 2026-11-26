@@ -30,6 +30,35 @@ class TestTokenSwitchAllocations(TestCase):
         dirty_empty.start()
         self.addCleanup(dirty_empty.stop)
 
+    @parametrize("layout", ["flat", "expert_major"])
+    @parametrize("initialize_tokens", [True, False])
+    def test_receive_token_initialization_preserves_metadata(
+        self, layout, initialize_tokens
+    ):
+        tokens = torch.ones(4, 512, dtype=torch.bfloat16)
+        scales = torch.ones(4, 16, dtype=torch.uint8)
+        weights = torch.ones(4, 2, dtype=torch.float32)
+        received, scores, ids, metadata = token_switch._dispatch_quantized_async_fake(
+            None,
+            tokens,
+            scales,
+            weights,
+            16,
+            layout,
+            initialize_tokens=initialize_tokens,
+        )
+        self.assertEqual(received.shape, (16, 512))
+        if initialize_tokens:
+            self.assertEqual(torch.count_nonzero(received), 0)
+        else:
+            self.assertTrue(torch.isnan(received).all())
+        self.assertEqual(torch.count_nonzero(scores), 0)
+        self.assertEqual(torch.count_nonzero(metadata), 0)
+        if layout == "flat":
+            self.assertEqual(ids, torch.full((16, 2), -1, dtype=torch.int64))
+        else:
+            self.assertIsNone(ids)
+
     @parametrize("initialize_tokens", [True, False])
     def test_backward_receive_token_initialization(self, initialize_tokens):
         tokens = torch.ones(4, 512, dtype=torch.bfloat16)
@@ -56,7 +85,7 @@ class TestTokenSwitchAllocations(TestCase):
         self.assertEqual(score_grads.shape, (4, 2))
         self.assertEqual(torch.count_nonzero(score_grads), 0)
 
-    @parametrize("name", ["dispatch_backward_async"])
+    @parametrize("name", ["dispatch_quantized_async", "dispatch_backward_async"])
     def test_receive_initialization_schema_defaults_to_safe_padding(self, name):
         schema = getattr(torch.ops._nccl_ep, name).default._schema
         argument = schema.arguments[-1]
