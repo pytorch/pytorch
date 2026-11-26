@@ -1356,13 +1356,22 @@ static void _scaled_mm_xpu_v2_impl(
 
   ScaledGemmEpilogue epilogue;
   if (accumulator.has_value()) {
-    scaled_blas::check_scaled_addmm_input(*accumulator);
-    if (scaled_blas::scaled_addmm_skip_matmul(
-            mat_a, mat_b, *accumulator, beta, alpha, out)) {
-      return;
-    }
+    TORCH_CHECK_VALUE(
+        reinterpret_cast<uintptr_t>(accumulator->const_data_ptr()) % 16 == 0,
+        "input data pointer must be 16-byte aligned");
+    TORCH_CHECK_VALUE(
+        !accumulator->is_neg(), "input must not be a negative view");
     epilogue.alpha = alpha.to<float>();
     epilogue.beta = beta.to<float>();
+    if (mat_a.size(0) == 0 || mat_a.size(1) == 0 || mat_b.size(1) == 0 ||
+        epilogue.alpha == 0.0f) {
+      if (epilogue.beta == 0.0f) {
+        out_mut.zero_();
+      } else {
+        at::mul_out(out_mut, *accumulator, beta);
+      }
+      return;
+    }
     if (epilogue.beta != 0.0f) {
       epilogue.accumulator = accumulator;
     }

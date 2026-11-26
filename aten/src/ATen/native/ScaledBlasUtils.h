@@ -260,24 +260,4 @@ void validate_scaled_grouped_mm_v2_inputs(
     ArrayRef<int64_t> contraction_dim,
     std::optional<c10::ScalarType> out_dtype);
 
-/**
- * Kernel-side checks on `_scaled_addmm`'s `input`, which the GEMM epilogue
- * reads through a raw pointer.
- */
-TORCH_API
-void check_scaled_addmm_input(const Tensor& input);
-
-/**
- * If `alpha * (mat_a @ mat_b)` contributes nothing (M, N or K is 0, or
- * alpha == 0), writes `beta * input` into `out` and returns true.
- */
-TORCH_API
-bool scaled_addmm_skip_matmul(
-    const Tensor& mat_a,
-    const Tensor& mat_b,
-    const Tensor& input,
-    const Scalar& beta,
-    const Scalar& alpha,
-    const Tensor& out);
-
 } // namespace at::native::scaled
