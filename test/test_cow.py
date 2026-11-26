@@ -132,6 +132,34 @@ class TestCOWDevice(TestCase):
             self.assertTrue(torch._C._is_cow_tensor(z))
             self.assertEqual(out, torch.full_like(out, 2))
 
+    @parametrize("captured", [False, True])
+    @parametrize("pointer", [False, True])
+    def test_materialize_on_another_stream(self, device, captured, pointer):
+        if captured and not (torch.device(device).type == "cuda" and TEST_CUDA_GRAPH):
+            raise unittest.SkipTest("requires CUDA graph support")
+        mod = _device_mod(device)
+        with _streams(device, 2) as (a, b):
+            inp = torch.ones(1024, device=device)
+            with _capture(a, captured) as graph:
+                x = inp + 0
+                y = x._lazy_clone()
+                b.wait_stream(a)
+                with mod.stream(b):
+                    _device_sleep(device, 10_000_000)
+                    if pointer:
+                        y.data_ptr()
+                    else:
+                        y.add_(1)
+                    out = y * 2
+                x.add_(2)
+                a.wait_stream(b)
+            self.assertNotEqual(x.const_data_ptr(), y.const_data_ptr())
+            self.assertFalse(torch._C._is_cow_tensor(y))
+            for _ in _replays(graph, captured, inp):
+                self.assertEqual(x, inp + 2)
+                self.assertEqual(y, inp + (0 if pointer else 1))
+                self.assertEqual(out, (inp + (0 if pointer else 1)) * 2)
+
 
 @unittest.skipUnless(TEST_CUDA_GRAPH, "requires CUDA graph support")
 @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires native allocator stream metadata")
@@ -169,31 +197,6 @@ class TestCOWCudaOnly(TestCase):
                 self.assertEqual(_capture_ancestors(a), before)
             graph.replay()
             self.assertEqual(out, torch.ones_like(out))
-
-    @parametrize("captured", [False, True])
-    @parametrize("pointer", [False, True])
-    def test_materialize_on_another_stream(self, device, captured, pointer):
-        with _streams(device, 2) as (a, b):
-            inp = torch.ones(1024, device=device)
-            with _capture(a, captured) as graph:
-                x = inp + 0
-                y = x._lazy_clone()
-                b.wait_stream(a)
-                with torch.cuda.stream(b):
-                    torch.cuda._sleep(10_000_000)
-                    if pointer:
-                        y.data_ptr()
-                    else:
-                        y.add_(1)
-                    out = y * 2
-                x.add_(2)
-                a.wait_stream(b)
-            self.assertNotEqual(x.const_data_ptr(), y.const_data_ptr())
-            self.assertFalse(torch._C._is_cow_tensor(y))
-            for _ in _replays(graph, captured, inp):
-                self.assertEqual(x, inp + 2)
-                self.assertEqual(y, inp + (0 if pointer else 1))
-                self.assertEqual(out, (inp + (0 if pointer else 1)) * 2)
 
     @skipIfRocm
     @requires_cuda_python_bindings
