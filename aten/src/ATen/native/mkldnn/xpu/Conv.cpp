@@ -327,22 +327,40 @@ Tensor _convolution_out(
   weight = make_contiguous_and_aligned(weight, mfmt);
   check_shape_forward(input, weight, bias, params);
 
+  // oneDNN describes dst densely in `mfmt`, so a caller-provided output that is
+  // not (e.g. a channel slice) is computed into a dense buffer and copied back
+  // at the end. A sum post-op accumulates into dst, so seed the buffer then.
+  // 1-D convs run as 2-D, so a provided 3-D output is viewed as 4-D.
+  auto prepare_output = [&](IntArrayRef dst_tz) -> Tensor {
+    Tensor provided =
+        output_r.defined() && ndim == 3 ? view4d(output_r) : output_r;
+    TORCH_CHECK_VALUE(
+        !(provided.defined() && attr.with_sum()) || provided.sizes() == dst_tz,
+        "convolution with a sum post-op needs the output (`other`) to have the "
+        "convolution's output shape ",
+        dst_tz,
+        ", but got ",
+        provided.sizes());
+    if (provided.defined() && provided.is_contiguous(mfmt)) {
+      return provided;
+    }
+    Tensor out = at::empty(dst_tz, input.options(), mfmt);
+    if (provided.defined() && attr.with_sum()) {
+      out.copy_(provided);
+    }
+    return out;
+  };
+
   Tensor output;
   if (transposed_) {
-    // create output and propagate memory format
-    if (!output_r.defined()) {
-      auto dst_tz = deconv_dst_size(
-          input.sizes(),
-          weight.sizes(),
-          params.padding,
-          params.stride,
-          params.dilation,
-          params.output_padding,
-          params.groups);
-      output = at::empty(dst_tz, input.options(), mfmt);
-    } else {
-      output = output_r;
-    }
+    output = prepare_output(deconv_dst_size(
+        input.sizes(),
+        weight.sizes(),
+        params.padding,
+        params.stride,
+        params.dilation,
+        params.output_padding,
+        params.groups));
 
     onednn::deconvolution(
         output,
@@ -373,20 +391,14 @@ Tensor _convolution_out(
       }
     }
 
-    // create output and propagate memory format
-    if (!output_r.defined()) {
-      auto dst_tz = conv_dst_size(
-          input.ndimension(),
-          input.sizes(),
-          weight.sizes(),
-          padding_front_top_left,
-          padding_back_bottom_right,
-          params.stride,
-          params.dilation);
-      output = at::empty(dst_tz, input.options(), mfmt);
-    } else {
-      output = output_r;
-    }
+    output = prepare_output(conv_dst_size(
+        input.ndimension(),
+        input.sizes(),
+        weight.sizes(),
+        padding_front_top_left,
+        padding_back_bottom_right,
+        params.stride,
+        params.dilation));
     onednn::convolution(
         output,
         input,
@@ -403,10 +415,10 @@ Tensor _convolution_out(
   if (ndim == 3) {
     output = view3d(output);
   }
-  if (output_r.defined() && !output_r.is_same(output)) {
-    output_r.copy_(output);
-  } else {
+  if (!output_r.defined()) {
     output_r = output;
+  } else if (!output_r.is_alias_of(output)) {
+    output_r.copy_(output);
   }
   return output_r;
 }
@@ -663,11 +675,14 @@ Tensor convolution_pointwise_binary(
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm) {
   c10::DeviceGuard device_guard(input_t.device());
-  Tensor output;
+  // "sum" accumulates into dst, so dst must start as a copy of other.
+  Tensor output = binary_attr == "sum" ? other_t.clone() : Tensor();
   Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
   // Step1: Construct binary attr
   Attr attr;
-  attr = construct_binary_attr(attr, binary_attr, other_t);
+  // 1-D convs run as 2-D (see _convolution_out), so the operand must match.
+  attr = construct_binary_attr(
+      attr, binary_attr, input_t.dim() == 3 ? view4d(other_t) : other_t);
   // Step2: Append unary attr
   if (unary_attr.has_value())
     attr = construct_unary_attr(
@@ -708,7 +723,9 @@ Tensor& convolution_pointwise_binary_(
   Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
   // Step1: Construct binary attr
   Attr attr;
-  attr = construct_binary_attr(attr, binary_attr, other_t);
+  // 1-D convs run as 2-D (see _convolution_out), so the operand must match.
+  attr = construct_binary_attr(
+      attr, binary_attr, input_t.dim() == 3 ? view4d(other_t) : other_t);
 
   // Step2: Append unary attr
   if (unary_attr.has_value())
