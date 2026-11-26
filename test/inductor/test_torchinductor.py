@@ -22148,8 +22148,8 @@ class _TemplateDeviceHost:
         super().setUp()
 
 
-def _wrap_template_test(test, *, is_bound=False):
-    source_params = () if is_bound else inspect.signature(test).parameters
+def _wrap_template_test(test):
+    source_params = inspect.signature(test).parameters
 
     @functools.wraps(test)
     def wrapped(self, *args, device=None, devices=None, **kwargs):
@@ -22198,7 +22198,6 @@ def _template_parametrize_fn(
     test_metadata_decorators,
     test_failure,
     has_xfail_prop,
-    suffix_overrides,
 ):
     def parametrize_fn(test, generic_cls, device_cls):
         if source_parametrize_fn is None:
@@ -22211,8 +22210,6 @@ def _template_parametrize_fn(
         suffix = device_cls.device_type
         if suffix == "privateuse1":
             suffix = torch._C._get_privateuse1_backend_name()
-        if suffix_overrides is not None:
-            suffix = suffix_overrides.get(suffix, suffix)
 
         decorators = list(test_metadata_decorators)
         if test_decorator is not None:
@@ -22302,11 +22299,9 @@ def instantiate_device_type_tests_from_templates(
     scope: dict[str, object],
     *,
     templates: Sequence[type],
-    templates_are_preexpanded: bool = False,
     test_failures: Mapping[str, TestFailure] | None = None,
     xfail_prop: str | None = None,
     test_decorator: Callable | None = None,
-    suffix_overrides: Mapping[str, str] | None = None,
     class_name_overrides: Mapping[str, str] | None = None,
     only_for=None,
     except_for=None,
@@ -22315,9 +22310,7 @@ def instantiate_device_type_tests_from_templates(
 ) -> tuple[type, ...]:
     """Instantiate templates' own test_* methods into a host bound in scope.
 
-    Pass all templates for a host together. For factory-wrapped, already bound
-    cases, set templates_are_preexpanded to avoid repeating parameter/dtype
-    expansion; host methods still use their own parametrization.
+    Pass all templates for a host together.
     Generated classes replace the host in scope. The returned tuple may be
     empty after device filtering; apply any post-generation patches to it.
     """
@@ -22349,15 +22342,12 @@ def instantiate_device_type_tests_from_templates(
 
     for name, value in tests.items():
         is_host = name in host_test_names
-        bound_template = templates_are_preexpanded and not is_host
-        new_test = _wrap_template_test(value, is_bound=bound_template)
+        new_test = _wrap_template_test(value)
         # Native wrappers retain function metadata, so names need no guessing.
         new_test._template_source_name = name
-        if bound_template:
-            new_test.__dict__.pop("dtypes", None)
         source_parametrize_fn = (
             None
-            if bound_template or _is_preexpanded_test(name, value)
+            if _is_preexpanded_test(name, value)
             else getattr(new_test, "parametrize_fn", None)
         )
         new_test.__dict__.pop("parametrize_fn", None)
@@ -22380,7 +22370,6 @@ def instantiate_device_type_tests_from_templates(
                 test_metadata_decorators,
                 tf,
                 has_xfail_prop,
-                suffix_overrides,
             )
         setattr(bridge_cls, name, new_test)
 
@@ -22411,7 +22400,7 @@ def instantiate_device_type_tests_from_templates(
 
     # Apply copy_tests-compatible public names after standard generation.
     _apply_template_name_overrides(
-        generated, scope, suffix_overrides, class_name_overrides, host_test_names
+        generated, scope, None, class_name_overrides, host_test_names
     )
 
     return generated
