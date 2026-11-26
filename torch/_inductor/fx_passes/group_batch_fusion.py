@@ -572,6 +572,8 @@ class BatchLinearLHSFusion(BatchFusion):
         super().__init__(**kwargs)
         self._bound_symbols_graph: torch.fx.Graph | None = None
         self._bound_symbols: OrderedSet = OrderedSet()
+        self._visible_output_graph: torch.fx.Graph | None = None
+        self._visible_output_nodes: OrderedSet = OrderedSet()
         self._devices = _normalize_devices(
             self.graph_search_options.get("devices"), "batch_linear_lhs"
         )
@@ -656,19 +658,25 @@ class BatchLinearLHSFusion(BatchFusion):
     def _reaches_user_visible_output(
         self, node: torch.fx.Node, graph: torch.fx.Graph
     ) -> bool:
-        output_node = graph.output_node()
-        args = output_node.args[0]
-        if not isinstance(args, (tuple, list)):
-            args = (args,)
-        visible_idxs = output_node.meta.get("user_visible_output_idxs")
-        if visible_idxs is None:
-            visible = OrderedSet(arg for arg in args if isinstance(arg, torch.fx.Node))
-        else:
-            visible = OrderedSet(
-                args[i]
-                for i in visible_idxs
-                if i < len(args) and isinstance(args[i], torch.fx.Node)
-            )
+        if self._visible_output_graph is not graph:
+            output_node = graph.output_node()
+            args = output_node.args[0]
+            if not isinstance(args, (tuple, list)):
+                args = (args,)
+            visible_idxs = output_node.meta.get("user_visible_output_idxs")
+            if visible_idxs is None:
+                visible = OrderedSet(
+                    arg for arg in args if isinstance(arg, torch.fx.Node)
+                )
+            else:
+                visible = OrderedSet(
+                    args[i]
+                    for i in visible_idxs
+                    if i < len(args) and isinstance(args[i], torch.fx.Node)
+                )
+            self._visible_output_graph = graph
+            self._visible_output_nodes = visible
+        visible = self._visible_output_nodes
         pending = [node]
         seen = OrderedSet([node])
         while pending:
@@ -797,27 +805,7 @@ class BatchLinearLHSFusion(BatchFusion):
             bias_m, input_m, weight_m = node.args[:3]
         else:
             return None
-        if self.graph_search_options.get(
-            "skip_user_visible", False
-        ) and self._reaches_user_visible_output(node, node.graph):
-            return None
         if not self._is_input_2d(input_m) or not self._is_input_2d(weight_m):  # type: ignore[arg-type]
-            return None
-        # Leave int8 weight-only quantization patterns for the WOQ matcher.
-        if self._is_quantized_weight_conversion(weight_m):  # type: ignore[arg-type]
-            return None
-        # Replacing a mutated mm output with a split view can break autograd.
-        if any(_is_mutable_node(user.target) for user in node.users):
-            return None
-        # Raw-storage consumers reinterpret physical storage and would observe
-        # the wide GEMM row stride instead of the eager slice. Follow views so
-        # an aliased consumer such as t().as_strided() also blocks the fusion.
-        if self._reaches_raw_storage_op(node):
-            return None
-        # Aliases copied separately during lowering, or a mutated view rebuilt
-        # by auto_functionalized, would observe changed storage. Do not fuse
-        # across such consumers.
-        if self._consumes_multiple_aliases(node):
             return None
         weight_val = weight_m.meta["val"]  # type: ignore[union-attr]
         if not statically_known_true(weight_val.shape[1] > 0):
@@ -838,6 +826,26 @@ class BatchLinearLHSFusion(BatchFusion):
         if max_bytes is not None and not statically_known_true(
             weight_val.numel() * weight_val.element_size() <= max_bytes
         ):
+            return None
+        if self.graph_search_options.get(
+            "skip_user_visible", False
+        ) and self._reaches_user_visible_output(node, node.graph):
+            return None
+        # Leave int8 weight-only quantization patterns for the WOQ matcher.
+        if self._is_quantized_weight_conversion(weight_m):  # type: ignore[arg-type]
+            return None
+        # Replacing a mutated mm output with a split view can break autograd.
+        if any(_is_mutable_node(user.target) for user in node.users):
+            return None
+        # Raw-storage consumers reinterpret physical storage and would observe
+        # the wide GEMM row stride instead of the eager slice. Follow views so
+        # an aliased consumer such as t().as_strided() also blocks the fusion.
+        if self._reaches_raw_storage_op(node):
+            return None
+        # Aliases copied separately during lowering, or a mutated view rebuilt
+        # by auto_functionalized, would observe changed storage. Do not fuse
+        # across such consumers.
+        if self._consumes_multiple_aliases(node):
             return None
         if bias_m is not None:
             if not isinstance(bias_m, torch.fx.Node):
@@ -2198,10 +2206,11 @@ def group_batch_fusion_passes(
                 )
             post_grad_options[name] = config.pre_grad_fusion_options[name]
         # Device-scoped defaults must not pay for the search on other
-        # devices. The filter applies to every group/batch fusion option. For
-        # the batch_linear_lhs-only default, derive the devices from mm/addmm
-        # nodes and drop the option when there are none; other device-scoped
-        # options still scan the graph.
+        # devices. The filter applies to every group/batch fusion option. When
+        # batch_linear_lhs is the only device-scoped entry (shipped default or
+        # explicit opt-in), derive the devices from mm/addmm nodes and drop the
+        # option when there are none; other device-scoped options still scan
+        # the graph.
         device_scoped = [
             name for name, options in post_grad_options.items() if "devices" in options
         ]

@@ -997,7 +997,7 @@ class TestGroupBatchFusion(TestCase):
             return torch.sigmoid(x)
 
         with FakeTensorMode():
-            gm = make_fx(f)(torch.randn(32, 64, device="cpu"))
+            gm = make_fx(f)(torch.randn(32, 64, device="xpu"))
 
         counters.clear()
         with patch.object(
@@ -1007,8 +1007,7 @@ class TestGroupBatchFusion(TestCase):
             torch._inductor.fx_passes.group_batch_fusion.group_batch_fusion_passes(
                 gm.graph, pre_grad=False
             )
-        for call in apply.call_args_list:
-            self.assertNotIsInstance(call.args[1], BatchLinearLHSFusion)
+        apply.assert_not_called()
         counters.clear()
 
     @parametrize("dynamic", [False, True])
