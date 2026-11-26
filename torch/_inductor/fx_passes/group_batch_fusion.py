@@ -881,7 +881,7 @@ class BatchLinearLHSFusion(BatchFusion):
             split_sections.append(weight.meta["val"].shape[1])  # type: ignore[union-attr]
 
         visible_flags = [
-            self._reaches_user_visible_output(node, graph.graph) for node in batch_nodes
+            self._reaches_user_visible_output(node, graph) for node in batch_nodes
         ]
         max_bytes = self.graph_search_options.get(
             "max_fuse_tensor_bytes_batch_linear_lhs"
