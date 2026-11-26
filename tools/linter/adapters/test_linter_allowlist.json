@@ -393,7 +393,6 @@
   "test/inductor/test_helion_kernels.py",
   "test/inductor/test_indexing.py",
   "test/inductor/test_inductor_annotations.py",
-  "test/inductor/test_inductor_freezing.py",
   "test/inductor/test_inductor_lite_mode.py",
   "test/inductor/test_inductor_ops.py",
   "test/inductor/test_inductor_scheduler.py",
