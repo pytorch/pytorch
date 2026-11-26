@@ -39,8 +39,13 @@
 //   - any other instruction or builtin handed a dict, a list, a set or a dict
 //     view (iterating it, unpacking it, slicing it, zip, sorted, ...): the
 //     whole content, in order (an OrderedDict's own order, which is not the
-//     order of the dict's table); len() and truth: the length.
-// Tuples aren't recorded: what they hold can't change.
+//     order of the dict's table); len() and truth: the length. C code reads
+//     through what it is handed (the list inside the tuple of a subscript,
+//     the rows of a nested list made into a tensor): the lists, dicts, sets
+//     and tuples inside a container or a tuple are read whole too, and what
+//     those hold.
+// A tuple itself isn't recorded (its items can't be bound anew); the
+// containers it holds are.
 //
 // Values are compared by exact type and value if they are an int, a float
 // (by bits) or a str, and by identity otherwise. The entries are grouped by
@@ -720,12 +725,38 @@ impl Trace {
         }
         if let Some((h, kind)) = Self::container(o) {
             self.whole(h, kind);
+            self.through(h, Some(kind));
+        } else if ffi::PyTuple_Check(o) != 0 {
+            self.through(o, None);
         } else if ffi::Py_TYPE(o) == &raw mut ffi::PyDictProxy_Type {
             self.refused = Some("it reads the namespace of something that isn't a class".into());
         } else if !bound {
             self.used(tr_builtin_self(o), true);
         }
         self.handed(o);
+    }
+
+    // C code that is handed a tuple (`kind` None) or a container reads
+    // through it: the list inside the tuple of a subscript, the rows of a
+    // nested list that is made into a tensor. The tuples, lists, dicts and
+    // sets that `o` holds are read whole as well, and what those hold. Each
+    // is walked once (one may hold itself), and no further once the trace
+    // has more entries than a region may have.
+    unsafe fn through(&mut self, o: *mut PyObject, kind: Option<Holder>) {
+        if self.count > MAX_ENTRIES || self.own.contains(&(o as usize)) || !self.seen.insert((o as usize, usize::MAX - 2)) {
+            return;
+        }
+        let items = match kind {
+            None => (0..ffi::PyTuple_GET_SIZE(o)).map(|i| ffi::PyTuple_GET_ITEM(o, i)).collect(),
+            // One that cannot be walked is refused by whole(), now or when the trace is over.
+            Some(kind) if ordered_ok(o, kind) && size(o, kind) <= MAX_ITEMS as isize => snapshot(o, kind),
+            Some(_) => vec![],
+        };
+        for x in items {
+            if ffi::PyTuple_Check(x) != 0 || ffi::PyList_Check(x) != 0 || ffi::PyDict_Check(x) != 0 || ffi::PySet_Check(x) != 0 {
+                self.used(x, true);
+            }
+        }
     }
 
     // C code was handed `o`: what it does with an object of a Python class

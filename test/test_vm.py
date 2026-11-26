@@ -3781,6 +3781,153 @@ class TestVmReads(TestCase):
         )
         self.assertLess(row["reads"], 50, msg=str(row))
 
+    @isolated
+    def test_list_inside_the_tuple_of_a_tensor_subscript(self, device):
+        # `y[:, picks]` hands C code a tuple: it reads the list through it.
+        kept = ReadsConfig()
+        kept.picks = [0, 2]
+        self.alternating(
+            device,
+            reads_through(lambda y: y[:, kept.picks] * 0.5),
+            lambda second: kept.picks.__setitem__(0, 1 if second else 0),
+        )
+
+    @isolated
+    def test_rows_of_a_nested_list_made_into_a_tensor(self, device):
+        kept = ReadsConfig()
+        kept.rows = [[0.5, 0.25], [0.125, 0.0]]
+        fn = reads_through(
+            lambda y: y * torch.as_tensor(kept.rows, device=device).sum()
+        )
+        self.alternating(
+            device,
+            fn,
+            lambda second: kept.rows[0].__setitem__(0, 0.75 if second else 0.5),
+        )
+
+    @isolated
+    def test_lists_that_are_the_values_of_a_dict_handed_to_a_builtin(self, device):
+        # max() compares the lists: it reads each through the dict's view,
+        # and which one it gives depends on the first item of both.
+        kept = ReadsConfig()
+        kept.table = {"a": [0.5, 0.25], "b": [0.625, 0.125]}
+        fn = reads_through(lambda y: y * max(kept.table.values())[1])
+        self.alternating(
+            device,
+            fn,
+            lambda second: kept.table["a"].__setitem__(0, 0.75 if second else 0.5),
+        )
+
+    @isolated
+    def test_list_three_tuples_deep(self, device):
+        kept = ReadsConfig()
+        row = [0.5, 0.25]
+        kept.deep = (((row,), ([0.125, 0.0],)),)
+        fn = reads_through(
+            lambda y: y * torch.as_tensor(kept.deep, device=device).sum()
+        )
+        self.alternating(
+            device, fn, lambda second: row.__setitem__(0, 0.75 if second else 0.5)
+        )
+
+    @isolated
+    def test_list_that_holds_itself(self, device):
+        # The walk through what a list holds ends at the list itself. Its
+        # repr is 18 or 20 characters long.
+        kept = ReadsConfig()
+        kept.loop = [0.5, 0.25]
+        kept.loop.append(kept.loop)
+        fn = reads_through(lambda y: y * len(repr(kept.loop)) * 0.01)
+        self.alternating(
+            device,
+            fn,
+            lambda second: kept.loop.__setitem__(0, 0.125 if second else 0.5),
+        )
+
+    @isolated
+    def test_tuple_that_holds_a_list_that_holds_the_tuple(self, device):
+        kept = ReadsConfig()
+        kept.ring = ([0.5, 0.25],)
+        kept.ring[0].append(kept.ring)
+        fn = reads_through(lambda y: y * len(repr(kept.ring)) * 0.01)
+        self.alternating(
+            device,
+            fn,
+            lambda second: kept.ring[0].__setitem__(0, 0.125 if second else 0.5),
+        )
+
+    def nested_rows(self, device, rows, count):
+        # Eight calls of a function that makes a tensor of `count` rows of
+        # the nested list `rows`; an item of a row changes in place after
+        # the fifth. The row of the function's block.
+        kept = ReadsConfig()
+        kept.rows = [[1e-5] * rows for _ in range(count)]
+        fn = reads_through(
+            lambda y: y * torch.as_tensor(kept.rows, device=device).sum()
+        )
+        g = vm(fn, passes=EARLY)
+        for call in range(8):
+            kept.rows[count - 1][rows - 1] = 0.5 if call >= 5 else 1e-5
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"].endswith("outer") and r["kind"] != "call"
+        )
+        return row
+
+    @isolated
+    def test_every_item_of_a_nested_list_is_an_entry_of_the_region(self, device):
+        # What a check costs: one comparison per item of every list read.
+        row = self.nested_rows(device, 100, 20)
+        self.assertEqual(
+            (row["state"], row["variants"], row["runs"], dict(row["misses"])),
+            ("region", 2, 3, {"read: a namespace or a container": 1}),
+            msg=str(row),
+        )
+        self.assertGreater(row["reads"], 2 * 20 * 100, msg=str(row))
+
+    @isolated
+    def test_nested_list_of_more_items_than_a_region_may_read_is_refused(self, device):
+        row = self.nested_rows(device, 1000, 40)
+        self.assertEqual((row["state"], row["runs"]), ("refused", 0), msg=str(row))
+        self.assertIn("it depends on more than 32768 reads", row["why"])
+
+    @isolated
+    def test_nested_list_that_is_an_argument_of_the_block(self, device):
+        # An argument is found by its structure, and the numbers in it are
+        # inputs of the region or checked by value: no entry is needed.
+        def fn(x, rows):
+            return (
+                ((x.sin() + 1) * torch.as_tensor(rows, device=x.device).sum())
+                .tanh()
+                .cos()
+                .exp()
+            )
+
+        rows = [[0.5, 0.25], [0.125, 0.0]]
+        g = vm(fn, passes=EARLY)
+        for call in range(13):
+            rows[0][0] = 0.75 if (call // 3) % 2 else 0.5
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(
+                g(x, rows), fn(x, rows), atol=0, rtol=0, msg=f"call {call}"
+            )
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"].endswith("<locals>.fn") and r["kind"] == "block"
+        )
+        self.assertEqual(
+            (row["state"], row["variants"], row["runs"]), ("region", 2, 8), msg=str(row)
+        )
+        self.assertEqual(
+            list(row["misses"]),
+            ["arg 1 leaf 0 (float, checked by float value)"],
+            msg=str(row),
+        )
+
 
 instantiate_device_type_tests(TestVmReads, globals())
 
