@@ -74,6 +74,17 @@ test_config = {
 }
 
 
+class _FxirTestConfigMixin:
+    def setUp(self):
+        super().setUp()
+        # config.patch cannot be a class decorator here: it returns a subclass
+        # whose __dict__ holds no test methods, so instantiate_device_type_tests
+        # (which scans __dict__.keys()) would not inject the device argument.
+        ctx = config.patch(test_config)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+
+
 class _FxirTestMixin:
     def _count_ops(self, gm: torch.fx.GraphModule, target: Callable) -> int:
         return len(gm.graph.find_nodes(op="call_function", target=target))
@@ -198,8 +209,7 @@ class _FxirTestMixin:
             return gm
 
 
-@config.patch(test_config)
-class FxirTestCase(_FxirTestMixin, InductorTestCase):
+class FxirTestCase(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @classmethod
@@ -2083,17 +2093,28 @@ class TestUnbackedSymbolDefs(InductorTestCase):
 
 
 @instantiate_parametrized_tests
-class TestFxirCpu(_FxirTestMixin, InductorTestCase):
+class TestFxirCpu(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def setUp(self):
-        super().setUp()
-        self._config_ctx = config.patch(test_config)
-        self._config_ctx.__enter__()
+    @parametrize("dynamic", (False, True))
+    @parametrize("input_", (1.5, 2, False))
+    def test_item(self, input_, dynamic: bool):
+        """
+        Test calling Tensor.item.
+        """
 
-    def tearDown(self):
-        self._config_ctx.__exit__(None, None, None)
-        super().tearDown()
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x[1].item()
+
+        x = torch.tensor((input_,) * 10)
+        d = Dim("s0", min=1)
+        dynamic_shapes = ({0: 2 * d},) if dynamic else None
+        self.check(M(), (x,), dynamic_shapes=dynamic_shapes)
+
+
+class TestFxirCppBackend(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
+    hw_classification = HardwareClassification.CPU
 
     def test_cpp_raises(self):
         """
@@ -2116,28 +2137,14 @@ class TestFxirCpu(_FxirTestMixin, InductorTestCase):
         ):
             self._compile_and_check(foo, args)
 
-    @parametrize("dynamic", (False, True))
-    @parametrize("input_", (1.5, 2, False))
-    def test_item(self, input_, dynamic: bool):
-        """
-        Test calling Tensor.item.
-        """
-
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return x[1].item()
-
-        x = torch.tensor((input_,) * 10)
-        d = Dim("s0", min=1)
-        dynamic_shapes = ({0: 2 * d},) if dynamic else None
-        self.check(M(), (x,), dynamic_shapes=dynamic_shapes)
-
 
 instantiate_device_type_tests(FxirTestCase, globals(), except_for="cpu", allow_xpu=True)
 
 instantiate_device_type_tests(
     AOTFxirTestCase, globals(), except_for="cpu", allow_xpu=True
 )
+
+instantiate_device_type_tests(TestFxirCppBackend, globals(), only_for="cpu")
 
 
 if __name__ == "__main__":
