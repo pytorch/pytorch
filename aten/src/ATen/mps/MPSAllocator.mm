@@ -4,6 +4,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/mps/MPSAllocator.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Logging.h>
 #include <c10/util/env.h>
@@ -25,6 +26,70 @@ uint64_t HeapBlock::heap_counter = 0;
 // actually in use). Lets the registered c10 allocator report readiness via
 // DeviceAllocator::initialized() without forcing Metal initialization.
 static std::atomic<bool> s_mps_allocator_initialized{false};
+
+// MPS keys of PYTORCH_ALLOC_CONF / torch._C._accelerator_setAllocatorSettings.
+// mps_large_alloc_threshold_mb: allocations at or above it get their own
+// OVERSIZE heap (see getHeapTier); 0, the default, keeps the built-in cutoff.
+class MPSAllocatorConfig {
+ public:
+  static MPSAllocatorConfig& instance() {
+    static MPSAllocatorConfig* s_instance = ([]() {
+      auto* inst = new MPSAllocatorConfig();
+      auto env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+      if (env.has_value()) {
+        inst->parseArgs(env.value());
+      }
+      return inst;
+    })();
+    return *s_instance;
+  }
+
+  static const std::unordered_set<std::string>& getKeys() {
+    static std::unordered_set<std::string> keys{"mps_large_alloc_threshold_mb"};
+    return keys;
+  }
+
+  size_t large_alloc_threshold_bytes() const {
+    return m_large_alloc_threshold_bytes.load();
+  }
+
+  void parseArgs(const std::string& env) {
+    // Each settings string is a full spec, as in AcceleratorAllocatorConfig.
+    m_large_alloc_threshold_bytes.store(0);
+    c10::CachingAllocator::ConfigTokenizer tokenizer(env);
+    for (size_t i = 0; i < tokenizer.size(); i++) {
+      const auto& key = tokenizer[i];
+      if (key == "mps_large_alloc_threshold_mb") {
+        tokenizer.checkToken(++i, ":");
+        const size_t threshold_mb = tokenizer.toSizeT(++i);
+        // Allocations of kXLargeHeap / 2 or more already get their own OVERSIZE heap.
+        TORCH_CHECK_VALUE(MB(threshold_mb) <= kXLargeHeap / 2,
+                          "mps_large_alloc_threshold_mb must be at most ",
+                          kXLargeHeap / 2 / MB(1),
+                          ", got ",
+                          threshold_mb);
+        m_large_alloc_threshold_bytes.store(MB(threshold_mb));
+      } else {
+        // PYTORCH_ALLOC_CONF is shared by every backend, so only reject unknown
+        // keys in our own namespace; e.g. CUDA's `backend` must not throw here.
+        TORCH_CHECK(key.compare(0, 4, "mps_") != 0,
+                    "Unrecognized key '",
+                    key,
+                    "' in MPS allocator config. Known MPS keys: mps_large_alloc_threshold_mb.");
+        i = tokenizer.skipKey(i);
+      }
+      if (i + 1 < tokenizer.size()) {
+        tokenizer.checkToken(++i, ",");
+      }
+    }
+  }
+
+ private:
+  MPSAllocatorConfig() = default;
+  std::atomic<size_t> m_large_alloc_threshold_bytes{0};
+};
+
+REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(MPSAllocatorConfig)
 
 void MPSHeapAllocatorImpl::init_allocator() {
   TORCH_CHECK(m_device.hasUnifiedMemory, "MPS backend is only supported on devices with unified memory");
@@ -100,8 +165,10 @@ size_t MPSHeapAllocatorImpl::get_allocation_size(size_t size, uint32_t usage) co
   // Keep the request in its original heap-size class (see getHeapTier): never let
   // rounding cross into a larger class, which would reserve a much larger backing
   // heap, nor push it past Metal's per-buffer limit.
+  const size_t oversize_threshold_bytes = MPSAllocatorConfig::instance().large_alloc_threshold_bytes();
   if (bucketed >= m_max_buffer_size ||
-      getHeapTier(bucketed, /*has_memory_pressure=*/false) != getHeapTier(aligned, /*has_memory_pressure=*/false)) {
+      getHeapTier(bucketed, /*has_memory_pressure=*/false, oversize_threshold_bytes) !=
+          getHeapTier(aligned, /*has_memory_pressure=*/false, oversize_threshold_bytes)) {
     return aligned;
   }
   return bucketed;
@@ -148,6 +215,9 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   auto stream_it = pool.available_buffers_by_stream.find(getCurrentMPSStream());
   if (stream_it != pool.available_buffers_by_stream.end()) {
     auto it = stream_it->second.lower_bound(&params.search_key);
+    while (it != stream_it->second.end() && (*it)->heap->dedicated != params.dedicated) {
+      ++it;
+    }
     if (it != stream_it->second.end() && (*it)->buffer && (*it)->size - alloc_size < pool.min_split &&
         (params.allow_in_flight_reuse || (*it)->retainCount() == 1)) {
       params.buffer_block = split_free_block(params, *it);
@@ -158,6 +228,9 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   // which is also what makes it safe to hand over to a different stream.
   if (!params.buffer_block) {
     auto it = pool.available_buffers.lower_bound(&params.search_key);
+    while (it != pool.available_buffers.end() && (*it)->heap->dedicated != params.dedicated) {
+      ++it;
+    }
     if (it != pool.available_buffers.end() && (!(*it)->buffer || (*it)->retainCount() <= 1)) {
       params.buffer_block = split_free_block(params, *it);
     }
@@ -291,7 +364,7 @@ bool MPSHeapAllocatorImpl::coalesce_free_blocks(AllocParams& params) {
   const size_t alloc_size = params.size();
 
   for (HeapBlock* heap : pool.heaps) {
-    if (heap->max_free_run < alloc_size) {
+    if (heap->max_free_run < alloc_size || heap->dedicated != params.dedicated) {
       continue;
     }
     // walk the heap in offset order, tracking the run of free blocks and the
@@ -421,6 +494,9 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   // we care about memory pressure if only we're allocating large buffers when the
   // low watermark limit has been reached
   params.has_memory_pressure = !(pool.usage & UsageFlags::SMALL) && getLowWatermarkValue() <= 0;
+  params.oversize_threshold_bytes = MPSAllocatorConfig::instance().large_alloc_threshold_bytes();
+  params.dedicated = params.oversize_threshold_bytes > 0 && alloc_size > kMaxSmallAlloc &&
+      alloc_size >= params.oversize_threshold_bytes;
 
   // first, try to get a block from the existing pool.
   bool block_found = get_free_buffer(params);
