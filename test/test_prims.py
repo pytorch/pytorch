@@ -370,7 +370,11 @@ class TestPrimsBasic(TestCase):
 
         # Third-party backends register via py_kernels directly (HOP.py_impl
         # refuses to override an existing registration), mirroring torch_npu.
+        # The dispatch cache is only cleared by HOP.py_impl, so clear it
+        # manually to make the swap effective even if this HOP was already
+        # dispatched earlier in the same process.
         hop.py_kernels[key] = replacement
+        hop._dispatch_cache.clear()
         try:
             def f():
                 rng_state, out = hop(torch.ops.aten.rand.default, [10], device="cpu")
@@ -385,6 +389,7 @@ class TestPrimsBasic(TestCase):
             self.assertTrue(any(n.target is hop for n in gm.graph.nodes))
         finally:
             hop.py_kernels[key] = builtin
+            hop._dispatch_cache.clear()
 
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
