@@ -8,8 +8,7 @@ from typing import Any, ClassVar, Literal
 
 import torch
 from torch._inductor import inductor_prims
-from torch._inductor.virtualized import V
-from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils._ordered_set import OrderedSet
 
 from .gemm_epilogue_utils import statically_known_shape_equal
@@ -72,11 +71,10 @@ class GemmReductionGeometry:
         if len(output_shape) != 3 or len(gemm_shape) != 2:
             return None
         for axis, group_dim in ((0, 1), (1, 2)):
-            try:
-                group = V.graph.sizevars.optimization_hint(output_shape[group_dim])
-            except (GuardOnDataDependentSymNode, TypeError, ValueError):
+            # The group size is compiled into the kernel, so it must be static.
+            if has_free_symbols(output_shape[group_dim]):
                 continue
-            geometry = cls(group=group, axis=axis)
+            geometry = cls(group=int(output_shape[group_dim]), axis=axis)
             if geometry.matches_output_shape(output_shape, gemm_shape):
                 return geometry
         return None
