@@ -411,6 +411,31 @@ def floats_filled_in(x, t):
     return floats_work(x, 2.0) + filled + torch.full_like(x, t)
 
 
+def floats_loop_names(x, pair):
+    y = (x.sin() * 2).cos()
+    names = []
+    for s in pair:
+        names.append(type(s).__name__)
+    return y, names
+
+
+def floats_kept_in_a_set(x, pair):
+    y = (x.sin() * 2).cos()
+    seen = {pair[0]}
+    return y, [type(s).__name__ for s in seen]
+
+
+def floats_kept_as_a_key(x, pair):
+    y = (x.sin() * 2).cos()
+    d = {pair[0]: 1}
+    return y, [type(k).__name__ for k in d]
+
+
+def floats_numbered(x, pair):
+    y = (x.sin() * 2).cos()
+    return y, [(i, type(s).__name__) for i, s in enumerate(pair)]
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmFloatArguments(TestCase):
     """A float argument is an input of a region's graph while the function
@@ -698,6 +723,24 @@ class TestVmFloatArguments(TestCase):
     @isolated
     def test_float_that_fills_a_tensor_of_a_given_size(self, device):
         self.in_the_graph(floats_filled_in, device)
+
+    @isolated
+    def test_loop_over_a_tuple_of_floats_gets_floats(self, device):
+        # The loop's iterator leaves the traced block with the tuple it
+        # goes over.
+        self.rows(floats_loop_names, device, pair=True)
+
+    @isolated
+    def test_float_put_in_a_set_is_a_float(self, device):
+        self.rows(floats_kept_in_a_set, device, pair=True)
+
+    @isolated
+    def test_float_that_is_the_key_of_a_new_dict_is_a_float(self, device):
+        self.rows(floats_kept_as_a_key, device, pair=True)
+
+    @isolated
+    def test_floats_that_enumerate_goes_over_are_floats(self, device):
+        self.rows(floats_numbered, device, pair=True)
 
 
 instantiate_device_type_tests(TestVmFloatArguments, globals())

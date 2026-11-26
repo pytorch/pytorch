@@ -47,7 +47,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering}
 use pyo3::ffi;
 use pyo3::ffi::PyObject;
 use pyo3::prelude::*;
-use pyo3::types::PyTuple;
+use pyo3::types::{PyList, PyTuple};
 
 use crate::cfg::ir::{Check, RegionOut, RegionSpec};
 use crate::exec::ffi::GilCell;
@@ -191,6 +191,24 @@ pub fn refuse(py: Python<'_>, why: &str) {
     match py.import("torch._rust_inductor").and_then(|m| m.call_method1("_refuse", (why,))) {
         Ok(e) => PyErr::from_value(e).restore(py),
         Err(e) => e.restore(py),
+    }
+}
+
+// Asked when a traced body is over, of what it hands on (`outs`, borrowed,
+// NULL allowed): a stand-in for a float kept where `plain` cannot give the
+// float back refuses the trace (torch._rust_inductor._kept_by says where),
+// so that the run does not stand and the program never gets the stand-in.
+// No exception is left set.
+pub unsafe fn kept(outs: &[*mut PyObject]) {
+    let py = Python::assume_attached();
+    let handed: Vec<Bound<'_, PyAny>> = outs.iter().filter(|o| !o.is_null()).map(|o| Bound::from_borrowed_ptr(py, *o)).collect();
+    let handed = PyList::new(py, handed);
+    let by = super::outside_executor(|| {
+        handed.and_then(|l| py.import("torch._rust_inductor")?.call_method1("_kept_by", (l,))).and_then(|k| k.extract::<Option<String>>())
+    });
+    if let Ok(Some(class)) = by {
+        refuse(py, &format!("it hands a float argument on in a {class}, which a region cannot make again"));
+        ffi::PyErr_Clear();
     }
 }
 

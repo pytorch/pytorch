@@ -1498,8 +1498,10 @@ impl Act<'_> {
             this.stop = std::ptr::null();
             this.reading = false;
             let mut outs: Vec<*mut PyObject> = sp.live_out.iter().map(|s| xincref(*this.local(*s))).collect();
+            super::region::kept(&outs);
             // A run that went on past a refusal (its code caught what the
-            // trace raised) is no run of the program's.
+            // trace raised, or it hands a stand-in on: see region::kept) is
+            // no run of the program's.
             let stands = !super::region::refused();
             let done = match &out {
                 Outcome::Stopped(x) => {
@@ -1715,6 +1717,9 @@ impl Act<'_> {
                 this.drop_all(&code.kills[step.kill.0 as usize..step.kill.1 as usize]);
             }
             this.reading = false;
+            // A stand-in for a float that the run hands on where it cannot
+            // be given back refuses the trace too (see region::kept).
+            super::region::kept(&ver.outputs.iter().map(|o| this.val(*o)).collect::<Vec<_>>());
             if super::region::refused() {
                 // Its code caught what the trace raised to refuse it, and
                 // went on: no run of the program's.

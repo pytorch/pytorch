@@ -172,24 +172,91 @@ def _tracer() -> PythonKeyTracer:
     return mode.tracer
 
 
+_TUPLE_ITERATOR, _LIST_ITERATOR = type(iter(())), type(iter([]))
+
+
 def _plain_result(x, depth=0):
     """x as the program is to see it once a trace is over: each _Scalar in it
-    replaced by the float it is. Exact tuples are rebuilt, exact lists and
-    dicts changed in place (the run that was traced made them). The executor
-    calls this on what a traced run leaves behind (see exec/region.rs)."""
+    replaced by the float it is. Exact tuples and frozensets are rebuilt, and
+    so is the iterator of a tuple (at the item it is at); exact lists, dicts
+    (their keys too) and sets are changed in place (the run that was traced
+    made them). The executor calls this on what a traced run leaves behind
+    (see exec/region.rs); what it does not reach is _kept_by's to find."""
     t = type(x)
     if t is _Scalar:
         return float.__float__(x)
-    if depth < 16:
-        if t is tuple:
-            new = tuple(_plain_result(y, depth + 1) for y in x)
-            return new if any(a is not b for a, b in zip(new, x)) else x
-        if t is list or t is dict:
-            for k, y in list(x.items()) if t is dict else list(enumerate(x)):
-                z = _plain_result(y, depth + 1)
-                if z is not y:
-                    x[k] = z
+    if depth >= 16:
+        return x
+    if t is tuple or t is frozenset:
+        new = [_plain_result(y, depth + 1) for y in x]
+        return t(new) if any(a is not b for a, b in zip(new, x)) else x
+    if t is list:
+        for k, y in enumerate(x):
+            z = _plain_result(y, depth + 1)
+            if z is not y:
+                x[k] = z
+    elif t is dict:
+        items = [(_plain_result(k, depth + 1), _plain_result(y, depth + 1)) for k, y in x.items()]
+        if any(k is not old for (k, _), old in zip(items, x)):
+            # In the order they were put in.
+            x.clear()
+            x.update(items)
+        else:
+            for k, y in items:
+                if y is not x[k]:
+                    x[k] = y
+    elif t is set:
+        new = [_plain_result(y, depth + 1) for y in x]
+        if any(a is not b for a, b in zip(new, x)):
+            x.clear()
+            x.update(new)
+    elif t is _TUPLE_ITERATOR or t is _LIST_ITERATOR:
+        state = x.__reduce__()
+        if len(state) == 3:
+            seq = _plain_result(state[1][0], depth + 1)
+            if seq is not state[1][0]:
+                x = iter(seq)
+                x.__setstate__(state[2])
     return x
+
+
+def _holds(x, depth=0) -> bool:
+    """Whether x is a _Scalar of the trace running, or an exact container (or
+    the iterator of a tuple or a list) that holds one."""
+    t = type(x)
+    if t is _Scalar:
+        return _live(x)
+    if t is _TUPLE_ITERATOR or t is _LIST_ITERATOR:
+        state = x.__reduce__()
+        return len(state) == 3 and _holds(state[1][0], depth + 1)
+    if depth < 4 and t in (tuple, list, set, frozenset):
+        return any(_holds(y, depth + 1) for y in x)
+    if depth < 4 and t is dict:
+        return any(_holds(k, depth + 1) or _holds(y, depth + 1) for k, y in x.items())
+    return False
+
+
+def _kept_by(outs) -> str | None:
+    """The class of an object among what a traced run hands on that keeps a
+    stand-in for a float where _plain_result does not reach (a generator, a
+    partial, an object the run made, an iterator over something else than a
+    tuple or a list), or None. The program would get the stand-in out of it
+    later: an object that is no float for code that asks its class. Looked
+    for in what each output refers to itself, exact containers followed."""
+    import gc
+
+    def look(x, depth):
+        t = type(x)
+        if t is _Scalar or isinstance(x, (torch.Tensor, str, bytes, int, float, type)):
+            return None
+        if t in (tuple, list, set, frozenset, dict) and depth < 4:
+            inner = [*x.keys(), *x.values()] if t is dict else x
+            return next((k for y in inner if (k := look(y, depth + 1)) is not None), None)
+        if t is _TUPLE_ITERATOR or t is _LIST_ITERATOR:
+            return None
+        return t.__name__ if any(_holds(y) for y in gc.get_referents(x)) else None
+
+    return next((k for o in outs if (k := look(o, 0)) is not None), None)
 
 
 def _live(x) -> bool:
