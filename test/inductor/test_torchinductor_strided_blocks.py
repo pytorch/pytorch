@@ -2309,6 +2309,11 @@ class GridSplitFeatureTest(InductorTestCase):
         features.get_grid_split.return_value = split
         features.indexing_scheduler_nodes.return_value = []
         features.any_index_expr_overflows_int32.return_value = False
+        # select_index_dtype reads these helpers; run the real ones on the mock.
+        features._index_dtype_numel.side_effect = lambda: (
+            SIMDKernelFeatures._index_dtype_numel(features)
+        )
+        features._index_dtype_buffers.return_value = []
         graph = mock.Mock(sizevars=SizeVarAllocator(shape_env))
         with V.set_graph_handler(graph):
             self.assertEqual(SIMDKernelFeatures.select_index_dtype(features), expected)
