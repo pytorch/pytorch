@@ -235,6 +235,7 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     frozenset.__getattribute__,
     int.__getattribute__,
     float.__getattribute__,
+    complex.__getattribute__,
     str.__getattribute__,
     list.__getattribute__,
     tuple.__getattribute__,
@@ -1325,6 +1326,8 @@ class SideEffects:
                         lambda: cg.load_import_from(utils.__name__, "object_new")
                     )
                 if var.mutation_type.cls_source is None:
+                    if type(var) is variables.OrderedDictVariable:
+                        var.unsupported_instance_state("returning a local OrderedDict")
                     unimplemented(
                         gb_type="Reconstruct user defined class without a source",
                         context=f"Class: {var.python_type().__name__}",

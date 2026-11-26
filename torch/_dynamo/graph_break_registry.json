@@ -3372,7 +3372,7 @@
       "Context": "context",
       "Explanation": "Dynamo cannot establish the stable receiver identity required by this operation.",
       "Hints": [
-        "Bind the method inside the compiled function or pass the computed result as an input."
+        "Pass the computed result as an input to the compiled function."
       ]
     }
   ],
@@ -7607,7 +7607,7 @@
   "GB3943": [
     {
       "Gb_type": "Unsupported user-defined formatting",
-      "Context": "{value.python_type_name()}.__format__, pending class mutation: {mutated}",
+      "Context": "{value.python_type_name()}, {detail}",
       "Explanation": "Dynamo cannot safely specialize this object's formatting behavior.",
       "Hints": [
         "Format this value outside the compiled region."
