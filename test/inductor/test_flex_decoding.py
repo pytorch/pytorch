@@ -2566,8 +2566,6 @@ class TestFlexDecodingLargeKV(InductorTestCase):
         torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
 
-# privateuse1/HPU test bases do not declare Capability.* yet; keep the
-# cpu/cuda/xpu scope until they register their capabilities.
 instantiate_device_type_tests(
     TestFlexDecoding, globals(), except_for=("privateuse1", "hpu"), allow_xpu=True
 )
