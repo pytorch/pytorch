@@ -267,6 +267,9 @@ static std::pair<int32_t, std::string> parentPidAndCommand(
     [[maybe_unused]] int32_t pid) {
 #ifdef __linux__
   std::ifstream statfile(fmt::format("/proc/{}/stat", pid));
+  if (!statfile.is_open()) {
+    return std::make_pair(0, "");
+  }
   std::string line;
   std::getline(statfile, line);
   // "<pid> (<comm>) <state> <ppid> ..."; comm may itself contain parentheses.
@@ -275,16 +278,18 @@ static std::pair<int32_t, std::string> parentPidAndCommand(
   const bool in_brackets = start_bracket_pos != std::string::npos &&
       end_bracket_pos != std::string::npos &&
       start_bracket_pos < end_bracket_pos;
-  char state = 0;
-  int32_t parent_pid = 0;
-  const bool parent_pid_parsed = static_cast<bool>(
-      std::istringstream(line.substr(end_bracket_pos + 1)) >> state >>
-      parent_pid);
-  if (in_brackets && parent_pid_parsed) {
-    return std::make_pair(
-        parent_pid,
-        line.substr(
-            start_bracket_pos + 1, end_bracket_pos - start_bracket_pos - 1));
+  if (in_brackets) {
+    char state = 0;
+    int32_t parent_pid = 0;
+    const bool parent_pid_parsed = static_cast<bool>(
+        std::istringstream(line.substr(end_bracket_pos + 1)) >> state >>
+        parent_pid);
+    if (parent_pid_parsed) {
+      return std::make_pair(
+          parent_pid,
+          line.substr(
+              start_bracket_pos + 1, end_bracket_pos - start_bracket_pos - 1));
+    }
   }
   // NOLINTNEXTLINE(performance-avoid-endl)
   std::cerr << "Failed to parse /proc/" << pid << "/stat" << std::endl;
