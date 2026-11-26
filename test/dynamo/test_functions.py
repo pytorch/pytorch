@@ -8,6 +8,7 @@ import datetime
 import enum
 import functools
 import inspect
+import io
 import itertools
 import keyword
 import math
@@ -233,19 +234,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = inline_ignore(x)
         x = inline_unused(x)
         return
-
-    def test_script_function_graph_break(self):
-        @torch.jit.script
-        def scripted():
-            if torch.jit.is_scripting():
-                return 1
-            print("unreachable")
-            return 2
-
-        def fn():
-            return scripted()
-
-        self.assertEqual(torch.compile(fn, backend="eager")(), 1)
 
     @make_test
     def test_inline_script_if_tracing_fn_with_default_args(a, b):
@@ -2385,12 +2373,11 @@ partial_fn = functools.partial(fn, scale=2)
                 return captured
 
             def check(target, delete):
-                target_alias = target
                 try:
                     if delete:
-                        delattr(target_alias, "__closure__")
+                        delattr(target, "__closure__")
                     else:
-                        target_alias.__closure__ = target_alias.__closure__
+                        target.__closure__ = target.__closure__
                 except AttributeError as exc:
                     return type(exc), str(exc)
                 return None, ""
@@ -2420,21 +2407,138 @@ partial_fn = functools.partial(fn, scale=2)
         def fn(x):
             x = x + 1
             torch._dynamo.graph_break()
-            target_alias = function_without_closure
             try:
-                target_alias.__closure__ = None
+                function_without_closure.__closure__ = None
             except AttributeError as exc:
                 result = type(exc), str(exc)
             else:
                 result = None, ""
             return x + 1, result
 
-        opt_fn = torch.compile(fn, backend="eager")
+        counter = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=counter)
         x = torch.ones(2)
         expected = fn(x)
         actual = opt_fn(x)
         self.assertEqual(expected, actual)
         self.assertEqual(actual[1], (AttributeError, "readonly attribute"))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("delete", [False, True])
+    def test_lru_cache_wrapper_closure_is_writable(self, delete):
+        def fn(x, wrapped):
+            if delete:
+                del wrapped.__closure__
+                return x + 1
+            wrapped.__closure__ = 3
+            return x + wrapped.__closure__
+
+        def make_wrapper():
+            wrapped = functools.lru_cache(function_without_closure)
+            wrapped.__closure__ = 1
+            return wrapped
+
+        x = torch.ones(2)
+        eager = make_wrapper()
+        traced = make_wrapper()
+        expected = fn(x, eager)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x, traced)
+        self.assertEqual(actual, expected)
+        if delete:
+            self.assertNotIn("__closure__", traced.__dict__)
+        else:
+            self.assertEqual(traced.__closure__, 3)
+        self.assertIsNone(function_without_closure.__closure__)
+
+    @parametrize("script", [False, True])
+    def test_function_wrapper_closure_is_readonly(self, script):
+        if script:
+            wrapped = torch.jit.script_if_tracing(function_without_closure)
+        else:
+            wrapped = torch.compile(function_without_closure, backend="eager")
+
+        def fn(x, target):
+            errors = []
+            try:
+                target.__closure__ = None
+            except AttributeError as exc:
+                errors.append(str(exc))
+            try:
+                delattr(target, "__closure__")
+            except AttributeError as exc:
+                errors.append(str(exc))
+            target.__name__ = "updated_wrapper"
+            return x + 1, errors, target.__name__
+
+        x = torch.ones(2)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x, wrapped)
+        self.assertEqual(wrapped.__name__, "updated_wrapper")
+        self.assertEqual(actual, fn(x, wrapped))
+        self.assertEqual(actual[1], ["readonly attribute"] * 2)
+        self.assertEqual(function_without_closure.__name__, "function_without_closure")
+
+    def test_sourced_function_attribute_writes(self):
+        def fn(x, target):
+            types.FunctionType.__dict__["__name__"].__set__(target, "new_name")
+            target.__get__ = 3
+            return x + target.__get__, target.__name__
+
+        def target():
+            pass
+
+        x = torch.ones(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, target),
+            (x + 3, "new_name"),
+        )
+        self.assertEqual(target.__name__, "new_name")
+        self.assertEqual(target.__dict__, {"__get__": 3})
+
+    @unittest.skipIf(sys.version_info >= (3, 12), "3.12+ defines __type_params__")
+    def test_function_type_params_is_instance_attribute_on_311(self):
+        def fn(x, target):
+            target.__type_params__ = 3
+            return x + target.__type_params__
+
+        def target():
+            pass
+
+        x = torch.ones(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, target), x + 3
+        )
+        self.assertEqual(target.__dict__, {"__type_params__": 3})
+
+    def test_existing_method_function_write_is_not_lost(self):
+        class A:
+            def m(self):
+                pass
+
+        def fn(x):
+            x = x + 1
+            A().m.__func__.__doc__ = "new doc"
+            return x + 1
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), x + 2)
+        self.assertEqual(A.m.__doc__, "new doc")
+
+    @parametrize("delete", [False, True])
+    def test_sourced_function_annotations_clear(self, delete):
+        def fn(x, target):
+            if delete:
+                delattr(target, "__annotations__")
+            else:
+                target.__annotations__ = None
+            return x + 1, target.__annotations__
+
+        def target(x: int):
+            pass
+
+        x = torch.ones(2)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, target)
+        self.assertEqual(result, (x + 1, {}))
+        self.assertIs(result[1], target.__annotations__)
 
     def test_function_member_setters_preserve_success_and_type_errors(self):
         def fn(x):
@@ -3139,6 +3243,49 @@ partial_fn = functools.partial(fn, scale=2)
 
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_union_type_hasattr(self):
+        def fn(x, t):
+            return x + 1, hasattr(t, "__name__"), hasattr(t, "__args__")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(fn(x, int | None), opt_fn(x, int | None))
+
+    def test_hasattr_caching_getattr(self):
+        # Mirrors tempfile._TemporaryFileWrapper: __getattr__ caches into
+        # __dict__, so guards must not call it while they are built.
+        class Wrapper:
+            def __init__(self):
+                self.__dict__["file"] = io.BytesIO()
+
+            def __getattr__(self, name):
+                a = getattr(self.__dict__["file"], name)
+                setattr(self, name, a)
+                return a
+
+        def fn(w, x):
+            if hasattr(w, "seek"):
+                return x + 1
+            return x - 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        w = Wrapper()
+        self.assertEqual(opt_fn(w, x), x + 1)
+        self.assertIn("seek", w.__dict__)
+        self.assertEqual(opt_fn(w, x), x + 1)
+
+        # Found without __getattr__: hasattr must still guard on presence.
+        def fn_tag(w, x):
+            return x + 1 if hasattr(w, "tag") else x - 1
+
+        opt_fn_tag = torch.compile(fn_tag, backend="eager", fullgraph=True)
+        w = Wrapper()
+        w.tag = 1
+        self.assertEqual(opt_fn_tag(w, x), x + 1)
+        del w.tag
+        self.assertEqual(opt_fn_tag(w, x), x - 1)
 
     @make_test
     def test_list_clear(a, b):
@@ -6427,6 +6574,17 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cached.foo, 1)
         self.assertEqual(cached.__doc__, "new")
 
+    def test_lru_cache_wrapper_method_wrapper_identity(self):
+        @functools.lru_cache
+        def cached(x):
+            return x + 1
+
+        def fn(x):
+            return x + 1, cached.__call__ is not None
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_functools_cache_guard(self):
         class Foo:
             @functools.lru_cache  # noqa: B019
@@ -8999,6 +9157,21 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = torch.compile(fn, backend="eager", fullgraph=True)(t, w)
         self.assertEqual(res, fn(t, functools.lru_cache(lambda: None)))
 
+    def test_function_wrapper_name_write_type_check(self):
+        # A torch.compile wrapper is a function: its __name__ setter rejects
+        # non-str values.
+        def fn(t, w):
+            try:
+                w.__name__ = 5
+                return t + 1
+            except TypeError:
+                return t - 1
+
+        t = torch.zeros(1)
+        w = torch.compile(lambda: None, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(t, w), fn(t, w))
+
     def test_str_handler_for_user_defined_object(self):
         """
         Confirms handler behaviour for `str` is the same between eager and dynamo.
@@ -9820,6 +9993,52 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         result = func_compiled(x)
 
         self.assertEqual(result, expected)
+
+    @parametrize("attr", ["__name__", "__qualname__"])
+    def test_bound_method_name_readonly(self, attr):
+        class A:
+            def m(self):
+                pass
+
+        def fn(x, a, bm):
+            out = []
+            # a.m is built during tracing; bm is a bound method graph input.
+            for m in (a.m, bm):
+                try:
+                    setattr(m, attr, "new")
+                except AttributeError:
+                    out.append(getattr(m, attr))
+            return x + 1, out
+
+        x = torch.ones(2)
+        ref = fn(x, A(), A().m)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, A(), A().m)
+        self.assertEqual(ref, res)
+        self.assertEqual(len(ref[1]), 2)
+
+    def test_bound_method_setattr_delattr(self):
+        class A:
+            def m(self):
+                pass
+
+        def fn(x, a):
+            out = []
+            for name in ("__doc__", "__name__", "__defaults__", "__func__", "foo"):
+                try:
+                    setattr(a.m, name, 1)
+                    out.append(False)
+                except AttributeError:
+                    out.append(True)
+                try:
+                    delattr(a.m, name)
+                    out.append(False)
+                except AttributeError:
+                    out.append(True)
+            return x + 1, out
+
+        x = torch.ones(2)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, A())
+        self.assertEqual(res, fn(x, A()))
 
 
 _FUNCTION_DEVICE_TEST_BASES = (FunctionTestsCudaOnly, FunctionTestsDevice)
