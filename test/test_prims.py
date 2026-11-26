@@ -349,46 +349,32 @@ class TestPrimsBasic(TestCase):
         self.assertEqual(result.device.type, "cpu")
         self.assertEqual(result.shape, (1,))
 
-    def test_run_and_save_rng_state_proxy_mode_respects_backend_registration(self):
-        # https://github.com/pytorch/pytorch/issues/206212
-        # Third-party backends register their own BackendSelect impl for the
-        # rng HOPs (torch_npu registers backend_select_with_npu).  The
-        # ProxyTorchDispatchMode impl must redispatch the HOP (with proxy
-        # tracing disabled) instead of calling the built-in backend selector
-        # directly, so that the registered impl is honored during make_fx
-        # tracing.
+    def test_rng_wrapper_backend_select(self):
         from torch.fx.experimental.proxy_tensor import make_fx
 
         hop = torch._prims.rng_prims.run_and_save_rng_state
+        rand = torch.ops.aten.rand.default
         key = torch._C.DispatchKey.BackendSelect
-        builtin = hop.py_kernels[key]
-        called = []
+        original = hop.py_kernels[key]
+        calls = []
 
         def replacement(op, *args, **kwargs):
-            called.append(op)
-            return builtin(op, *args, **kwargs)
+            calls.append(op)
+            return original(op, *args, **kwargs)
 
-        # Third-party backends register via py_kernels directly (HOP.py_impl
-        # refuses to override an existing registration), mirroring torch_npu.
-        # The dispatch cache is only cleared by HOP.py_impl, so clear it
-        # manually to make the swap effective even if this HOP was already
-        # dispatched earlier in the same process.
+        def f():
+            _, out = hop(rand, [10], device="cpu")
+            return out
+
         hop.py_kernels[key] = replacement
-        hop._dispatch_cache.clear()
         try:
-            def f():
-                rng_state, out = hop(torch.ops.aten.rand.default, [10], device="cpu")
-                return out
-
+            hop._dispatch_cache.clear()
             gm = make_fx(f)()
-            self.assertTrue(
-                called,
-                "registered BackendSelect impl was bypassed by the "
-                "ProxyTorchDispatchMode impl of run_and_save_rng_state",
-            )
-            self.assertTrue(any(n.target is hop for n in gm.graph.nodes))
+
+            self.assertEqual(calls, [rand])
+            self.assertIn(hop, [node.target for node in gm.graph.nodes])
         finally:
-            hop.py_kernels[key] = builtin
+            hop.py_kernels[key] = original
             hop._dispatch_cache.clear()
 
     def test_torch_ops(self):
