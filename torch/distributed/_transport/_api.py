@@ -406,8 +406,11 @@ class Transport(ABC):
             if received or (deadline is not None and loop.time() >= deadline):
                 return received
             # Backends cannot signal arrivals to the loop, so poll with backoff.
-            await asyncio.sleep(delay)
+            await self._sleep_notification_poll(delay)
             delay = min(delay * 2, 1e-3)
+
+    async def _sleep_notification_poll(self, delay: float) -> None:
+        await asyncio.sleep(delay)
 
     def _poll_notifications(self, *, wait: bool) -> list[Notification]:
         return self.wait_notifications(timeout=0)

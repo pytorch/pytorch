@@ -8,7 +8,7 @@ from concurrent.futures import Future as _ThreadFuture
 from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
 from importlib import import_module
-from threading import Condition, current_thread, RLock, Thread
+from threading import Condition, current_thread, Lock, RLock, Thread
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
@@ -133,6 +133,8 @@ class NIXLTransport(Transport):
         self._notifying: set[_NIXLWork] = set()
         self._received: deque[list[Notification] | Exception] = deque()
         self._async_poll_requested = False
+        self._async_waiter_slot = Lock()
+        self._async_waiter: asyncio.Future[None] | None = None
         # Whether a wait_notifications caller is polling NIXL for the others.
         self._draining = False
         # Lifecycle: open -> closing -> closed. Closing rejects new operations and
@@ -299,6 +301,31 @@ class NIXLTransport(Transport):
             self._async_poll_requested = True
         return self._take_notifications()
 
+    async def _sleep_notification_poll(self, delay: float) -> None:
+        if self._received:
+            return
+        if not self._async_poll_requested or not self._async_waiter_slot.acquire(False):
+            await asyncio.sleep(delay)
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            waiter = loop.create_future()
+            self._async_waiter = waiter
+            if not self._received:
+                timer = loop.call_later(delay, self._wake_notification_waiter, waiter)
+                try:
+                    await waiter
+                finally:
+                    timer.cancel()
+        finally:
+            self._async_waiter = None
+            self._async_waiter_slot.release()
+
+    @staticmethod
+    def _wake_notification_waiter(waiter: asyncio.Future[None]) -> None:
+        if not waiter.done():
+            waiter.set_result(None)
+
     def _stage_notifications(self) -> None:
         self._async_poll_requested = False
         if not self._closed and not self._closing:
@@ -306,6 +333,14 @@ class NIXLTransport(Transport):
                 self._drain_notifications()
             except Exception as error:
                 self._received.append(error)
+            waiter = self._async_waiter
+            if self._received and waiter is not None:
+                try:
+                    waiter.get_loop().call_soon_threadsafe(
+                        self._wake_notification_waiter, waiter
+                    )
+                except RuntimeError:
+                    pass  # Its event loop closed before the wakeup.
 
     def _drain_notifications(self) -> None:
         # Caller holds _operation_lock. Consumers can claim a staged batch

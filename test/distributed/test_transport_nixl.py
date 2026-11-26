@@ -1044,6 +1044,49 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         )
         self.assertEqual(second.wait_notifications(timeout=0), [])
 
+    def test_cancelled_notification_waiter_releases_wakeup_slot(self):
+        sender, receiver = self.make_transport_pair()
+        sender.send_notification(receiver.peer_id, b"kept").wait()
+
+        async def run(owner):
+            def wait():
+                return asyncio.create_task(
+                    receiver.wait_notifications_async(timeout=30)
+                )
+
+            first = wait()
+            await asyncio.sleep(0)
+            first.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await first
+
+            followers = [wait(), wait()]
+            await asyncio.sleep(0)
+            loop = asyncio.get_running_loop()
+            with patch.object(
+                loop, "call_soon_threadsafe", wraps=loop.call_soon_threadsafe
+            ) as wake:
+                # bind stages the message while its thread still owns the lock.
+                owner.submit(receiver.bind).result()
+                self.assertEqual(wake.call_count, 1)
+            done, pending = await asyncio.wait(
+                followers, timeout=1, return_when=asyncio.FIRST_COMPLETED
+            )
+            self.assertEqual(len(done), 1)
+            self.assertEqual(done.pop().result(), [(sender.peer_id, b"kept")])
+            follower = pending.pop()
+            follower.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await follower
+            self.assertEqual(await receiver.wait_notifications_async(timeout=0), [])
+
+        with ThreadPoolExecutor(max_workers=1) as owner:
+            owner.submit(receiver._operation_lock.acquire).result()
+            try:
+                asyncio.run(run(owner))
+            finally:
+                owner.submit(receiver._operation_lock.release).result()
+
     def test_close_fails_pending_async_notification_wait(self):
         _, receiver = self.make_transport_pair()
 
