@@ -3825,7 +3825,6 @@ class PointwiseStrictNumericsTest(TestCase):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG, calls=calls)
         self.assertFalse(mismatches, f"{_op_id(op)} {dtype} edge outputs: {mismatches}")
 
-
     @decorateIf(
         unittest.skip("uncompilable op under fullgraph"),
         lambda p: p["op"].name in COMPILE_UNSUPPORTED,
