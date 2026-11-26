@@ -937,13 +937,12 @@ class TestOptimRenewed(TestCase):
         """
         if impl not in ("foreach", "fused"):
             raise AssertionError(f"impl must be 'foreach' or 'fused', got {impl!r}")
+        device_type = _get_device_type(devices[0])
         if impl == "foreach" and "foreach" not in optim_info.supported_impls:
-            return unittest.skip(
-                f"foreach not supported for {optim_info.optim_cls.__name__}"
-            )
-        elif impl == "fused" and "cuda" not in optim_info.supports_fused_on:
-            return unittest.skip(
-                f"fused not supported for {optim_info.optim_cls.__name__} on cuda"
+            self.skipTest(f"foreach not supported for {optim_info.optim_cls.__name__}")
+        elif impl == "fused" and device_type not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"fused not supported for {optim_info.optim_cls.__name__} on {device_type}"
             )
 
         params = [
