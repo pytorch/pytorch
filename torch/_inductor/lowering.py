@@ -1416,6 +1416,13 @@ def register_pointwise(
             if any(isinstance(arg, IRNode) and is_triton(arg) for arg in args):
                 if allow_alpha:
                     raise AssertionError("expected: not allow_alpha")
+                for arg in pytree.tree_leaves((args, kwargs)):
+                    if _is_tensor_irnode(arg) and is_triton(arg):
+                        arg.realize()
+                        V.graph.preserve_input_alignment(
+                            (arg.get_name(),),
+                            "native pointwise kernels require original input pointer alignment",
+                        )
                 return native_handler(*args, **kwargs)
             args, kwargs = transform_args(
                 list(args),

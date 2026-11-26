@@ -29,6 +29,31 @@ from torch.testing._internal.inductor_pointwise_coverage import (
 class TestPointwiseCoverage(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("missing", ("none", "edge", "baseline", "matching_call"))
+    def test_native_calls_are_reported_separately(self, missing):
+        record = CoverageRecord(
+            {"test": "native_polynomial"}, required_sample_kinds=("opinfo", "edges")
+        )
+        record.native_calls_compared = 2
+        record.native_calls_matched = 1 if missing == "matching_call" else 2
+        record.native_calls_by_sample_kind["opinfo"] = 1
+        if missing != "edge":
+            record.native_calls_by_sample_kind["edges"] = 1
+        record.native_baseline_verified = missing != "baseline"
+        record.numerical_fallbacks = 1
+        case = unittest.FunctionTestCase(lambda: None)
+        result = unittest.TestResult()
+        with record_result(record, result, case):
+            case.run(result)
+        self.assertEqual(
+            record.status,
+            "native_call_equivalent" if missing == "none" else "unverified",
+        )
+        event = record.event()
+        self.assertEqual(event["compared"], 0)
+        self.assertEqual(event["matched"], 0)
+        self.assertEqual(event["native_calls_compared"], 2)
+
     def test_strict_suite_has_no_duplicate_test_ids(self):
         spec = importlib.util.spec_from_file_location(
             f"{__name__}.strict_numerics_collection",

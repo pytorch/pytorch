@@ -53,6 +53,57 @@ class NativeCalls(TorchDispatchMode):
 class TestNativePointwise(TestCase):
     hw_classification = HardwareClassification.CUDA
 
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("op_name", ("laguerre_polynomial_l", "legendre_polynomial_p"))
+    @parametrize("layout", ("contiguous", "strided", "scalar"))
+    @parametrize("numerics", ("default", "strict"))
+    @parametrize("mixed", (False, True))
+    def test_reused_native_arguments(
+        self, device, dtype, op_name, layout, numerics, mixed
+    ):
+        compiled_calls = []
+        compilations = []
+
+        def fn(x, degree):
+            result = getattr(torch.special, op_name)(x, degree)
+            return (result, x + 1) if mixed else result
+
+        def backend(gm, inputs):
+            compilations.append(gm)
+            compiled = lookup_backend("inductor")(gm, inputs)
+
+            def execute(*args):
+                calls = NativeCalls()
+                with calls:
+                    output = compiled(*args)
+                compiled_calls.extend(calls.calls)
+                return output
+
+            return execute
+
+        torch._dynamo.reset()
+        with config.patch(
+            numerics=numerics, fx_graph_cache=False, fx_graph_remote_cache=False
+        ):
+            compiled = torch.compile(fn, backend=backend, fullgraph=True)
+            for offset in (0, 1, 2):
+                base = torch.arange(16, dtype=dtype, device=device)
+                x = base[offset : offset + 6]
+                if layout == "strided":
+                    x = x[::2]
+                elif layout == "scalar":
+                    x = x[0]
+                degree = torch.full_like(x, 2.75)
+                eager_calls = NativeCalls()
+                with eager_calls:
+                    expected = fn(x, degree)
+                actual = compiled(x, degree)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                self.assertEqual(len(eager_calls.calls), 1)
+                self.assertEqual(compiled_calls, eager_calls.calls)
+                compiled_calls.clear()
+        self.assertEqual(len(compilations), 1)
+
     @dtypes(torch.bool, torch.float32, torch.float64, torch.int64, torch.uint64)
     @parametrize("op_name", ("laguerre_polynomial_l", "legendre_polynomial_p"))
     @parametrize("layout", ("contiguous", "strided", "broadcast"))

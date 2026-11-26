@@ -1,10 +1,13 @@
 # Owner(s): ["module: inductor"]
 """Tests for strict numerics mode."""
 
+import ast
+import hashlib
 import itertools
 import json
 import math
 import os
+import struct
 import subprocess
 import sys
 import unittest
@@ -7892,13 +7895,243 @@ REFERENCE_INPUTS = frozenset(
 )
 
 
-# Skip raw-bit sweeps for prohibitively slow value-dependent series.
-BITPATTERN_SLOW = frozenset(
-    {
-        "special.laguerre_polynomial_l",
-        "special.legendre_polynomial_p",
+# Compare complete calls to these deterministic native kernels for every degree.
+NATIVE_POLYNOMIALS = {
+    "special.laguerre_polynomial_l": torch.ops.aten.special_laguerre_polynomial_l,
+    "special.legendre_polynomial_p": torch.ops.aten.special_legendre_polynomial_p,
+}
+
+
+class _NativeCallProbe(TorchDispatchMode):
+    """Verify a shared native call without evaluating its value-dependent series."""
+
+    def __init__(self, packet, *, compiling=False):
+        super().__init__()
+        self.overloads = tuple(packet.op_overloads())
+        self.schema_names = {
+            op.default._schema.name for op in NATIVE_POLYNOMIALS.values()
+        }
+        self.compiling = compiling
+        self.frames = []
+        self.output = None
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake
+
+        kwargs = kwargs or {}
+        if func._schema.name in self.schema_names and func not in self.overloads:
+            raise AssertionError("Unexpected native polynomial operator")
+        if func in self.overloads and not any(
+            is_fake(value) for value in tree_leaves((args, kwargs))
+        ):
+            if self.compiling:
+                raise AssertionError("Native polynomial execution during compilation")
+            if func._schema.is_mutable or any(
+                value.alias_info is not None
+                for value in (*func._schema.arguments, *func._schema.returns)
+            ):
+                raise AssertionError("Expected a pure native polynomial schema")
+            if torch.Tag.pointwise not in func.tags or any(
+                tag in func.tags
+                for tag in (
+                    torch.Tag.nondeterministic_bitwise,
+                    torch.Tag.nondeterministic_seeded,
+                )
+            ):
+                raise AssertionError("Expected a deterministic pointwise kernel")
+
+            def encode(value):
+                if isinstance(value, torch.Tensor):
+                    flat = value.detach().resolve_conj().resolve_neg().cpu().reshape(-1)
+                    packed = torch.empty((flat.numel(),), dtype=flat.dtype)
+                    packed.copy_(flat)
+                    digest = hashlib.sha256(
+                        packed.view(torch.uint8).numpy().tobytes()
+                    ).hexdigest()
+                    return (
+                        value.dtype,
+                        value.device,
+                        tuple(value.shape),
+                        value.stride(),
+                        value.storage_offset(),
+                        value.data_ptr(),
+                        value.untyped_storage().data_ptr(),
+                        value.requires_grad,
+                        value.is_neg(),
+                        value.is_conj(),
+                        digest,
+                    )
+                if isinstance(value, float):
+                    return (float, struct.pack("!d", value))
+                return (type(value), value)
+
+            self.frames.append(
+                (
+                    func,
+                    tree_map(encode, args),
+                    tree_map(encode, kwargs),
+                    torch.get_default_dtype(),
+                    torch.cuda.current_device(),
+                    torch.cuda.current_stream().cuda_stream,
+                    torch.is_autocast_enabled("cuda"),
+                    torch._C._dispatch_dump_table(func._schema.name),
+                )
+            )
+            fake = FakeTensorMode()
+
+            def convert(value):
+                return (
+                    fake.from_tensor(value)
+                    if isinstance(value, torch.Tensor)
+                    else value
+                )
+
+            with fake:
+                meta = func(*tree_map(convert, args), **tree_map(convert, kwargs))
+            if meta.dtype not in (torch.float32, torch.float64):
+                raise AssertionError(
+                    "Native polynomials dispatch only float32 and float64"
+                )
+            # This tensor is a return-identity probe, never a numerical result.
+            self.output = torch.empty_strided(
+                meta.shape, meta.stride(), dtype=meta.dtype, device=meta.device
+            ).zero_()
+            return self.output
+        return func(*args, **kwargs)
+
+    def matches(self, other, eager_result, compiled_result):
+        return (
+            len(self.frames) == len(other.frames) == 1
+            and self.frames == other.frames
+            and eager_result is self.output
+            and compiled_result is other.output
+        )
+
+
+def _native_polynomial_probe(op):
+    packet = NATIVE_POLYNOMIALS.get(op.name)
+    return _NativeCallProbe(packet) if packet is not None else nullcontext()
+
+
+def _native_call_wrapper_is_direct(code, operator):
+    """Allow a native call and metadata checks, but no tensor computations."""
+    runtime = next(
+        (
+            node
+            for node in ast.walk(ast.parse(code))
+            if isinstance(node, ast.FunctionDef) and node.name == "call"
+        ),
+        None,
+    )
+    if runtime is None:
+        return False
+    output = None
+    returned = False
+    inputs = set()
+    metadata_checks = {
+        "assert_size_stride",
+        "assert_size_stride_grouped",
+        "assert_tensor_metadata",
+        "assert_alignment",
     }
-)
+
+    def simple(node):
+        if isinstance(node, (ast.Name, ast.Constant)):
+            return True
+        if isinstance(node, ast.Attribute):
+            return simple(node.value)
+        if isinstance(node, (ast.Tuple, ast.List)):
+            return all(simple(item) for item in node.elts)
+        if isinstance(node, ast.UnaryOp):
+            return isinstance(node.op, (ast.USub, ast.UAdd)) and isinstance(
+                node.operand, ast.Constant
+            )
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "float"
+            and not node.keywords
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value in ("nan", "inf", "-inf")
+        )
+
+    def simple_args(call):
+        return all(simple(item) for item in call.args) and all(
+            simple(item.value) for item in call.keywords
+        )
+
+    def check(statements):
+        nonlocal output, returned
+        for node in statements:
+            if isinstance(node, ast.With):
+                if (
+                    len(node.items) != 1
+                    or not isinstance(node.items[0].context_expr, ast.Call)
+                    or ast.unparse(node.items[0].context_expr.func)
+                    != "torch.cuda._DeviceGuard"
+                    or not simple_args(node.items[0].context_expr)
+                    or not check(node.body)
+                ):
+                    return False
+            elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                if (
+                    isinstance(target, (ast.Tuple, ast.List))
+                    and all(isinstance(item, ast.Name) for item in target.elts)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "args"
+                ):
+                    inputs.update(item.id for item in target.elts)
+                elif isinstance(target, ast.Name) and isinstance(node.value, ast.Call):
+                    if not simple_args(node.value):
+                        return False
+                    call = ast.unparse(node.value.func)
+                    if (
+                        call == "copy_if_misaligned"
+                        and output is None
+                        and target.id in inputs
+                    ):
+                        if (
+                            len(node.value.args) != 1
+                            or ast.unparse(node.value.args[0]) != target.id
+                        ):
+                            return False
+                    elif call == f"torch.ops.{operator}" and output is None:
+                        output = target.id
+                    else:
+                        return False
+                else:
+                    return False
+            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                call = ast.unparse(node.value.func)
+                if call not in metadata_checks | {
+                    "args.clear",
+                    "torch.cuda.set_device",
+                } or not simple_args(node.value):
+                    return False
+            elif isinstance(node, ast.Delete):
+                if not all(
+                    isinstance(target, ast.Name) and target.id in inputs
+                    for target in node.targets
+                ):
+                    return False
+            elif isinstance(node, ast.Return):
+                if (
+                    output is None
+                    or returned
+                    or not isinstance(node.value, ast.Tuple)
+                    or len(node.value.elts) != 1
+                    or not isinstance(node.value.elts[0], ast.Name)
+                    or node.value.elts[0].id != output
+                ):
+                    return False
+                returned = True
+            else:
+                return False
+        return True
+
+    return check(runtime.body) and returned
 
 
 class _RngOpDetector(TorchDispatchMode):
@@ -8115,6 +8348,62 @@ class PointwiseStrictNumericsTest(TestCase):
             self._coverage.generated_fallbacks = metrics.generated_fallback_kernel_count
             if not equal:
                 self._coverage.mismatches[kind] += 1
+
+    @dtypes(torch.float64)
+    @parametrize("change", ("none", "dtype", "stride", "value", "result", "duplicate"))
+    def test_native_call_probe_detects_changed_execution(self, device, dtype, change):
+        from torch._dynamo.backends.registry import lookup_backend
+        from torch._inductor.graph import GraphLowering
+
+        packet = torch.ops.aten.special_laguerre_polynomial_l
+        x = torch.tensor([[0.25, 0.5], [0.75, 1]], device=device, dtype=dtype)
+        degree = torch.full_like(x, 1e20)
+        eager = _NativeCallProbe(packet)
+        with eager:
+            expected = packet(x, degree)
+        observed = []
+        wrappers = []
+
+        def fn(x, degree):
+            if change == "dtype":
+                x, degree = x.float(), degree.float()
+            elif change == "stride":
+                x, degree = x.t(), degree.t()
+            elif change == "value":
+                x = x + 1
+            result = packet(x, degree)
+            if change == "result":
+                result = result + 1
+            elif change == "duplicate":
+                result = packet(x, degree) + result
+            return result
+
+        def backend(gm, inputs):
+            with (
+                _NativeCallProbe(packet, compiling=True),
+                mock.patch.object(GraphLowering, "save_output_code", wrappers.append),
+            ):
+                compiled = lookup_backend("inductor")(gm, inputs)
+
+            def execute(*args):
+                probe = _NativeCallProbe(packet)
+                with probe:
+                    result = compiled(*args)
+                observed.append(probe)
+                return result
+
+            return execute
+
+        torch._dynamo.reset()
+        with config.patch(fx_graph_cache=False, fx_graph_remote_cache=False):
+            actual = torch.compile(fn, backend=backend, fullgraph=True)(x, degree)
+        self.assertEqual(len(observed), 1)
+        direct = len(wrappers) == 1 and _native_call_wrapper_is_direct(
+            wrappers[0], observed[0].frames[0][0]
+        )
+        self.assertEqual(
+            direct and eager.matches(observed[0], expected, actual), change == "none"
+        )
 
     def setUp(self):
         super().setUp()
@@ -8423,9 +8712,6 @@ class PointwiseStrictNumericsTest(TestCase):
         if op.name in POINTWISE_GEOMETRY | POINTWISE_CONDITIONAL:
             self._coverage_filter("raw_bits_require_original_geometry")
             return []
-        if op.name in BITPATTERN_SLOW:
-            self._coverage_filter("raw_bit_sweep_disabled_for_slow_series")
-            return []
         key = (_op_id(op), _dtype_label(dtype))
         expanded = (
             ALL_SAMPLES
@@ -8534,7 +8820,8 @@ class PointwiseStrictNumericsTest(TestCase):
                     continue
                 seen.add(key)
                 try:
-                    op.op(inp, *args, **kwargs)
+                    with _native_polynomial_probe(op):
+                        op.op(inp, *args, **kwargs)
                 except Exception as error:
                     self._coverage_filter(
                         f"invalid_raw_bit_call:{type(error).__name__}"
@@ -8582,7 +8869,7 @@ class PointwiseStrictNumericsTest(TestCase):
                 continue
             inp, args, kwargs = call
             detector = _RngOpDetector()
-            with detector:
+            with detector, _native_polynomial_probe(op):
                 _pointwise_op(op)(inp, *args, **kwargs)
             if detector.has_rng and op.name not in POINTWISE_DROPOUT | {
                 "nn.functional.rrelu"
@@ -8690,14 +8977,15 @@ class PointwiseStrictNumericsTest(TestCase):
         return mismatches
 
     def _combined_calls(self, device, op, dtype, *, backward=False):
-        try:
-            calls = self._collect_calls(device, op, dtype, backward=backward)
-        except unittest.SkipTest as error:
-            self._coverage_filter(f"opinfo_samples_skipped:{error}")
-            calls = []
-        # Preserve the edge inputs previously generated in a separate seeded test.
-        torch.manual_seed(0)
-        calls += self._edge_calls(op, device, dtype, backward=backward)
+        with _native_polynomial_probe(op):
+            try:
+                calls = self._collect_calls(device, op, dtype, backward=backward)
+            except unittest.SkipTest as error:
+                self._coverage_filter(f"opinfo_samples_skipped:{error}")
+                calls = []
+            # Preserve the edge inputs previously generated in a separate seeded test.
+            torch.manual_seed(0)
+            calls += self._edge_calls(op, device, dtype, backward=backward)
         return calls
 
     def _assert_sample_ledgers(self, mismatches, op, dtype, what, xfail, xfail_name):
@@ -8717,6 +9005,9 @@ class PointwiseStrictNumericsTest(TestCase):
         r"""Return mismatching (source, index, shape, kwargs, kind) records."""
         if calls is None:
             calls = self._collect_calls(device, op, dtype)
+
+        if op.name in NATIVE_POLYNOMIALS:
+            return self._sweep_native_calls(device, op, dtype, cfg, calls)
 
         def fn(inp, args, kwargs):
             return _pointwise_op(op)(inp, *args, **kwargs)
@@ -8764,6 +9055,76 @@ class PointwiseStrictNumericsTest(TestCase):
         if not mismatches:
             # A mismatch must not be turned into a no-kernel skip.
             self._require_kernel(tested, "no usable sample", op, dtype)
+        return mismatches
+
+    def _sweep_native_calls(self, device, op, dtype, cfg, calls):
+        from torch._dynamo.backends.registry import lookup_backend
+        from torch._inductor.graph import GraphLowering
+
+        packet = NATIVE_POLYNOMIALS[op.name]
+        observed = []
+        wrappers = []
+
+        def fn(inp, args, kwargs):
+            return _pointwise_op(op)(inp, *args, **kwargs)
+
+        def backend(gm, inputs):
+            emitted = []
+            with (
+                _NativeCallProbe(packet, compiling=True),
+                mock.patch.object(GraphLowering, "save_output_code", emitted.append),
+            ):
+                compiled = lookup_backend("inductor")(gm, inputs)
+
+            def execute(*args):
+                probe = _NativeCallProbe(packet)
+                with probe:
+                    result = compiled(*args)
+                observed.append(probe)
+                wrappers.extend(emitted)
+                return result
+
+            return execute
+
+        mismatches = []
+        with (
+            config.patch(cfg),
+            torch._dynamo.config.patch(
+                recompile_limit=sys.maxsize,
+                accumulated_recompile_limit=sys.maxsize,
+            ),
+        ):
+            metrics.reset()
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend=backend, fullgraph=True, dynamic=False)
+            for idx, (tag, inp, args, kwargs) in enumerate(calls):
+                eager = _NativeCallProbe(packet)
+                with eager:
+                    expected = fn(inp, args, kwargs)
+                observed.clear()
+                wrappers.clear()
+                result = compiled(inp, args, kwargs)
+                equal = (
+                    len(observed) == len(wrappers) == 1
+                    and eager.matches(observed[0], expected, result)
+                    and _native_call_wrapper_is_direct(wrappers[0], eager.frames[0][0])
+                )
+                if self._coverage is not None:
+                    self._coverage.native_calls_compared += 1
+                    self._coverage.native_calls_matched += int(equal)
+                    self._coverage.native_calls_by_sample_kind[
+                        "edges" if tag.startswith("edge_") else "opinfo"
+                    ] += 1
+                    self._coverage.native_calls_by_source[tag] += 1
+                    self._coverage.generated_kernels = metrics.generated_kernel_count
+                    self._coverage.generated_fallbacks = (
+                        metrics.generated_fallback_kernel_count
+                    )
+                    if not equal:
+                        self._coverage.mismatches["native_call"] += 1
+                if not equal:
+                    mismatches.append((tag, idx, [], kwargs, "native_call"))
+        self.assertGreater(len(calls), 0)
         return mismatches
 
     def _assert_ledger(self, mismatches, op, dtype, what, xfail, xfail_name):
