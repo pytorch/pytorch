@@ -4,7 +4,7 @@
 
 namespace at::native::mkldnn {
 
-void direct_copy(const ideep::tensor& src, ideep::tensor& dst) {
+void direct_copy(const MkldnnMemory& src, MkldnnMemory& dst) {
   // May replace dst's buffer and layout when they differ from src's.
   dst.reinit_if_possible(src.get_desc());
   src.reorder_to(dst);
