@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
     largeTensorTest, precisionOverride, dtypes, skipCPUIf, skipCUDAIf, skipXPU, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU
+    dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU, onlyCUDA
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
@@ -1259,6 +1259,212 @@ class TestTensorCreation(TestCase):
         res = torch.cat(xs, dim=0)
         ref = torch.cat(xs_cpu, dim=0)
         self.assertEqual(res, ref)
+
+    @dtypes(torch.bfloat16, torch.float, torch.uint8)
+    def test_cat_contig_aligned_slices(self, device, dtype):
+        # Contiguous cats whose slices are or are not multiples of 16 bytes,
+        # e.g. appending a step to a [N, L, D] cache along dim 1.
+        for n, d, dim in product((1, 33, 1000), (8, 15, 64, 1536), (0, 1, 2)):
+            shapes = [[n, 2, d] for _ in range(3)]
+            for shape, length in zip(shapes, (2, 1, 3)):
+                shape[dim] *= length
+            xs = [make_tensor(shape, dtype=dtype, device=device) for shape in shapes]
+            res = torch.cat(xs, dim=dim)
+            ref = torch.cat([x.cpu() for x in xs], dim=dim)
+            self.assertEqual(res, ref, atol=0, rtol=0, msg=f"{n=} {d=} {dim=}")
+        # One input that starts off a 16-byte boundary.
+        aligned = make_tensor((64, 2, 64), dtype=dtype, device=device)
+        offset = make_tensor((64 * 2 * 64 + 1,), dtype=dtype, device=device)[1:].view(64, 2, 64)
+        ref = torch.cat([aligned.cpu(), offset.cpu()], dim=1)
+        self.assertEqual(torch.cat([aligned, offset], dim=1), ref, atol=0, rtol=0)
+
+    @dtypes(torch.bfloat16, torch.float, torch.uint8, torch.long)
+    def test_cat_unaligned_slices(self, device, dtype):
+        # Contiguous cats whose slices are not multiples of 16 bytes or whose
+        # inputs or output start off a 16-byte boundary, so each output row
+        # starts at a different offset within 16 bytes.
+        def check(xs, dim, out=None):
+            ref = torch.cat([x.cpu() for x in xs], dim=dim)
+            res = torch.cat(xs, dim=dim, out=out)
+            self.assertEqual(res, ref, atol=0, rtol=0, msg=f"{[x.shape for x in xs]} {dim=}")
+
+        def offset_by(shape, elems):
+            flat = make_tensor((math.prod(shape) + elems,), dtype=dtype, device=device)
+            return flat[elems:].view(shape)
+
+        # Row lengths from production cats: [N, 6432] + [N, 1] and
+        # [N, 80, 52] + [N, 5, 52], with N scaled down.
+        cases = [
+            ([[67, 6432], [67, 1]], 1),
+            ([[67, 1], [67, 6432]], 1),
+            ([[67, 80, 52], [67, 5, 52]], 1),
+            ([[67, 6431], [67, 2], [67, 17]], 1),
+            ([[5, 3, 7], [5, 3, 9], [5, 3, 1]], 2),
+            ([[3, 7, 5], [3, 1, 5]], 1),
+            ([[7, 33], [1, 33], [9, 33]], 0),
+            ([[1, 1], [1, 15]], 1),
+            ([[129, 1], [129, 1], [129, 1]], 1),
+        ]
+        for shapes, dim in cases:
+            check([make_tensor(s, dtype=dtype, device=device) for s in shapes], dim)
+            # Every input starts 1 element off its allocation.
+            check([offset_by(s, 1) for s in shapes], dim)
+            # Output starts 1 element off its allocation.
+            out_shape = list(shapes[0])
+            out_shape[dim] = sum(s[dim] for s in shapes)
+            xs = [make_tensor(s, dtype=dtype, device=device) for s in shapes]
+            check(xs, dim, out=offset_by(out_shape, 1))
+        # Aligned slices with one misaligned input pointer.
+        check([make_tensor((67, 64, 52), dtype=dtype, device=device), offset_by((67, 64, 52), 1)], 1)
+        # A strided input: a column slice next to a contiguous input.
+        strided = make_tensor((67, 6440), dtype=dtype, device=device)[:, :6432]
+        check([strided, make_tensor((67, 1), dtype=dtype, device=device)], 1)
+
+    @dtypes(torch.bfloat16, torch.float, torch.uint8)
+    def test_cat_input_extent(self, device, dtype):
+        # Inputs whose first or last byte is off a 16-byte boundary: views at the
+        # very start and end of an exactly sized storage, and DLPack-wrapped
+        # views, whose storage is the view. The caching allocator pads blocks,
+        # so a read past an input would not change the output; these cases
+        # check that the per-element fallback at the ends of an input copies
+        # the right elements.
+        def check(xs, dim):
+            ref = torch.cat([x.cpu() for x in xs], dim=dim)
+            res = torch.cat(xs, dim=dim)
+            self.assertEqual(res, ref, atol=0, rtol=0, msg=f"{[x.shape for x in xs]} {dim=}")
+
+        for rows, cols in [(1, 7), (3, 7), (5, 33), (67, 6431)]:
+            n = rows * cols
+            storage = make_tensor((2 * n + 1,), dtype=dtype, device=device)
+            head = storage[:n].view(rows, cols)
+            tail = storage[n + 1 :].view(rows, cols)
+            check([head, tail], 1)
+            check([tail, head], 0)
+            wrapped = torch.from_dlpack(storage[1 : n + 1]).view(rows, cols)
+            self.assertEqual(wrapped.untyped_storage().nbytes(), n * wrapped.element_size())
+            check([wrapped, make_tensor((rows, 1), dtype=dtype, device=device)], 1)
+            # Strided rows whose last row ends at the end of the storage.
+            padded = make_tensor((rows * (cols + 3),), dtype=dtype, device=device)
+            strided_tail = padded.view(rows, cols + 3)[:, 3:]
+            check([strided_tail, strided_tail], 1)
+
+    @dtypes(torch.bfloat16, torch.float, torch.uint8, torch.long)
+    def test_cat_strided_rows(self, device, dtype):
+        # Non-contiguous cats: inputs whose rows are contiguous (slices along the
+        # cat dim, column slices, broadcast outer dims) next to contiguous inputs
+        # and inputs whose rows are not contiguous.
+        def check(xs, dim):
+            ref = torch.cat([x.cpu() for x in xs], dim=dim)
+            res = torch.cat(xs, dim=dim)
+            self.assertEqual(res, ref, atol=0, rtol=0, msg=f"{[(x.shape, x.stride()) for x in xs]} {dim=}")
+
+        def t(*shape):
+            return make_tensor(shape, dtype=dtype, device=device)
+
+        # Slice along the cat dim, then every other element along it (rows not
+        # contiguous), then a transposed input, each next to a contiguous input.
+        check([t(9, 20, 16)[:, :5], t(9, 64, 16)], 1)
+        check([t(9, 20, 16)[:, ::2], t(9, 64, 16)], 1)
+        check([t(9, 16, 4).transpose(1, 2), t(9, 64, 16)], 1)
+        # Column slices, one starting off a 16-byte boundary.
+        check([t(33, 40)[:, :7], t(33, 14)[:, 1:], t(33, 1)], 1)
+        # Broadcast outer dim (stride 0).
+        check([t(1, 3, 7).expand(5, 3, 7), t(5, 2, 7)], 1)
+        # Slices along an inner dim: the outer dims collapse to one stride, then
+        # they do not.
+        check([t(4, 5, 30)[..., :9], t(4, 5, 3)], 2)
+        check([t(4, 10, 6)[:, :5, :3], t(4, 5, 2)], 2)
+        # Along dim 0 a column slice is not row-contiguous.
+        check([t(6, 40)[:, :17], t(3, 17)], 0)
+        # An empty input.
+        check([t(9, 20, 16)[:, :5], t(9, 0, 16), t(9, 3, 16)], 1)
+        # More inputs than one strided batch holds, with one transposed input.
+        xs = [t(3, 9)[:, : k % 5 + 1] if k % 2 else t(3, k % 5 + 1) for k in range(70)]
+        check(xs + [t(4, 3).t()], 1)
+        # Over 2 MiB of row-contiguous inputs next to a transposed input, so the
+        # batch is split between two kernels, in one batch and across two.
+        check([t(16, 256, 4).transpose(1, 2), t(16, 640, 256)], 1)
+        check([t(16, 4).t()] + [t(4, 10050)[:, : 10000 + k] for k in range(69)], 1)
+
+    @onlyCUDA
+    @dtypes(torch.bool, torch.uint8, torch.float8_e4m3fn, torch.bfloat16, torch.float, torch.long,
+            torch.complex64, torch.complex128)
+    def test_cat_edge_cases(self, device, dtype):
+        # Gate and tail edges of the contiguous and strided cat kernels, compared
+        # bit-exactly with CPU on integer views of the same bytes (random bytes,
+        # so non-canonical bools and NaN payloads count).
+        itemsize = torch.empty(0, dtype=dtype).element_size()
+        int_type = {1: torch.uint8, 2: torch.int16, 4: torch.int32, 8: torch.int64}
+
+        def as_int(x):
+            return torch.view_as_real(x).view(torch.int64) if itemsize == 16 else x.view(int_type[itemsize])
+
+        def t(*shape, off=0):
+            raw = torch.randint(0, 256, ((math.prod(shape) + off) * itemsize,), dtype=torch.uint8, device=device)
+            return raw.view(dtype)[off:].view(shape)
+
+        def check(xs, dim, out=None):
+            res = torch.cat(xs, dim=dim, out=out)
+            ref = torch.cat([as_int(x).cpu() for x in xs], dim=dim)
+            self.assertEqual(as_int(res).cpu(), ref, atol=0, rtol=0, msg=f"{[(x.shape, x.stride()) for x in xs]} {dim=}")
+
+        v = 16 // itemsize
+        # Slices of 16 bytes and +-1 element, along dims 0-2 and in 4-D.
+        for w in sorted({v, max(v - 1, 1), v + 1, 2 * v + 1}):
+            check([t(5, 2, w), t(5, 1, w)], 1)
+            check([t(5, 3, w), t(5, 3, w + 1)], 2)
+            check([t(7, w), t(3, w)], 0)
+        for d in range(4):
+            shape = [2, 3, 4, 2 * v]
+            shape[d] += 1
+            check([t(2, 3, 4, 2 * v), t(*shape)], d)
+        # Base pointers 1 element and 8 bytes off 16 bytes, per input and output.
+        for off in sorted({1, max(8 // itemsize, 1)}):
+            check([t(37, 3, 4 * v, off=off), t(37, 3, 4 * v)], 1)
+            check([t(37, 3, 4 * v), t(37, 3, 4 * v)], 1, out=t(37, 6, 4 * v, off=off))
+        # Rows of 1 to 2 * v + 1 elements, so partial chunks at both row ends.
+        for w in range(1, 2 * v + 2):
+            check([t(33, w), t(33, 1)], 1)
+        # Size-1 dims with an arbitrary stride, a single row, single elements.
+        odd = t(24).as_strided((3, 1, 8), (8, 999, 1))
+        check([odd, t(3, 1, 5)], 2)
+        check([odd, t(3, 20, 8)[:, :2]], 1)
+        check([t(1, v), t(1, v + 3)], 1)
+        check([t(1), t(1)], 0)
+        # Empty inputs, and more inputs than one contiguous (128) or strided (64)
+        # batch holds.
+        check([t(5, 2, 7), t(5, 0, 7), t(5, 1, 7)], 1)
+        check([t(3, k % 5 + 1) for k in range(129)], 1)
+        check([t(3, 9)[:, : k % 5 + 1] if k % 2 else t(3, k % 5 + 1) for k in range(130)] + [t(4, 3).t()], 1)
+        # Strided inputs: expanded inner dim, 4-D slice, misaligned slice.
+        check([t(5, 1).expand(5, 7), t(5, 3)], 1)
+        check([t(2, 3, 9, v + 1)[:, :, :4], t(2, 3, 2, v + 1)], 2)
+        check([t(9, 20, v + 1, off=1)[:, :5], t(9, 3, v + 1, off=1)], 1)
+        # Channels-last inputs and a non-contiguous out= take the existing paths.
+        cl = [t(2, v, 3, 5).contiguous(memory_format=torch.channels_last),
+              t(2, 1, 3, 5).contiguous(memory_format=torch.channels_last)]
+        check(cl, 1)
+        check([t(8, v), t(8, 1)], 1, out=t(v + 1, 8).t())
+        # An output whose pointer is not a multiple of the element size, which
+        # only external memory can give (__cuda_array_interface__ does not check
+        # alignment), takes the existing kernels and writes no byte past its end.
+        # ROCm only: AMD GPUs allow unaligned element stores, while CUDA faults on
+        # them in any kernel.
+        if torch.version.hip and itemsize in (2, 4):
+            rows, cols = 33, 6
+            buf = torch.zeros((rows * cols + 2) * itemsize, dtype=torch.uint8, device=device)
+
+            class External:
+                __cuda_array_interface__ = {
+                    "data": (buf.data_ptr() + 1, False),
+                    "shape": (rows, cols),
+                    "typestr": {2: "<i2", 4: "<i4"}[itemsize],
+                    "version": 2,
+                }
+
+            check([t(rows, cols - 1), t(rows, 1)], 1, out=torch.as_tensor(External(), device=device).view(dtype))
+            outside = torch.cat([buf[:1], buf[1 + rows * cols * itemsize :]]).cpu()
+            self.assertEqual(outside, torch.zeros_like(outside), atol=0, rtol=0)
 
     @dtypes(torch.float)
     @largeTensorTest("16GB")

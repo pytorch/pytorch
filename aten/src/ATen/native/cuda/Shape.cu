@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
@@ -11,6 +12,11 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/util/CallOnce.h>
+
+#include <array>
+#include <limits>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -36,6 +42,20 @@ inline bool is_aligned_vec4(const void* ptr) {
   auto iptr = reinterpret_cast<uintptr_t>(ptr);
   return !(iptr % alignof(int4));
 }
+
+#ifdef USE_ROCM
+bool is_gfx1250_device(const c10::DeviceIndex device_index) {
+  TORCH_INTERNAL_ASSERT(
+      device_index >= 0 && device_index < C10_COMPILE_TIME_MAX_GPUS);
+  static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> once_flags;
+  static std::array<bool, C10_COMPILE_TIME_MAX_GPUS> results{};
+  c10::call_once(once_flags[device_index], [device_index] {
+    results[device_index] =
+        at::detail::getCUDAHooks().isGPUArch({"gfx1250"}, device_index);
+  });
+  return results[device_index];
+}
+#endif
 
 inline bool getCatGrid(ptrdiff_t nTensors, dim3& grid) {
   const int numSM = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
@@ -234,7 +254,9 @@ __global__ void CatArrayBatchedCopy_vectorized(
     TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
     const int concatDim,
     IndexType trailingSize) {
-
+// On ROCm only gfx1250 launches this kernel (vectorizedCatAllowed in
+// parallel_cat), so other ROCm targets compile a stub.
+#if !defined(USE_ROCM) || defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__)
     IndexType tid = blockIdx.x * blockDim.x + threadIdx.x;
     IndexType nElements = inputs.nElements[blockIdx.y] / elems_per_vec;
 
@@ -254,6 +276,9 @@ __global__ void CatArrayBatchedCopy_vectorized(
       at::native::memory::st_vec<alignment>(output + dataOffset + elementOffset, vec);
       tid += stride;
     }
+#else
+  CUDA_KERNEL_ASSERT(false && "CatArrayBatchedCopy_vectorized is gfx1250-only on ROCm");
+#endif
 }
 
 
@@ -320,6 +345,211 @@ __global__ void CatArrayBatchedCopy_alignedK_contig(
     }
 }
 
+#ifdef USE_ROCM
+// Returns the 16 bytes that start byte_offset (0..15) bytes into lo:hi, where
+// lo is the lower-addressed half: a funnel shift of 64-bit halves.
+__device__ __forceinline__ at::native::memory::Vec<16> extract_16_bytes(
+    const at::native::memory::Vec<16>& lo,
+    const at::native::memory::Vec<16>& hi,
+    unsigned int byte_offset) {
+  constexpr unsigned int half_bytes = sizeof(uint64_t);
+  constexpr unsigned int half_bits = half_bytes * 8;
+  const bool skip_half = byte_offset >= half_bytes;
+  const uint64_t first = skip_half ? lo.u64[1] : lo.u64[0];
+  const uint64_t second = skip_half ? hi.u64[0] : lo.u64[1];
+  const uint64_t third = skip_half ? hi.u64[1] : hi.u64[0];
+  const unsigned int shift = (byte_offset % half_bytes) * 8;
+  at::native::memory::Vec<16> out;
+  out.u64[0] = shift ? (first >> shift) | (second << (half_bits - shift)) : first;
+  out.u64[1] = shift ? (second >> shift) | (third << (half_bits - shift)) : second;
+  return out;
+}
+
+/*
+  gfx1250 kernel for contiguous cats that CatArrayBatchedCopy_vectorized cannot
+  take because a slice is not a multiple of 16 bytes or a pointer is not 16-byte
+  aligned, and for the inputs of strided cats whose rows are contiguous. Each
+  input is viewed as outerSize rows of rowSize contiguous elements; row r lands
+  in output row r at column offset * innerSize. Input rows are back to back
+  when stride_size == 1; when stride_size > 1, the host stores input i's row
+  stride in tensorStride[i].tensorStride[0]. A thread owns one
+  16-byte-aligned chunk of the output that a row overlaps and reads the row
+  bytes it covers with two aligned 16-byte input loads: a chunk fully inside the
+  row is written with one 16-byte store, and a partial chunk at an end of the
+  row with one store per element. A chunk whose aligned loads would reach
+  before the input's first byte or past its last byte (only chunks within 32
+  bytes of either end of the input can) reads its bytes with per-element loads
+  instead, so no byte outside the input is read.
+*/
+template <typename T, typename IndexType, int batch_size, int stride_size>
+__global__ void CatArrayBatchedCopy_unaligned_vectorized(
+    char* output,
+    CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
+    IndexType innerSize,
+    IndexType outputRowSize,
+    IndexType outerSize) {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__)
+  constexpr unsigned int vec_bytes = ALIGNED_VEC_LOAD_BYTES_16;
+  constexpr IndexType elems_per_vec = vec_bytes / sizeof(T);
+  const IndexType rowSize = inputs.dimSize[blockIdx.y] * innerSize;
+  if (rowSize == 0) {
+    return;
+  }
+  // A row of rowSize elements overlaps at most this many aligned output chunks.
+  const IndexType chunksPerRow = (rowSize + elems_per_vec - 1) / elems_per_vec + 1;
+  const IndexType nChunks = outerSize * chunksPerRow;
+  const char* input = reinterpret_cast<const char*>(inputs.input[blockIdx.y]);
+  // Byte offsets below are relative to output; outputMisalignment places them
+  // on the 16-byte grid of addresses.
+  const int64_t outputMisalignment = reinterpret_cast<uintptr_t>(output) % vec_bytes;
+  const int64_t outputColumn = static_cast<int64_t>(inputs.offset[blockIdx.y]) * innerSize;
+  const int64_t rowBytes = static_cast<int64_t>(rowSize) * sizeof(T);
+  const int64_t inputRowBytes = stride_size > 1
+      ? static_cast<int64_t>(inputs.tensorStride[blockIdx.y].tensorStride[0]) * sizeof(T)
+      : rowBytes;
+  // Bytes from the input's first element to the end of its last row.
+  const int64_t inputBytes = (static_cast<int64_t>(outerSize) - 1) * inputRowBytes + rowBytes;
+
+  for (IndexType chunk = blockIdx.x * blockDim.x + threadIdx.x; chunk < nChunks;
+       chunk += gridDim.x * blockDim.x) {
+    const IndexType row = chunk / chunksPerRow;
+    const IndexType chunkInRow = chunk - row * chunksPerRow;
+    const int64_t rowBegin = (static_cast<int64_t>(row) * outputRowSize + outputColumn) * sizeof(T);
+    const int64_t rowEnd = rowBegin + rowBytes;
+    const int64_t chunkBegin = ((rowBegin + outputMisalignment) & ~static_cast<int64_t>(vec_bytes - 1)) -
+        outputMisalignment + static_cast<int64_t>(chunkInRow) * vec_bytes;
+    const int64_t chunkEnd = chunkBegin + vec_bytes;
+    const int64_t begin = chunkBegin > rowBegin ? chunkBegin : rowBegin;
+    const int64_t end = chunkEnd < rowEnd ? chunkEnd : rowEnd;
+    if (begin >= end) {
+      continue;
+    }
+    const int64_t srcInInput = static_cast<int64_t>(row) * inputRowBytes + (begin - rowBegin);
+    const char* src = input + srcInInput;
+    const int64_t nBytes = end - begin;
+    const unsigned int srcOffset = reinterpret_cast<uintptr_t>(src) % vec_bytes;
+    // The next aligned 16 bytes are loaded only if they hold bytes of
+    // [begin, end); otherwise the same 16 bytes are reloaded, so that both loads
+    // are always in flight together.
+    const bool loadNext = srcOffset + nBytes > vec_bytes;
+    const int64_t loadBegin = srcInInput - srcOffset;
+    if (loadBegin < 0 || loadBegin + (loadNext ? 2 : 1) * vec_bytes > inputBytes) {
+      for (int64_t i = 0; i < nBytes; i += sizeof(T)) {
+        *reinterpret_cast<T*>(output + begin + i) = *reinterpret_cast<const T*>(src + i);
+      }
+      continue;
+    }
+    const char* srcAligned = src - srcOffset;
+    const auto lo = at::native::memory::ld_vec<vec_bytes>(srcAligned);
+    const auto hi = at::native::memory::ld_vec<vec_bytes>(srcAligned + (loadNext ? vec_bytes : 0));
+    const auto bytes = extract_16_bytes(lo, hi, srcOffset);
+    if (nBytes == vec_bytes) {
+      at::native::memory::st_vec<vec_bytes>(output + chunkBegin, bytes);
+    } else {
+      // A partial chunk at an end of the row: its first nBytes bytes, one
+      // element store each.
+#pragma unroll
+      for (IndexType i = 0; i < elems_per_vec; ++i) {
+        if (static_cast<int64_t>(i * sizeof(T)) < nBytes) {
+          T value;
+          __builtin_memcpy(&value, reinterpret_cast<const char*>(&bytes) + i * sizeof(T), sizeof(T));
+          *reinterpret_cast<T*>(output + begin + i * sizeof(T)) = value;
+        }
+      }
+    }
+  }
+#else
+  CUDA_KERNEL_ASSERT(false && "CatArrayBatchedCopy_unaligned_vectorized is gfx1250-only");
+#endif
+}
+
+// True if one batch of a cat can take CatArrayBatchedCopy_unaligned_vectorized:
+// Contiguous memory format and output, an output pointer that is a multiple of
+// sizeof(T) (the kernel places chunk edges on whole elements of the output),
+// and every input's chunk count fits the int range so that the unsigned
+// grid-stride index cannot wrap.
+template <typename T, int batch_size, int stride_size>
+static inline bool can_use_unaligned_vectorized_cat(
+    const CatArrInputTensorMetadata<T, unsigned int, batch_size, stride_size>& inputs,
+    const Tensor& out,
+    int64_t dimension,
+    int nInputs,
+    c10::MemoryFormat memory_format) {
+  if (memory_format != c10::MemoryFormat::Contiguous || !out.is_contiguous() ||
+      reinterpret_cast<uintptr_t>(out.const_data_ptr()) % sizeof(T) != 0) {
+    return false;
+  }
+  const int64_t innerSize = c10::multiply_integers(out.sizes().begin() + dimension + 1, out.sizes().end());
+  const int64_t outerSize = c10::multiply_integers(out.sizes().begin(), out.sizes().begin() + dimension);
+  constexpr int64_t elems_per_vec = ALIGNED_VEC_LOAD_BYTES_16 / sizeof(T);
+  for (int i = 0; i < nInputs; ++i) {
+    const int64_t rowSize = inputs.dimSize[i] * innerSize;
+    if (outerSize * (ceil_div(rowSize, elems_per_vec) + 1) > std::numeric_limits<int>::max()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Requires can_use_unaligned_vectorized_cat(inputs, out, dimension, nInputs, memory_format).
+template <typename T, int batch_size, int stride_size>
+static inline void launch_unaligned_vectorized_cat_kernel(
+    char* output,
+    const CatArrInputTensorMetadata<T, unsigned int, batch_size, stride_size>& inputs,
+    const Tensor& out,
+    int64_t dimension,
+    int nInputs,
+    unsigned int max_elements_per_tensor,
+    cudaStream_t stream) {
+  const int64_t innerSize = c10::multiply_integers(out.sizes().begin() + dimension + 1, out.sizes().end());
+  const int64_t outputRowSize = out.size(dimension) * innerSize;
+  const int64_t outerSize = out.numel() / outputRowSize;
+  auto [catGrid, applyBlock] = getCatGridContig<T, ALIGNED_VEC_LOAD_BYTES_16>(max_elements_per_tensor, nInputs);
+  CatArrayBatchedCopy_unaligned_vectorized<T, unsigned int, batch_size, stride_size><<<catGrid, applyBlock, 0, stream>>>(
+      output,
+      inputs,
+      static_cast<unsigned int>(innerSize),
+      static_cast<unsigned int>(outputRowSize),
+      static_cast<unsigned int>(outerSize));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+// Bytes of row-contiguous inputs from which a strided batch that also has other
+// inputs is split into the alignment-tolerant kernel and CatArrayBatchedCopy.
+constexpr int64_t kMinRowBytesToSplitStridedCat = 2 * 1024 * 1024;
+
+// Row stride, in elements, of a non-empty input viewed as outer rows of
+// t.size(dimension) * innerSize contiguous elements (the layout
+// CatArrayBatchedCopy_unaligned_vectorized reads), or nullopt if the elements
+// of a row are not contiguous or the dims before `dimension` do not collapse to
+// one stride.
+static inline std::optional<int64_t> cat_input_row_stride(const Tensor& t, int64_t dimension) {
+  int64_t expected = 1;
+  for (int64_t d = t.dim() - 1; d >= dimension; --d) {
+    if (t.size(d) != 1 && t.stride(d) != expected) {
+      return std::nullopt;
+    }
+    expected *= t.size(d);
+  }
+  // A single row (all outer sizes 1) keeps the row size as its stride.
+  int64_t rowStride = expected;
+  bool collapsed = false;
+  for (int64_t d = dimension - 1; d >= 0; --d) {
+    if (t.size(d) == 1) {
+      continue;
+    }
+    if (!collapsed) {
+      rowStride = t.stride(d);
+      collapsed = true;
+    } else if (t.stride(d) != expected) {
+      return std::nullopt;
+    }
+    expected = t.stride(d) * t.size(d);
+  }
+  return rowStride;
+}
+#endif
+
 template <typename scalar_t, int batch_size, int stride_size>
 void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
@@ -333,10 +563,18 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   // 16 Byte boundary.
 
   constexpr bool isContig = stride_size == 1;
-#ifndef USE_ROCM
-  // CatArrayBatchedCopy_contig is faster on ROCm, see #118685.
-  bool isAligned = true;
   constexpr int alignment = 16;
+#ifdef USE_ROCM
+  // CatArrayBatchedCopy_contig is faster on most ROCm GPUs (#118685), but on
+  // gfx1250 (wave32) its narrow scalar accesses are limited by the memory
+  // instruction rate, so gfx1250 takes the same 16-byte vectorized path as CUDA.
+  // Also gates CatArrayBatchedCopy_unaligned_vectorized, so it must agree with
+  // that kernel's device gate (__gfx1250__, __gfx1250_strict__ or __SPIRV__);
+  // a mismatch asserts.
+  const bool vectorizedCatAllowed = is_gfx1250_device(out.device().index());
+#else
+  bool isAligned = true;
+  constexpr bool vectorizedCatAllowed = true;
 #endif
 
   // Next, let's initialize the size, stride arrays for the output Tensor.
@@ -371,16 +609,16 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
 
-#ifndef USE_ROCM
   // for channels last computing slice size correctly is much more involved, so we never send it
   // on the fully vectorized path
   // we need output stride in cat dimension to be multiple of alignment,
   // if we ever use it to compute offsets
   // for catting in 0th dimension it doesn't matter
-  bool isInOutAligned = isContig && at::native::memory::get_alignment(data) >= alignment &&
+  // CatArrayBatchedCopy_vectorized also needs every input 16-byte aligned with
+  // a slice that is a multiple of 16 bytes; both are checked per input below.
+  bool isInOutAligned = vectorizedCatAllowed && isContig && at::native::memory::get_alignment(data) >= alignment &&
                         memory_format == c10::MemoryFormat::Contiguous && (dimension == 0 ||
                         outputParam.tensorStride[dimension - 1] * sizeof(scalar_t) % alignment == 0);
-#endif
   unsigned int max_elements_per_tensor = 0;
 
   // Now we loop
@@ -396,7 +634,6 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       // high-dimensional tensor
       if (inputs[i+batchCounter].get().numel() > 0) {
         dimSize = inputs[i+batchCounter].get().size(dimension);
-#ifndef USE_ROCM
         if (isInOutAligned) {
           auto t = inputs[i+batchCounter].get();
           // similarly to output stride, we cannot trust stride value to
@@ -407,7 +644,6 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
           slice_size *= sizeof(scalar_t);
           isInOutAligned &= (slice_size % alignment == 0);
         }
-#endif
       }
 
       catMetaData.input[batchCounter] = (scalar_t*)(inputs[i+batchCounter].get().const_data_ptr());
@@ -419,8 +655,8 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       // If at least one of the inputs is not aligned, we can't call the
       // CatArrayBatchedCopy_alignedK_contig
       isAligned &= is_aligned_vec4(catMetaData.input[batchCounter]);
-      isInOutAligned &= at::native::memory::get_alignment(catMetaData.input[batchCounter]) >= alignment;
 #endif
+      isInOutAligned &= at::native::memory::get_alignment(catMetaData.input[batchCounter]) >= alignment;
 
       if (stride_size > 1) {
         auto strides = inputs[i+batchCounter].get().strides();
@@ -447,9 +683,71 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       continue;
 
 #ifdef USE_ROCM
+    // On gfx1250 (vectorizedCatAllowed), contiguous cats that miss the 16-byte
+    // vectorized gate above take the alignment-tolerant 16-byte kernel instead of
+    // CatArrayBatchedCopy_contig. 16-byte types are always 16-byte aligned.
+    if constexpr (isContig && sizeof(scalar_t) < ALIGNED_VEC_LOAD_BYTES_16) {
+      if (vectorizedCatAllowed && !isInOutAligned &&
+          can_use_unaligned_vectorized_cat(catMetaData, out, dimension, batchCounter, memory_format)) {
+        launch_unaligned_vectorized_cat_kernel(
+            reinterpret_cast<char*>(data), catMetaData, out, dimension, batchCounter, max_elements_per_tensor,
+            stream.stream());
+        continue;
+      }
+    }
+    // On gfx1250, the inputs of a strided batch whose rows are contiguous
+    // (contiguous inputs, slices along the cat dim, broadcast outer dims) take
+    // the same kernel, with each input's row stride in tensorStride[0], if they
+    // are all the inputs or hold at least kMinRowBytesToSplitStridedCat bytes.
+    // CatArrayBatchedCopy below copies the other inputs and skips these, whose
+    // nElements become 0.
+    if constexpr (!isContig && sizeof(scalar_t) < ALIGNED_VEC_LOAD_BYTES_16) {
+      if (vectorizedCatAllowed) {
+        auto rowMetaData = catMetaData;
+        std::array<bool, batch_size> byRows{};
+        unsigned int rowMaxElements = 0;
+        int64_t rowBytes = 0;
+        bool hasOtherInputs = false;
+        for (int k = 0; k < batchCounter; ++k) {
+          const auto rowStride = catMetaData.nElements[k] > 0
+              ? cat_input_row_stride(inputs[i + k].get(), dimension)
+              : std::nullopt;
+          if (rowStride.has_value()) {
+            byRows[k] = true;
+            rowMetaData.tensorStride[k].tensorStride[0] = static_cast<unsigned int>(*rowStride);
+            rowMaxElements = std::max(rowMaxElements, catMetaData.nElements[k]);
+            rowBytes += static_cast<int64_t>(catMetaData.nElements[k]) * sizeof(scalar_t);
+          } else {
+            rowMetaData.dimSize[k] = 0;
+            hasOtherInputs |= catMetaData.nElements[k] > 0;
+          }
+        }
+        // Splitting a batch adds a launch, which pays off only for enough row bytes.
+        if (rowMaxElements > 0 && (!hasOtherInputs || rowBytes >= kMinRowBytesToSplitStridedCat) &&
+            can_use_unaligned_vectorized_cat(rowMetaData, out, dimension, batchCounter, memory_format)) {
+          launch_unaligned_vectorized_cat_kernel(
+              reinterpret_cast<char*>(data), rowMetaData, out, dimension, batchCounter, rowMaxElements,
+              stream.stream());
+          max_elements_per_tensor = 0;
+          for (int k = 0; k < batchCounter; ++k) {
+            if (byRows[k]) {
+              catMetaData.nElements[k] = 0;
+            }
+            max_elements_per_tensor = std::max(max_elements_per_tensor, catMetaData.nElements[k]);
+          }
+          if (max_elements_per_tensor == 0) {
+            continue;
+          }
+        }
+      }
+    }
+#endif
+
+#ifdef USE_ROCM
     // always base grid size on max_elements_per_tensor
-    auto [catGrid, applyBlock] = getCatGridRocm<scalar_t>(
-          max_elements_per_tensor, batchCounter);
+    auto [catGrid, applyBlock] = isInOutAligned
+        ? getCatGridContig<scalar_t, alignment>(max_elements_per_tensor, batchCounter)
+        : getCatGridRocm<scalar_t>(max_elements_per_tensor, batchCounter);
 #else
     dim3 applyBlock, catGrid;
     if constexpr (isContig) {
@@ -472,7 +770,6 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     }
 #endif
     int nDimsLocal = nDims;
-#ifndef USE_ROCM
     int32_t trailingSize = 0;
     TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> kernelOutputParam;
     if (isInOutAligned) {
@@ -497,7 +794,6 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
         kernelOutputParam.tensorStride[i] /= elems_per_vec;
       }
     }
-#endif
 
     int cat_dim = dimension;
     if (memory_format != c10::MemoryFormat::Contiguous) {
@@ -512,14 +808,22 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       }
     }
     // Template Declarations for dim = 1, 2, 3, 4
-    // #ifdef can't nest in a macro body, so ROCm (contig/generic only) and
-    // CUDA (the full aligned/vectorized chain) get separate definitions.
+    // #ifdef can't nest in a macro body, so ROCm (vectorized on gfx1250, else
+    // contig or generic) and CUDA (the full aligned/vectorized chain) get
+    // separate definitions.
 #ifdef USE_ROCM
 #define HANDLE_CASE(DIMS) \
     if constexpr (isContig) {\
-      CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
-          catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
+      if (isInOutAligned) {\
+        constexpr auto elems_per_vec = alignment / sizeof(scalar_t); \
+        CatArrayBatchedCopy_vectorized<scalar_t, unsigned int, DIMS, batch_size, stride_size, alignment, elems_per_vec><<<\
+        catGrid, applyBlock, 0, stream.stream()>>>(\
+          reinterpret_cast<char*>(data), catMetaData, kernelOutputParam, cat_dim, trailingSize);\
+      } else {\
+        CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+            catGrid, applyBlock, 0, stream.stream()>>>(\
+                data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
+      }\
     } else {\
       CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
