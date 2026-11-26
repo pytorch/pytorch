@@ -1149,7 +1149,7 @@ def _opaque_call(fn, *args, **kwargs):
 # What the trace running changed that outlives it, by id, with what puts it
 # back: a tensor written in place with its copy, a random generator drawn
 # from with its state (see _RefuseImpure, _put_back).
-_trace_backups: dict[int, tuple[Any, torch.Tensor]] | None = None
+_trace_backups: dict[int, tuple[Any, ...]] | None = None
 
 
 def _generators(given) -> list[torch.Generator]:
@@ -1162,17 +1162,22 @@ def _generators(given) -> list[torch.Generator]:
     return [torch.default_generator, *torch.cuda.default_generators]
 
 
-def _put_back(backups: dict[int, tuple[Any, torch.Tensor]]) -> None:
+def _put_back(backups: dict[int, tuple[Any, ...]]) -> None:
     """Takes back what a trace that is given up did to what outlives it,
     before the executor runs its block again from the start: a tensor it
-    wrote in place gets its values back, a generator it drew from its state
-    (the block's draws are then the ones eager makes, once)."""
+    wrote in place gets its values and its version counter back, a
+    generator it drew from its state (the block's draws and writes are then
+    the ones eager makes, once)."""
     with torch.no_grad():
-        for x, saved in backups.values():
+        for x, saved, *version in backups.values():
             if isinstance(x, torch.Generator):
                 x.set_state(saved)
             else:
                 x.copy_(saved)
+                if version:
+                    # The trace's write and this one are none of the
+                    # program's.
+                    torch._C._autograd._unsafe_set_version_counter((x,), tuple(version))
 
 
 # Operators whose result's size depends on the data and whose schema does
@@ -1231,7 +1236,7 @@ class _RefuseImpure(TorchDispatchMode):
     put back."""
 
     def __init__(
-        self, backups: dict[int, tuple[Any, torch.Tensor]], refuse: bool = True
+        self, backups: dict[int, tuple[Any, ...]], refuse: bool = True
     ) -> None:
         super().__init__()
         self.backups = backups
@@ -1258,7 +1263,9 @@ class _RefuseImpure(TorchDispatchMode):
                 for t in x if isinstance(x, (list, tuple)) else [x]:
                     if isinstance(t, torch.Tensor) and id(t) not in self.backups:
                         with torch.utils._python_dispatch._disable_current_modes():
-                            self.backups[id(t)] = (t, t.detach().clone())
+                            # An inference tensor counts no versions.
+                            version = () if t.is_inference() else (t._version,)
+                            self.backups[id(t)] = (t, t.detach().clone(), *version)
         try:
             out = func(*args, **kwargs)
         except _Refused:
@@ -2590,7 +2597,7 @@ def trace_region(
         if c[0] == _FLOAT
     )
     n_tensors = len(example) - n_floats
-    backups: dict[int, tuple[Any, torch.Tensor]] = {}
+    backups: dict[int, tuple[Any, ...]] = {}
     locs: list[Any] = []
     state = {"specialized": set()}
 

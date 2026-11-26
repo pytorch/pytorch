@@ -1154,6 +1154,17 @@ def backward_first_at_the_trace(w, v, x, on):
     return backward_in_a_branch(y, on).cos().tanh().exp()
 
 
+def given_up_after_a_write(x, acc):
+    acc.add_(x.sin().cos().tanh().exp())
+    # A trace is given up here: it reads values out of a tensor.
+    return acc * float(acc.sum() > 0)
+
+
+def given_up_after_a_write_to_a_view(x, acc):
+    acc[1:].mul_(x.sin().cos().tanh().exp()[1:])
+    return acc * float(acc.sum() > 0)
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmGivenUpTraces(TestCase):
     """A trace that comes to something a region cannot hold is given up and
@@ -1336,6 +1347,28 @@ class TestVmGivenUpTraces(TestCase):
                 g(x), given_up_in_a_loop(x), atol=0, rtol=0, msg=f"call {call}"
             )
         return g
+
+    @isolated
+    def test_version_of_a_tensor_written_before_the_trace_is_given_up(self, device):
+        # The trace wrote the tensor and the write was taken back: the
+        # program's own write is the one that counts.
+        for fn in (given_up_after_a_write, given_up_after_a_write_to_a_view):
+            g = vm_early(fn)
+            for call in range(6):
+                x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                    device
+                )
+                mine, theirs = (
+                    torch.ones(4, 8, device=device),
+                    torch.ones(4, 8, device=device),
+                )
+                self.assertEqual(
+                    g(x, mine), fn(x, theirs), atol=0, rtol=0, msg=f"call {call}"
+                )
+                self.assertEqual(mine, theirs, atol=0, rtol=0, msg=f"call {call}")
+                self.assertEqual(
+                    mine._version, theirs._version, msg=f"{fn.__name__}, call {call}"
+                )
 
     def backwards(self, fn, device):
         # Ten calls, each side on leaves of its own: what the call returns
