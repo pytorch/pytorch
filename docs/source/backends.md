@@ -345,6 +345,10 @@ These backends include:
 ```
 
 ```{eval-rst}
+.. autofunction::  torch.backends.mps.is_mpp_available
+```
+
+```{eval-rst}
 .. autofunction::  torch.backends.mps.get_core_count
 ```
 
