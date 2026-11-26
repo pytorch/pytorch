@@ -2,14 +2,14 @@
 
 import os
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import Backend as C10dBackend
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import TEST_CUDA
+from torch.testing._internal.common_utils import ACCELERATOR_TYPE, TEST_MULTIACCELERATOR
 
 
 STANDARD_DTYPES = (
@@ -42,6 +42,7 @@ class BackendConfig:
     name: str
     device_type: str
     supports_coalescing: bool = False
+    supports_nonblocking_coalescing: bool = True
     supports_bitwise_reductions: bool = False
     supports_cuda_graph_barrier: bool = False
     supports_dropped_p2p_work: bool = False
@@ -51,10 +52,13 @@ class BackendConfig:
     supports_work_result: bool = False
     supports_gather_single: bool = False
     supports_uneven_all_gather: bool = False
+    supports_reduce_avg: bool = True
     dtypes: tuple[torch.dtype, ...] = STANDARD_DTYPES
     float8_dtypes: tuple[torch.dtype, ...] = ()
     premul_sum_dtypes: tuple[torch.dtype, ...] = ()
     complex_dtypes: tuple[torch.dtype, ...] = COMPLEX_DTYPES
+    # Feature name -> tracking issue, appended to that feature's skip reason.
+    gap_issues: dict[str, str] = field(default_factory=dict)
 
 
 class PythonGlooBackend(C10dBackend):
@@ -182,11 +186,41 @@ C10D_BACKENDS: tuple[BackendConfig, ...] = (
             torch.bfloat16,
         ),
     ),
+    BackendConfig(
+        "xccl",
+        "xpu",
+        supports_coalescing=True,
+        supports_nonblocking_coalescing=False,
+        supports_reduce_avg=False,
+        supports_work_sequence_number=True,
+        supports_uneven_all_gather=True,
+        supports_collectives_timing=True,
+        gap_issues={
+            "gather_single": "https://github.com/intel/torch-xpu-ops/issues/5385",
+            "nan_check_hook": "https://github.com/intel/torch-xpu-ops/issues/6144",
+            "split_group": "https://github.com/intel/torch-xpu-ops/issues/5385",
+            "work results": "https://github.com/intel/torch-xpu-ops/issues/5409",
+        },
+        float8_dtypes=FLOAT8_DTYPES,
+        premul_sum_dtypes=(
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+        ),
+    ),
 )
 
-CUDA_BACKENDS = tuple(
-    backend for backend in C10D_BACKENDS if backend.device_type == "cuda"
+ACCELERATOR_BACKENDS = tuple(
+    backend for backend in C10D_BACKENDS if backend.device_type != "cpu"
 )
+
+
+def skip_unsupported(test, feature):
+    reason = f"{test.backend_name} does not support {feature}"
+    if issue := test.gap_issues.get(feature):
+        reason += f": {issue}"
+    test.skipTest(reason)
 
 
 class C10dBackendTest:
@@ -196,7 +230,7 @@ class C10dBackendTest:
 
     @property
     def device(self):
-        if self.device_type == "cuda":
+        if self.device_type != "cpu":
             return torch.device(self.device_type, self.rank)
         return torch.device(self.device_type)
 
@@ -215,8 +249,8 @@ class C10dBackendTest:
 
     def _init_pg(self):
         os.environ["LOCAL_RANK"] = str(self.rank)
-        if self.device_type == "cuda":
-            torch.cuda.set_device(self.rank)
+        if self.device_type != "cpu":
+            torch.accelerator.set_device_index(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             self.backend_name,
@@ -239,16 +273,16 @@ class C10dBackendTestContinuous:
 
     @property
     def device(self):
-        if self.device_type == "cuda":
-            return torch.device("cuda", self.rank)
+        if self.device_type != "cpu":
+            return torch.device(self.device_type, self.rank)
         return torch.device(self.device_type)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         if "_store_prefix" not in cls.__dict__:
             cls._store_prefix = rdvz_file
-        if cls.device_type == "cuda":
-            torch.cuda.set_device(rank)
+        if cls.device_type != "cpu":
+            torch.accelerator.set_device_index(rank)
         super()._init_pg(rank, world_size, rdvz_file)
 
     @classmethod
@@ -279,6 +313,7 @@ def instantiate_backend_tests(
                 "backend_name": backend.name,
                 "device_type": backend.device_type,
                 "supports_coalescing": backend.supports_coalescing,
+                "supports_nonblocking_coalescing": backend.supports_nonblocking_coalescing,
                 "supports_bitwise_reductions": backend.supports_bitwise_reductions,
                 "supports_cuda_graph_barrier": backend.supports_cuda_graph_barrier,
                 "supports_dropped_p2p_work": backend.supports_dropped_p2p_work,
@@ -288,19 +323,21 @@ def instantiate_backend_tests(
                 "supports_work_result": backend.supports_work_result,
                 "supports_gather_single": backend.supports_gather_single,
                 "supports_uneven_all_gather": backend.supports_uneven_all_gather,
+                "supports_reduce_avg": backend.supports_reduce_avg,
                 "dtypes": backend.dtypes,
                 "float8_dtypes": backend.float8_dtypes,
                 "premul_sum_dtypes": backend.premul_sum_dtypes,
                 "complex_dtypes": backend.complex_dtypes,
+                "gap_issues": backend.gap_issues,
             },
         )
         test_class = unittest.skipIf(
             not dist.is_backend_available(backend.name),
             f"{backend.name} backend is not available",
         )(test_class)
-        if backend.device_type == "cuda":
+        if backend.device_type != "cpu":
             test_class = unittest.skipIf(
-                not TEST_CUDA or torch.cuda.device_count() < 2,
-                f"{backend.name} requires 2+ GPUs",
+                not TEST_MULTIACCELERATOR or ACCELERATOR_TYPE != backend.device_type,
+                f"{backend.name} requires 2+ {backend.device_type} devices",
             )(test_class)
         namespace[class_name] = test_class
