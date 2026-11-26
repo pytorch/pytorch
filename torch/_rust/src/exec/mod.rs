@@ -3006,7 +3006,11 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
                 effects::Effect::TorchOp { .. } => torch_ops = true,
                 effects::Effect::Frame { func, how: effects::How::Direct } => frames = Some(func.clone()),
                 effects::Effect::Frame { func, how: effects::How::Indirect } => {
-                    pure_indirect(py, prep, v, func, depth, memo).map_err(|e| format!("{} entered {func} indirectly: {e}", here()))?;
+                    // The hash of a key the region's reads lead to is that
+                    // object's on every call (see shown.rs).
+                    if !(func.ends_with("Tensor.__hash__") && shown::key_read(py, prep, v, own)) {
+                        pure_indirect(py, prep, v, func, depth, memo).map_err(|e| format!("{} entered {func} indirectly: {e}", here()))?;
+                    }
                     indirect = true;
                 }
                 // A generator's frame (one the site made, if pure).

@@ -20,6 +20,10 @@
 //!     list, dict or set (read, or iterated with a new iterator);
 //!   - an object of a class defined in Python whose C bases are all in the
 //!     class table (what its own methods do is in their frames);
+//!   - a defaultdict, read as a dict is; subscripted, only by a key that is
+//!     the traced call's on every call the region is entered for (a number
+//!     or a string the code was given, or an object the reads lead to): the
+//!     region's reads then say that the key is there;
 //!   - an iterator, where it is only read; where its items are taken, only
 //!     if the same frame made it from operands whose items may be taken.
 //! Err says which operand is not, for torch.vm.regions.
@@ -287,20 +291,31 @@ fn made_of_shown(py: Python<'_>, prep: &Prepared, call: ValueId, own: &Own) -> b
     })
 }
 
-// Whether value x is an iterator its frame made from operands whose items
-// may be taken (GetIter, a call of a builtin that makes one, a generator the
-// frame made), directly, from a local slot (not an argument's) every store
-// to which is one, or as a block's stack param every edge into it passes one
-// for (as fresh_container, for containers).
-fn made_here(py: Python<'_>, prep: &Prepared, x: ValueId, own: &Own, seen: &mut HashSet<ValueId>) -> bool {
+// What is asked of how a value came about.
+#[derive(Clone, Copy, PartialEq)]
+enum Way {
+    // An iterator its frame made from operands whose items may be taken:
+    // GetIter, a call of a builtin that makes one, a generator.
+    Made,
+    // An object the region's reads lead to: read from a namespace, an
+    // attribute or a cell, or an item of a container that was (the reads
+    // have a container's items with it).
+    Read,
+}
+
+// Whether value x came about that way on every path: directly, from a local
+// slot (not an argument's) every store to which did, from a cell likewise,
+// or as a block's stack param every edge into which passes one that did (as
+// fresh_container, for containers).
+fn every_way(py: Python<'_>, prep: &Prepared, x: ValueId, way: Way, own: &Own, seen: &mut HashSet<ValueId>) -> bool {
     let cfg = &prep.cfg;
     if !seen.insert(x) {
         return true;
     }
-    match cfg[x].op {
-        Op::GetIter => operand(py, prep, cfg[x].args[0], Use::Take, own).is_ok(),
+    match (way, &cfg[x].op) {
+        (Way::Made, Op::GetIter) => operand(py, prep, cfg[x].args[0], Use::Take, own).is_ok(),
         // (A call with a star hands over a tuple, whose items are not judged.)
-        Op::Call { .. } | Op::Bytecode { opcode: opcodes::CALL_FUNCTION_EX, .. } => {
+        (Way::Made, Op::Call { .. } | Op::Bytecode { opcode: opcodes::CALL_FUNCTION_EX, .. }) => {
             // A call that entered a Python function's frame and gave an
             // iterator made a generator: its frames are judged where they
             // are resumed.
@@ -314,19 +329,24 @@ fn made_here(py: Python<'_>, prep: &Prepared, x: ValueId, own: &Own, seen: &mut 
         }
         // A generator expression's first argument is the iterator its
         // caller made for it (see genexpr_over_made).
-        Op::LoadLocal { slot: 0 } | Op::LoadLocalChecked { slot: 0 } if own.fresh_self => true,
-        Op::LoadLocal { slot } | Op::LoadLocalChecked { slot } => {
+        (Way::Made, Op::LoadLocal { slot: 0 } | Op::LoadLocalChecked { slot: 0 }) if own.fresh_self => true,
+        (Way::Read, Op::LoadGlobal(_) | Op::LoadGlobalIn { .. } | Op::LoadAttr(_) | Op::Const(_) | Op::Lit(_) | Op::Pinned(_)) => true,
+        (Way::Read, Op::GetIter | Op::Bytecode { opcode: opcodes::BINARY_SUBSCR, .. }) => every_way(py, prep, cfg[x].args[0], way, own, seen),
+        // The item FOR_ITER took: of what its iterator is over.
+        (Way::Read, Op::Project(0)) if matches!(cfg[cfg[x].args[0]].op, Op::IterNext) => every_way(py, prep, cfg[cfg[x].args[0]].args[0], way, own, seen),
+        (_, Op::LoadLocal { slot } | Op::LoadLocalChecked { slot }) => {
             // Stores of values never computed are on paths never taken.
             let types = unsafe { &*prep.types.get() };
-            let stored = |i: &&crate::cfg::ir::Instr| matches!(i.op, Op::StoreLocal { slot: s } if s == slot && types.get(i.args[0].idx()).is_some_and(|t| t.ty.is_some()));
+            let stored = |i: &&crate::cfg::ir::Instr| matches!(i.op, Op::StoreLocal { slot: s } if s == *slot && types.get(i.args[0].idx()).is_some_and(|t| t.ty.is_some()));
             let mut stores = cfg.instrs.iter().filter(stored).peekable();
-            (slot as usize) >= own.nargs && stores.peek().is_some() && stores.all(|i| made_here(py, prep, i.args[0], own, seen))
+            (*slot as usize) >= own.nargs && stores.peek().is_some() && stores.all(|i| every_way(py, prep, i.args[0], way, own, seen))
         }
-        Op::LoadDeref { slot } => match free_index(cfg, slot) {
-            Some(i) => own.free.get(i) == Some(&Free::Fresh),
-            None => cell_stores(cfg, slot, own).is_some_and(|xs| !xs.is_empty() && xs.iter().all(|x| made_here(py, prep, *x, own, seen))),
+        (_, Op::LoadDeref { slot }) => match free_index(cfg, *slot) {
+            // A cell of the function's closure: its content is one of the reads.
+            Some(i) => way == Way::Read || own.free.get(i) == Some(&Free::Fresh),
+            None => cell_stores(cfg, *slot, own).is_some_and(|xs| !xs.is_empty() && xs.iter().all(|x| every_way(py, prep, *x, way, own, seen))),
         },
-        Op::Param(crate::cfg::ir::ParamKind::Stack(_)) => {
+        (_, Op::Param(crate::cfg::ir::ParamKind::Stack(_))) => {
             let Some((b, pos)) = cfg.block_ids().find_map(|b| {
                 let explicit = cfg[b].params.iter().filter(|p| !matches!(cfg[**p].op, Op::Param(k) if k.is_implicit()));
                 explicit.clone().position(|p| *p == x).map(|i| (b, i))
@@ -345,7 +365,7 @@ fn made_here(py: Python<'_>, prep: &Prepared, x: ValueId, own: &Own, seen: &mut 
                     }
                     for ver in &cfg[p].versions {
                         edges += 1;
-                        if !made_here(py, prep, ver.outputs[e.args[pos] as usize], own, seen) {
+                        if !every_way(py, prep, ver.outputs[e.args[pos] as usize], way, own, seen) {
                             return false;
                         }
                     }
@@ -357,11 +377,28 @@ fn made_here(py: Python<'_>, prep: &Prepared, x: ValueId, own: &Own, seen: &mut 
     }
 }
 
+fn made_here(py: Python<'_>, prep: &Prepared, x: ValueId, own: &Own, seen: &mut HashSet<ValueId>) -> bool {
+    every_way(py, prep, x, Way::Made, own, seen)
+}
+
 // Whether call `x` of `func` makes a generator expression over an iterator
 // its frame made: the generator's frames then take the items of what is
 // their own (its first argument, as an __init__'s self is its own).
 pub fn genexpr_over_made(py: Python<'_>, prep: &Prepared, x: ValueId, func: &str, own: &Own) -> bool {
     func.ends_with("<genexpr>") && handed(prep, x).first().is_some_and(|a| made_here(py, prep, *a, own, &mut HashSet::new()))
+}
+
+// Whether the key of the subscript or membership test `v` is an object the
+// region's reads lead to: the hash it is looked up by (a tensor's is which
+// tensor it is) is then that object's on every call.
+pub fn key_read(py: Python<'_>, prep: &Prepared, v: ValueId, own: &Own) -> bool {
+    let ins = &prep.cfg[v];
+    let key = match ins.op {
+        Op::Bytecode { opcode: opcodes::BINARY_SUBSCR, .. } => ins.args.get(1),
+        Op::Bytecode { opcode: opcodes::CONTAINS_OP, .. } => ins.args.first(),
+        _ => None,
+    };
+    key.is_some_and(|k| every_way(py, prep, *k, Way::Read, own, &mut HashSet::new()))
 }
 
 // The kinds value x was seen to have (None: never computed, or too many).
@@ -392,7 +429,29 @@ pub fn instr(py: Python<'_>, prep: &Prepared, v: ValueId, own: &Own) -> Result<(
     let reads = |args: &[ValueId]| args.iter().try_for_each(|a| operand(py, prep, *a, Use::Read, own));
     let takes = |args: &[ValueId]| args.iter().try_for_each(|a| operand(py, prep, *a, Use::Take, own));
     match ins.op {
-        Op::Bytecode { opcode: opcodes::BINARY_SUBSCR, .. } if has(prep, ins.args[0], DEFAULTS) => Err("a defaultdict, which puts in a key it is read for and lacks".into()),
+        // d[key] puts the key in if d lacks it. It does not on any call a
+        // region is entered for when the key is the traced call's on every
+        // such call: a number or a string the code was given (a constant, an
+        // argument, which the region is found by) or an object the reads
+        // lead to. The subscript is among the region's reads (the item, or
+        // the dict's whole content), taken after it ran: a call on which the
+        // key is not there is no call of the region, and runs as written. A
+        // key the code computes may be one the traced run put in itself,
+        // from a read that is dropped because of it (d[len(d)]).
+        Op::Bytecode { opcode: opcodes::BINARY_SUBSCR, .. } if has(prep, ins.args[0], DEFAULTS) => {
+            let key = ins.args[1];
+            let value = kinds(prep, key).is_some_and(|ks| ks.iter().all(|k| matches!(k, Kind::None | Kind::Bool(_) | Kind::Int(_) | Kind::Float | Kind::Str(_))));
+            let given = match prep.cfg[key].op {
+                Op::Const(_) | Op::Lit(_) | Op::Pinned(_) => true,
+                Op::LoadLocal { slot } | Op::LoadLocalChecked { slot } => (slot as usize) < own.nargs,
+                _ => false,
+            };
+            if (value && given) || every_way(py, prep, key, Way::Read, own, &mut HashSet::new()) {
+                Ok(())
+            } else {
+                Err("a defaultdict and a key the region is not found by: a key it lacks is put in".into())
+            }
+        }
         Op::LoadAttr(_) | Op::LoadMethod(_) | Op::ToBool => ins.args.iter().try_for_each(|a| operand(py, prep, *a, Use::Ask, own)),
         Op::Binary(_) | Op::Compare(_) => reads(&ins.args),
         Op::GetIter | Op::IterNext => takes(&ins.args),

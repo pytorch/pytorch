@@ -27,7 +27,13 @@ void format_value(std::ostringstream& os, const c10::IValue& v) {
       os << "None";
       return;
     }
-    os << dtype_short_name(t.scalar_type()) << t.sym_sizes();
+    os << dtype_short_name(t.scalar_type());
+    // A nested tensor has no sizes: asking for them raises.
+    if (t.is_nested()) {
+      os << "[nested]";
+    } else {
+      os << t.sym_sizes();
+    }
     if (!t.device().is_cpu()) {
       os << "@" << t.device();
     }

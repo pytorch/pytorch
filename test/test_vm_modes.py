@@ -18,9 +18,12 @@ id() and hash() give which object their operand is on every call. And of
 state a region reads without a check of its own: the backend flags are part
 of the thread state a region is for, no region is traced or entered under a
 torch function mode, and a method that tells of a tensor what a region does
-not check ends the region also where it is taken from the class.
+not check ends the region also where it is taken from the class. And of a
+nested tensor, which the executor's record of the operators that run does
+not ask for sizes.
 """
 
+import array
 import collections
 import contextlib
 import ctypes
@@ -46,6 +49,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
     run_tests,
+    TEST_NUMPY,
     TestCase,
 )
 
@@ -1262,6 +1266,17 @@ def modes_made_enumerate(x):
     return modes_around(x, k + len(list(reversed(MODES_KEPT))))
 
 
+# A defaultdict read for keys that are there: the weights a list the
+# function reads holds (an optimizer's state), and a string.
+MODES_WEIGHTS = MODES_PER_WEIGHT = None
+
+
+def modes_keyed_by_weights(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = MODES_PER_WEIGHT["steps"] + MODES_PER_WEIGHT[MODES_WEIGHTS[0]]
+    return ((y * k + 1).cos().tanh().exp() * 2).sin()
+
+
 MODES_ENDS = [
     modes_unpack,
     modes_listed,
@@ -1348,6 +1363,41 @@ class TestVmEffects(TestCase):
         self.assertGreater(region_runs(compiled), 0)
         places = [r for r in vm.regions(compiled) if r["state"] == "region"]
         self.assertEqual(len(places), 1)
+
+    @isolated
+    def test_defaultdict_read_for_keys_that_are_there(self, device):
+        # The region is found by the list's weights and by the dict's
+        # content: the keys are there when it is entered, so nothing is put
+        # in, and the read sits inside the region. A call on which a key is
+        # not there is a call of its own, and the key is put in.
+        global MODES_WEIGHTS, MODES_PER_WEIGHT
+        MODES_WEIGHTS = [torch.ones(2, device=device)]
+        MODES_PER_WEIGHT = collections.defaultdict(float, steps=0.5)
+        MODES_PER_WEIGHT[MODES_WEIGHTS[0]] = 1.5
+        compiled = vm(modes_keyed_by_weights, passes=EARLY)
+        runs, places = [], 0
+        for call in range(14):
+            if call == 8:
+                # The operations in front of the read and behind it are one
+                # region so far. A weight the dict lacks:
+                places = sum(r["state"] == "region" for r in vm.regions(compiled))
+                MODES_WEIGHTS.insert(0, torch.ones(2, device=device))
+            if call == 11:
+                # A key that was there is gone.
+                del MODES_PER_WEIGHT["steps"]
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            got = compiled(x)
+            # Its keys are the weights and "steps", after the call on the VM.
+            keys = len(MODES_WEIGHTS) + 1
+            self.assertEqual(len(MODES_PER_WEIGHT), keys, msg=f"call {call}")
+            want = modes_keyed_by_weights(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            runs.append(region_runs(compiled))
+        self.assertGreater(runs[7], runs[4])
+        self.assertGreater(runs[10], runs[8])
+        self.assertGreater(runs[13], runs[11])
+        self.assertEqual(places, 1)
 
 
 instantiate_device_type_tests(TestVmEffects, globals())
@@ -1460,6 +1510,24 @@ MODES_READS = [
 ]
 
 
+# An argument of a kind whose content no region checks, read by C code.
+def modes_item_of(x, arg):
+    return modes_work(x) * float(arg[0])
+
+
+def modes_length_of(x, arg):
+    return modes_work(x) * len(arg)
+
+
+MODES_ARGUMENTS = {
+    "numpy": (modes_item_of, lambda: torch.tensor([2.0, 1.0]).numpy()),
+    "bytearray": (modes_item_of, lambda: bytearray([2, 1])),
+    "deque": (modes_item_of, lambda: collections.deque([2.0, 1.0])),
+    "array": (modes_item_of, lambda: array.array("d", [2.0, 1.0])),
+    "deque_length": (modes_length_of, lambda: collections.deque([2.0, 1.0])),
+}
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmStateRead(TestCase):
     """State a program reads and a region has no check of its own for: a
@@ -1496,8 +1564,56 @@ class TestVmStateRead(TestCase):
         compiled = vm(fn, passes=EARLY)
         self.assertEqual(self.log(device, compiled, fn), want, atol=0, rtol=0)
 
+    @parametrize("kind", list(MODES_ARGUMENTS))
+    @isolated
+    def test_argument_read_by_c_code_is_read_on_every_call(self, device, kind):
+        if kind == "numpy" and not TEST_NUMPY:
+            self.skipTest("needs numpy")
+        fn, make = MODES_ARGUMENTS[kind]
+        arg = make()
+        compiled = vm(fn, passes=EARLY)
+        for call in range(10):
+            if call == 6:
+                # The same object, with other content.
+                if fn is modes_length_of:
+                    arg.append(1.0)
+                else:
+                    arg[0] = 3
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            got, want = compiled(x, arg), fn(x, arg)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        # The operations in front of the read are still a region.
+        self.assertGreater(region_runs(compiled), 0)
+
 
 instantiate_device_type_tests(TestVmStateRead, globals())
+
+
+def modes_nested(x, nt):
+    return modes_work(x), (nt * 2).to_padded_tensor(0.0)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmNestedTensors(TestCase):
+    """A nested tensor has no sizes to ask for: the executor does not ask,
+    and a function that is given one runs as eager runs it."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @isolated
+    def test_nested_tensor_argument(self, device):
+        compiled = vm(modes_nested, passes=EARLY)
+        for call in range(8):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            parts = [torch.randn(n, 3, device=device) for n in (2, 4)]
+            nt = torch.nested.nested_tensor(parts)
+            got, want = compiled(x, nt), modes_nested(x, nt)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+
+
+instantiate_device_type_tests(TestVmNestedTensors, globals())
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
