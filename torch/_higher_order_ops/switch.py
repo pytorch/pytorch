@@ -13,6 +13,7 @@ from torch._higher_order_ops.utils import (
     _fake_mode_handler,
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
+    align_bw_branch_outputs,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
     create_fn_remove_none,
@@ -323,6 +324,7 @@ class SwitchAutogradOp(torch.autograd.Function):
             if not grads_tensor_masks:
                 grads_tensor_masks = mask
 
+        align_bw_branch_outputs(branches_bw_gm, operands, grads_tensor_masks)
         grads = switch_op(
             ctx._index,
             branches_bw_gm,

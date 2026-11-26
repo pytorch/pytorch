@@ -12710,6 +12710,142 @@ class GraphModule(torch.nn.Module):
         compiled = torch.compile(g, backend=backend, dynamic=True, fullgraph=True)
         self.assertEqual(compiled(5, 7), g(5, 7))
 
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_cond_backward_mismatched_branch_grad_strides(self, backend):
+        def qr_solve(x, w):
+            eye = torch.eye(32, device=x.device, dtype=x.dtype)
+            q, r = torch.linalg.qr(w + 3.0 * eye)
+            rhs = (x @ q).transpose(0, 1)
+            sol = torch.linalg.solve_triangular(
+                r + 2.0 * eye, rhs, upper=True
+            ).transpose(0, 1)
+            return (sol + x * 0.2).contiguous()
+
+        def fn(x, w):
+            pred = x.detach().sum() > 0
+            return torch.cond(
+                pred,
+                lambda a, b: qr_solve(a, b),
+                lambda a, b: (a @ b).tanh().contiguous(),
+                (x, w),
+            )
+
+        for sign in (1.0, -1.0):
+            torch.manual_seed(0)
+            x_ref = (torch.randn(16, 32).abs() * 0.15 * sign).requires_grad_(True)
+            w_ref = (torch.randn(32, 32) * 0.15).requires_grad_(True)
+            y_ref = fn(x_ref, w_ref)
+            gx_ref, gw_ref = torch.autograd.grad(y_ref.sum(), (x_ref, w_ref))
+
+            x_c = x_ref.detach().clone().requires_grad_(True)
+            w_c = w_ref.detach().clone().requires_grad_(True)
+            y_c = torch.compile(fn, backend=backend)(x_c, w_c)
+            gx_c, gw_c = torch.autograd.grad(y_c.sum(), (x_c, w_c))
+            self.assertEqual(y_c, y_ref)
+            self.assertEqual(gx_c, gx_ref)
+            self.assertEqual(gw_c, gw_ref)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_cond_backward_mismatched_grad_layouts(self, backend):
+        def fn_size1(x, w):
+            pred = x.detach().sum() > 0
+            return torch.cond(
+                pred,
+                lambda a, b: (a @ b.t().contiguous().t()).contiguous(),
+                lambda a, b: (a * b.t()).sum(dim=1, keepdim=True).contiguous(),
+                (x, w),
+            )
+
+        for sign in (1.0, -1.0):
+            torch.manual_seed(1)
+            x_ref = (torch.randn(16, 32).abs() * sign).requires_grad_(True)
+            w_ref = torch.randn(32, 1).requires_grad_(True)
+            y_ref = fn_size1(x_ref, w_ref)
+            gx_ref, gw_ref = torch.autograd.grad(y_ref.sum(), (x_ref, w_ref))
+
+            x_c = x_ref.detach().clone().requires_grad_(True)
+            w_c = w_ref.detach().clone().requires_grad_(True)
+            y_c = torch.compile(fn_size1, backend=backend)(x_c, w_c)
+            gx_c, gw_c = torch.autograd.grad(y_c.sum(), (x_c, w_c))
+            self.assertEqual(y_c, y_ref)
+            self.assertEqual(gx_c, gx_ref)
+            self.assertEqual(gw_c, gw_ref)
+
+        def fn_cl(x, w):
+            pred = x.detach().sum() > 0
+            return torch.cond(
+                pred,
+                lambda a, b: (a * b.contiguous()).contiguous(),
+                lambda a, b: (a + b).to(memory_format=torch.channels_last).contiguous(),
+                (x, w),
+            )
+
+        for sign in (1.0, -1.0):
+            torch.manual_seed(2)
+            x_ref = (
+                (torch.randn(2, 4, 3, 3).abs() * sign)
+                .to(memory_format=torch.channels_last)
+                .requires_grad_(True)
+            )
+            w_ref = (
+                torch.randn(2, 4, 3, 3)
+                .to(memory_format=torch.channels_last)
+                .requires_grad_(True)
+            )
+            y_ref = fn_cl(x_ref, w_ref)
+            gx_ref, gw_ref = torch.autograd.grad(y_ref.sum(), (x_ref, w_ref))
+
+            x_c = x_ref.detach().clone().requires_grad_(True)
+            w_c = w_ref.detach().clone().requires_grad_(True)
+            y_c = torch.compile(fn_cl, backend=backend)(x_c, w_c)
+            gx_c, gw_c = torch.autograd.grad(y_c.sum(), (x_c, w_c))
+            self.assertEqual(y_c, y_ref)
+            self.assertEqual(gx_c, gx_ref)
+            self.assertEqual(gw_c, gw_ref)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_switch_backward_mismatched_branch_grad_strides(self, backend):
+        def qr_solve(x, w):
+            eye = torch.eye(32, device=x.device, dtype=x.dtype)
+            q, r = torch.linalg.qr(w + 3.0 * eye)
+            rhs = (x @ q).transpose(0, 1)
+            sol = torch.linalg.solve_triangular(
+                r + 2.0 * eye, rhs, upper=True
+            ).transpose(0, 1)
+            return (sol + x * 0.2).contiguous()
+
+        def fn(idx, x, w):
+            return switch(
+                idx,
+                (
+                    lambda a, b: qr_solve(a, b),
+                    lambda a, b: (a @ b).tanh().contiguous(),
+                    lambda a, b: (a * 0.5).contiguous(),
+                ),
+                (x, w),
+            )
+
+        for branch_idx in (0, 1, 2):
+            torch.manual_seed(3)
+            x_ref = (torch.randn(16, 32) * 0.15).requires_grad_(True)
+            w_ref = (torch.randn(32, 32) * 0.15).requires_grad_(True)
+            y_ref = fn(torch.tensor(branch_idx), x_ref, w_ref)
+            gx_ref, gw_ref = torch.autograd.grad(
+                y_ref.sum(), (x_ref, w_ref), allow_unused=True
+            )
+            if gw_ref is None:
+                gw_ref = torch.zeros_like(w_ref)
+
+            x_c = x_ref.detach().clone().requires_grad_(True)
+            w_c = w_ref.detach().clone().requires_grad_(True)
+            y_c = torch.compile(fn, backend=backend)(
+                torch.tensor(branch_idx), x_c, w_c
+            )
+            gx_c, gw_c = torch.autograd.grad(y_c.sum(), (x_c, w_c))
+            self.assertEqual(y_c, y_ref)
+            self.assertEqual(gx_c, gx_ref)
+            self.assertEqual(gw_c, gw_ref)
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
