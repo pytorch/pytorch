@@ -92,20 +92,46 @@ __global__ void upsample_bilinear2d_out_frame(
 }
 
 #ifdef USE_ROCM
+// Architectures with a perf sweep for the heuristics in this file.
+enum class TunedArch : int8_t { kNone, kGfx950, kGfx942, kGfx1250 };
+
+// isGPUArch builds a std::vector<std::string> and a std::string on every
+// call, and the callers run on every forward and backward. Resolve the
+// architecture once per device.
+TunedArch tuned_arch() {
+  static c10::once_flag init_flag;
+  static std::vector<TunedArch> arch_by_device;
+  c10::call_once(init_flag, [] {
+    const auto& hooks = at::detail::getCUDAHooks();
+    const auto num_devices = at::cuda::device_count();
+    arch_by_device.resize(num_devices, TunedArch::kNone);
+    for (const auto device : c10::irange(num_devices)) {
+      if (hooks.isGPUArch({"gfx950"}, device)) {
+        arch_by_device[device] = TunedArch::kGfx950;
+      } else if (hooks.isGPUArch({"gfx942"}, device)) {
+        arch_by_device[device] = TunedArch::kGfx942;
+      } else if (hooks.isGPUArch({"gfx1250"}, device)) {
+        arch_by_device[device] = TunedArch::kGfx1250;
+      }
+    }
+  });
+  return arch_by_device[c10::cuda::current_device()];
+}
+
 // upsample_bilinear2d_out_frame runs one thread per output pixel and loops
 // over all N*C planes. Below this many output pixels per CU it leaves the
 // device idle, and the one-thread-per-element kernels below are faster.
 // Architectures without a perf sweep keep the plane kernel.
 int64_t plane_kernel_min_pixels_per_sm() {
-  const auto& hooks = at::detail::getCUDAHooks();
-  if (hooks.isGPUArch({"gfx950"})) {
-    return 512;
-  }
-  if (hooks.isGPUArch({"gfx942"})) {
-    return 256;
-  }
-  if (hooks.isGPUArch({"gfx1250"})) {
-    return 768;
+  switch (tuned_arch()) {
+    case TunedArch::kGfx950:
+      return 512;
+    case TunedArch::kGfx942:
+      return 256;
+    case TunedArch::kGfx1250:
+      return 768;
+    case TunedArch::kNone:
+      break;
   }
   return 0;
 }
@@ -948,41 +974,17 @@ struct NhwcGatherBounds {
   int64_t max_contributions;
 };
 
-enum class NhwcGatherArch : int8_t { kNone, kGfx950, kGfx942, kGfx1250 };
-
-// isGPUArch builds a std::vector<std::string> and a std::string on every call,
-// and this runs on every backward. Resolve the architecture once per device.
-NhwcGatherArch nhwc_gather_arch() {
-  static c10::once_flag init_flag;
-  static std::vector<NhwcGatherArch> arch_by_device;
-  c10::call_once(init_flag, [] {
-    const auto& hooks = at::detail::getCUDAHooks();
-    const auto num_devices = at::cuda::device_count();
-    arch_by_device.resize(num_devices, NhwcGatherArch::kNone);
-    for (const auto device : c10::irange(num_devices)) {
-      if (hooks.isGPUArch({"gfx950"}, device)) {
-        arch_by_device[device] = NhwcGatherArch::kGfx950;
-      } else if (hooks.isGPUArch({"gfx942"}, device)) {
-        arch_by_device[device] = NhwcGatherArch::kGfx942;
-      } else if (hooks.isGPUArch({"gfx1250"}, device)) {
-        arch_by_device[device] = NhwcGatherArch::kGfx1250;
-      }
-    }
-  });
-  return arch_by_device[c10::cuda::current_device()];
-}
-
 NhwcGatherBounds nhwc_gather_bounds(at::ScalarType dtype) {
   const bool is_half = dtype == at::ScalarType::Half;
   const int64_t max_contributions = is_half ? 0 : 512;
-  switch (nhwc_gather_arch()) {
-    case NhwcGatherArch::kGfx950:
+  switch (tuned_arch()) {
+    case TunedArch::kGfx950:
       return {6, max_contributions};
-    case NhwcGatherArch::kGfx942:
+    case TunedArch::kGfx942:
       return {is_half ? 4 : 16, max_contributions};
-    case NhwcGatherArch::kGfx1250:
+    case TunedArch::kGfx1250:
       return {2, max_contributions};
-    case NhwcGatherArch::kNone:
+    case TunedArch::kNone:
       break;
   }
   return {0, 0};
