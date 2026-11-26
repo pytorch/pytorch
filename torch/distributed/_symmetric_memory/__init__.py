@@ -2177,7 +2177,8 @@ def _low_contention_all_gather_ce_multicast(
     device = torch.device("cuda", device_index)
     # This op is CUDA-only; going through the device module is just so that the
     # union returned by `get_mem_pool` type-checks.
-    with torch.get_device_module(device).use_mem_pool(get_mem_pool(device)):
+    mempool = get_mem_pool(device)
+    with torch.get_device_module(device).use_mem_pool(mempool, device=device):
         output = torch.empty_strided(
             out_shape,
             make_contiguous_strides_for(out_shape),
@@ -2491,8 +2492,10 @@ def empty(  # type: ignore[misc]
 
     if _should_use_implicit_mempool() and device.type in _MEMPOOL_DEVICE_TYPES:
         # Allocate tensor from an implicit memory pool
-        mempool = get_mem_pool(device)
-        with torch.get_device_module(device).use_mem_pool(mempool):
+        device_module = torch.get_device_module(device)
+        if device.index is None:
+            device = torch.device(device.type, device_module.current_device())
+        with device_module.use_mem_pool(get_mem_pool(device), device=device):
             return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
     else:
         return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
@@ -2667,7 +2670,7 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool | torch.xpu.MemPool:
 
         >>> # doctest: +SKIP
         >>> pool = torch.distributed._symmetric_memory.get_mem_pool("cuda:0")
-        >>> with torch.cuda.use_mem_pool(pool):
+        >>> with torch.cuda.use_mem_pool(pool, device="cuda:0"):
         >>>     tensor = torch.randn(1000, device="cuda:0")
         >>> tensor = torch.ops.symm_mem.one_shot_all_reduce(tensor, "sum", group_name)
 
@@ -2683,14 +2686,21 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool | torch.xpu.MemPool:
     # undefined behaviors. We could consider relaxing this in the future if we
     # establish stream tracking and implicit synchronization around an
     # allocation.
+    device = torch.device(device)
+    device_module = torch.get_device_module(device)
+    if device.index is None:
+        device = torch.device(device.type, device_module.current_device())
     if device not in _symm_mem_pools:
         allocator = get_mempool_allocator(device)
-        # Create a new pool with the given allocator and the preset options.
-        _symm_mem_pools[device] = torch.get_device_module(device).MemPool(
-            allocator,
-            use_on_oom=False,
-            no_split=True,
-        )
+        # Create a new pool with the given allocator and the preset options. A
+        # pool routes allocations only on the device that was current when it
+        # was created, so pass this device to `use_mem_pool`.
+        with device_module.device(device):
+            _symm_mem_pools[device] = device_module.MemPool(
+                allocator,
+                use_on_oom=False,
+                no_split=True,
+            )
 
     return _symm_mem_pools[device]
 
