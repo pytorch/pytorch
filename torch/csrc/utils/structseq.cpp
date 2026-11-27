@@ -16,6 +16,7 @@
 #include <torch/csrc/utils/structseq.h>
 #include <sstream>
 
+#include <c10/util/irange.h>
 #include <structmember.h>
 
 namespace torch::utils {
@@ -27,7 +28,7 @@ PyObject* returned_structseq_repr(PyStructSequence* obj) {
   std::stringstream ss;
   ss << typ->tp_name << "(\n";
 
-  for (Py_ssize_t i = 0; i < num_elements; i++) {
+  for (const auto i : c10::irange(num_elements)) {
     const char* cname = typ->tp_members[i].name;
     if (cname == nullptr) {
       PyErr_Format(

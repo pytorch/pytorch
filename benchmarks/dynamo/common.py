@@ -491,7 +491,6 @@ def output_signpost(data, args, suite, error=None):
         "tag",
         "coverage",
         "overhead",
-        "speedup_dynamo_ts",
         "speedup_fx2trt",
         "speedup_fx2trt_fp16",
         "accuracy",
@@ -1071,8 +1070,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         )
     elif args.export_nativert:
         frozen_model_iter_fn = export_nativert(model, example_inputs)
-    elif args.torchscript_jit_trace:
-        frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
     elif args.aot_precompile:
         frozen_model_iter_fn = aot_precompile(model, example_inputs)
     else:
@@ -1346,13 +1343,6 @@ def xla(args, model_iter_fn, model, example_inputs):
     return format_speedup(speedup, pvalue)
 
 
-def try_script(model, example_inputs):
-    try:
-        return torch.jit.script(model)
-    except Exception:
-        return None
-
-
 def _produce_dynamic_shapes_for_export(path, x):
     # mark_dynamic() is ignored for export.
     # use this to produce dynamic_shapes spec instead.
@@ -1487,28 +1477,6 @@ class NativeRTCache:
         return cls.cache[key]
 
 
-class JitTracedCache:
-    cache: dict[weakref.ref, Any] = {}
-
-    @classmethod
-    def load(cls, model, example_inputs):
-        key = weakref.ref(model)
-        if key not in cls.cache:
-            example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-            if example_args:
-                jit_traced_module = torch.jit.trace(
-                    model, example_inputs=example_args, strict=False
-                )
-            else:
-                jit_traced_module = torch.jit.trace(
-                    model, example_kwarg_inputs=example_kwargs, strict=False
-                )
-
-            cls.cache[key] = jit_traced_module
-
-        return cls.cache[key]
-
-
 def export(model, example_inputs):
     from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
@@ -1584,16 +1552,6 @@ def export_aot_inductor(model, example_inputs, mode):
         return optimized(*example_args, **example_kwargs)
 
     return opt_aot_inductor
-
-
-def torchscript_jit_trace(model, example_inputs):
-    optimized = JitTracedCache.load(model, example_inputs)
-
-    def opt_jit_trace(_, example_inputs, collect_outputs=False):
-        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return optimized(*example_args, **example_kwargs)
-
-    return opt_jit_trace
 
 
 def download_retry_decorator(download_fn):
@@ -2411,7 +2369,6 @@ class BenchmarkRunner:
                         self.args.export
                         or self.args.export_aot_inductor
                         or self.args.export_nativert
-                        or self.args.torchscript_jit_trace
                         or self.args.aot_precompile
                     ):
                         # apply export on module directly
@@ -3057,7 +3014,6 @@ class BenchmarkRunner:
             if (
                 self.args.export_aot_inductor
                 or self.args.export_nativert
-                or self.args.torchscript_jit_trace
                 or self.args.aot_precompile
             ):
                 optimized_model_iter_fn = optimize_ctx
@@ -3822,11 +3778,6 @@ def parse_args(args=None):
         "--overhead", action="store_true", help=help(overhead_experiment)
     )
     group.add_argument(
-        "--speedup-dynamo-ts",
-        action="store_true",
-        help="TorchDynamo frontend with torchscript backend",
-    )
-    group.add_argument(
         "--speedup-fx2trt", action="store_true", help=help(speedup_experiment_fx2trt)
     )
     group.add_argument(
@@ -3885,11 +3836,6 @@ def parse_args(args=None):
         "--export-nativert",
         action="store_true",
         help="Measure pass rate with Export+NativeRT",
-    )
-    group.add_argument(
-        "--torchscript-jit-trace",
-        action="store_true",
-        help="Measure pass rate with TorchScript jit.trace",
     )
     group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
@@ -4552,20 +4498,12 @@ def run(runner, args, original_dir=None):
         optimize_ctx = export_nativert
         experiment = speedup_experiment
         output_filename = "export_nativert.csv"
-    elif args.torchscript_jit_trace:
-        optimize_ctx = torchscript_jit_trace
-        experiment = speedup_experiment
-        output_filename = "torchscript_jit_trace.csv"
     elif args.xla:
         (dev,) = args.devices
         os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
         torch._dynamo.mark_dynamic = MagicMock()
         experiment = xla
         output_filename = "xla.csv"
-    elif args.speedup_dynamo_ts:
-        optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedup_dynamo_ts.csv"
     elif args.prims_nvfuser:
         optimize_ctx = torch._dynamo.optimize("prims_nvfuser", nopython=args.nopython)
         experiment = speedup_experiment

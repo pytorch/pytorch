@@ -1061,6 +1061,45 @@ _low_precision_dtypes = (
 _complex_dtypes = (torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128)
 
 
+# Shell dtypes with no defined value conversion. Mirrors c10::isShellType and
+# the eager check in aten/src/ATen/native/Copy.cpp so tracing rejects the same
+# casts.
+_uncastable_shell_dtypes = frozenset(
+    (
+        torch.float4_e2m1fn_x2,
+        torch.bits1x8,
+        torch.bits2x4,
+        torch.bits4x2,
+        torch.bits8,
+        torch.bits16,
+        *(getattr(torch, f"uint{i}") for i in range(1, 8)),
+        *(getattr(torch, f"int{i}") for i in range(1, 8)),
+    )
+)
+
+
+def check_shell_dtype_cast(src: torch.dtype, dst: torch.dtype) -> None:
+    if src == dst or not (
+        src in _uncastable_shell_dtypes or dst in _uncastable_shell_dtypes
+    ):
+        return
+    if torch.float4_e2m1fn_x2 in (src, dst):
+        raise NotImplementedError(
+            f"Casting from {src} to {dst} is not supported. "
+            "torch.float4_e2m1fn_x2 packs two fp4 values per byte, so there is no "
+            "elementwise conversion. To decode, use .view(torch.uint8) and unpack "
+            "the nibbles (low 4 bits are the first element, high 4 bits the "
+            "second); to encode, pack fp4 codes into torch.uint8 and "
+            ".view(torch.float4_e2m1fn_x2)."
+        )
+    shell = src if src in _uncastable_shell_dtypes else dst
+    raise NotImplementedError(
+        f"Casting from {src} to {dst} is not supported: {shell} is a shell dtype "
+        "with no defined conversions. Use .view() to reinterpret the bytes as a "
+        "same-size integer dtype instead."
+    )
+
+
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
     if not isinstance(dtype, torch.dtype):
         raise AssertionError(f"Expected torch.dtype, got {type(dtype)}")
@@ -2021,6 +2060,34 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
         return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
 
     return torch.contiguous_format
+
+
+def upsample_output_memory_format(input: TensorLikeType) -> torch.memory_format:
+    # Mirrors at::native::upsample::output_memory_format (bilinear, bicubic and lanczos): for a
+    # uint8 CPU input, suggest_memory_format() also requires the stride of a size-1 batch dimension
+    # to fit the layout, so e.g. `hwc.permute(2, 0, 1)[None]` is reported as contiguous; retry with a
+    # batch stride that fits any layout.
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    memory_format = suggest_memory_format(input)
+    # Inside a fake tensor's meta function, input.device is "meta".
+    device = maybe_get_fake_device(input) or input.device
+    if (
+        memory_format != torch.contiguous_format
+        or device.type != "cpu"
+        or input.dtype != torch.uint8
+        or input.ndim != 4
+        or not guard_or_false(input.shape[0] == 1)
+    ):
+        return memory_format
+    strides = list(input.stride())
+    strides[0] = 1
+    for s, n in zip(input.stride()[1:], input.shape[1:]):
+        strides[0] = cast(int, sym_max(strides[0], s * n))
+    if are_strides_like_channels_last_or_false(input.shape, strides):
+        return torch.channels_last
+    return memory_format
 
 
 def prod(xs: Sequence[NumberType]) -> NumberType:

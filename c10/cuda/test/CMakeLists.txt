@@ -11,6 +11,7 @@ set(C10_CUDA_ALL_TEST_FILES
     impl/CUDATest.cpp
     impl/CUDACachingAllocatorReserveTest.cpp
     impl/CUDACachingAllocatorReserveDeviceTest.cpp
+    util/TypeIndex_test.cu
 )
 if(BUILD_TEST)
   foreach(test_src ${C10_CUDA_ALL_TEST_FILES})

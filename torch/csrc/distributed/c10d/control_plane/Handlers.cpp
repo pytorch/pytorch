@@ -68,9 +68,8 @@ RegisterHandler pingHandler{"ping", [](const Request&, Response& res) {
                             }};
 
 // Each hooked backend records into its own FlightRecorder instance, so the
-// caller says which one to read. Defaulting to the instance ProcessGroupGloo
-// records into keeps existing callers -- the debug server's "FlightRecorder
-// CPU" page among them -- seeing what they always did.
+// caller says which one to read. Defaults to gloo's instance, which existing
+// callers -- the debug server's "FlightRecorder CPU" page among them -- read.
 std::string frBackendParam(const Request& req) {
   auto backend = req.getParam("backend");
   return backend.empty() ? ::c10d::kDefaultFRBackend : backend;

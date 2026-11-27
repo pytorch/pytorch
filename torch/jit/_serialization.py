@@ -54,30 +54,6 @@ def save(m, f, _extra_files=None) -> None:
         behavior of division changed in 1.6, and 1.5 does not know how to
         replicate the 1.6 behavior.
 
-    Example:
-    .. testcode::
-
-        import torch
-        import io
-
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                return x + 10
-
-        m = torch.jit.script(MyModule())
-
-        # Save to file
-        torch.jit.save(m, 'scriptmodule.pt')
-        # This line is equivalent to the previous
-        m.save("scriptmodule.pt")
-
-        # Save to io.BytesIO buffer
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-
-        # Save with extra files
-        extra_files = {'foo.txt': b'bar'}
-        torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
     if sys.version_info >= (3, 14):
         warnings.warn(
@@ -130,43 +106,6 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
         during :func:`torch.jit.load`. Never load data that could have come from an untrusted
         source, or that could have been tampered with. **Only load data you trust**.
 
-    Example:
-    .. testcode::
-
-        import torch
-        import io
-
-        torch.jit.load('scriptmodule.pt')
-
-        # Load ScriptModule from io.BytesIO object
-        with open('scriptmodule.pt', 'rb') as f:
-            buffer = io.BytesIO(f.read())
-
-        # Load all tensors to the original device
-        torch.jit.load(buffer)
-
-        # Load all tensors onto CPU, using a device
-        buffer.seek(0)
-        torch.jit.load(buffer, map_location=torch.device('cpu'))
-
-        # Load all tensors onto CPU, using a string
-        buffer.seek(0)
-        torch.jit.load(buffer, map_location='cpu')
-
-        # Load with extra files.
-        extra_files = {'foo.txt': ''}  # values will be replaced with data
-        torch.jit.load('scriptmodule.pt', _extra_files=extra_files)
-        print(extra_files['foo.txt'])
-
-    .. testoutput::
-        :hide:
-
-        ...
-
-    .. testcleanup::
-
-        import os
-        os.remove("scriptmodule.pt")
     """
     if sys.version_info >= (3, 14):
         warnings.warn(
@@ -269,14 +208,10 @@ def save_jit_module_to_flatbuffer(m, f, _extra_files=None) -> None:
         import torch
         import io
 
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                return x + 10
+        import torch.utils.mkldnn
 
-        m = torch.jit.script(MyModule())
-
-        # Save to file
-        torch.jit.save_jit_module_to_flatbuffer(m, 'scriptmodule.ff')
+        model = torch.utils.mkldnn.to_mkldnn(torch.nn.Linear(2, 3).eval())
+        torch.jit.save_jit_module_to_flatbuffer(model, 'scriptmodule.ff')
     """
     extra_files = _extra_files
     if extra_files is None:

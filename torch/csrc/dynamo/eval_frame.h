@@ -12,13 +12,8 @@ PyObject* torch_c_dynamo_eval_frame_init(void);
 
 #endif
 
-// All the eval APIs change in 3.11 so we need to decide which one to use on the
-// fly https://docs.python.org/3/c-api/init.html#c._PyFrameEvalFunction
-#if IS_PYTHON_3_11_PLUS
+// https://docs.python.org/3/c-api/init.html#c._PyFrameEvalFunction
 #define THP_EVAL_API_FRAME_OBJECT _PyInterpreterFrame
-#else
-#define THP_EVAL_API_FRAME_OBJECT PyFrameObject
-#endif // IS_PYTHON_3_11_PLUS
 
 // We need to be able to return the _PyInterpreterFrame to python so create
 // a python binding for it
@@ -46,7 +41,9 @@ void clear_old_frame_if_python_312_plus(
     THP_EVAL_API_FRAME_OBJECT* frame);
 #endif
 
+PyObject* eval_frame_callback_get(void);
 void eval_frame_callback_set(PyObject* obj);
+PyObject* dynamo_set_eval_frame(PyObject* callback, PyObject* module);
 
 int64_t get_current_isolate_recompiles_id(void);
 

@@ -135,6 +135,11 @@ def _upsample_lanczos2d_aa(
     align_corners: bool,
     scale_factors: Sequence[float] | None,
 ) -> Tensor: ...
+def _upsample_inter_area2d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
 def upsample_bicubic2d(
     input: Tensor,
     output_size: Sequence[int] | None,

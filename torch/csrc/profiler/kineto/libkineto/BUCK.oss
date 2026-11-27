@@ -1,0 +1,3 @@
+load("//torch/csrc/profiler/kineto/libkineto:kineto.buck.bzl", "define_kineto")
+
+define_kineto()

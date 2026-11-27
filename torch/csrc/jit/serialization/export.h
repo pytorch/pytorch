@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/pickler_helper.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
@@ -175,15 +176,6 @@ TORCH_API void ExportModule(
     bool bytecode_format = false,
     bool save_mobile_debug_info = false,
     bool use_flatbuffer = false);
-
-// Write the bytes of a pickle archive and the tensors referenced inside that
-// archive
-TORCH_API void writeArchiveAndTensors(
-    const std::string& archive_name,
-    const char* pickle_bytes,
-    size_t size,
-    const std::vector<at::Tensor>& tensors,
-    caffe2::serialize::PyTorchStreamWriter& out);
 
 // Surrounding system can install an additional hook to produce extra files
 // with metadata based on environment every time a module is serialized.

@@ -108,7 +108,11 @@ template <
     bool PADDING = false,
     bool TRANSA = false,
     bool TRANSB = false>
-void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
+bool gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
+  // The epilogue computes alpha * A * B and never reads C.
+  if (beta != 0) {
+    return false;
+  }
   // Get input information.
   int M = m;
   int N = n;
@@ -224,11 +228,14 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
      c_element_op);
 
 
- TORCH_CHECK(gemm.IsSupportedArgument(argument), "wrong! device_gemm with the specified compilation parameters does not support this GEMM problem");
+ if (!gemm.IsSupportedArgument(argument)) {
+   return false;
+ }
 
 
  auto stream = at::cuda::getCurrentCUDAStream().stream();
  invoker.Run(argument, StreamConfig{stream, false});
+ return true;
 }
 
 
@@ -264,7 +271,11 @@ template <
     bool PADDING = false,
     bool TRANSA = false,
     bool TRANSB = false>
-void gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
+bool gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
+  // The PassThrough epilogue computes A * B only.
+  if (alpha != 1 || beta != 0) {
+    return false;
+  }
   // Get input information.
   int M = m;
   int N = n;
@@ -376,9 +387,7 @@ void gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
 
  if(!gemm.IsSupportedArgument(argument))
  {
-        printf("error shape = %ld %ld %ld TRANSA=%d TRANSB=%d \n",
-                        n, m, k,TRANSA, TRANSB);
-        TORCH_CHECK(false, "wrong! device_gemm with the specified compilation parameters does not support this GEMM problem");
+   return false;
  }
 
 
@@ -402,6 +411,7 @@ void gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
                           <<  gemm.GetTypeString()
                           << std::endl;
 #endif
+ return true;
 }
 
 } // namespace at::native

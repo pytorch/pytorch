@@ -166,6 +166,22 @@ C10_EXPORT at::Tensor broadcast(
     int64_t src,
     std::string group_name);
 
+C10_EXPORT at::Tensor reduce(
+    const at::Tensor& input,
+    int64_t dst,
+    c10::intrusive_ptr<ReduceOp> reduce_op,
+    c10::intrusive_ptr<ProcessGroup> group);
+
+C10_EXPORT at::Tensor gather(
+    const at::Tensor& input,
+    int64_t dst,
+    c10::intrusive_ptr<ProcessGroup> group);
+
+C10_EXPORT at::Tensor scatter(
+    const at::Tensor& input,
+    int64_t src,
+    c10::intrusive_ptr<ProcessGroup> group);
+
 C10_EXPORT at::Tensor isend(
     at::Tensor& send_buf,
     int64_t dst,

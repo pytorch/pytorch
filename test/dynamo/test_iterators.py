@@ -9,7 +9,9 @@ import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     make_dynamo_test,
+    parametrize,
     xfailIfPy313AndEarlier,
 )
 
@@ -121,6 +123,7 @@ class NotReversibleNone:
         return idx
 
 
+@instantiate_parametrized_tests
 class TestIterators(torch._dynamo.test_case.TestCase):
     """Test iterator support in Dynamo"""
 
@@ -402,39 +405,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         ]
         self.assertEqual(result, expected)
 
-    def test_constant_variable_list_tp_iter(self):
-        """ConstantVariable wrapping a list value should iterate via tp_iter_impl.
-
-        ConstantVariable.create() normally redirects list to ListVariable. This
-        test bypasses __init__ to construct a ConstantVariable holding a list
-        directly, exercising the generic tp_iter_impl unpack path.
-        """
-        from torch._dynamo.variables.base import VariableTracker
-        from torch._dynamo.variables.constant import ConstantVariable
-        from torch._dynamo.variables.lists import ListIteratorVariable
-
-        cv = ConstantVariable.__new__(ConstantVariable)
-        VariableTracker.__init__(cv)
-        cv.value = [1, 2, 3]
-
-        result = cv.tp_iter_impl(None)
-        self.assertIsInstance(result, ListIteratorVariable)
-        self.assertEqual([v.as_python_constant() for v in result.items], [1, 2, 3])
-
-    def test_constant_variable_tuple_tp_iter(self):
-        """ConstantVariable wrapping a tuple value iterates via tp_iter_impl."""
-        from torch._dynamo.variables.base import VariableTracker
-        from torch._dynamo.variables.constant import ConstantVariable
-        from torch._dynamo.variables.lists import ListIteratorVariable
-
-        cv = ConstantVariable.__new__(ConstantVariable)
-        VariableTracker.__init__(cv)
-        cv.value = (10, 20, 30)
-
-        result = cv.tp_iter_impl(None)
-        self.assertIsInstance(result, ListIteratorVariable)
-        self.assertEqual([v.as_python_constant() for v in result.items], [10, 20, 30])
-
     def test_constant_variable_non_iterable_tp_iter(self):
         """Non-iterable ConstantVariable falls back to base unimplemented."""
         from torch._dynamo.exc import Unsupported
@@ -589,6 +559,68 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         it = reversed([10, 20, 30])
         self.assertEqual(opt_fn(it, x), torch.tensor(65))
 
+    @parametrize("protocol", ["iter", "getitem"])
+    @parametrize("constructor", [list, tuple])
+    def test_unsized_iterable_arg_guards(self, protocol, constructor):
+        class GetItemIterable:
+            def __init__(self, data):
+                self.data = data
+
+            def __getitem__(self, index):
+                return self.data[index]
+
+        iterable_type = CustomIterable if protocol == "iter" else GetItemIterable
+
+        def fn(x, obj):
+            values = constructor(obj)
+            return x + sum(values), len(values)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+        obj = iterable_type([torch.tensor(1), torch.tensor(2)])
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Contents are runtime tensor inputs, not constants from the first trace.
+        obj = iterable_type([torch.tensor(3), torch.tensor(4)])
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 1)
+
+        # The backing list guards, not len(obj), invalidate a changed length.
+        obj.data.append(torch.tensor(5))
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
+
+        obj.data[0] = torch.tensor(7)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
+
+        obj.data.clear()
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_unsized_iterable_scalar_state_guards(self):
+        class ScalarIterable:
+            def __init__(self, count):
+                self.count = count
+
+            def __iter__(self):
+                return iter(range(self.count))
+
+        def fn(x, obj):
+            return x + sum(list(obj))
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+        obj = ScalarIterable(2)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 1)
+        obj.count = 3
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
+
     def test_list_reverseiterator_arg_guards(self):
         """Guard validation and recompilation for list_reverseiterator arguments."""
 
@@ -636,6 +668,21 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         it = reversed([10, 20, 30, 40])
         next(it)  # start is now 2, not 3 (consumed 40; remaining: 30, 20, 10)
         self.assertEqual(opt_fn(it, torch.tensor(0)), torch.tensor(60))
+
+    def test_list_reverseiterator_iter_keeps_position(self):
+        """Issue #196211: iter() on a partially consumed reversed iterator."""
+
+        def fn(x):
+            it = reversed([x, x + 2, x + 5])
+            last = next(it)
+            it2 = iter(it)
+            middle = next(it2)
+            first = next(it)
+            return last - middle, first, it2 is it
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor([3.0, 7.0])
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_list_reverseiterator_mutation_side_effects(self):
         """Caller-side iterator advancement via _codegen_list_iterator_mutation."""
