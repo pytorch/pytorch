@@ -88,8 +88,8 @@ def _test_cuda_ipc_collect_during_export():
     import torch.cuda._gpu_trace as gpu_trace
 
     test_case = TestCase()
-    # Match CUDA_IPC_REF_COUNTER_FILE_SIZE in torch/csrc/CudaIPCTypes.h.
-    # This must exceed CUDA_IPC_MAXIMUM_EVENTS_TO_USE to force stream synchronization.
+    # Match IPC_REF_COUNTER_FILE_SIZE in torch/csrc/IPCTypes.h.
+    # This must exceed IPC_MAXIMUM_EVENTS_TO_USE to force stream synchronization.
     counter_file_size = 10000
     tensors = [
         torch.empty(1, dtype=torch.uint8, device="cuda")
