@@ -1020,7 +1020,8 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.sizes_vec,
       variables_for_bucket,
       bucket.sparse_tensor_indices);
-  if (lazy_bucket_allocation_ && comm_hook_ == nullptr) {
+  if (comm_hook_ == nullptr &&
+      (lazy_bucket_allocation_ || should_rebuild_buckets())) {
     std::vector<at::Tensor> tensors = {grad_bucket.getBufferRef()};
 #ifdef IS_NCCLX
     if (grad_bucket.getSparseGradIndices().has_value()) {
