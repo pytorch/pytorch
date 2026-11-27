@@ -1106,7 +1106,7 @@ class TestOptimRenewed(TestCase):
 
     @onlyAccelerator
     @skipMPS
-    @largeTensorTest("72GB", "cuda")
+    @largeTensorTest("72GB")
     @serialTest()
     @optims(
         [optim for optim in optim_db if optim.optim_cls.__name__ == "Muon"],
