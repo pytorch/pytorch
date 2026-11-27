@@ -12,7 +12,7 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
         source "${SCRIPTPATH}/set_desired_python.sh"
 
         # build_env_setup.py needs its build-flag exports (USE_CUDA,
-        # TH_BINARY_BUILD, ...) to reach the wheel build subprocess; it
+        # USE_MAGMA, ...) to reach the wheel build subprocess; it
         # writes them here for us to source.
         ENV_FILE=$(mktemp)
         trap 'rm -f "$ENV_FILE"' EXIT
@@ -49,6 +49,8 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
         # CUDA arch types only: this arm also serves cpu/xpu/rocm, where stage 2 can
         # only skip.
         if [[ "${GPU_ARCH_TYPE}" == cuda* ]]; then
+            # cuda.pathfinder needs the toolkit root in the final manywheel image.
+            export CUDA_PATH="${CUDA_PATH:-${CUDA_HOME:-/usr/local/cuda}}"
             # nullglob so an empty directory counts as zero, not the pattern.
             naot_wheels=()
             shopt -s nullglob

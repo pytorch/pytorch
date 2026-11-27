@@ -4,7 +4,7 @@ import ctypes
 import subprocess
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_5
@@ -24,6 +24,37 @@ from torch.testing._internal.common_utils import (
 # wheel LD_PRELOADed; torch's bundled libcupti is typically 13.1.
 if TEST_CUPTI:
     from torch.profiler._cuspy.cupti_python import CUPTI_SUCCESS, CuptiError, pylibcupti
+
+
+@unittest.skipIf(not TEST_CUPTI, "requires cupti-python")
+@instantiate_parametrized_tests
+class TestPyLibCuptiHes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("rc", [0, 1, 15, 999])
+    def test_hes_uses_subscriber_and_preserves_error(self, rc):
+        from torch.profiler._cuspy import cupti_python
+
+        lib = MagicMock()
+        lib.cuptiActivitySetAttribute_v2.return_value = rc
+        wrapper = object.__new__(cupti_python._PyLibCupti)
+        wrapper._lib = lib
+        with patch.object(wrapper, "_result_string", return_value=f"CUPTI_ERROR_{rc}"):
+            if rc == CUPTI_SUCCESS:
+                wrapper.activity_enable_hes(1234)
+            else:
+                with self.assertRaisesRegex(
+                    CuptiError,
+                    rf"cuptiActivitySetAttribute_v2\(ENABLE_HES\) failed with CUPTI_ERROR_{rc}",
+                ):
+                    wrapper.activity_enable_hes(1234)
+        lib.cuptiActivitySetAttribute_v2.assert_called_once()
+        subscriber, attr, size, value = lib.cuptiActivitySetAttribute_v2.call_args.args
+        self.assertEqual(subscriber.value, 1234)
+        self.assertEqual(attr, cupti_python.ActivityAttr.ENABLE_HES)
+        self.assertEqual(ctypes.cast(size, ctypes.POINTER(ctypes.c_size_t))[0], 1)
+        self.assertEqual(ctypes.cast(value, ctypes.POINTER(ctypes.c_uint8))[0], 1)
+        lib.cuptiActivityEnableHWTrace.assert_not_called()
 
 
 @unittest.skipIf(

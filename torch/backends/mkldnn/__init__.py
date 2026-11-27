@@ -8,7 +8,9 @@ from torch.backends import (
     __allow_nonbracketed_mutation,
     _FP32Precision,
     _get_fp32_precision_getter,
+    _get_fp32_precision_state,
     _set_fp32_precision_setter,
+    _set_fp32_precision_state,
     ContextProp,
     PropModule,
 )
@@ -79,6 +81,10 @@ class verbose:
         return False
 
 
+# The fp32 precision state that set_flags writes; see the cudnn equivalent.
+_FP32_PRECISION_STATE_KEYS = ("mkldnn.all",)
+
+
 def set_flags(
     _enabled=None, _deterministic=None, _allow_tf32=None, _fp32_precision="none"
 ):
@@ -102,12 +108,14 @@ def set_flags(
 @contextmanager
 def flags(enabled=False, deterministic=False, allow_tf32=True, fp32_precision="none"):
     with __allow_nonbracketed_mutation():
+        orig_precision = _get_fp32_precision_state(*_FP32_PRECISION_STATE_KEYS)
         orig_flags = set_flags(enabled, deterministic, allow_tf32, fp32_precision)
     try:
         yield
     finally:
         with __allow_nonbracketed_mutation():
             set_flags(*orig_flags)
+            _set_fp32_precision_state(orig_precision)
 
 
 class MkldnnModule(PropModule):

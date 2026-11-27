@@ -42,7 +42,6 @@ if not is_available():
 
 else:
     from torch._C._distributed_c10d import Backend as C10dBackend
-    from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
         _get_default_group,
         _register_process_group_opaque_type,
@@ -599,11 +598,14 @@ else:
             # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
             # mesh, we need to make two API calls per ranks to create all the subgroups.
+            # The split_group path requires the parent backend to actually
+            # support communicator splitting (e.g. NCCL ncclCommSplit). Some
+            # backends (e.g. XCCL) do not override supportsSplitting() and
+            # would raise inside split_group, so fall back to the new_group
+            # path below when splitting is unsupported. This check is the last term so the backend lookup only happens
+            # once the split path is otherwise viable.
             if (
-                (
-                    getattr(default_group, "bound_device_id", None) is not None
-                    or dist_config.use_torchcomms
-                )
+                getattr(default_group, "bound_device_id", None) is not None
                 and torch.accelerator.is_available()
                 and (
                     backend is None
@@ -612,6 +614,9 @@ else:
                     ).name()
                     == backend
                 )
+                and default_group._get_backend(
+                    torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
+                ).supports_splitting
             ):
                 split_ranks = pg_ranks_by_dim.tolist()
                 if not preserve_rank_order:
@@ -631,10 +636,6 @@ else:
             # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
             # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
             # along with appending information to the `dim_group_names` list whenever necessary.
-            # When torchcomms is enabled with a fake backend (e.g. disabled mesh dimensions), use hashed PG names so they
-            # stay consistent with the hash-based names produced by split_group for real backends. Sequential integer names
-            # from new_group are not resolvable from compiled code when mixed with split_group hash names.
-            use_hashed = dist_config.use_torchcomms and backend == "fake"
             pg_name = None
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
@@ -644,7 +645,6 @@ else:
                     backend=backend,
                     pg_options=pg_options,
                     group_desc=group_desc,
-                    use_local_synchronization=use_hashed,
                     sort_ranks=not preserve_rank_order,
                 )
 

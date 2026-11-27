@@ -1375,3 +1375,21 @@ def grouped_mm_single_dim_strategy(
         )
 
     return strategies
+
+
+# Registered by hand rather than generated from the rule above, because the generated
+# out rules do not carry the stride filter.
+@register_single_dim_strategy(
+    aten._grouped_mm.out,
+    full_mesh_strategy_filter=_valid_grouped_mm_strides,
+)
+def grouped_mm_out_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    # out is the last input and must have the placement of the result.
+    return [
+        [*rule, rule[0]]
+        for rule in grouped_mm_single_dim_strategy(
+            aten._grouped_mm.default, args_schema, kwargs_schema
+        )
+    ]

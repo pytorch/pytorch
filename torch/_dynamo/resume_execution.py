@@ -62,6 +62,21 @@ TORCH_DYNAMO_RESUME_IN_PREFIX = "torch_dynamo_resume_in"
 IS_TRACING_RESUME_PROLOGUE_VARNAME = "__is_tracing_resume_prologue"
 
 
+def _deepcopy_instructions(instructions: list[Instruction]) -> list[Instruction]:
+    # copy.deepcopy(instructions) recurses along target and exn_tab_entry links.
+    # Seeding the memo with shallow copies resolves those links without recursing.
+    memo: dict[int, Any] = {}
+    copies = []
+    for inst in instructions:
+        new = copy.copy(inst)
+        memo[id(inst)] = new
+        copies.append(new)
+    for inst, new in zip(instructions, copies):
+        for field in dataclasses.fields(inst):
+            setattr(new, field.name, copy.deepcopy(getattr(inst, field.name), memo))
+    return copies
+
+
 # If is_resume - this codegen is for a resume function
 def _initial_push_null(insts: list[Instruction]) -> None:
     insts.append(create_instruction("PUSH_NULL"))
@@ -376,11 +391,20 @@ class ContinueExecutionCache:
         def update(
             instructions: list[Instruction], code_options: dict[str, Any]
         ) -> None:
-            meta.instructions = copy.deepcopy(instructions)
+            meta.instructions = _deepcopy_instructions(instructions)
 
             args = ["__nested_resume_fns", "__nested_frame_values"]
             args += [f"___stack{i}" for i in range(nstack)]
             args.extend(v for v in argnames if v not in args)
+            # A cellvar that is also a fast local (e.g. an argument captured by a
+            # closure) shares one slot in CPython. It becomes a freevar below, so
+            # on 3.13+ (where fix_vars maps LOAD_FAST etc. of a free name to its
+            # free slot) drop the fast local, or the name gets a second slot.
+            cell_locals = (
+                set(code_options["co_cellvars"])
+                if sys.version_info >= (3, 13)
+                else set()
+            )
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
@@ -406,10 +430,11 @@ class ContinueExecutionCache:
             code_options["co_argcount"] = len(args)
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0
+            varnames = code_options["co_varnames"]
             code_options["co_varnames"] = tuple(
                 args
                 + [v for v in argnames_null if v not in args]
-                + [v for v in code_options["co_varnames"] if v not in args]
+                + [v for v in varnames if v not in args and v not in cell_locals]
                 + [IS_TRACING_RESUME_PROLOGUE_VARNAME]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
