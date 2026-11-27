@@ -408,7 +408,8 @@ torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 // Pass TORCH_ABI_VERSION for build, and TORCH_TARGET_VERSION for target when
 // defined (otherwise TORCH_ABI_VERSION). Target must be nonzero and <= build.
 // Older nonzero targets are valid when this entrypoint is available at runtime.
-// Build selects schema adapters; target is forwarded to value conversions.
+// Build selects historical schema adapters; opt-in target-gated adapters use
+// known target (otherwise build). Both versions are forwarded to conversions.
 // Returns AOTITorchError; C++ callers should use
 // torch::stable::call_dispatcher.
 AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
