@@ -4509,6 +4509,47 @@ def index_fill_(
     return _index_fill(x, dim, index, value, inplace=True)
 
 
+def _index_fill_value_in_range(
+    value: TensorLike, dtype: torch.dtype
+) -> TensorLike | None:
+    # Eager index_fill reads a Tensor value with item() and converts it with
+    # c10::overflows' rules; returns None when the conversion cannot overflow.
+    src = value.dtype
+    if src == dtype or src == torch.bool or dtype == torch.bool:
+        return None
+    if utils.is_complex_dtype(dtype):
+        real_dtype = utils.corresponding_real_dtype(dtype)
+        if not utils.is_complex_dtype(src):
+            return _index_fill_value_in_range(value, real_dtype)
+        real_ok = _index_fill_value_in_range(torch.real(value), real_dtype)
+        imag_ok = _index_fill_value_in_range(torch.imag(value), real_dtype)
+        if real_ok is None or imag_ok is None:
+            return None
+        return real_ok & imag_ok
+    # float32 holds every float8/16 value and every bound below exactly
+    compute_dtype = torch.float64 if src == torch.float64 else torch.float32
+    if utils.is_integer_dtype(dtype):
+        info = torch.iinfo(dtype)
+        if utils.is_integer_dtype(src):
+            lo = -info.max if info.min == 0 else info.min
+            src_info = torch.iinfo(src)
+            if src_info.min >= lo and src_info.max <= info.max:
+                return None
+            # uint64 values >= 2**63 wrap to negative int64 values
+            if src == torch.uint64:
+                lo = 0
+            v = value.to(torch.int64)
+            return (v >= lo) & (v <= info.max)
+        v = value.to(compute_dtype)
+        return (v >= info.min) & (v < float(info.max + 1))
+    info = torch.finfo(dtype)
+    src_max = torch.finfo(src).max if src.is_floating_point else torch.iinfo(src).max
+    if src_max <= info.max:
+        return None
+    v = value.to(compute_dtype)
+    return ~torch.isfinite(v) | (v.abs() <= info.max)
+
+
 def _index_fill(
     x: TensorLike,
     dim: int,
@@ -4527,6 +4568,20 @@ def _index_fill(
             lambda: "Only supports 0-dimensional value tensor. "  # type: ignore[union-attr]
             f"Got a tensor with {value.ndim} dimensions.",
         )  # type: ignore[arg-type]
+        torch._check(
+            x.dtype.is_complex or not value.dtype.is_complex,
+            lambda: (
+                "index_fill_(): Converting complex Scalar to non-complex type "
+                "is not supported"
+            ),
+        )
+        in_range = _index_fill_value_in_range(value, x.dtype)
+        if in_range is not None:
+            aten._assert_async.msg(
+                in_range,
+                f"index_fill_(): value cannot be converted to type {x.dtype} without overflow",
+            )
+        value = value.to(x.dtype)
     else:
         value = torch.scalar_tensor(
             value,
