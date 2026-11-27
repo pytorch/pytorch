@@ -1,0 +1,16 @@
+{% if FINAL and CTAS > 1 %}
+{{def_kernel("X", "G", "MEAN", "PARTIAL")}}
+{% else %}
+{{def_kernel("X", "G", "MEAN")}}
+    PARTIAL = X
+{% endif %}
+    channel = tl.program_id(0).to(tl.int64)
+    cta = tl.program_id(1)
+    dy, dot = triton_helpers.cuda_bn_backward_channels_last_statistics(X, G, MEAN, PARTIAL, channel, cta, N, C, BH, CTAS, {{FINAL and CTAS > 1}})
+    component = tl.arange(0, 2)
+    value = tl.where(component == 0, dy, dot)
+{% if not FINAL %}
+    {{store_output(("component", "channel", "cta"), "value", "True", val_shape=("2",))}}
+{% else %}
+    {{store_output(("component", "channel"), "value", "True", val_shape=("2",))}}
+{% endif %}
