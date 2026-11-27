@@ -31,9 +31,16 @@ def workflow(on: dict[str, Any], jobs: dict[str, Any]) -> dict[Any, Any]:
 
 
 def build_and_test(
-    env: str, config: str, runner: str = RUNNER, with_test: bool = True
+    env: str,
+    config: str,
+    runner: str = RUNNER,
+    with_test: bool = True,
+    fake_tensor: str = "",
 ) -> dict[str, Any]:
-    entry = f'{{ config: "{config}", shard: 1, num_shards: 1, runner: "{runner}" }},'
+    extra = f', fake_tensor: "{fake_tensor}"' if fake_tensor else ""
+    entry = (
+        f'{{ config: "{config}", shard: 1, num_shards: 1, runner: "{runner}"{extra} }},'
+    )
     inputs = {"build-environment": env, "test-matrix": f"{{ include: [\n{entry}\n]}}"}
     jobs: dict[str, Any] = {"build": {"uses": "./_linux-build.yml", "with": inputs}}
     if with_test:
@@ -88,6 +95,9 @@ class TestWorkflowDuplicateJobsLinter(unittest.TestCase):
         cases = {
             "different runner": build_and_test("linux-arm", "default", runner="l-arm"),
             "no test job": build_and_test("linux-arm", "default", with_test=False),
+            "cpp fake tensor": build_and_test(
+                "linux-arm", "default", fake_tensor="cpp"
+            ),
         }
         for name, jobs in cases.items():
             with self.subTest(name):

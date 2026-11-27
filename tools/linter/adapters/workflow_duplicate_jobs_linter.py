@@ -7,10 +7,12 @@
 """Flags test configs that run in more than one workflow against main.
 
 Workflows that run on a push to main or on a schedule all test main. A test
-config with the same build-environment, config name and runner in two of them,
-including in the reusable workflows they call, runs twice for the same commit.
-The runner is part of the key so that the same config on different hardware,
-like trunk's Graviton3 and pull's Graviton4 aarch64 jobs, is not a duplicate.
+config with the same build-environment, config name, runner and fake tensor
+mode in two of them, including in the reusable workflows they call, runs twice
+for the same commit. The runner is part of the key so that the same config on
+different hardware, like trunk's Graviton3 and pull's Graviton4 aarch64 jobs, is
+not a duplicate. The fake tensor mode is part of it because fake_tensor: "cpp"
+sets CPP_FAKETENSOR=1, so cpp-faketensor-weekly.yml tests a different code path.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ MATRIX_REF = re.compile(r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}")
 # One test-matrix entry per line, e.g.
 # { config: "default", shard: 1, num_shards: 5, runner: "${{ ... }}l-x86iavx512-8-64" },
 ENTRY = re.compile(r'config:\s*"([^"]+)".*runner:\s*"(?:\$\{\{.*?\}\})?([^"]+)"')
+FAKE_TENSOR = re.compile(r'fake_tensor:\s*"([^"]*)"')
 
 
 class LintSeverity(str, Enum):
@@ -71,6 +74,7 @@ class TestConfig(NamedTuple):
     build_environment: str
     config: str
     runner: str
+    fake_tensor: str
 
 
 class Occurrence(NamedTuple):
@@ -139,8 +143,9 @@ def test_configs(
             env = substitute(build_environment, combo)
             for line in substitute(test_matrix, combo).splitlines():
                 if m := ENTRY.search(line):
+                    fake = f[1] if (f := FAKE_TENSOR.search(line)) else ""
                     occurrence = Occurrence(root, path, job_id)
-                    found.append((TestConfig(env, m[1], m[2]), occurrence))
+                    found.append((TestConfig(env, m[1], m[2], fake), occurrence))
     return found
 
 
@@ -189,8 +194,9 @@ def lint(
             if o.path not in linted:
                 continue
             others = ", ".join(sorted(str(r) for r in roots - {o.root}))
+            fake = f' with fake_tensor "{key.fake_tensor}"' if key.fake_tensor else ""
             description = (
-                f'{key.build_environment} config "{key.config}" on {key.runner} also runs from '
+                f'{key.build_environment} config "{key.config}" on {key.runner}{fake} also runs from '
                 f"{others}, so it runs twice for the same commit on main. Remove one, or add "
                 "it to ALLOWLIST in tools/linter/adapters/workflow_duplicate_jobs_linter.py "
                 "with the reason."
