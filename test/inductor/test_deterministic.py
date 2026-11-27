@@ -107,10 +107,6 @@ class DeterministicTestRun2Run(TestCase):
         The test assumes benchmarks/dynamo/huggingface.py can be found from
         the current working directory.
         """
-        # Pass --devices explicitly: without it the benchmark subprocess falls
-        # back to torch.accelerator.current_accelerator(), which only
-        # auto-detects a subset of accelerators and otherwise silently runs on
-        # cpu. --devices takes a device type, not an indexed device string.
         device_type = torch.device(device).type
 
         def _setup_env(env):
