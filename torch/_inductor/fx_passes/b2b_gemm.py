@@ -579,6 +579,7 @@ def tuned_b2b_gemm(
     *,
     layout=None,
 ) -> torch._inductor.ir.TensorBox:
+    """Autotune the fused B2B GEMM template against the unoptimized two-kernel fallback."""
     # call .realize() to get rid of Pointwise
     A.realize()
     B.realize()
@@ -602,31 +603,64 @@ def tuned_b2b_gemm(
     inner_m, inner_n, inner_k = (M, O, N) if is_left_assoc else (N, P, O)
     allow_tf32_inner = mm_allow_tf32(inner_m, inner_n, inner_k, device_type)
     allow_tf32_outer = mm_allow_tf32(M, P, O if is_left_assoc else N, device_type)
-    for config in b2b_gemm_configs:
-        if is_left_assoc:
-            b2b_gemm_left_template.maybe_append_choice(
-                choices,
-                input_nodes=(A, B, C),
-                layout=layout,
-                subgraphs=[subgraph_buffer],
-                ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
-                ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
-                **config,
-            )
-        else:
-            b2b_gemm_right_template.maybe_append_choice(
-                choices,
-                input_nodes=(A, B, C),
-                layout=layout,
-                subgraphs=[subgraph_buffer],
-                ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
-                ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
-                **config,
-            )
-    # add the unoptimized choice to mitigate performance degradation
-    choices.append(
-        _make_unoptimized_b2b_gemm_choice(is_left_assoc, subgraph, [A, B, C], layout)
+    # On XPU the fused template (one kernel) and the unoptimized choice (two
+    # kernels) rank differently end-to-end than the autotuner's kernel timing
+    # suggests: the fused kernel wins while the serial N*O reduction is small and
+    # loses once it is large, because that reduction runs inside a single
+    # program. Build only the winning kind of candidate on XPU.
+    force_fused = force_unoptimized = False
+    is_16bit = inner_dtype in (torch.float16, torch.bfloat16) and outer_dtype in (
+        torch.float16,
+        torch.bfloat16,
     )
+    if device_type == "xpu" and is_16bit:
+        try:
+            n_hint = (
+                optimization_hint(N, fallback=None)
+                if isinstance(N, torch.SymInt)
+                else int(N)
+            )
+            o_hint = (
+                optimization_hint(O, fallback=None)
+                if isinstance(O, torch.SymInt)
+                else int(O)
+            )
+        except Exception:
+            n_hint = o_hint = None
+        if n_hint is not None and o_hint is not None:
+            if n_hint * o_hint <= 8192:
+                force_fused = True
+            else:
+                force_unoptimized = True
+
+    if not force_unoptimized:
+        for config in b2b_gemm_configs:
+            if is_left_assoc:
+                b2b_gemm_left_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(A, B, C),
+                    layout=layout,
+                    subgraphs=[subgraph_buffer],
+                    ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
+                    ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
+                    **config,
+                )
+            else:
+                b2b_gemm_right_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(A, B, C),
+                    layout=layout,
+                    subgraphs=[subgraph_buffer],
+                    ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
+                    ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
+                    **config,
+                )
+    if not force_fused or not choices:
+        choices.append(
+            _make_unoptimized_b2b_gemm_choice(
+                is_left_assoc, subgraph, [A, B, C], layout
+            )
+        )
     # autotune
     node, _ = autotune_select_algorithm("b2b_gemm", choices, [A, B, C], layout)
     return node
