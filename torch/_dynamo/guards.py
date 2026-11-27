@@ -363,9 +363,8 @@ def _native_method_metadata(
         owner = receiver if is_cls else type(receiver)
         if type(owner) is not type or not type_is_immutable(owner):
             return None
-        descr = inspect.getattr_static(owner, value.__name__, None)
         kind = types.ClassMethodDescriptorType if is_cls else types.MethodDescriptorType
-        if type(descr) is not kind:
+        if type(inspect.getattr_static(owner, value.__name__, None)) is not kind:
             return None
         if not is_cls:
             expected = NativeMethodMetadata(owner, value.__name__, id(receiver))
@@ -4149,8 +4148,9 @@ class GuardBuilder(GuardBuilderBase):
         flags_source: Source,
     ) -> None:
         """Guard flag membership by hook storage position. OrderedDict iteration
-        also needs ORDERED_DICT_ORDER_MATCH. Empty flags require only a guard
-        that the flags stay empty; this does not constrain the hooks dictionary.
+        also needs ORDERED_DICT_ORDER_MATCH. For empty flags, the runtime guard
+        checks only that they stay empty. Nested region reuse also compares the
+        membership tuple, preserving the number of hooks and requiring exact integer keys.
         """
         hooks_source = AttrSource(guard.originating_source, hooks_name)
         flags = self.get(flags_source)
@@ -5132,6 +5132,7 @@ def _namedtuple_pickle_code(
 def _pickle_state(value: object, *, base: type = object) -> _PickleState:
     """Which state reconstruction can inspect beyond explicitly guarded values."""
     cls = type(value)
+    lookup = inspect.getattr_static
     ordered = base is object and issubclass(cls, collections.OrderedDict)
     meta = type(cls)
     if meta is not type and (
@@ -5147,44 +5148,38 @@ def _pickle_state(value: object, *, base: type = object) -> _PickleState:
     if any(cls is registered for registered in copyreg.dispatch_table):
         return _PickleState.OPAQUE
     for base_cls, namespace in iter_mro_static_dicts(cls):
-        if "__dict__" not in namespace:
-            continue
-        desc = namespace["__dict__"]
-        if (
-            type(desc) is not types.GetSetDescriptorType
+        if "__dict__" in namespace and (
+            type(desc := namespace["__dict__"]) is not types.GetSetDescriptorType
             or desc.__name__ != "__dict__"
             or (desc.__objclass__ is not object and desc.__objclass__ is not base_cls)
         ):
             return _PickleState.OPAQUE
     if (
         base is object
-        and inspect.getattr_static(cls, "__slots__", None) is not None
-        and inspect.getattr_static(cls, "__setattr__") is not object.__setattr__
+        and lookup(cls, "__slots__", None) is not None
+        and lookup(cls, "__setattr__") is not object.__setattr__
     ):
         return _PickleState.OPAQUE
     if issubclass(cls, dict):
         dict_base = collections.OrderedDict if ordered else dict
         methods = ("__new__", "__setitem__") + (("__init__",) if ordered else ())
-        if any(
-            inspect.getattr_static(cls, name) is not getattr(dict_base, name)
-            for name in methods
-        ):
+        if any(lookup(cls, name) is not getattr(dict_base, name) for name in methods):
             return _PickleState.OPAQUE
     protocol_base = collections.OrderedDict if ordered else base
     hooks = ("__getstate__", "__setstate__", "__getnewargs_ex__", "__getattr__")
     for name in ("__reduce__", "__reduce_ex__", *hooks):
         expected = getattr(protocol_base, name, None)
-        if inspect.getattr_static(value, name, None) is not expected:
+        if lookup(value, name, None) is not expected:
             return _PickleState.OPAQUE
     if base is object:
         if not is_generic_getattr(cls):
             return _PickleState.OPAQUE
-    elif inspect.getattr_static(value, "__getattribute__") is not base.__getattribute__:
+    elif lookup(value, "__getattribute__") is not base.__getattribute__:
         return _PickleState.OPAQUE
-    if (newargs := inspect.getattr_static(value, "__getnewargs__", None)) is not None:
+    if (newargs := lookup(value, "__getnewargs__", None)) is not None:
         # A generated namedtuple repacks fields; custom constructors may inspect them.
-        new = inspect.getattr_static(cls, "__new__")
-        fields = inspect.getattr_static(cls, "_fields", None)
+        new = lookup(cls, "__new__")
+        fields = lookup(cls, "_fields", None)
         if (
             type(fields) is tuple
             and all(type(field) is str for field in fields)
@@ -5194,8 +5189,8 @@ def _pickle_state(value: object, *, base: type = object) -> _PickleState:
             and type(new) is staticmethod
             and type(func := new.__func__) is types.FunctionType
             and dict.get(func.__globals__, "_tuple_new") is tuple.__new__
-            and inspect.getattr_static(cls, "__iter__", None) is tuple.__iter__
-            and inspect.getattr_static(cls, "__len__", None) is tuple.__len__
+            and lookup(cls, "__iter__", None) is tuple.__iter__
+            and lookup(cls, "__len__", None) is tuple.__len__
         ):
             new_code, args_code = _namedtuple_pickle_code(fields)
             if func.__code__ == new_code and newargs.__code__ is args_code:
@@ -5314,7 +5309,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._instance_policies: dict[int, _PickleState] = {}
         self._pruned_dictionary_ids: set[int] = set()
         self._dict_snapshots: dict[int, _DictionaryItemsSnapshot | dict[Any, Any]] = {}
-        self._dropped_state: set[int] = set()
+        self._dropped_state: dict[int, object] = {}
+        self._proxy_dependencies: dict[int, tuple[object, object]] = {}
+        self._scopes: dict[str, dict[str, Any]] = {}
         self._constructor_reductions: dict[int, tuple[object, Any]] = {}
         self._collect_required_state()
 
@@ -5371,10 +5368,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._retain_required_state(stack)
 
     def _constructor_referents(self, value: Any) -> collections.abc.Iterable[Any]:
-        """Visit carried module attributes and the function or tensor reductions replayed at dump.
-        Meta tensors use native pickle. A missing or empty reduction is provisional until
-        constructor aliases are known, so it cannot be cached.
-        """
+        """Visit carried attributes and reductions. Cache only reductions that survive pruning."""
         typ = type(value)
         function = typ is types.FunctionType
         if function or (issubclass(typ, torch.Tensor) and self._keep(value)):
@@ -5396,8 +5390,22 @@ class GuardsStatePickler(FunctionPicklerBase):
             () if issubclass(typ, self._STATE_LEAF_TYPES) else gc.get_referents(value)
         )
 
+    def _record_dropped(self, value: object) -> None:
+        self._dropped_state[id(value)] = value
+        if dependency := self._proxy_dependencies.get(id(value)):
+            path = ""
+            for prefix, scope in self._scopes.items():
+                for name, obj in scope.items():
+                    if obj is dependency[1]:
+                        path = f" at {prefix}[{name!r}]"
+                        break
+            raise torch._dynamo.exc.PackageError(
+                f"The mapping proxy{path} needs pruned {type(value).__qualname__} state "
+                "in its copy. Expose the dependency as a guarded input"
+            )
+
     def _retain_required_state(
-        self, values: collections.abc.Iterable[Any], *, checking_copy: bool = False
+        self, values: collections.abc.Iterable[Any], *, proxy: object | None = None
     ) -> None:
         stack = list(values)
         while stack:
@@ -5405,13 +5413,17 @@ class GuardsStatePickler(FunctionPicklerBase):
             obj_id = id(value)
             if obj_id in self._whole_compared_values:
                 continue
-            if checking_copy and obj_id in self._dropped_state:
-                raise torch._dynamo.exc.PackageError(
-                    f"A mapping proxy copy needs pruned {type(value).__qualname__} state. Expose the dependency as a guarded input"
-                )
-            self._whole_compared_values[obj_id] = value
-            self.missing_values.pop(obj_id, None)
-            self.empty_values.pop(obj_id, None)
+            if proxy is None:
+                self._whole_compared_values[obj_id] = value
+                self.missing_values.pop(obj_id, None)
+                self.empty_values.pop(obj_id, None)
+            else:
+                # A late copy can require intact state, but cannot change what other reducers prune.
+                if obj_id in self._proxy_dependencies:
+                    continue
+                self._proxy_dependencies[obj_id] = value, proxy
+                if obj_id in self._dropped_state:
+                    self._record_dropped(value)
             stack.extend(self._constructor_referents(value))
 
     @classmethod
@@ -5656,9 +5668,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         modes: collections.abc.Sequence[torch.overrides.TorchFunctionMode] = (),
         annotation: dict[str, Any] | None = None,
     ) -> None:
-        """Prepare the scopes once before dumping, retaining keys, modes and the FX annotation
-        before pruning local leaves and freezing dictionary slots.
-        """
+        """Retain constructor and guard dependencies before pruning leaves and dictionary slots."""
+        self._scopes = {"L": local_scope, "G": global_scope}
         value: Any
         for value in itertools.chain(self.guard_tree_values.values(), dictionaries):
             if issubclass(type(value), dict):
@@ -5671,8 +5682,9 @@ class GuardsStatePickler(FunctionPicklerBase):
             self._retain_required_state((annotation,))
         self._prune_local_scope(local_scope)
         if dictionaries or self.missing_values or self.empty_values:
-            roots = itertools.chain(local_scope.values(), global_scope.values(), modes)
-            self._retain_dict_aliases(roots)
+            self._retain_dict_aliases(
+                itertools.chain(local_scope.values(), global_scope.values(), modes)
+            )
         for value in dictionaries:
             if type(value) is dict:
                 # Freeze slots before other reducers run. Rehash user keys only at load.
@@ -5682,10 +5694,9 @@ class GuardsStatePickler(FunctionPicklerBase):
                 )
 
     def _retain_dict_aliases(
-        self, roots: collections.abc.Iterable[Any], *, checking_copy: bool = False
+        self, roots: collections.abc.Iterable[Any], *, proxy: object | None = None
     ) -> None:
         """Protect state that survives through a saved constructor from pruning by identity."""
-        retained = self.guard_tree_values.keys() | self._verbatim_elements
         opaque: list[Any] = []
         for whole, pending in ((False, list(roots)), (True, opaque)):
             seen: set[int] = set()
@@ -5699,15 +5710,15 @@ class GuardsStatePickler(FunctionPicklerBase):
                     continue
                 pruned = obj_id in self.missing_values or obj_id in self.empty_values
                 if whole and (
-                    pruned or checking_copy or obj_id in self._pruned_dictionary_ids
+                    pruned or proxy is not None or obj_id in self._pruned_dictionary_ids
                 ):
-                    self._retain_required_state((value,), checking_copy=checking_copy)
+                    self._retain_required_state((value,), proxy=proxy)
                 elif whole:
                     pending.extend(self._constructor_referents(value))
                 elif pruned:
                     continue
                 elif obj_id in self._pruned_dictionary_ids:
-                    pending.extend(v for v in dict.values(value) if id(v) in retained)
+                    pending.extend(filter(self._kept_element, dict.values(value)))
                     if typ is collections.defaultdict:
                         pending.append(value.default_factory)
                     elif typ is not dict:
@@ -5754,12 +5765,14 @@ class GuardsStatePickler(FunctionPicklerBase):
                 ):
                     pending.extend(gc.get_referents(value))
 
+    def _kept_element(self, value: object) -> bool:
+        return self._keep(value) or id(value) in self._verbatim_elements
+
     def _can_prune_value(self, value: object) -> bool:
-        return (
-            (obj_id := id(value)) not in self.guard_tree_values
-            and obj_id not in self._whole_compared_values
-            and obj_id not in self._verbatim_elements
-            and not _is_shared_constant(value)
+        return not (
+            self._kept_element(value)
+            or id(value) in self._whole_compared_values
+            or _is_shared_constant(value)
         )
 
     def _dictionary_state(self, obj: Any, state: Any, *, record: bool = True) -> Any:
@@ -5771,7 +5784,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         ):
             if pruned := self._unguarded_attributes(obj):
                 if record:
-                    self._dropped_state.add(id(obj))
+                    self._record_dropped(obj)
                 missing = self._missing("unguarded attribute")
                 return {k: missing if k in pruned else v for k, v in state.items()}
         return state
@@ -5781,7 +5794,7 @@ class GuardsStatePickler(FunctionPicklerBase):
     ) -> collections.abc.Iterator[tuple[Any, Any]]:
         for key, item in dict.items(value):
             if id(value) in self._pruned_dictionary_ids and self._can_prune_value(item):
-                self._dropped_state.add(id(value))
+                self._record_dropped(value)
                 item = self._missing("unguarded dictionary value")
             yield key, item
 
@@ -5993,7 +6006,7 @@ class GuardsStatePickler(FunctionPicklerBase):
     # Everything else in missing_values stays on the reducer_override path, and
     # so does a container that is also in empty_values: reducer_override checks
     # empty_values first, so a bound method's receiver is rebuilt empty rather
-    # than as the sentinel. A dictionary snapshot already accounts for its slots.
+    # than as the sentinel, and this hook keeps that precedence.
     _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
 
     def persistent_id(
@@ -6012,7 +6025,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             and id(obj) not in self.empty_values
             and id(obj) not in self._verbatim_elements
         ):
-            self._dropped_state.add(id(obj))
+            self._record_dropped(obj)
             return _PRUNED_VALUE_PID
         return None
 
@@ -6023,7 +6036,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         import sympy
 
         if id(obj) in self.empty_values:
-            self._dropped_state.add(id(obj))
+            self._record_dropped(obj)
             return type(obj).__new__, (type(obj),)
 
         if type(obj) is types.MethodWrapperType:
@@ -6038,7 +6051,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
 
         if id(obj) in self.missing_values:
-            self._dropped_state.add(id(obj))
+            self._record_dropped(obj)
             return _Missing, ("missing values",)
 
         if (cached := self._constructor_reductions.get(id(obj))) is not None:
@@ -6255,7 +6268,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.MappingProxyType):
             copied = obj.copy()
             # Custom copy() can introduce dependencies after pruning.
-            self._retain_dict_aliases((copied,), checking_copy=True)
+            self._retain_dict_aliases((copied,), proxy=obj)
             return type(self)._unpickle_mapping_proxy, (copied,)
 
         elif isinstance(
@@ -6395,7 +6408,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             # attribute and need it at load.
             pruned = self._unguarded_attributes(obj)
             if pruned:
-                self._dropped_state.add(id(obj))
+                self._record_dropped(obj)
                 missing = self._missing("unguarded attribute")
                 state = {k: missing if k in pruned else v for k, v in vars(obj).items()}
                 # Swap only the state: a dict or list subclass's default reduce
@@ -6473,6 +6486,7 @@ class GuardsStatePickler(FunctionPicklerBase):
 
     def _prune_unguarded_attributes(self, obj: Any) -> None:
         for attr in self._unguarded_attributes(obj).values():
+            self._record_dropped(attr)
             self.missing_values[id(attr)] = attr
 
     def _unguarded_attributes(self, obj: Any) -> dict[str, Any]:
