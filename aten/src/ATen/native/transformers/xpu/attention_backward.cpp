@@ -28,7 +28,13 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward_xpu(
     const Tensor& philox_offset,
     std::optional<double> scale,
     std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right) {
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& grad_logsumexp) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !grad_logsumexp.has_value() || !grad_logsumexp->defined(),
+      "_flash_attention_backward: grad_logsumexp is not supported on XPU. If the ",
+      "lse does not reach the loss, detach it (for example before returning it ",
+      "from a torch.compile region)");
   return sycltla::_flash_attention_backward(
       grad_out,
       query,

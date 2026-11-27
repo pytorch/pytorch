@@ -16,7 +16,7 @@ from torch._inductor.codegen.mps import MetalKernel
 from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.exc import InductorError
 from torch._inductor.select_algorithm import PartialRender
-from torch._inductor.utils import Placeholder, run_and_get_code
+from torch._inductor.utils import Placeholder, run_and_get_code, run_and_get_cpp_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_mps_types_and
@@ -601,6 +601,32 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    @parametrize("dynamic", [False, True])
+    @parametrize("case", ["limit", "scalars", "reduction", "indirect", "two_kernels"])
+    def test_argument_buffers(self, case, dynamic):
+        # https://github.com/pytorch/pytorch/issues/201864
+        n = MetalKernel.max_buffer_args
+        x = make_tensor(33, 65, device=self.device, dtype=torch.float32)
+        ys = make_tensor(n, 65, 33, device=self.device, dtype=torch.float32).mT.unbind()
+        m = make_tensor(65, 65, device=self.device, dtype=torch.float32)
+        cpu_scalars = [torch.tensor(i / 7, dtype=torch.float64) for i in range(n)]
+        idx = torch.arange(33, device=self.device).flip(0)
+        fn, args = {
+            "limit": (lambda x, *ys: sum(ys, x), [x, *ys[: n - 2]]),
+            "scalars": (lambda x, *ys: sum(ys, x), [x, *cpu_scalars]),
+            "reduction": (lambda x, *ys: sum(ys, x).amax(dim=0), [x, *ys]),
+            "indirect": (lambda i, x, *ys: sum(ys, x[i]), [idx, x, *ys[: n - 3]]),
+            "two_kernels": (lambda x, m, *ys: sum(ys, sum(ys, x) @ m), [x, m, *ys]),
+        }[case]
+        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=dynamic), *args)
+        self.assertEqual(result, fn(*args))
+        kernels = 2 if case == "two_kernels" else 1
+        packed = dynamic or case != "limit"
+        self.assertEqual(code.count("kernel void "), kernels)
+        self.assertEqual(code.count("_buffers& buffers"), kernels * packed)
+        self.assertEqual("constant long* int_args" in code, packed and dynamic)
+        self.assertEqual(f"error_buf_idx={1 + dynamic}" in code, case == "indirect")
+
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
 
@@ -625,8 +651,23 @@ class MPSBasicTests(TestCase):
 
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
+@instantiate_parametrized_tests
 class MPSBasicTestsAOTI(TestCase):
     hw_classification = HardwareClassification.MPS
+
+    @parametrize("over_cap", [False, True])
+    def test_many_buffer_args(self, over_cap):
+        class M(torch.nn.Module):
+            def forward(self, x, *weights):
+                return sum(weights, x)
+
+        n = MetalKernel.max_buffer_args - 3 + over_cap
+        dims = {0: torch.export.Dim("h"), 1: torch.export.Dim("w")}
+        x = make_tensor(33, 65, device="mps", dtype=torch.float32)
+        weights = make_tensor(n, 65, 33, device="mps", dtype=torch.float32).mT.unbind()
+        shapes = (dims, (dims,) * n)
+        _, code = run_and_get_cpp_code(self.check_model, M(), (x, *weights), shapes)
+        self.assertEqual(code.count("kernel void "), 1 + over_cap)
 
     def check_model(self, m, inp, dynamic_shapes=None):
         res2 = m(*inp)

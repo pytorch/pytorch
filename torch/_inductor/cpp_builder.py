@@ -506,7 +506,10 @@ def convert_cubin_to_obj(
     ld: str,
     objcopy: str,
 ) -> str:
-    obj_file = cubin_file + ".o"
+    # Several kernels can map to one cubin file, so name the object, which
+    # carries kernel-specific symbols, after the kernel.
+    ext = os.path.splitext(cubin_file)[1]
+    obj_file = os.path.join(os.path.dirname(cubin_file), f"{kernel_name}{ext}.o")
     # Convert .cubin to .o
     cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
     subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
@@ -1279,6 +1282,12 @@ def get_cpp_options(
         ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
+    # Linux only. One argument per list: the builder drops repeated arguments,
+    # which would separate a repeated flag such as -mllvm from its value.
+    if _IS_LINUX and config.cpp.extra_cflags:
+        passthrough_args.append(" ".join(config.cpp.extra_cflags))
+    if _IS_LINUX and do_link and config.cpp.extra_ldflags:
+        passthrough_args.append(" ".join(config.cpp.extra_ldflags))
 
     if config.aot_inductor.cross_target_platform == "windows":
         passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])

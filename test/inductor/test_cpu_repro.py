@@ -5513,6 +5513,20 @@ class CPUReproTests(TestCase):
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
 
+    @config.patch(inplace_buffers=True)
+    def test_no_inplace_reuse_of_indirect_index_buffer(self):
+        # The topk indices die at the gather, but must not be overwritten by
+        # its output: the gather uses their values as addresses.
+        def fn(scores, ids):
+            idx = torch.topk(scores, 5, dim=1).indices
+            return torch.gather(ids, 1, idx)
+
+        inps = [torch.randn(8, 200), torch.randint(0, 2**40, (8, 200))]
+        fn_opt = torch.compile(fn, backend="inductor")
+        out, code = run_and_get_cpp_code(fn_opt, *inps)
+        self.assertNotIn("in_out_ptr", code)
+        self.assertEqual(out, fn(*inps))
+
     def test_eliminate_meaningless_copy(self):
         def fn(x1, x2):
             permute = torch.ops.aten.permute.default(x2, [0, 2, 1, 3])

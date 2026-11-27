@@ -23,7 +23,7 @@ from typing import Any, cast
 import sympy
 
 import torch
-from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils._ordered_set import OrderedSet
 
 from ...ir import Buffer, ComputedBuffer, Pointwise, Reduction
@@ -162,10 +162,10 @@ class NVGemmEpilogueProgram:
         analysis = self.capture.analysis
         if analysis is None:
             return geometries
-        try:
-            n = V.graph.sizevars.optimization_hint(self.capture.gemm.get_size()[1])
-        except (GuardOnDataDependentSymNode, TypeError, ValueError):
+        gemm_size = _gemm_mn(self.capture.gemm)
+        if gemm_size is None:
             return geometries
+        n = gemm_size[1]
         gemm_name = self.capture.gemm.get_name()
         gemm_dtype = self.capture.gemm.get_dtype()
         for node in self.capture.nodes:
@@ -204,10 +204,10 @@ class NVGemmEpilogueProgram:
             or analysis is None
         ):
             return False
-        try:
-            n = V.graph.sizevars.optimization_hint(self.capture.gemm.get_size()[1])
-        except (GuardOnDataDependentSymNode, TypeError, ValueError):
+        gemm_size = _gemm_mn(self.capture.gemm)
+        if gemm_size is None:
             return False
+        n = gemm_size[1]
         match = analysis.synthetic_reduction_program(
             plan.reduction_output,
             self.capture.gemm.get_name(),
@@ -295,10 +295,10 @@ class NVGemmEpilogueProgram:
             )
             if discovered and discovered.issubset(claimed):
                 return False
-        try:
-            n = V.graph.sizevars.optimization_hint(self.capture.gemm.get_size()[1])
-        except (GuardOnDataDependentSymNode, TypeError, ValueError):
+        gemm_size = _gemm_mn(self.capture.gemm)
+        if gemm_size is None:
             return True
+        n = gemm_size[1]
         gemm_name = self.capture.gemm.get_name()
         gemm_dtype = self.capture.gemm.get_dtype()
         generated_outputs = self.generated_reduction_geometries
@@ -412,29 +412,26 @@ class NVGemmEpilogueLowering:
     ) -> GemmReductionGeometry | None:
         if not isinstance(buffer.data, Pointwise):
             return None
-        try:
-            m, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
-            output_size = tuple(
-                map(V.graph.sizevars.optimization_hint, buffer.data.ranges)
-            )
-        except (GuardOnDataDependentSymNode, TypeError, ValueError):
+        gemm_size = _gemm_mn(gemm_node)
+        compressed_size = _compressed_output_size(buffer.data.ranges)
+        if gemm_size is None or compressed_size is None:
             return None
-        compressed_size = _compressed_output_size(output_size)
-        if compressed_size is None:
-            return None
+        m, n = gemm_size
         out_m, out_n = compressed_size
-        if m == out_m and out_n > 0 and n % out_n == 0:
-            geometry = GemmReductionGeometry(group=n // out_n, axis=1)
-        elif n == out_n and out_m > 0 and m % out_m == 0:
-            geometry = GemmReductionGeometry(group=m // out_m, axis=0)
+        reads = list(scheduler_node.read_writes.reads)
+        group = len(reads)
+        if group <= 1:
+            return None
+        known_equals = V.graph.sizevars.statically_known_equals
+        if known_equals(m, out_m) and known_equals(n, out_n * group):
+            geometry = GemmReductionGeometry(group=group, axis=1)
+        elif known_equals(n, out_n) and known_equals(m, out_m * group):
+            geometry = GemmReductionGeometry(group=group, axis=0)
         else:
             return None
-        if geometry.group <= 1:
-            return None
 
-        reads = list(scheduler_node.read_writes.reads)
         range_vars = scheduler_node.read_writes.range_vars
-        if len(reads) != geometry.group or range_vars is None:
+        if range_vars is None:
             return None
         if not range_vars:
             range_vars = tuple(
@@ -525,10 +522,9 @@ class NVGemmEpilogueLowering:
             if len(reduction.reduction_ranges) != 1:
                 return None
             group_extent = reduction.reduction_ranges[0]
-            try:
-                group = V.graph.sizevars.optimization_hint(group_extent)
-            except (GuardOnDataDependentSymNode, TypeError, ValueError):
+            if has_free_symbols(group_extent):
                 return None
+            group = int(group_extent)
             if (known_equals(m, out_m) and known_equals(n, out_n * group_extent)) or (
                 known_equals(out_m, m) and known_equals(out_n, n // group_extent)
             ):
@@ -726,22 +722,22 @@ class NVGemmEpilogueLowering:
         reads = OrderedSet(read.name for read in scheduler_node.read_writes.reads)
         if reads != OrderedSet((gemm_name,)):
             return None
-        try:
-            m, n = map(V.graph.sizevars.optimization_hint, context.gemm.get_size())
-        except (GuardOnDataDependentSymNode, TypeError, ValueError):
+        gemm_size = _gemm_mn(context.gemm)
+        if gemm_size is None:
             return None
         inferred = analysis.synthetic_reduction_region(
             buffer.get_name(),
             gemm_name,
             V.graph.get_dtype(gemm_name),
-            n,
+            gemm_size[1],
         )
         if inferred is None:
             return None
         geometry, region = inferred.geometry, inferred.region
-        if (m, n)[
-            geometry.axis
-        ] % geometry.group != 0 or not geometry.matches_output_shape(
+        grouped_extent = gemm_size[geometry.axis]
+        if not V.graph.sizevars.statically_known_true(
+            sympy.Eq(sympy.Mod(grouped_extent, geometry.group), 0)
+        ) or not geometry.matches_output_shape(
             buffer.get_size(), context.gemm.get_size()
         ):
             return None
@@ -799,11 +795,10 @@ class NVGemmEpilogueLowering:
                 if region is None or len(region.reductions) != 1:
                     continue
                 reduction = region.reductions[0]
-                axis = grouped_reduction_axis_ir(
-                    reduction,
-                    config.group,
-                    V.graph.sizevars.optimization_hint(context.gemm.get_size()[1]),
-                )
+                gemm_size = _gemm_mn(context.gemm)
+                if gemm_size is None:
+                    continue
+                axis = grouped_reduction_axis_ir(reduction, config.group, gemm_size[1])
                 if (
                     axis == config.axis
                     and reduction.reduction_type == config.reduction_type
@@ -1043,10 +1038,10 @@ class NVGemmEpilogueLowering:
         analysis = context.analysis
         if analysis is None:
             return None
-        try:
-            m, n = map(V.graph.sizevars.optimization_hint, context.gemm.get_size())
-        except (GuardOnDataDependentSymNode, TypeError, ValueError):
+        gemm_size = _gemm_mn(context.gemm)
+        if gemm_size is None:
             return None
+        m, n = gemm_size
         candidates: dict[str, tuple[ComputedBuffer, GemmReductionGeometry]] = {}
 
         def add_candidate(
@@ -1337,6 +1332,17 @@ def _computed_buffers(
     if not buffers or not all(isinstance(buffer, ComputedBuffer) for buffer in buffers):
         return None
     return cast(tuple[ComputedBuffer, ...], buffers)
+
+
+def _gemm_mn(gemm: Buffer) -> tuple[Any, Any] | None:
+    """Symbolic (M, N) of a 2-D GEMM output; None for a batched GEMM.
+
+    Grouped-reduction fusion bakes its group geometry into the kernel, so every
+    shape relation it relies on is proven on these symbolic sizes rather than on
+    optimization hints, which would fuse a kernel that is wrong for other sizes.
+    """
+    size = gemm.get_size()
+    return (size[0], size[1]) if len(size) == 2 else None
 
 
 def _compressed_output_size(shape: Sequence[Any]) -> tuple[Any, Any] | None:

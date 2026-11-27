@@ -688,7 +688,7 @@ def normalize(
     input: Tensor,
     p: float = ...,
     dim: int | _size = ...,
-    eps: float = ...,
+    eps: float | None = ...,
     out: Tensor | None = ...,
 ) -> Tensor: ...
 
