@@ -155,7 +155,7 @@ impl Row {
 
 pub enum License {
     // Nothing records from a row's columns yet.
-    Row(#[allow(dead_code)] &'static Row),
+    Row(&'static Row),
     NoRow(String),
     NotMine,
 }
@@ -225,6 +225,12 @@ pub fn records(what: &What) -> bool {
         Taken::Stop(_) => matches!(what, What::Callee(_)),
         _ => false,
     })
+}
+
+// The family that is to take `what` over, where one says so and none has
+// yet: for a report.
+pub fn later(what: &What) -> Option<&'static str> {
+    FAMILIES.iter().find_map(|family| if let Taken::Later(name) = (family.rule)(what) { Some(name) } else { None })
 }
 
 // Asked by a verdict about the callee its visits called: Err, with the

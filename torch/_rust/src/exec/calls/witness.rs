@@ -270,6 +270,12 @@ pub fn resume() {
     }
 }
 
+// How many top-level operators the innermost open witness has seen, and the
+// last of them.
+pub fn top() -> (usize, Option<String>) {
+    STACK.with_borrow(|s| s.last().map_or((0, None), |o| (o.seen.ops.len(), o.seen.ops.last().cloned())))
+}
+
 // From exec::eval_frame, for every Python frame entered on this thread.
 pub fn frame_entered() {
     if LIVE.get() != 0 {

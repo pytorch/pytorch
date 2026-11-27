@@ -867,7 +867,18 @@ unsafe extern "C" fn eval_frame(
     if tracing {
         reads::frame_entered();
     }
+    // TORCH_RUST_CALLS=shadow, under a run the call-list recorder looks on:
+    // a frame runs the first plan of its code on the executor, as under a
+    // trace with TORCH_RUST_TRACE_PLAIN, and one that is left to CPython
+    // ends the recording (calls/record.rs).
+    let shadow = calls::record::recording();
+    if shadow {
+        calls::record::frame(frame, true);
+    }
     if !gen_frame && SKIP_ANY.load(Ordering::Relaxed) && SKIPPED.lock().unwrap().contains(&(code as usize)) {
+        if shadow {
+            calls::record::frame(frame, false);
+        }
         if NEXT_CLONE.get().0 == code as usize {
             NEXT_CLONE.set((0, 0, 0));
         }
@@ -882,6 +893,9 @@ unsafe extern "C" fn eval_frame(
     // region's body is traced, a hook for the events the interpreter
     // reports (the trace's own machinery raises some: it compiles code).
     if !gen_frame && (gc_callback(frame) || tracing && tr_event_hook(tr_frame_func(frame)) != 0) {
+        if shadow {
+            calls::record::frame(frame, false);
+        }
         return outside_executor(|| prev(tstate, frame, throwflag));
     }
     if tracing && let Some(deep) = tracer_code(code) {
@@ -890,7 +904,7 @@ unsafe extern "C" fn eval_frame(
         }
         return if deep { outside_executor(|| prev(tstate, frame, throwflag)) } else { prev(tstate, frame, throwflag) };
     }
-    let plain = tracing && *TRACE_PLAIN;
+    let plain = (tracing && *TRACE_PLAIN) || shadow;
     let pending = NEXT_CLONE.get();
     let cloned = !gen_frame && pending.2 != 0 && pending.0 == code as usize && tr_current_frame(tstate) as usize == pending.1;
     if cloned {
@@ -901,8 +915,16 @@ unsafe extern "C" fn eval_frame(
     } else {
         match compiled(code) {
             Lookup::Compiled(c) => Some(c),
-            Lookup::Trampoline => return prev(tstate, frame, throwflag),
+            Lookup::Trampoline => {
+                if shadow {
+                    calls::record::frame(frame, false);
+                }
+                return prev(tstate, frame, throwflag);
+            }
             Lookup::Outside => {
+                if shadow {
+                    calls::record::frame(frame, false);
+                }
                 // A region is no place for what a compiler made or does:
                 // its kernels are no operators a trace would see.
                 if reads::on() {
@@ -924,7 +946,7 @@ unsafe extern "C" fn eval_frame(
         if !c.cold.load(Ordering::Relaxed) && BYPASSED.load(Ordering::Relaxed) && !c.auto_optimized.load(Ordering::Relaxed) {
             c.cold.store(true, Ordering::Relaxed);
         }
-        if c.cold.load(Ordering::Relaxed) && !tracing && !(!gen_frame && covered::observes(c)) {
+        if c.cold.load(Ordering::Relaxed) && !tracing && !shadow && !(!gen_frame && covered::observes(c)) {
             return if c.deep.load(Ordering::Relaxed) { outside_executor(|| prev(tstate, frame, throwflag)) } else { prev(tstate, frame, throwflag) };
         }
     }
@@ -957,7 +979,7 @@ unsafe extern "C" fn eval_frame(
     // which records, so that the next trace finds what it ran judged (see
     // covered.rs).
     // Under TRACE_PLAIN every frame under a traced body runs it too.
-    let observed = !tracing && !gen_frame && covered::observes(c);
+    let observed = !tracing && !shadow && !gen_frame && covered::observes(c);
     let plan = if observed || plain { unsafe { &*(&*c.plans.lock().unwrap()[0] as *const Plan) } } else { c.plan() };
     let start = if gen_frame {
         let unit = tr_frame_get_instr(frame) as u32;
@@ -983,7 +1005,7 @@ unsafe extern "C" fn eval_frame(
     if !std::ptr::eq(plan, c.plan()) {
         c.sweep();
     }
-    if matches!(outcome, run::Outcome::Return(_)) && OPTIMIZE.load(Ordering::Relaxed) && !OPTIMIZING.get() && !tracing {
+    if matches!(outcome, run::Outcome::Return(_)) && OPTIMIZE.load(Ordering::Relaxed) && !OPTIMIZING.get() && !tracing && !shadow {
         let py = Python::assume_attached();
         if !c.auto_optimized.swap(true, Ordering::Relaxed) {
             if let Err(e) = optimize(py, c, None) {

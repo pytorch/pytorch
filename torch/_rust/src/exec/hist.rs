@@ -107,7 +107,7 @@ impl Table {
 
 // "module.Qualified.Name" of a class Python code made; tp_name of any other
 // (it carries the module where the class has one).
-unsafe fn class_name(tp: *mut ffi::PyTypeObject) -> String {
+pub unsafe fn class_name(tp: *mut ffi::PyTypeObject) -> String {
     let plain = CStr::from_ptr((*tp).tp_name).to_string_lossy().into_owned();
     if ffi::PyType_HasFeature(tp, ffi::Py_TPFLAGS_HEAPTYPE) == 0 {
         return plain;
@@ -146,7 +146,7 @@ unsafe fn text(s: *mut PyObject) -> Option<String> {
 // descriptor ("c") by the class and the name, a bound method by its
 // function, a class by its own name; anything else (an instance with
 // __call__, a partial) by its class.
-unsafe fn callee_name(f: *mut PyObject) -> String {
+pub unsafe fn callee_name(f: *mut PyObject) -> String {
     if f.is_null() {
         return "?".to_string();
     }
@@ -183,7 +183,7 @@ unsafe fn callee_name(f: *mut PyObject) -> String {
 }
 
 // What an instruction is, but for a call.
-fn kind(op: &Op) -> &'static str {
+pub fn kind(op: &Op) -> &'static str {
     match op {
         Op::Null => "Null",
         Op::Unknown => "Unknown",

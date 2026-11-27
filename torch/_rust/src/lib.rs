@@ -138,6 +138,8 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::calls::_calls_tables, m)?)?;
     m.add_class::<exec::calls::List>()?;
     m.add_function(wrap_pyfunction!(exec::calls::_witness, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::shadow::_calls_shadow, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::shadow::_calls_shadow_missed, m)?)?;
     m.add_function(wrap_pyfunction!(exec::calls::witness::_witness_names, m)?)?;
     m.add_function(wrap_pyfunction!(exec::calls::witness::_witness_pause, m)?)?;
     m.add_function(wrap_pyfunction!(cfg::python::_cfg_opcodes, m)?)?;

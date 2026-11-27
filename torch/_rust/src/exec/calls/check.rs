@@ -46,7 +46,7 @@ struct Scope<'a> {
 
 // What the license sees of each operand of `e`: the pinned class of a leaf,
 // the parts of what is built, the items of a constant that is an exact tuple.
-unsafe fn shapes(e: &Entry, consts: &[Py<PyAny>]) -> Vec<Shape> {
+pub(super) unsafe fn shapes(e: &Entry, consts: &[Py<PyAny>]) -> Vec<Shape> {
     unsafe fn constant(x: *mut PyObject) -> Shape {
         unsafe {
             if ffi::PyTuple_CheckExact(x) == 0 {

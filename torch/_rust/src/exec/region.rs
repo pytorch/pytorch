@@ -158,6 +158,11 @@ pub fn enabled() -> bool {
 // about the runs that don't.
 pub const MAX_GAVE_UP: u32 = 3;
 
+// How many runs of its last version a block is traced after.
+pub fn after() -> u32 {
+    AFTER.load(Ordering::Relaxed)
+}
+
 // Whether block b's version (the last, the one traces are made from) should
 // be traced on this run.
 pub fn due(runs: &AtomicU32, off: &AtomicBool) -> bool {

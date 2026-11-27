@@ -126,6 +126,21 @@ struct Act<'a> {
     // Whether this activation runs a frame under a traced body: it runs
     // only what the optimizer's verdict covered (see covered.rs).
     under_body: bool,
+    // TORCH_RUST_CALLS=shadow: 1, this activation is the body of a recorded
+    // run; 2, a frame under it; else 0 (see calls/record.rs).
+    shadow: u8,
+}
+
+// A block's params, held from before its version is selected for the run
+// that the call-list recorder may take (see Act::shadow_run).
+struct Held(Vec<*mut PyObject>);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        for o in self.0.drain(..) {
+            unsafe { ffi::Py_XDECREF(o) };
+        }
+    }
 }
 
 // An activation's buffers, pooled per thread so a call allocates nothing.
@@ -284,7 +299,7 @@ pub const FLAG_YIELD: u8 = 16;
 // Runs `f` with a recorder for p's table at `site`, or with none on this
 // thread if p doesn't record or recording is off.
 fn recording<R>(p: &Prepared, site: Site, f: impl FnOnce(*mut Recorder) -> R) -> R {
-    if p.record && super::RECORD.load(std::sync::atomic::Ordering::Relaxed) && !super::region::tracing() {
+    if p.record && super::RECORD.load(std::sync::atomic::Ordering::Relaxed) && !super::region::tracing() && !super::calls::record::recording() {
         effects::scope(&p.effects, site, f)
     } else {
         effects::unrecorded(|| f(std::ptr::null_mut()))
@@ -320,12 +335,16 @@ pub unsafe fn run(c: &Compiled, prep: &Prepared, f: *mut Frame, start: Start) ->
             stop: std::ptr::null(),
             reading: reads::entered_by_body(),
             under_body: reads::entered_by_body(),
+            shadow: if super::calls::record::recording() { 2 } else { 0 },
         };
         // Between this frame's instrs no instr is running (the caller puts
         // back what was, once the frame is gone).
         if act.reading {
             reads::function(tr_frame_func(f));
             reads::set_in_instr(false);
+        }
+        if act.shadow != 0 {
+            super::calls::record::scope(true);
         }
         let result = match start {
             Start::Entry => act.run_blocks(ENTRY, None),
@@ -335,6 +354,9 @@ pub unsafe fn run(c: &Compiled, prep: &Prepared, f: *mut Frame, start: Start) ->
                 None => Outcome::Error,
             },
         };
+        if act.shadow != 0 {
+            super::calls::record::scope(false);
+        }
         act.into_bufs().give();
         result
     })
@@ -366,6 +388,7 @@ pub unsafe fn run_graph(prep: &Prepared, inputs: &[*mut PyObject]) -> Result<Vec
         stop: std::ptr::null(),
         reading: false,
         under_body: false,
+        shadow: 0,
     };
     for (obj, p) in inputs.iter().zip(&prep.cfg[ENTRY].params) {
         act.set(*p, xincref(*obj));
@@ -905,6 +928,12 @@ impl Act<'_> {
 
     // Runs b's origin on `params` (owned).
     unsafe fn run_origin(&self, b: BlockId, params: Vec<*mut PyObject>) -> Outcome {
+        self.run_origin_as(b, params, self.shadow)
+    }
+
+    // As run_origin; `shadow`: what the origin's activation is to the
+    // call-list recorder (Act::shadow).
+    unsafe fn run_origin_as(&self, b: BlockId, params: Vec<*mut PyObject>, shadow: u8) -> Outcome {
         let origin = self.p.origins[b.idx()].as_ref().expect("verified: a block without a matching version has an origin");
         recording(origin, Site::Block(ENTRY), |rec| {
             let Bufs { vals, args, outs, edge } = Bufs::take(origin.cfg.instrs.len());
@@ -929,11 +958,18 @@ impl Act<'_> {
                 stop: std::ptr::null(),
                 reading: self.reading,
                 under_body: self.under_body,
+                shadow,
             };
             for (obj, q) in params.into_iter().zip(&origin.cfg[ENTRY].params) {
                 sub.set(*q, obj);
             }
+            if shadow != 0 {
+                super::calls::record::scope(true);
+            }
             let result = sub.run_blocks(ENTRY, None);
+            if shadow != 0 {
+                super::calls::record::scope(false);
+            }
             sub.into_bufs().give();
             result
         })
@@ -1136,6 +1172,7 @@ impl Act<'_> {
             if let Some(rec) = self.rec.as_mut() {
                 rec.at(Site::Block(b));
             }
+            let mut shadow: Option<Held> = None;
             let (mut vi, first) = match resume.take() {
                 Some(r) => r,
                 None if self.p.autograd[b.idx()].load(std::sync::atomic::Ordering::Relaxed) && self.wants_autograd(b) => match self.bootstrap(b) {
@@ -1145,16 +1182,27 @@ impl Act<'_> {
                     }
                     Err(outcome) => return outcome,
                 },
-                None => match self.select(b) {
-                    Some(vi) => (vi, 0),
-                    None => match self.miss(b) {
-                        Ok(next) => {
-                            b = next;
-                            continue 'blocks;
+                None => {
+                    // The params as they are before a version is selected
+                    // (select drops those its version does not use).
+                    let held = (super::calls::record::on() && self.shadow_due(b)).then(|| Held(blk.params.iter().map(|p| xincref(self.val(*p))).collect()));
+                    match self.select(b) {
+                        Some(vi) => {
+                            shadow = held.filter(|_| vi + 1 == blk.versions.len());
+                            (vi, 0)
                         }
-                        Err(outcome) => return outcome,
-                    },
-                },
+                        None => {
+                            drop(held);
+                            match self.miss(b) {
+                                Ok(next) => {
+                                    b = next;
+                                    continue 'blocks;
+                                }
+                                Err(outcome) => return outcome,
+                            }
+                        }
+                    }
+                }
             };
             let mut i = first;
             // The region version runs the variant of its place that is for
@@ -1212,7 +1260,20 @@ impl Act<'_> {
                 {
                     i = code.steps.len();
                 }
+                // The arrival before the one that is traced: the recorder
+                // takes this run of the block (calls/record.rs).
+                if let Some(held) = shadow.take().filter(|_| i == 0) {
+                    match self.shadow_run(b, vi, held) {
+                        Ok(next) => {
+                            b = next;
+                            continue 'blocks;
+                        }
+                        Err(outcome) => return outcome,
+                    }
+                }
             }
+            drop(shadow);
+            let shadowed = self.shadow != 0;
             while i < code.steps.len() {
                 // Steps' kill ranges are within `kills`, and instrs index
                 // values within `vals`.
@@ -1222,6 +1283,9 @@ impl Act<'_> {
                 if fast && step.op != Fast::No {
                     if counted {
                         self.count(&self.cfg[step.v], None, true);
+                    }
+                    if shadowed {
+                        super::calls::record::tick(if let Fast::StoreLocal(_, x) = step.op { Some(x.0) } else { None });
                     }
                     // A value is null until its instr defines it.
                     let vals = self.vals.as_mut_ptr();
@@ -1696,6 +1760,40 @@ impl Act<'_> {
         out
     }
 
+    // TORCH_RUST_CALLS=shadow. Whether this arrival at block b is one that
+    // today's engine runs as it is before it traces the block: the arrival
+    // before the one that is due, or, while regions are not on yet and
+    // arrivals are observed for the traces to come (torch.vm's schedule),
+    // the first of this block. It is the run the call-list recorder takes,
+    // if the block's last version is selected for it.
+    unsafe fn shadow_due(&self, b: BlockId) -> bool {
+        let relaxed = std::sync::atomic::Ordering::Relaxed;
+        self.shadow == 0
+            && self.c.is_some()
+            && self.p.origins[b.idx()].is_some()
+            && !super::region::tracing()
+            && !super::calls::record::recording()
+            && !self.p.region_off[b.idx()].load(relaxed)
+            && if super::region::enabled() {
+                self.p.region_runs[b.idx()].load(relaxed) + 2 == super::region::after()
+            } else {
+                super::region::observing() && !super::calls::record::taken((self.p as *const Prepared as usize, b.0))
+            }
+    }
+
+    // Runs block b, whose last version vi was selected and has run nothing,
+    // as a miss does: its origin, the plain instructions, on its params
+    // (`held`), with the call-list recorder looking on. Then as after_origin.
+    unsafe fn shadow_run(&mut self, b: BlockId, vi: usize, mut held: Held) -> Result<BlockId, Outcome> {
+        let params = std::mem::take(&mut held.0);
+        self.clear(b, vi);
+        let name = self.block_name(self.c.expect("checked by shadow_due"), b, vi);
+        super::calls::record::begin(name, (self.p as *const Prepared as usize, b.0), &params, self.f);
+        let result = self.run_origin_as(b, params, 1);
+        super::calls::record::end(if let Outcome::Leave(outs) = &result { Some(outs) } else { None });
+        self.after_origin(b, result)
+    }
+
     // Joins this run's params and inputs of block b's version vi (the last)
     // into the types its trace gets.
     unsafe fn region_observe(&mut self, b: BlockId, vi: usize) {
@@ -1714,6 +1812,9 @@ impl Act<'_> {
         let blk = &cfg[b];
         let ver = &blk.versions[vi];
         let code = &self.p.code[b.idx()][vi];
+        if super::calls::record::on() {
+            super::calls::record::traced((self.p as *const Prepared as usize, b.0));
+        }
         let ids: Vec<ValueId> = blk.params.iter().chain(&ver.inputs).copied().collect();
         let args: Vec<*mut PyObject> = ids.iter().map(|x| self.val(*x)).collect();
         // Params the version doesn't use, already dropped by select().
@@ -1943,6 +2044,9 @@ impl Act<'_> {
         if self.reading && super::hist::on() {
             self.count(ins, callee, false);
         }
+        if self.shadow != 0 {
+            return self.recorded(v, ins, callee);
+        }
         match callee {
             Some(f) if super::backward::is(f) => {
                 if self.reading {
@@ -1975,6 +2079,30 @@ impl Act<'_> {
             }
             _ => self.exec(v, ins),
         }
+    }
+
+    // Runs instr v of a recorded run as guarded runs it where nothing is
+    // traced, with the call-list recorder told before and after it
+    // (calls/record.rs): what it is, its operands, and what it left.
+    #[cold]
+    unsafe fn recorded(&mut self, v: ValueId, ins: &Instr, callee: Option<*mut PyObject>) -> R {
+        let operands: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+        let kwnames = match ins.op {
+            Op::Call { kw_names: Some(k), .. } => self.konst(k),
+            _ => std::ptr::null_mut(),
+        };
+        let site = super::rules::Site { frame: self.f, names: self.names, operands: &operands, kwnames };
+        let told = super::calls::record::before(self.shadow == 1, v.0, ins, &site, callee);
+        let done = match callee {
+            Some(f) if super::backward::is(f) => super::outside_executor(|| self.exec(v, ins)),
+            _ => self.exec(v, ins),
+        };
+        if told {
+            let made = &self.p.projects[v.idx()];
+            let results: Vec<*mut PyObject> = if made.is_empty() { vec![self.val(v)] } else { made.iter().flatten().map(|x| self.val(*x)).collect() };
+            super::calls::record::after(done.is_ok(), &results);
+        }
+        done
     }
 
     // Hands instruction `ins`, about to run in a traced body or a frame

@@ -79,7 +79,11 @@
 // which the recorder will ask; until then lists are made by tests only.
 
 mod check;
+mod entries;
+mod origins;
+pub mod record;
 mod run;
+pub mod shadow;
 mod slots;
 mod spec;
 pub mod witness;

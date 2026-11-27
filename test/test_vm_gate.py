@@ -8557,5 +8557,251 @@ class TestVmRulesTorch(TestCase):
         self.assertIn(met, (0, refused), msg=str(vm.regions(compiled)))
 
 
+SHADOW_PROGRAM = """
+import json, sys, torch, torch.nn.functional as F
+from torch import vm
+
+torch.manual_seed(0)
+w = torch.randn(4, 3, 3, 3)
+m = torch.randn(8, 8)
+bn = torch.nn.BatchNorm2d(3)
+buf = torch.zeros(2, 3, 8, 8)
+PAIR = [m, m]
+
+def chain(x):
+    y = torch.conv2d(x, w, None, 1, 1)
+    y = torch.relu(y)
+    return y @ m
+
+def frame_under(x):
+    y = F.relu(x)
+    return torch.cat([y, x * 2], dim=1)
+
+def in_place(x):
+    y = torch.relu(x)
+    y += x
+    return y * 2
+
+def part(x):
+    return torch.mul(torch.max(x, 1)[0], 2.0)
+
+def sliced(x):
+    return torch.sigmoid(x[:, 1:3])
+
+def writer(x):
+    y = torch.relu(x)
+    torch.relu_(y)
+    return y + 1
+
+def value_read(x):
+    return torch.mul(x, x.sum().item())
+
+def no_row(x):
+    return torch.add(x, 1, out=buf)
+
+def kept_list(x):
+    y = torch.relu(x)
+    return torch.cat(PAIR, dim=1), y
+
+def starred(x):
+    pair = (x, x)
+    return torch.add(*pair)
+
+def raised(x):
+    try:
+        return torch.add(x, m[:3])
+    except RuntimeError:
+        return torch.relu(x)
+
+def state(x):
+    return bn(x).sum()
+
+fn = globals()[sys.argv[1]]
+inputs = [torch.randn(2, 3, 8, 8) for _ in range(6)]
+flat = lambda r: r if isinstance(r, tuple) else (r,)
+def run(f):
+    bn.reset_running_stats()
+    outs = [flat(f(x.clone())) for x in inputs]
+    return outs, bn.running_mean.clone(), int(bn.num_batches_tracked)
+want = run(fn)
+compiled = vm(fn, passes=vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1))
+got = run(compiled)
+same = all(torch.equal(p, q) for a, b in zip(want[0], got[0]) for p, q in zip(a, b))
+same = same and torch.equal(want[1], got[1]) and want[2] == got[2]
+regions = [(r.get("state"), r.get("runs")) for r in vm.regions(compiled)]
+print(json.dumps({"same": same, "regions": regions, "shadow": torch._rust._calls_shadow()}))
+"""
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+class TestVmCallsShadow(TestCase):
+    """``TORCH_RUST_CALLS=shadow``: beside today's engine a recorder looks on
+    while a block runs once as it is written, and says which list of the
+    body's own C calls it would have made, or where and why it stopped. It
+    changes nothing: every program computes what eager computes, leaves the
+    state eager leaves, and has the regions it has without the variable.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+    RAN: dict = {}
+
+    def program(self, name, mode="shadow"):
+        if (name, mode) not in self.RAN:
+            env = {k: v for k, v in os.environ.items() if k != "TORCH_RUST_CALLS"}
+            if mode is not None:
+                env["TORCH_RUST_CALLS"] = mode
+            command = [sys.executable, "-c", SHADOW_PROGRAM, name]
+            ran = subprocess.run(
+                command, env=env, capture_output=True, text=True, timeout=600
+            )
+            self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+            self.RAN[name, mode] = json.loads(ran.stdout.splitlines()[-1])
+        out = self.RAN[name, mode]
+        # The program is eager's program, with the recorder or without.
+        self.assertTrue(out["same"], name)
+        return out
+
+    def recorded(self, name):
+        """The recording of the block that holds the body of ``name``."""
+        found = [
+            s for s in self.program(name)["shadow"] if s["place"].startswith(name + ":")
+        ]
+        self.assertTrue(found, name)
+        return found[0]
+
+    def complete(self, name):
+        found = self.recorded(name)
+        self.assertEqual(
+            (found["status"], found["stop"], found["refused"]),
+            ("complete", None, None),
+            found,
+        )
+        return found
+
+    def stopped(self, name, at, why):
+        found = self.recorded(name)
+        self.assertEqual(found["status"], "stopped", found)
+        self.assertIn(at, found["stop"][0])
+        self.assertIn(why, found["stop"][1])
+        self.assertEqual(found["validated"], "")
+        return found
+
+    def test_nothing_runs_without_the_variable(self):
+        for name in ("chain", "frame_under", "in_place", "writer", "state"):
+            with self.subTest(name=name):
+                on = self.program(name)
+                for mode in (None, "0"):
+                    off = self.program(name, mode)
+                    self.assertEqual(off["shadow"], [])
+                    # The regions are where they are without the recorder.
+                    self.assertEqual(off["regions"], on["regions"])
+                self.assertTrue(on["shadow"])
+
+    def test_the_program_is_eagers_with_the_recorder(self):
+        programs = "chain frame_under in_place part sliced writer value_read no_row kept_list starred raised state"
+        for name in programs.split():
+            with self.subTest(name=name):
+                self.assertTrue(self.program(name)["shadow"], name)
+
+    def test_pure_tensor_calls_give_a_list_that_validates_equal(self):
+        found = self.complete("chain")
+        self.assertEqual(found["entries"], 3)
+        self.assertEqual(found["validated"], "equal")
+        self.assertTrue(found["traced"])
+        lines = found["text"].splitlines()
+        # An input, a constant of the code, a result moved into its one use.
+        self.assertIn("r0 = torch.conv2d(in0, pin0, None, 1, 1)", lines[0])
+        self.assertIn("r1 = torch.relu(move r0)", lines[1])
+        self.assertIn("r2 = move r1 @ pin1", lines[2])
+        # The two tensors of the module's globals have no recorded origin.
+        self.assertEqual(found["loose"], 2)
+        self.assertEqual(found["outputs"][0], 1)
+
+    def test_a_frame_under_the_body_gives_its_c_call(self):
+        found = self.complete("frame_under")
+        lines = found["text"].splitlines()
+        self.assertIn("r0 = torch.relu(in0)", lines[0])
+        self.assertIn("r1 = in0 * 2", lines[1])
+        # A list the body built for the call, its parts by origin.
+        self.assertIn("r2 = torch.cat([move r0, move r1], dim=1)", lines[2])
+        self.assertEqual(found["validated"], "equal")
+        self.assertEqual(found["loose"], 0)
+        # What the rule table has not taken over is counted, not recorded.
+        self.assertIn(
+            "call py torch.nn.functional.relu x torch.Tensor", dict(found["left"])
+        )
+        self.assertTrue(
+            any("_has_torch_function_unary" in what for what, _ in found["handed"])
+        )
+
+    def test_an_in_place_operator_is_an_entry_that_is_not_run_again(self):
+        found = self.complete("in_place")
+        line = next(line for line in found["text"].splitlines() if "+=" in line)
+        self.assertIn("r0 += in0", line)
+        self.assertIn("writes(0)", line)
+        self.assertIn("is(operand 0)", line)
+        self.assertEqual(found["validated"], "not validated: an entry writes")
+        # The witness saw the write the entry states, and nothing else.
+        self.assertEqual([note for note in found["notes"] if "+=" in note], [])
+
+    def test_a_result_tuple_and_a_slice_built_for_a_subscript(self):
+        # Today's blocks end in front of a subscript of a result tuple, so
+        # the tuple leaves its block whole: an entry whose result the list
+        # has no output for, and whose release nothing saw.
+        found = self.complete("part")
+        lines = found["text"].splitlines()
+        self.assertIn("r0 = torch.max(in0, 1)", lines[0])
+        self.assertIn("count=2", lines[0])
+        self.assertEqual(
+            (found["late"], found["unstated"], found["outputs"][0]), (1, 1, 0)
+        )
+        self.assertEqual(
+            found["validated"],
+            "not validated: no output of the block is a result of an entry",
+        )
+        found = self.complete("sliced")
+        self.assertIn("in0[(None:None:None, 1:3:None)]", found["text"].splitlines()[0])
+        self.assertEqual(found["validated"], "equal")
+
+    def test_an_operator_under_no_entry_stops_the_recording(self):
+        found = self.stopped(
+            "writer",
+            "relu_ (later: writes)",
+            "ran under an instruction that is no entry (the last: aten::relu_)",
+        )
+        self.assertEqual(found["entries"], 1)
+        found = self.stopped("value_read", "item (later: facts)", "aten::item")
+        self.assertEqual(found["entries"], 1)
+
+    def test_no_row_stops_with_the_rows_reason(self):
+        found = self.stopped(
+            "no_row", "add", "has no row for these operands: it passes out="
+        )
+        self.assertEqual(found["entries"], 0)
+
+    def test_a_container_the_body_kept_stops_the_recording(self):
+        self.stopped(
+            "kept_list",
+            "cat",
+            "a container the body did not build for this instruction: list",
+        )
+
+    def test_a_star_call_and_a_call_that_raises_stop_the_recording(self):
+        self.stopped("starred", "add", "a star call of C code")
+        self.stopped("raised", "torch.add", "the call of an entry raised")
+
+    def test_state_is_eagers_and_its_writer_stops_the_recording(self):
+        # Batch norm in training mode writes its running statistics.
+        found = [
+            s
+            for s in self.program("state")["shadow"]
+            if s["stop"] and "batch_norm" in s["stop"][0]
+        ]
+        self.assertTrue(found)
+        self.assertIn("later: writes", found[0]["stop"][0])
+
+
 if __name__ == "__main__":
     run_tests()
