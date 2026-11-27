@@ -7895,8 +7895,6 @@ REFERENCE_INPUTS = frozenset(
 # Skip raw-bit sweeps for prohibitively slow value-dependent series.
 BITPATTERN_SLOW = frozenset(
     {
-        "polygamma",
-        "special.polygamma",
         "special.laguerre_polynomial_l",
         "special.legendre_polynomial_p",
     }

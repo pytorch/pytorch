@@ -249,8 +249,8 @@ inline typename std::enable_if_t<std::is_floating_point_v<T>, T> calc_erfinv(
  * Cephes Math Library. See note [3-Clause BSD License for the Cephes Math
  * Library].
  */
-template <typename scalar_t, bool is_cuda = false>
-C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) {
+template <typename scalar_t, bool is_cuda = false, bool normalized = false>
+C10_HOST_DEVICE inline scalar_t zeta_series(scalar_t x, scalar_t q) {
   using acc_t = acc_type<scalar_t, is_cuda>;
   const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
   constexpr acc_t zero = acc_t{0.0};
@@ -272,41 +272,15 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) {
   };
 
   acc_t a, b, k, s, t, w;
-  if (x == one) {
-    return std::numeric_limits<scalar_t>::infinity();
-  }
-
-  if (x < one) {
-    return std::numeric_limits<scalar_t>::quiet_NaN();
-  }
-
-  if (q <= zero) {
-    if (q == std::floor(q)) {
-      return std::numeric_limits<scalar_t>::infinity();
-    }
-    if (x != std::floor(x)) {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
-    }
-    if constexpr (
-        std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>) {
-      constexpr scalar_t even_threshold = std::is_same_v<scalar_t, float>
-          ? scalar_t{16777216.0}
-          : scalar_t{9007199254740992.0};
-      // Even exponents give positive terms, and a near-zero term overflows.
-      if (std::isfinite(x) && x >= even_threshold) {
-        return std::numeric_limits<scalar_t>::infinity();
-      }
-    }
-  }
-
-  s = std::pow(q, -x);
+  s = normalized ? one : std::pow(q, -x);
   a = q;
   int i = 0;
   b = zero;
   while ((i < 9) || (a <= acc_t{9.0})) {
     i += 1;
-    a += one;
-    b = ::pow(a, -x);
+    a = normalized ? static_cast<acc_t>(q) + i : a + one;
+    b = normalized ? std::exp(-x * std::log1p(static_cast<acc_t>(i) / q))
+                   : ::pow(a, -x);
     s += b;
     if ((-MACHEP * s < b) && (b < MACHEP * s)) {
       return static_cast<scalar_t>(s);
@@ -316,23 +290,166 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) {
   w = a;
   s += b * w / (x - one);
   s -= half * b;
-  a = one;
+  a = normalized ? b : one;
   k = zero;
   for (i = 0; i < 12; i++) {
-    a *= x + k;
-    b /= w;
-    t = a * b / A[i];
+    if constexpr (normalized) {
+      a *= (x + k) / w;
+      t = a / A[i];
+    } else {
+      a *= x + k;
+      b /= w;
+      t = a * b / A[i];
+    }
     s = s + t;
     t = ::fabs(t / s);
     if (t < MACHEP) {
       return static_cast<scalar_t>(s);
     }
     k += one;
-    a *= x + k;
-    b /= w;
+    if constexpr (normalized) {
+      a *= (x + k) / w;
+    } else {
+      a *= x + k;
+      b /= w;
+    }
     k += one;
   }
   return static_cast<scalar_t>(s);
+}
+
+template <typename scalar_t, bool is_cuda = false>
+C10_HOST_DEVICE inline scalar_t zeta_tail(scalar_t x, scalar_t q) {
+  using acc_t = acc_type<scalar_t, is_cuda>;
+  const acc_t exponent = static_cast<acc_t>(x);
+  const acc_t coordinate = static_cast<acc_t>(q);
+  const acc_t normalized =
+      zeta_series<acc_t, is_cuda, true>(exponent, coordinate);
+  const acc_t power = std::pow(coordinate, -exponent);
+  if (power >= std::numeric_limits<acc_t>::min()) {
+    return static_cast<scalar_t>(power * normalized);
+  }
+  return static_cast<scalar_t>(
+      std::exp(-exponent * std::log(coordinate) + std::log(normalized)));
+}
+
+template <typename T>
+C10_HOST_DEVICE inline T zeta_paired_power_difference(
+    T base,
+    T gap,
+    T exponent) {
+  T factor = -std::expm1(-exponent * std::log1p(gap / base));
+  T power = std::pow(base, -exponent);
+  if (std::isinf(power)) {
+    return std::exp(-exponent * std::log(base) + std::log(factor));
+  }
+  return power * factor;
+}
+
+template <typename T>
+C10_HOST_DEVICE inline T zeta_paired_difference(T x, T q) {
+  T lo = std::floor(q);
+  T hi = std::ceil(q);
+  T lower = q - lo;
+  T upper = hi - q;
+  // Retain the distance from the half-integer before rounding either fraction.
+  T delta = (lo + hi) - (q + q);
+  T gap = std::abs(delta);
+  if (gap == T(0)) {
+    return T(0);
+  }
+  T sign = delta > T(0) ? T(1) : T(-1);
+  T base = lower < upper ? lower : upper;
+  T result = T(0);
+  for (int k = 0; k < 9; k++) {
+    result += zeta_paired_power_difference(base + T(k), gap, x);
+  }
+  if (std::isinf(result)) {
+    return sign * result;
+  }
+  T w = base + T(9);
+  result += zeta_paired_power_difference(w, gap, x - T(1)) / (x - T(1));
+  result += T(0.5) * zeta_paired_power_difference(w, gap, x);
+  static const T A[] = {
+      12.,
+      -720.,
+      30240.,
+      -1209600.,
+      47900160.,
+      -1.8924375803183791606e9,
+      7.47242496e10,
+      -2.950130727918164224e12,
+      1.1646782814350067249e14,
+      -4.5979787224074726105e15,
+      1.8152105401943546773e17,
+      -7.1661652561756670113e18};
+  T log_rising = std::log(x);
+  for (int j = 0; j < 12; j++) {
+    if (j) {
+      log_rising += std::log(x + T(2 * j - 1)) + std::log(x + T(2 * j));
+    }
+    T exponent = x + T(2 * j + 1);
+    T log_difference = -exponent * std::log(w) +
+        std::log(-std::expm1(-exponent * std::log1p(gap / w)));
+    T term = std::exp(log_rising - std::log(std::abs(A[j])) + log_difference);
+    result += A[j] > T(0) ? term : -term;
+  }
+  return sign * result;
+}
+
+template <typename scalar_t, bool is_cuda = false>
+C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) {
+  using acc_t = acc_type<scalar_t, is_cuda>;
+  const auto zero = scalar_t{0};
+  const auto one = scalar_t{1};
+  if (x == one) {
+    return std::numeric_limits<scalar_t>::infinity();
+  }
+  if (x < one) {
+    return std::numeric_limits<scalar_t>::quiet_NaN();
+  }
+  if (!(q <= zero)) {
+    return zeta_series<scalar_t, is_cuda>(x, q);
+  }
+  if (q == std::floor(q)) {
+    return std::numeric_limits<scalar_t>::infinity();
+  }
+  if (x != std::floor(x)) {
+    return std::numeric_limits<scalar_t>::quiet_NaN();
+  }
+  if (std::isinf(x)) {
+    return std::numeric_limits<scalar_t>::infinity();
+  }
+  if constexpr (
+      std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>) {
+    constexpr scalar_t even_threshold = std::is_same_v<scalar_t, float>
+        ? scalar_t{16777216.0}
+        : scalar_t{9007199254740992.0};
+    if (x >= even_threshold) {
+      return std::numeric_limits<scalar_t>::infinity();
+    }
+  }
+  const acc_t exponent = static_cast<acc_t>(x);
+  const acc_t coordinate = static_cast<acc_t>(q);
+  if (std::fmod(exponent, acc_t{2}) == acc_t{0}) {
+    const acc_t lower = coordinate - std::floor(coordinate);
+    const acc_t upper = std::ceil(coordinate) - coordinate;
+    const acc_t left = zeta_series<acc_t, is_cuda>(exponent, lower);
+    const acc_t right = zeta_series<acc_t, is_cuda>(exponent, upper);
+    const acc_t sum = left + right;
+    if (std::isinf(sum)) {
+      return static_cast<scalar_t>(sum);
+    }
+    const acc_t tail =
+        zeta_tail<acc_t, is_cuda>(exponent, acc_t{1} - coordinate);
+    return static_cast<scalar_t>(sum - tail);
+  }
+  const acc_t difference = zeta_paired_difference(exponent, coordinate);
+  if (std::isinf(difference)) {
+    return static_cast<scalar_t>(difference);
+  }
+  const acc_t tail = zeta_tail<acc_t, is_cuda>(exponent, acc_t{1} - coordinate);
+  return static_cast<scalar_t>(difference + tail);
 }
 
 /*
@@ -530,13 +647,75 @@ inline Half calc_digamma(Half a) {
   return calc_digamma(static_cast<float>(a));
 }
 
+C10_HOST_DEVICE inline double polygamma_log_scale(
+    int64_t order,
+    double q,
+    double q_low) {
+  const auto integer = static_cast<uint64_t>(order);
+  const double high = static_cast<double>(integer >> 32) * 4294967296.0;
+  const double low = static_cast<double>(integer & 0xffffffff);
+  const double n = high + low;
+  const double n_low = (high - n) + low;
+  if (n >= 32.0 && q >= n * 0.25 && q <= n * 0.5) {
+    // Combine Stirling's scale without subtracting large logarithms.
+    const double e_hi = 2.718281828459045;
+    const double e_lo = 1.4456468917292502e-16;
+    double residual = std::fma(-e_hi, q, n);
+    residual += n_low;
+    residual = std::fma(-e_lo, q, residual);
+    residual = std::fma(-e_hi, q_low, residual);
+    residual = std::fma(-e_lo, q_low, residual);
+    double delta = residual / (e_hi * q);
+    double inverse = 1.0 / n;
+    double square = inverse * inverse;
+    double correction = inverse *
+        (1.0 / 12.0 -
+         square * (1.0 / 360.0 - square * (1.0 / 1260.0 - square / 1680.0)));
+    return n * std::log1p(delta) + n_low * std::log1p(delta) +
+        0.5 * std::log(n) - std::log(q) + 0.91893853320467274178 + correction;
+  }
+  return std::lgamma(n + 1.0) - (n + 1.0) * std::log(q);
+}
+
 template <typename scalar_t, bool is_cuda = false>
-inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
+inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int64_t n) {
   // already blocked if n <= 1
   const auto one = scalar_t{1};
-  return ((n % 2) ? one : -one) *
-      std::exp(std::lgamma(static_cast<scalar_t>(n) + one)) *
-      zeta<scalar_t, is_cuda>(static_cast<scalar_t>(n + 1), x);
+  const auto log_gamma = std::lgamma(static_cast<scalar_t>(n) + one);
+  const auto gamma = std::exp(log_gamma);
+  const auto exponent = static_cast<scalar_t>(static_cast<double>(n) + 1.0);
+  const auto sign = (n % 2) ? one : -one;
+  if (std::isfinite(x) && x < scalar_t{0} && x != std::floor(x) &&
+      std::isinf(gamma)) {
+    const double fraction = static_cast<double>(x) - std::floor(x);
+    if (n % 2 || fraction != 0.5) {
+      return n % 2 || fraction > 0.5
+          ? std::numeric_limits<scalar_t>::infinity()
+          : -std::numeric_limits<scalar_t>::infinity();
+    }
+  }
+  const auto value = zeta<scalar_t, is_cuda>(exponent, x);
+  if (std::isfinite(x)) {
+    double coordinate = static_cast<double>(x);
+    double coordinate_low = 0.0;
+    if (x < scalar_t{0} && x != std::floor(x) && n % 2 == 0 &&
+        (std::floor(x) + std::ceil(x)) == (x + x)) {
+      coordinate = 1.0 - static_cast<double>(x);
+      coordinate_low = (1.0 - coordinate) - static_cast<double>(x);
+    }
+    if (coordinate > 0.0 &&
+        (std::isinf(gamma) || value < std::numeric_limits<scalar_t>::min() ||
+         std::isnan(value))) {
+      const double power = static_cast<double>(n) + 1.0;
+      const double normalized =
+          zeta_series<double, is_cuda, true>(power, coordinate);
+      const double log_scale =
+          polygamma_log_scale(n, coordinate, coordinate_low);
+      return static_cast<scalar_t>(
+          sign * std::exp(log_scale + std::log(normalized)));
+    }
+  }
+  return sign * gamma * value;
 }
 
 // regularized lower incomplete gamma
