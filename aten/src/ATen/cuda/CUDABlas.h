@@ -143,8 +143,10 @@ bool gemm_and_bias(
     // selection -- is identical, and duplicating it drifts.
     // c_ld is the leading dimension of C, which need not match result_ld: C and
     // D are separate tensors and may be padded differently.
-    // beta is ignored when a bias is supplied, since the epilogue applies the
-    // bias and the GEMM accumulates with beta == 0.
+    // beta is ignored when a bias is supplied: the epilogue applies the bias
+    // and the GEMM accumulates with beta == 0. The one exception is the
+    // fp16/bf16 Split-K workaround, which adds the bias as a C operand scaled
+    // by beta, and is therefore only used when beta == 1.
     const C_Dtype* c_ptr = nullptr,
     int64_t c_ld = 0,
     at::opmath_type<Dtype> beta = 1);

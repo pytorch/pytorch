@@ -1632,8 +1632,8 @@ bool gemm_and_bias(
   if constexpr (std::is_same_v<Dtype, at::Half>) {
 #ifndef USE_ROCM
     if (computeType == CUBLAS_COMPUTE_16F) {
-      halpha_val = alpha_val;
-      hbeta_val = beta_val;
+      halpha_val = static_cast<at::Half>(alpha_val);
+      hbeta_val = static_cast<at::Half>(beta_val);
       alpha_ptr = &halpha_val;
       beta_ptr = &hbeta_val;
     }
@@ -1644,12 +1644,12 @@ bool gemm_and_bias(
     auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
     if (fp16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
-      uint32_t mask =
+      uint32_t mask = static_cast<uint32_t>(
           fp16_reduction ==
                   at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
               ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
                  CUBLASLT_REDUCTION_SCHEME_NONE)
-              : CUBLASLT_REDUCTION_SCHEME_NONE;
+              : CUBLASLT_REDUCTION_SCHEME_NONE);
       preference.setAttribute(
           CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, mask);
     }
@@ -1657,12 +1657,12 @@ bool gemm_and_bias(
     auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
     if (bf16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
-      uint32_t mask =
+      uint32_t mask = static_cast<uint32_t>(
           bf16_reduction ==
                   at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
               ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
                  CUBLASLT_REDUCTION_SCHEME_NONE)
-              : CUBLASLT_REDUCTION_SCHEME_NONE;
+              : CUBLASLT_REDUCTION_SCHEME_NONE);
       preference.setAttribute(
           CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, mask);
     }
@@ -1697,15 +1697,18 @@ bool gemm_and_bias(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }
 
-  CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
-  CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
-  CuBlasLtMatrixLayout Cdesc(cType, m, n, c_ptr ? c_ld : result_ld);
+  const auto m_u = static_cast<uint64_t>(m);
+  const auto n_u = static_cast<uint64_t>(n);
+  const auto k_u = static_cast<uint64_t>(k);
+  CuBlasLtMatrixLayout Adesc(abType, m_u, k_u, mat1_ld, transpose_mat1);
+  CuBlasLtMatrixLayout Bdesc(abType, k_u, n_u, mat2_ld, transpose_mat2);
+  CuBlasLtMatrixLayout Cdesc(cType, m_u, n_u, c_ptr ? c_ld : result_ld);
   // When c_ptr is null, C aliases D and the layouts are identical, so reuse
   // Cdesc rather than paying for a second cublasLtMatrixLayoutCreate on what is
   // the hot nn.Linear path.
   std::optional<CuBlasLtMatrixLayout> Ddesc;
   if (c_ptr) {
-    Ddesc.emplace(cType, m, n, result_ld);
+    Ddesc.emplace(cType, m_u, n_u, result_ld);
   }
   const auto Ddesc_raw = c_ptr ? Ddesc->descriptor() : Cdesc.descriptor();
 
@@ -1725,21 +1728,95 @@ bool gemm_and_bias(
 #endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
-  int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-      ltHandle,
-      computeDesc.descriptor(),
-      Adesc.descriptor(),
-      Bdesc.descriptor(),
-      Cdesc.descriptor(),
-      Ddesc_raw,
-      preference.descriptor(),
-      1,
-      &heuristicResult,
-      &returnedResult));
+  auto Cdesc_raw = Cdesc.descriptor();
+  const void* c_operand = c_ptr ? c_ptr : result_ptr;
+  std::optional<CuBlasLtMatrixLayout> BiasCdesc;
+
+  const auto query_heuristic = [&]() -> bool {
+    int returnedResult = 0;
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+        ltHandle,
+        computeDesc.descriptor(),
+        Adesc.descriptor(),
+        Bdesc.descriptor(),
+        Cdesc_raw,
+        Ddesc_raw,
+        preference.descriptor(),
+        1,
+        &heuristicResult,
+        &returnedResult));
+    return returnedResult > 0;
+  };
+
+  bool found_algo = query_heuristic();
+#if !defined(USE_ROCM) && CUDA_VERSION < 13040
+  // With Split-K algorithms, the bias epilogue is applied after the reduced
+  // A @ B is rounded to the output dtype. For fp16 (same for bf16) this computes
+  //   f16(f32(f16(A @ B)) + f32(bias)),
+  // so A @ B can overflow or lose bits even when A @ B + bias is well within
+  // range, e.g. when a large bias cancels a large A @ B.
+  // For such algorithms we add the bias as a C operand (beta == 1, ld == 0)
+  // instead, which computes
+  //   f16(f32(A @ B) + f32(bias)),
+  // with a single rounding at the end.
+  // cuBLAS fixed this in 13.6.0.2 (CTK 13.3.1); we gate on CUDA < 13.4 to be safe.
+  // Explicit FP16 accumulation keeps its requested semantics and is excluded.
+  // TODO: the TunableOp cuBLASLt path (tunable/GemmCublaslt.h) can still select
+  // SplitK algorithms with the bias epilogue and is not covered by this workaround.
+  if constexpr (
+      std::is_same_v<Dtype, C_Dtype> &&
+      (std::is_same_v<Dtype, at::Half> || std::is_same_v<Dtype, at::BFloat16>)) {
+    const auto is_splitk_algo = [&]() -> bool {
+      int splitk_num = 0;
+      TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoConfigGetAttribute(
+          &heuristicResult.algo,
+          CUBLASLT_ALGO_CONFIG_SPLITK_NUM,
+          &splitk_num,
+          sizeof(splitk_num),
+          nullptr));
+      return splitk_num > 1;
+    };
+    // The bias is added unscaled by the epilogue and as beta * C otherwise, so
+    // the two are equivalent only for beta == 1. The algo is queried last.
+    if (found_algo && bias != nullptr && beta == static_cast<opmath_t>(1) &&
+        computeType != CUBLAS_COMPUTE_16F && is_splitk_algo()) {
+      computeDesc.setAttribute(
+          CUBLASLT_MATMUL_DESC_EPILOGUE, detail::cublasLtEpilogue(activation, static_cast<const Dtype*>(nullptr)));
+      computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, static_cast<const Dtype*>(nullptr));
+      BiasCdesc.emplace(abType, m_u, n_u, static_cast<int64_t>(0));
+      Cdesc_raw = BiasCdesc->descriptor();
+      c_operand = bias;
+      beta_val = beta;
+      preference.setAttribute(
+          CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES,
+          detail::getAlignment(reinterpret_cast<uintptr_t>(bias)));
+
+      // Try to reuse the selected algorithm, and re-query the heuristic if it
+      // cannot be reused or its workspace requirement no longer fits.
+      const auto algo = heuristicResult.algo;
+      cublasLtMatmulHeuristicResult_t checkResult = {};
+      const bool reusable =
+          cublasLtMatmulAlgoCheck(
+              ltHandle,
+              computeDesc.descriptor(),
+              Adesc.descriptor(),
+              Bdesc.descriptor(),
+              Cdesc_raw,
+              Ddesc_raw,
+              &algo,
+              &checkResult) == CUBLAS_STATUS_SUCCESS &&
+          checkResult.workspaceSize <= ltworkspace.size;
+      if (reusable) {
+        heuristicResult = checkResult;
+      } else {
+        found_algo = query_heuristic();
+      }
+    }
+  }
+#endif
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
-  if (returnedResult == 0) {
+  if (!found_algo) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
   }
   else {
@@ -1752,8 +1829,8 @@ bool gemm_and_bias(
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      c_ptr ? c_ptr : result_ptr,
-      Cdesc.descriptor(),
+      c_operand,
+      Cdesc_raw,
       result_ptr,
       Ddesc_raw,
       &heuristicResult.algo,
