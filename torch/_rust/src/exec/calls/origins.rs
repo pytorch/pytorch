@@ -12,7 +12,8 @@
 //   - at each BUILD_LIST / BUILD_TUPLE / BUILD_MAP / BUILD_CONST_KEY_MAP /
 //     BUILD_SLICE of the body or of a frame under it: the container's
 //     template, under the instruction's result value in its activation
-//     (built); before any instruction: the values it names (used).
+//     (built); before any instruction: the values it names (used); where
+//     the body leaves its block: each value it hands on (leaving).
 // What it guarantees
 //   - a tensor is known by identity through a weak reference with a C
 //     callback: the table counts no reference, an address stands for a
@@ -118,14 +119,18 @@ pub struct Origins {
     held: HashMap<usize, (Py<PyAny>, Origin)>,
     // A weak reference's address -> its tensor's address.
     weak: HashMap<usize, usize>,
-    // (activation, value) -> the container that value's BUILD made, and the
-    // operands of it taken by value that are no constants of the code.
-    built: HashMap<(u32, u32), (Made, Vec<String>)>,
+    // (activation, value) -> the container that value's BUILD made, the
+    // operands of it taken by value that are no constants of the code, and
+    // those known by their value only (valued).
+    built: HashMap<(u32, u32), (Made, Vec<String>, Vec<String>)>,
     // What is known of the values that are no tensors (known.rs).
     pub known: super::known::Known,
     // Operands taken by value, since record.rs last looked, that are no
     // constants of the code: the class and what made the value.
     pub baked: Vec<String>,
+    // Operands taken by value, since record.rs last looked, of which the
+    // class and the value are known and not which object they are.
+    pub valued: Vec<String>,
     pub consts: Vec<Py<PyAny>>,
     pub ninputs: u32,
     // Inputs, then pins, held weakly for the validation; the path each
@@ -143,6 +148,21 @@ pub struct Origins {
     roots: Vec<Pin>,
     // Immutable operands taken by value, by class.
     pub by_value: HashMap<&'static str, u64>,
+}
+
+// What is known of a value the body hands on, asked where it leaves: whether
+// it is known which object it is, or its value only (known.rs Kind), the
+// input it is, what made it if it is not known, and the container its BUILD
+// made if no instruction has named it since.
+#[derive(Default)]
+pub struct Leaving {
+    pub object: bool,
+    pub value: bool,
+    pub input: Option<u32>,
+    pub maker: String,
+    // (the template, its operands taken by value that are not known, those
+    // known by their value only)
+    pub built: Option<(Made, Vec<String>, Vec<String>)>,
 }
 
 pub unsafe fn plain_tensor(o: *mut PyObject) -> bool {
@@ -344,7 +364,7 @@ impl Origins {
     }
 
     pub fn built(&mut self, at: (u32, u32), made: Made) {
-        self.built.insert(at, (made, std::mem::take(&mut self.baked)));
+        self.built.insert(at, (made, std::mem::take(&mut self.baked), std::mem::take(&mut self.valued)));
     }
 
     // An instruction that is no entry and no BUILD names these values.
@@ -360,6 +380,24 @@ impl Origins {
         self.known.left(depth);
     }
 
+    // The value `at` of the body's activation is handed on by the block.
+    pub fn leaving(&mut self, at: (u32, u32)) -> Leaving {
+        Leaving { object: self.known.object(at), value: self.known.lit(at), input: self.known.input(at), maker: self.known.maker(at).to_string(), built: self.built.remove(&at) }
+    }
+
+    // Whether the object at `position` of what the run began on is `o`.
+    pub fn began_on(&self, position: u32, o: *mut PyObject) -> bool {
+        !o.is_null() && self.start.get(position as usize) == Some(&(o as usize))
+    }
+
+    // Whether the reads recorded so far lead to `o` from what was there
+    // before the run (reads.rs leads_to): the namespaces, the cells the run
+    // did not make, the roots that live.
+    pub unsafe fn led(&self, o: *mut PyObject) -> bool {
+        let roots: Vec<*mut PyObject> = self.roots.iter().filter_map(|r| r.live()).filter(|r| !r.is_null()).collect();
+        unsafe { crate::exec::reads::leads_to(o, &roots) }
+    }
+
     fn constant(&mut self, o: *mut PyObject) -> Tmpl {
         let at = self.consts.iter().position(|c| c.as_ptr() == o).unwrap_or_else(|| {
             self.consts.push(unsafe { Py::from_borrowed_ptr(Python::assume_attached(), o) });
@@ -372,7 +410,7 @@ impl Origins {
     // `depth`.
     pub unsafe fn template(&mut self, o: *mut PyObject, at: (u32, u32)) -> Made {
         unsafe {
-            if let Some((made, baked)) = self.built.remove(&at) {
+            if let Some((made, baked, _)) = self.built.remove(&at) {
                 self.baked.extend(baked);
                 return made;
             }
@@ -387,8 +425,7 @@ impl Origins {
                     Some(Origin::Part(j, i)) => Tmpl::Part(j, Box::new([i])),
                     Some(Origin::Unknown(by)) => return Err(format!("an operand of unknown origin: {} made by {by}", class_text(o))),
                     None => {
-                        let roots: Vec<*mut PyObject> = self.roots.iter().filter_map(|r| r.live()).filter(|r| !r.is_null()).collect();
-                        if !crate::exec::reads::leads_to(o, &roots) {
+                        if !self.led(o) {
                             return Err("an operand of unknown origin: a tensor no recorded read leads to".into());
                         }
                         let i = self.pins.len() as u32;
@@ -410,10 +447,15 @@ impl Origins {
                             if !self.exact.iter().any(|(p, _)| *p == position) {
                                 self.exact.push((position, Py::from_borrowed_ptr(Python::assume_attached(), o)));
                             }
-                            self.known.set(at, true, String::new);
+                            // By value: a later arrival is held to the class
+                            // and the value, not to the object (known.rs).
+                            self.known.set(at, Some(super::known::Kind::of(o, false)), String::new);
                         }
                         None => self.baked.push(format!("{} from {}", class_text(o), self.known.maker(at))),
                     }
+                }
+                if !self.known.object(at) {
+                    self.valued.push(class_text(o));
                 }
                 *self.by_value.entry(std::ffi::CStr::from_ptr((*ffi::Py_TYPE(o)).tp_name).to_str().unwrap_or("?")).or_default() += 1;
                 return Ok((self.constant(o), vec![class_of(o)]));

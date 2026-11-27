@@ -16,17 +16,54 @@
 //     exact Tensor / Parameter, the immutable classes, torch's constants,
 //     exact tuples, lists and dicts of those, and no `out=`;
 //   - a STOP, with the measured verdict, for a member whose results follow
-//     data, whose two calls differ, or that was not measured enough: no
-//     trace runs it, wherever it is called;
+//     data, under which the operators run differ with the data (O), whose
+//     two calls differ, or that was not measured enough: under 5 returning
+//     samples on a device, or under 5 whose results were compared on other
+//     data (what S rests on). No trace runs it, wherever it is called;
+//   - THE MEASURED DOMAIN (built, not enforced). The column `domain` has
+//     the classes of operands the member's returning samples had, place by
+//     place (a position, the receiver first, or a keyword's name). A call
+//     that hands an operand of another class in some place was not
+//     measured. With TORCH_RUST_RULES_DOMAIN=1 in the environment such a
+//     call has no row; with TORCH_RUST_RULES_UNSAMPLED=FILE it is written to
+//     FILE as `member, place, class`. Without them nothing is asked: the
+//     calls that real programs make are not all sampled yet;
 //   - a ROW PER FORM for a member that only its results following data
-//     stands against, where the samples tell its forms apart: behind such a
-//     member's line the file has a line per form of the operands (their
-//     classes, in the call's own shape: positional and keyword), computed
+//     stands against, where the samples tell its forms apart. A FORM is
+//     which places among a call's operands hold a tensor, or an exact list
+//     or tuple with a tensor in it (`0:T 1:T`, `0:[T]`; `plain`: none): a
+//     number is read once and is the same on every run of a region, the
+//     data of a tensor is not (a 0-dim tensor where an int is declared is
+//     read by the argument parser, and the sizes of the result follow it).
+//     Behind such a member's line the file has a line per form, computed
 //     from the samples of that form alone and read by the same verdict(). A
 //     call of a form whose line is a row has the row; a call of any other
-//     form, measured or not, stops the trace (formed_call);
-//   - LATER, with the family that will take it, for a member that writes or
-//     re-keys an operand (writes), draws, makes a tensor of no tensor or
+//     form, measured or not, stops the trace (formed_call). A member none of
+//     whose forms is a row, and whose calls that hand no tensor (`plain`: a
+//     factory's) are left to another family, is left to that family whole;
+//   - for a member that WRITES the memory of an operand and draws nothing
+//     (writer): a row that names the operands written, for any plain call,
+//     if every write measured is one the schema of its operator declares and
+//     no call measured changed an operand's key; else a row per form, each
+//     on its form's own samples, with a bool operand in the form by its
+//     value where the calls measured do not do the same under both
+//     (batch_norm writes its running statistics only in training, and no
+//     schema says so). A form in which an operand's KEY was changed in place
+//     (resize_, set_, requires_grad_, squeeze_, unsqueeze_, t_) is a stop:
+//     what a region finds or checks by that operand's key would no longer
+//     hold. Not so the one change every in-place write makes (of_the_write:
+//     the written operand comes to require grad when another operand does;
+//     copy_ has the samples): the code that was there before the table
+//     knows in-place writes under autograd, and a row takes none of it
+//     away. The row SAYS what is written
+//     (Write::Operands) and does nothing about it: whoever runs the call
+//     asks (the trace of today's engine through hand_over, from
+//     covered::step, before the call runs: the trace's one record of its
+//     writes is told of each tensor, torch/_rust_inductor/undo.py; given
+//     up, the trace undoes its writes, the last first, and it no longer
+//     takes the call for one that leaves nothing behind);
+//   - LATER, with the family that will take it, for a member that draws,
+//     makes a tensor of no tensor or
 //     follows ambient state (ambient), returns a fact or a value of a tensor
 //     (facts), or enters Python code under the call (native: on CUDA seven
 //     members go through the Python router of torch._native, whose frames
@@ -34,6 +71,12 @@
 //     code that decided before decides.
 // A torch callee that is not in the file is not this family's (Taken::No):
 // the name filter of shown.rs still decides for it.
+//
+// Where what is: this file reads the table and resolves its members;
+// torch/lines.rs is what a measured line means (verdict, writer);
+// torch/forms.rs the operands of a call (plain_call, formed_call);
+// torch/sampled.rs the measured domain; torch/writes.rs what a call with a
+// row writes, and the hand-over of it to today's trace.
 //
 // What it is given
 //   - by rules::rows, a callee as the instruction has it: the callable, a
@@ -45,8 +88,12 @@
 //   - a callee is matched by identity: a builtin and a method descriptor by
 //     the C definition they are made from (so `x.add` bound to a tensor is
 //     `Tensor.add`), anything else by its address;
-//   - under a trace rule() runs no code: it reads the table made before;
-//   - with no table (ready() did not run, or failed) every callee is a stop.
+//   - under a trace rule() and the rows' `before` run no Python code: they
+//     read the table, the constants of torch and the switches made by
+//     ready(), never make them (members() is called by ready(), by the dump
+//     and by the doors for tests only);
+//   - with no table (ready() did not run, or failed, or a name of the table
+//     resolves to nothing in this torch) every callee is a stop.
 // What it may not assume
 //   - that a row is all the license a call has: the checks that were there
 //     before the table still run behind it.
@@ -61,16 +108,39 @@ use pyo3::prelude::*;
 
 use super::super::ffi::{tr_bound_function, tr_partial_func};
 use super::super::{reads, scalars};
-use super::{Enters, Family, Group, Read, Res, Row, Scalars, Site, Taken, What, Write};
+use super::{Before, Enters, Family, Group, Read, Res, Row, Scalars, Site, Taken, What, Write, Written};
+
+mod forms;
+mod lines;
+mod sampled;
+mod writes;
+
+use forms::*;
+use lines::*;
+use sampled::*;
+pub use writes::{hand_over, only_computes};
+use writes::*;
 
 pub const FAMILY: Family = Family { name: "torch", rule, table };
 
 const WHY: &str = "Measured on the CPU and on CUDA: the call enters no Python frame, changes no operand's bytes or key, moves no generator, gives the same bits twice, and the count and keys of its results are the same for other data in operands of the same keys. It is run again on each call's operands.";
 const WHY_WARN: &str = "As a member that only computes, but it can show a warning: the frames of that are not the row's, and are asked about as any frame under the body.";
-const ROW: Row = Row { operands: &[], reads: &[], writes: Write::None, result: Res::Entry, enters: Enters::Never, scalars: Scalars::Operand, why: WHY, before: Some(plain_call) };
+const ROW: Row = Row { operands: &[], reads: &[], writes: Write::None, result: Res::Entry, enters: Enters::Never, scalars: Scalars::Operand, why: WHY, before: Some(plain_call), form: "" };
 const WHY_FORM: &str = "As a member that only computes, for the forms of operands measured so, each on its own samples: in another form of operands the count or the sizes of its results follow data, or it was not measured, and a call of that form stops the trace.";
-const ROW_FORM: Row = Row { operands: &[], reads: &[Read::Class], writes: Write::None, result: Res::Entry, enters: Enters::Never, scalars: Scalars::Operand, why: WHY_FORM, before: Some(formed_call) };
-const ROW_WARN: Row = Row { operands: &[], reads: &[], writes: Write::None, result: Res::Entry, enters: Enters::Foreign, scalars: Scalars::Operand, why: WHY_WARN, before: Some(plain_call) };
+const ROW_FORM: Row = Row { operands: &[], reads: &[Read::Class], writes: Write::None, result: Res::Entry, enters: Enters::Never, scalars: Scalars::Operand, why: WHY_FORM, before: Some(formed_call), form: "" };
+const ROW_WARN: Row = Row { operands: &[], reads: &[], writes: Write::None, result: Res::Entry, enters: Enters::Foreign, scalars: Scalars::Operand, why: WHY_WARN, before: Some(plain_call), form: "" };
+const WHY_WRITES: &str = "Measured on the CPU and on CUDA: the call writes the memory of the operands named and no other, changes no operand's key, moves no generator and gives the same bits twice; every write measured is one the schema of its operator declares, on the same operands in every form of the call that was measured.";
+const WHY_WRITES_FORM: &str = "As a member that writes operands, for one form of the call's operands (a bool among them by its value) on that form's own samples: which operands the call writes, declared by a schema or not, is what was measured in this form. A call of a form with no row stops the trace.";
+const ROW_WRITES: Row = Row { operands: &[], reads: &[], writes: Write::None, result: Res::Entry, enters: Enters::Never, scalars: Scalars::Operand, why: WHY_WRITES, before: Some(writing_call), form: "" };
+
+// The `before` functions of this family's rows, each by the function it
+// is, with what it refuses and what it records: the dump names a row's
+// `before` by this list, and a `before` that is not on it has no name.
+pub const BEFORES: &[(Before, &str, &str)] = &[
+    (plain_call, "plain_call", "refuses: a callee that is no member of the table; a call through a functools.partial or through a slot bound to its receiver; a builtin bound to a class or module that is not exactly a type or a module; `out=`; an operand that is not plain (an exact Tensor or Parameter, an immutable of the closed list, a constant of torch, the engine's stand-in for a number, an exact tuple, list or dict with str keys of those, 8 deep at most); with the domain switch on, an operand of a class no sample of the member had in its place. records: nothing (the operands are what the call is run again on)"),
+    (formed_call, "formed_call", "refuses: what plain_call refuses; a dict among the operands, or containers nested deeper than a form tells; a call whose form (the places that hold a tensor or an exact list or tuple with one, and each bool the form names by its value) has no line that is a row, or has a row of its own that is not this one. records: nothing"),
+    (writing_call, "writing_call", "refuses: what plain_call refuses, or formed_call if the row is for one form; a call that does not hand over, in its place, an operand the row says is written. records: nothing, and tells nobody: the tensors the call writes go to the trace's record of writes through hand_over, which the executor calls behind the license"),
+];
 
 // Resolves `names` as attributes from a loaded module on: `found[i]` is the
 // object, or None. Of a class it is the C member that the class or a base
@@ -99,8 +169,15 @@ struct Member {
     taken: Taken,
     // The object the name resolved to, by address (0: it did not).
     object: usize,
-    // The lines of its forms, if the file has them: a row or a stop each.
+    // The lines of its forms, if it goes by them: a row or a stop each.
     forms: Vec<(&'static str, Taken)>,
+    // Whether what a call of it is goes by the form of the call's operands.
+    by_form: bool,
+    // Whether its line says that it writes or re-keys an operand.
+    writer: bool,
+    // The classes its returning samples had in each place among their
+    // operands (a position, or a keyword's name).
+    domain: Vec<(&'static str, Vec<&'static str>)>,
 }
 
 struct Members {
@@ -111,40 +188,6 @@ struct Members {
 }
 
 static MEMBERS: OnceLock<Members> = OnceLock::new();
-
-// What a measured line means, a member's or a form's: the columns are
-// member, form, kind, cpu, cuda, out, P, W, K, D, S, R, A, L (the head of the
-// file says what each is). A line that is none of the cases written here is
-// a stop.
-fn verdict(line: &[&str]) -> Taken {
-    let &[_, _, _, cpu, cuda, _, p, w, k, d, s, r, a, l] = line else { return Taken::Stop("its line of the table of torch's members has other columns than the rules read") };
-    let is = |verdict: &str, word: &str| verdict.split('@').next() == Some(word);
-    let stop = |why: String| Taken::Stop(Box::leak(why.into_boxed_str()));
-    let enough = |n: &str| n.parse::<u32>().is_ok_and(|n| n >= 5);
-    if s.starts_with("data") {
-        stop(format!("the count or the sizes of its results follow the data of its operands, not only their keys (measured: {s})"))
-    } else if p.starts_with("yes") {
-        Taken::Later("native")
-    } else if !is(w, "no") || !is(k, "no") {
-        Taken::Later("writes")
-    } else if !is(d, "no") {
-        Taken::Later("ambient")
-    } else if r.starts_with("NO") {
-        stop(format!("two calls on the same operands give different bits (measured: {r})"))
-    } else if (l.contains("follows=") && !l.contains("follows=none")) || is(s, "no-sample") {
-        Taken::Later("ambient")
-    } else if a.starts_with("no-tensor-result") || l.contains("pyval=data") {
-        Taken::Later("facts")
-    } else if !is(s, "key") || !is(r, "yes") || !(is(p, "no") || p.starts_with("warn")) {
-        stop(format!("its measured line is none the rules know (P {p}, S {s}, R {r})"))
-    } else if !enough(cpu) || !enough(cuda) {
-        stop(format!("it has under 5 returning samples on a device (cpu {cpu}, cuda {cuda})"))
-    } else if p.starts_with("warn") {
-        Taken::Rows(&[ROW_WARN])
-    } else {
-        Taken::Rows(&[ROW])
-    }
-}
 
 // What identifies the C function behind a callable: for a builtin and a
 // method descriptor the definition both are made from, else the object.
@@ -162,23 +205,52 @@ unsafe fn key(f: *mut PyObject) -> usize {
 // The table, made on first use: runs Python code (RESOLVE).
 fn members() -> &'static Members {
     MEMBERS.get_or_init(|| {
-        let lines: Vec<Vec<&str>> = include_str!("torch_members.tsv").lines().filter(|l| !l.starts_with('#') && !l.is_empty()).skip(1).map(|l| l.split('\t').collect()).collect();
+        let lines: Vec<Vec<&'static str>> = include_str!("torch_members.tsv").lines().filter(|l| !l.starts_with('#') && !l.is_empty()).skip(1).map(|l| l.split('\t').collect()).collect();
         // A form's line comes behind its member's: a row, or a stop (what a
         // member's line leaves to another family is no row of a form).
         let mut all: Vec<Member> = vec![];
         for line in &lines {
             match (line.get(1), all.last_mut()) {
-                (Some(&"-"), _) => all.push(Member { name: line[0], taken: verdict(line), object: 0, forms: vec![] }),
+                // A member that writes: by its own line if that says of
+                // every write that a schema declares it and of no key that
+                // it changed (the lines of its forms then say no more);
+                // else by the lines of its forms, which follow.
+                (Some(&"-"), _) => all.push(match verdict(line) {
+                    Taken::Later("writes") => {
+                        let whole = writer(line, "");
+                        let declared = matches!(whole, Taken::Rows(rows) if matches!(rows[0].writes, Write::Operands(written) if written.iter().all(|w| w.declared)));
+                        Member { name: line[0], taken: whole, object: 0, forms: vec![], by_form: !declared, writer: true, domain: domain(line) }
+                    }
+                    taken => Member { name: line[0], taken, object: 0, forms: vec![], by_form: matches!(taken, Taken::Stop(_)), writer: false, domain: domain(line) },
+                }),
+                (Some(_), Some(member)) if member.name == line[0] && !member.by_form => {}
+                (Some(form), Some(member)) if member.name == line[0] && member.writer => member.forms.push((form, writer(line, form))),
                 (Some(form), Some(member)) if member.name == line[0] => member.forms.push((form, match verdict(line) {
                     Taken::Rows(_) => Taken::Rows(&[ROW_FORM]),
                     Taken::Stop(why) => Taken::Stop(why),
+                    // Calls that hand no tensor (a factory's): nothing to
+                    // compare, and another family's to take.
+                    Taken::Later(family) if *form == "plain" => Taken::Later(family),
                     _ => Taken::Stop("in this form it was not measured to only compute"),
                 })),
-                _ => all.push(Member { name: line[0], taken: Taken::Stop("its line of the table of torch's members is of no member"), object: 0, forms: vec![] }),
+                _ => all.push(Member { name: line[0], taken: Taken::Stop("its line of the table of torch's members is of no member"), object: 0, forms: vec![], by_form: false, writer: false, domain: vec![] }),
             }
         }
-        for member in all.iter_mut().filter(|m| m.forms.iter().any(|(_, taken)| matches!(taken, Taken::Rows(_)))) {
-            member.taken = Taken::Rows(&[ROW_FORM]);
+        // A member that goes by its forms has the rows of its forms. One
+        // that has none, and whose calls that hand no tensor are left to
+        // another family (a factory), is left to that family whole, as
+        // before its forms were measured apart: the code that decided
+        // before decides until that family takes it.
+        for member in all.iter_mut().filter(|m| m.by_form && !m.forms.is_empty()) {
+            let rows: Vec<Row> = member.forms.iter().filter_map(|(_, taken)| if let Taken::Rows(rows) = taken { Some(Row { ..rows[0] }) } else { None }).collect();
+            let later = member.forms.iter().find_map(|(_, taken)| if let Taken::Later(family) = taken { Some(*family) } else { None });
+            if !rows.is_empty() {
+                member.taken = if member.writer { Taken::Rows(Box::leak(rows.into_boxed_slice())) } else { Taken::Rows(&[ROW_FORM]) };
+            } else if let (Some(family), false) = (later, member.writer) {
+                member.taken = Taken::Later(family);
+            } else if member.writer && !matches!(member.taken, Taken::Stop(_)) {
+                member.taken = Taken::Stop("no form of its operands that was measured apart has a row");
+            }
         }
         let mut by_key = HashMap::new();
         let failed = Python::attach(|py| unsafe {
@@ -188,12 +260,21 @@ fn members() -> &'static Members {
             if ran.is_err() || found.is_null() || ffi::PyList_GET_SIZE(found) != all.len() as ffi::Py_ssize_t {
                 return true;
             }
+            // A name that resolves to nothing here: the table is not of
+            // this torch, and no callee can be told to be none of its
+            // members (one of its stops would be left to other code).
+            let mut unresolved = false;
             for (i, member) in all.iter_mut().enumerate() {
                 let object = ffi::PyList_GET_ITEM(found, i as ffi::Py_ssize_t);
                 if object != ffi::Py_None() {
                     member.object = object as usize;
                     by_key.insert(key(object), i);
+                } else {
+                    unresolved = true;
                 }
+            }
+            if unresolved {
+                return true;
             }
             // The table refers to its objects by address: kept for good.
             std::mem::forget(g.unbind());
@@ -208,15 +289,17 @@ fn members() -> &'static Members {
 pub fn ready() {
     members();
     super::super::torch_constant_types();
+    domain_switches();
 }
 
 // The member `f` calls: itself, the method a bound builtin is of, or what a
 // functools.partial calls.
 unsafe fn member(f: *mut PyObject) -> Option<&'static Member> {
-    let members = MEMBERS.get()?;
+    // (Read, never made here: members() makes it, from ready().)
+    let made = MEMBERS.get()?;
     let partial = tr_partial_func(f);
     let called = tr_bound_function(if partial.is_null() { f } else { partial });
-    members.by_key.get(&key(called)).map(|i| &members.all[*i])
+    made.by_key.get(&key(called)).map(|i| &made.all[*i])
 }
 
 // The name of the member `f` calls, for a refusal.
@@ -228,13 +311,28 @@ fn rule(what: &What) -> Taken {
     let What::Callee(f) = *what else { return Taken::No };
     match MEMBERS.get() {
         None => Taken::Stop("the table of torch's members is not made"),
-        Some(members) if members.failed => Taken::Stop("the table of torch's members could not be made"),
+        Some(made) if made.failed => Taken::Stop("the table of torch's members could not be made"),
         Some(_) => unsafe { member(f) }.map_or(Taken::No, |m| m.taken),
     }
 }
 
 fn table() -> Vec<(String, Taken)> {
     members().all.iter().map(|m| (m.name.to_string(), m.taken)).collect()
+}
+
+/// The `before` functions of the family's rows: for each of BEFORES its
+/// name, what it refuses and records, and how many rows of the table have
+/// it as their `before`; last, under the name ``"UNNAMED"``, how many rows
+/// have a `before` that is on no list.
+#[pyfunction]
+pub fn _rules_torch_befores() -> Vec<(String, String, usize)> {
+    let rows = members().all.iter().flat_map(|m| if let Taken::Rows(rows) = m.taken { rows.iter() } else { [].iter() });
+    let befores: Vec<usize> = rows.filter_map(|row| row.before.map(|f| f as usize)).collect();
+    let count = |f: Before| befores.iter().filter(|b| **b == f as usize).count();
+    let mut found: Vec<(String, String, usize)> = BEFORES.iter().map(|(f, name, says)| (name.to_string(), says.to_string(), count(*f))).collect();
+    let named: usize = found.iter().map(|(_, _, rows)| rows).sum();
+    found.push(("UNNAMED".into(), String::new(), befores.len() - named));
+    found
 }
 
 /// Every member of the table of torch's C callees: its name, the address of
@@ -261,134 +359,11 @@ pub fn _rules_torch_forms() -> Vec<(String, String, String)> {
     members().all.iter().flat_map(|m| m.forms.iter().map(|(form, taken)| (m.name.to_string(), form.to_string(), status(*taken)))).collect()
 }
 
-unsafe fn is_out(name: *mut PyObject) -> bool {
-    ffi::Py_TYPE(name) == &raw mut ffi::PyUnicode_Type && ffi::PyUnicode_CompareWithASCIIString(name, c"out".as_ptr()) == 0
-}
-
-// Whether a row takes the operand `o`: a plain tensor, an immutable, a
-// constant of torch, the engine's stand-in for a number, or an exact tuple,
-// list or dict (with str keys) of those. Err: why not.
-unsafe fn plain(o: *mut PyObject, depth: u8) -> Result<(), String> {
-    let tp = ffi::Py_TYPE(o);
-    if [Group::PlainTensor, Group::Immutable, Group::TorchConstant].iter().any(|g| g.holds(tp)) || scalars::stand_in(o) {
-        return Ok(());
-    }
-    let mut items = vec![];
-    if tp == &raw mut ffi::PyTuple_Type {
-        items.extend((0..ffi::PyTuple_GET_SIZE(o)).map(|i| ffi::PyTuple_GET_ITEM(o, i)));
-    } else if tp == &raw mut ffi::PyList_Type {
-        items.extend((0..ffi::PyList_GET_SIZE(o)).map(|i| ffi::PyList_GET_ITEM(o, i)));
-    } else if tp == &raw mut ffi::PyDict_Type {
-        let (mut at, mut k, mut v) = (0, std::ptr::null_mut(), std::ptr::null_mut());
-        while ffi::PyDict_Next(o, &mut at, &mut k, &mut v) != 0 {
-            if ffi::Py_TYPE(k) != &raw mut ffi::PyUnicode_Type || is_out(k) {
-                return Err("it is handed a dict with `out` or with a key that is no str".into());
-            }
-            items.push(v);
-        }
-    } else {
-        return Err(format!("it is handed a {}, and the member was measured on plain tensors, numbers and exact containers of them", reads::type_name(o)));
-    }
-    if depth == 8 || items.iter().any(|x| x.is_null()) {
-        return Err("it is handed containers nested more than 8 deep, or one that is being filled".into());
-    }
-    items.into_iter().try_for_each(|x| plain(x, depth + 1))
-}
-
-// The operands of a call of `f` in the call's order: the receiver of a bound
-// builtin, then what the instruction hands over (the values of the keywords
-// last). Err: a callee whose own operands are not all among them.
-unsafe fn operands(f: *mut PyObject, site: &Site) -> Result<Vec<*mut PyObject>, String> {
-    if !tr_partial_func(f).is_null() {
-        return Err("it is called through a functools.partial, whose own arguments are not among the operands".into());
-    }
-    let receiver = if ffi::Py_TYPE(f) == &raw mut ffi::PyCFunction_Type {
-        // What a builtin is bound to: nothing, its module or its class
-        // (nothing to look at), or the receiver of a method.
-        let bound = (*(f as *mut ffi::PyCFunctionObject)).m_self;
-        if bound.is_null() || ffi::PyType_Check(bound) != 0 || ffi::PyModule_Check(bound) != 0 { std::ptr::null_mut() } else { bound }
-    } else if tr_bound_function(f) == f {
-        std::ptr::null_mut()
-    } else {
-        return Err("it is called as a slot bound to its receiver, which is not among the operands".into());
-    };
-    Ok(std::iter::once(receiver).chain(site.operands.iter().copied()).filter(|o| !o.is_null() && *o != f).collect())
-}
-
-// The values a row is for: every operand plain, the receiver of a bound
-// builtin among them, and no `out=`. Records nothing: the operands are what
-// the call is run again on.
-unsafe fn plain_call(what: &What, site: &Site) -> Result<(), String> {
-    let What::Callee(f) = *what else { return Err("it is no call".into()) };
-    let operands = operands(f, site)?;
-    if !site.kwnames.is_null() && (0..ffi::PyTuple_GET_SIZE(site.kwnames)).any(|i| is_out(ffi::PyTuple_GET_ITEM(site.kwnames, i))) {
-        return Err("it passes out=, which the member writes: that form was measured apart and has no row yet".into());
-    }
-    operands.into_iter().try_for_each(|o| plain(o, 0))
-}
-
-// The form of an operand as the column `form` of the table names it; None:
-// an operand of a class, or nested deeper, than a form names.
-unsafe fn form(o: *mut PyObject, depth: u8) -> Option<String> {
-    let tp = ffi::Py_TYPE(o);
-    let named = [(&raw mut ffi::PyLong_Type, "int"), (&raw mut ffi::PyFloat_Type, "float"), (&raw mut ffi::PyBool_Type, "bool"), (ffi::Py_TYPE(ffi::Py_None()), "None")];
-    if Group::PlainTensor.holds(tp) {
-        return Some("T".into());
-    }
-    if let Some((_, name)) = named.iter().find(|(named, _)| *named == tp) {
-        return Some(name.to_string());
-    }
-    if tp as usize == super::super::torch_constant_types()[4] {
-        return Some("Size".into());
-    }
-    let (name, items): (&str, Vec<*mut PyObject>) = if tp == &raw mut ffi::PyTuple_Type {
-        ("tuple", (0..ffi::PyTuple_GET_SIZE(o)).map(|i| ffi::PyTuple_GET_ITEM(o, i)).collect())
-    } else if tp == &raw mut ffi::PyList_Type {
-        ("list", (0..ffi::PyList_GET_SIZE(o)).map(|i| ffi::PyList_GET_ITEM(o, i)).collect())
-    } else {
-        return None;
-    };
-    if depth == 8 {
-        return None;
-    }
-    let mut forms = items.into_iter().map(|x| if x.is_null() { None } else { form(x, depth + 1) }).collect::<Option<Vec<_>>>()?;
-    forms.sort();
-    forms.dedup();
-    Some(format!("{name}[{}]", forms.join(",")))
-}
-
-// The form of a call: of each positional operand in order, then name=form
-// of each keyword in the order of the names.
-unsafe fn call_form(operands: &[*mut PyObject], kwnames: *mut PyObject) -> Option<String> {
-    let named = if kwnames.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(kwnames) as usize };
-    let positional = operands.len().checked_sub(named)?;
-    let mut forms = operands[..positional].iter().map(|o| form(*o, 0)).collect::<Option<Vec<_>>>()?;
-    let mut keywords = vec![];
-    for (i, o) in operands[positional..].iter().enumerate() {
-        let name = ffi::PyUnicode_AsUTF8(ffi::PyTuple_GET_ITEM(kwnames, i as ffi::Py_ssize_t));
-        if name.is_null() {
-            ffi::PyErr_Clear();
-            return None;
-        }
-        keywords.push(format!("{}={}", CStr::from_ptr(name).to_str().ok()?, form(*o, 0)?));
-    }
-    keywords.sort();
-    forms.extend(keywords);
-    Some(forms.join(" "))
-}
-
-// The values a row of a member with forms is for: a plain call (plain_call)
-// whose form has a line that is a row. Records nothing, as plain_call; it is
-// asked wherever the call runs under a trace (the row reads classes), so a
-// form that stops does so under a call taken at another's word too.
-unsafe fn formed_call(what: &What, site: &Site) -> Result<(), String> {
-    plain_call(what, site)?;
-    let What::Callee(f) = *what else { return Err("it is no call".into()) };
-    let Some(member) = member(f) else { return Err("it is no member of the table".into()) };
-    let Some(form) = call_form(&operands(f, site)?, site.kwnames) else { return Err("it is handed an operand of a class no measured form of it has".into()) };
-    match member.forms.iter().find(|(named, _)| *named == form) {
-        Some((_, Taken::Rows(_))) => Ok(()),
-        Some((_, Taken::Stop(why))) => Err(format!("called on ({form}): {why}")),
-        _ => Err(format!("no call of it on ({form}) was measured apart, and on other operands the count or the sizes of its results follow data")),
-    }
+/// The classes of operands each member of the table was measured on:
+/// ``(member, place, classes)`` for every place among the operands (a
+/// position, the receiver first, or the name of a keyword) that a returning
+/// sample of the member had an operand in.
+#[pyfunction]
+pub fn _rules_torch_domain() -> Vec<(String, String, Vec<String>)> {
+    members().all.iter().flat_map(|m| m.domain.iter().map(|(place, classes)| (m.name.to_string(), place.to_string(), classes.iter().map(|c| c.to_string()).collect()))).collect()
 }

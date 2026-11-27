@@ -4686,7 +4686,7 @@ RULES_COLUMNS = {
         "Modules",
         "Attribute",
     ),
-    "writes": r"None|Slot|Handled|Fills\(\d+\)",
+    "writes": r"None|Slot|Handled|Fills\(\d+\)|Operands\(\w+!?(,\w+!?)*\)",
     "result": r"None|Lit|Entry|Slot|Part|Made|Pinned|Return|Operand\(\d+\)",
     "enters": r"Never|Named|Foreign",
     "scalars": r"None|Operand|Parts|Specialize",
@@ -4911,6 +4911,21 @@ def rules_opnames(code):
     return names
 
 
+# The stops of a stop program that the table is not heard about when the
+# program runs with the construct in the traced body: (program, stop) -> why.
+RULES_NOT_HEARD = {
+    # In the handler of the await's own exceptions, which no call entered.
+    ("await", "CLEANUP_THROW"): "beside",
+    # The assert holds on every call: the raise is in a branch never taken.
+    ("failed_assert", "LOAD_ASSERTION_ERROR"): "not run",
+    # The block ends for GET_LEN and MATCH_KEYS, which follow it.
+    ("match_mapping", "MATCH_MAPPING"): "beside",
+    ("match_sequence", "MATCH_SEQUENCE"): "beside",
+    # The generator's frame is not run by the executor at all.
+    ("yield_from", "GET_YIELD_FROM_ITER"): "not run",
+}
+
+
 @instantiate_parametrized_tests
 @unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmRulesOps(TestCase):
@@ -4981,11 +4996,32 @@ class TestVmRulesOps(TestCase):
         for op in ops:
             self.assertTrue(self.listed(table, op), op)
 
+    def asked(self, family, what):
+        """The keywords that ask the table about the What of a dump line."""
+        if family == "torch":
+            callee = TestVmRulesTorch.member(self, what)
+            return {"callee": callee, "operands": [callee]}
+        if what.startswith("<"):
+            return {"opcode": int(what[1:-1])}
+        opname, _, arg = what.partition(" ")
+        if opname.isupper():
+            return {"opcode": opcode.opmap[opname], "oparg": int(arg or 0)}
+        return {"kind": what}
+
     def test_the_dump_is_regular(self):
-        fields = {"row": 10, "stop": 4, "later": 4, "as": 4, "group": 4}
+        fields = {"row": 11, "stop": 4, "later": 4, "as": 4, "group": 4}
+        fields |= {"default": 5, "unheard": 4, "form": 6, "before": 5, "order": 5}
         table = self.statuses()
         seen = collections.Counter()
         dumped = set()
+        # What the dump says is left to a name, each as the table is asked
+        # about it.
+        left = collections.defaultdict(list)
+        defaults, unheard = {}, []
+        callables = collections.defaultdict(list)
+        for _, callee, kind, answer in rules_callables():
+            if answer in RULES_CALLEES:
+                callables[kind].append({"callee": callee, "operands": [callee]})
         for line in torch._rust._rules_dump().splitlines():
             parts = line.split("\t")
             with self.subTest(line=line):
@@ -4993,21 +5029,51 @@ class TestVmRulesOps(TestCase):
                 self.assertEqual(len(parts), fields[parts[0]])
                 self.assertTrue(all(parts))
                 seen[parts[0]] += 1
-                if parts[0] == "group":
+                if parts[0] in ("group", "form", "before", "order"):
+                    # (What these say: TestVmRulesDump.)
+                    continue
+                if parts[0] == "default" and parts[1] != "callees":
+                    continue
+                if parts[0] == "unheard":
+                    # A name, and what stands in for its rules.
+                    self.assertEqual(parts[1], "-")
+                    self.assertGreater(len(parts[3]), 60)
+                    unheard.append(parts[2])
+                    continue
+                if parts[0] == "default":
+                    # What a callee of a kind answers where no family lists
+                    # it: the name it is left under, or a stop; and why.
+                    _, family, kind, answer, why = parts
+                    self.assertEqual(family, "callees")
+                    self.assertEqual(answer, RULES_CALLEE_KINDS.get(kind))
+                    self.assertTrue(why.endswith("."), why)
+                    self.assertGreater(len(why), 60)
+                    self.assertNotIn(kind, defaults)
+                    defaults[kind] = answer
+                    # A kind with no object to ask about is not tested.
+                    self.assertTrue(callables[kind], kind)
+                    if answer.startswith("later:"):
+                        left[answer.partition(":")[2]] += callables[kind]
                     continue
                 how, family, what, *rest = parts
                 self.assertIn(family, RULES_FAMILIES)
+                if family == "torch" and how == "row":
+                    # (A row for one form of a call: `CALLEE (FORM)`.)
+                    what = what.partition(" (")[0]
                 dumped.add(
                     (what, how if how in ("row", "stop") else f"{how}:{rest[0]}")
                 )
                 if how == "later":
                     self.assertIn(rest[0], (*RULES_FAMILIES, *RULES_LATER))
-                if how in ("row", "stop"):
-                    # One sentence, or one reason.
+                    left[rest[0]].append(self.asked(family, what))
+                if how == "stop":
+                    # One reason.
                     self.assertGreater(len(rest[-1]), 20)
                 if how != "row":
                     continue
-                operands, reads, writes, result, enters, scalars, why = rest
+                operands, reads, writes, result, enters, scalars, why, before = rest
+                self.assertGreater(len(why), 20)
+                self.assertRegex(before, r"^(-|\w+)$")
                 self.assertRegex(operands, r"^(-|(-?\d+:\w+)(,-?\d+:\w+)*)$")
                 for read in reads.split(","):
                     self.assertIn(read, ("-", *RULES_COLUMNS["reads"]))
@@ -5023,6 +5089,36 @@ class TestVmRulesOps(TestCase):
         self.assertGreater(seen["stop"], 30)
         self.assertGreater(seen["row"], 30)
         self.assertGreater(seen["group"], 6)
+        # The defaults are every kind of callee, each once, and the names a
+        # call taken at another's word runs unheard are a list with no name
+        # twice.
+        self.assertEqual(defaults, RULES_CALLEE_KINDS)
+        self.assertEqual(sorted(unheard), sorted(RULES_UNHEARD))
+        # A `default` and an `unheard` line are what the table answers, asked
+        # about a What that the dump leaves to that name: left to the code
+        # that decided before, by that name; unheard at a word if the name is
+        # on the list, and a stop there if it is not.
+        hear = torch._rust._rules_hear
+        asked = collections.Counter()
+        for name, asks in left.items():
+            for what in asks:
+                with self.subTest(left_to=name, what=str(what)[:80]):
+                    plain = hear(**what)
+                    if name in RULES_FAMILIES and plain[0] in ("row", "stop"):
+                        # (A family written since: its own lines answer.)
+                        continue
+                    self.assertEqual(plain, ("older", name))
+                    word = hear(**what, at_a_word=True)
+                    if name in unheard:
+                        self.assertEqual(word, ("unheard", name))
+                    else:
+                        self.assertEqual(word[0], "stop")
+                        self.assertIn(name, word[1])
+                    asked[name] += 1
+        for name in unheard:
+            self.assertGreater(asked[name], 0, msg=f"nothing is left to {name}")
+        for kind in defaults:
+            self.assertGreater(len(callables[kind]), 0, msg=kind)
 
     def test_a_group_is_a_list_of_exact_classes(self):
         class Int(int):
@@ -5093,10 +5189,33 @@ class TestVmRulesOps(TestCase):
             for state, why in place.get("traces", ())
             if state != "region"
         ]
+        # Where a block ends because of an instruction, and why.
+        ends = [
+            str(place.get("why"))
+            for place in vm.regions(compiled)
+            if place.get("state") == "not movable"
+        ]
+        heard = {}
         for stop in RULES_STOPS[name][0]:
             met = sum(traces for _, what, _, traces, _, _ in rows if what == stop)
             named = sum(f"no row for: {stop} " in why for why in refusals)
             self.assertEqual(met, named, msg=f"{stop}: {refusals}")
+            # Whether the table was heard about it: a trace that met it was
+            # refused for it, or no trace came to it because a block ends in
+            # front of it for the table's reason.
+            told = sum(f"{stop} stops a trace: " in why for why in ends)
+            heard[stop] = named + told > 0
+        # A stop the table was not heard about is known, with why: it sits
+        # beside another stop of the construct that the table was heard
+        # about (one block's end is reported once), or in code no call ran.
+        for stop, was in heard.items():
+            if not was:
+                heard[stop] = "beside" if True in heard.values() else "not run"
+        expected = {
+            stop: RULES_NOT_HEARD.get((name, stop), True)
+            for stop in RULES_STOPS[name][0]
+        }
+        self.assertEqual(heard, expected, msg=f"{refusals} {ends}")
 
 
 # How a program comes to hand a region an object the region then knows by
@@ -8560,6 +8679,19 @@ TORCH_SIZED = {
         ("torch._pack_padded_sequence", "torch.lstm"),
         f"r = LSTM({TORCH_PACKED})[0].data",
     ),
+    "gru_packed": (
+        ("torch._pack_padded_sequence", "torch.gru"),
+        f"r = GRU({TORCH_PACKED})[0].data",
+    ),
+    "rnn_tanh_packed": (
+        ("torch._pack_padded_sequence", "torch.rnn_tanh"),
+        f"r = RNN_TANH({TORCH_PACKED})[0].data",
+    ),
+    "rnn_relu_packed": (
+        ("torch._pack_padded_sequence", "torch.rnn_relu"),
+        f"r = RNN_RELU({TORCH_PACKED})[0].data",
+    ),
+    "empty": (("torch.empty",), "r = torch.empty(6, 8).zero_() + y"),
 }
 # The ten rows that traces of real programs meet most, and `Tensor.to` for
 # a constant of torch among the operands: the construct, which makes `r`.
@@ -8579,67 +8711,80 @@ TORCH_ROWS = {
 # Calls of a member with a row that the row is not for.
 # A member that is sized by data in some forms of its operands and was
 # measured apart in each: by name, the member, the form of the call's
-# operands, and the lines of f behind `y = ...`.
+# operands (which places hold a tensor), and the lines of f behind `y = ...`.
 TORCH_FORM_ROWS = {
-    "split_sections": (
-        "torch.tensor_split",
-        "T int",
-        "r = torch.tensor_split(y, 2)[1]",
-    ),
-    "split_sections_dim": (
-        "torch.tensor_split",
-        "T int int",
-        "r = torch.tensor_split(y, 2, 1)[1]",
-    ),
-    "split_indices": (
-        "torch.tensor_split",
-        "T tuple[int]",
-        "r = torch.tensor_split(y, (1, 4))[1]",
-    ),
-    "split_indices_dim": (
-        "torch.tensor_split",
-        "T tuple[int] int",
-        "r = torch.tensor_split(y, (2, 5), 1)[1]",
-    ),
-    "split_method": (
-        "torch.Tensor.tensor_split",
-        "T tuple[int] int",
-        "r = y.tensor_split((2, 5), 1)[1]",
-    ),
-    "repeat": (
-        "torch.repeat_interleave",
-        "T repeats=int",
-        "r = torch.repeat_interleave(y, repeats=2)",
-    ),
-    "repeat_dim": (
-        "torch.repeat_interleave",
-        "T dim=int repeats=int",
-        "r = torch.repeat_interleave(y, repeats=2, dim=1)",
-    ),
-}
-# Calls of those members in a form with no row: one whose own samples are
-# sized by data, and forms no sample has (a keyword for a positional operand,
-# a list for a tuple, a tensor inside the tuple).
-TORCH_FORM_STOPS = {
-    "split_tensor": (
-        "torch.tensor_split",
-        f"r = torch.tensor_split(y, {TORCH_SPLITS})[1]",
-    ),
+    "split_sections": ("torch.tensor_split", "r = torch.tensor_split(y, 2)[1]"),
+    "split_sections_dim": ("torch.tensor_split", "r = torch.tensor_split(y, 2, 1)[1]"),
+    "split_indices": ("torch.tensor_split", "r = torch.tensor_split(y, (1, 4))[1]"),
     "split_keyword": ("torch.tensor_split", "r = torch.tensor_split(y, 2, dim=1)[1]"),
     "split_list": ("torch.tensor_split", "r = torch.tensor_split(y, [1, 4])[1]"),
-    "split_method_keyword": (
-        "torch.Tensor.tensor_split",
-        "r = y.tensor_split((2, 5), dim=1)[1]",
-    ),
+    "split_method": ("torch.Tensor.tensor_split", "r = y.tensor_split((2, 5), 1)[1]"),
+    "repeat": ("torch.repeat_interleave", "r = torch.repeat_interleave(y, repeats=2)"),
     "repeat_positional": (
         "torch.repeat_interleave",
         "r = torch.repeat_interleave(y, 2)",
     ),
+    "view": ("torch.Tensor.view", "r = y.view(-1)"),
+    "view_sizes": ("torch.Tensor.view", "r = y.view(2, 3, 8)"),
+    "reshape": ("torch.Tensor.reshape", "r = y.reshape(8, 6)"),
+    "reshape_four": ("torch.Tensor.reshape", "r = y.reshape(2, 3, 4, 2)"),
+    "sum": ("torch.Tensor.sum", "r = y.sum(1)"),
+    "sum_keywords": ("torch.Tensor.sum", "r = y.sum(dim=-1, keepdim=True)"),
+    "unsqueeze": ("torch.Tensor.unsqueeze", "r = y.unsqueeze(0)"),
+    "expand": ("torch.Tensor.expand", "r = y.expand(2, 6, 8)"),
+    "chunk": ("torch.Tensor.chunk", "r = y.chunk(2)[1]"),
+    "topk": ("torch.Tensor.topk", "r = y.topk(2)[0]"),
+    "narrow": ("torch.Tensor.narrow", "r = y.narrow(0, 1, 2)"),
+    "select": ("torch.Tensor.select", "r = y.select(0, 1)"),
+    "repeat_method": ("torch.Tensor.repeat", "r = y.repeat(2, 1)"),
+    "split_leaf": ("torch._C._VariableFunctions.split", "r = torch._VF.split(y, 2)[1]"),
+}
+# Calls of those members in a form with no row: a tensor in a place where
+# the calls measured so were sized by its data. By name: the member, the
+# form, the lines of f behind `y = ...`.
+TORCH_FORM_STOPS = {
+    "split_tensor": (
+        "torch.tensor_split",
+        "0:T 1:T",
+        f"r = torch.tensor_split(y, {TORCH_SPLITS})[1]",
+    ),
     "repeat_tensor": (
         "torch.repeat_interleave",
+        "0:T repeats:T",
         "r = torch.repeat_interleave(y.flatten(), repeats=(y.abs() * 2).long().flatten())",
     ),
+    "narrow_tensor": (
+        "torch.Tensor.narrow",
+        "0:T 2:T",
+        "r = y.narrow(0, torch.tensor(1), 2)",
+    ),
+    "view_tensor": ("torch.Tensor.view", "0:T 1:T", "r = y.view(torch.tensor(8), 6)"),
+    "reshape_tensor": (
+        "torch.Tensor.reshape",
+        "0:T 1:T",
+        "r = y.reshape(torch.tensor(8), 6)",
+    ),
+    "unsqueeze_tensor": (
+        "torch.Tensor.unsqueeze",
+        "0:T 1:T",
+        "r = y.unsqueeze(torch.tensor(1))",
+    ),
+    "chunk_tensor": (
+        "torch.Tensor.chunk",
+        "0:T 1:T",
+        "r = y.chunk(torch.tensor(2))[1]",
+    ),
+    "topk_tensor": ("torch.Tensor.topk", "0:T 1:T", "r = y.topk(torch.tensor(2))[0]"),
+    "select_tensor": (
+        "torch.Tensor.select",
+        "0:T 2:T",
+        "r = y.select(0, torch.tensor(1))",
+    ),
 }
+# Those of them that the form alone keeps out of a region. In the others a
+# 0-dim tensor stands where an int is declared: the argument parser reads
+# its value, and a trace is cut in front of a read of a value too.
+TORCH_FORM_STOPS_ALONE = {"split_tensor", "repeat_tensor", "narrow_tensor"}
 TORCH_NO_ROW = {
     "out": ("torch.add", "r = torch.zeros_like(y)\ntorch.add(y, 1.0, out=r)"),
     "partial": ("torch.add", "r = functools.partial(torch.add, y)(1.0)"),
@@ -8647,15 +8792,68 @@ TORCH_NO_ROW = {
 }
 
 
+def torch_key_of_the_write(written, rekeyed):
+    """Whether the measured column K names no change of a key, or only what
+    autograd makes of an in-place write that the column W names: the written
+    operand comes to require grad when another operand does."""
+    wrote = {w.partition("(")[0] for w in written.rpartition("@")[0].split(",")}
+    changes = rekeyed.rpartition("@")[0]
+    return changes == "no" or all(
+        one.partition("(")[0] in wrote
+        and set(one.partition("(")[2].partition(")")[0].split())
+        <= {"leaf", "requires_grad"}
+        for one in changes.split(",")
+    )
+
+
 def torch_source(construct):
     body = "\n".join(f"    {line}" for line in construct.splitlines())
     return (
         "import functools\nimport numpy\nimport torch\n"
         "import torch.nn.functional as F\nfrom torch.nn.utils import rnn\n"
-        "torch.manual_seed(0)\nLSTM = torch.nn.LSTM(2, 3)\n"
+        "torch.manual_seed(0)\n"
+        # (One line: the tests know the construct's line.)
+        "LSTM, GRU, RNN_TANH = torch.nn.LSTM(2, 3), torch.nn.GRU(2, 3), torch.nn.RNN(2, 3); "
+        "RNN_RELU = torch.nn.RNN(2, 3, nonlinearity='relu')\n"
         f"def f(x):\n    y = torch.sin(x) * 2.0 + torch.cos(x)\n{body}\n"
         "    return torch.tanh(y).sum() + (r * 2.0).sum(), r\n"
     )
+
+
+# A body with a member that has a row (gelu, a builtin bound to its module),
+# run 8 times under vm in a process of its own, after one thing is made
+# other about the table's names (sys.argv[1]): prints whether every call
+# gave eager's values, how often a region over f ran, and why traces were
+# refused or places had no region.
+TORCH_TABLE_PROGRAM = """
+import json, sys, types, torch, torch.nn.functional as F
+from torch import vm
+
+class Other(types.ModuleType):
+    pass
+
+if sys.argv[1] == "a_name_resolves_to_nothing":
+    del torch._C._nn.hardtanh_
+elif sys.argv[1] == "a_module_of_another_class":
+    torch._C._nn.__class__ = Other
+
+def f(x):
+    y = torch.sin(x) * 2.0 + torch.cos(x)
+    r = F.gelu(y)
+    return torch.tanh(y).sum() + (r * 2.0).sum(), r
+
+compiled = vm(f, passes=vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1))
+same = []
+for call in range(8):
+    x = torch.randn(6, 8, generator=torch.Generator().manual_seed(call))
+    got, want = compiled(x), f(x)
+    same.append(all(bool((a == b).all()) for a, b in zip(got, want, strict=True)))
+rows = [r for r in vm.regions(compiled) if r["function"] == "f"]
+runs = sum(r["runs"] for r in rows if r["state"] == "region")
+whys = {str(why) for r in rows for _, why in r.get("traces", ()) if why}
+whys |= {str(r["why"]) for r in rows if r.get("why")}
+print(json.dumps({"same": same, "runs": runs, "whys": sorted(whys)}))
+"""
 
 
 @instantiate_parametrized_tests
@@ -8666,8 +8864,8 @@ class TestVmRulesTorch(TestCase):
     nothing, repeat bit for bit and give results whose count and sizes do not
     follow data; the row is for plain operands and no ``out=``. A callee
     measured to do otherwise stops a trace wherever it is called, and one
-    that writes, draws or returns a fact is left to the code that decided
-    before. A callee that only the sizes of its results stand against, and
+    that draws or returns a fact is left to the code that decided before
+    (one that writes: TestVmRulesTorchWrites). A callee that only the sizes of its results stand against, and
     that was measured apart for each form of its operands, has a row for the
     forms whose own samples are clean; a call of it in any other form stops
     the trace. The table is a file of measured verdicts; every name in it is
@@ -8680,6 +8878,8 @@ class TestVmRulesTorch(TestCase):
         "kind",
         "cpu",
         "cuda",
+        "scpu",
+        "scuda",
         "out",
         "P",
         "W",
@@ -8689,6 +8889,8 @@ class TestVmRulesTorch(TestCase):
         "R",
         "A",
         "L",
+        "O",
+        "domain",
     ]
     KINDS = {
         "builtin": "builtin_function_or_method",
@@ -8743,11 +8945,13 @@ class TestVmRulesTorch(TestCase):
         for line in torch._rust._rules_dump().splitlines():
             how, family, what, *rest = line.split("\t")
             if family == "torch":
-                dumped[how] += 1
-                self.assertEqual(table[what].partition(":")[0], how)
-                if how == "row":
-                    self.assertEqual(rest[2:4], ["None", "Entry"])
-        self.assertEqual(sum(dumped.values()), len(table))
+                # (A row for one form of a call: `CALLEE (FORM)`.)
+                member, _, form = what.partition(" (")
+                dumped[member] += 1
+                self.assertEqual(table[member].partition(":")[0], how)
+                if how == "row" and rest[2] == "None" and not form:
+                    self.assertEqual(rest[3], "Entry")
+        self.assertEqual(len(dumped), len(table))
 
         def said(line, column):
             return line[column].rpartition("@")[0]
@@ -8755,6 +8959,7 @@ class TestVmRulesTorch(TestCase):
         # The members that are rows by a form of their operands.
         forms = torch._rust._rules_torch_forms()
         rows = {member for member, _, status in forms if status == "row"}
+        left = {member: status for member, _, status in forms if ":" in status}
 
         for line in self.lines():
             with self.subTest(member=line["member"]):
@@ -8765,46 +8970,103 @@ class TestVmRulesTorch(TestCase):
                 sized = said(line, "S").startswith("data")
                 python = said(line, "P").startswith("yes")
                 differs = said(line, "R").startswith("NO")
-                if status == "row" and not formed:
+                # It writes or re-keys an operand and draws nothing: a row
+                # of its own only if a schema declares every write measured
+                # and no key was changed; else by its forms (tested apart).
+                writer = not quiet and said(line, "D") == "no" and not sized
+                writer = writer and not python
+                if status == "row" and not formed and writer:
+                    for write in said(line, "W").split(","):
+                        self.assertEqual(write.partition("(")[2][:5], "decl;")
+                    self.assertTrue(torch_key_of_the_write(line["W"], line["K"]))
+                elif status == "row" and not formed:
                     self.assertTrue(quiet)
+                if writer:
+                    self.assertIn(status, ("row", "stop"))
+                if status == "row" and not formed:
                     self.assertIn(said(line, "P").partition("(")[0], ("no", "warn"))
                     self.assertEqual((said(line, "S"), said(line, "R")), ("key", "yes"))
-                    self.assertGreaterEqual(int(line["cpu"]), 5)
-                    self.assertGreaterEqual(int(line["cuda"]), 5)
+                    # Enough samples returned, and enough of them had their
+                    # results compared on other data, on each device.
+                    for count in ("cpu", "cuda", "scpu", "scuda"):
+                        self.assertGreaterEqual(int(line[count]), 5)
                     self.assertNotIn("no-tensor-result", line["A"])
+                    self.assertTrue(line["O"].startswith("nested=key"))
+                    self.assertNotEqual(line["domain"], "-")
+                # The operators under the call differ with the data.
+                if "nested=data" in line["O"]:
+                    self.assertEqual(status, "stop")
                 if sized or (differs and quiet and not python):
-                    self.assertEqual(
-                        status, "row" if line["member"] in rows else "stop"
-                    )
-                self.assertLessEqual(formed, sized and quiet and not python)
+                    member = line["member"]
+                    want = "row" if member in rows else left.get(member, "stop")
+                    self.assertEqual(status, want)
+                # (By its forms: a writer, or one that only its results
+                # following data, and draws, stand against.)
+                still = all(said(line, c) == "no" for c in "WK")
+                self.assertLessEqual(formed, writer or (sized and still and not python))
                 # Python under the call: neither a row nor yet a stop.
                 self.assertEqual(python and not sized, status == "later:native")
                 if status.startswith("later:"):
-                    self.assertFalse(sized)
+                    self.assertEqual(sized, line["member"] in left)
                     self.assertIn(status.partition(":")[2], RULES_LATER)
 
     def test_a_form_is_a_row_only_on_samples_of_its_own(self):
         forms = {
             (m, form): status for m, form, status in torch._rust._rules_torch_forms()
         }
-        lines = self.lines(forms=True)
-        self.assertEqual(sorted(forms), sorted((x["member"], x["form"]) for x in lines))
         members = {name: status for name, _, status in torch._rust._rules_torch()}
-        rows = collections.Counter()
+        # The lines of the forms of a member that goes by its own line (a
+        # writer whose every write a schema declares) say no more than it.
+        by_form = {member for member, _ in forms}
+        whole = {x["member"] for x in self.lines(forms=True)} - by_form
+        self.assertEqual({members[member] for member in whole}, {"row"})
+        writers = {
+            x["member"]
+            for x in self.lines()
+            if any(x[c].rpartition("@")[0] != "no" for c in "WK")
+            and "nested=data" not in x["O"]
+        }
+        self.assertLessEqual(whole, writers)
+        lines = [x for x in self.lines(forms=True) if x["member"] in by_form]
+        self.assertEqual(sorted(forms), sorted((x["member"], x["form"]) for x in lines))
+        rows, later = collections.Counter(), {}
         for line in lines:
             with self.subTest(member=line["member"], form=line["form"]):
                 status = forms[line["member"], line["form"]]
                 clean = [line[c].rpartition("@")[0] for c in "PWKDSR"]
-                enough = all(int(line[d]) >= 5 for d in ("cpu", "cuda"))
-                is_row = clean == ["no"] * 4 + ["key", "yes"] and enough
-                self.assertEqual(status, "row" if is_row else "stop")
+                enough = all(
+                    int(line[d]) >= 5 for d in ("cpu", "cuda", "scpu", "scuda")
+                ) and line["O"].startswith("nested=key")
+                if line["member"] in writers:
+                    # The form of a writer: what it writes is the row's.
+                    del clean[1]
+                    is_row = clean == ["no"] * 3 + ["key", "yes"] and enough
+                    self.assertEqual(status, "row" if is_row else "stop")
+                else:
+                    is_row = clean == ["no"] * 4 + ["key", "yes"] and enough
+                    is_row = is_row and "no-tensor-result" not in line["A"]
+                    self.assertEqual(status == "row", is_row)
+                    # Left to another family: calls that hand no tensor,
+                    # with nothing against them but that nothing was compared.
+                    if status.startswith("later:"):
+                        self.assertEqual(line["form"], "plain")
+                        self.assertNotIn("data", line["S"])
+                        self.assertIn(status.partition(":")[2], RULES_LATER)
+                        later[line["member"]] = status
                 self.assertNotIn("?", line["form"] if is_row else "")
+                self.assertRegex(
+                    line["form"],
+                    r"^(\?|plain|\w+:(T|\[T\]|True|False)( \w+:(T|\[T\]|True|False))*)$",
+                )
                 rows[line["member"]] += is_row
-        # A member is a row exactly if a form of it is.
+        # A member is a row exactly if a form of it is; with no such form it
+        # is left, whole, to the family a form of it is left to.
         for member, count in rows.items():
-            self.assertEqual(members[member], "row" if count else "stop")
+            want = "row" if count else later.get(member, "stop")
+            self.assertEqual(members[member], want, msg=member)
         self.assertEqual(
-            {m for m, _, _ in TORCH_FORM_ROWS.values()}, {m for m in rows if rows[m]}
+            {m for m, _ in TORCH_FORM_ROWS.values()},
+            {m for m in rows if rows[m] and m not in writers},
         )
 
     def test_every_data_sized_member_has_a_program(self):
@@ -8884,12 +9146,16 @@ class TestVmRulesTorch(TestCase):
     @parametrize("name", list(TORCH_FORM_ROWS))
     @checks_isolated
     def test_a_region_runs_over_a_form_that_is_a_row(self, name):
-        member, form, construct = TORCH_FORM_ROWS[name]
-        self.assertIn((member, form, "row"), torch._rust._rules_torch_forms())
+        member, construct = TORCH_FORM_ROWS[name]
+        # Every call here hands one tensor, its first operand.
+        self.assertIn((member, "0:T", "row"), torch._rust._rules_torch_forms())
         compiled = self.calls(construct)
         met, refused = self.met_and_refused(compiled, member)
         self.assertGreater(met, 0)
         self.assertEqual(refused, 0, msg=str(vm.regions(compiled)))
+        if name == "topk":
+            # (Its result is a structseq, which no block is over yet.)
+            return
         # As for a row: the call is on line 10.
         runs = sum(
             r["runs"]
@@ -8903,10 +9169,12 @@ class TestVmRulesTorch(TestCase):
     @parametrize("name", list(TORCH_FORM_STOPS))
     @checks_isolated
     def test_a_form_that_is_no_row_is_in_no_region(self, name):
-        member, construct = TORCH_FORM_STOPS[name]
+        member, form, construct = TORCH_FORM_STOPS[name]
+        self.assertIn((member, form, "stop"), torch._rust._rules_torch_forms())
         compiled = self.calls(construct)
         met, refused = self.met_and_refused(compiled, member)
-        self.assertGreater(refused, 0, msg=str(vm.regions(compiled)))
+        if name in TORCH_FORM_STOPS_ALONE:
+            self.assertGreater(refused, 0, msg=str(vm.regions(compiled)))
         self.assertEqual(met, refused, msg=str(vm.regions(compiled)))
 
     @parametrize("name", list(TORCH_NO_ROW))
@@ -8918,6 +9186,48 @@ class TestVmRulesTorch(TestCase):
         self.assertGreater(refused, 0)
         # (Through a partial the callee the trace met is the partial.)
         self.assertIn(met, (0, refused), msg=str(vm.regions(compiled)))
+
+    @parametrize(
+        "way",
+        ["as_measured", "a_name_resolves_to_nothing", "a_module_of_another_class"],
+    )
+    def test_the_table_is_of_this_torch_or_no_callee_has_a_row(self, way):
+        # A name of the table that resolves to nothing: the table is not of
+        # this torch, and every callee of torch stops a trace (a member's
+        # stop is not left to other code). A builtin whose module is of a
+        # class of its own: no row for that call.
+        ran = subprocess.run(
+            [sys.executable, "-c", TORCH_TABLE_PROGRAM, way],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+        found = json.loads(ran.stdout.splitlines()[-1])
+        self.assertEqual(found["same"], [True] * 8)
+        if way == "as_measured":
+            self.assertGreater(found["runs"], 0, msg=str(found))
+            return
+        self.assertEqual(found["runs"], 0, msg=str(found))
+        said = {
+            "a_name_resolves_to_nothing": "the table of torch's members could not be made",
+            "a_module_of_another_class": "a class or a module that is not exactly",
+        }[way]
+        self.assertTrue(any(said in why for why in found["whys"]), msg=str(found))
+
+    def test_every_before_of_the_family_is_on_its_list(self):
+        # The dump names a row's `before` by the function it is, from the
+        # family's list: no row of the table has a `before` that is not on
+        # it, and each says what it refuses and what it records.
+        found = torch._rust._rules_torch_befores()
+        self.assertEqual(
+            [name for name, _, _ in found],
+            ["plain_call", "formed_call", "writing_call", "UNNAMED"],
+        )
+        for name, says, rows in found[:-1]:
+            self.assertRegex(says, r"^refuses: .+\. records: .+", msg=name)
+            self.assertGreater(rows, 0, msg=name)
+        self.assertEqual(found[-1][2], 0)
 
 
 SHADOW_PROGRAM = """
@@ -9250,6 +9560,104 @@ def shifted(x):
     torch.relu_(y)
     return twice(y) + 1
 
+# Which object a value is: `is` between two operands the list knows by value.
+def is_float(x, a, b):
+    y = x * a
+    z = y * b
+    return z * (a is b)
+
+def is_int(x, a, b):
+    y = x * a
+    z = y * b
+    return z * (a is b)
+
+def is_str(x):
+    return x * 2 * (MODE is MODE_TOO)
+
+def is_tuple(x, a, b):
+    return (x[a] + x[b]) * (a is b)
+
+def is_constant(x, s):
+    y = x * s
+    return y * (s is 1.5)
+
+def is_global(x):
+    return x * SCALE * (SCALE is SCALE_TOO)
+
+def is_none(x):
+    return x * 2 * (NONE_FLAG is None)
+
+def is_true(x, a):
+    return x * a * (a is True)
+
+def writes_only(x):
+    x += 1.0
+    return x * 2
+
+# What a block hands on besides tensors, and the neighbour of each that has
+# no statement.
+def out_flag(x):
+    y = torch.relu(x) * 2
+    if NONE_FLAG is None:
+        y = y * 2
+    return y
+
+def out_flag_unknown(x):
+    y = torch.relu(x) * 2
+    if STATE["double"]:
+        y = y * 2
+    return y
+
+def out_input(x, k):
+    y = torch.relu(x) * 2
+    return k * (y if NONE_FLAG is None else x)
+
+def out_coincides(x, k):
+    y = torch.relu(x) * 2
+    if STATE["double"]:
+        y = y * 2
+    return y
+
+def out_tuple(x):
+    y = torch.relu(x) * 2
+    return y, x * 2
+
+def out_tuple_named(x):
+    y = torch.relu(x) * 2
+    t = (y, x * 2)
+    len(t)
+    return t
+
+def out_tuple_valued(x, k):
+    y = x * k * 2
+    return y, k
+
+def out_led(x):
+    f = torch.relu
+    y = torch.sigmoid(x) * 2
+    if NONE_FLAG is None:
+        y = f(y)
+    return y
+
+def out_iterator(x):
+    y = torch.relu(x) * 2
+    for t in PAIR:
+        y = y + 1
+    return y
+
+SCALE_TOO = SCALE
+MODE = MODE_TOO = "floor"
+CODE_FLOAT = [c for c in is_constant.__code__.co_consts if isinstance(c, float)][0]
+# Two objects of one value, per class: (the class's operands of the first
+# four calls, of the last two).
+TWO_OF = {
+    "is_float": ((1.5, float("1.5")), lambda v: (v[0], v[0]), lambda v: v),
+    "is_int": ((int("1000"), int("1000")), lambda v: (v[0], v[0]), lambda v: v),
+    "is_tuple": (((0, 1), tuple([0, 1])), lambda v: (v[0], v[0]), lambda v: v),
+    "is_constant": ((CODE_FLOAT, float("1.5")), lambda v: (v[0],), lambda v: (v[1],)),
+    "is_true": ((True,), lambda v: v, lambda v: v),
+}
+assert all(type(v[0]) is type(v[-1]) and v[0] == v[-1] and (v[0] is not v[-1] or len(v) == 1) for v, _, _ in TWO_OF.values())
 LATE = ("overlap", "shifted")
 # A collection is due after every second allocation; in `collects_garbage`
 # the collector is off until the body turns it on.
@@ -9263,14 +9671,20 @@ BETWEEN = {
     "patched": lambda: setattr(torch.Tensor, "audit_mark", 1),
     "patched_behind": lambda: setattr(torch.Tensor, "audit_mark", 1),
     "none_flag_under": lambda: globals().__setitem__("NONE_FLAG", 0),
+    "is_global": lambda: globals().__setitem__("SCALE_TOO", float("2.0")),
+    "is_str": lambda: globals().__setitem__("MODE_TOO", "".join(["flo", "or"])),
+    "out_flag": lambda: globals().__setitem__("NONE_FLAG", 0),
 }
 # What a program is called with besides (or in place of) the tensor, by call.
 ARGS = {"float_input": lambda i: (1.5,) if i < 4 else (2.5,)}
+ARGS.update({n: (lambda i, v=v, first=first, last=last: first(v) if i < 4 else last(v)) for n, (v, first, last) in TWO_OF.items()})
+ARGS.update(out_input=lambda i: (2.0 + i,), out_coincides=lambda i: (True,), out_tuple_valued=lambda i: (2.0,))
 KWARGS = ("in_kwargs",)
 # What a program changes before its second call: a way its first call, the
 # one the optimizer judged it by, did not take.
 EARLY = {"backward_under": lambda: STATE.__setitem__("double", False)}
 M0 = m.clone()
+SCALE0 = SCALE
 name = sys.argv[1]
 if name == "later_stops":
     print(json.dumps(later_stops()))
@@ -9282,7 +9696,7 @@ def run(f):
     bn.reset_running_stats()
     STATE.update(double=True, dead=[])
     KEEP.clear()
-    globals().update(SCALE=2.0, m=M0, NONE_FLAG=None)
+    globals().update(SCALE=SCALE0, SCALE_TOO=SCALE0, MODE_TOO=MODE, m=M0, NONE_FLAG=None)
     M0.copy_(M0C)
     default_helper.__defaults__ = (3,)
     GRAD.grad = None
@@ -9330,7 +9744,7 @@ print(json.dumps({"same": same, "regions": regions, "digest": digest.hexdigest()
 # program: (the instruction a recording of it stopped at, why): each a part of
 # the text the recorder gives.
 SHADOW_STOPS = {
-    "writer": ("relu_ (later: writes)", "ran under an instruction that is no entry (the last: aten::relu_)"),
+    "writer": ("relu_", "ran under an instruction that is no entry (the last: aten::relu_)"),
     "value_read": ("item (later: facts)", "aten::item"),
     "no_row": ("add", "has no row for these operands: it passes out="),
     "kept_list": ("cat", "a container the body did not build for this instruction: list"),
@@ -9342,9 +9756,9 @@ SHADOW_STOPS = {
     "callback": ("died", "a frame that no instruction of the body called"),
     "lost": ("relu_", "aten::relu_"),
     "in_a_dict_of_ints": ("Binary(*)", "a tensor no recorded read leads to"),
-    "length_of_a_global": ("Tensor.__len__", "it ran under call c builtins.len, which names no function"),
-    "finalizer_at_frame_exit": ("Quiet.__del__", "it ran under call py __main__.holds, whose callee's frame had been entered already"),
-    "class_called": ("Scaled.__init__", "it ran under call class __main__.Scaled, which names no function"),
+    "length_of_a_global": ("Tensor.__len__", "it ran under call c builtins.len (later: callees: builtins), which names no function"),
+    "finalizer_at_frame_exit": ("Quiet.__del__", "it ran under call py __main__.holds (later: callees: python functions), whose callee's frame had been entered already"),
+    "class_called": ("Scaled.__init__", "it ran under call class __main__.Scaled (later: callees: classes), which names no function"),
     "property_read": ("Holder.scale", "it ran under LoadAttr (later: attributes), which names no function"),
     "wrapped_descriptor_read": ("Getter.__get__", "it ran under LoadAttr (later: attributes), whose callee is another function"),
     "getattribute_read": ("Hooked.__getattribute__", "it ran under LoadAttr (later: attributes), whose callee is another function"),
@@ -9357,7 +9771,7 @@ SHADOW_STOPS = {
 # what the list took by value).
 SHADOW_PARTIAL = {
     "chain": ("a pin: the reads that lead to it are not run as a check on a later arrival yet", False),
-    "frame_under": ("no row: call py torch.nn.functional.relu", False),
+    "frame_under": ("no row: call py torch.nn.functional.relu (later: callees: python functions)", False),
     "in_place": ("the reads of the run are recorded, and nothing runs them as checks on a later arrival yet", False),
     "method_of_a_global": ("a pin: the reads that lead to it are not run as a check on a later arrival yet", False),
     "in_a_tuple": ("no row: BINARY_SUBSCR (later: subscripts) x tuple", False),
@@ -9425,6 +9839,18 @@ class TestVmCallsShadow(TestCase):
             "in_kwargs",
             "float_input",
             "cell_number",
+            "out_flag",
+            "out_flag_unknown",
+            "out_input",
+            "out_coincides",
+            "out_tuple",
+            "out_tuple_named",
+            "out_tuple_valued",
+            "out_led",
+            "out_iterator",
+            "writes_only",
+            "is_none",
+            "is_true",
         }  # fmt: skip
     )
 
@@ -9499,7 +9925,9 @@ class TestVmCallsShadow(TestCase):
                     for field in ("pins", "late", "unstated"):
                         self.assertEqual(found[field], 0, field)
                     self.assertEqual(found["jumps"][1], 0)
-                    self.assertFalse(found["validated"].startswith("DIFFERENT"))
+                    # It was run again on the recorded run's operands and
+                    # made what the block made.
+                    self.assertEqual(found["validated"], "equal")
                     self.assertFalse(found["again"].startswith("DIFFERENT"))
 
     @parametrize("name", PROGRAMS)
@@ -9518,6 +9946,9 @@ class TestVmCallsShadow(TestCase):
                 self.assertIn(kind, ("replayable", "partial", "stopped", "refused"))
                 self.assertEqual(kind == "stopped", found["stop"] is not None)
                 self.assertFalse(found["pins"] and kind == "replayable")
+                if kind == "replayable":
+                    self.assertEqual(found["validated"], "equal")
+                    self.assertFalse(found["again"].startswith("DIFFERENT"), found)
 
     def test_with_1_a_place_is_recorded_once_and_its_list_run_on_later_arrivals(self):
         # The run that was due for a trace is the recorded one; the block
@@ -9641,6 +10072,149 @@ class TestVmCallsShadow(TestCase):
         self.assertEqual(found["again"], "")
         # The witness saw the write the entry states, and nothing else.
         self.assertEqual([note for note in found["notes"] if "+=" in note], [])
+
+    def test_a_list_that_was_never_run_again_is_not_replayable(self):
+        # Every instruction of the block is an entry and nothing else is met:
+        # the list has no other reason. One of its entries writes, so it is
+        # never run again, and nothing shows that it is the body.
+        for mode in ("shadow", "1"):
+            found = [
+                s
+                for s in self.program("writes_only", mode)["shadow"]
+                if s["place"].startswith("writes_only:")
+            ][0]
+            self.assertEqual(found["stop"], None)
+            self.assertEqual(
+                [why for why, _ in found["reasons"]],
+                ["never run again and found equal: not validated: an entry writes"],
+            )
+            self.assertEqual(
+                found["status"],
+                "partial: never run again and found equal: not validated: an entry writes",
+            )
+            self.assertEqual(found["again"], "")
+
+    # program: (whether the list knows which objects the operands of its `is`
+    # are, whether the list, which took the answer for a constant, differs
+    # from the block once the program hands two objects of one value where
+    # it handed one).
+    IDENTITY = {
+        "is_float": (False, True),
+        "is_int": (False, True),
+        "is_tuple": (False, True),
+        "is_constant": (False, True),
+        "is_global": (False, True),
+        "is_str": (False, True),
+        "is_none": (True, False),
+        "is_true": (True, False),
+    }
+
+    @parametrize("name", list(IDENTITY))
+    def test_which_object_a_value_is_is_not_known_from_its_value(self, name):
+        # A float, an int, a str or a tuple the list is specialized on, or
+        # that a recorded read holds by value, is known by its class and its
+        # value: a later arrival with another object of that value passes
+        # every check. The answer of `is` between two of them is no constant
+        # of the list. None, True and False are one object each.
+        known, differs = self.IDENTITY[name]
+        baked = "an operand taken by value that is no constant of the code: bool from the result of IS_OP"
+        for mode in ("shadow", "1"):
+            # (Beside today's engine some of these programs are not eager's,
+            # with the variable and without: a region of the engine takes
+            # the answer for a constant. With 1 nothing is formed.)
+            out = self.program(name, mode, same=mode == "1")
+            found = [s for s in out["shadow"] if s["place"].startswith(name + ":")]
+            self.assertEqual(len(found), 1, found)
+            found = found[0]
+            reasons = [why for why, _ in found["reasons"]]
+            self.assertEqual(found["stop"], None)
+            self.assertEqual(baked not in reasons, known, reasons)
+            if not known:
+                self.assertTrue(found["status"].startswith("partial: "), found)
+            if mode == "1":
+                self.assertEqual(
+                    found["again"].startswith("DIFFERENT"), differs, found["again"]
+                )
+            self.assertFalse(
+                found["status"] == "replayable"
+                and found["again"].startswith("DIFFERENT")
+            )
+
+    # program: (how many outputs that are no tensors its first block's list
+    # states, the start of a reason that says an output has no statement,
+    # or None if every output is stated, whether the list was run again).
+    OUTPUTS = {
+        # The answer of a test on a global that is None: an object.
+        "out_flag": (1, None, True),
+        # The answer of a test on a value nothing knows.
+        "out_flag_unknown": (
+            0,
+            "an output that is not stated: bool, a value that is not known",
+            True,
+        ),  # noqa: B950
+        # A param on the stack where the first block ends, and the answer of
+        # its test.
+        "out_input": (2, None, True),
+        # The same answer, True, in a call whose param is True: no statement
+        # by which object it happens to be.
+        "out_coincides": (
+            0,
+            "an output that is not stated: bool, a value that is not known",
+            True,
+        ),  # noqa: B950
+        # A tuple built for the exit.
+        "out_tuple": (1, None, True),
+        # One that another instruction named before the exit.
+        "out_tuple_named": (
+            0,
+            "an output that is not stated: tuple, which holds results of entries, which no BUILD of the run made for the exit",
+            False,
+        ),  # noqa: B950
+        # One with a float the list is specialized on: its value is known,
+        # not which object the tuple holds.
+        "out_tuple_valued": (
+            0,
+            "an output that is not stated: tuple, which holds results of entries, built of a value known by its value only: float",
+            False,
+        ),  # noqa: B950
+        # A function the reads lead to, and the answer of the test.
+        "out_led": (2, None, True),
+        # The iterator of a loop: only a template of outputs could state it.
+        "out_iterator": (0, "an output only a template states: list_iterator", True),
+    }
+
+    @parametrize("name", list(OUTPUTS))
+    def test_an_output_is_stated_from_where_its_value_is_from(self, name):
+        stated, unstated, ran = self.OUTPUTS[name]
+        for mode in ("shadow", "1"):
+            out = self.program(name, mode)
+            found = [s for s in out["shadow"] if s["place"].startswith(name + ":")][0]
+            self.assertEqual(found["stop"], None, found)
+            reasons = [why for why, _ in found["reasons"]]
+            without = [why for why in reasons if why.startswith("an output")]
+            self.assertEqual(found["stated"], stated, found)
+            if unstated is None:
+                self.assertEqual(without, [])
+            else:
+                self.assertEqual(len(without), 1, without)
+                self.assertTrue(without[0].startswith(unstated), without)
+            # What is stated is compared on the later arrivals: the block
+            # made it there too, or the program had changed what the list
+            # rests on (out_flag sets the global before its fifth call). A
+            # list none of whose outputs is a result is never run again.
+            if not ran:
+                self.assertTrue(found["validated"].startswith("not validated"))
+                self.assertEqual(found["again"], "")
+                continue
+            self.assertEqual(found["validated"], "equal")
+            if name == "out_flag":
+                self.assertEqual(
+                    found["again"],
+                    "DIFFERENT on a later arrival: output 1 of the block is a bool where the list states a value it knows",  # noqa: B950
+                )
+            else:
+                self.assertTrue(found["again"].startswith("equal on "), found["again"])
+                self.assertIn(", 0 not comparable", found["again"])
 
     def test_a_witness_that_disagrees_with_its_entry_gates_the_validation(self):
         # linalg.cond's row says it only computes; an operator under it
@@ -9929,17 +10503,709 @@ class TestVmCallsShadow(TestCase):
         self.assertTrue(out["same"])
         found = self.reached("del_temporary")
         reasons = [why.split(" x ")[0] for why, _ in found["reasons"]]
-        self.assertIn("no row: call class __main__.Logged", reasons)
+        self.assertIn(
+            "no row: call class __main__.Logged (later: callees: classes)", reasons
+        )
 
-    def test_state_is_eagers_and_its_writer_stops_the_recording(self):
-        # Batch norm in training mode writes its running statistics.
+    def test_state_is_eagers_and_a_list_with_its_writer_is_not_run_again(self):
+        # Batch norm in training mode writes its running statistics: its
+        # row says so, the call is an entry that is not pure, and a list
+        # with it is never run a second time to be compared.
         found = [
-            s
-            for s in self.program("state")["shadow"]
-            if s["stop"] and "batch_norm" in s["stop"][0]
+            s for s in self.program("state")["shadow"] if "batch_norm" in s["text"]
         ]
         self.assertTrue(found)
-        self.assertIn("later: writes", found[0]["stop"][0])
+        for recording in found:
+            self.assertNotEqual(recording["status"], "replayable")
+            self.assertEqual(recording["validated"], "not validated: an entry writes")
+            self.assertEqual(recording["again"], "")
+
+
+# Members that write the operand they are called on, each with a call of it
+# on line 10 of the program (torch_source): the lines of f behind `y = ...`.
+# STATE is a tensor of the module, which outlives every call: what a region
+# over the member leaves in it is compared after every call. A member that
+# gives the same for what it wrote before is handed other values first, by
+# a store (no member).
+TORCH_WRITERS = {
+    "torch.Tensor.add_": "r = STATE.add_(1.5)",
+    "torch.Tensor.mul_": "r = STATE.mul_(y * 0.5)",
+    "torch.Tensor.sub_": "r = STATE.sub_(y, alpha=2)",
+    "torch.Tensor.clamp_": "STATE[:] = y\nr = STATE.clamp_(min=0.0)",
+    "torch.Tensor.zero_": "STATE[:] = y\nr = STATE.zero_()",
+    "torch.Tensor.addcmul_": "r = STATE.addcmul_(y, y, value=0.5)",
+    "torch.relu_": "STATE[:] = y\nr = torch.relu_(STATE)",
+    "torch.sigmoid_": "STATE[:] = y\nr = torch.sigmoid_(STATE)",
+    "torch._C._nn.leaky_relu_": "STATE[:] = y\nr = F.leaky_relu(STATE, 0.1, inplace=True)",
+    "torch._C._nn.hardtanh_": "STATE[:] = y\nr = F.hardtanh(STATE, -0.5, 0.5, inplace=True)",
+    "torch.Tensor.copy_": "r = STATE.copy_(y)",
+}
+
+
+def torch_writer_source(construct):
+    """A module with f, args(call) and read(): f runs the construct, whose
+    last line calls a member that writes STATE."""
+    body = "\n".join(f"    {line}" for line in construct.splitlines())
+    return (
+        "import torch\nimport torch.nn.functional as F\n"
+        "STATE = torch.full((6, 8), 0.5)\n"
+        "def read():\n    return (STATE.clone(),)\n"
+        "def args(call):\n"
+        "    seed = torch.Generator().manual_seed(call // 2)\n"
+        "    return (torch.randn(6, 8, generator=seed),)\n"
+        f"def f(x):\n    y = torch.sin(x) * 2.0 + torch.cos(x)\n{body}\n"
+        "    return torch.tanh(y).sum() + (r * 2.0).sum(), r\n"
+    )
+
+
+# Calls that change the key of the tensor they are called on in place: by
+# name, the member and the lines of f behind `y = ...`.
+TORCH_REKEYS = {
+    "unsqueeze_": ("torch.Tensor.unsqueeze_", "r = y * 1.0\nr.unsqueeze_(0)"),
+    "t_": ("torch.Tensor.t_", "r = y * 1.0\nr.t_()"),
+    "resize_": ("torch.Tensor.resize_", "r = y * 1.0\nr.resize_(4, 8)"),
+    "set_": ("torch.Tensor.set_", "r = torch.zeros(2)\nr.set_(y)"),
+    "requires_grad_": (
+        "torch.Tensor.requires_grad_",
+        "r = (y * 1.0).detach()\nr.requires_grad_()",
+    ),
+    "squeeze_": ("torch.Tensor.squeeze_", "r = y[None] * 1.0\nr.squeeze_(0)"),
+}
+# Programs with a batch norm that has running statistics, each a module with
+# f, args(call) and read() (the statistics): `raises` has an operator behind
+# the batch norm that raises on some calls; `read` reads a value of the
+# running mean behind it; `given_up` calls, behind it, a function no trace
+# gets through (a trace that came that far is given up and the code runs
+# again as written); `eval` is not in training. `{w}`: the weight and the
+# bias, or None for both.
+TORCH_NORM_HEAD = (
+    "import torch\nimport torch.nn.functional as F\n"
+    "RM, RV = torch.zeros(8), torch.ones(8)\n"
+    "W, B = torch.full((8,), 1.5), torch.full((8,), 0.25)\n"
+    "def read():\n    return RM.clone(), RV.clone()\n"
+    "def args(call):\n"
+    "    x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call))\n"
+    "    return x, torch.tensor([0, 9 if call >= 8 and call % 5 == 0 else 3])\n"
+)
+TORCH_NORMS = {
+    "raises": (
+        "def f(x, idx):\n"
+        "    y = F.batch_norm(x, RM, RV, {w}, True, 0.5, 1e-5)\n"
+        "    z = (y * 3 + 1).cos().tanh()\n"
+        "    return z.index_select(1, idx).exp().sum(0)\n"
+    ),
+    "read": (
+        "def f(x, idx):\n"
+        "    y = F.batch_norm(x, RM, RV, {w}, True, 0.5, 1e-5)\n"
+        "    k = RM.sum().item()\n"
+        "    return (y * 3 + 1).cos().tanh() * k\n"
+    ),
+    "given_up": (
+        "def f(x, idx):\n"
+        "    y = F.batch_norm(x, RM, RV, {w}, True, 0.5, 1e-5)\n"
+        "    u = torch.unique((y * 2).round())\n"
+        "    return (y * 3 + 1).cos().tanh() * u.sum()\n"
+    ),
+    "eval": (
+        "def f(x, idx):\n"
+        "    y = F.batch_norm(x, RM, RV, {w}, False, 0.5, 1e-5)\n"
+        "    return (y * 3 + 1).cos().tanh()\n"
+    ),
+    # Nothing reads what the call returns: it is no dead code.
+    "unused": (
+        "def f(x, idx):\n"
+        "    F.batch_norm(x, RM, RV, {w}, True, 0.5, 1e-5)\n"
+        "    return (x * 3 + 1).cos().tanh() + (RM * 0.01).sum()\n"
+    ),
+    "stats_unused": (
+        "def f(x, idx):\n"
+        "    torch.batch_norm_update_stats(x, RM, RV, 0.5)\n"
+        "    return (x * 3 + 1).cos().tanh() + (RM * 0.01).sum()\n"
+    ),
+}
+
+
+# What the license of an instruction names outside the source of the rule
+# table: entries of the C API that run no code (types, fields, the items of
+# exact tuples, lists and dicts, texts), functions of the executor that
+# read and record, and one table made on first use (imports.rs names(),
+# from C-level dicts). A name that is not here is a way into Python until
+# it was looked at and is written here.
+RULES_LICENSE_NAMES = [
+    "ffi::PyBool_Type",
+    "ffi::PyBytes_Type",
+    "ffi::PyCFunctionObject",
+    "ffi::PyCFunction_Type",
+    "ffi::PyClassMethodDescr_Type",
+    "ffi::PyComplex_Type",
+    "ffi::PyDict_Next",
+    "ffi::PyDict_Type",
+    "ffi::PyErr_Clear",
+    "ffi::PyFloat_Type",
+    "ffi::PyFunction_Type",
+    "ffi::PyImport_GetModuleDict",
+    "ffi::PyList_GET_ITEM",
+    "ffi::PyList_GET_SIZE",
+    "ffi::PyList_Type",
+    "ffi::PyLong_AsLong",
+    "ffi::PyLong_Type",
+    "ffi::PyMethodDescrObject",
+    "ffi::PyMethodDescr_Type",
+    "ffi::PyModule_Check",
+    "ffi::PyModule_GetDef",
+    "ffi::PyModule_GetDict",
+    "ffi::PyModule_Type",
+    "ffi::PySet_Type",
+    "ffi::PyTuple_GET_ITEM",
+    "ffi::PyTuple_GET_SIZE",
+    "ffi::PyTuple_Type",
+    "ffi::PyTypeObject",
+    "ffi::PyType_Check",
+    "ffi::PyType_GetFlags",
+    "ffi::PyType_Type",
+    "ffi::PyUnicode_AsUTF8",
+    "ffi::PyUnicode_CompareWithASCIIString",
+    "ffi::PyUnicode_FindChar",
+    "ffi::PyUnicode_FromFormat",
+    "ffi::PyUnicode_GetLength",
+    "ffi::PyUnicode_InternFromString",
+    "ffi::PyUnicode_Substring",
+    "ffi::PyUnicode_Type",
+    "ffi::PyWrapperDescr_Type",
+    "ffi::Py_DECREF",
+    "ffi::Py_Ellipsis",
+    "ffi::Py_False",
+    "ffi::Py_None",
+    "ffi::Py_TPFLAGS_TYPE_SUBCLASS",
+    "ffi::Py_TYPE",
+    "ffi::Py_True",
+    "ffi::Py_XDECREF",
+    "ffi::Py_XINCREF",
+    "ffi::Py_ssize_t",
+    "opcodes::caches",
+    "opcodes::name",
+    "reads::attr",
+    "reads::class_is",
+    "reads::dict_get",
+    "reads::subscript",
+    "reads::text",
+    "reads::type_name",
+    "scalars::stand_in",
+    "super::super::plain_tensor_types",
+    "super::super::super::torch_constant_types",
+    "super::super::torch_constant_types",
+    "the word get_or_init",
+]
+
+
+def rules_license_reach(rules):
+    """By the source under exec/rules: what the license of an instruction
+    can run, and what that names outside the table's own source. Returns
+    (reach, names, python). `reach`: the functions reachable from
+    rules::license, each family's rule and each row's `before` by a call, a
+    method call or a function handed over by its name, as (file, function).
+    `names`: every path those functions name that is not of the table's own
+    modules, enums and structs or of Rust's library, and the words of pyo3
+    and of making on first use in their text. `python`: every function of
+    the source, reached or not, with such a word or a call of
+    scalars::tell."""
+    texts = {}
+    for path in sorted(glob.glob(os.path.join(rules, "**", "*.rs"), recursive=True)):
+        with open(path) as f:
+            text = re.sub(r"//[^\n]*", "", f.read())
+        text = re.sub(r'"(?:[^"\\]|\\.)*"', '""', text)
+        texts[os.path.relpath(path, rules)] = text
+    head = re.compile(r"^\s*(?:pub(?:\([a-z]+\))? )?(?:unsafe )?fn (\w+)", re.MULTILINE)
+    bodies = {}
+    for file, text in texts.items():
+        found = list(head.finditer(text))
+        for m, following in zip(found, found[1:] + [None]):
+            end = following.start() if following else len(text)
+            bodies[file, m.group(1)] = text[m.end() : end]
+    defined = collections.defaultdict(list)
+    for file, name in bodies:
+        defined[name].append(file)
+    own = {os.path.splitext(os.path.basename(file))[0] for file in texts}
+    own |= {"super", "self", "rules"}
+    types = {
+        t
+        for text in texts.values()
+        for t in re.findall(r"\b(?:enum|struct) (\w+)", text)
+    }
+    library = {"Box", "Vec", "HashMap", "OnceLock", "CStr", "String"}
+    library |= {"std", "str", "u8", "usize"}
+    words = ("py", "Python", "Bound", "pyo3", "get_or_init", "assume_attached")
+
+    def named(file, name):
+        if (file, name) in bodies:
+            return [(file, name)]
+        return [(other, name) for other in defined.get(name, ())]
+
+    todo = named("mod.rs", "license")
+    for file, text in texts.items():
+        for name in re.findall(r"before: Some\((\w+)\)", text):
+            todo += named(file, name)
+        for name in re.findall(r'Family \{ name: "", (\w+), \w+ \}', text):
+            todo += named(file, name)
+    reach, names = set(), set()
+    while todo:
+        file, name = todo.pop()
+        if (file, name) in reach:
+            continue
+        reach.add((file, name))
+        body = bodies[file, name]
+        for path in re.findall(r"\b((?:\w+::)+\w+)", body):
+            first, last = path.split("::")[0], path.split("::")[-1]
+            if first in own and last in defined:
+                todo += named(file, last)
+            elif first in own and last[0].islower():
+                # Something of the executor's, named from the table's place.
+                names.add(path)
+            elif first in own or first in types or first in library:
+                continue
+            # (Of a type that is not the table's: its functions; a variant,
+            # a constant or a type is data.)
+            elif first[0].islower() or last[0].islower():
+                names.add(path)
+        # A call, a method call, or a function handed over by its name.
+        calls = re.findall(r"\b(\w+)\s*\(", body)
+        for called in calls + re.findall(r"[(,]\s*(\w+)\s*\)", body):
+            todo += named(file, called)
+        names |= {f"the word {w}" for w in words if re.search(rf"\b{w}\b", body)}
+    python = {
+        function
+        for function, body in bodies.items()
+        if any(re.search(rf"\b{w}\b", body) for w in (*words, "tell"))
+    }
+    return reach, names, python
+
+
+# A body with a callee that writes, run 10 times under vm: prints, per call,
+# what f returned and the state behind it, and the recordings of the
+# recorder of call lists (none unless TORCH_RUST_CALLS=shadow).
+TORCH_WRITES_SHADOW = """
+import json, sys, torch, torch.nn.functional as F
+from torch import vm
+
+RM, RV = torch.zeros(8), torch.ones(8)
+KEPT = torch.zeros(4, 8)
+
+def norm(x):
+    y = F.batch_norm(x, RM, RV, None, None, True, 0.5, 1e-5)
+    return (y * 3 + 1).cos().tanh()
+
+def relu(x):
+    y = torch.relu_(x * 1.5)
+    KEPT.copy_(y)
+    return torch.relu_(KEPT).sum(0) + y.tanh().sum(0)
+
+f = {"norm": norm, "relu": relu}[sys.argv[1]]
+compiled = vm(f, passes=vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1))
+calls = []
+for call in range(10):
+    x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call))
+    out = compiled(x)
+    calls.append([out.tolist(), RM.tolist(), RV.tolist(), KEPT.tolist()])
+shadow = [{k: r[k] for k in ("status", "validated", "text", "reasons", "stop")} for r in torch._rust._calls_shadow()]
+print(json.dumps({"calls": calls, "shadow": shadow}))
+"""
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRulesTorchWrites(TestCase):
+    """A C callee of torch that was measured to write the memory of an
+    operand has a row that names the operands written, as measured: for any
+    plain call where a schema declares every write measured, else per form of
+    the call's operands, a bool among them by its value (``batch_norm``
+    writes its running statistics in training only, and no schema says so).
+    Before such a call runs under a trace the tensors are handed to the
+    trace: given up, it puts their values back, and its region is not taken
+    for one that leaves nothing behind when it raises. A form of a call that
+    was measured to change an operand's key in place stops the trace."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def rows(self):
+        """The rows of the torch family that write operands: (member, form)
+        -> the row's operands, as the dump names them."""
+        found = {}
+        for line in torch._rust._rules_dump().splitlines():
+            how, family, what, *rest = line.split("\t")
+            if how == "row" and family == "torch" and rest[2].startswith("Operands"):
+                member, _, form = what.partition(" (")
+                found[member, form.removesuffix(")")] = rest[2][9:-1].split(",")
+        return found
+
+    def test_a_row_names_the_operands_measured_written(self):
+        path = os.path.join(CRATE, "exec", "rules", "torch_members.tsv")
+        if not os.path.exists(path):
+            self.skipTest("the executor's source is not beside the tests")
+        with open(path) as f:
+            lines = [line.rstrip("\n").split("\t") for line in f if line[0] != "#"]
+        measured = {(x[0], "" if x[1] == "-" else x[1]): x for x in lines[1:]}
+        rows = self.rows()
+        self.assertGreater(len(rows), 25)
+        for (member, form), written in rows.items():
+            with self.subTest(member=member, form=form):
+                line = measured[member, form]
+                self.assertTrue(torch_key_of_the_write(line[9], line[10]))
+                want = [
+                    w.partition("(")[0]
+                    + ("" if w.partition("(")[2].startswith("decl;") else "!")
+                    for w in line[9].rpartition("@")[0].split(",")
+                ]
+                self.assertEqual(written, want)
+                # A row of the member's own line: every write is declared.
+                if not form:
+                    self.assertNotIn("!", "".join(written))
+        # The one member measured to write what no schema declares, by the
+        # value of `training`.
+        norm = {
+            form: w
+            for (member, form), w in rows.items()
+            if member == "torch.batch_norm"
+        }
+        self.assertEqual(
+            norm,
+            {
+                "0:T 1:T 2:T 3:T 4:T 5:True 8:True": ["3!", "4!"],
+                "0:T 3:T 4:T 5:True 8:True": ["3!", "4!"],
+            },
+        )
+        # Not in training, or with no statistics, it has rows that write
+        # nothing.
+        forms = torch._rust._rules_torch_forms()
+        for form in (
+            "0:T 1:T 2:T 3:T 4:T 5:False 8:True",
+            "0:T 3:T 4:T 5:False 8:True",
+            "0:T 1:T 2:T 5:True 8:True",
+            "0:T 5:True 8:True",
+        ):
+            self.assertIn(("torch.batch_norm", form, "row"), forms)
+
+    def beside_eager(self, source, calls=24):
+        """Runs the program `calls` times as written and under vm, each in a
+        module of its own, and holds what f returns or raises and what
+        read() gives equal after every call. Returns the compiled function."""
+        eager, traced = {}, {}
+        exec(compile(source, "<torch writes>", "exec"), eager)
+        exec(compile(source, "<torch writes>", "exec"), traced)
+        compiled = vm(traced["f"], passes=CHECKS_EARLY)
+        for call in range(calls):
+            want = checks_outcome(eager["f"], *eager["args"](call))
+            got = checks_outcome(compiled, *traced["args"](call))
+            self.assertEqual(type(got), type(want), msg=f"call {call}: {got!r}")
+            if not isinstance(want, Exception):
+                self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            for a, b in zip(traced["read"](), eager["read"](), strict=True):
+                self.assertEqual(a, b, atol=0, rtol=0, msg=f"after call {call}")
+        return compiled
+
+    @parametrize("weights", ["affine", "plain"])
+    @parametrize("name", list(TORCH_NORMS))
+    @checks_isolated
+    def test_batch_norm_writes_its_statistics_once(self, name, weights):
+        handed = {"affine": "W, B", "plain": "None, None"}[weights]
+        source = TORCH_NORM_HEAD + TORCH_NORMS[name].format(w=handed)
+        compiled = self.beside_eager(source)
+        runs = sum(
+            r["runs"]
+            for r in vm.regions(compiled)
+            if r["function"] == "f" and r["state"] == "region"
+        )
+        # Each of these forms has a row: a region runs.
+        if name in ("raises", "eval", "unused", "stats_unused"):
+            self.assertGreater(runs, 0, msg=str(vm.regions(compiled)))
+
+    @parametrize("member", list(TORCH_WRITERS))
+    @checks_isolated
+    def test_a_region_runs_over_a_member_that_writes(self, member):
+        table = {name: status for name, _, status in torch._rust._rules_torch()}
+        self.assertEqual(table[member], "row")
+        self.assertEqual(self.rows()[member, ""], ["0"])
+        os.environ["TORCH_RUST_GATE_HIST"] = "1"
+        source = torch_writer_source(TORCH_WRITERS[member])
+        # What f returns and what it leaves in STATE, after every call.
+        compiled = self.beside_eager(source, calls=13)
+        met, refused = TestVmRulesTorch.met_and_refused(self, compiled, member)
+        self.assertGreater(met, 0)
+        self.assertEqual(refused, 0, msg=str(vm.regions(compiled)))
+        # A region over the line of the member's call ran.
+        at = [k + 1 for k, line in enumerate(source.splitlines()) if "    r = " in line]
+        self.assertEqual(len(at), 1)
+        runs = sum(
+            r["runs"]
+            for r in vm.regions(compiled)
+            if r["function"] == "f"
+            and r["state"] == "region"
+            and r["lines"][0] < at[0] < r["lines"][1]
+        )
+        self.assertGreater(runs, 0, msg=str(vm.regions(compiled)))
+
+    @parametrize("name", list(TORCH_REKEYS))
+    @checks_isolated
+    def test_a_call_that_changes_a_key_is_in_no_region(self, name):
+        member, construct = TORCH_REKEYS[name]
+        compiled = TestVmRulesTorch.calls(self, construct)
+        met, refused = TestVmRulesTorch.met_and_refused(self, compiled, member)
+        self.assertEqual(met, refused, msg=f"{member}: {vm.regions(compiled)}")
+
+    @parametrize("name", ["norm", "relu"])
+    def test_the_recorder_of_call_lists_never_runs_a_writer_again(self, name):
+        # Beside today's engine the recorder may run a list again to compare
+        # it; one with a call that writes would write twice.
+        def run(mode):
+            env = {k: v for k, v in os.environ.items() if k != "TORCH_RUST_CALLS"}
+            command = [sys.executable, "-c", TORCH_WRITES_SHADOW, name]
+            ran = subprocess.run(
+                command, env=env | mode, capture_output=True, text=True, timeout=600
+            )
+            self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+            return json.loads(ran.stdout.splitlines()[-1])
+
+        plain, shadow = run({}), run({"TORCH_RUST_CALLS": "shadow"})
+        self.assertEqual(plain["shadow"], [])
+        # Every result and the state behind every call, bit for bit.
+        self.assertEqual(shadow["calls"], plain["calls"])
+        member = {"norm": "batch_norm", "relu": "relu_"}[name]
+        met = [
+            r
+            for r in shadow["shadow"]
+            if member in r["text"] or member in json.dumps([r["reasons"], r["stop"]])
+        ]
+        self.assertTrue(met, msg=str(shadow["shadow"]))
+        for recording in met:
+            said = json.dumps(recording)
+            self.assertNotEqual(recording["status"], "replayable", msg=said)
+            # Why its list was not run again: the recording stopped at the
+            # call (it is no entry of a list), or an entry of its list
+            # writes.
+            if recording["status"] == "stopped":
+                self.assertIn(member, json.dumps(recording["stop"]), msg=said)
+            else:
+                self.assertEqual(
+                    recording["validated"], "not validated: an entry writes", msg=said
+                )
+
+    def test_asking_the_table_makes_nothing(self):
+        # What the license of an instruction runs (rules::license, a
+        # family's rule, a row's `before`, and all they call) reads tables
+        # made before any trace and runs no Python code: code run there
+        # would run in the middle of an instruction of the program. So it
+        # names nothing of pyo3, makes nothing on first use, and what it
+        # names outside the table's own source is the recorded list.
+        rules = os.path.join(CRATE, "exec", "rules")
+        if not os.path.isdir(rules):
+            self.skipTest("the executor's source is not beside the tests")
+        reach, names, python = rules_license_reach(rules)
+        self.assertEqual(sorted(names), RULES_LICENSE_NAMES)
+        self.assertGreater(len(reach), 40)
+        for function in (
+            ("mod.rs", "license"),
+            ("torch.rs", "rule"),
+            ("torch/forms.rs", "plain_call"),
+            ("torch/forms.rs", "formed_call"),
+            ("torch/writes.rs", "writing_call"),
+            ("imports.rs", "import_name"),
+            ("groups.rs", "holds"),
+        ):
+            self.assertIn(function, reach)
+        # The functions of the table's source that name pyo3, call Python
+        # or make something on first use: the makers (called from where a
+        # function goes onto the executor), the doors for tests, and the
+        # hand-over of written tensors to today's trace, which the executor
+        # calls behind the license (covered.rs) and the license does not.
+        self.assertEqual(
+            python,
+            {
+                ("callees.rs", "ready"),
+                ("dump.rs", "_rules_callee_kind"),
+                ("dump.rs", "_rules_groups"),
+                ("dump.rs", "_rules_hear"),
+                ("dump.rs", "_rules_unheard"),
+                ("imports.rs", "names"),
+                ("torch.rs", "members"),
+                ("torch/sampled.rs", "domain_switches"),
+                ("torch/writes.rs", "hand_over"),
+            },
+        )
+        # The one of them the license reaches is made on first use from
+        # C-level dicts.
+        self.assertEqual(python & reach, {("imports.rs", "names")})
+        with open(os.path.join(rules, "imports.rs")) as f:
+            names = re.sub(r"//[^\n]*", "", f.read())
+        body = names[names.index("fn names()") : names.index("unsafe fn exact(")]
+        self.assertNotRegex(
+            body, r"Python::attach|py\.|\.call|PyObject_|PyImport_Import\w"
+        )
+        # Each maker is called from ready() and from the doors only.
+        callers = collections.defaultdict(set)
+        for path in glob.glob(os.path.join(rules, "**", "*.rs"), recursive=True):
+            with open(path) as f:
+                text = re.sub(r"//[^\n]*", "", f.read())
+            inside = None
+            for line in text.splitlines():
+                named = re.match(
+                    r"\s*(?:pub(?:\([a-z]+\))? )?(?:unsafe )?fn (\w+)", line
+                )
+                inside = named.group(1) if named else inside
+                for maker in ("members", "domain_switches"):
+                    if re.search(rf"\b{maker}\(\)", line) and not named:
+                        callers[maker].add((os.path.relpath(path, rules), inside))
+        doors = ("", "_forms", "_domain", "_befores")
+        doors = {("torch.rs", f"_rules_torch{x}") for x in doors}
+        self.assertEqual(
+            callers["members"], {("torch.rs", "ready"), ("torch.rs", "table")} | doors
+        )
+        self.assertEqual(callers["domain_switches"], {("torch.rs", "ready")})
+        # What tells the kind of a callee is made by the one function that
+        # makes every family's tables (and by nothing under a trace).
+        made_by = set()
+        for path in glob.glob(os.path.join(rules, "**", "*.rs"), recursive=True):
+            with open(path) as f:
+                text = re.sub(r"//[^\n]*", "", f.read())
+            for inside, body in re.findall(
+                r"fn (\w+)[^{]*\{(.*?)\n\}", text, flags=re.DOTALL
+            ):
+                if re.search(r"\bcallees::ready\(\)", body):
+                    made_by.add((os.path.relpath(path, rules), inside))
+        self.assertEqual(made_by, {("mod.rs", "ready")})
+
+    @parametrize(
+        "way",
+        [
+            "a before that tells Python",
+            "a rule that makes the table",
+            "a form read through pyo3",
+            "a function handed over by its name",
+        ],
+    )
+    def test_a_way_into_python_under_the_license_is_seen(self, way):
+        # The test above, on a copy of the source with one line added.
+        rules = os.path.join(CRATE, "exec", "rules")
+        if not os.path.isdir(rules):
+            self.skipTest("the executor's source is not beside the tests")
+        file, before, added = {
+            "a before that tells Python": (
+                "torch/forms.rs",
+                "    let operands = operands(f, site)?;\n",
+                '    scalars::tell(Python::assume_attached(), "_row_writes", vec![]);\n',
+            ),
+            "a rule that makes the table": (
+                "torch.rs",
+                "    let What::Callee(f) = *what else { return Taken::No };\n",
+                "    members();\n",
+            ),
+            "a form read through pyo3": (
+                "torch/forms.rs",
+                "    let mut found = vec![];\n",
+                "    let _ = Bound::from_borrowed_ptr(py, kwnames).len();\n",
+            ),
+            "a function handed over by its name": (
+                "torch/forms.rs",
+                "    let mut found = vec![];\n",
+                "    let _ = std::iter::once(()).map(hand_over);\n",
+            ),
+        }[way]
+        with tempfile.TemporaryDirectory() as copy:
+            for path in glob.glob(os.path.join(rules, "**", "*.rs"), recursive=True):
+                to = os.path.join(copy, os.path.relpath(path, rules))
+                os.makedirs(os.path.dirname(to), exist_ok=True)
+                with open(path) as f:
+                    text = f.read()
+                if os.path.relpath(path, rules) == file:
+                    self.assertEqual(text.count(before), 1)
+                    text = text.replace(before, before + added)
+                with open(to, "w") as f:
+                    f.write(text)
+            reach, names, python = rules_license_reach(copy)
+        self.assertTrue(
+            sorted(names) != RULES_LICENSE_NAMES
+            or python & reach != {("imports.rs", "names")},
+            msg=way,
+        )
+
+
+# Calls of a member with a row that hand it, in some place, an operand of a
+# class that no sample of the member had there: by name, the member, the
+# place, the class, and the lines of f behind `y = ...`.
+TORCH_UNSAMPLED = {
+    "cat_tuple": ("torch.cat", "0", "tuple[T]", "r = torch.cat((y, y))"),
+    "to_dtype": ("torch.Tensor.to", "1", "dtype", "r = y.to(torch.float64)"),
+    "mean_int": ("torch.Tensor.mean", "1", "int", "r = y.mean(1)"),
+}
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRulesTorchDomain(TestCase):
+    """The table of torch's C callees has, per member, the classes of
+    operands that the member's measured calls had, place by place: a position
+    among the operands, the receiver first, or the name of a keyword. A call
+    that hands an operand of another class in some place was not measured.
+    Calls that real programs make are not all sampled yet, so that is not
+    asked by default: with ``TORCH_RUST_RULES_DOMAIN=1`` such a call stops
+    the trace, and with ``TORCH_RUST_RULES_UNSAMPLED=FILE`` it is written to
+    FILE. A callee under which the operators run differ with the data of its
+    operands has no row."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_every_row_has_the_places_its_samples_had(self):
+        table = {name: status for name, _, status in torch._rust._rules_torch()}
+        places = collections.defaultdict(dict)
+        for member, place, classes in torch._rust._rules_torch_domain():
+            places[member][place] = classes
+        for member, status in table.items():
+            if status == "row":
+                with self.subTest(member=member):
+                    self.assertIn("0", places[member])
+        known = r"T|int|float|bool|None|Size|str|complex|dtype|device|layout"
+        known = rf"({known}|memory_format|\?|(tuple|list)\[[\w,?]*\])"
+        for member, of_member in places.items():
+            for place, classes in of_member.items():
+                with self.subTest(member=member, place=place):
+                    self.assertRegex(place, r"^(\d+|[A-Za-z_]\w*)$")
+                    for name in classes:
+                        self.assertRegex(name, f"^{known}$")
+        for member, place, name, _ in TORCH_UNSAMPLED.values():
+            self.assertEqual(table[member], "row")
+            self.assertNotIn(name, places[member].get(place, ()))
+
+    @parametrize("name", list(TORCH_UNSAMPLED))
+    @checks_isolated
+    def test_asked_for_a_call_outside_the_places_is_in_no_region(self, name):
+        member, place, classes, construct = TORCH_UNSAMPLED[name]
+        with tempfile.TemporaryDirectory() as tmp:
+            # Read once, where a function first goes onto the executor.
+            os.environ["TORCH_RUST_RULES_DOMAIN"] = "1"
+            os.environ["TORCH_RUST_RULES_UNSAMPLED"] = os.path.join(tmp, "calls")
+            compiled = TestVmRulesTorch.calls(self, construct)
+            with open(os.path.join(tmp, "calls")) as f:
+                written = {tuple(line.rstrip("\n").split("\t")) for line in f}
+        self.assertIn((member, place, classes), written)
+        met, refused = TestVmRulesTorch.met_and_refused(self, compiled, member)
+        self.assertGreater(refused, 0, msg=str(vm.regions(compiled)))
+        self.assertEqual(met, refused, msg=f"{member}: {vm.regions(compiled)}")
+
+    @parametrize("name", list(TORCH_UNSAMPLED))
+    @checks_isolated
+    def test_not_asked_the_call_has_its_row(self, name):
+        member, _, _, construct = TORCH_UNSAMPLED[name]
+        compiled = TestVmRulesTorch.calls(self, construct)
+        met, refused = TestVmRulesTorch.met_and_refused(self, compiled, member)
+        self.assertGreater(met, 0)
+        self.assertEqual(refused, 0, msg=str(vm.regions(compiled)))
+
+    @checks_isolated
+    def test_operators_that_differ_with_the_data_are_in_no_region(self):
+        member = "torch.Tensor.to_sparse"
+        table = {name: status for name, _, status in torch._rust._rules_torch()}
+        self.assertEqual(table[member], "stop")
+        compiled = TestVmRulesTorch.calls(self, "r = (y > 0).to_sparse().to_dense()")
+        met, refused = TestVmRulesTorch.met_and_refused(self, compiled, member)
+        self.assertEqual(met, refused, msg=f"{member}: {vm.regions(compiled)}")
 
 
 # What a generator's frame can be when a torch.vm function's run meets it:
@@ -10533,7 +11799,13 @@ class Slow:
         print("LOG the interpreter ends", flush=True)
 
 
-f = vm(body, passes=EARLY) if way == "vm" else body
+if way == "vm":
+    f = vm(body, passes=EARLY)
+elif way == "printed":
+    # Under the hook of the bytecode printer (it prints the code it enters).
+    f = lambda *args: torch._rust.call_with_bytecode_printing(body, *args)
+else:
+    f = body
 for call in range(calls):
     f(torch.full((4, 8), call + 1.0), False)
 threading.Thread(target=f, args=(torch.full((4, 8), 9.0), True), daemon=True).start()
@@ -10559,16 +11831,22 @@ class TestVmEdgeThreadEnds(TestCase):
 
     def test_a_thread_inside_the_executor_when_the_interpreter_ends(self):
         members = [
-            (where, how, calls)
+            (where, how, calls, "vm")
             for where in EDGE_ENDS_WHERE
             for how in EDGE_ENDS_HOW
             for calls in EDGE_ENDS_CALLS
         ]
+        # The same under the other frame-evaluation hook of the extension.
+        members += [
+            (where, how, 0, "printed")
+            for where in EDGE_ENDS_WHERE
+            for how in EDGE_ENDS_HOW
+        ]
 
         def ends(member):
             both = []
-            for way in ("eager", "vm"):
-                where, how, calls = member
+            for way in ("eager", member[3]):
+                where, how, calls = member[:3]
                 command = [
                     sys.executable,
                     "-c",
@@ -10591,12 +11869,12 @@ class TestVmEdgeThreadEnds(TestCase):
         with concurrent.futures.ThreadPoolExecutor(6) as pool:
             found = dict(zip(members, pool.map(ends, members)))
         differ = [
-            f"{m}: (status, log) of eager {eager}, of torch.vm {got}; stderr: {said or told}"
+            f"{m}: (status, log) of eager {eager}, under the hook {got}; stderr: {said or told}"
             for m, ((eager, said), (got, told)) in found.items()
             if eager != got
         ]
         self.assertEqual(differ, [], msg="\n".join(differ))
-        self.assertEqual(len(found), 18)
+        self.assertEqual(len(found), 24)
         want = [
             "LOG the main thread leaves",
             "LOG the interpreter is ending",
@@ -13539,6 +14817,47 @@ try:
 except ValueError:
     log("caught")
 log("after try")
+== exception: three temporaries on the stack when it raises
+def fails():
+    raise ValueError
+
+
+def callee(a, b, c, d):
+    pass
+--
+try:
+    callee(T("a"), T("b"), T("c"), fails())
+except ValueError:
+    log("caught")
+log("after try")
+== exception: the instruction that raises lets go of its operands, then the stack
+try:
+    [T("a"), T("c") + T("k")]
+except TypeError:
+    log("caught")
+log("after try")
+== exception: a callee that raises keeps the operands in its frame
+class Fails(T):
+    def __getitem__(self, key):
+        raise ValueError
+--
+try:
+    [T("a"), Fails("c")[T("k")]]
+except ValueError:
+    log("caught")
+log("after try")
+== exception: a slice load that raises
+try:
+    [T("a"), T("c")[T("lo") : T("hi")]]
+except TypeError:
+    log("caught")
+log("after try")
+== exception: a slice store that raises
+try:
+    T("c")[T("lo") : T("hi")] = T("v")
+except TypeError:
+    log("caught")
+log("after try")
 == exception: escapes the function
 raise ValueError(T("payload"))
 == exception: escapes the function with locals
@@ -14073,9 +15392,10 @@ alone views ..T. a@body:2{x=tensor} | a@body
 between views ..TR a@body:3{x=tensor,y=tensor} | a@body
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: compare, chained
-alone deaths .LTR in -a -b -c out RET DROP GC | in -a -c -b out RET DROP GC
-between deaths .LTR in -a -b -c out RET DROP GC | in -a -c -b out RET DROP GC
-inside deaths .LTR -a -b -c RET DROP GC | -a -c -b RET DROP GC
+alone deaths ..T. in -a -b -c out RET DROP GC | in -a -c -b out RET DROP GC
+between deaths ..TR in -a -b -c out RET DROP GC | in -a -c -b out RET DROP GC
+inside deaths ..T. -a -b -c RET DROP GC | -a -c -b RET DROP GC
+inside views .L.R a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: compare, chained, cut short
 alone views ..T. a@body:2{x=tensor} | a@body
 between views ..TR a@body:3{x=tensor,y=tensor} | a@body
@@ -14101,13 +15421,10 @@ alone views ..T. c@body:2{x=tensor} | c@body
 between views ..TR c@body:3{x=tensor,y=tensor} | c@body
 inside views .LTR c@body:2{x=tensor,y=tensor} | c@body:2{x=tensor}
 == subscript: slice load
-alone deaths FLTR in -lo -hi -c out RET DROP GC | in -c -lo -hi out RET DROP GC
-between deaths FLTR in -lo -hi -c out RET DROP GC | in -c -lo -hi out RET DROP GC
-inside deaths FLTR -lo -hi -c RET DROP GC | -c -lo -hi RET DROP GC
-== subscript: slice store
-alone deaths FLTR in -lo -hi -v -c out RET DROP GC | in -v -c -lo -hi out RET DROP GC
-between deaths FLTR in -lo -hi -v -c out RET DROP GC | in -v -c -lo -hi out RET DROP GC
-inside deaths FLTR -lo -hi -v -c RET DROP GC | -v -c -lo -hi RET DROP GC
+alone deaths ..T. in -lo -hi -c out RET DROP GC | in -c -lo -hi out RET DROP GC
+between deaths ..TR in -lo -hi -c out RET DROP GC | in -c -lo -hi out RET DROP GC
+inside deaths ..T. -lo -hi -c RET DROP GC | -c -lo -hi RET DROP GC
+inside views .L.R lo@body:2{x=tensor,y=tensor} | lo@body:2{x=tensor}
 == subscript: slice load with a step
 alone deaths ..T. in -c -st -lo -hi out RET DROP GC | in -lo -hi -st -c out RET DROP GC
 between deaths ..TR in -c -st -lo -hi out RET DROP GC | in -lo -hi -st -c out RET DROP GC
@@ -14397,10 +15714,14 @@ inside views FLTR cm@body:4{x=tensor,y=tensor} | cm@body:3{x=tensor,y=tensor}
 alone deaths FLTR in exit after del -payload -cm after with out RET DROP GC | in exit after del -cm -payload after with out RET DROP GC
 between deaths FLTR in exit after del -payload -cm after with out RET DROP GC | in exit after del -cm -payload after with out RET DROP GC
 inside deaths FLTR exit after del -payload -cm after with RET DROP GC | exit after del -cm -payload after with RET DROP GC
-== exception: a container being built when it raises
-alone deaths FLTR in -b -a caught after try out RET DROP GC | in -a -b caught after try out RET DROP GC
-between deaths FLTR in -b -a caught after try out RET DROP GC | in -a -b caught after try out RET DROP GC
-inside deaths FLTR -b -a caught after try RET DROP GC | -a -b caught after try RET DROP GC
+== exception: the instruction that raises lets go of its operands, then the stack
+alone deaths .LTR in -c -k -a caught after try out RET DROP GC | in -a -c -k caught after try out RET DROP GC
+between deaths .LTR in -c -k -a caught after try out RET DROP GC | in -a -c -k caught after try out RET DROP GC
+inside deaths .LTR -c -k -a caught after try RET DROP GC | -a -c -k caught after try RET DROP GC
+== exception: a slice load that raises
+alone deaths .LTR in -lo -hi -c -a caught after try out RET DROP GC | in -a -lo -hi -c caught after try out RET DROP GC
+between deaths .LTR in -lo -hi -c -a caught after try out RET DROP GC | in -a -lo -hi -c caught after try out RET DROP GC
+inside deaths .LTR -lo -hi -c -a caught after try RET DROP GC | -a -lo -hi -c caught after try RET DROP GC
 == tensor: binary
 inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
 == tensor: binary with a number
@@ -14616,7 +15937,7 @@ class TestVmReleaseOrder(TestCase):
 
     def test_the_record_names_members_of_the_table(self):
         table = release_table(RELEASE_MEMBERS)
-        self.assertEqual(len(table), 242)
+        self.assertEqual(len(table), 247)
         for name, lines in release_table(RELEASE_KNOWN).items():
             self.assertIn(name, table)
             self.assertTrue(lines, msg=name)
@@ -14625,6 +15946,34 @@ class TestVmReleaseOrder(TestCase):
                 self.assertIn(form, RELEASE_FORMS, msg=line)
                 self.assertIn(kind, ("deaths", "views", "cpythons", "calls"), msg=line)
                 self.assertRegex(ways, "^[F.][L.][T.][R.]$", msg=line)
+
+    def test_every_generic_instruction_has_an_order(self):
+        # In which order a step lets go of its operands is a row per kind of
+        # instruction (exec/order.rs), not the numbers of the values: every
+        # opcode the generic instruction runs has a row, and the rows that
+        # are not the stack's own order are the two slice instructions.
+        with open(os.path.join(os.path.dirname(CRATE), "csrc", "exec_ops.c")) as f:
+            source = f.read()
+        generic = source[source.index("int tr_generic(") :]
+        generic = generic[: generic.index("\n}\n")]
+        opcodes = dict(torch._rust._cfg_opcodes())
+        cases = [n for n in re.findall(r"case ([A-Z_0-9]+):", generic) if n in opcodes]
+        self.assertGreater(len(cases), 55)
+        operands = {"STORE_SLICE": 4}
+        other = {}
+        for name in cases:
+            n = operands.get(name, 3)
+            order = torch._rust._cfg_releases(opcodes[name], n)
+            self.assertIsNotNone(order, msg=name)
+            if order != list(range(n)):
+                other[name] = order
+        self.assertEqual(
+            other, {"BINARY_SLICE": [1, 2, 0], "STORE_SLICE": [2, 3, 0, 1]}
+        )
+        # An opcode the generic instruction does not run has no row, and
+        # neither has a slice instruction with other operands than its own.
+        self.assertIsNone(torch._rust._cfg_releases(opcodes["POP_TOP"], 1))
+        self.assertIsNone(torch._rust._cfg_releases(opcodes["BINARY_SLICE"], 2))
 
     def test_where_the_two_cpythons_differ_torch_vm_is_the_hooked_one(self):
         # A member in which a hook alone moves a death: torch.vm lets go
@@ -14646,6 +15995,1319 @@ class TestVmReleaseOrder(TestCase):
         ]
         self.assertEqual(own, ["C method: of a temporary container"])
         self.assertNotIn(own[0], marked)
+
+
+# The tensors over one buffer of 6 x 8 floats that TestVmRulesTorchUndo
+# tells the record of and writes, by what each is to the buffer.
+UNDO_TENSORS = {
+    "the buffer": lambda b: b,
+    "a row": lambda b: b[1],
+    "rows": lambda b: b[2:5],
+    "rows that overlap them": lambda b: b[1:4],
+    "a column": lambda b: b[:, 3],
+    "all of it, flat": lambda b: b.view(48),
+    "every fifth element": lambda b: b.view(48)[::5],
+    "transposed": lambda b: b.t(),
+    "of another dtype": lambda b: b.view(torch.int32),
+    "of the storage, no view of the buffer": lambda b: torch.empty(
+        0, device=b.device
+    ).set_(b.untyped_storage(), 8, (3, 8), (8, 1)),
+    "one element eight times": lambda b: b[0, :1].expand(8),
+    "windows that overlap": lambda b: b.view(48).unfold(0, 4, 2),
+    "of another storage over the memory": lambda b: torch.from_numpy(b.numpy()),
+}
+# Programs with two writes to the memory of BIG, a tensor of the module: a
+# module with f, args(call) and read() each. The first write is to `a`, the
+# second to `b`: what the two are to each other is the relation; who writes
+# is the writer (a member with a row whose schema declares the write, a
+# store by a subscript, a member with a row for a list of tensors, a batch
+# norm in training that is handed the two halves as its statistics); how
+# the traced run ends is the end.
+UNDO_HEAD = (
+    "import torch\nimport torch.nn.functional as F\nDEVICE = {device!r}\n"
+    "def gen(call):\n    return torch.Generator().manual_seed(call)\n"
+)
+UNDO_STATE = (
+    "BIG = torch.cat([torch.zeros(8), torch.ones(8)]).to(DEVICE)\n{made}"
+    "def read():\n    return (BIG.clone(),)\n"
+    "def args(call):\n"
+    "    x = torch.randn(4, 8, generator=gen(call)).to(DEVICE)\n"
+    "    return x, torch.tensor([0, 9 if call in {bad} else 3], device=DEVICE)\n"
+    "def f(x, idx):\n    y = torch.sin(x) * 2.0 + torch.cos(x)\n"
+)
+UNDO_RELATIONS = {
+    "one_object": ("", "BIG", "BIG"),
+    "a_view_of_it": ("V = BIG[2:10]\n", "BIG", "V"),
+    "its_base": ("V = BIG[2:10]\n", "V", "BIG"),
+    "a_view_that_overlaps_it": ("V, U = BIG[:10], BIG[6:]\n", "V", "U"),
+    "of_its_storage": (
+        "O = torch.empty(0, device=DEVICE).set_(BIG.untyped_storage(), 4, (8,), (1,))\n",
+        "BIG",
+        "O",
+    ),
+    "views_made_on_the_way": ("", "BIG[:8]", "BIG[4:12]"),
+}
+UNDO_WRITERS = {
+    "add_": "{t}.add_(0.25)",
+    "mul_": "{t}.mul_(1.5)",
+    "copy_": "{t}.copy_({t} * 0.5 + 1.0)",
+    "store": "{t}[1:] = {t}[1:] * 0.5 + 1.0",
+    "foreach": "torch._foreach_mul_([{t}], 1.25)",
+    "norm": (
+        "n = {t}.numel() // 2\n"
+        "    q = F.batch_norm(x[:, :n], {t}[:n], {t}[n:], None, None, True, 0.5, 1e-5)"
+    ),
+}
+# The end: the calls on which an operator behind the writes raises, and the
+# lines behind the writes. `given_up`: a call no trace gets through (the
+# trace is given up there and the body runs again as written); `raises`: an
+# operator raises on the calls a trace may be made on, and on later ones;
+# `kept`: neither.
+UNDO_ENDS = {
+    "given_up": (
+        "()",
+        "    u = torch.unique((y * 2).round())\n"
+        "    return (BIG * 3 + 1).cos().sum() + y.tanh().sum() * u.sum()\n",
+    ),
+    "raises": (
+        "(1, 2, 3, 6, 8)",
+        "    z = (y * 3 + 1).cos().tanh()\n"
+        "    return z.index_select(1, idx).exp().sum(0) + (BIG * 3 + 1).cos().sum()\n",
+    ),
+    "kept": ("()", "    return (BIG * 3 + 1).cos().sum() + y.tanh().sum(0)\n"),
+}
+
+
+def undo_source(device, first, second, relation, end):
+    made, a, b = UNDO_RELATIONS[relation]
+    bad, behind = UNDO_ENDS[end]
+    writes = f"    {UNDO_WRITERS[first].format(t=a)}\n    {UNDO_WRITERS[second].format(t=b)}\n"
+    return (
+        UNDO_HEAD.format(device=device)
+        + UNDO_STATE.format(made=made, bad=bad)
+        + writes
+        + behind
+    )
+
+
+# Programs whose traced run writes one memory more than once and is given
+# up (or raises, `err`), each the lines behind UNDO_HEAD: state, read(),
+# args(call) and f. The first seven are the ones a tensor's values came
+# back wrong in: a write, then a batch norm handed views of what was
+# written as its statistics; a tensor and an alias of it; a view, then its
+# base; the statistics, then their base. Then: the version counters; a
+# generator; a column, a row, the column again; the same bytes as another
+# dtype; a second storage over the same memory (the CPU only).
+UNDO_BIG = (
+    "BIG = torch.cat([torch.zeros(8), torch.ones(8)]).to(DEVICE)\n"
+    "def read():\n    return (BIG.clone(),)\n"
+)
+UNDO_STATS = (
+    "RM, RV = torch.zeros(8, device=DEVICE), torch.ones(8, device=DEVICE)\n"
+    "def read():\n    return RM.clone(), RV.clone()\n"
+)
+UNDO_BUF = (
+    "BUF = torch.zeros(6, 8, device=DEVICE)\nV = BUF.view(48)\n"
+    "def read():\n    return (BUF.clone(),)\n"
+)
+UNDO_X48 = (
+    "def args(call):\n    return (torch.randn(4, 8, generator=gen(call)).to(DEVICE),)\n"
+)
+UNDO_X68 = (
+    "def args(call):\n    return (torch.randn(6, 8, generator=gen(call)).to(DEVICE),)\n"
+)
+UNDO_PAD = "def f(x):\n    y = torch.sin(x) * 2.0 + torch.cos(x)\n"
+UNDO_NORM = "F.batch_norm(x, {}, None, None, True, 0.5, 1e-5)\n"
+UNDO_UNIQUE = "    u = torch.unique((y * 2).round())\n"
+UNDO_GIVEN_UP = UNDO_UNIQUE + "    return (BUF * 3 + 1).cos() * u.sum()\n"
+UNDO_PROGRAMS = {
+    "write_then_norm_of_views": UNDO_BIG
+    + UNDO_X48
+    + "def f(x):\n    BIG.add_(0.25)\n    y = "
+    + UNDO_NORM.format("BIG[:8], BIG[8:]")
+    + UNDO_UNIQUE
+    + "    return (y * 3 + 1).cos().tanh() * u.sum()\n",
+    "aliases_written_then_norm": UNDO_STATS.replace(
+        "def read", "A, C = RM.view(8), RV.view(8)\ndef read"
+    )
+    + UNDO_X48
+    + "def f(x):\n    A.add_(0.25)\n    C.mul_(1.5)\n    y = "
+    + UNDO_NORM.format("RM, RV")
+    + UNDO_UNIQUE
+    + "    return (y * 3 + 1).cos().tanh() * u.sum()\n",
+    "write_then_norm_of_views_err": UNDO_BIG
+    + "def args(call):\n"
+    + "    x = torch.randn(4, 8, generator=gen(call)).to(DEVICE)\n"
+    + "    return x, torch.tensor([0, 9 if call in (6, 8) else 3], device=DEVICE)\n"
+    + "def f(x, idx):\n    BIG.add_(0.25)\n    y = "
+    + UNDO_NORM.format("BIG[:8], BIG[8:]")
+    + "    z = (y * 3 + 1).cos().tanh()\n"
+    + "    return z.index_select(1, idx).exp().sum(0)\n",
+    "tensor_then_alias": UNDO_BUF
+    + UNDO_X68
+    + UNDO_PAD
+    + "    BUF.add_(y)\n    V.mul_(0.5)\n"
+    + UNDO_GIVEN_UP,
+    "view_then_base": UNDO_BUF
+    + UNDO_X68
+    + UNDO_PAD
+    + "    BUF[0].add_(1.0)\n    BUF.mul_(2.0)\n"
+    + UNDO_GIVEN_UP,
+    "norm_of_views_then_base": UNDO_BIG.replace("BIG", "BUF")
+    + UNDO_X48
+    + "def f(x):\n    y = "
+    + UNDO_NORM.format("BUF[:8], BUF[8:]")
+    + "    BUF.mul_(1.5)\n"
+    + UNDO_UNIQUE
+    + "    return (BUF[:8] * 3 + 1).cos() * y * u.sum()\n",
+    "norm_then_statistics_written": UNDO_STATS
+    + UNDO_X48
+    + "def f(x):\n    y = "
+    + UNDO_NORM.format("RM, RV")
+    + "    RM.mul_(1.5)\n    RV[2:4].add_(1.0)\n"
+    + UNDO_UNIQUE
+    + "    return (RM * 3 + 1).cos() * y * u.sum()\n",
+    "version_counters": UNDO_BUF.replace(
+        "return (BUF.clone(),)",
+        "return BUF.clone(), torch.tensor([BUF._version, V._version])",
+    )
+    + UNDO_X68
+    + UNDO_PAD
+    + "    BUF.add_(y)\n    V.mul_(0.5)\n"
+    + UNDO_GIVEN_UP,
+    "generator": UNDO_BUF.replace(
+        "return (BUF.clone(),)", "return BUF.clone(), G.get_state()"
+    ).replace("V = BUF", "G = torch.Generator().manual_seed(5)\nV = BUF")
+    + UNDO_X68
+    + UNDO_PAD
+    + "    BUF.add_(torch.rand(6, 8, generator=G).to(DEVICE))\n    V.mul_(0.5)\n"
+    + UNDO_GIVEN_UP,
+    "column_row_column": UNDO_BUF
+    + UNDO_X68
+    + UNDO_PAD
+    + "    BUF[:, 1].add_(1.0)\n    BUF[2].mul_(1.5)\n    BUF[:, 1].add_(y[:, 0])\n"
+    + UNDO_GIVEN_UP,
+    "another_dtype": UNDO_BUF.replace("V = BUF.view(48)", "V = BUF.view(torch.int32)")
+    + UNDO_X68
+    + UNDO_PAD
+    + "    BUF.add_(y)\n    V.add_(1)\n"
+    + UNDO_GIVEN_UP,
+    "another_storage": UNDO_BUF.replace(
+        "V = BUF.view(48)", "V = torch.from_numpy(BUF.numpy())"
+    )
+    + UNDO_X68
+    + UNDO_PAD
+    + "    BUF.add_(y)\n    V.mul_(0.5)\n    BUF.add_(1.0)\n"
+    + UNDO_GIVEN_UP,
+}
+
+
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRulesTorchUndo(TestCase):
+    """A trace that is given up leaves the memory of every tensor, every
+    version counter and every generator as they were when it began: the
+    block then runs again as written, and writes and draws once. The trace
+    has one record of its writes and draws, in order, each with what was
+    there before (torch/_rust_inductor/undo.py), told before the write by
+    whoever knows of it (the row of a C callee measured to write, the
+    trace's dispatch mode for an operator), and undone the last first:
+    whatever two written tensors are to each other."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def bits(self, t):
+        return t.contiguous().view(torch.int32).clone()
+
+    def test_the_record_takes_back_writes_of_one_memory(self, device):
+        from torch._rust_inductor import undo
+
+        names = [
+            name
+            for name in UNDO_TENSORS
+            if device == "cpu" or "another storage" not in name
+        ]
+        for first, second in itertools.product(names, names):
+            with self.subTest(first=first, second=second):
+                seed = torch.Generator().manual_seed(1)
+                buffer = torch.randn(6, 8, generator=seed).to(device)
+                start = self.bits(buffer)
+                made = {name: UNDO_TENSORS[name](buffer) for name in {first, second}}
+                a, b = made[first], made[second]
+                versions = [buffer._version, a._version, b._version]
+                record = undo.Undo()
+                self.assertTrue(record.empty())
+                for t, value in ((a, 7), (b, 9), (a, 11)):
+                    record.write(t)
+                    t.fill_(value)
+                self.assertFalse(record.empty())
+                held = record.nbytes()
+                # Never more than the two tensors, and nothing for a write
+                # into memory that is held whole.
+                size = a.numel() * a.element_size() + b.numel() * b.element_size()
+                self.assertLessEqual(held, size)
+                if "another storage" not in second and first in (
+                    "the buffer",
+                    "all of it, flat",
+                ):
+                    self.assertEqual(held, 48 * 4)
+                record.back()
+                self.assertEqual(self.bits(buffer), start)
+                self.assertEqual([buffer._version, a._version, b._version], versions)
+                self.assertTrue(record.empty())
+
+    def test_the_record_holds_an_out_from_its_first_element_on(self, device):
+        from torch._rust_inductor import undo
+
+        def run(grows):
+            buffer = torch.arange(48.0, device=device).reshape(6, 8)
+            start, flat = buffer.clone(), buffer.view(48)
+            out = flat[:2]
+            record = undo.Undo()
+            record.write(out, grows=grows)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                # Resized to five elements inside the buffer's storage.
+                torch.add(torch.arange(5.0, device=device), 100.0, out=out)
+            self.assertEqual(int((buffer != start).sum()), 5)
+            record.back()
+            return int((buffer != start).sum())
+
+        self.assertEqual(run(True), 0)
+        # (Told as a write of its two elements, three stay written.)
+        self.assertEqual(run(False), 3)
+
+    def test_the_record_is_written_back_outside_an_inference_mode(self, device):
+        from torch._rust_inductor import undo
+
+        buffer = torch.randn(6, 8, device=device)
+        start, record = buffer.clone(), undo.Undo()
+        with torch.inference_mode():
+            record.write(buffer)
+            buffer.add_(1.0)
+            made = torch.ones(4, device=device)
+            record.write(made)
+            made.add_(1.0)
+        record.back()
+        self.assertEqual(buffer, start, atol=0, rtol=0)
+        self.assertEqual(made, torch.ones(4, device=device), atol=0, rtol=0)
+
+    def test_the_record_of_a_leaf_that_requires_grad(self, device):
+        from torch._rust_inductor import undo
+
+        p = torch.nn.Parameter(torch.randn(6, 8, device=device))
+        start, version, record = p.detach().clone(), p._version, undo.Undo()
+        record.write(p)
+        with torch.no_grad():
+            p.add_(1.0)
+        record.back()
+        self.assertEqual(p.detach(), start, atol=0, rtol=0)
+        self.assertEqual(
+            (p._version, p.requires_grad, p.is_leaf, p.grad_fn),
+            (version, True, True, None),
+        )
+
+    def test_the_record_of_draws_and_of_a_tensor_that_is_not_strided(self, device):
+        from torch._rust_inductor import undo
+
+        g = torch.Generator().manual_seed(3)
+        start, record = g.get_state(), undo.Undo()
+        for _ in range(2):
+            record.draw(g)
+            torch.rand(3, generator=g)
+        self.assertFalse(record.empty())
+        record.back()
+        self.assertEqual(g.get_state(), start)
+        sparse = torch.eye(3, device=device).to_sparse()
+        for _ in range(2):
+            record.write(sparse)
+            sparse.mul_(2.0)
+        record.back()
+        self.assertEqual(sparse.to_dense(), torch.eye(3, device=device), atol=0, rtol=0)
+
+    def test_the_record_of_a_tensor_whose_key_changes_between_writes(self, device):
+        from torch._rust_inductor import undo
+
+        buffer = torch.randn(6, 8, device=device)
+        start, t, record = buffer.clone(), buffer[:, :6], undo.Undo()
+        record.write(t)
+        t.add_(1.0)
+        t.transpose_(0, 1)
+        record.write(t)
+        t.mul_(2.0)
+        t.as_strided_((2, 2), (1, 8), 20)
+        record.write(t)
+        t.zero_()
+        record.back()
+        # The memory; the tensor's key is not the record's to put back.
+        self.assertEqual(buffer, start, atol=0, rtol=0)
+
+    def test_what_the_record_says_of_the_run(self, device):
+        from torch._rust_inductor import undo
+
+        record = undo.Undo()
+        self.assertEqual((record.empty(), record.undeclared), (True, False))
+        # A write of no element is a write.
+        record.write(torch.zeros(0, device=device))
+        self.assertEqual((record.empty(), record.undeclared), (False, False))
+        self.assertEqual(record.nbytes(), 0)
+        record.write(torch.zeros(3, device=device), declared=False)
+        self.assertEqual((record.undeclared, record.nbytes()), (True, 12))
+        record.clear()
+        self.assertEqual((record.empty(), record.undeclared), (True, True))
+
+    def test_an_operator_tells_what_it_may_write(self, device):
+        from torch._rust_inductor import stays
+
+        aten = torch.ops.aten
+        x, y, out = (torch.ones(4, 8, device=device) for _ in range(3))
+        mean, var = torch.zeros(8, device=device), torch.ones(8, device=device)
+
+        def written(func, *args, **kwargs):
+            found = stays.written(func, args, kwargs)
+            # By object.
+            places = [*args, *kwargs.values()]
+            places = [t for p in places for t in (p if type(p) is list else [p])]
+            return [
+                (next(k for k, p in enumerate(places) if p is t), declared, grows)
+                for t, declared, grows in found
+            ]
+
+        self.assertEqual(written(aten.add.Tensor, x, y), [])
+        self.assertEqual(written(aten.add_.Tensor, x, y), [(0, True, False)])
+        self.assertEqual(written(aten.add.out, x, y, out=out), [(2, True, True)])
+        self.assertEqual(
+            written(aten._foreach_mul_.Scalar, [x, y], 2.0),
+            [(0, True, False), (1, True, False)],
+        )
+        norm = aten.native_batch_norm.default
+        stats = [(3, False, False), (4, False, False)]
+        self.assertEqual(
+            written(norm, x, None, None, mean, var, True, 0.5, 1e-5), stats
+        )
+        self.assertEqual(written(norm, x, None, None, mean, var, False, 0.5, 1e-5), [])
+        self.assertEqual(written(norm, x, None, None, None, None, True, 0.5, 1e-5), [])
+        self.assertEqual(
+            written(aten.batch_norm_update_stats.default, x, mean, var, 0.5),
+            [(1, False, False), (2, False, False)],
+        )
+        # Every operator listed as writing what its schema does not mark
+        # names the statistics as the list of them has them.
+        for name in sorted(stays.UNDECLARED):
+            packet = getattr(aten, name)
+            for overload in packet.overloads():
+                schema = getattr(packet, overload)._schema
+                names = [a.name for a in schema.arguments]
+                with self.subTest(operator=schema.name, overload=overload):
+                    self.assertLessEqual(set(stays.STATISTICS), set(names))
+
+    def beside_eager(self, source, calls=12):
+        """Runs the program as written and under vm, each in a module of
+        its own, and holds what f returns or raises and what read() gives
+        equal after every call. Returns how often a region over f ran."""
+        eager, traced = {}, {}
+        exec(compile(source, "<undo>", "exec"), eager)
+        exec(compile(source, "<undo>", "exec"), traced)
+        compiled = vm(traced["f"], passes=CHECKS_EARLY)
+
+        def runs():
+            return sum(
+                r["runs"]
+                for r in vm.regions(compiled)
+                if r["function"] == "f" and r["state"] == "region"
+            )
+
+        before = runs()
+        for call in range(calls):
+            want = checks_outcome(eager["f"], *eager["args"](call))
+            got = checks_outcome(compiled, *traced["args"](call))
+            self.assertEqual(type(got), type(want), msg=f"call {call}: {got!r}")
+            if isinstance(want, Exception):
+                self.assertEqual(str(got), str(want), msg=f"call {call}")
+            else:
+                self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            for a, b in zip(traced["read"](), eager["read"](), strict=True):
+                self.assertEqual(a, b, atol=0, rtol=0, msg=f"after call {call}")
+        return runs() - before
+
+    @parametrize("end", list(UNDO_ENDS))
+    @parametrize("relation", list(UNDO_RELATIONS))
+    @checks_isolated
+    def test_two_writers_of_one_memory(self, device, relation, end):
+        if end == "raises" and device != "cpu":
+            self.skipTest("an index out of range is an assert on the device there")
+        for first, second in itertools.product(UNDO_WRITERS, UNDO_WRITERS):
+            with self.subTest(first=first, second=second):
+                source = undo_source(device, first, second, relation, end)
+                runs = self.beside_eager(source)
+                if end == "kept":
+                    self.assertGreater(runs, 0, msg="no region over the two writes")
+
+    @parametrize("name", list(UNDO_PROGRAMS))
+    @checks_isolated
+    def test_a_trace_that_is_given_up_leaves_what_it_found(self, device, name):
+        if name == "another_storage" and device != "cpu":
+            self.skipTest("a tensor over an array's memory is on the CPU")
+        if name.endswith("_err") and device != "cpu":
+            self.skipTest("an index out of range is an assert on the device there")
+        self.beside_eager(UNDO_HEAD.format(device=device) + UNDO_PROGRAMS[name])
+
+
+instantiate_device_type_tests(TestVmRulesTorchUndo, globals())
+# The kinds of callee that no family of rules has a line for (the exact type
+# of the callee tells the kind: rules/callees.rs), each with what a call of
+# one answers where no family lists the callee: the name it is left under.
+# No kind stops a trace yet: the last one is what none of the others is, and
+# is left to the code that decided before the table as the others are.
+RULES_CALLEE_KINDS = {
+    "function": "later:callees: python functions",
+    "method": "later:callees: bound methods",
+    "a C function or descriptor of torch's namespaces": "later:callees: torch, unswept",
+    "builtin_function_or_method": "later:callees: builtins",
+    "method_descriptor": "later:callees: method descriptors",
+    "wrapper_descriptor": "later:callees: slot wrappers",
+    "type": "later:callees: classes",
+    "a class of another metaclass": "later:callees: classes of a metaclass",
+    "functools.partial": "later:callees: partials",
+    "an instance of a class with a Python __call__": "later:callees: instances",
+    "an instance of a class with a C __call__": "later:callees: C callables",
+    "anything else": "later:callees: of no listed kind",
+}  # fmt: skip
+RULES_CALLEES = tuple(
+    answer.partition(":")[2]
+    for answer in RULES_CALLEE_KINDS.values()
+    if answer.startswith("later:")
+)
+
+
+def rules_fn(x):
+    return x
+
+
+def rules_gen():
+    yield 1
+
+
+async def rules_coro():
+    return 1
+
+
+class RulesPlain:
+    pass
+
+
+class RulesWithInit:
+    def __init__(self):
+        self.k = 1
+
+
+class RulesWithNew:
+    def __new__(cls):
+        return super().__new__(cls)
+
+
+class RulesCallable:
+    def __call__(self):
+        return 1
+
+
+class RulesBuiltinCall:
+    __call__ = len
+
+
+class RulesPartialCall:
+    __call__ = functools.partial(rules_fn, 1)
+
+
+class RulesStaticCall:
+    __call__ = staticmethod(rules_fn)
+
+
+class RulesMeta(type):
+    def __call__(cls, *args):
+        return super().__call__(*args)
+
+
+class RulesOfMeta(metaclass=RulesMeta):
+    pass
+
+
+class RulesEnum(enum.Enum):
+    A = 1
+
+
+class RulesPartial(functools.partial):
+    pass
+
+
+class RulesHolder:
+    @staticmethod
+    def static():
+        return 1
+
+    @classmethod
+    def of_class(cls):
+        return 1
+
+    def method(self):
+        return 1
+
+
+def rules_callables():
+    """One object of every kind a program can put where a callee goes: what
+    it is, the object, the kind its exact type is (written from CPython's
+    types), and what a call of it with a tensor answers: "row", "stop", or
+    the name it is left under."""
+    lines = {name: status for name, _, status in torch._rust._rules_torch()}
+    functions = torch._C._VariableFunctions
+    unswept = next(
+        f
+        for n, f in ((n, getattr(functions, n)) for n in sorted(dir(functions)))
+        if isinstance(f, types.BuiltinFunctionType)
+        and not n.startswith("__")
+        and f"torch.{n}" not in lines
+    )
+    unswept_method = next(
+        f
+        for n, f in sorted(vars(torch._C.TensorBase).items())
+        if isinstance(f, types.MethodDescriptorType)
+        and f"torch.Tensor.{n}" not in lines
+    )
+    torch_c = "a C function or descriptor of torch's namespaces"
+    python_call = "an instance of a class with a Python __call__"
+    c_call = "an instance of a class with a C __call__"
+    return [
+        ("a Python function", rules_fn, "function", "callees: python functions"),
+        ("a lambda", lambda: 1, "function", "callees: python functions"),
+        ("a generator function", rules_gen, "function", "callees: python functions"),
+        ("a coroutine function", rules_coro, "function", "callees: python functions"),
+        ("a bound method", RulesHolder().method, "method", "callees: bound methods"),
+        ("a C function bound by hand", types.MethodType(len, [1]), "method", "callees: bound methods"),
+        ("a method of a builtin, bound", [].append, "builtin_function_or_method", "callees: builtins"),
+        ("a builtin function", len, "builtin_function_or_method", "callees: builtins"),
+        ("a method of object, bound to a list", [].__dir__, "builtin_function_or_method", "callees: builtins"),
+        ("a method of object, bound to an object of torch", functions.__dir__, "builtin_function_or_method", "callees: builtins"),
+        ("a method of modules, bound to torch", torch.__dir__, "builtin_function_or_method", "callees: builtins"),
+        ("a method of object, bound to the class of tensors", torch.Tensor.__subclasshook__, "builtin_function_or_method", "callees: builtins"),
+        ("a method descriptor of object", object.__reduce_ex__, "method_descriptor", "callees: method descriptors"),
+        ("a slot wrapper of object, as the class of tensors has it", torch.Tensor.__getattribute__, "wrapper_descriptor", "callees: slot wrappers"),
+        ("a method descriptor", str.join, "method_descriptor", "callees: method descriptors"),
+        ("a classmethod descriptor", vars(dict)["fromkeys"], "method_descriptor", "callees: method descriptors"),
+        ("a slot wrapper", int.__add__, "wrapper_descriptor", "callees: slot wrappers"),
+        ("a slot wrapper, bound", (1).__add__, "wrapper_descriptor", "callees: slot wrappers"),
+        ("a class", RulesPlain, "type", "callees: classes"),
+        ("a class with a Python __init__", RulesWithInit, "type", "callees: classes"),
+        ("a class with a Python __new__", RulesWithNew, "type", "callees: classes"),
+        ("a builtin class", int, "type", "callees: classes"),
+        ("a class of modules", torch.nn.Linear, "type", "callees: classes"),
+        ("a class of a metaclass", RulesOfMeta, "a class of another metaclass", "callees: classes of a metaclass"),
+        ("an Enum class", RulesEnum, "a class of another metaclass", "callees: classes of a metaclass"),
+        ("an abstract class", contextlib.nullcontext, "a class of another metaclass", "callees: classes of a metaclass"),
+        ("the class of tensors", torch.Tensor, "a class of another metaclass", "callees: classes of a metaclass"),
+        ("a partial", functools.partial(rules_fn, 1), "functools.partial", "callees: partials"),
+        ("an instance of a subclass of partial", RulesPartial(rules_fn, 1), c_call, "callees: C callables"),
+        ("an instance with a Python __call__", RulesCallable(), python_call, "callees: instances"),
+        ("a module instance", torch.nn.Linear(2, 2), python_call, "callees: instances"),
+        ("a staticmethod object", vars(RulesHolder)["static"], c_call, "callees: C callables"),
+        ("a cached function", functools.lru_cache(None)(rules_fn), c_call, "callees: C callables"),
+        ("an itemgetter", operator.itemgetter(0), c_call, "callees: C callables"),
+        ("a numpy ufunc", numpy.sqrt, c_call, "callees: C callables"),
+        ("an instance whose class has a builtin under __call__", RulesBuiltinCall(), "anything else", "callees: of no listed kind"),
+        ("an instance whose class has a partial under __call__", RulesPartialCall(), "anything else", "callees: of no listed kind"),
+        ("an instance whose class has a staticmethod under __call__", RulesStaticCall(), "anything else", "callees: of no listed kind"),
+        ("a classmethod object", vars(RulesHolder)["of_class"], "anything else", "callees: of no listed kind"),
+        ("an object that is not callable", 3, "anything else", "callees: of no listed kind"),
+        ("a C function of torch with a row", torch.sin, torch_c, "row"),
+        ("a C method of tensors with a row, bound", torch.ones(2).cos, torch_c, "row"),
+        ("a C function of torch that stops", torch.nonzero, torch_c, "stop"),
+        ("a C function of torch left to a family", torch.dropout, torch_c, "ambient"),
+        ("a C function of torch with no line", unswept, torch_c, "callees: torch, unswept"),
+        ("a C method of tensors with no line", unswept_method, torch_c, "callees: torch, unswept"),
+        ("a C function of torch's own module", torch._C._is_tracing, torch_c, "callees: torch, unswept"),
+    ]  # fmt: skip
+
+
+# The families of rules that are not written yet whose instructions a call
+# taken at another's word may run with no rule heard (rules/mod.rs). A name
+# the table leaves something to and that is not here stops a trace there.
+RULES_UNHEARD = (
+    "attributes",
+    "subscripts",
+    "iteration",
+    "torch",
+    "functions",
+    "stores",
+    "descriptors",
+    "classes",
+    "recorder",
+    "native",
+    "ambient",
+    "facts",
+    *RULES_CALLEES,
+)
+# The names the table leaves something to that a call taken at another's
+# word may NOT run unheard: none today.
+RULES_HEARD_AT_A_WORD = ()
+# How the construct of a stop program comes to run under a call that a trace
+# takes at another's word: in a function the pass list declares pure; in a
+# helper that the declared function calls; in the declared function, called
+# through a helper nobody declared; in a function of torch that another
+# tracer keeps whole (the test makes one: a function with torch's module name
+# in that tracer's table of them).
+RULES_WORDS = ("declared", "under", "over", "whole")
+# The stop programs whose construct enters no frame and writes nothing
+# outside its own: only of such a function is a call taken at the other
+# tracer's word (a leaf), so only these come under a trace that way.
+RULES_WHOLE_LEAVES = (
+    "match_class",
+    "match_class_positional",
+    "match_mapping",
+    "match_sequence",
+    "failed_assert",
+)
+
+
+def rules_source_at_a_word(name, how):
+    """The program of a stop with its construct in `kof`, which the body
+    calls (through `helper`, for "over")."""
+    _, setup, construct, change, state = RULES_STOPS[name][:5]
+
+    def indented(text):
+        return "\n".join(f"    {line}" for line in text.splitlines())
+
+    kof = f"def kof():\n{indented(construct)}\n    return k\n"
+    if how == "under":
+        kof = (
+            f"def kof_inner():\n{indented(construct)}\n    return k\n"
+            "def kof():\n    return kof_inner()\n"
+        )
+    call = "helper()" if how == "over" else "kof()"
+    return (
+        f"import torch\n{setup}\n{kof}"
+        "def helper():\n    return kof()\n"
+        "def f(x):\n    y = torch.sin(x) * 2.0 + torch.cos(x)\n"
+        f"    k = {call}\n"
+        "    return (y * k + torch.tanh(y)).sum(-1)\n"
+        f"def change(second):\n{indented(change)}\n"
+        f"def state():\n    return {state}\n"
+    )
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRulesTrusted(TestCase):
+    """A call that a trace takes at another's word (a callable the pass list
+    declares pure, a function of torch that another tracer keeps whole) is
+    said to only compute. That is no word on an instruction under it that
+    nobody can check: the rule table is asked about every instruction there
+    as anywhere, and what it stops, has no row for or does not list stops the
+    trace. What such a call may run with no rule heard is a list: the families
+    of rules that are not written yet."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_what_runs_unheard_is_a_list_of_families(self):
+        unheard = dict(torch._rust._rules_unheard())
+        self.assertEqual(sorted(unheard), sorted(RULES_UNHEARD))
+        for family, why in unheard.items():
+            # Each with what stands in for its rules there.
+            self.assertGreater(len(why), 60, msg=family)
+        # Every name the table leaves anything to is on the list, or is
+        # written down here as one that is heard there: no name is unheard,
+        # or heard, because nobody thought of it.
+        left_to = set()
+        for line in torch._rust._rules_dump().splitlines():
+            parts = line.split("\t")
+            if parts[0] == "later":
+                left_to.add(parts[3])
+            elif parts[0] == "default" and parts[3].startswith("later:"):
+                left_to.add(parts[3].partition(":")[2])
+        self.assertGreater(len(left_to), 20)
+        # ("imports" is written: the kinds' list still names it, and the
+        # family's rows answer.)
+        self.assertEqual(
+            left_to - {"imports"}, {*RULES_UNHEARD, *RULES_HEARD_AT_A_WORD}
+        )
+        self.assertEqual(set(RULES_UNHEARD) & set(RULES_HEARD_AT_A_WORD), set())
+
+    def test_every_answer_of_the_table_is_heard_at_a_word(self):
+        hear = torch._rust._rules_hear
+        table = collections.defaultdict(list)
+        for name, status in torch._rust._rules_kinds():
+            table[name].append(status)
+        seen = collections.Counter()
+        for name, statuses in table.items():
+            if name.startswith("<"):
+                what = {"opcode": int(name[1:-1])}
+            elif name.isupper() or name.partition(" ")[0].isupper():
+                opname, _, arg = name.partition(" ")
+                what = {"opcode": opcode.opmap[opname], "oparg": int(arg or 0)}
+            else:
+                what = {"kind": name}
+            plain = hear(**what)
+            word = hear(**what, at_a_word=True)
+            hows = {status.partition(":")[0] for status in statuses}
+            with self.subTest(what=name):
+                if hows & {"stop", "as", "unlisted"}:
+                    # No trace runs it, wherever it is.
+                    self.assertEqual(plain[0], "stop")
+                    self.assertEqual(word, plain)
+                    seen[sorted(hows & {"stop", "as", "unlisted"})[0]] += 1
+                elif "row" in hows:
+                    # A row, or none for no operand: the same answer.
+                    self.assertIn(plain[0], ("row", "stop"))
+                    self.assertEqual(word, plain)
+                    seen["row"] += 1
+                else:
+                    (family,) = {status.partition(":")[2] for status in statuses}
+                    self.assertEqual(plain, ("older", family))
+                    self.assertEqual(word, ("unheard", family))
+                    self.assertIn(family, RULES_UNHEARD)
+                    seen["later"] += 1
+        self.assertGreater(seen["stop"], 30)
+        self.assertGreater(seen["as"], 25)
+        self.assertGreater(seen["unlisted"], 100)
+        self.assertGreater(seen["row"], 30)
+        self.assertGreater(seen["later"], 30)
+
+    def test_a_callee_is_heard_at_a_word(self):
+        class Tensor(torch.Tensor):
+            pass
+
+        hear = torch._rust._rules_hear
+        members = {name: status for name, _, status in torch._rust._rules_torch()}
+        x = torch.ones(2)
+        # A member that stops, one with a row, one left to a family that is
+        # not written, and a callee with no line.
+        self.assertEqual(members["torch.nonzero"], "stop")
+        self.assertEqual(members["torch.sin"], "row")
+        self.assertEqual(members["torch.dropout"], "later:ambient")
+
+        def heard(callee, *operands, word=False):
+            return hear(callee=callee, operands=[callee, *operands], at_a_word=word)
+
+        for word in (False, True):
+            self.assertEqual(heard(torch.nonzero, x, word=word)[0], "stop")
+            self.assertEqual(heard(torch.sin, x, word=word)[0], "row")
+            # A row is for the operands it was measured on, there too.
+            answer = heard(torch.sin, x.as_subclass(Tensor), word=word)
+            self.assertEqual(answer[0], "stop")
+            self.assertIn("no row for these operands", answer[1])
+        self.assertEqual(heard(torch.dropout, x), ("older", "ambient"))
+        self.assertEqual(heard(torch.dropout, x, word=True), ("unheard", "ambient"))
+        self.assertEqual(heard(len, [1]), ("older", "callees: builtins"))
+        self.assertEqual(heard(len, [1], word=True), ("unheard", "callees: builtins"))
+
+    @parametrize("name", list(RULES_STOPS))
+    @checks_isolated
+    def test_a_stopped_instruction_runs_under_no_call_taken_at_a_word(self, name):
+        from torch._dynamo import trace_rules, variables
+
+        # Counted from the first trace on: which instructions traces met.
+        os.environ["TORCH_RUST_GATE_HIST"] = "1"
+        programs = {}
+        for how in RULES_WORDS:
+            source = rules_source_at_a_word(name, how)
+            eager, traced = {}, {}
+            exec(compile(source, f"<rules eager {how}>", "exec"), eager)
+            exec(compile(source, f"<rules vm {how}>", "exec"), traced)
+            programs[how] = (eager, traced)
+        kept = programs["whole"][1]["kof"]
+        kept.__module__ = "torch.nn.functional"
+        in_graph = variables.TorchInGraphFunctionVariable
+        trace_rules.get_torch_obj_rule_map()[kept] = in_graph
+        self.assertIs(trace_rules.lookup(kept), in_graph)
+        declared = tuple(programs[how][1]["kof"] for how in RULES_WORDS[:3])
+        passes = vm.configure(
+            vm.DEFAULT_PASSES,
+            regions={"at": 3, "observe": 1},
+            pure_calls={"rounds": 1, "pure": declared},
+        )
+        held = rules_opnames(
+            compile(rules_source_at_a_word(name, "declared"), "", "exec")
+        )
+        stops = RULES_STOPS[name][0]
+        for stop in stops:
+            self.assertIn(RULES_LOWERED.get(stop, stop), held)
+
+        def met():
+            rows = torch._rust._gate_report()["rows"]
+            return collections.Counter(
+                {
+                    stop: sum(n for _, what, _, n, _, _ in rows if what == stop)
+                    for stop in stops
+                }
+            )
+
+        def refused(compiled):
+            # (The report is of the process: of every function so far.)
+            return collections.Counter(
+                str(why)
+                for place in vm.regions(compiled)
+                for state, why in place.get("traces", ())
+                if state != "region"
+            )
+
+        refused_before = collections.Counter()
+        for how, (eager, traced) in programs.items():
+            met_before = met()
+            compiled = vm(traced["f"], passes=passes)
+            for call in range(13):
+                # The value the construct reads: A, then B, then A again.
+                second = 7 <= call < 10
+                eager["change"](second)
+                traced["change"](second)
+                torch.manual_seed(call)
+                x = torch.randn(4, 8)
+                want = checks_outcome(eager["f"], x)
+                got = checks_outcome(compiled, x)
+                said = f"{how}, call {call}"
+                self.assertIsInstance(want, torch.Tensor, msg=said)
+                self.assertIsInstance(got, torch.Tensor, msg=f"{said}: {got!r}")
+                self.assertEqual(got, want, atol=0, rtol=0, msg=said)
+                self.assertEqual(traced["state"](), eager["state"](), msg=said)
+            refused_now = refused(compiled)
+            refusals = list((refused_now - refused_before).elements())
+            refused_before = refused_now
+            # Every trace that met a stopped instruction was refused for it.
+            met_now = met()
+            for stop in stops:
+                named = sum(f"no row for: {stop} " in why for why in refusals)
+                self.assertEqual(
+                    met_now[stop] - met_before[stop],
+                    named,
+                    msg=f"{how}, {stop}: {refusals}",
+                )
+            # And one did meet a stop: the call is in a block, and the trace
+            # of that block came to the construct under the call.
+            if how != "whole" or name in RULES_WHOLE_LEAVES:
+                stopped = [
+                    why
+                    for why in refusals
+                    if re.search(r"no row for: [A-Z_]+[A-Z_0-9 ]* stops a trace", why)
+                ]
+                self.assertTrue(stopped, msg=f"{how}: {refusals}")
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+class TestVmRulesCallees(TestCase):
+    """A call is asked about as its callee. A callee that a family of rules
+    lists answers by its line: a row, a stop, or the family it is left to.
+    Every other callee is told by its exact type, as CPython tells what a
+    call of it runs, and is left by name to the rules of its kind; an object
+    of none of the kinds has a name of its own. No callee answers nothing:
+    what the table does not decide, it says who decides."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_no_callable_answers_nothing(self):
+        hear, kind_of = torch._rust._rules_hear, torch._rust._rules_callee_kind
+        x = torch.ones(2)
+        kinds = set()
+        for said, callee, kind, answer in rules_callables():
+            with self.subTest(callee=said):
+                self.assertEqual(kind_of(callee), kind)
+                plain = hear(callee=callee, operands=[callee, x])
+                word = hear(callee=callee, operands=[callee, x], at_a_word=True)
+                if answer in ("row", "stop"):
+                    # A line of a family, with its sentence or its reason.
+                    self.assertEqual((plain[0], word[0]), (answer, answer))
+                    self.assertGreater(len(plain[1]), 20)
+                    continue
+                self.assertEqual(plain, ("older", answer))
+                self.assertEqual(word, ("unheard", answer))
+                self.assertIn(answer, RULES_UNHEARD)
+                if answer in RULES_CALLEES:
+                    # Told by its kind: the kind's own answer.
+                    self.assertEqual(RULES_CALLEE_KINDS[kind], f"later:{answer}")
+                    kinds.add(kind)
+        # Every kind has an object above that no family lists.
+        self.assertEqual(kinds, set(RULES_CALLEE_KINDS))
+
+    def test_a_kind_is_the_exact_type(self):
+        kind_of = torch._rust._rules_callee_kind
+        types_of = collections.defaultdict(set)
+        for _, callee, kind, _ in rules_callables():
+            types_of[kind].add(type(callee))
+        # A kind that is one type of CPython, or two, holds nothing else.
+        self.assertEqual(types_of["function"], {types.FunctionType})
+        self.assertEqual(types_of["method"], {types.MethodType})
+        self.assertEqual(
+            types_of["builtin_function_or_method"], {types.BuiltinFunctionType}
+        )
+        self.assertEqual(
+            types_of["method_descriptor"],
+            {types.MethodDescriptorType, types.ClassMethodDescriptorType},
+        )
+        self.assertEqual(
+            types_of["wrapper_descriptor"],
+            {types.WrapperDescriptorType, types.MethodWrapperType},
+        )
+        self.assertEqual(types_of["type"], {type})
+        self.assertEqual(types_of["functools.partial"], {functools.partial})
+        for meta in types_of["a class of another metaclass"]:
+            self.assertTrue(issubclass(meta, type) and meta is not type, meta)
+        # An instance is told by what its class has under __call__, looked up
+        # as a call looks it up: on the class, not on the instance.
+        for kind, under in (
+            ("an instance of a class with a Python __call__", {types.FunctionType}),
+            ("an instance of a class with a C __call__", {types.WrapperDescriptorType}),
+        ):
+            for cls in types_of[kind]:
+                found = next(
+                    vars(k)["__call__"] for k in cls.__mro__ if "__call__" in vars(k)
+                )
+                self.assertIn(type(found), under, msg=cls)
+        for cls in types_of["anything else"]:
+            found = [vars(k)["__call__"] for k in cls.__mro__ if "__call__" in vars(k)]
+            self.assertNotIn(
+                type(found[0]) if found else None,
+                (types.FunctionType, types.WrapperDescriptorType),
+                msg=cls,
+            )
+        shadowed = RulesPlain()
+        shadowed.__call__ = rules_fn
+        self.assertEqual(kind_of(shadowed), "anything else")
+
+
+# The families whose rows' `before` functions the dump cannot name yet (the
+# family has no list of them): empty when every family has one.
+RULES_BEFORE_UNNAMED = ("torch",)
+# The rows whose `before` tests values, by (what, operands): how the table
+# is asked about an instruction the row is for.
+RULES_ROW_ASKS = {
+    ("IMPORT_NAME", "0:Immutable,1:Immutable"): {"operands": [0, None], "names": ["math"], "frame": True},
+    ("IMPORT_NAME", "0:Immutable,1:ExactTuple"): {"operands": [0, ("sqrt",)], "names": ["math"], "frame": True},
+    ("IMPORT_FROM", "0:ExactModule"): {"operands": [math], "names": ["sqrt"], "frame": True},
+}  # fmt: skip
+# Each `before` function the dump names: an instruction its row's classes
+# take and it refuses, and what the reason says.
+RULES_REFUSED = {
+    "import_name": ({"opcode": opcode.opmap["IMPORT_NAME"], "operands": [1, None], "names": ["math"], "frame": True}, "a relative import"),
+    "import_from": ({"opcode": opcode.opmap["IMPORT_FROM"], "operands": [math], "names": ["no_such_name"], "frame": True}, "no_such_name"),
+}  # fmt: skip
+# The callees of torch whose lines per form of operands are not heard: the
+# callee as a whole is left to a name, which is answered before any operand
+# is looked at, so a form that was measured to stop does not stop a call.
+RULES_FORMS_NOT_HEARD = (
+    "torch.arange",
+    "torch.eye",
+    "torch.full",
+    "torch.ones",
+    "torch.rand",
+    "torch.randn",
+    "torch.zeros",
+)
+# What the table answers where no line decides (the `default` lines that are
+# not a kind of callee): how each case is asked about and what the reason
+# says, or why nothing can be asked.
+RULES_DEFAULTS = {
+    "an opcode number that no list of a family has": "every number that is no opcode",
+    "an opcode that is lowered to instruction kinds, met as the opcode": "every `as` line",
+    "rows, of which none takes the classes of the operands": ({"opcode": opcode.opmap["LIST_APPEND"], "operands": [(), 1]}, "LIST_APPEND has no row for operands of the classes (tuple, int)"),
+    "rows that take the classes, each with a before that refuses the operands": "every `before` line",
+    "an instruction or an opcode that no family answers for": "none exists: every kind and every number has a line or is no opcode",
+    "a callee that no family lists, whose kind answers neither a name nor a stop": "none exists: every kind of callee answers a name or a stop",
+    "a stop of one family and rows of another for one instruction": "none exists: nothing has a stop line and a row line",
+    "under a call taken at another's word, left to a name that is not on the list of what runs unheard": "none exists: every name is on the list",
+    "of the torch family: any callee, while the table of torch's members is not made": "a new process",
+    "of the torch family: a call of a member that has lines per form, in a form that no line has": "a member with lines per form",
+}  # fmt: skip
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+class TestVmRulesDump(TestCase):
+    """The dump of the rule table is what the table decides: every line of
+    it is asked about, with operands made for that line, through the function
+    a trace asks through, and the answer is the line. A row answers with its
+    own line; a stop with its reason; what is left to a name with that name.
+    What is answered where no line decides is a line too, and is asked
+    about."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def lines(self):
+        return [line.split("\t") for line in torch._rust._rules_dump().splitlines()]
+
+    def values(self, x):
+        """An operand of each class the measurement of torch's members names."""
+        return {
+            "T": x, "int": 1, "bool": True, "float": 1.5, "None": None, "str": "a",
+            "complex": 1j, "dtype": torch.float32, "device": torch.device("cpu"),
+            "layout": torch.strided, "memory_format": torch.contiguous_format,
+            "Size": torch.Size((1,)), "tuple[]": (), "list[]": [], "tuple[int]": (1,),
+            "list[int]": [1], "list[float]": [1.5], "list[T]": [x], "tuple[T]": (x,),
+            "tuple[T,int]": (x, 1), "tuple[T,float]": (x, 1.5), "tuple[None,T]": (None, x),
+        }  # fmt: skip
+
+    def torch_ask(self, member, form, domain, x):
+        """A call of `member` in the form of operands `form` (none: any call
+        of the classes it was measured on), or None if this test cannot make
+        one."""
+        values = self.values(x)
+        places = domain.get(member, {})
+        positional, keywords = {}, {}
+        if form == "plain":
+            # A call with no tensor among its operands.
+            plain = [c for c in places.get("0", ()) if c in values and "T" not in c]
+            if not plain:
+                return None
+            positional["0"] = values[plain[0]]
+        for item in form.split(" ") if form not in ("", "plain") else ():
+            place, _, held = item.partition(":")
+            made = {"T": x, "[T]": [x], "True": True, "False": False}
+            if held not in made:
+                return None
+            (positional if place.isdigit() else keywords)[place] = made[held]
+        if not form:
+            for place, classes in places.items():
+                made = [c for c in ("T", *classes) if c in classes and c in values]
+                if not place.isdigit():
+                    continue
+                if not made:
+                    return None
+                positional[place] = values[made[0]]
+        operands = []
+        for at in range(max(map(int, positional), default=-1) + 1):
+            if str(at) in positional:
+                operands.append(positional[str(at)])
+                continue
+            # A place the form does not name holds no tensor.
+            plain = [c for c in places.get(str(at), ()) if c in values and "T" not in c]
+            if not plain:
+                return None
+            operands.append(values[plain[0]])
+        callee = TestVmRulesTorch.member(self, member)
+        ask = {"callee": callee, "operands": [callee, *operands, *keywords.values()]}
+        if keywords:
+            ask["kwnames"] = tuple(keywords)
+        return ask
+
+    def test_every_line_is_what_the_table_answers(self):
+        class Tensor(torch.Tensor):
+            pass
+
+        hear = torch._rust._rules_hear
+        asked_of = TestVmRulesOps.asked
+        x = torch.ones(2)
+        groups = {"Immutable": 0, "ExactList": [], "ExactTuple": (), "ExactDict": {}}
+        groups |= {"ExactSet": set(), "ExactModule": math, "PlainTensor": x}
+        groups |= {"TorchConstant": torch.float32}
+        domain = collections.defaultdict(dict)
+        for member, place, classes in torch._rust._rules_torch_domain():
+            domain[member][place] = classes
+        lines = self.lines()
+        self.assertEqual(len({tuple(parts) for parts in lines}), len(lines))
+        rows = {parts[2]: "\t".join(parts) for parts in lines if parts[0] == "row"}
+        formed = {parts[2] for parts in lines if parts[0] == "form"}
+        overridden = set()
+        asked, unmade = collections.Counter(), collections.Counter()
+        for parts in lines:
+            how, family, what = parts[:3]
+            line = "\t".join(parts)
+            with self.subTest(line=line[:100]):
+                if how == "stop":
+                    ask = asked_of(self, family, what)
+                    answer = hear(**ask)
+                    self.assertEqual(answer[0], "stop")
+                    # (A callee is named as the table found it: one C
+                    # function may be under two names of torch.)
+                    reason = f" stops a trace: {parts[3]}"
+                    self.assertTrue(answer[1].endswith(reason), answer[1])
+                    if family != "torch":
+                        self.assertEqual(answer[1], what + reason)
+                    self.assertEqual(hear(**ask, at_a_word=True), answer)
+                elif how == "as":
+                    ask = asked_of(self, family, what)
+                    answer = ("stop", f"{what} is no instruction the rules list")
+                    self.assertEqual(hear(**ask), answer)
+                    self.assertEqual(hear(**ask, at_a_word=True), answer)
+                elif how == "row" and family == "torch":
+                    member, _, form = what.partition(" (")
+                    if not form and member in formed:
+                        # (A row for the forms that have lines: asked there.)
+                        continue
+                    ask = self.torch_ask(member, form.removesuffix(")"), domain, x)
+                    if ask is None:
+                        unmade[how] += 1
+                        continue
+                    self.assertEqual(hear(**ask), ("row", line))
+                    self.assertEqual(hear(**ask, at_a_word=True), ("row", line))
+                    # The row is for the classes measured: not for a subclass.
+                    ask["operands"] = [ask["callee"], x.as_subclass(Tensor)]
+                    ask.pop("kwnames", None)
+                    refused = hear(**ask)
+                    self.assertEqual(refused[0], "stop")
+                    self.assertIn("no row for these operands", refused[1])
+                elif how == "row":
+                    spec = parts[3]
+                    ask = asked_of(self, family, what)
+                    if (what, spec) in RULES_ROW_ASKS:
+                        ask |= RULES_ROW_ASKS[what, spec]
+                    else:
+                        # A row with a `before` is for values: asked by hand.
+                        self.assertEqual(parts[10], "-")
+                        named = dict(o.split(":") for o in spec.split(",") if o != "-")
+                        last = "-1" in named
+                        ask["operands"] = [groups[named.pop("-1")]] if last else []
+                        for at, group in sorted(named.items()):
+                            self.assertEqual(int(at), len(ask["operands"]) - last)
+                            ask["operands"].insert(int(at), groups[group])
+                    self.assertEqual(hear(**ask), ("row", line))
+                    self.assertEqual(hear(**ask, at_a_word=True), ("row", line))
+                    if spec != "-":
+                        # An operand of a class the row does not name.
+                        ask["operands"] = [object() for _ in ask["operands"]]
+                        refused = hear(**ask)
+                        self.assertEqual(refused[0], "stop")
+                        self.assertIn(
+                            "has no row for operands of the classes", refused[1]
+                        )
+                elif how == "form":
+                    ask = self.torch_ask(what, parts[3], domain, x)
+                    if ask is None:
+                        unmade[how] += 1
+                        continue
+                    answer = hear(**ask)
+                    if parts[4] == "row":
+                        row = rows.get(f"{what} ({parts[3]})") or rows[what]
+                        self.assertEqual(answer, ("row", row))
+                    elif parts[4] == "stop":
+                        self.assertEqual(answer[0], "stop")
+                    else:
+                        # The callee is left to a name whatever the form.
+                        self.assertEqual(answer, ("older", parts[4].partition(":")[2]))
+                    if parts[4] != parts[5]:
+                        overridden.add(what)
+                    self.assertRegex(parts[5], r"^(row|stop|later:\w+)$")
+                    self.assertEqual(
+                        hear(**ask, at_a_word=True)[0] == "stop", answer[0] == "stop"
+                    )
+                else:
+                    continue
+                asked[how] += 1
+        self.assertGreater(asked["stop"], 50)
+        self.assertGreater(asked["as"], 25)
+        self.assertGreater(asked["row"], 150)
+        self.assertGreater(asked["form"], 100, msg=str(asked))
+        # The callees whose lines per form are not what a call is answered:
+        # each is left to a name as a whole, so a form measured to stop does
+        # not stop it. Known, and to be empty.
+        self.assertEqual(sorted(overridden), sorted(RULES_FORMS_NOT_HEARD))
+        # What this test cannot make operands for is counted, and is little.
+        self.assertLess(sum(unmade.values()), 3, msg=str(unmade))
+
+    def test_a_before_is_named_and_refuses(self):
+        hear = torch._rust._rules_hear
+        lines = self.lines()
+        named = {parts[2]: parts for parts in lines if parts[0] == "before"}
+        self.assertEqual(sorted(named), sorted(RULES_REFUSED))
+        used = collections.defaultdict(set)
+        for parts in lines:
+            if parts[0] == "row":
+                used[parts[10]].add(parts[1])
+        # A row's `before` is a function the dump has a line for, of the
+        # row's own family.
+        self.assertEqual(used.pop("UNNAMED", set()), set(RULES_BEFORE_UNNAMED))
+        used.pop("-")
+        self.assertEqual(sorted(used), sorted(named))
+        for name, (_, _, _, family, says) in named.items():
+            with self.subTest(before=name):
+                self.assertEqual(used[name], {family})
+                self.assertIn("Refuses ", says)
+                self.assertIn("Records ", says)
+                ask, why = RULES_REFUSED[name]
+                refused = hear(**ask)
+                self.assertEqual(refused[0], "stop")
+                self.assertIn("has no row for these operands: ", refused[1])
+                self.assertIn(why, refused[1])
+
+    def test_the_order_is_the_families(self):
+        lines = self.lines()
+        order = {parts[2]: parts for parts in lines if parts[0] == "order"}
+        self.assertEqual(sorted(order), ["families", "rows"])
+        self.assertEqual(order["families"][3], ",".join(RULES_FAMILIES))
+        self.assertEqual(order["rows"][3], "first")
+        # The lines of the families come in that order.
+        families = [parts[1] for parts in lines if parts[1] in RULES_FAMILIES]
+        firsts = [f for at, f in enumerate(families) if f not in families[:at]]
+        self.assertEqual(firsts, list(RULES_FAMILIES))
+        # Nothing has a stop of one family and rows of another: the day
+        # something does, this fails and that default is asked about.
+        stopped = {parts[2] for parts in lines if parts[0] == "stop"}
+        rowed = {parts[2].partition(" (")[0] for parts in lines if parts[0] == "row"}
+        self.assertEqual(stopped & rowed, set())
+
+    def test_a_default_is_what_is_answered(self):
+        hear = torch._rust._rules_hear
+        lines = self.lines()
+        defaults = {p[2]: p for p in lines if p[0] == "default" and p[1] != "callees"}
+        self.assertEqual(sorted(defaults), sorted(RULES_DEFAULTS))
+        for case, (_, family, _, answer, why) in defaults.items():
+            with self.subTest(case=case):
+                self.assertEqual(family, "rules")
+                self.assertEqual(answer, "stop")
+                self.assertTrue(why.endswith("."), why)
+                if isinstance(RULES_DEFAULTS[case], tuple):
+                    ask, reason = RULES_DEFAULTS[case]
+                    self.assertEqual(hear(**ask), ("stop", reason))
+                    self.assertEqual(hear(**ask, at_a_word=True), ("stop", reason))
+        # Every number that the dump has no line for is no opcode, and stops.
+        listed = {parts[2].partition(" ")[0] for parts in lines if parts[1] == "ops"}
+        numbers = 0
+        for number in range(256):
+            name = opcode.opname[number]
+            if name in listed:
+                continue
+            numbers += 1
+            answer = hear(opcode=number)
+            self.assertEqual(answer[0], "stop", msg=name)
+            self.assertIn("is no instruction the rules list", answer[1])
+            self.assertEqual(hear(opcode=number, at_a_word=True), answer)
+        self.assertGreater(numbers, 100)
+        # A member with lines per form, called in a form that no line has.
+        forms = collections.defaultdict(set)
+        for parts in lines:
+            if parts[0] == "form":
+                forms[parts[2]].add(parts[3])
+        x = torch.ones(2)
+        tried = 0
+        for member, has in sorted(forms.items()):
+            if not {"0:T", "0:T 1:T"} & has or "0:T 1:T 2:T 3:T" in has:
+                continue
+            if member in RULES_FORMS_NOT_HEARD:
+                continue
+            callee = TestVmRulesTorch.member(self, member)
+            answer = hear(callee=callee, operands=[callee, x, x, x, x])
+            self.assertEqual(answer[0], "stop", msg=member)
+            tried += 1
+        self.assertGreater(tried, 10)
+
+    def test_no_callee_runs_before_the_table_is_made(self):
+        # In a process where no function went onto the executor.
+        program = (
+            "import torch\n"
+            "import torch._rust\n"
+            "hear = torch._rust._rules_hear\n"
+            "for callee in (len, torch.sin, print, torch.nn.Linear):\n"
+            "    for word in (False, True):\n"
+            "        ask = dict(callee=callee, operands=[callee], at_a_word=word)\n"
+            "        print(*hear(**ask, make=False), sep='|')\n"
+        )
+        ran = subprocess.run(
+            [sys.executable, "-c", program], capture_output=True, text=True, timeout=600
+        )
+        self.assertEqual(ran.returncode, 0, msg=ran.stderr[-2000:])
+        answers = ran.stdout.splitlines()
+        self.assertEqual(len(answers), 8)
+        for answer in answers:
+            self.assertRegex(
+                answer,
+                r"^stop\|.* stops a trace: the table of torch's members is not made$",
+            )
 
 
 if __name__ == "__main__":

@@ -10,9 +10,12 @@ use std::collections::HashSet;
 use crate::cfg::ir::*;
 
 pub struct VersionLive {
-    // Params the version doesn't use, dropped when it starts.
+    // Params the version doesn't use, dropped when it starts, the top one
+    // first (order.rs).
     pub entry_kill: Vec<ValueId>,
-    // Values dropped after body[i] executes.
+    // Values dropped after body[i] executes: its operands in the order the
+    // instruction lets go of them (order.rs), then its own value if nothing
+    // reads it.
     pub after_kill: Vec<Vec<ValueId>>,
 }
 
@@ -22,6 +25,8 @@ pub struct Liveness {
     // A Yield after which a value other than its stack args is live (the
     // executor saves only the stack in a suspended frame).
     pub bad_yield: Option<ValueId>,
+    // An instr whose op has no order in which it lets go of its operands.
+    pub no_order: Option<ValueId>,
 }
 
 // The segment covering body[at], if any.
@@ -33,17 +38,18 @@ fn uses(live: &mut HashSet<ValueId>, vs: &[ValueId]) {
     live.extend(vs.iter().filter(|v| !v.is_reserved()));
 }
 
-fn version(cfg: &Cfg, blk: &Block, ver: &Version, bad_yield: &mut Option<ValueId>) -> VersionLive {
+fn version(cfg: &Cfg, blk: &Block, ver: &Version, bad_yield: &mut Option<ValueId>, no_order: &mut Option<ValueId>) -> VersionLive {
     let mut live = HashSet::new();
     uses(&mut live, &ver.outputs);
     let mut after_kill = vec![vec![]; ver.body.len()];
     for i in (0..ver.body.len()).rev() {
         let v = ver.body[i];
         let ins = &cfg[v];
-        let mut candidates: Vec<ValueId> = ins.args.iter().copied().filter(|a| !a.is_reserved()).collect();
+        let mut candidates = super::order::releases(&ins.op, &ins.args).unwrap_or_else(|| {
+            *no_order = Some(v);
+            vec![]
+        });
         candidates.push(v);
-        candidates.sort();
-        candidates.dedup();
         after_kill[i] = candidates.into_iter().filter(|c| !live.contains(c)).collect();
         if ins.op == Op::Yield && live.iter().any(|l| *l != v && !ins.args.contains(l)) {
             *bad_yield = Some(v);
@@ -57,17 +63,17 @@ fn version(cfg: &Cfg, blk: &Block, ver: &Version, bad_yield: &mut Option<ValueId
         }
     }
     VersionLive {
-        entry_kill: blk.params.iter().copied().filter(|p| !live.contains(p)).collect(),
+        entry_kill: blk.params.iter().rev().copied().filter(|p| !live.contains(p)).collect(),
         after_kill,
     }
 }
 
 pub fn compute(cfg: &Cfg) -> Liveness {
-    let mut bad_yield = None;
+    let (mut bad_yield, mut no_order) = (None, None);
     let versions = cfg
         .blocks
         .iter()
-        .map(|blk| blk.versions.iter().map(|ver| version(cfg, blk, ver, &mut bad_yield)).collect())
+        .map(|blk| blk.versions.iter().map(|ver| version(cfg, blk, ver, &mut bad_yield, &mut no_order)).collect())
         .collect();
-    Liveness { versions, bad_yield }
+    Liveness { versions, bad_yield, no_order }
 }

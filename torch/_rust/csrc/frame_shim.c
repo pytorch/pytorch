@@ -312,3 +312,51 @@ PyObject* tr_code_localsplusnames(PyCodeObject* code) {
 int* tr_eval_breaker_flag(PyThreadState* tstate) {
   return (int*)&tstate->interp->ceval.eval_breaker;
 }
+
+// A thread that CPython ends while the interpreter is finalizing (see
+// exec/mod.rs ThreadEnds). CPython 3.12 ends it with pthread_exit, which
+// unwinds the thread's stack frame by frame; frames of Rust and of C++
+// cannot be unwound that way (their cleanups would let go of references
+// without the GIL, and an unwind that leaves one of them ends the process).
+// With glibc, pthread_exit's unwind first runs the thread's cleanup records
+// whose frame it has left, and a record that lives outside the stack counts
+// as left at the very first step: its routine runs before any frame is
+// unwound, and parks the thread for good, as CPython does itself from 3.14
+// on. The record is pushed where a thread enters the outermost frame of a
+// hook of this extension and popped where it leaves it.
+#if defined(__GLIBC__)
+#include <stdlib.h>
+#include <unistd.h>
+
+extern void _pthread_cleanup_push(struct _pthread_cleanup_buffer*, void (*)(void*), void*);
+extern void _pthread_cleanup_pop(struct _pthread_cleanup_buffer*, int);
+
+static void tr_thread_ends(void* arg) {
+  // Another exit of the thread (C code that calls pthread_exit itself, a
+  // cancellation) goes on as it would.
+  while (_Py_IsFinalizing()) {
+    pause();
+  }
+}
+
+void* tr_ends_push(void) {
+  struct _pthread_cleanup_buffer* record = malloc(sizeof *record);
+  if (record != NULL) {
+    _pthread_cleanup_push(record, tr_thread_ends, NULL);
+  }
+  return record;
+}
+
+void tr_ends_pop(void* record) {
+  if (record != NULL) {
+    _pthread_cleanup_pop(record, 0);
+    free(record);
+  }
+}
+#else
+void* tr_ends_push(void) {
+  return NULL;
+}
+
+void tr_ends_pop(void* record) {}
+#endif

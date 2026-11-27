@@ -50,7 +50,11 @@ unsafe extern "C" fn eval_frame(
         IN_HOOK.set(false);
     }
     let prev: EvalFrameFn = std::mem::transmute(PREV_EVAL_FRAME.load(Ordering::Acquire));
-    prev(tstate, frame, throwflag)
+    // A thread CPython ends under this frame parks (exec::ThreadEnds).
+    let ends = crate::exec::ThreadEnds::enter();
+    let result = prev(tstate, frame, throwflag);
+    ends.leave();
+    result
 }
 
 unsafe fn print_frame_code(frame: *mut InterpreterFrame) {

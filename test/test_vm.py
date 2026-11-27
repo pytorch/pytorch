@@ -2292,7 +2292,9 @@ class TestVmDataSizes(TestCase):
 
     @isolated
     def test_sparse_tensor(self, device):
-        self.no_region(sized_sparse, device, why="a tensor that is not strided")
+        # (The operators that run under to_sparse differ with the data of
+        # its operand: a trace stops in front of the call.)
+        self.no_region_holds("to_sparse", self.rows(sized_sparse, device))
 
     @isolated
     def test_nms_of_torchvision(self, device):

@@ -16,7 +16,8 @@
 // What it is given (by run.rs and mod.rs's eval_frame)
 //   - begin / end around the run of the block's plain instructions; scope
 //     around each activation (the body, a frame under it); frame for each
-//     Python frame entered, and whether the executor runs it;
+//     Python frame entered, and whether the executor runs it; leaves where
+//     the body leaves its block, with the values it hands on;
 //   - before each instruction: what it is and its operands, as covered.rs is
 //     given them; after it: whether it raised and its results; tick for an
 //     instruction of the executor's inline path.
@@ -56,7 +57,8 @@
 //     value that is no constant of the code; a conditional jump under the
 //     body on a value that is not known; a pin (the reads that lead to it
 //     are recorded, and nothing runs them as a check on a later arrival
-//     yet); an output that the list does not state;
+//     yet); an output that the list does not state (outs.rs has what a
+//     statement is);
 //     a release that was not seen; an operator between the instructions;
 //     an exception raised under the body; a generator's yield; a witness
 //     that disagrees with its entry;
@@ -89,9 +91,9 @@ use pyo3::prelude::*;
 use super::again::{self, Armed};
 use super::entries::{blank, text, Call, Maker};
 use super::frames::Frames;
-use super::known::{self, Found, Known, Reasons};
+use super::known::{self, Found, Kind, Known, Reasons};
 pub use super::known::Plain;
-use super::origins::{class_text, plain_tensor, Origin, Origins};
+use super::origins::{class_text, plain_tensor, Leaving, Origin, Origins};
 use super::shadow::{self, Shadow};
 use super::{reading, slots, witness, Assert, Callee, Entry, Tmpl, PURE};
 use crate::cfg::ir::{Instr, Op};
@@ -158,10 +160,11 @@ enum Pending {
     // No entry: what it is; whether a tensor it leaves was made by it; why
     // it is no entry though it runs C code on a tensor, if that is so; the
     // tensors among its operands; the Python frame it may enter; whether
-    // its result is a known value (None: known.rs was told); what is asked
+    // its result is a known value if all goes well (None: known.rs was
+    // told), and whether by identity or by value only; what is asked
     // behind it if its result is what a recorded read found, and the reason
     // it is if that read is not held (known.rs Found).
-    Other { what: String, makes: bool, why: Option<String>, operands: Vec<usize>, frames: Frames, known: Option<bool>, found: Option<(Found, Option<String>)> },
+    Other { what: String, makes: bool, why: Option<String>, operands: Vec<usize>, frames: Frames, known: Option<Option<bool>>, found: Option<(Found, Option<String>)> },
 }
 
 // An instruction in flight: with the operators the run's witness had seen
@@ -199,6 +202,8 @@ pub(super) struct Rec {
     outer: Option<witness::Witnessed>,
     // The reads of the thread are this recording's (reads.rs Owner).
     reads: bool,
+    // What is known of each value the body hands on, told where it leaves.
+    pub(super) leaving: Vec<Leaving>,
 }
 
 impl Rec {
@@ -239,6 +244,8 @@ impl Rec {
         for what in std::mem::take(&mut self.origins.baked) {
             self.reasons.add(format!("an operand taken by value that is no constant of the code: {what}"));
         }
+        // (An entry's operand is asked for by its value.)
+        self.origins.valued.clear();
     }
 
     // The deaths since the last instruction: of a slot the entry just made
@@ -294,7 +301,7 @@ impl Rec {
             };
             if let Some(made) = self.maker().built(ins, all) {
                 self.origins.built(at, made);
-                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), frames: Frames::of(row, &ins.op, site, callee), known: Some(false), found: None }, at);
+                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), frames: Frames::of(row, &ins.op, site, callee), known: Some(None), found: None }, at);
             }
             let facts = self.shadow.facts;
             let call = match (row, callee) {
@@ -318,6 +325,7 @@ impl Rec {
                 None => None,
             };
             self.origins.baked.clear();
+            self.origins.valued.clear();
             self.origins.used(depth, ins.args.iter().map(|x| x.0));
             let first = if all.first().is_some_and(|o| o.is_null()) { 2 } else { 1 };
             let given = callee.map_or(all, |_| &all[first.min(all.len())..]);
@@ -328,11 +336,17 @@ impl Rec {
             // the license of slots.rs reads off the key.
             let fact = self.shadow.facts > facts;
             let plain = Plain::of(&ins.op, &ins.args);
+            // Whether the result is known if all goes well: Some(true) by
+            // what the instruction is (a bool: one object per value),
+            // Some(false) by value only (a fact read off a key). IsNone asks
+            // for its operand's VALUE (None is the one object of its class);
+            // `is` asks WHICH objects both operands are: two values that are
+            // known by value only say nothing of that.
             let known = match (&ins.op, &plain) {
                 (_, Some(_)) => None,
-                (Op::IsNone, _) => Some(self.origins.known.lit((depth, ins.args[0].0)) || self.keyed(all[0])),
-                (Op::Bytecode { opcode: IS_OP, .. }, _) => Some(ins.args.iter().all(|x| self.origins.known.lit((depth, x.0)))),
-                _ => Some(fact && self.keyed(all[0])),
+                (Op::IsNone, _) => Some((self.origins.known.lit((depth, ins.args[0].0)) || self.keyed(all[0])).then_some(true)),
+                (Op::Bytecode { opcode: IS_OP, .. }, _) => Some(ins.args.iter().all(|x| self.origins.known.object((depth, x.0))).then_some(true)),
+                _ => Some((fact && self.keyed(all[0])).then_some(false)),
             };
             if let Some(plain) = plain {
                 self.origins.known.plain(depth, v, plain);
@@ -390,19 +404,24 @@ impl Rec {
                 Pending::Other { what, makes, why, operands, known, found, .. } => {
                     // The result is what a recorded read found only if
                     // reads.rs holds that read; the list then rests on it.
+                    let result = results.first().copied().unwrap_or(std::ptr::null_mut());
                     let held = match found {
-                        Some((found, _)) if ok && found.holds(results.first().copied().unwrap_or(std::ptr::null_mut())) => {
-                            self.reasons.add(known::PENDING.into());
-                            true
-                        }
-                        Some((_, Some(unread))) => {
-                            self.reasons.add(unread);
-                            false
-                        }
-                        _ => false,
+                        Some((found, unread)) => match found.holds(result).filter(|_| ok) {
+                            Some(kind) => {
+                                self.reasons.add(known::PENDING.into());
+                                Some(kind)
+                            }
+                            None => {
+                                unread.into_iter().for_each(|unread| self.reasons.add(unread));
+                                None
+                            }
+                        },
+                        None => None,
                     };
                     if let Some(known) = known {
-                        self.origins.known.set(at, (known || held) && ok, || format!("the result of {what}"));
+                        // (A result that is not there is not known.)
+                        let by_what_it_is = known.filter(|_| ok && !result.is_null()).map(|object| Kind::of(result, object));
+                        self.origins.known.set(at, held.or(by_what_it_is), || format!("the result of {what}"));
                     }
                     if direct > 0 {
                         let ran = format!("{direct} operator(s) ran under an instruction that is no entry (the last: {})", last.unwrap_or_default());
@@ -490,7 +509,7 @@ pub unsafe fn begin(place: String, key: (usize, u32), params: &[*mut PyObject], 
         let origins = Origins::begin(params.iter().copied().chain((0..tr_frame_nlocalsplus(frame) as usize).map(|i| *locals.add(i))), known);
         let shadow = Shadow { place, key, ..Shadow::default() };
         witness::begin();
-        let mut rec = Rec { shadow, origins, entries: Vec::new(), stack: Vec::new(), window: None, drops: Vec::new(), tuples: Vec::new(), at: 0, claimed: 0, pure: true, left: HashMap::new(), handed: HashMap::new(), reasons: Reasons::default(), disagreed: false, entry_open: false, entry_seen: None, outer: None, reads: false };
+        let mut rec = Rec { shadow, origins, entries: Vec::new(), stack: Vec::new(), window: None, drops: Vec::new(), tuples: Vec::new(), at: 0, claimed: 0, pure: true, left: HashMap::new(), handed: HashMap::new(), reasons: Reasons::default(), disagreed: false, entry_open: false, entry_seen: None, outer: None, reads: false, leaving: Vec::new() };
         // No recording of a run that a list could not be entered under, and
         // none whose reads are not recorded.
         let began = reading::begin();
@@ -511,6 +530,9 @@ pub unsafe fn end(outs: Option<&[*mut PyObject]>) {
         // The block's exception, if it left by one, stays as it is.
         let raised = ffi::PyErr_GetRaisedException();
         let key = rec.shadow.key;
+        // What the block hands on is stated while the reads are the
+        // recording's: an object is stated by the reads that lead to it.
+        let stated = outs.filter(|_| rec.shadow.stop.is_none()).map(|outs| rec.state(outs));
         // Whether every read of the run was recorded, asked before they are
         // let go of; then what they held is released, as early as it can be.
         let stood = if std::mem::take(&mut rec.reads) { reading::end() } else { None };
@@ -518,7 +540,7 @@ pub unsafe fn end(outs: Option<&[*mut PyObject]>) {
         if let Some(why) = stood {
             rec.stop("the end of the body", why);
         }
-        let (shadow, armed) = rec.end(outs, outer);
+        let (shadow, armed) = rec.end(stated, outer);
         // What ran under this recording ran behind the stop of the one around it.
         let seen = shadow.seen;
         with(|r| (r.shadow.seen, r.shadow.left_behind) = (r.shadow.seen + seen, r.shadow.left_behind + seen));
@@ -570,6 +592,15 @@ pub fn tick(v: u32, plain: Plain) {
             r.origins.used(DEPTH.get(), std::iter::once(x));
         }
         r.origins.known.plain(DEPTH.get(), v, plain);
+    })
+}
+
+// The body of the recorded run leaves its block: the values it hands on, in
+// the order of the block's outputs (None: a value that is not known of).
+pub fn leaves(ids: impl Iterator<Item = Option<u32>>) {
+    with(|r| {
+        let depth = DEPTH.get();
+        r.leaving = ids.map(|v| v.map_or_else(Leaving::default, |v| r.origins.leaving((depth, v)))).collect();
     })
 }
 

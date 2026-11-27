@@ -85,7 +85,7 @@ pub fn what(op: &Op, callee: Option<*mut PyObject>) -> What {
 }
 
 const fn row(operands: &'static [(i8, Class)], reads: &'static [Read], writes: Write, result: Res, enters: Enters, scalars: Scalars, why: &'static str) -> Row {
-    Row { operands, reads, writes, result, enters, scalars, why, before: None }
+    Row { operands, reads, writes, result, enters, scalars, why, before: None, form: "" }
 }
 
 const CONST_ROW: Row = row(&[], &[Read::Constant], Write::None, Res::Lit, Never, Scalars::None, "A constant is part of the code object, and the code is what a region is found by.");

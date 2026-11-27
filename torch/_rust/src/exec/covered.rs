@@ -72,8 +72,12 @@
 //   - step() is Ok(true) for a call the optimizer takes at another's word
 //     without looking inside (a callable the pass list calls pure, a call a
 //     cfg pass made movable, a torch function another tracer keeps whole):
-//     the caller holds a Trusted while it runs, and nothing under it is
-//     asked about.
+//     the caller holds a Trusted while it runs. Under it the rule table is
+//     asked about every instruction as anywhere, and step() is Err for what
+//     the table stops or has no row for; of what the table leaves to the
+//     code that decided before, nothing more is asked there (no verdict, no
+//     kind of operand, no callee), and only if the table lists it as what
+//     such a call may run unheard (rules::hear).
 // What it may not assume
 //   - that a covered instruction does the same in another frame: a verdict
 //     is for what its frame owns (an __init__ on the object just made), and
@@ -328,20 +332,29 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, ins: &Instr, site: &rules:
     }
     // A trace that is refused already runs on to its end as the program
     // takes it (its handlers, its cleanup): nothing more is asked of it.
-    // Nor is what runs under a call taken at another's word, but for an
-    // instruction whose row records its reads itself: nothing else does.
-    let what = rules::ops::what(&ins.op, callee);
-    let trusted = TRUSTED.get() > 0;
-    if super::region::refused() || (trusted && !rules::records(&what)) {
+    if super::region::refused() {
         raises::over();
         return Ok(false);
     }
-    // The rule table is asked before anything else (rules/mod.rs): what a
-    // family of it has taken over runs under a trace by a row only. A row
-    // takes nothing away from what is asked below; one that reads more than
-    // its operands records those reads here, before the instruction runs.
+    // The rule table is asked before anything else (rules/mod.rs), wherever
+    // the instruction runs: what a family of it has taken over runs under a
+    // trace by a row only. A row takes nothing away from what is asked
+    // below; one that reads more than its operands records those reads
+    // here, before the instruction runs.
+    let what = rules::ops::what(&ins.op, callee);
+    let trusted = TRUSTED.get() > 0;
     let classes: Vec<rules::Class> = operands.iter().map(|o| rules::Class::of(*o)).collect();
-    if let rules::License::NoRow(why) = rules::license(&what, &classes, site) {
+    let refused = match rules::hear(&what, &classes, site, trusted) {
+        rules::Heard::Stop(why) => Some(why),
+        // A row that says the call writes operands: the trace is handed
+        // those tensors before the call runs (rules/torch.rs), wherever the
+        // call is.
+        rules::Heard::Row(row) => rules::torch::hand_over(row, &what, site).err(),
+        // Left to what is asked below; under a call taken at another's
+        // word nothing below is asked, and the table lists what runs so.
+        rules::Heard::Older | rules::Heard::Unheard(_) => None,
+    };
+    if let Some(why) = refused {
         AGAIN.set(false);
         let at = c.map_or(String::new(), |c| format!(" at line {} of {}", c.line(ins.origin), c.qualname));
         return Err(format!("it runs an instruction{at} that the engine's rules have no row for: {why}"));

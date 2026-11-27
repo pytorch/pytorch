@@ -94,7 +94,7 @@ unsafe fn find(o: *mut PyObject, depth: u8, out: &mut Vec<*mut PyObject>) {
 
 // Calls torch._rust_inductor.`name` with these objects; what it raises is
 // written out and dropped (the trace goes on as it would have).
-unsafe fn tell<'py>(py: Python<'py>, name: &str, args: Vec<Bound<'py, PyAny>>) -> Option<Bound<'py, PyAny>> {
+pub unsafe fn tell<'py>(py: Python<'py>, name: &str, args: Vec<Bound<'py, PyAny>>) -> Option<Bound<'py, PyAny>> {
     let r = super::outside_executor(|| py.import("torch._rust_inductor").and_then(|m| m.getattr(name)).and_then(|f| f.call1(pyo3::types::PyTuple::new(py, args)?)));
     r.map_err(|e| e.write_unraisable(py, None)).ok()
 }

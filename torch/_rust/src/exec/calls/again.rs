@@ -23,8 +23,12 @@
 //     exactly the recorded value (exec/exact.rs) is a MISS of the list,
 //     counted as "input value": the list is for that value only, and the
 //     block runs as written;
-//   - what the list made is compared with what the block made (shadow.rs
-//     compare) and then released; the first difference is kept in the
+//   - what the block made is compared with what the list states: each
+//     output that is stated with its statement (outs.rs holds: a value, an
+//     object by identity, a new container by its structure), and the
+//     tensors in them with what the list made (shadow.rs compare), which is
+//     then released. An arrival where a statement cannot be compared is
+//     counted "not comparable"; the first difference is kept in the
 //     place's Shadow, and the list is not run again after one;
 //   - a list that its OWN check ended before the entry the check is for ran,
 //     with nothing to take back (run.rs: the stops "class", "part" and
@@ -45,6 +49,7 @@ use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;
 
 use super::origins::{plain_tensor, walk, KEY};
+use super::outs::{Kept, Out};
 use super::run::{Stop, What};
 use super::{shadow, List};
 use crate::exec::exact;
@@ -64,8 +69,9 @@ pub struct Armed {
     pub names: Vec<(Box<[u32]>, Py<PyAny>)>,
     pub exact: Vec<(u32, Py<PyAny>)>,
     pub pins: Vec<Pin>,
-    // For each output of the list, the position among the block's outputs.
-    pub outs: Vec<usize>,
+    // The outputs of the block that the list states: the position among
+    // the block's outputs, and the statement.
+    pub stated: Vec<(usize, Out)>,
     // The place's Shadow (shadow::amend).
     pub kept: usize,
     pub left: u32,
@@ -78,6 +84,8 @@ struct Pending {
     // What the list made (owned), and the storages it ran on.
     made: *mut PyObject,
     operands: Vec<usize>,
+    // What the arrival began on at the positions its statements name.
+    kept: Vec<(u32, Kept)>,
 }
 
 thread_local! {
@@ -182,7 +190,10 @@ pub unsafe fn begin(key: (usize, u32), params: &[*mut PyObject], frame: *mut Fra
             Ok(made) => {
                 let id = NEXT.replace(NEXT.get() + 1);
                 let operands = inputs.iter().chain(&pointers).map(|o| shadow::storage(*o)).collect();
-                PENDING.with_borrow_mut(|p| p.push(Pending { id, key, frame: frame as usize, made, operands }));
+                let mut positions = Vec::new();
+                armed.stated.iter().for_each(|(_, out)| out.inputs(&mut positions));
+                let kept = positions.into_iter().map(|p| (p, Kept::of(all.get(p as usize).copied().unwrap_or(std::ptr::null_mut())))).collect();
+                PENDING.with_borrow_mut(|p| p.push(Pending { id, key, frame: frame as usize, made, operands, kept }));
                 Some(Again(id))
             }
             Err(stop) => {
@@ -210,8 +221,25 @@ pub unsafe fn outs(key: (usize, u32), frame: *mut Frame, outs: &[*mut PyObject])
         let Some(pending) = found else { return };
         ARMED.with_borrow_mut(|a| {
             let Some(armed) = a.get_mut(&key) else { return };
-            let wanted: Option<Vec<*mut PyObject>> = armed.outs.iter().map(|i| outs.get(*i).copied().filter(|o| !o.is_null())).collect();
-            let verdict = wanted.map_or("not validated".to_string(), |wanted| shadow::compare(pending.made, &wanted, &pending.operands));
+            // The block's tensor for each output of the list, found by the
+            // statements; a statement that does not hold is the difference.
+            let mut wanted = vec![std::ptr::null_mut(); armed.list.outputs.len()];
+            let mut compared = Ok(true);
+            for (at, out) in &armed.stated {
+                compared = match outs.get(*at).map(|o| out.holds(*o, &pending.kept, &mut wanted)) {
+                    Some(Ok(all)) => compared.map(|so_far| so_far && all),
+                    Some(Err(why)) => Err(format!("DIFFERENT: output {at} of the block is {why}")),
+                    None => compared.map(|_| false),
+                };
+                if compared.is_err() {
+                    break;
+                }
+            }
+            let verdict = match compared {
+                Err(why) => why,
+                Ok(all) if !all || wanted.iter().any(|o| o.is_null()) => "not validated".to_string(),
+                Ok(_) => shadow::compare(pending.made, &wanted, &pending.operands),
+            };
             if verdict == "equal" {
                 shadow::amend(armed.kept, |s| s.again.0 += 1);
             } else if verdict.starts_with("DIFFERENT") {

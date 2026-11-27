@@ -40,7 +40,7 @@ pub fn begin() -> Result<(), String> {
             writes::begin();
             // (Made where a function goes onto the executor; asked for here
             // so that rules::license never makes it under an instruction.)
-            rules::torch::ready();
+            rules::ready();
         }
         began
     });

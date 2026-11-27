@@ -24,6 +24,10 @@ takes two inputs of one storage that do not overlap for independent. A
 graph can be lowered while no node of it is handed, or takes, a place in a
 storage outside the elements of its arguments.
 
+``written(func, args, kwargs)``: the tensors a call of an operator may
+write, by the same two sources (the schema's marks, UNDECLARED): what a
+trace keeps to take back (undo.py).
+
 ``names(gm)`` names the first node of ``gm`` that may; None if none can. A
 node cannot only if all of:
 
@@ -161,6 +165,60 @@ UNMEASURED = (
     "miopen_batch_norm",
 )
 UNDECLARED = frozenset(MEASURED + UNMEASURED)
+
+
+def unmarked(n):
+    """Whether the node calls one of UNDECLARED: an operator that writes to
+    an argument its schema does not mark. Such a call is no dead code when
+    nothing reads its results, and the order of reads and writes that the
+    schemas of a graph tell is not the program's where it is."""
+    schema = getattr(n.target, "_schema", None) if n.op == "call_function" else None
+    return schema is not None and schema.name.partition("::")[2] in UNDECLARED
+
+
+# The arguments that an operator of UNDECLARED writes and does not mark.
+STATISTICS = ("running_mean", "running_var")
+# By operator: the places of the arguments it may write, each (position,
+# name, whether the schema marks it, whether it is an `out=`), and the place
+# of the `training` of one of UNDECLARED.
+_places: dict = {}
+
+
+def written(func, args, kwargs):
+    """The tensors that a call of the operator ``func`` with these arguments
+    may write, of those it is handed: (tensor, declared, out) each.
+    ``declared``: the schema marks the argument as written. Not declared:
+    a statistic of one of UNDECLARED, unless the call hands a ``training``
+    that is False (calls of ``batch_norm`` that are not in training were
+    measured to write nothing). ``out``: the argument is an ``out=``, which
+    the operator resizes to its result before it writes it."""
+    found = _places.get(func)
+    if found is None:
+        schema = func._schema
+        listed = schema.name.partition("::")[2] in UNDECLARED
+        places, training = [], None
+        for k, a in enumerate(schema.arguments):
+            declared = a.alias_info is not None and a.alias_info.is_write
+            if declared or (listed and a.name in STATISTICS):
+                places.append((k, a.name, declared, a.is_out))
+            elif listed and a.name == "training":
+                training = (k, a.name)
+        found = _places[func] = (places, training)
+    places, training = found
+
+    def handed(k, name):
+        return args[k] if k < len(args) else kwargs.get(name)
+
+    idle = training is not None and handed(*training) is False
+    tensors = []
+    for k, name, declared, out in places:
+        if idle and not declared:
+            continue
+        x = handed(k, name)
+        for t in x if isinstance(x, (list, tuple)) else (x,):
+            if isinstance(t, torch.Tensor):
+                tensors.append((t, declared, out))
+    return tensors
 
 
 def writes(gm):

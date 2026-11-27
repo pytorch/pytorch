@@ -103,6 +103,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::_cfg_skip, m)?)?;
     m.add_function(wrap_pyfunction!(exec::own::_cfg_own_frames, m)?)?;
     m.add_function(wrap_pyfunction!(exec::left::_cfg_left, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::order::_cfg_releases, m)?)?;
     m.add_function(wrap_pyfunction!(exec::left::_cfg_fail_plans, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_impure, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_set_cfg_pass_hook, m)?)?;
@@ -133,8 +134,13 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_dump, m)?)?;
     m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_kinds, m)?)?;
     m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_groups, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_unheard, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_hear, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_callee_kind, m)?)?;
     m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch, m)?)?;
     m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_forms, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_domain, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_befores, m)?)?;
     m.add_class::<exec::graph::Ref>()?;
     m.add_function(wrap_pyfunction!(exec::joint::_trace_joint, m)?)?;
     m.add_function(wrap_pyfunction!(exec::autograd::_set_cfg_autograd, m)?)?;

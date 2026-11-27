@@ -181,7 +181,8 @@ pub struct Code {
     // The values each step drops after it runs (Step::kill ranges).
     pub kills: Vec<ValueId>,
     // What's left when the version runs to its end: the values no step drops
-    // (those its outputs or only its unwind segments use).
+    // (those its outputs or only its unwind segments use), in the order the
+    // block got them (order.rs).
     pub exit_kill: Vec<ValueId>,
     // For each exit of the terminator (Jump: one, Branch: then and else) that
     // goes to a block, how the version's values pass to its params.
@@ -239,9 +240,7 @@ impl Code {
                 })
                 .collect();
             let dropped: std::collections::HashSet<&ValueId> = lv.entry_kill.iter().chain(&kills).collect();
-            let mut exit_kill: Vec<ValueId> =
-                blk.params.iter().chain(&ver.inputs).chain(&ver.body).filter(|v| holds(v) && !dropped.contains(v)).copied().collect();
-            exit_kill.sort();
+            let exit_kill: Vec<ValueId> = super::order::as_got(blk, ver).filter(|v| holds(v) && !dropped.contains(v)).collect();
             let exits: Vec<&Exit> = match &blk.term {
                 Terminator::Jump(e) => vec![e],
                 Terminator::Branch { then, else_, .. } => vec![then, else_],
@@ -522,11 +521,12 @@ impl Act<'_> {
         }
     }
 
-    // Drops what is left of a version's values when control leaves the block.
+    // Drops what is left of a version's values when control leaves the
+    // block, the top one first (order.rs).
     unsafe fn clear(&mut self, b: BlockId, ver: usize) {
         let blk = &self.cfg[b];
-        for v in blk.params.iter().chain(&blk.versions[ver].inputs).chain(&blk.versions[ver].body) {
-            self.set(*v, std::ptr::null_mut());
+        for v in super::order::top_down(blk, &blk.versions[ver]) {
+            self.set(v, std::ptr::null_mut());
         }
     }
 
@@ -1077,6 +1077,12 @@ impl Act<'_> {
                 Err(Outcome::Return(r))
             }
             Exit::Leave(os) => {
+                if self.shadow == 1 {
+                    // The body of a recorded run leaves: which values it
+                    // hands on (none told for a version that is not known).
+                    let ids = clear.map(|vi| &blk.versions[vi].outputs);
+                    super::calls::record::leaves(os.iter().map(|o| ids.map(|ids| ids[*o as usize].0)));
+                }
                 let r = take(os);
                 if let Some(vi) = clear {
                     self.clear_at_exit(b, vi);
@@ -1110,19 +1116,24 @@ impl Act<'_> {
         let cfg = self.cfg;
         let blk = &cfg[b];
         let take = |args: &[ValueId]| -> Vec<*mut PyObject> { args.iter().map(|a| xincref(self.val(*a))).collect() };
-        let (h, args) = match super::live::segment_at(&blk.versions[ver], at).map(|s| &s.handler) {
-            None | Some(Handler::Propagate) => {
-                self.clear(b, ver);
-                return Unwound::Propagate;
-            }
-            Some(Handler::Block(k, args)) => (blk.handlers[*k], take(args)),
-            Some(Handler::Outer(k, args)) => {
-                let args = take(args);
-                self.clear(b, ver);
-                return Unwound::Outer(*k, args);
-            }
+        let segment = super::live::segment_at(&blk.versions[ver], at).map(|s| &s.handler);
+        let args = match segment {
+            None | Some(Handler::Propagate) => vec![],
+            Some(Handler::Block(_, args) | Handler::Outer(_, args)) => take(args),
         };
+        // The instruction that raised let go of its operands before the
+        // stack is unwound: what the step would have dropped, in its order
+        // (the handler holds its own references by now); then the rest.
+        let code = &self.p.code[b.idx()][ver];
+        if let Some(step) = code.steps.get(at) {
+            self.drop_all(&code.kills[step.kill.0 as usize..step.kill.1 as usize]);
+        }
         self.clear(b, ver);
+        let h = match segment {
+            None | Some(Handler::Propagate) => return Unwound::Propagate,
+            Some(Handler::Block(k, _)) => blk.handlers[*k],
+            Some(Handler::Outer(k, _)) => return Unwound::Outer(*k, args),
+        };
         self.enter_handler(h, args);
         Unwound::Block(h)
     }

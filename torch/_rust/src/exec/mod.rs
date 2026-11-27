@@ -22,6 +22,7 @@ mod kinds;
 pub mod left;
 mod live;
 mod made;
+pub mod order;
 pub mod overlap;
 pub mod own;
 pub mod pin;
@@ -301,6 +302,13 @@ impl Prepared {
             }
         }
         let globals = (0..nglobals).map(|_| ffi::GilCell::new(ffi::GlobalCache::default())).collect();
+        if let Some(v) = live.no_order {
+            return Err(pyo3::exceptions::PyNotImplementedError::new_err(format!(
+                "CFG executor: no order in which the instruction at offset {} lets go of its operands ({:?})",
+                cfg[v].origin * 2,
+                cfg[v].op
+            )));
+        }
         if let Some(y) = live.bad_yield {
             return Err(pyo3::exceptions::PyNotImplementedError::new_err(format!(
                 "CFG executor: a value not on the stack is live across the yield at offset {}",
@@ -904,18 +912,48 @@ enum Runs<'a> {
     Executor { c: &'a Compiled, plan: &'a Plan, start: run::Start, observed: bool },
 }
 
-// Lives while a frame is under the hook; forgotten when the hook returns.
+// Lives while a thread is under a frame of a hook of this extension (this
+// one, the bytecode printer's); `leave` ends it.
 // CPython 3.12 ends a thread that comes back for the GIL after the
 // interpreter's finalization began (a daemon thread that slept, waited or
-// was switched out under this frame) with pthread_exit, which unwinds the
-// thread's stack. An unwind that left the hook would end the whole process
-// ("panic in a function that cannot unwind"), where plain CPython ends the
-// thread alone. The thread stays here for good instead, as every such thread
-// does from CPython 3.14 on: it holds nothing of the interpreter (take_gil
-// gives the GIL back before it ends the thread) and touches nothing of it
-// again, and the process ends without it. A panic of this crate is no such
-// unwind: it goes on and ends the process as before.
-struct ThreadEnds;
+// was switched out under the frame) with pthread_exit, which unwinds the
+// thread's stack. The frames of this crate cannot be unwound that way:
+// their destructors would let go of references without the GIL, and an
+// unwind that left an `extern "C"` function of the crate would end the
+// whole process ("panic in a function that cannot unwind"), where plain
+// CPython ends the thread alone. So the thread parks for good instead, as
+// every such thread does from CPython 3.14 on: it holds nothing of the
+// interpreter (take_gil gives the GIL back before it ends the thread) and
+// touches nothing of it again, and the process ends without it.
+//   - Where the C library runs a thread's cleanup records before it unwinds
+//     (glibc: frame_shim.c tr_ends_push), the outermost guard of a thread
+//     holds such a record and the thread parks before any frame is unwound.
+//   - Else, and for an unwind that is neither a panic of this crate nor the
+//     interpreter's (another exit of the thread), the guard's own drop parks
+//     it where the unwind reaches the hook's frame; the frames beneath are
+//     unwound first.
+// A panic of this crate is no such unwind: it goes on and ends the process
+// as before.
+pub(crate) struct ThreadEnds(*mut c_void);
+
+thread_local! {
+    // How many ThreadEnds live on this thread.
+    static ENDS: Cell<u32> = const { Cell::new(0) };
+}
+
+impl ThreadEnds {
+    pub(crate) unsafe fn enter() -> ThreadEnds {
+        let depth = ENDS.get();
+        ENDS.set(depth + 1);
+        ThreadEnds(if depth == 0 { tr_ends_push() } else { std::ptr::null_mut() })
+    }
+
+    pub(crate) unsafe fn leave(self) {
+        ENDS.set(ENDS.get() - 1);
+        tr_ends_pop(self.0);
+        std::mem::forget(self);
+    }
+}
 
 impl Drop for ThreadEnds {
     fn drop(&mut self) {
@@ -932,9 +970,9 @@ unsafe extern "C" fn eval_frame(
     frame: *mut Frame,
     throwflag: c_int,
 ) -> *mut pyo3::ffi::PyObject {
-    let ends = ThreadEnds;
+    let ends = ThreadEnds::enter();
     let result = enter(tstate, frame, throwflag);
-    std::mem::forget(ends);
+    ends.leave();
     result
 }
 
@@ -3933,7 +3971,7 @@ pub fn call_with_cfg_execution<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     trampoline::init(func.py())?;
     shown::ready();
-    rules::torch::ready();
+    rules::ready();
     // Made here, as shown's tables are: a traced run asks for them
     // (made.rs), and making them runs Python code.
     makers();

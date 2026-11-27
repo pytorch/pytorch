@@ -10,6 +10,27 @@
 //     lit / maker);
 //   - whatever makes the recording less than the body (Reasons::add).
 // What it guarantees
+//   - A VALUE IS KNOWN IN ONE OF TWO KINDS (Kind), and whoever asks says
+//     which it needs:
+//       Value   its exact class and its value (the bits of a float, the
+//               digits of an int, the content of a str): what a later
+//               arrival is held to by exec/exact.rs. Which OBJECT it is, is
+//               not known: two floats of the same bits are two objects;
+//       Object  which object it is, on every arrival the list is entered
+//               on: a constant of the code object (the code holds it), an
+//               object a recorded read expects by identity, one of the
+//               objects there is exactly one of (None, True, False,
+//               Ellipsis, NotImplemented: singleton()). It implies Value.
+//     Produced: Object by a constant, by IsNone and by `is` (a bool), by a
+//     read reads.rs holds by identity; Value by an input the list is
+//     specialized on, by a read held by value (an exact int, float or str),
+//     by a key fact of a tensor; Object for any of these if the object is a
+//     singleton. A load or a store of a local keeps the kind.
+//     Consumed: an operand taken by value (origins.rs), the test of a
+//     jump (a bool), IsNone (None is the one object of its class) and the
+//     key of a dict item ask for Value; `is` / `is not` and the dict of a
+//     dict item ask for Object: which object an operand is cannot be told
+//     from its value. Nothing else of the neutral kinds asks about a value;
 //   - lit() is true only for a value that is a constant of the code object,
 //     a copy of one through locals the run itself stored, one record.rs
 //     set as a fact that the list checks (the key of an input or a result),
@@ -73,6 +94,28 @@ pub enum Found {
     Item(*mut PyObject, *mut PyObject),
 }
 
+// How a value is known (see the head of the file). Object implies Value.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Kind {
+    Value,
+    Object,
+}
+
+// Whether there is exactly one object of what `o` is: None, True, False,
+// Ellipsis, NotImplemented. The closed list: every other class may have two
+// objects of one value.
+pub unsafe fn singleton(o: *mut PyObject) -> bool {
+    unsafe { [ffi::Py_None(), ffi::Py_True(), ffi::Py_False(), ffi::Py_Ellipsis(), ffi::Py_NotImplemented()].contains(&o) }
+}
+
+impl Kind {
+    // The kind `o` is known in, where its producer knows it by identity
+    // (`object`) or by value only.
+    pub unsafe fn of(o: *mut PyObject, object: bool) -> Kind {
+        if object || unsafe { singleton(o) } { Kind::Object } else { Kind::Value }
+    }
+}
+
 impl Found {
     // None: `op` is of no listed kind, or (a subscript) its dict or its key
     // is not known.
@@ -84,21 +127,25 @@ impl Found {
                 (Op::Bytecode { opcode: BINARY_SUBSCR, .. }, None) => {
                     let (dict, key) = (*site.operands.first()?, *site.operands.get(1)?);
                     let plain = !dict.is_null() && !key.is_null() && ffi::PyDict_CheckExact(dict) != 0 && (ffi::PyUnicode_CheckExact(key) != 0 || ffi::PyLong_CheckExact(key) != 0);
-                    (plain && args.iter().take(2).all(|x| known.lit((depth, x.0)))).then_some(Found::Item(dict, key))
+                    // Which dict it is, and the value of the key.
+                    (plain && known.object((depth, args.first()?.0)) && known.lit((depth, args.get(1)?.0))).then_some(Found::Item(dict, key))
                 }
                 _ => None,
             }
         }
     }
 
-    // Whether reads.rs holds the read that gave `result`.
-    pub unsafe fn holds(&self, result: *mut PyObject) -> bool {
+    // Whether reads.rs holds the read that gave `result`, and in which kind
+    // that makes it known: an object, where the read expects that very
+    // object; a value, where it expects an equal one.
+    pub unsafe fn holds(&self, result: *mut PyObject) -> Option<Kind> {
         unsafe {
-            match *self {
-                Found::Global(globals, builtins, name) => reads::global_found(globals, builtins, name, result),
-                Found::Pinned => reads::pinned(result),
-                Found::Item(dict, key) => reads::item_found(dict, key, result),
-            }
+            let by_identity = match *self {
+                Found::Global(globals, builtins, name) => reads::global_found(globals, builtins, name, result)?,
+                Found::Pinned => reads::pinned(result).then_some(true)?,
+                Found::Item(dict, key) => reads::item_found(dict, key, result)?,
+            };
+            Some(Kind::of(result, by_identity))
         }
     }
 }
@@ -138,22 +185,22 @@ pub fn neutral(op: &Op, row: &Row) -> Option<&'static str> {
         Op::Const(_) => "a constant of the code object, and the code is what a list is found by",
         Op::LoadLocal { .. } | Op::LoadLocalChecked { .. } | Op::StoreLocal { .. } | Op::DeleteLocal { .. } => "a slot of the run's own frame: the value keeps the origin it has, and a value the store lets go is released as eager releases it",
         Op::Project(_) => "it names one result of the instruction before it",
-        Op::IsNone => "which object the operand is: the answer is known exactly when the operand is",
+        Op::IsNone => "whether the operand is None, the one object of its class: the answer is known when the operand's value is",
         Op::MakeCell { .. } => "it wraps a slot of the run's own frame in a new cell",
         // A frame of that work is a frame no instruction called: a stop.
         Op::Resume | Op::EvalBreaker => "the interpreter's pending work, none of which is the body's",
         Op::Bytecode { opcode: NOP | POP_TOP | PUSH_NULL | COPY | SWAP | END_FOR | CACHE | KW_NAMES | EXTENDED_ARG, .. } => "it moves values on the frame's own stack",
-        Op::Bytecode { opcode: IS_OP, .. } => "whether two operands are one object: known exactly when both are",
+        Op::Bytecode { opcode: IS_OP, .. } => "whether two operands are one object: known only when both are known as objects (Kind::Object), never from their values",
         _ => return None,
     })
 }
 
 #[derive(Default)]
 pub struct Known {
-    // (activation, value): a value that is known.
-    lit: HashSet<(u32, u32)>,
+    // (activation, value): a value that is known, and how.
+    lit: HashMap<(u32, u32), Kind>,
     // (activation, local slot): the slot holds a known value.
-    slots: HashSet<(u32, u32)>,
+    slots: HashMap<(u32, u32), Kind>,
     // (activation, value) -> what made a value that is not known.
     makers: HashMap<(u32, u32), String>,
     // The body's activation, how many params its block has, the local
@@ -174,10 +221,11 @@ impl Known {
 
     pub fn plain(&mut self, depth: u32, v: u32, op: Plain) {
         match op {
-            Plain::Const => drop(self.lit.insert((depth, v))),
+            // The code object holds its constants: the same object always.
+            Plain::Const => drop(self.lit.insert((depth, v), Kind::Object)),
             Plain::Load(slot) => {
-                if self.slots.contains(&(depth, slot)) {
-                    self.lit.insert((depth, v));
+                if let Some(kind) = self.slots.get(&(depth, slot)) {
+                    self.lit.insert((depth, v), *kind);
                 } else {
                     self.makers.insert((depth, v), "a local the run did not store a known value in (an input, a parameter)".into());
                     if depth == self.body && !self.changed.contains(&slot) {
@@ -187,10 +235,9 @@ impl Known {
             }
             Plain::Store(slot, x) => {
                 self.changes(depth, slot);
-                if self.lit.contains(&(depth, x)) {
-                    self.slots.insert((depth, slot));
-                } else {
-                    self.slots.remove(&(depth, slot));
+                match self.lit.get(&(depth, x)) {
+                    Some(kind) => drop(self.slots.insert((depth, slot), *kind)),
+                    None => drop(self.slots.remove(&(depth, slot))),
                 }
             }
             Plain::Delete(slot) => {
@@ -215,17 +262,24 @@ impl Known {
         if at.0 == self.body { self.inputs.get(&at.1).copied() } else { None }
     }
 
+    // Whether the value `at` is known, at least by its value.
     pub fn lit(&self, at: (u32, u32)) -> bool {
-        self.lit.contains(&at)
+        self.lit.contains_key(&at)
     }
 
-    // The value `at` is known (`lit`), or made by `maker`.
-    pub fn set(&mut self, at: (u32, u32), lit: bool, maker: impl FnOnce() -> String) {
-        if lit {
-            self.lit.insert(at);
-        } else {
-            self.lit.remove(&at);
-            self.makers.insert(at, maker());
+    // Whether it is known which object the value `at` is.
+    pub fn object(&self, at: (u32, u32)) -> bool {
+        self.lit.get(&at) == Some(&Kind::Object)
+    }
+
+    // The value `at` is known in the kind `lit`, or (None) made by `maker`.
+    pub fn set(&mut self, at: (u32, u32), lit: Option<Kind>, maker: impl FnOnce() -> String) {
+        match lit {
+            Some(kind) => drop(self.lit.insert(at, kind)),
+            None => {
+                self.lit.remove(&at);
+                self.makers.insert(at, maker());
+            }
         }
     }
 
@@ -235,8 +289,8 @@ impl Known {
 
     // An activation is over.
     pub fn left(&mut self, depth: u32) {
-        self.lit.retain(|(d, _)| *d != depth);
-        self.slots.retain(|(d, _)| *d != depth);
+        self.lit.retain(|(d, _), _| *d != depth);
+        self.slots.retain(|(d, _), _| *d != depth);
         self.makers.retain(|(d, _), _| *d != depth);
     }
 }

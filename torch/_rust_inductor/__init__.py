@@ -53,7 +53,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.vm import _writes
 
-from . import stays as _stays
+from . import stays as _stays, undo as _undo
 
 
 log = logging.getLogger(__name__)
@@ -1253,8 +1253,8 @@ def _opaque_call(fn, *args, **kwargs):
             torch._C.DisableTorchFunction(),
         ):
             with (
-                _RefuseImpure(_trace_backups, refuse=False)
-                if _trace_backups is not None
+                _RefuseImpure(_trace_undo, refuse=False)
+                if _trace_undo is not None
                 else contextlib.nullcontext()
             ):
                 out = fn(*args, **kwargs)
@@ -1270,10 +1270,32 @@ def _opaque_call(fn, *args, **kwargs):
     return track_tensor_tree(out, proxy, constant=None, tracer=tracer)
 
 
-# What the trace running changed that outlives it, by id, with what puts it
-# back: a tensor written in place with its copy, a random generator drawn
-# from with its state (see _RefuseImpure, _put_back).
-_trace_backups: dict[int, tuple[Any, ...]] | None = None
+# The record of what the trace that is running does to memory that outlives
+# it: its writes to tensors and its draws, in order (undo.py). Everybody who
+# knows of a write tells this one record, before the write (_row_writes,
+# _RefuseImpure).
+_trace_undo: _undo.Undo | None = None
+
+
+def _row_writes(tensors: list[torch.Tensor], declared: bool) -> None:
+    """Told by the executor (exec/covered.rs), before a call of the traced
+    body runs whose row of the rule table (exec/rules/torch.rs) says that
+    the callee writes the memory of ``tensors``: what calls of that callee
+    were measured to write, which
+    is more than the operators' schemas say (``batch_norm`` in training
+    writes its running statistics; no schema declares it and no version
+    counter moves). The trace's record is told of each (undo.py): a trace
+    that is given up takes its writes back, the last first, and a body with
+    such a call is not one that leaves nothing behind.
+    ``declared``: a schema declares every one of these writes; if not, the
+    order of reads and writes that the graph's schemas tell is not the
+    program's, and the trace's graph gets no host prologue (_compile).
+    Raises, and the trace is then refused, where no trace keeps a record."""
+    undo = _trace_undo
+    if undo is None:
+        raise AssertionError("a row writes tensors and no trace is running")
+    for t in tensors:
+        undo.write(t, declared)
 
 
 def _generators(given) -> list[torch.Generator]:
@@ -1284,24 +1306,6 @@ def _generators(given) -> list[torch.Generator]:
     if not torch.cuda.is_initialized():
         return [torch.default_generator]
     return [torch.default_generator, *torch.cuda.default_generators]
-
-
-def _put_back(backups: dict[int, tuple[Any, ...]]) -> None:
-    """Takes back what a trace that is given up did to what outlives it,
-    before the executor runs its block again from the start: a tensor it
-    wrote in place gets its values and its version counter back, a
-    generator it drew from its state (the block's draws and writes are then
-    the ones eager makes, once)."""
-    with torch.no_grad():
-        for x, saved, *version in backups.values():
-            if isinstance(x, torch.Generator):
-                x.set_state(saved)
-            else:
-                x.copy_(saved)
-                if version:
-                    # The trace's write and this one are none of the
-                    # program's.
-                    torch._C._autograd._unsafe_set_version_counter((x,), tuple(version))
 
 
 def _in_order(x) -> list[Any]:
@@ -1391,15 +1395,13 @@ class _RefuseImpure(TorchDispatchMode):
     and gives the trace up when an op raises an error of its own.
     The executor then runs the block as usual,
     which is only sound if nothing it did under tracing had an effect: so
-    each tensor an op writes in place is copied into `backups` first, and
-    the state of each generator a random op may draw from, for the caller to
-    put back."""
+    the trace's record (``undo``, see undo.py) is told of each tensor an op
+    may write (stays.written), and of each generator a random op may draw
+    from, before the op runs, for the caller to take back."""
 
-    def __init__(
-        self, backups: dict[int, tuple[Any, ...]], refuse: bool = True
-    ) -> None:
+    def __init__(self, undo: _undo.Undo, refuse: bool = True) -> None:
         super().__init__()
-        self.backups = backups
+        self.undo = undo
         self.refuse = refuse
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -1413,19 +1415,9 @@ class _RefuseImpure(TorchDispatchMode):
             raise _refuse(f"it runs {func}, which {why}")
         if torch.Tag.nondeterministic_seeded in func.tags:
             for g in _generators(kwargs.get("generator")):
-                if id(g) not in self.backups:
-                    self.backups[id(g)] = (g, g.get_state())
-        if func._schema.is_mutable:
-            for k, a in enumerate(func._schema.arguments):
-                if a.alias_info is None or not a.alias_info.is_write:
-                    continue
-                x = args[k] if k < len(args) else kwargs.get(a.name)
-                for t in x if isinstance(x, (list, tuple)) else [x]:
-                    if isinstance(t, torch.Tensor) and id(t) not in self.backups:
-                        with torch.utils._python_dispatch._disable_current_modes():
-                            # An inference tensor counts no versions.
-                            version = () if t.is_inference() else (t._version,)
-                            self.backups[id(t)] = (t, t.detach().clone(), *version)
+                self.undo.draw(g)
+        for t, declared, out in _stays.written(func, args, kwargs):
+            self.undo.write(t, declared, grows=out)
         try:
             out = func(*args, **kwargs)
         except _Refused:
@@ -2541,10 +2533,13 @@ def _named(gm):
     return named
 
 
-def _compile(name, gm, example, consts, args, plan, types, shares):
+def _compile(name, gm, example, consts, args, plan, types, shares, undeclared):
     """What a region runs for its graph, and whether the graph's reads of
     values run first, in a prologue of their own (_split_host). ``shares``:
-    how the traced call's tensors stand in memory, as a key (_overlap)."""
+    how the traced call's tensors stand in memory, as a key (_overlap).
+    ``undeclared``: a call of the trace wrote a tensor that no schema says it
+    writes (_row_writes): no prologue then, since _split_host orders reads
+    and writes by the schemas of the graph's operators."""
     from torch._inductor.compile_fx import compile_fx
 
     if block_pipeline is None:
@@ -2565,7 +2560,7 @@ def _compile(name, gm, example, consts, args, plan, types, shares):
         return _compiled[key][0], False
     split = (
         _split_host(gm, example, consts)
-        if any(n.target in _SKIP_OPS for n in gm.graph.nodes)
+        if not undeclared and any(n.target in _SKIP_OPS for n in gm.graph.nodes)
         else None
     )
     if split is not None:
@@ -3099,7 +3094,8 @@ def _trace_region(
         if c[0] == _FLOAT
     )
     n_tensors = len(example) - n_floats
-    backups: dict[int, tuple[Any, ...]] = {}
+    # What the traced run does to memory that outlives it (undo.py).
+    undo = _undo.Undo()
     # The lists, dicts and sets among the args, each with what it holds as
     # the call hands it over (see _hand_back).
     as_given = [(a, _in_order(a)) for a in args if type(a) in (list, dict, set)]
@@ -3125,7 +3121,7 @@ def _trace_region(
     fx_tracers: list[PythonKeyTracer] = []
 
     def body(*xs):
-        global _scalar_state, _trace_backups
+        global _scalar_state, _trace_undo
         fx_tracers.append(_tracer())
         # make_fx tracks the input tensors by identity, wherever args hold them;
         # floats are swapped for _Scalars of their placeholders.
@@ -3162,13 +3158,14 @@ def _trace_region(
             scalar_args = (
                 _ScalarArgs(_tracer().graph) if in_vm else contextlib.nullcontext()
             )
-            with scalar_args, _RefuseImpure(backups):
-                _trace_backups = backups
+            with scalar_args, _RefuseImpure(undo):
+                _trace_undo = undo
                 try:
                     with own.program(_tracer().root):
                         outs = _region_body(*call_args)
                 finally:
-                    _trace_backups = None
+                    _trace_undo = None
+                    result["undeclared"] = undo.undeclared
             # The tensors fx lifted out of the body as constants are the
             # program's too (the tracer's root module holds them). The
             # tracer's own modules are not kept: what their death runs (a
@@ -3178,9 +3175,9 @@ def _trace_region(
             keep((lifted, list(root.parameters()), list(root.buffers())))
             # The executor goes on from where the body left off: what it did
             # stands even if no region comes of it.
-            result["repeatable"] = not backups
-            keep(list(backups.values()))
-            backups.clear()
+            result["repeatable"] = undo.empty()
+            keep(undo.kept())
+            undo.clear()
             as_given.clear()
             # In this order (exec/reads.rs): the record of the run's writes
             # lets go of what its stores replaced, and a finalizer that runs
@@ -3264,8 +3261,10 @@ def _trace_region(
         # cut them.
         gm = make_fx(body, decomposition_table={}, tracing_mode="real")(*example)
     except Exception as e:
-        # The executor runs the block again from its start.
-        _put_back(backups)
+        # The executor runs the block again from its start: what the trace
+        # wrote in place and drew is taken back first, the last first (the
+        # block's writes and draws are then the ones eager makes, once).
+        undo.back()
         _hand_back(as_given)
         if isinstance(e, _Refused):
             _traced(name, "not yet" if e.later else "refused", str(e))
@@ -3331,7 +3330,9 @@ def _trace_region(
     # the parameter being used, unlike eager: dead code's parameters are
     # dropped (AOT lifts every parameter of the module), and an input nothing
     # reads goes in detached.
-    gm.graph.eliminate_dead_code()
+    # (A call that writes to an argument its schema does not mark is not
+    # dead when nothing reads its results: stays.UNDECLARED.)
+    gm.graph.eliminate_dead_code(lambda n: n.is_impure() or _stays.unmarked(n))
     gm.recompile()
     read = {n.target for n in gm.graph.find_nodes(op="get_attr")}
     for k in [*gm._parameters, *gm._buffers]:
@@ -3377,7 +3378,12 @@ def _trace_region(
             print(f"region {name}: refused: {e}")
         return None
     shares = overlap.key()
-    compiled, hosted = _compile(name, gm, example, consts, args, plan, types, shares)
+    undeclared = result.get("undeclared", True) or any(
+        _stays.unmarked(n) for n in gm.graph.nodes
+    )
+    compiled, hosted = _compile(
+        name, gm, example, consts, args, plan, types, shares, undeclared
+    )
     if overlap.two_storages and (lowered or hosted):
         # What is made of a graph, and a graph whose reads of values run
         # first (_same_memory), know shared memory by its storage.

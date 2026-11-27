@@ -7,8 +7,8 @@
 // and where the recorded run is (the activation, the body's step).
 // What it guarantees
 //   - vector(): the entry of a call of a C callee, in the order of the
-//     call's operands, flagged pure (the only rows that make entries today
-//     are of callees that only compute); Err for a form of call whose
+//     call's operands, flagged pure only for a callee whose every row says
+//     that it writes no operand (rules::torch::only_computes); Err for a form of call whose
 //     operands are not all on the instruction (a star call, a partial, a
 //     builtin bound to its receiver) and for an operand with no origin;
 //   - slot(): the entry of an operator, a subscript or an attribute
@@ -116,7 +116,11 @@ impl Maker<'_> {
                 args: args.into(),
                 classes: classes.into(),
                 kwnames: (!kwnames.is_null()).then(|| Py::<pyo3::types::PyTuple>::from_borrowed_ptr(Python::assume_attached(), kwnames)),
-                flags: Flags { bits: PURE, ..Flags::default() },
+                // Pure only if every row of the callee says, of every form of
+                // its call, that it writes no operand (the table has no row
+                // for a callee that draws or changes a key): a list with any
+                // other entry is never run again.
+                flags: Flags { bits: if rules::torch::only_computes(f) { PURE } else { 0 }, ..Flags::default() },
                 ..blank(Callee::Vector(Py::from_borrowed_ptr(Python::assume_attached(), f), label.clone().into()), self.at)
             };
             Ok(Call { entry, label, ids: Vec::new(), operands: all[first..].to_vec() })

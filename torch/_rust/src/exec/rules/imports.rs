@@ -47,7 +47,7 @@ use pyo3::ffi::PyObject;
 
 use super::super::ffi::{tr_attr_home, tr_frame_builtins, tr_type_lookup};
 use super::super::reads;
-use super::{Class, Enters, Family, Group, Read, Res, Row, Scalars, Site, Taken, What, Write};
+use super::{Before, Class, Enters, Family, Group, Read, Res, Row, Says, Scalars, Site, Taken, What, Write};
 use crate::cfg::opcodes::{self, IMPORT_FROM, IMPORT_NAME};
 
 pub const FAMILY: Family = Family { name: "imports", rule, table };
@@ -57,9 +57,16 @@ const WHY_FROM: &str = "The name is the item of the exact module's dict, or with
 
 const NAME_READS: &[Read] = &[Read::Global, Read::Modules, Read::Class, Read::Attribute];
 // (level, names): an int and None, or an int and a tuple.
-const NAME_ROW: Row = Row { operands: &[(0, Class::Group(Group::Immutable)), (1, Class::Group(Group::Immutable))], reads: NAME_READS, writes: Write::None, result: Res::Pinned, enters: Enters::Never, scalars: Scalars::None, why: WHY_NAME, before: Some(import_name) };
-const NAMES_ROW: Row = Row { operands: &[(0, Class::Group(Group::Immutable)), (1, Class::Group(Group::ExactTuple))], reads: NAME_READS, writes: Write::None, result: Res::Pinned, enters: Enters::Never, scalars: Scalars::None, why: WHY_NAME, before: Some(import_name) };
-const FROM_ROW: Row = Row { operands: &[(0, Class::Group(Group::ExactModule))], reads: &[Read::Class, Read::Attribute, Read::Modules], writes: Write::None, result: Res::Pinned, enters: Enters::Never, scalars: Scalars::None, why: WHY_FROM, before: Some(import_from) };
+const NAME_ROW: Row = Row { operands: &[(0, Class::Group(Group::Immutable)), (1, Class::Group(Group::Immutable))], reads: NAME_READS, writes: Write::None, result: Res::Pinned, enters: Enters::Never, scalars: Scalars::None, why: WHY_NAME, before: Some(import_name), form: "" };
+const NAMES_ROW: Row = Row { operands: &[(0, Class::Group(Group::Immutable)), (1, Class::Group(Group::ExactTuple))], reads: NAME_READS, writes: Write::None, result: Res::Pinned, enters: Enters::Never, scalars: Scalars::None, why: WHY_NAME, before: Some(import_name), form: "" };
+const FROM_ROW: Row = Row { operands: &[(0, Class::Group(Group::ExactModule))], reads: &[Read::Class, Read::Attribute, Read::Modules], writes: Write::None, result: Res::Pinned, enters: Enters::Never, scalars: Scalars::None, why: WHY_FROM, before: Some(import_from), form: "" };
+
+// What the rows' `before` functions refuse and record, for the dump (the
+// head of the file has it in full).
+pub const BEFORES: &[Says] = &[
+    (import_name as Before, "import_name", "Refuses a relative import; a list of names that is neither None nor a tuple of strs; builtins whose __import__ is not the interpreter's own; a module, or the package in front of a dotted name's first dot, that is not loaded, is being initialized or is no exact module; names taken from a package or from a module with a __getattr__. Records the __import__ item of the frame's builtins, the items of sys.modules it finds with __spec__ and _initializing of each module found, and, where names are taken, that the module's dict has neither __path__ nor __getattr__."),
+    (import_from as Before, "import_from", "Refuses an object that is no exact module; a name that the class of modules has an attribute for; a name that is no item of the module's dict where that dict has a __getattr__, or no __name__ to look a submodule up by, or where the submodule of that name is not loaded. Records the item of the module's dict under the name, present with its value or absent, and for a submodule also that the dict has no __getattr__, its __name__, and the item of sys.modules with what is read of the module found."),
+];
 
 fn rule(what: &What) -> Taken {
     match *what {
@@ -215,7 +222,7 @@ unsafe fn name_of(what: &What, site: &Site) -> Result<*mut PyObject, String> {
 }
 
 // IMPORT_NAME(name) on (level, names).
-unsafe fn import_name(what: &What, site: &Site) -> Result<(), String> {
+unsafe fn import_name(_: &Row, what: &What, site: &Site) -> Result<(), String> {
     let n = names();
     let name = name_of(what, site)?;
     let &[level, fromlist] = site.operands else { return Err("it has other operands than a level and a list of names".into()) };
@@ -270,7 +277,7 @@ unsafe fn import_name(what: &What, site: &Site) -> Result<(), String> {
 }
 
 // IMPORT_FROM(name) on an exact module.
-unsafe fn import_from(what: &What, site: &Site) -> Result<(), String> {
+unsafe fn import_from(_: &Row, what: &What, site: &Site) -> Result<(), String> {
     let n = names();
     let name = name_of(what, site)?;
     let &[module] = site.operands else { return Err("it has other operands than a module".into()) };

@@ -3018,39 +3018,46 @@ pub unsafe fn leads_to(o: *mut PyObject, given: &[*mut PyObject]) -> bool {
 // The doors by which the call-list recorder takes the result of an
 // instruction for a value its recorded reads stand for (calls/known.rs has
 // the list of kinds). Each answers for one read, by where it was read from,
-// and is true only if the recorder's Trace HOLDS that read as an entry that
-// expects exactly `value` there: the same object, or (an exact int, float or
-// str) the same value. That the count of reads grew says nothing: only the
-// first read of an item is recorded, and a later one may have found
+// and answers only if the recorder's Trace HOLDS that read as an entry that
+// expects exactly `value` there: Some(true) where the entry expects the same
+// OBJECT, Some(false) where it expects (an exact int, float or str) the same
+// VALUE: which object a later arrival finds there, such an entry does not
+// say. None: no such entry. That the count of reads grew says nothing: only
+// the first read of an item is recorded, and a later one may have found
 // something else.
 
 impl Trace {
-    // Whether item `key` of `holder` is an entry that expects `value`.
-    unsafe fn found(&self, holder: *mut PyObject, key: *mut PyObject, value: *mut PyObject) -> bool {
+    // Whether item `key` of `holder` is an entry that expects `value`, and
+    // whether by identity.
+    unsafe fn found(&self, holder: *mut PyObject, key: *mut PyObject, value: *mut PyObject) -> Option<bool> {
         let wanted = |i: &&Item| i.key.as_ptr() == key && matches!(i.want, Want::Is | Want::Equal);
-        self.group_of.get(&(holder as usize)).is_some_and(|g| self.entries.groups[*g].items.iter().find(wanted).is_some_and(|i| same(value, i.want, i.value.as_ref())))
+        let item = self.entries.groups[*self.group_of.get(&(holder as usize))?].items.iter().find(wanted)?;
+        same(value, item.want, item.value.as_ref()).then_some(item.want == Want::Is)
     }
 }
 
 // The item `key` of the dict `holder` was read and gave `value`.
-pub unsafe fn item_found(holder: *mut PyObject, key: *mut PyObject, value: *mut PyObject) -> bool {
-    standing().is_ok() && !value.is_null() && TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| t.found(holder, key, value)))
+pub unsafe fn item_found(holder: *mut PyObject, key: *mut PyObject, value: *mut PyObject) -> Option<bool> {
+    if standing().is_err() || value.is_null() {
+        return None;
+    }
+    TRACE.with_borrow(|t| t.as_ref().and_then(|t| t.found(holder, key, value)))
 }
 
 // A load of the global `name` in a frame of these namespaces gave `value`:
 // the item of the globals, or the item of the builtins with the entry that
 // the globals have no such name.
-pub unsafe fn global_found(globals: *mut PyObject, builtins: *mut PyObject, name: *mut PyObject, value: *mut PyObject) -> bool {
+pub unsafe fn global_found(globals: *mut PyObject, builtins: *mut PyObject, name: *mut PyObject, value: *mut PyObject) -> Option<bool> {
     if ffi::PyDict_Check(globals) == 0 || ffi::PyDict_Check(builtins) == 0 || value.is_null() || standing().is_err() {
-        return false;
+        return None;
     }
     TRACE.with_borrow(|t| {
-        t.as_ref().is_some_and(|t| {
+        t.as_ref().and_then(|t| {
             if !dict_get(globals, name).is_null() {
                 return t.found(globals, name, value);
             }
             let absent = |i: &Item| i.key.as_ptr() == name && i.want == Want::Absent;
-            t.group_of.get(&(globals as usize)).is_some_and(|g| t.entries.groups[*g].items.iter().any(absent)) && t.found(builtins, name, value)
+            t.group_of.get(&(globals as usize)).filter(|g| t.entries.groups[**g].items.iter().any(absent)).and_then(|_| t.found(builtins, name, value))
         })
     })
 }

@@ -85,6 +85,7 @@ mod finish;
 mod frames;
 mod known;
 mod origins;
+mod outs;
 mod reading;
 pub mod record;
 mod run;

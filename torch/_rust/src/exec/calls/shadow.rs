@@ -20,7 +20,8 @@
 //   - A STATUS IS FROM A CLOSED SET AND "replayable" IS POSITIVE: a Shadow
 //     is "stopped" (the recording ended early), "refused" (the check of
 //     lists refused it), "partial: <the first reason>" (it reached the end
-//     and record.rs met at least one thing the list does not say), or
+//     and record.rs met at least one thing the list does not say, or the
+//     list was not run again and found equal on the run's own operands), or
 //     "replayable" (none of those). Nothing here decides a reason;
 //   - validate() runs the list once, outside the executor, and compares bit
 //     for bit (compare): each output must have the key of the block's, on
@@ -70,6 +71,8 @@ pub struct Shadow {
     pub outputs: (usize, usize),
     // Outputs that hold results of entries and are none themselves.
     pub unstated: u32,
+    // Outputs that are no tensors and that the list states (outs.rs).
+    pub stated: u32,
     pub by_value: Vec<(String, u64)>,
     pub left: Vec<(String, u64)>,
     pub handed: Vec<(String, u64)>,
@@ -172,9 +175,9 @@ impl Shadow {
         let counts = |v: &[(String, u64)]| format!("{{{}}}", v.iter().map(|(k, n)| format!("{}: {n}", quoted(k))).collect::<Vec<_>>().join(", "));
         let stop = self.stop.as_ref().map_or("null".into(), |(at, why)| format!("[{}, {}]", quoted(at), quoted(why)));
         format!(
-            "{{\"place\": {}, \"status\": {}, \"traced\": {}, \"entries\": {}, \"seen\": {}, \"left_behind\": {}, \"stop\": {stop}, \"refused\": {}, \"text\": {}, \"pins\": {}, \"late\": {}, \"specialized\": {}, \"outputs\": [{}, {}], \"unstated\": {}, \"by_value\": {}, \"left\": {}, \"handed\": {}, \"facts\": {}, \"notes\": [{}], \"validated\": {}, \"reasons\": {}, \"jumps\": [{}, {}], \"frames\": {}, \"breaks\": {}, \"again\": {}, \"missed\": {}}}",
+            "{{\"place\": {}, \"status\": {}, \"traced\": {}, \"entries\": {}, \"seen\": {}, \"left_behind\": {}, \"stop\": {stop}, \"refused\": {}, \"text\": {}, \"pins\": {}, \"late\": {}, \"specialized\": {}, \"outputs\": [{}, {}], \"unstated\": {}, \"stated\": {}, \"by_value\": {}, \"left\": {}, \"handed\": {}, \"facts\": {}, \"notes\": [{}], \"validated\": {}, \"reasons\": {}, \"jumps\": [{}, {}], \"frames\": {}, \"breaks\": {}, \"again\": {}, \"missed\": {}}}",
             quoted(&self.place), quoted(&self.status()), self.traced, self.entries, self.seen, self.left_behind, self.refused.as_deref().map_or("null".into(), quoted), quoted(&self.text),
-            self.pins, self.late, self.specialized, self.outputs.0, self.outputs.1, self.unstated, counts(&self.by_value), counts(&self.left), counts(&self.handed), self.facts,
+            self.pins, self.late, self.specialized, self.outputs.0, self.outputs.1, self.unstated, self.stated, counts(&self.by_value), counts(&self.left), counts(&self.handed), self.facts,
             self.notes.iter().map(|n| quoted(n)).collect::<Vec<_>>().join(", "), quoted(&self.validated), counts(&self.reasons), self.jumps.0, self.jumps.1, self.frames, self.breaks, quoted(&self.again_text()), counts(&self.missed)
         )
     }
@@ -202,7 +205,9 @@ extern "C" fn dump() {
 /// list's own check ended it with nothing done, by the check. ``pins``: tensors that were there before
 /// the run and that the reads it recorded lead to. ``specialized``: immutable
 /// inputs the list took by value; a later arrival with another value there is
-/// a miss ("input value"). ``jumps``: conditional
+/// a miss ("input value"). ``stated``: outputs of the block that are no
+/// tensors and that the list states; a later arrival's are compared with
+/// the statement. ``jumps``: conditional
 /// jumps under the body on a (known, other) value. ``breaks``: how often the
 /// executor's own empty function, by which the interpreter handles what is
 /// pending, ran under the recorded run.
@@ -226,6 +231,7 @@ pub fn _calls_shadow(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
                 d.set_item("specialized", s.specialized)?;
                 d.set_item("outputs", s.outputs)?;
                 d.set_item("unstated", s.unstated)?;
+                d.set_item("stated", s.stated)?;
                 d.set_item("by_value", s.by_value.clone())?;
                 d.set_item("left", s.left.clone())?;
                 d.set_item("handed", s.handed.clone())?;
