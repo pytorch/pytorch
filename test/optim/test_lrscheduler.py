@@ -354,6 +354,11 @@ class TestLRScheduler(TestCase):
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test(scheduler, targets, epochs)
 
+    @parametrize("step_size", [0, -1, 0.5, 1.5, 2.0, float("nan")])
+    def test_step_lr_step_size_limits(self, step_size):
+        with self.assertRaisesRegex(ValueError, "Expected positive integer step_size"):
+            StepLR(self.opt, step_size=step_size)
+
     def test_get_last_lr_step_lr(self):
         from torch.nn import Parameter
 
@@ -449,6 +454,33 @@ class TestLRScheduler(TestCase):
         scheduler = ConstantLR(self.opt, factor=1.0 / 2, total_iters=5)
         self._test(scheduler, targets, epochs)
 
+    @parametrize("factor", [-1.0, 1.1, float("nan")])
+    def test_constantlr_factor_limits(self, factor):
+        with self.assertRaisesRegex(ValueError, "Constant multiplicative factor"):
+            ConstantLR(self.opt, factor=factor)
+
+    def test_constantlr_zero_factor_undo(self):
+        scheduler = ConstantLR(self.opt, factor=0.0, total_iters=2)
+        self.opt.step()
+        scheduler.step()
+        self.assertEqual(scheduler.get_last_lr(), [0.0] * len(self.opt.param_groups))
+        self.opt.step()
+        with self.assertRaisesRegex(
+            ValueError, "undoing multiplying by a factor of 0 is undefined"
+        ):
+            scheduler.step()
+
+    @parametrize("milestone", [1, 2])
+    def test_sequentiallr_zero_factor(self, milestone):
+        base_lrs = copy.deepcopy([group["lr"] for group in self.opt.param_groups])
+        zero = ConstantLR(self.opt, factor=0.0, total_iters=2)
+        following = StepLR(self.opt, step_size=2)
+        scheduler = SequentialLR(self.opt, [zero, following], milestones=[milestone])
+        for _ in range(milestone):
+            self.opt.step()
+            scheduler.step()
+        self.assertEqual(scheduler.get_last_lr(), base_lrs)
+
     def test_linearlr(self):
         # lr = 0.025     if epoch == 0
         # lr = 0.03125   if epoch == 1
@@ -477,6 +509,11 @@ class TestLRScheduler(TestCase):
         iters = 4
         with self.assertRaises(ValueError):
             LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
+
+    @parametrize("factor_name", ["start_factor", "end_factor"])
+    def test_linearlr_nan_factor(self, factor_name):
+        with self.assertRaisesRegex(ValueError, "multiplicative factor expected"):
+            LinearLR(self.opt, **{factor_name: float("nan")})
 
     def test_constantlr_with_epoch(self):
         # lr = 0.025     if epoch < 5
