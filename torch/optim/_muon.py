@@ -416,8 +416,6 @@ def _multi_tensor_muon(
         if g.ndim != 2:
             raise ValueError("Param gradient must be a 2D matrix")
 
-    # Phase 1: momentum buffer update fused across all params.
-    # buf <- lerp(buf, grad, 1 - momentum) for every param in one call.
     torch._foreach_lerp_(muon_momentum_bufs, grads, 1 - momentum)
     if nesterov:
         updates = list(torch._foreach_lerp(grads, muon_momentum_bufs, momentum))
@@ -428,17 +426,14 @@ def _multi_tensor_muon(
         if u.ndim != 2:
             raise ValueError("Muon update must be a 2D matrix")
 
-    # Phase 2: Newton-Schulz. Some operations are fused across tensors; the
-    # iterations run per tensor since standard NS has no natural batching.
     updates = _multi_tensor_zeropower_via_newtonschulz(
         updates, ns_coefficients, ns_steps, eps
     )
 
-    # Phase 3: weight-decay shrink (uniform scale across all params) followed
-    # by the shape-grouped negative-lr add: the adjusted lr depends on the
-    # shape, and _foreach_add_ takes a single alpha per call.
     torch._foreach_mul_(params, 1 - lr * weight_decay)
 
+    # Group the add by shape: the adjusted lr depends on the shape, and
+    # _foreach_add_ takes a single alpha per call.
     add_groups: dict[tuple[int, int], list[int]] = {}
     for i, p in enumerate(params):
         add_groups.setdefault((p.size(0), p.size(1)), []).append(i)
