@@ -196,7 +196,6 @@ class ConvMultiFunctionalBN(torch.nn.Module):
 
 class OptimizeForInferenceTemplate(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
-    _do_cuda_non_default_stream = False
 
     @classmethod
     def setUpClass(cls):
@@ -958,7 +957,6 @@ if TEST_WITH_ROCM:
 
 class OptimizeForInferenceAcceleratorTemplate(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
-    _do_cuda_non_default_stream = False
 
     @skipIf(not HAS_TRITON, "requires triton")
     def test_autocast(self, device):
@@ -1037,7 +1035,6 @@ class OptimizeForInferenceAcceleratorTemplate(TestCase):
 
 class OptimizeForInferenceCudaTemplate(TestCase):
     hw_classification = HardwareClassification.CUDA
-    _do_cuda_non_default_stream = False
 
     @skipCUDAIf(not HAS_TRITON, "requires triton")
     def test_static_indices_cudagraph(self, device):
