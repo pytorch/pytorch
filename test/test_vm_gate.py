@@ -8921,7 +8921,7 @@ class TestVmRulesTorch(TestCase):
 
 
 SHADOW_PROGRAM = """
-import functools, gc, hashlib, json, sys, weakref, torch, torch.nn.functional as F
+import collections, functools, gc, hashlib, json, sys, weakref, torch, torch.nn.functional as F
 from torch import vm
 
 torch.manual_seed(0)
@@ -9060,6 +9060,47 @@ def in_a_dict(x):
         return d["a"] * 2
     return d["a"]
 
+def in_an_ordered_dict(x):
+    d = collections.OrderedDict(a=x + 1)
+    if STATE["double"]:
+        return d["a"] * 2
+    return d["a"]
+
+def in_a_dict_of_ints(x):
+    d = {0: x + 1}
+    if STATE["double"]:
+        return d[0] * 2
+    return d[0]
+
+def in_kwargs(**kwargs):
+    return kwargs["a"] * 2 + 1
+
+def float_input(x, s=1.5):
+    return x * s + 1
+
+def make_cell_number():
+    k = 2.0
+    def cell_helper(y):
+        return y * k
+    def cell_number(x):
+        return cell_helper(x + 1) + 1
+    return cell_number
+
+cell_number = make_cell_number()
+NONE_FLAG = None
+
+def none_helper(y):
+    if NONE_FLAG is None:
+        return y * 2
+    return y - 3
+
+def none_flag_under(x):
+    return none_helper(x + 1) + 1
+
+def imports_a_module(x):
+    import math
+    return x * 2 * math.pi
+
 def patched(x):
     return x * 2 + 1
 
@@ -9106,6 +9147,30 @@ DESCRIBED = Described()
 def descriptor_read(x):
     return x * DESCRIBED.scale
 
+class Wrapped:
+    # The lookup finds a classmethod, whose C code calls the __get__ of what
+    # it wraps: not the function the class has under the name, nor this one.
+    scale = classmethod(Getter())
+
+    def __getattr__(self, name):
+        raise AttributeError(name)
+
+WRAPPED = Wrapped()
+
+def wrapped_descriptor_read(x):
+    return x * WRAPPED.scale
+
+class Hooked:
+    scale = Getter()
+
+    def __getattribute__(self, name):
+        return 3
+
+HOOKED = Hooked()
+
+def getattribute_read(x):
+    return x * HOOKED.scale
+
 LIN = torch.nn.Linear(8, 8)
 
 def module_called(x):
@@ -9128,6 +9193,30 @@ def collects_garbage(x):
     y = x + 1
     z = torch.relu(y)
     return torch.relu(z) * 2
+
+class Logged:
+    v = 3
+
+    def __del__(self):
+        STATE["dead"].append("logged")
+
+def del_temporary(x):
+    y = x.sin() * 2
+    k = Logged().v
+    return (y * k + 1).cos().tanh().exp()
+
+GRAD = torch.randn(2, 3, 8, 8, requires_grad=True)
+ONE = torch.ones(())
+ENGINE = torch.autograd.Variable._execution_engine
+
+def maybe_backward(y):
+    if STATE["double"]:
+        return y * 2
+    ENGINE.run_backward((y.sum(),), (ONE,), False, False, (), allow_unreachable=True, accumulate_grad=True)
+    return y * 3
+
+def backward_under(x):
+    return maybe_backward(x * GRAD) + 1
 
 def later_stops():
     # Three hand-built lists whose operator `*` was resolved on torch.Tensor,
@@ -9173,7 +9262,14 @@ BETWEEN = {
     "length_of_a_global": lambda: globals().__setitem__("m", torch.randn(4, 16)),
     "patched": lambda: setattr(torch.Tensor, "audit_mark", 1),
     "patched_behind": lambda: setattr(torch.Tensor, "audit_mark", 1),
+    "none_flag_under": lambda: globals().__setitem__("NONE_FLAG", 0),
 }
+# What a program is called with besides (or in place of) the tensor, by call.
+ARGS = {"float_input": lambda i: (1.5,) if i < 4 else (2.5,)}
+KWARGS = ("in_kwargs",)
+# What a program changes before its second call: a way its first call, the
+# one the optimizer judged it by, did not take.
+EARLY = {"backward_under": lambda: STATE.__setitem__("double", False)}
 M0 = m.clone()
 name = sys.argv[1]
 if name == "later_stops":
@@ -9186,22 +9282,29 @@ def run(f):
     bn.reset_running_stats()
     STATE.update(double=True, dead=[])
     KEEP.clear()
-    globals().update(SCALE=2.0, m=M0)
+    globals().update(SCALE=2.0, m=M0, NONE_FLAG=None)
     M0.copy_(M0C)
     default_helper.__defaults__ = (3,)
+    GRAD.grad = None
     outs = []
     for i, x in enumerate(inputs):
+        if i == 1 and name in EARLY:
+            EARLY[name]()
         if i == 4 and name in BETWEEN:
             BETWEEN[name]()
         if i == 2 and name in LATE and f is not fn:
             torch._rust._set_cfg_regions(True, 2, 4, 64)
         if name == "collects_garbage":
             gc.disable()
-        outs.append(flat(f(x.clone())))
+        if name in KWARGS:
+            outs.append(flat(f(a=x.clone())))
+        else:
+            outs.append(flat(f(x.clone(), *ARGS.get(name, lambda i: ())(i))))
     if name in COLLECTS:
         gc.enable()
         gc.collect()
-    return outs, bn.running_mean.clone(), int(bn.num_batches_tracked), list(STATE["dead"]), M0.clone()
+    grad = None if GRAD.grad is None else GRAD.grad.clone()
+    return outs, bn.running_mean.clone(), int(bn.num_batches_tracked), list(STATE["dead"]), M0.clone(), grad
 M0C = M0.clone()
 def equal(a, b):
     if torch.is_tensor(a):
@@ -9238,12 +9341,15 @@ SHADOW_STOPS = {
     "leaves_by_exception": ("the end of the body", "the block left by an exception"),
     "callback": ("died", "a frame that no instruction of the body called"),
     "lost": ("relu_", "aten::relu_"),
-    "in_a_dict": ("Binary(*)", "a tensor no recorded read leads to"),
+    "in_a_dict_of_ints": ("Binary(*)", "a tensor no recorded read leads to"),
     "length_of_a_global": ("Tensor.__len__", "it ran under call c builtins.len, which names no function"),
     "finalizer_at_frame_exit": ("Quiet.__del__", "it ran under call py __main__.holds, whose callee's frame had been entered already"),
     "class_called": ("Scaled.__init__", "it ran under call class __main__.Scaled, which names no function"),
     "property_read": ("Holder.scale", "it ran under LoadAttr (later: attributes), which names no function"),
+    "wrapped_descriptor_read": ("Getter.__get__", "it ran under LoadAttr (later: attributes), whose callee is another function"),
+    "getattribute_read": ("Hooked.__getattribute__", "it ran under LoadAttr (later: attributes), whose callee is another function"),
     "collects_garbage": ("Cycle.__del__", "it ran between two instructions"),
+    "backward_under": ("a backward", "the autograd engine runs under it"),
 }  # fmt: skip
 
 # program: (a reason its recording must give, whether the list must differ
@@ -9252,11 +9358,13 @@ SHADOW_STOPS = {
 SHADOW_PARTIAL = {
     "chain": ("a pin: the reads that lead to it are not run as a check on a later arrival yet", False),
     "frame_under": ("no row: call py torch.nn.functional.relu", False),
-    "in_place": ("a read with no check, or a kind the recorder does not list: LoadGlobal", False),
+    "in_place": ("the reads of the run are recorded, and nothing runs them as checks on a later arrival yet", False),
     "method_of_a_global": ("a pin: the reads that lead to it are not run as a check on a later arrival yet", False),
     "in_a_tuple": ("no row: BINARY_SUBSCR (later: subscripts) x tuple", False),
     "reads_value": ("the witness of an entry disagrees with it: torch._C._linalg.linalg_cond", False),
-    "global_number": ("an operand taken by value that is no constant of the code: float", True),
+    "global_number": ("the reads of the run are recorded, and nothing runs them as checks on a later arrival yet", True),
+    "none_flag_under": ("the reads of the run are recorded, and nothing runs them as checks on a later arrival yet", True),
+    "imports_a_module": ("the reads of the run are recorded, and nothing runs them as checks on a later arrival yet", False),
     "flag_under": ("a jump under the body tested the result of ToBool", True),
     "flag_operand": ("a jump under the body tested the result of ToBool", False),
     "default_operand": ("an operand taken by value that is no constant of the code: int", True),
@@ -9287,6 +9395,10 @@ class TestVmCallsShadow(TestCase):
     A recording's status is "replayable" only if the recorder met nothing
     that the list does not say; else it is "partial" with the reasons,
     "stopped" or "refused".
+    ``TORCH_RUST_CALLS=1``: the recorder takes the run that today's engine
+    would trace, in place of the trace. Nothing is formed of what it
+    records: no region runs, and every program still computes what eager
+    computes.
     """
 
     hw_classification = HardwareClassification.GENERIC
@@ -9307,6 +9419,12 @@ class TestVmCallsShadow(TestCase):
             "module_called",
             "descriptor_read",
             "collects",
+            "del_temporary",
+            "in_a_dict",
+            "in_an_ordered_dict",
+            "in_kwargs",
+            "float_input",
+            "cell_number",
         }  # fmt: skip
     )
 
@@ -9383,6 +9501,49 @@ class TestVmCallsShadow(TestCase):
                     self.assertEqual(found["jumps"][1], 0)
                     self.assertFalse(found["validated"].startswith("DIFFERENT"))
                     self.assertFalse(found["again"].startswith("DIFFERENT"))
+
+    @parametrize("name", PROGRAMS)
+    def test_with_1_the_recorder_is_in_place_of_the_trace_and_forms_nothing(self, name):
+        # Values and state are eager's (also where today's regions differ in
+        # the last bits: there are none), no region is formed, and a
+        # recording says what it is as it does beside the engine.
+        out = self.program(name, "1")
+        self.assertEqual([r for r in out["regions"] if r[0] == "region"], [])
+        if name != "reads_value":
+            self.assertEqual(out["digest"], self.program(name, None)["digest"])
+        for found in out["shadow"]:
+            with self.subTest(place=found["place"]):
+                self.assertFalse(found["traced"])
+                kind = found["status"].split(":")[0]
+                self.assertIn(kind, ("replayable", "partial", "stopped", "refused"))
+                self.assertEqual(kind == "stopped", found["stop"] is not None)
+                self.assertFalse(found["pins"] and kind == "replayable")
+
+    def test_with_1_a_place_is_recorded_once_and_its_list_run_on_later_arrivals(self):
+        # The run that was due for a trace is the recorded one; the block
+        # runs as written on the two calls after it, and the list gave what
+        # the block made on both.
+        found = [
+            s
+            for s in self.program("operators", "1")["shadow"]
+            if s["place"].startswith("operators:")
+        ]
+        self.assertEqual(len(found), 1, found)
+        self.assertEqual(
+            (found[0]["status"], found[0]["validated"]), ("replayable", "equal")
+        )
+        self.assertEqual(found[0]["entries"], 5)
+        self.assertRegex(found[0]["again"], r"^equal on 2 later arrival")
+        # A list that is not the body: the way a frame under it took on a
+        # flag, which the program flips at its fifth call.
+        found = [
+            s
+            for s in self.program("flag_under", "1")["shadow"]
+            if s["place"].startswith("flag_under:")
+        ]
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0]["status"].startswith("partial: "), found)
+        self.assertTrue(found[0]["again"].startswith("DIFFERENT on a later arrival"))
 
     def test_operators_on_inputs_and_constants_are_replayable(self):
         found = self.reached("operators")
@@ -9542,17 +9703,105 @@ class TestVmCallsShadow(TestCase):
         self.assertEqual((found[0]["pins"], found[0]["validated"]), (0, "equal"))
         self.assertRegex(found[0]["again"], r"^equal on [1-9]\d* later arrival")
 
+    def test_a_tensor_among_the_values_of_a_dict_of_str_keys_is_an_input(self):
+        # The value of a dict that an earlier block of the frame built, and
+        # the value of the dict of the call's keyword arguments: inputs by
+        # their path and key, every arrival's own. (The dict holds `x + 1`:
+        # a list on `x` itself would not give what the block gives.)
+        found = [s for s in self.places("in_a_dict") if " * 2" in s["text"]]
+        self.assertTrue(found, self.places("in_a_dict"))
+        self.assertRegex(found[0]["text"], r"r0 = in\d \* 2")
+        self.assertEqual((found[0]["pins"], found[0]["validated"]), (0, "equal"))
+        self.assertRegex(found[0]["again"], r"^equal on [1-9]\d* later arrival")
+        found = self.reached("in_kwargs")
+        self.assertIn("r0 = in0 * 2", found["text"].splitlines()[0])
+        self.assertEqual((found["pins"], found["validated"]), (0, "equal"))
+        self.assertRegex(found["again"], r"^equal on [1-9]\d* later arrival")
+        # A dict with a key that is no str is not walked: the tensor in it
+        # is no input, and no read leads to it (SHADOW_STOPS). Nor is a
+        # subclass of dict: the tensor in it is found by the read of the
+        # dict, which that arrival alone has, so the list has a pin and is
+        # never run on a later arrival.
+        found = [s for s in self.places("in_an_ordered_dict") if "* 2" in s["text"]]
+        self.assertTrue(found, self.places("in_an_ordered_dict"))
+        self.assertIn("r0 = pin0 * 2", found[0]["text"])
+        self.assertEqual(found[0]["pins"], 1)
+        self.assertNotRegex(found[0]["again"], r"^equal on [1-9]")
+
+    def test_an_immutable_input_taken_by_value_specializes_the_list(self):
+        # `s` is a local of the frame that the run did not store: the list
+        # multiplies by the recorded 1.5 and says so. The calls that pass
+        # 2.5 are misses of the list, counted, and no difference.
+        found = self.reached("float_input")
+        self.assertEqual((found["status"], found["specialized"]), ("replayable", 1))
+        self.assertIn("r0 = in0 * 1.5", found["text"].splitlines()[0])
+        self.assertEqual(found["validated"], "equal")
+        self.assertRegex(found["again"], r"^equal on [1-9]\d* later arrival")
+        self.assertEqual([check for check, _ in found["missed"]], ["input value"])
+        # A float of a frame under the body (a default of the callee) is no
+        # input: taken by value, a reason.
+        found = self.reached("default_operand")
+        self.assertEqual(found["specialized"], 0)
+        self.assertTrue(
+            any("taken by value that is no constant" in w for w, _ in found["reasons"])
+        )
+
+    def test_a_value_is_known_only_as_what_a_recorded_read_found(self):
+        pending = "the reads of the run are recorded, and nothing runs them as checks on a later arrival yet"
+
+        def reasons(name):
+            return [why for why, _ in self.reached(name)["reasons"]]
+
+        # A float loaded from a global: the run's reads hold the item of the
+        # namespace, so the operand is no value of unknown origin and the
+        # load no read without a check; the list rests on that read.
+        found = reasons("global_number")
+        self.assertIn(pending, found)
+        self.assertFalse(
+            [w for w in found if "taken by value" in w or "LoadGlobal" in w]
+        )
+        # `is None` of a global, tested by a jump in a frame under the body.
+        found = self.reached("none_flag_under")
+        self.assertEqual(found["jumps"], [1, 0])
+        self.assertFalse(
+            [w for w, _ in found["reasons"] if "a jump under the body" in w]
+        )
+        # An import of a loaded module: its row recorded what it read.
+        found = reasons("imports_a_module")
+        self.assertIn(pending, found)
+        self.assertFalse([w for w in found if "IMPORT_NAME" in w])
+        # The content of a cell, read in a frame under the body, is in no
+        # list of kinds: a read with no check, and a value of no origin.
+        found = [
+            s
+            for s in self.program("cell_number")["shadow"]
+            if "cell_number:" in s["place"] and s["entries"] == 3
+        ]
+        self.assertTrue(found, self.program("cell_number")["shadow"])
+        found = [why for why, _ in found[0]["reasons"]]
+        self.assertTrue(
+            [w for w in found if "a read with no check" in w and "LoadDeref" in w]
+        )
+        self.assertTrue(
+            [
+                w
+                for w in found
+                if "taken by value" in w and "the result of LoadDeref" in w
+            ]
+        )
+
     def test_a_pin_is_a_tensor_the_recorded_reads_lead_to_or_the_list_stops(self):
         # The same tensor operand of the same operator: found by a load of a
-        # global, a pin; found in a dict a local holds, which no recorded read
-        # leads to, no list.
+        # global, a pin; found in a dict with an int key that a local holds,
+        # which is not walked and which no recorded read leads to, no list.
         for name in ("chain", "method_of_a_global"):
             found = self.reached(name)
             self.assertGreater(found["pins"], 0)
             self.assertNotEqual(found["status"], "replayable")
-        for found in self.places("in_a_dict"):
-            if found["stop"] is not None:
-                self.assertEqual((found["pins"], found["entries"]), (0, 0))
+        stopped = [s for s in self.places("in_a_dict_of_ints") if s["stop"] is not None]
+        self.assertTrue(stopped)
+        for found in stopped:
+            self.assertEqual((found["pins"], found["entries"]), (0, 0))
         for name in self.PROGRAMS:
             for found in self.program(name, same=name != "reads_value")["shadow"]:
                 # No list with a pin passes for the body.
@@ -9639,8 +9888,11 @@ class TestVmCallsShadow(TestCase):
         # A frame under an instruction that names another function, or none,
         # is no frame of the body: the finalizer of a callee's local, which
         # runs when the callee's frame ends and the call is still in flight;
-        # the __init__ under the call of a class; a property's getter.
-        for name in ("finalizer_at_frame_exit", "class_called", "property_read"):
+        # the __init__ under the call of a class; a property's getter; the
+        # __get__ of a descriptor that is not the one the class has under
+        # the name (a classmethod wraps it); a __getattribute__ of the class,
+        # which runs in place of the lookup that names the descriptor.
+        for name in ("finalizer_at_frame_exit", "class_called", "property_read", "wrapped_descriptor_read", "getattribute_read"):  # fmt: skip
             stopped = [s for s in self.places(name) if s["stop"] is not None]
             self.assertTrue(stopped, name)
             for found in stopped:
@@ -9666,6 +9918,18 @@ class TestVmCallsShadow(TestCase):
         for found in stopped:
             self.assertEqual(found["stop"][0], "Cycle.__del__")
             self.assertGreater(found["breaks"], 0)
+
+    def test_a_finalizer_of_what_the_reads_held_last_runs_with_the_reads_let_go(self):
+        # The attribute is read off a temporary: the recorded run's reads
+        # hold the last reference to it until the recording ends, so its
+        # __del__ runs where they are let go of. A block of that __del__ may
+        # be recorded in its turn, which begins reads of its own: the
+        # program ends as eager's does, with every finalizer run.
+        out = self.program("del_temporary")
+        self.assertTrue(out["same"])
+        found = self.reached("del_temporary")
+        reasons = [why.split(" x ")[0] for why, _ in found["reasons"]]
+        self.assertIn("no row: call class __main__.Logged", reasons)
 
     def test_state_is_eagers_and_its_writer_stops_the_recording(self):
         # Batch norm in training mode writes its running statistics.

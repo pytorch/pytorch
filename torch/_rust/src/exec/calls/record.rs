@@ -1,7 +1,12 @@
-// The recorder of call lists, in SHADOW mode (TORCH_RUST_CALLS=shadow; unset
-// or anything else: on() is false and nothing here runs). It looks on while
-// one ordinary run of a block goes by, the run before the one today's engine
-// traces, and says what list of the body's own C calls it would have made.
+// The recorder of call lists (TORCH_RUST_CALLS; unset or anything but the
+// two values below: on() is false and nothing here runs). It looks on while
+// one ordinary run of a block goes by and says what list of the body's own
+// C calls it would have made. Which run:
+//   shadow  the run before the one today's engine traces: the recorder is
+//           beside the engine, which forms and runs its regions as it does;
+//   1       the run today's engine would trace (replaces()): the recorder is
+//           in its place, no trace of today's engine begins, and nothing is
+//           formed of what was recorded: the block runs as written after.
 // It changes nothing a program computes: no instruction runs differently,
 // nothing of the program is called, no tensor is held (origins.rs), nothing
 // it finds is used by the engine. What the recorded run reads is recorded
@@ -84,7 +89,7 @@ use pyo3::prelude::*;
 use super::again::{self, Armed};
 use super::entries::{blank, text, Call, Maker};
 use super::frames::Frames;
-use super::known::{self, Reasons};
+use super::known::{self, Found, Known, Reasons};
 pub use super::known::Plain;
 use super::origins::{class_text, plain_tensor, Origin, Origins};
 use super::shadow::{self, Shadow};
@@ -97,11 +102,29 @@ use crate::exec::tensor_key::TensorKey;
 use crate::exec::hist;
 use crate::exec::reads;
 
-static ON: LazyLock<bool> = LazyLock::new(|| std::env::var_os("TORCH_RUST_CALLS").is_some_and(|v| v == "shadow"));
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Off,
+    Shadow,
+    Replaces,
+}
+
+static MODE: LazyLock<Mode> = LazyLock::new(|| match std::env::var_os("TORCH_RUST_CALLS") {
+    Some(v) if v == "shadow" => Mode::Shadow,
+    Some(v) if v == "1" => Mode::Replaces,
+    _ => Mode::Off,
+});
 
 #[inline]
 pub fn on() -> bool {
-    *ON
+    *MODE != Mode::Off
+}
+
+// Whether the recorder takes the run today's engine would trace, in place of
+// the trace.
+#[inline]
+pub fn replaces() -> bool {
+    *MODE == Mode::Replaces
 }
 
 thread_local! {
@@ -135,8 +158,10 @@ enum Pending {
     // No entry: what it is; whether a tensor it leaves was made by it; why
     // it is no entry though it runs C code on a tensor, if that is so; the
     // tensors among its operands; the Python frame it may enter; whether
-    // its result is a known value (None: known.rs was told).
-    Other { what: String, makes: bool, why: Option<String>, operands: Vec<usize>, frames: Frames, known: Option<bool> },
+    // its result is a known value (None: known.rs was told); what is asked
+    // behind it if its result is what a recorded read found, and the reason
+    // it is if that read is not held (known.rs Found).
+    Other { what: String, makes: bool, why: Option<String>, operands: Vec<usize>, frames: Frames, known: Option<bool>, found: Option<(Found, Option<String>)> },
 }
 
 // An instruction in flight: with the operators the run's witness had seen
@@ -269,7 +294,7 @@ impl Rec {
             };
             if let Some(made) = self.maker().built(ins, all) {
                 self.origins.built(at, made);
-                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), frames: Frames::of(row, &ins.op, site, callee), known: Some(false) }, at);
+                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), frames: Frames::of(row, &ins.op, site, callee), known: Some(false), found: None }, at);
             }
             let facts = self.shadow.facts;
             let call = match (row, callee) {
@@ -312,6 +337,10 @@ impl Rec {
             if let Some(plain) = plain {
                 self.origins.known.plain(depth, v, plain);
             }
+            if let Op::MakeCell { slot } = ins.op {
+                self.origins.known.changes(depth, slot);
+            }
+            let mut found = Found::of(&ins.op, row, site, &ins.args, depth, &self.origins.known).map(|f| (f, None));
             match row {
                 None if fact => {}
                 None => {
@@ -323,7 +352,14 @@ impl Rec {
                     self.reasons.add(format!("no row: {name}{later} x {class}"));
                 }
                 Some(row) if known::neutral(&ins.op, row).is_some() => {}
-                Some(row) => self.reasons.add(format!("a read with no check, or a kind the recorder does not list: {name} (its row reads {:?})", row.reads)),
+                Some(row) => {
+                    let unread = format!("a read with no check, or a kind the recorder does not list: {name} (its row reads {:?})", row.reads);
+                    // (A kind of known.rs's list: decided behind it.)
+                    match found.as_mut() {
+                        Some(found) => found.1 = Some(unread),
+                        None => self.reasons.add(unread),
+                    }
+                }
             }
             // C code of torch that is no entry makes what it returns; so does
             // an instruction that runs C code on a tensor.
@@ -331,7 +367,7 @@ impl Rec {
             let operands = all.iter().filter(|o| plain_tensor(**o)).map(|o| *o as usize).collect();
             let frames = Frames::of(row, &ins.op, site, callee);
             let what = if matches!(ins.op, Op::ToBool) { format!("{name} of {}", self.origins.known.maker((depth, ins.args[0].0))) } else { format!("{name}{later}") };
-            self.push(Pending::Other { what, makes, why, operands, frames, known }, at)
+            self.push(Pending::Other { what, makes, why, operands, frames, known, found }, at)
         }
     }
 
@@ -351,9 +387,22 @@ impl Rec {
             // entry inside it.
             let direct = now.saturating_sub(ops).saturating_sub(self.claimed - claimed);
             match pending {
-                Pending::Other { what, makes, why, operands, known, .. } => {
+                Pending::Other { what, makes, why, operands, known, found, .. } => {
+                    // The result is what a recorded read found only if
+                    // reads.rs holds that read; the list then rests on it.
+                    let held = match found {
+                        Some((found, _)) if ok && found.holds(results.first().copied().unwrap_or(std::ptr::null_mut())) => {
+                            self.reasons.add(known::PENDING.into());
+                            true
+                        }
+                        Some((_, Some(unread))) => {
+                            self.reasons.add(unread);
+                            false
+                        }
+                        _ => false,
+                    };
                     if let Some(known) = known {
-                        self.origins.known.set(at, known && ok, || format!("the result of {what}"));
+                        self.origins.known.set(at, (known || held) && ok, || format!("the result of {what}"));
                     }
                     if direct > 0 {
                         let ran = format!("{direct} operator(s) ran under an instruction that is no entry (the last: {})", last.unwrap_or_default());
@@ -429,14 +478,16 @@ fn with<R: Default>(f: impl FnOnce(&mut Rec) -> R) -> R {
     done
 }
 
-// A run of the block `place` (key: its plan and block) begins on `params`
-// in the frame `frame`. A recording in flight has stopped (shadow_due):
-// this one is recorded on top of it.
-pub unsafe fn begin(place: String, key: (usize, u32), params: &[*mut PyObject], frame: *mut Frame) {
+// A run of the block `place` (key: its plan and block) begins on `params`,
+// which are the values `ids` of the activation about to begin, in the frame
+// `frame`. A recording in flight has stopped (shadow_due): this one is
+// recorded on top of it.
+pub unsafe fn begin(place: String, key: (usize, u32), params: &[*mut PyObject], ids: &[u32], frame: *mut Frame) {
     unsafe {
         TAKEN.with_borrow_mut(|t| t.insert(key));
         let locals = tr_frame_localsplus(frame);
-        let origins = Origins::begin(params.iter().copied().chain((0..tr_frame_nlocalsplus(frame) as usize).map(|i| *locals.add(i))));
+        let known = Known::begin(DEPTH.get() + 1, ids);
+        let origins = Origins::begin(params.iter().copied().chain((0..tr_frame_nlocalsplus(frame) as usize).map(|i| *locals.add(i))), known);
         let shadow = Shadow { place, key, ..Shadow::default() };
         witness::begin();
         let mut rec = Rec { shadow, origins, entries: Vec::new(), stack: Vec::new(), window: None, drops: Vec::new(), tuples: Vec::new(), at: 0, claimed: 0, pure: true, left: HashMap::new(), handed: HashMap::new(), reasons: Reasons::default(), disagreed: false, entry_open: false, entry_seen: None, outer: None, reads: false };
@@ -495,7 +546,17 @@ pub unsafe fn before(body: bool, v: u32, ins: &Instr, site: &Site, callee: Optio
 }
 
 pub unsafe fn after(ok: bool, results: &[*mut PyObject]) {
-    with(|r| unsafe { r.after(ok, results) })
+    // What the instruction named is let go of outside the borrow of the
+    // recordings (frames.rs): a function that dies may run a finalizer.
+    let named = with(|r| unsafe {
+        let named = match r.stack.last_mut() {
+            Some(InFlight { pending: Pending::Other { frames, .. }, .. }) => Some(std::mem::take(frames)),
+            _ => None,
+        };
+        r.after(ok, results);
+        named
+    });
+    drop(named);
 }
 
 // An instruction of the executor's inline path, which only moves the value
@@ -598,6 +659,14 @@ pub fn again_due(key: (usize, u32)) -> bool {
 }
 
 pub use again::{begin as again_begin, outs as again_outs, Again};
+
+// The recorded run comes to something no list holds: the recording ends in
+// front of it.
+pub fn stop(at: &str, why: &str) {
+    with(|r| {
+        r.stop(at, why.into());
+    })
+}
 
 // Today's engine traces the place with this key.
 pub fn traced(key: (usize, u32)) {

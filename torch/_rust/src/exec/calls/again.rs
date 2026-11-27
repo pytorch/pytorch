@@ -13,10 +13,16 @@
 //   - a list is run again only if record.rs armed it: every entry is one
 //     whose row says it only computes, and the witness of none disagreed;
 //   - it runs on an arrival only if that arrival's inputs (origins.rs walk:
-//     the params, then the frame's locals, and the items of the exact tuples
-//     and lists among them, each tensor once) are found by the same paths as
-//     the recorded run's and have the same keys, and every pin is alive; any
-//     other arrival is counted "not comparable";
+//     the params, then the frame's locals, and what the exact tuples, lists
+//     and dicts of str keys among them hold, each tensor once) are found by
+//     the same paths as the recorded run's, under the same dict keys, and
+//     have the same keys, and every pin is alive; any other arrival is
+//     counted "not comparable";
+//   - an arrival on which an input that the list is specialized on (an
+//     immutable the recorded run took by value: origins.rs exact) is not
+//     exactly the recorded value (exec/exact.rs) is a MISS of the list,
+//     counted as "input value": the list is for that value only, and the
+//     block runs as written;
 //   - what the list made is compared with what the block made (shadow.rs
 //     compare) and then released; the first difference is kept in the
 //     place's Shadow, and the list is not run again after one;
@@ -38,9 +44,10 @@ use std::collections::HashMap;
 use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;
 
-use super::origins::{plain_tensor, walk};
+use super::origins::{plain_tensor, walk, KEY};
 use super::run::{Stop, What};
 use super::{shadow, List};
+use crate::exec::exact;
 use crate::exec::ffi::{tr_frame_localsplus, tr_frame_nlocalsplus, Frame};
 use crate::exec::pin::Pin;
 use crate::exec::tensor_key::TensorKey;
@@ -50,8 +57,12 @@ const LATER: u32 = 16;
 pub struct Armed {
     pub list: List,
     pub keys: Vec<TensorKey>,
-    // The path each input was found by at the recorded run.
+    // The path each input was found by at the recorded run; the dict keys
+    // on those paths; the immutable inputs the list is specialized on, by
+    // position.
     pub paths: Vec<Box<[u32]>>,
+    pub names: Vec<(Box<[u32]>, Py<PyAny>)>,
+    pub exact: Vec<(u32, Py<PyAny>)>,
     pub pins: Vec<Pin>,
     // For each output of the list, the position among the block's outputs.
     pub outs: Vec<usize>,
@@ -109,37 +120,62 @@ impl Drop for Again {
     }
 }
 
-// The inputs of an arrival as origins.rs numbers them, each with its path.
-unsafe fn inputs(params: &[*mut PyObject], frame: *mut Frame) -> (Vec<*mut PyObject>, Vec<Box<[u32]>>) {
+// What an arrival is walked into: its inputs as origins.rs numbers them,
+// each with its path; the keys of the dicts walked, by path; and what it
+// began on (the params, then the frame's locals).
+struct Arrival {
+    inputs: Vec<*mut PyObject>,
+    paths: Vec<Box<[u32]>>,
+    keys: HashMap<Box<[u32]>, *mut PyObject>,
+    all: Vec<*mut PyObject>,
+}
+
+unsafe fn arrival(params: &[*mut PyObject], frame: *mut Frame) -> Arrival {
     unsafe {
         let locals = tr_frame_localsplus(frame);
-        let all = params.iter().copied().chain((0..tr_frame_nlocalsplus(frame) as usize).map(|i| *locals.add(i)));
-        let (mut found, mut paths): (Vec<*mut PyObject>, Vec<Box<[u32]>>) = (Vec::new(), Vec::new());
-        walk(all, &mut |path, o| {
-            if plain_tensor(o) && !found.contains(&o) {
-                found.push(o);
+        let all: Vec<*mut PyObject> = params.iter().copied().chain((0..tr_frame_nlocalsplus(frame) as usize).map(|i| *locals.add(i))).collect();
+        let (mut inputs, mut paths, mut keys): (Vec<*mut PyObject>, Vec<Box<[u32]>>, HashMap<Box<[u32]>, *mut PyObject>) = (Vec::new(), Vec::new(), HashMap::new());
+        walk(all.iter().copied(), &mut |path, o| {
+            if path.last().is_some_and(|step| step & KEY != 0) {
+                keys.insert(path.into(), o);
+            } else if plain_tensor(o) && !inputs.contains(&o) {
+                inputs.push(o);
                 paths.push(path.into());
             }
         });
-        (found, paths)
+        Arrival { inputs, paths, keys, all }
     }
+}
+
+fn miss(kept: usize, check: &str) {
+    shadow::amend(kept, |s| match s.missed.iter_mut().find(|(c, _)| c == check) {
+        Some((_, n)) => *n += 1,
+        None => s.missed.push((check.to_string(), 1)),
+    })
 }
 
 // A later arrival at the place `key` on `params` (borrowed) in `frame`.
 pub unsafe fn begin(key: (usize, u32), params: &[*mut PyObject], frame: *mut Frame) -> Option<Again> {
     unsafe {
         let py = Python::assume_attached();
-        let (inputs, paths) = inputs(params, frame);
+        let Arrival { inputs, paths, keys, all } = arrival(params, frame);
         // The list leaves the table while it runs: nothing it runs can find it.
         let mut armed = ARMED.with_borrow_mut(|a| a.remove(&key))?;
         armed.left -= 1;
-        let same = paths == armed.paths && inputs.len() == armed.keys.len() && inputs.iter().zip(&armed.keys).all(|(o, k)| TensorKey::of(*o).as_ref() == Some(k));
+        let named = armed.names.iter().all(|(path, name)| keys.get(path).is_some_and(|k| exact::same(*k, name.as_ptr())));
+        let same = named && paths == armed.paths && inputs.len() == armed.keys.len() && inputs.iter().zip(&armed.keys).all(|(o, k)| TensorKey::of(*o).as_ref() == Some(k));
         let pins = armed.pins.iter().map(|p| p.live().filter(|o| !o.is_null()).map(|o| Py::<PyAny>::from_borrowed_ptr(py, o))).collect::<Option<Vec<_>>>();
         let (true, Some(pins)) = (same, pins) else {
             shadow::amend(armed.kept, |s| s.again.1 += 1);
             ARMED.with_borrow_mut(|a| a.insert(key, armed));
             return None;
         };
+        // The list is for these values of its immutable inputs.
+        if !armed.exact.iter().all(|(position, value)| all.get(*position as usize).is_some_and(|o| exact::same(*o, value.as_ptr()))) {
+            miss(armed.kept, "input value");
+            ARMED.with_borrow_mut(|a| a.insert(key, armed));
+            return None;
+        }
         let pointers: Vec<*mut PyObject> = pins.iter().map(|o| o.as_ptr()).collect();
         let ran = crate::exec::outside_executor(|| armed.list.run(py, &inputs, &pointers));
         let found = match ran {
@@ -152,10 +188,7 @@ pub unsafe fn begin(key: (usize, u32), params: &[*mut PyObject], frame: *mut Fra
             Err(stop) => {
                 ffi::PyErr_Clear();
                 match stopped(&stop) {
-                    Ok(check) => shadow::amend(armed.kept, |s| match s.missed.iter_mut().find(|(c, _)| c == check) {
-                        Some((_, n)) => *n += 1,
-                        None => s.missed.push((check.to_string(), 1)),
-                    }),
+                    Ok(check) => miss(armed.kept, check),
                     Err(why) => {
                         shadow::amend(armed.kept, |s| s.again.2 = Some(why));
                         armed.left = 0;

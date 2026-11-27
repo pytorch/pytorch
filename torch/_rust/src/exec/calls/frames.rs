@@ -25,42 +25,52 @@
 //     another function, or a second frame of a named one (a finalizer that
 //     ran when the callee's frame ended);
 //   - nothing of the program runs: a class is asked by the type's own lookup
-//     (csrc/exec_ops.c), a callable by its exact type.
+//     (csrc/exec_ops.c), a callable by its exact type;
+//   - a named function is HELD while its instruction is in flight: a frame's
+//     function is compared with a function that lives, never with an address
+//     another function could have been made at. (A callee that is an operand
+//     is held by the executor's value for as long anyway; what a class has
+//     under a name is held by the class only, and the program can take it
+//     away under the instruction.) record.rs lets go where the instruction
+//     ends, outside its borrow of the recordings: a function that dies there
+//     may run a finalizer.
 // What it may not assume
 //   - that a row which names frames (Enters::Named) says which: none does
-//     yet, so such an instruction names no function here;
-//   - that a named function lives while the instruction is in flight: it is
-//     known by its address, which the frame's function is compared with.
+//     yet, so such an instruction names no function here.
 
 use std::sync::OnceLock;
 
 use pyo3::ffi::{self, PyObject};
+use pyo3::prelude::*;
 
 use crate::cfg::ir::Op;
 use crate::exec::ffi::{tr_bound_function, tr_frame_func, tr_type_function, tr_type_heap, tr_type_lookup, Frame, PyMethod_Type};
 use crate::exec::rules::{Enters, Row, Site};
 
+#[derive(Default)]
 pub struct Frames {
-    // The functions whose frame the instruction may still enter (0: none).
-    named: [usize; 2],
+    // The functions the instruction names, held, and whether a frame of
+    // each was entered under it.
+    named: [Option<Py<PyAny>>; 2],
+    entered: [bool; 2],
     // Why no frame is the instruction's, if it named none.
     none: Option<&'static str>,
 }
 
 const UNNAMED: &str = "which names no function that the frame could be compared with";
 
-unsafe fn function(f: *mut PyObject) -> usize {
-    if !f.is_null() && unsafe { ffi::Py_TYPE(f) } == &raw mut ffi::PyFunction_Type { f as usize } else { 0 }
+unsafe fn function(f: *mut PyObject) -> Option<Py<PyAny>> {
+    unsafe { (!f.is_null() && ffi::Py_TYPE(f) == &raw mut ffi::PyFunction_Type).then(|| Py::from_borrowed_ptr(Python::assume_attached(), f)) }
 }
 
 // What the class of `descriptor`, if it is one written in Python, has under
 // __get__, if that is a Python function.
-unsafe fn getter(descriptor: *mut PyObject) -> usize {
+unsafe fn getter(descriptor: *mut PyObject) -> Option<Py<PyAny>> {
     static GET: OnceLock<usize> = OnceLock::new();
     unsafe {
         let name = *GET.get_or_init(|| ffi::PyUnicode_InternFromString(c"__get__".as_ptr()) as usize) as *mut PyObject;
         let class = ffi::Py_TYPE(descriptor);
-        if name.is_null() || tr_type_heap(class) == 0 { 0 } else { function(tr_type_lookup(class, name)) }
+        if descriptor.is_null() || name.is_null() || tr_type_heap(class) == 0 { None } else { function(tr_type_lookup(class, name)) }
     }
 }
 
@@ -68,35 +78,37 @@ impl Frames {
     pub unsafe fn of(row: Option<&Row>, op: &Op, site: &Site, callee: Option<*mut PyObject>) -> Frames {
         unsafe {
             if let Some(row) = row {
-                return Frames { named: [0, 0], none: Some(if row.enters == Enters::Named { UNNAMED } else { "which enters none" }) };
+                return Frames { none: Some(if row.enters == Enters::Named { UNNAMED } else { "which enters none" }), ..Frames::default() };
             }
             let named = match (callee, op) {
-                (Some(f), _) if ffi::Py_TYPE(f) == &raw mut ffi::PyFunction_Type => [f as usize, 0],
-                (Some(f), _) if ffi::Py_TYPE(f) == &raw mut PyMethod_Type => [function(tr_bound_function(f)), 0],
-                (Some(f), _) => [function(tr_type_function(f, 0)), 0],
+                (Some(f), _) if ffi::Py_TYPE(f) == &raw mut PyMethod_Type => [function(tr_bound_function(f)), None],
+                (Some(f), _) if ffi::Py_TYPE(f) == &raw mut ffi::PyFunction_Type => [function(f), None],
+                (Some(f), _) => [function(tr_type_function(f, 0)), None],
                 (None, Op::LoadAttr(n) | Op::LoadMethod(n)) if site.operands.first().is_some_and(|o| !o.is_null()) => {
                     let object = site.operands[0];
-                    let found = tr_type_lookup(ffi::Py_TYPE(object), *site.names.add(*n as usize));
-                    [if found.is_null() { 0 } else { getter(found) }, function(tr_type_function(object, 1))]
+                    [getter(tr_type_lookup(ffi::Py_TYPE(object), *site.names.add(*n as usize))), function(tr_type_function(object, 1))]
                 }
-                _ => [0, 0],
+                _ => [None, None],
             };
-            Frames { named, none: (named == [0, 0]).then_some(UNNAMED) }
+            let none = named.iter().all(Option::is_none).then_some(UNNAMED);
+            Frames { named, none, ..Frames::default() }
         }
     }
 
-    // Ok: `frame` is one the instruction called. Err: why it is not.
+    // Ok: `frame` is one the instruction called. Err: why it is not. (No
+    // reference is let go of here: the caller holds the recordings.)
     pub unsafe fn enter(&mut self, frame: *mut Frame) -> Result<(), &'static str> {
         if let Some(why) = self.none {
             return Err(why);
         }
-        let function = unsafe { tr_frame_func(frame) } as usize;
-        match self.named.iter().position(|named| *named != 0 && *named == function) {
+        let function = unsafe { tr_frame_func(frame) };
+        let is = |at: &usize| !self.entered[*at] && self.named[*at].as_ref().is_some_and(|named| named.as_ptr() == function);
+        match [0, 1].iter().find(|at| is(at)) {
             Some(at) => {
-                self.named[at] = 0;
+                self.entered[*at] = true;
                 Ok(())
             }
-            None if self.named == [0, 0] => Err("whose callee's frame had been entered already"),
+            None if (0..2).all(|at| self.named[at].is_none() || self.entered[at]) => Err("whose callee's frame had been entered already"),
             None => Err("whose callee is another function"),
         }
     }

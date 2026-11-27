@@ -20,7 +20,7 @@
 
 use std::cell::Cell;
 
-use crate::exec::{ambient, outside_executor, reads, rules, writes};
+use crate::exec::{ambient, backward, outside_executor, reads, rules, writes};
 
 thread_local! {
     // A recording that stopped has reads to let go of.
@@ -33,6 +33,8 @@ pub fn begin() -> Result<(), String> {
         return Err(format!("the state around the run is not neutral: {what}"));
     }
     let began = outside_executor(|| {
+        // (run.rs asks of every call whether it starts the autograd engine.)
+        backward::ready();
         let began = reads::begin_for_recorder();
         if began {
             writes::begin();

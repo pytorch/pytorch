@@ -64,6 +64,8 @@ pub struct Shadow {
     // slots whose release was not seen (stated at the end of the body).
     pub pins: u32,
     pub late: u32,
+    // Immutable inputs the list is specialized on (origins.rs exact).
+    pub specialized: u32,
     // Outputs that are results of entries; the block's other outputs.
     pub outputs: (usize, usize),
     // Outputs that hold results of entries and are none themselves.
@@ -100,8 +102,18 @@ thread_local! {
     static MISSED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+// The kept recordings are left in TORCH_RUST_CALLS_DIR when the interpreter
+// is finalized (dump).
+fn at_exit() {
+    static AT_EXIT: std::sync::Once = std::sync::Once::new();
+    AT_EXIT.call_once(|| unsafe {
+        ffi::Py_AtExit(Some(dump));
+    });
+}
+
 // Every recording is kept, a stopped one too. Its index, for amend().
 pub fn keep(shadow: Shadow) -> usize {
+    at_exit();
     KEPT.with_borrow_mut(|kept| {
         kept.push(shadow);
         kept.len() - 1
@@ -113,10 +125,7 @@ pub fn amend(at: usize, f: impl FnOnce(&mut Shadow)) {
 }
 
 pub fn traced(key: (usize, u32)) {
-    static AT_EXIT: std::sync::Once = std::sync::Once::new();
-    AT_EXIT.call_once(|| unsafe {
-        ffi::Py_AtExit(Some(dump));
-    });
+    at_exit();
     KEPT.with_borrow_mut(|kept| {
         let mut found = false;
         for s in kept.iter_mut().filter(|s| s.key == key) {
@@ -163,9 +172,9 @@ impl Shadow {
         let counts = |v: &[(String, u64)]| format!("{{{}}}", v.iter().map(|(k, n)| format!("{}: {n}", quoted(k))).collect::<Vec<_>>().join(", "));
         let stop = self.stop.as_ref().map_or("null".into(), |(at, why)| format!("[{}, {}]", quoted(at), quoted(why)));
         format!(
-            "{{\"place\": {}, \"status\": {}, \"traced\": {}, \"entries\": {}, \"seen\": {}, \"left_behind\": {}, \"stop\": {stop}, \"refused\": {}, \"text\": {}, \"pins\": {}, \"late\": {}, \"outputs\": [{}, {}], \"unstated\": {}, \"by_value\": {}, \"left\": {}, \"handed\": {}, \"facts\": {}, \"notes\": [{}], \"validated\": {}, \"reasons\": {}, \"jumps\": [{}, {}], \"frames\": {}, \"breaks\": {}, \"again\": {}, \"missed\": {}}}",
+            "{{\"place\": {}, \"status\": {}, \"traced\": {}, \"entries\": {}, \"seen\": {}, \"left_behind\": {}, \"stop\": {stop}, \"refused\": {}, \"text\": {}, \"pins\": {}, \"late\": {}, \"specialized\": {}, \"outputs\": [{}, {}], \"unstated\": {}, \"by_value\": {}, \"left\": {}, \"handed\": {}, \"facts\": {}, \"notes\": [{}], \"validated\": {}, \"reasons\": {}, \"jumps\": [{}, {}], \"frames\": {}, \"breaks\": {}, \"again\": {}, \"missed\": {}}}",
             quoted(&self.place), quoted(&self.status()), self.traced, self.entries, self.seen, self.left_behind, self.refused.as_deref().map_or("null".into(), quoted), quoted(&self.text),
-            self.pins, self.late, self.outputs.0, self.outputs.1, self.unstated, counts(&self.by_value), counts(&self.left), counts(&self.handed), self.facts,
+            self.pins, self.late, self.specialized, self.outputs.0, self.outputs.1, self.unstated, counts(&self.by_value), counts(&self.left), counts(&self.handed), self.facts,
             self.notes.iter().map(|n| quoted(n)).collect::<Vec<_>>().join(", "), quoted(&self.validated), counts(&self.reasons), self.jumps.0, self.jumps.1, self.frames, self.breaks, quoted(&self.again_text()), counts(&self.missed)
         )
     }
@@ -191,7 +200,9 @@ extern "C" fn dump() {
 /// or "not validated: ...", on the recorded run's operands; ``again``: the same
 /// on later arrivals at the place; ``missed``: the later arrivals on which the
 /// list's own check ended it with nothing done, by the check. ``pins``: tensors that were there before
-/// the run and that the reads it recorded lead to. ``jumps``: conditional
+/// the run and that the reads it recorded lead to. ``specialized``: immutable
+/// inputs the list took by value; a later arrival with another value there is
+/// a miss ("input value"). ``jumps``: conditional
 /// jumps under the body on a (known, other) value. ``breaks``: how often the
 /// executor's own empty function, by which the interpreter handles what is
 /// pending, ran under the recorded run.
@@ -212,6 +223,7 @@ pub fn _calls_shadow(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
                 d.set_item("text", &s.text)?;
                 d.set_item("pins", s.pins)?;
                 d.set_item("late", s.late)?;
+                d.set_item("specialized", s.specialized)?;
                 d.set_item("outputs", s.outputs)?;
                 d.set_item("unstated", s.unstated)?;
                 d.set_item("by_value", s.by_value.clone())?;

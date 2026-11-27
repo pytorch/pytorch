@@ -28,10 +28,22 @@
 //     recorded run (by_value counts them); unless known.rs knows it for a
 //     constant of the code, it is told as baked: the list is not the body;
 //   - an INPUT is a plain tensor found at the start of the run by walk():
-//     a param or a local, or an item of an exact tuple or list among them
-//     (as deep as REACH, no longer than WIDE), each tensor once, with the
-//     path it was found by. A later arrival is asked for its inputs by the
-//     same walk, so an input is that arrival's tensor at the same path;
+//     a param or a local, or an item of an exact tuple or list, or a value
+//     of an exact dict whose keys are all exact strs, among them (as deep
+//     as REACH, no longer than WIDE), each tensor once, with the path it
+//     was found by; for a step through a dict the key at that position is
+//     kept too (keys). A later arrival is asked for its inputs by the same
+//     walk, so an input is that arrival's tensor at the same path, under
+//     the same keys. A container of any other class (a subclass of dict, a
+//     dict with a key that is no exact str, a set) is not walked: a tensor
+//     in it is no input;
+//   - an immutable operand that is an INPUT (known.rs input(): a param of
+//     the block, a local of the body's frame the run had not changed) is
+//     taken by value and the list is SPECIALIZED on it: the position and
+//     the value are kept (exact), a later arrival is asked for exactly that
+//     value there (again.rs, exec/exact.rs), and the value is known from
+//     then on. Only if the object at that position when the run began is
+//     the operand;
 //   - a plain tensor with no origin is a PIN only if the reads recorded so
 //     far (reads.rs, which the recorded run's instructions tell as a trace's
 //     do) lead to it from what was there before the run: a namespace a
@@ -117,10 +129,16 @@ pub struct Origins {
     pub consts: Vec<Py<PyAny>>,
     pub ninputs: u32,
     // Inputs, then pins, held weakly for the validation; the path each
-    // input was found by (walk).
+    // input was found by (walk), and for each step of those paths through
+    // a dict the path of the key (KEY) with the key.
     pub inputs: Vec<Pin>,
     pub paths: Vec<Box<[u32]>>,
+    pub keys: Vec<(Box<[u32]>, Py<PyAny>)>,
     pub pins: Vec<Pin>,
+    // What the run began on, by address: the params, then the locals.
+    start: Vec<usize>,
+    // The immutable inputs the list is specialized on: (position, value).
+    pub exact: Vec<(u32, Py<PyAny>)>,
     // The input objects a recorded read can start from, held weakly.
     roots: Vec<Pin>,
     // Immutable operands taken by value, by class.
@@ -166,13 +184,46 @@ pub unsafe fn reach(o: *mut PyObject, depth: u8, f: &mut dyn FnMut(*mut PyObject
 // What a run starts from, in the one order every arrival is walked in: each
 // of `all` (the block's params, then the frame's locals) and, through exact
 // tuples and lists no longer than WIDE and as deep as REACH, their items,
-// with the path ([position, index, ...]). `f` is told every object that is
-// no such container and not NULL; a container too long or too deep is told
-// as the object it is, and what it holds is not walked.
+// and through exact dicts of at most WIDE items whose keys are all exact
+// strs their values in the dict's order, with the path ([position, index,
+// ...]; the i-th value of a dict is the step DICT | i). `f` is told every
+// object that is no such container and not NULL, and each key of a dict
+// that is walked, by the path of its value with KEY | i for the last step;
+// a container too long or too deep, and a dict with another key, is told as
+// the object it is, and what it holds is not walked.
 pub const WIDE: isize = 64;
+pub const DICT: u32 = 1 << 31;
+pub const KEY: u32 = 1 << 30;
 pub unsafe fn walk(all: impl Iterator<Item = *mut PyObject>, f: &mut dyn FnMut(&[u32], *mut PyObject)) {
+    // The items of an exact dict of exact str keys, if `o` is one.
+    unsafe fn items(o: *mut PyObject) -> Option<Vec<(*mut PyObject, *mut PyObject)>> {
+        unsafe {
+            if ffi::PyDict_CheckExact(o) == 0 || ffi::PyDict_Size(o) > WIDE {
+                return None;
+            }
+            let (mut at, mut k, mut v, mut found) = (0, std::ptr::null_mut(), std::ptr::null_mut(), Vec::new());
+            while ffi::PyDict_Next(o, &mut at, &mut k, &mut v) != 0 {
+                if ffi::PyUnicode_CheckExact(k) == 0 {
+                    return None;
+                }
+                found.push((k, v));
+            }
+            Some(found)
+        }
+    }
     unsafe fn item(o: *mut PyObject, path: &mut Vec<u32>, f: &mut dyn FnMut(&[u32], *mut PyObject)) {
         unsafe {
+            if path.len() <= REACH as usize && let Some(found) = items(o) {
+                for (i, (k, v)) in found.into_iter().enumerate() {
+                    path.push(KEY | i as u32);
+                    f(path, k);
+                    path.pop();
+                    path.push(DICT | i as u32);
+                    item(v, path, f);
+                    path.pop();
+                }
+                return;
+            }
             let (tuple, list) = (ffi::PyTuple_CheckExact(o) != 0, ffi::PyList_CheckExact(o) != 0);
             if !(tuple || list) || path.len() > REACH as usize || ffi::Py_SIZE(o) > WIDE {
                 return f(path, o);
@@ -204,13 +255,18 @@ pub unsafe fn class_text(o: *mut PyObject) -> String {
 
 impl Origins {
     // A run begins on `all`: the block's params, then the frame's locals.
-    pub unsafe fn begin(all: impl Iterator<Item = *mut PyObject>) -> Origins {
+    pub unsafe fn begin(all: impl Iterator<Item = *mut PyObject>, known: super::known::Known) -> Origins {
         DEATHS.with_borrow_mut(|d| d.clear());
         LOST.set(false);
-        let mut origins = Origins::default();
+        let all: Vec<*mut PyObject> = all.collect();
+        let mut origins = Origins { known, start: all.iter().map(|o| *o as usize).collect(), ..Origins::default() };
+        // Each key of a walked dict, by its path.
+        let mut keys: HashMap<Box<[u32]>, *mut PyObject> = HashMap::new();
         unsafe {
-            walk(all, &mut |path, o| {
-                if plain_tensor(o) {
+            walk(all.into_iter(), &mut |path, o| {
+                if path.last().is_some_and(|step| step & KEY != 0) {
+                    keys.insert(path.into(), o);
+                } else if plain_tensor(o) {
                     if origins.get(o).is_none() && origins.mark(o, Origin::In(origins.ninputs)) {
                         origins.inputs.push(Pin::weak(o));
                         origins.paths.push(path.into());
@@ -224,7 +280,17 @@ impl Origins {
                         origins.roots.push(root);
                     }
                 }
-            })
+            });
+            // The keys the inputs were found under.
+            for path in &origins.paths {
+                for (at, step) in path.iter().enumerate().filter(|(_, step)| *step & DICT != 0) {
+                    let mut key: Vec<u32> = path[..at].to_vec();
+                    key.push(KEY | (step & !DICT));
+                    if !origins.keys.iter().any(|(p, _)| **p == *key) && let Some(k) = keys.get(key.as_slice()) {
+                        origins.keys.push((key.into(), Py::from_borrowed_ptr(Python::assume_attached(), *k)));
+                    }
+                }
+            }
         };
         origins
     }
@@ -337,7 +403,17 @@ impl Origins {
             }
             if super::immutable(o, 0) {
                 if !self.known.lit(at) {
-                    self.baked.push(format!("{} from {}", class_text(o), self.known.maker(at)));
+                    // An input: the list is for this value of it. Anything
+                    // else is baked: the list is not the body.
+                    match self.known.input(at).filter(|p| self.start.get(*p as usize) == Some(&(o as usize))) {
+                        Some(position) => {
+                            if !self.exact.iter().any(|(p, _)| *p == position) {
+                                self.exact.push((position, Py::from_borrowed_ptr(Python::assume_attached(), o)));
+                            }
+                            self.known.set(at, true, String::new);
+                        }
+                        None => self.baked.push(format!("{} from {}", class_text(o), self.known.maker(at))),
+                    }
                 }
                 *self.by_value.entry(std::ffi::CStr::from_ptr((*ffi::Py_TYPE(o)).tp_name).to_str().unwrap_or("?")).or_default() += 1;
                 return Ok((self.constant(o), vec![class_of(o)]));

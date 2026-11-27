@@ -93,6 +93,7 @@ impl Rec {
             // The reads that lead to a pin are recorded; until a later
             // arrival is entered under them, a list with a pin is not shown
             // to be the body.
+            self.shadow.specialized = self.origins.exact.len() as u32;
             self.shadow.pins = self.origins.pins.len() as u32;
             if self.shadow.pins > 0 {
                 self.reasons.add("a pin: the reads that lead to it are not run as a check on a later arrival yet".into());
@@ -118,8 +119,8 @@ impl Rec {
                 None => shadow::validate(py, &list, &self.origins.inputs, &self.origins.pins, &made),
             };
             let keys = self.origins.inputs.iter().map(|p| p.live().and_then(|o| TensorKey::of(o))).collect::<Option<Vec<_>>>();
-            let paths = std::mem::take(&mut self.origins.paths);
-            let armed = keys.filter(|_| self.shadow.validated == "equal").map(|keys| Armed { list, keys, paths, pins: std::mem::take(&mut self.origins.pins), outs: places, kept: 0, left: 0 });
+            let (paths, names, exact) = (std::mem::take(&mut self.origins.paths), std::mem::take(&mut self.origins.keys), std::mem::take(&mut self.origins.exact));
+            let armed = keys.filter(|_| self.shadow.validated == "equal").map(|keys| Armed { list, keys, paths, names, exact, pins: std::mem::take(&mut self.origins.pins), outs: places, kept: 0, left: 0 });
             (self.shadow, armed)
         }
     }

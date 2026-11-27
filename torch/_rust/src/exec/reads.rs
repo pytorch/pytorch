@@ -2926,12 +2926,16 @@ pub fn begin_for_recorder() -> bool {
 }
 
 // The recorder lets go of its reads; of reads that are not its own it lets
-// nothing go. What they held is released here, and the thread is nobody's
-// before that: a finalizer that runs then may be recorded or traced.
+// nothing go. What they held is released here, with the thread nobody's and
+// its slot free: the Trace is taken out of the slot first and dropped
+// behind end(), because a finalizer that runs for what the reads held last
+// may begin a recording or a trace, which puts its own Trace into the slot.
 pub fn end_for_recorder() {
     if OWNER.get() == Owner::Recorder {
         OWNER.set(Owner::Nobody);
+        let held = TRACE.take();
         end();
+        drop(held);
     }
 }
 
@@ -2953,4 +2957,54 @@ pub fn standing() -> Result<usize, String> {
 // caller holds alive. False for reads that do not stand.
 pub unsafe fn leads_to(o: *mut PyObject, given: &[*mut PyObject]) -> bool {
     standing().is_ok() && TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| led(&t.entries, Start::Before(given)).contains(&(o as usize))))
+}
+
+// ---- What a read of the recorder's run FOUND --------------------------------
+//
+// The doors by which the call-list recorder takes the result of an
+// instruction for a value its recorded reads stand for (calls/known.rs has
+// the list of kinds). Each answers for one read, by where it was read from,
+// and is true only if the recorder's Trace HOLDS that read as an entry that
+// expects exactly `value` there: the same object, or (an exact int, float or
+// str) the same value. That the count of reads grew says nothing: only the
+// first read of an item is recorded, and a later one may have found
+// something else.
+
+impl Trace {
+    // Whether item `key` of `holder` is an entry that expects `value`.
+    unsafe fn found(&self, holder: *mut PyObject, key: *mut PyObject, value: *mut PyObject) -> bool {
+        let wanted = |i: &&Item| i.key.as_ptr() == key && matches!(i.want, Want::Is | Want::Equal);
+        self.group_of.get(&(holder as usize)).is_some_and(|g| self.entries.groups[*g].items.iter().find(wanted).is_some_and(|i| same(value, i.want, i.value.as_ref())))
+    }
+}
+
+// The item `key` of the dict `holder` was read and gave `value`.
+pub unsafe fn item_found(holder: *mut PyObject, key: *mut PyObject, value: *mut PyObject) -> bool {
+    standing().is_ok() && !value.is_null() && TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| t.found(holder, key, value)))
+}
+
+// A load of the global `name` in a frame of these namespaces gave `value`:
+// the item of the globals, or the item of the builtins with the entry that
+// the globals have no such name.
+pub unsafe fn global_found(globals: *mut PyObject, builtins: *mut PyObject, name: *mut PyObject, value: *mut PyObject) -> bool {
+    if ffi::PyDict_Check(globals) == 0 || ffi::PyDict_Check(builtins) == 0 || value.is_null() || standing().is_err() {
+        return false;
+    }
+    TRACE.with_borrow(|t| {
+        t.as_ref().is_some_and(|t| {
+            if !dict_get(globals, name).is_null() {
+                return t.found(globals, name, value);
+            }
+            let absent = |i: &Item| i.key.as_ptr() == name && i.want == Want::Absent;
+            t.group_of.get(&(globals as usize)).is_some_and(|g| t.entries.groups[*g].items.iter().any(absent)) && t.found(builtins, name, value)
+        })
+    })
+}
+
+// Some item that was read is an entry that expects the object `value` by
+// identity: for a row that records its own reads and says its result is
+// one of the objects it read (the imports).
+pub unsafe fn pinned(value: *mut PyObject) -> bool {
+    let is = |i: &Item| i.want == Want::Is && i.value.as_ref().is_some_and(|v| v.is(value));
+    standing().is_ok() && !value.is_null() && TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| t.entries.groups.iter().any(|g| g.items.iter().any(is))))
 }

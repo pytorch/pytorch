@@ -1267,18 +1267,32 @@ impl Act<'_> {
                 if super::region::observing() {
                     self.region_observe(b, vi);
                 }
+                let replaces = super::calls::record::replaces();
                 if super::region::enabled()
                     && !self.p.region_off[b.idx()].load(std::sync::atomic::Ordering::Relaxed)
                     && self.region_room(b, vi)
                     && super::region::due(&self.p.region_runs[b.idx()], &self.p.region_off[b.idx()])
                     && self.region_worthy(b, vi)
-                    && self.region_trace(b, vi)
                 {
-                    i = code.steps.len();
+                    if !replaces {
+                        if self.region_trace(b, vi) {
+                            i = code.steps.len();
+                        }
+                    } else if let Some(held) = shadow.take() {
+                        // TORCH_RUST_CALLS=1: the recorder takes the run
+                        // that would be traced, in place of the trace.
+                        match self.region_record(b, vi, held) {
+                            Ok(next) => {
+                                b = next;
+                                continue 'blocks;
+                            }
+                            Err(outcome) => return outcome,
+                        }
+                    }
                 }
                 // The arrival before the one that is traced: the recorder
                 // takes this run of the block (calls/record.rs).
-                if let Some(held) = shadow.take().filter(|_| i == 0) {
+                if let Some(held) = shadow.take().filter(|_| i == 0 && !replaces) {
                     match self.shadow_run(b, vi, held) {
                         Ok(next) => {
                             b = next;
@@ -1488,7 +1502,9 @@ impl Act<'_> {
     unsafe fn span(&mut self, si: usize) -> Option<Result<BlockId, Outcome>> {
         let cfg = self.cfg;
         let sp = &cfg.spans[si];
-        if super::region::tracing() || self.c.is_none() {
+        // (TORCH_RUST_CALLS=1: no trace of today's engine begins, a span's
+        // neither; its blocks run, and are recorded, one by one.)
+        if super::region::tracing() || self.c.is_none() || super::calls::record::replaces() {
             return None;
         }
         if !super::region::enabled() {
@@ -1791,6 +1807,9 @@ impl Act<'_> {
     // arrivals are observed for the traces to come (torch.vm's schedule),
     // the first of this block. It is the run the call-list recorder takes,
     // if the block's last version is selected for it.
+    // TORCH_RUST_CALLS=1: whether this arrival may be the one that is due
+    // for a trace (run_blocks decides that once a version is selected): its
+    // params are held for the recorder, which takes that run.
     unsafe fn shadow_due(&self, b: BlockId) -> bool {
         let relaxed = std::sync::atomic::Ordering::Relaxed;
         self.shadow == 0
@@ -1799,7 +1818,9 @@ impl Act<'_> {
             && !super::region::tracing()
             && !super::calls::record::recording()
             && !self.p.region_off[b.idx()].load(relaxed)
-            && if super::region::enabled() {
+            && if super::calls::record::replaces() {
+                super::region::enabled()
+            } else if super::region::enabled() {
                 self.p.region_runs[b.idx()].load(relaxed) + 2 == super::region::after()
             } else {
                 super::region::observing() && !super::calls::record::taken((self.p as *const Prepared as usize, b.0))
@@ -1813,10 +1834,21 @@ impl Act<'_> {
         let params = std::mem::take(&mut held.0);
         self.clear(b, vi);
         let name = self.block_name(self.c.expect("checked by shadow_due"), b, vi);
-        super::calls::record::begin(name, (self.p as *const Prepared as usize, b.0), &params, self.f);
+        let ids: Vec<u32> = self.p.origins[b.idx()].as_ref().map_or(Vec::new(), |origin| origin.cfg[ENTRY].params.iter().map(|p| p.0).collect());
+        super::calls::record::begin(name, (self.p as *const Prepared as usize, b.0), &params, &ids, self.f);
         let result = self.run_origin_as(b, params, 1);
         super::calls::record::end(if let Outcome::Leave(outs) = &result { Some(outs) } else { None });
         self.after_origin(b, result)
+    }
+
+    // TORCH_RUST_CALLS=1. Block b, whose last version vi was selected and
+    // has run nothing, is due for a trace: the call-list recorder takes this
+    // run of it instead, as shadow_run does. Nothing is formed of what it
+    // records, and the place is not recorded again: the block runs as
+    // written from here on.
+    unsafe fn region_record(&mut self, b: BlockId, vi: usize, held: Held) -> Result<BlockId, Outcome> {
+        self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+        self.shadow_run(b, vi, held)
     }
 
     // Joins this run's params and inputs of block b's version vi (the last)
@@ -2121,6 +2153,11 @@ impl Act<'_> {
             _ => std::ptr::null_mut(),
         };
         let site = super::rules::Site { frame: self.f, names: self.names, operands: &operands, kwnames };
+        // The autograd engine is no part of a list (backward.rs): the
+        // recording ends in front of its call.
+        if let Some(f) = callee && super::backward::is(f) {
+            super::calls::record::stop("a backward", "the autograd engine runs under it, and no list holds what the engine does");
+        }
         let (told, entry) = super::calls::record::before(self.shadow == 1, v.0, ins, &site, callee);
         // What an entry is handed is no read of the run (record::before).
         let reading = self.reading;
