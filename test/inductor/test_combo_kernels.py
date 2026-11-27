@@ -2555,6 +2555,52 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             self.assertGreater(counters["inductor"]["coordesc_tuning_bench"], 0)
 
     @requires_gpu_and_triton
+    @parametrize("launch_setting", ["num_warps", "num_stages"])
+    @parametrize("cdt", [False, True])
+    @torch._inductor.config.patch(
+        {"triton.persistent_reductions": False, "compile_threads": 1}
+    )
+    def test_reductions_preserve_tuned_launch(self, launch_setting, cdt):
+        from torch._inductor.runtime import triton_heuristics
+
+        def fn(a, b, c):
+            return a.sum(-1), b.sum(-1), c.sum(-1)
+
+        inputs = [torch.randn(32, n, device=GPU_TYPE) for n in (512, 1024, 2048)]
+        original_reduction = triton_heuristics.reduction
+
+        def fixed_standalone_config(size_hints, **kwargs):
+            if "combo_grid_meta" in kwargs["inductor_meta"]:
+                return original_reduction(size_hints, **kwargs)
+            # Fix standalone tuning so timing noise cannot choose the test outcome.
+            chosen = {"XBLOCK": 1, "R0_BLOCK": 512, "num_warps": 4, "num_stages": 1}
+            if size_hints["r0_"] != 512:
+                chosen[launch_setting] = 8 if launch_setting == "num_warps" else 2
+            return triton_heuristics.fixed_config(
+                chosen,
+                kwargs["filename"],
+                kwargs["triton_meta"],
+                {**kwargs["inductor_meta"], "coordinate_descent_tuning": False},
+            )
+
+        with (
+            patch.object(triton_heuristics, "reduction", fixed_standalone_config),
+            torch._inductor.config.patch(coordinate_descent_tuning=cdt),
+        ):
+            with fresh_cache(), torch._inductor.config.patch(combo_kernels=False):
+                expected = torch.compile(fn)(*inputs)
+            torch._dynamo.reset()
+            counters.clear()
+            with fresh_cache():
+                actual, kernels = run_and_get_kernels(torch.compile(fn), *inputs)
+
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        # Coordinate descent on a combo would retune its reductions' blocks and warps.
+        self.assertEqual(counters["inductor"]["coordesc_tuning_bench"], 0)
+        # The two reductions tuned alike share one combo; the third runs alone.
+        self.assertEqual(len(kernels), 2)
+
+    @requires_gpu_and_triton
     @parametrize("per_kernel_alloc", [False, True])
     def test_concat_autotune_preserves_output_aliasing(self, per_kernel_alloc):
         from torch._inductor.codegen.wrapper import PythonWrapperCodegen
