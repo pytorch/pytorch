@@ -4078,6 +4078,20 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_relu_bool_input(self):
+        def fn(a):
+            return torch.relu(a)
+
+        x = torch.tensor([False, True])
+        with self.assertRaisesRegex(
+            NotImplementedError, "Boolean inputs not supported for relu"
+        ):
+            torch.relu(x)
+        with self.assertRaisesRegex(
+            NotImplementedError, "Boolean inputs not supported for relu"
+        ):
+            torch.compile(fn, backend="inductor")(x)
+
     def test_exp(self):
         def fn(a, b):
             return (torch.exp(a), torch.exp(a + b))
