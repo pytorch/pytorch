@@ -70,6 +70,19 @@ class TestMultiProcContinuousHarness(TestCase):
         self._wait(["ok", "ok"])
         self.assertFalse(self.Fake.poison_pill)
 
+    def test_poison_pill_not_inherited(self):
+        # A failure in a base test class must not skip a subclass's tests.
+        Sub = type("Sub", (self.Fake,), {"task_queues": []})
+        self.Fake.poison_pill = True
+        try:
+            with patch.object(Sub, "_ensure_processes_spawned"):
+                Sub("test_x").setUp()
+                Sub.poison_pill = True
+                with self.assertRaisesRegex(unittest.SkipTest, "Previous test failed"):
+                    Sub("test_x").setUp()
+        finally:
+            self.Fake.poison_pill = False
+
     def test_teardown_kills_hung_ranks(self):
         ctx = multiprocessing.get_context("spawn")
         procs = [ctx.Process(target=_sleep, daemon=True) for _ in range(3)]

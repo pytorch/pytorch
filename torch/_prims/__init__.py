@@ -1356,7 +1356,6 @@ def _broadcast_in_dim_meta(
             original_idx = original_idx + 1
         else:
             if guard_or_true(shape[idx] != 1):
-                # consistent with previous use of guard_size_oblivious
                 new_strides.append(0)
             elif original_idx == a.ndim:
                 new_strides.append(1)
