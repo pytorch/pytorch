@@ -3710,7 +3710,7 @@ class CommonTemplate:
                 torch.clamp_max(a, 200),
                 torch.clamp_min(a, -300),
                 b.clamp(-5, 300),
-                (a // 2).clamp(max=300) + 1,
+                (a >> 1).clamp(max=300) + 1,
                 *torch._foreach_clamp_max([a, b], 300),
                 *torch._foreach_maximum([a, b], -300),
             )
