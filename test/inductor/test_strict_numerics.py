@@ -3450,6 +3450,7 @@ class PointwiseStrictNumericsTest(TestCase):
             ] += 1
             self._coverage.matched += int(equal)
             self._coverage.generated_kernels = metrics.generated_kernel_count
+            self._coverage.generated_fallbacks = metrics.generated_fallback_kernel_count
             if not equal:
                 self._coverage.mismatches[kind] += 1
 

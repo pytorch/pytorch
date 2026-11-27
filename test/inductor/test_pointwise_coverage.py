@@ -62,6 +62,7 @@ class TestPointwiseCoverage(TestCase):
         (
             "matched",
             "matched_without_kernel",
+            "matched_with_fallback",
             "unverified",
             "known_mismatch",
             "skipped",
@@ -109,6 +110,7 @@ class TestPointwiseCoverage(TestCase):
                 record.generated_kernels = int(
                     outcome not in ("matched_without_kernel", "unverified")
                 )
+                record.generated_fallbacks = int(outcome == "matched_with_fallback")
                 if record.expected_mismatch:
                     record.mismatches["nan-payload"] += 1
                 else:
@@ -233,7 +235,7 @@ class TestPointwiseCoverage(TestCase):
     def test_worker_merge_and_unexecuted_cases(self):
         methods = [
             f"test_pointwise_bitwise_{op}_cuda_float32"
-            for op in ("relu", "float_power", "signbit", "log")
+            for op in ("relu", "float_power", "signbit", "log", "batch_norm")
         ]
         cases = [coverage_case(method) for method in methods]
         manifest = {
@@ -254,6 +256,12 @@ class TestPointwiseCoverage(TestCase):
                 known.mismatches["value"] = 1
                 known.filters["backward_requires_reduction"] = 2
                 write_event(directory, known.event())
+                write_event(
+                    directory,
+                    CoverageRecord(
+                        cases[4], status="matched_with_fallback", generated_fallbacks=1
+                    ).event(),
+                )
             with mock.patch("os.getpid", return_value=2):
                 write_event(directory, manifest)
                 write_event(
@@ -265,15 +273,28 @@ class TestPointwiseCoverage(TestCase):
                         cases[2], status="skipped", reason="no kernel"
                     ).event(),
                 )
+                write_event(
+                    directory, CoverageRecord(cases[4], status="matched").event()
+                )
             summary = summarize(directory)
             self.assertEqual(len(list(Path(directory).glob("pointwise-*.log"))), 2)
         self.assertEqual(
             summary["counts"],
-            {"failed": 1, "known_mismatch": 1, "skipped": 1, "not_run": 1},
+            {
+                "failed": 1,
+                "known_mismatch": 1,
+                "skipped": 1,
+                "not_run": 1,
+                "matched_with_fallback": 1,
+            },
         )
         rows = {row["op"]: row for row in summary["rows"]}
         self.assertEqual(rows["relu"]["attempts"], 2)
         self.assertEqual(rows["relu"]["attempt_statuses"], ["failed", "matched"])
+        self.assertEqual(rows["batch_norm"]["generated_fallbacks"], 1)
+        self.assertEqual(
+            rows["batch_norm"]["attempt_statuses"], ["matched_with_fallback", "matched"]
+        )
         self.assertEqual(
             summary["filter_events_across_attempts"], {"backward_requires_reduction": 2}
         )
