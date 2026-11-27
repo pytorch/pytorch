@@ -77,9 +77,6 @@ test_config = {
 class _FxirTestConfigMixin:
     def setUp(self):
         super().setUp()
-        # A class-level @config.patch cannot be used with
-        # instantiate_device_type_tests: it returns a subclass whose __dict__
-        # holds no test methods, so zero tests would be collected silently.
         ctx = config.patch(test_config)
         ctx.__enter__()
         self.addCleanup(ctx.__exit__, None, None, None)
