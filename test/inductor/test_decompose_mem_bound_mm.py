@@ -208,7 +208,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         "b,m,k,n,should_decompose",
         [(10240, 2, 2, 2, True), (10240, 2, 32, 32, False), (2000, 2, 2, 2, False)],
     )
-    @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not has_triton(), "requires triton")
     def test_decompose_bmm(self, device, b, m, n, k, should_decompose):
         device_type = torch.device(device).type
         torch._logging.set_logs(inductor=logging.DEBUG)
@@ -248,7 +248,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
     )
     @parametrize("has_bias", [True, False])
-    @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not has_triton(), "requires triton")
     def test_decompose_linear(self, device, m, n, k, has_bias, should_decompose):
         device_type = torch.device(device).type
         torch._logging.set_logs(inductor=logging.DEBUG)
@@ -302,7 +302,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
     )
     @parametrize("has_bias", [True, False])
-    @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not has_triton(), "requires triton")
     def test_decompose_linear_mixed_precision(
         self, device, m, n, k, has_bias, should_decompose
     ):
@@ -355,7 +355,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
     )
     @parametrize("has_bias", [True, False])
-    @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not has_triton(), "requires triton")
     def test_decompose_mm(self, device, m, n, k, has_bias, should_decompose):
         device_type = torch.device(device).type
         torch._logging.set_logs(inductor=logging.DEBUG)
@@ -404,7 +404,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
     )
     @parametrize("has_bias", [True, False])
-    @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not has_triton(), "requires triton")
     def test_decompose_mm_mixed_precision(
         self, device, m, n, k, has_bias, should_decompose
     ):
@@ -490,7 +490,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         )
         counters.clear()
 
-    @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not has_triton(), "requires triton")
     def test_realize_input(self, device):
         device_type = torch.device(device).type
         if device_type not in ("cuda", "xpu"):
@@ -541,7 +541,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
             "decompose_mm_pass": {"skip_dynamic_shape_dim_check": True},
         }
     )
-    @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not has_triton(), "requires triton")
     def test_dynamic_shape_decompose_addmm(self, device):
         device_type = torch.device(device).type
         m, k, n = 19494144, 8, 8
@@ -682,7 +682,7 @@ class TestDecomposeAddmmScalars(TestCase):
     @torch._inductor.config.patch(
         post_grad_fusion_options={"decompose_mm_pass": {}},
     )
-    @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not has_triton(), "requires triton")
     def test_decompose_addmm_scalars(self, device, kwargs, should_decompose):
         # The pass takes a single-row mat1 on CPU and a tall one on GPU. k, n > 16 keep
         # Inductor's CPU addmm decomposition, which bumps the same counter, out of the way.
