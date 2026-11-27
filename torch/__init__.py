@@ -1872,7 +1872,6 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
