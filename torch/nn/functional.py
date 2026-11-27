@@ -7628,9 +7628,8 @@ def scaled_addmm(
     matrix with shape ``(mat1.size(0), mat2.size(1))`` and dtype ``float16``, ``bfloat16``, or
     ``float32``. The result has the dtype of ``input``; there is no separate
     output dtype. CUDA recipes are supported when their selected implementation
-    uses cuBLASLt; non-cuBLAS fallbacks and ROCm are not supported. On XPU, all
-    recipes that :func:`scaled_mm` supports on XPU are supported, including MXFP4;
-    MX and NVFP4 scales must be unswizzled and unpadded (``SwizzleType.NO_SWIZZLE``).
+    uses cuBLASLt; non-cuBLAS fallbacks and ROCm are not supported. XPU is also
+    supported, with MX and NVFP4 scales in ``SwizzleType.NO_SWIZZLE`` layout.
 
     Args:
         input: Matrix accumulated into the scaled matrix product.
@@ -7644,8 +7643,7 @@ def scaled_addmm(
         swizzle_b: Swizzling pattern, if any, for ``scale_b``.
         contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
             dimensions are also accepted).
-        use_fast_accum: Whether to enable tensor-core fast accumulation. Ignored
-            with a warning on XPU.
+        use_fast_accum: Whether to enable tensor-core fast accumulation.
         beta: Multiplier for ``input``.
         alpha: Multiplier for the scaled matrix product.
 
