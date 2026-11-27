@@ -2229,7 +2229,6 @@ fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
-    xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
 }
 symbolic_tensor_segfaults = {
@@ -2343,6 +2342,24 @@ class TestProxyTensorOpInfo(TestCase):
     @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
+
+    def test_histogram_dynamic_symbolic_shape(self, device):
+        def fn(value):
+            return torch.histogram(value, 4)
+
+        traced = make_fx(fn, tracing_mode="symbolic")(torch.randn(5, device=device))
+        for size in (3, 11):
+            value = torch.randn(size, device=device)
+            self.assertEqual(traced(value), fn(value))
+
+    def test_histogram_symbolic_weight_shape_error(self, device):
+        def fn(value, weight):
+            return torch.histogram(value, 4, weight=weight)
+
+        with self.assertRaisesRegex(RuntimeError, "same shape as the input tensor"):
+            make_fx(fn, tracing_mode="symbolic")(
+                torch.randn(5, device=device), torch.randn(4, device=device)
+            )
 
     @ops([op for op in op_db + custom_op_db if op.get_inplace()], allowed_dtypes=(torch.float,))
     @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
