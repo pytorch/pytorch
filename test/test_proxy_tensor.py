@@ -932,11 +932,12 @@ class TestLowPrecisionPointwiseBarrier(TestCase):
                 if node.target is operator.getitem and node.args[0] is producer
             ]
             self.assertEqual(len(projections), len(x))
-            for node in (producer, projections[-1]):
-                if expect_barrier:
-                    self.assertIs(node.meta.get("low_precision_pointwise_barrier"), True)
-                else:
-                    self.assertNotIn("low_precision_pointwise_barrier", node.meta)
+            if expect_barrier:
+                self.assertIs(
+                    producer.meta.get("low_precision_pointwise_barrier"), True
+                )
+            else:
+                self.assertNotIn("low_precision_pointwise_barrier", producer.meta)
 
     def test_tuple_output(self):
         x = torch.ones(2, 3, dtype=torch.float16)

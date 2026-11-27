@@ -1740,12 +1740,10 @@ class ForeachPrecisionTests(TestCase):
             options={"emulate_precision_casts": True},
         )(x, divisor, cancel)
 
-        torch.testing.assert_close(compiled, eager)
+        self.assertEqual(compiled, eager, atol=0, rtol=0)
 
 
-instantiate_device_type_tests(
-    ForeachPrecisionTests, globals(), only_for=("cpu", "cuda")
-)
+instantiate_device_type_tests(ForeachPrecisionTests, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":

@@ -1150,11 +1150,12 @@ HANDLED_TYPES = (Tensor, torch.nn.Parameter, FakeTensor)
 
 
 def _maybe_record_pointwise_barrier(
-    func: object, proxy_mode: ProxyTorchDispatchMode
+    func: object, proxy_mode: ProxyTorchDispatchMode, node: fx.Node | None = None
 ) -> None:
     """
     Records operators whose tensor outputs or inputs are fp16/bf16 so downstream pointwise code can
-    emulate eager's rounding behavior when emulate_precision_casts is enabled.
+    emulate eager's rounding behavior when emulate_precision_casts is enabled. For tuple/list
+    outputs, marks the producer rather than its getitem projections.
     """
     if proxy_mode.decomp_layers or not proxy_mode.emulate_precision_casts:
         return
@@ -1162,35 +1163,27 @@ def _maybe_record_pointwise_barrier(
     if not isinstance(func, torch._ops.OpOverload):
         return
 
-    last_node = next(iter(reversed(proxy_mode.tracer.graph.nodes)))
+    if node is None:
+        node = next(iter(reversed(proxy_mode.tracer.graph.nodes)))
     low_pr_fp = (torch.bfloat16, torch.float16)
 
-    def has_low_precision_tensor(value: object) -> bool:
-        if isinstance(value, torch.Tensor):
-            return value.dtype in low_pr_fp
-        if isinstance(value, (list, tuple)):
-            return any(has_low_precision_tensor(item) for item in value)
-        return False
-
-    nodes_to_check = [last_node]
     while (
-        last_node.op == "call_function"
-        and last_node.target is operator.getitem
-        and isinstance(last_node.args[0], fx.Node)
-        and isinstance(last_node.args[0].meta.get("val"), (list, tuple))
+        node.op == "call_function"
+        and node.target is operator.getitem
+        and isinstance(node.args[0], fx.Node)
+        and isinstance(node.args[0].meta.get("val"), (list, tuple))
     ):
-        last_node = last_node.args[0]
-        nodes_to_check.append(last_node)
+        node = node.args[0]
 
-    for node in nodes_to_check:
-        if has_low_precision_tensor(node.meta.get("val")) or (
-            node.target is not operator.getitem
-            and any(
-                has_low_precision_tensor(input_node.meta.get("val"))
-                for input_node in node.all_input_nodes
-            )
-        ):
-            node.meta["low_precision_pointwise_barrier"] = True
+    if pytree.tree_any_only(
+        Tensor, lambda t: t.dtype in low_pr_fp, node.meta.get("val")
+    ) or any(
+        pytree.tree_any_only(
+            Tensor, lambda t: t.dtype in low_pr_fp, input_node.meta.get("val")
+        )
+        for input_node in node.all_input_nodes
+    ):
+        node.meta["low_precision_pointwise_barrier"] = True
 
 
 def _fetch_proxies_and_all_constant_flag(
@@ -1631,7 +1624,7 @@ def proxy_call(
         constant=constant,
         tracer=tracer,
     )
-    _maybe_record_pointwise_barrier(func, proxy_mode)
+    _maybe_record_pointwise_barrier(func, proxy_mode, proxy_out.node)
     return out
 
 
