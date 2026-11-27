@@ -104,16 +104,6 @@ SKIPS = {
     Descriptor(op=aten.transpose, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.view_as_real, variant=Variant.Distributed): "No scalar support",
     Descriptor(
-        op=aten.mm, variant=Variant.OpInterleaved | Variant.GradCheck
-    ): "Conjugated inputs",
-    Descriptor(
-        op=aten.dot, variant=Variant.OpInterleaved | Variant.GradCheck
-    ): "Conjugated inputs",
-    Descriptor(
-        op=aten.addmm, variant=Variant.OpInterleaved | Variant.GradCheck
-    ): "Conjugated inputs",
-    Descriptor(op=aten.vdot, variant=Variant.OpInterleaved): "Conjugated inputs",
-    Descriptor(
         op=aten.index_fill, variant=Variant.OpInterleaved
     ): "prims.copy_strided not implemented",
 }
