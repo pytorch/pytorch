@@ -136,6 +136,12 @@ class Pipeline:
             p.step_begin for p in block_passes if hasattr(p, "step_begin")
         ]
 
+    def lowers(self, gm: torch.fx.GraphModule) -> bool:
+        """Whether block passes are given ``gm``: not on a list that runs a
+        region's graph as traced, and not a graph that reads ``.data``, which
+        only the graph as traced reads as what it is (data_reads)."""
+        return not self.as_traced and not data_reads(gm)
+
     def __call__(
         self,
         name: str,
@@ -169,8 +175,7 @@ class Pipeline:
             if isinstance(t, TensorType) and t.is_const
         ]
         versions = [Version("v1", [], gm, [])]
-        # Only the graph as traced reads `.data` as what it is (data_reads).
-        traced_only = not self.as_traced and bool(data_reads(gm))
+        traced_only = not self.as_traced and not self.lowers(gm)
         if traced_only:
             report.notes.append(
                 "no block pass ran: the graph reads .data of a tensor, which only the graph as traced does (a lowering would count the tensor's versions)"

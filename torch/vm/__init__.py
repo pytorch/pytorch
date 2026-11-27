@@ -35,7 +35,9 @@ and as far from one another in it, the same ones overlap, and all the others
 are apart. Two views that slide through one buffer at a fixed distance are
 one such relation; where the graph writes to a tensor and a pass lowers it,
 overlapping tensors also have to start where they did in their storage. A
-call that differs is traced for itself.
+call that differs is traced for itself. A graph that may reach outside its
+tensors' elements (``as_strided``, ``set_``) is not lowered: with a pass that
+lowers there is no region for it.
 
 Without ``passes``, ``torch.vm(fn)`` runs the VM's own passes and compiles
 regions with Inductor. Regions and bypassing cold code are process-wide once

@@ -2492,18 +2492,20 @@ def _overlap(tensors, consts, gm, lowered):
     is made for that too: with ``lowered`` and a graph that may write to a
     tensor, also for where in its storage each tensor that overlaps another
     starts. Refuses a trace with a tensor whose place cannot be said: it is
-    not taken to be apart from the others. And, for a lowering, one with two
-    tensors in one storage that do not overlap if a node of ``gm`` may reach
-    from one to the other (stays.py): what is made of a graph takes such two
-    for independent."""
+    not taken to be apart from the others. And one whose graph block passes
+    are given and that may name a place in a storage outside the elements of
+    a node's arguments (stays.py): what is made of a graph is handed its
+    tensors' own elements. The graph as traced hands every operator the
+    call's own tensors, whose storages are all there."""
+    passed = lowered and (block_pipeline is None or block_pipeline.lowers(gm))
+    named = _stays.names(gm) if passed else None
+    if named is not None:
+        raise _Refused(
+            f"{named}, and what a lowering makes has its tensors' own elements"
+        )
     overlap = _rust().Overlap(tensors, consts, lowered and _stays.writes(gm))
     if overlap.unplaced is not None:
         raise _Refused(overlap.unplaced)
-    leaving = _stays.leaves(gm) if lowered and overlap.apart else None
-    if leaving is not None:
-        raise _Refused(
-            f"two of its tensors are in one storage without overlapping and {leaving}"
-        )
     return overlap
 
 
