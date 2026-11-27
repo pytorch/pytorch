@@ -197,20 +197,22 @@ def _transfer_meta(
         new_meta["tensor_meta"] = old_node.meta["tensor_meta"]
 
 
+def _execution_context(node: torch.fx.Node) -> tuple[Any, ...]:
+    custom = node.meta.get("custom", {})
+    return (
+        custom.get("stream", 0),
+        custom.get("mempool"),
+        custom.get("mempool_device"),
+    )
+
+
 def _common_custom_context(nodes: Sequence[torch.fx.Node]) -> dict[str, Any]:
     if not nodes:
         return {}
 
-    stream = nodes[0].meta.get("custom", {}).get("stream", 0)
-    mempool = nodes[0].meta.get("custom", {}).get("mempool")
-    mempool_device = nodes[0].meta.get("custom", {}).get("mempool_device")
+    stream, mempool, mempool_device = _execution_context(nodes[0])
     if any(
-        (
-            node.meta.get("custom", {}).get("stream", 0),
-            node.meta.get("custom", {}).get("mempool"),
-            node.meta.get("custom", {}).get("mempool_device"),
-        )
-        != (stream, mempool, mempool_device)
+        _execution_context(node) != (stream, mempool, mempool_device)
         for node in nodes[1:]
     ):
         return {}

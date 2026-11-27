@@ -51,6 +51,8 @@ a pass must not eliminate `x.clone()`, by the same rule as in [Altering Aliasing
 
 Mutation-introducing passes must run after passes that rely on the functional invariant. Near lowering, `slice_scatter_chunking_pass` must run before `reinplace_inplaceable_ops`; `decompose_auto_functionalized` runs later and also introduces mutation. Any pass running after mutation has been introduced must support the resulting non-functional graph. Preserve these ordering constraints when adding or reordering passes.
 
+The `fold_foreach_input_mutation_ops` pass must run after `reinplace_inplaceable_ops`, which recognizes individual `aten.copy_.default` epilogues. It combines complete, alias-safe copy epilogues into `_foreach_copy_` while preserving observable values and aliasing relationships.
+
 Early auto-functionalized output rewiring in `reinplace_inplaceable_ops` requires `decompose_auto_functionalized` to run afterwards and consume `only_clone_these_tensors`. Until then, the graph cannot be executed with the functional wrappers' ordinary cloning behavior. Disable early rewiring when decomposition is disabled.
 
 
