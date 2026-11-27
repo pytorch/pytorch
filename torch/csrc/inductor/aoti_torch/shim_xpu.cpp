@@ -5,6 +5,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUStream.h>
 
 using namespace torch::aot_inductor;
@@ -75,6 +76,35 @@ AOTITorchError aoti_torch_get_current_sycl_queue(void** ret) {
     int32_t device_index =
         static_cast<int32_t>(static_cast<uint16_t>(c10::xpu::current_device()));
     *ret = &(at::xpu::getCurrentXPUStream(device_index).queue());
+  });
+}
+
+AOTITorchError aoti_torch_xpu_caching_allocator_raw_alloc(
+    uint64_t nbytes,
+    void** ret_ptr) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    if (nbytes == 0) {
+      *ret_ptr = nullptr;
+      return AOTI_TORCH_SUCCESS;
+    }
+
+    *ret_ptr = c10::xpu::XPUCachingAllocator::raw_alloc(nbytes);
+
+    if (*ret_ptr == nullptr) {
+      TORCH_CHECK(
+          false,
+          "Failed to allocate ",
+          nbytes,
+          " bytes from XPU caching allocator");
+    }
+  });
+}
+
+AOTITorchError aoti_torch_xpu_caching_allocator_raw_delete(void* ptr) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    if (ptr != nullptr) {
+      c10::xpu::XPUCachingAllocator::raw_delete(ptr);
+    }
   });
 }
 

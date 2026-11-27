@@ -6,7 +6,9 @@
 #include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/TransformationHelper.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/PhiloxStatelessRNG.h>
+#include <ATen/native/cpu/Loops.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -21,6 +23,7 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <cmath>
 #include <limits>
 #include <type_traits>
@@ -130,14 +133,14 @@ void philox_distribution_kernel(
   const uint64_t* keys_ptr = key_flat.const_data_ptr<uint64_t>();
   constexpr int epc = elems_per_call<scalar_t>;
   int64_t chunks_per_key = (elems_per_key + epc - 1) / epc;
-  for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
+  for (const auto key_idx : c10::irange(num_keys)) {
     uint64_t seed = keys_ptr[key_idx * 2];
     uint64_t offset = keys_ptr[key_idx * 2 + 1];
-    for (int64_t chunk = 0; chunk < chunks_per_key; chunk++) {
+    for (const auto chunk : c10::irange(chunks_per_key)) {
       auto sample = sample_func(seed, offset + static_cast<uint64_t>(chunk));
       int64_t base = key_idx * elems_per_key + chunk * epc;
       int64_t remaining = std::min(static_cast<int64_t>(epc), elems_per_key - chunk * epc);
-      for (int64_t j = 0; j < remaining; j++) {
+      for (const auto j : c10::irange(remaining)) {
         out_ptr[base + j] = param_func(sample[j]);
       }
     }
@@ -173,10 +176,10 @@ Tensor _philox_key_split_cpu(const Tensor& key, int64_t num_splits) {
   auto key_contig = key.contiguous();
   const uint64_t* input = key_contig.const_data_ptr<uint64_t>();
   uint64_t* out_ptr = output.data_ptr<uint64_t>();
-  for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
+  for (const auto key_idx : c10::irange(num_keys)) {
     uint64_t seed = input[key_idx * 2];
     uint64_t offset = input[key_idx * 2 + 1];
-    for (int64_t split_idx = 0; split_idx < num_splits; split_idx++) {
+    for (const auto split_idx : c10::irange(num_splits)) {
       auto r = philox_4x32(seed, offset + static_cast<uint64_t>(split_idx));
       int64_t out = (split_idx * num_keys + key_idx) * 2;
       philox_derive_key(r, &out_ptr[out], &out_ptr[out + 1]);
@@ -203,7 +206,7 @@ static Tensor philox_key_fold_in_impl(const Tensor& key, uint64_t fold) {
   auto key_contig = key.contiguous();
   const uint64_t* input = key_contig.const_data_ptr<uint64_t>();
   uint64_t* out_ptr = output.data_ptr<uint64_t>();
-  for (int64_t idx = 0; idx < num_keys; idx++) {
+  for (const auto idx : c10::irange(num_keys)) {
     uint64_t seed = input[idx * 2];
     uint64_t offset = input[idx * 2 + 1];
     auto r = philox_4x32(seed, offset + fold);
@@ -252,6 +255,27 @@ Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double
 
     philox_distribution_kernel<scalar_t>(
         "_philox_uniform_", self, key, sample_func, param_func);
+  });
+  return self;
+}
+
+Tensor& _philox_uniform_tensor_cpu_(
+    Tensor& self, const Tensor& key, const Tensor& low, const Tensor& high) {
+  philox_check_bound("_philox_uniform_", "low", low, self);
+  philox_check_bound("_philox_uniform_", "high", high, self);
+  auto iter = TensorIteratorConfig()
+      .add_output(self)
+      .add_const_input(self)
+      .add_owned_const_input(low.to(self.scalar_type()))
+      .add_owned_const_input(high.to(self.scalar_type()))
+      .build();
+  // Sample with the default [0, 1) bounds, then rescale in a second pass.
+  _philox_uniform_cpu_(self, key, 0.0, 1.0);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
+    cpu_kernel(iter, [](scalar_t x, scalar_t lo, scalar_t hi) -> scalar_t {
+      return static_cast<scalar_t>(static_cast<dist_acctype<scalar_t>>(x) * (hi - lo) + lo);
+    });
   });
   return self;
 }

@@ -18,9 +18,9 @@ struct Frame {
 
 enum class Mode { addr2line, fast, dladdr };
 
-// note: symbolize is really slow
-// it will launch an addr2line process that has to parse dwarf
-// information from the libraries that frames point into.
+// note: symbolize can be slow. Mode::fast parses the dwarf information
+// of the libraries in-process; Mode::addr2line launches an addr2line
+// process per library, which can take minutes on some binutils versions.
 // Callers should first batch up all the unique void* pointers
 // across a number of unwind states and make a single call to
 // symbolize.

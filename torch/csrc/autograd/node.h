@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/utils/python_stub.h>
 
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/SequenceNumber.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
@@ -14,6 +15,11 @@
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
+
+#ifdef USE_ROCM
+// For at::ROCmBackwardPassGuard
+#include <ATen/Context.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -171,7 +177,7 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
 
     auto step_callbacks =
         at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
-    if (C10_UNLIKELY(step_callbacks.has_value())) {
+    if (step_callbacks.has_value()) [[unlikely]] {
       at::RecordFunction guard(std::move(*step_callbacks));
       // Using sequence number and thread id to correlate with
       // the forward pass function

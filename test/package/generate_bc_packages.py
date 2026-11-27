@@ -16,7 +16,7 @@ def generate_bc_packages():
         from package_a.test_nn_module import TestNnModule
 
         test_nn_module = TestNnModule()
-        test_torchscript_module = torch.jit.script(TestNnModule())
+        test_torchscript_module = torch.jit._script.script(TestNnModule())
         test_fx_module: torch.fx.GraphModule = symbolic_trace(TestNnModule())
         with PackageExporter(f"{packaging_directory}/test_nn_module.pt") as pe1:
             pe1.intern("**")

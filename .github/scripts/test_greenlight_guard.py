@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 from unittest import main, mock, TestCase
 
@@ -30,7 +30,7 @@ from greenlight_messages import GREENLIGHT_JOB_URL
 from greenlight_preflight import REVIEW_WINDOW, STALE_LABEL
 
 
-NOW = datetime(2026, 8, 25, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 25, 12, 0, 0, tzinfo=UTC)
 MERGE_SHA = "a" * 40
 OTHER_SHA = "b" * 40
 REPO = "pytorch/pytorch"

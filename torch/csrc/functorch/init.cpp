@@ -22,7 +22,9 @@
 #include <c10/core/AutogradState.h>
 #include <c10/core/InferenceMode.h>
 
+#include <c10/util/irange.h>
 #include <iostream>
+#include <optional>
 #include <utility>
 
 // This file contains functorch's Python bindings.
@@ -118,7 +120,7 @@ static Tensor _movedim(const Tensor& self, int64_t src, int64_t dst) {
   }
   VmapDimVector permutation;
   permutation.reserve(logical_dim);
-  for (int64_t dim = 0; dim < logical_dim; dim++) {
+  for (const auto dim : c10::irange(logical_dim)) {
     if (dim == src) {
       continue;
     }
@@ -260,7 +262,7 @@ static int64_t _grad_increment_nesting() {
   if (prev_inference_mode) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(false);
-    c10::AutogradState::set_tls_state(std::move(state));
+    c10::AutogradState::set_tls_state(state);
   }
   return initAndPushDynamicLayer(
       TransformType::Grad,
@@ -279,7 +281,7 @@ static int64_t _grad_decrement_nesting() {
   if (meta.prevInferenceMode_) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(true);
-    c10::AutogradState::set_tls_state(std::move(state));
+    c10::AutogradState::set_tls_state(state);
   }
   return layer.layerId();
 }
@@ -292,7 +294,7 @@ static int64_t _jvp_increment_nesting() {
   if (prev_inference_mode) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(false);
-    c10::AutogradState::set_tls_state(std::move(state));
+    c10::AutogradState::set_tls_state(state);
   }
   return initAndPushDynamicLayer(
       TransformType::Jvp,
@@ -311,7 +313,7 @@ static int64_t _jvp_decrement_nesting() {
   if (meta.prevInferenceMode_) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(true);
-    c10::AutogradState::set_tls_state(std::move(state));
+    c10::AutogradState::set_tls_state(state);
   }
   return layer.layerId();
 }
@@ -406,7 +408,7 @@ static int64_t maybe_get_level(const Tensor& tensor) {
 static void maybe_unsafe_set_level(const Tensor& tensor, int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
-    return batched->_unsafe_set_level(level);
+    batched->_unsafe_set_level(level);
   }
 }
 
@@ -440,7 +442,7 @@ static void tls_set_vmap_excluded(bool excluded) {
 }
 
 static void _set_dynamic_layer_keys_included(bool value) {
-  return setDynamicLayerFrontBackKeysIncluded(value);
+  setDynamicLayerFrontBackKeysIncluded(value);
 }
 
 static void dump_dls() {
@@ -507,7 +509,7 @@ PyObject* unwrap_dead_wrappers(PyObject* args) {
   // Lazily allocate only after finding a dead wrapper; otherwise return args.
   THPObjectPtr result;
 
-  for (Py_ssize_t idx = 0; idx < num_args; idx++) {
+  for (const auto idx : c10::irange(num_args)) {
     auto* item = PyTuple_GET_ITEM(args, idx);
     if (THPVariable_Check(item)) {
       const auto& tensor = THPVariable_Unpack(item);
@@ -524,7 +526,7 @@ PyObject* unwrap_dead_wrappers(PyObject* args) {
         if (!result) {
           return nullptr;
         }
-        for (Py_ssize_t copy_idx = 0; copy_idx < idx; copy_idx++) {
+        for (const auto copy_idx : c10::irange(idx)) {
           auto* copied_item = PyTuple_GET_ITEM(args, copy_idx);
           Py_INCREF(copied_item);
           PyTuple_SET_ITEM(result.get(), copy_idx, copied_item);

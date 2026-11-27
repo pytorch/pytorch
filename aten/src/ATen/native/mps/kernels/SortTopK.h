@@ -31,6 +31,39 @@ kernel void sort_block_topk(
   }
 }
 
+// Single-block float sort on to_radix_key integer keys, which is several times
+// faster than the NaN-aware float compare. A full sort passes sel = {0, size}.
+template <typename T, short TPTG, short TN>
+kernel void sort_block_fkey(
+    const device T* inp [[buffer(0)]],
+    device T* out_vals [[buffer(1)]],
+    device long* out_idx [[buffer(2)]],
+    constant int& size [[buffer(3)]],
+    constant long2& strides [[buffer(4)]],
+    constant bool& desc [[buffer(5)]],
+    constant int2& sel [[buffer(6)]],
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint3 lid [[thread_position_in_threadgroup]]) {
+  using KeyT = typename radix_bits<T>::type;
+  constexpr int ELEMS_PER_TG = TPTG * TN;
+  threadgroup KeyT tgv[ELEMS_PER_TG];
+  threadgroup uint tgi[ELEMS_PER_TG];
+  const long base_in = long(tid.y) * strides.y;
+  for (int i = int(lid.x); i < ELEMS_PER_TG; i += TPTG) {
+    tgv[i] = i < size ? KeyT(to_radix_key(inp[base_in + i * strides.x], desc))
+                      : sort_init<KeyT>(false);
+    tgi[i] = i < size ? uint(i) : ~uint(0);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  block_merge_sort<KeyT, uint, TPTG, TN, false>(tgv, tgi, lid.x, false);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const long base_out = long(tid.y) * long(sel.y);
+  for (int j = int(lid.x); j < sel.y; j += TPTG) {
+    out_vals[base_out + j] = from_radix_key<T>(tgv[sel.x + j], desc);
+    out_idx[base_out + j] = long(tgi[sel.x + j]);
+  }
+}
+
 template <typename T, typename InIdxT, short TPTG, short TN>
 kernel void mb_merge_final_topk(
     const device T* vi [[buffer(0)]],
@@ -430,9 +463,28 @@ INSTANTIATE_TOPK_RADIX_TPTG512(ushort);
       uint3,                                                                  \
       uint3);
 
-#define INSTANTIATE_FKEY_ALL(T, KeyT) \
-  INSTANTIATE_FKEY(T, KeyT, 256, 4)   \
-  INSTANTIATE_FKEY(T, KeyT, 512, 4)   \
+#define INSTANTIATE_SORT_BLOCK_FKEY(T, TPTG)                              \
+  template [[host_name("sort_block_fkey_" #T "_tptg" #TPTG)]] kernel void \
+  sort_block_fkey<T, TPTG, 4>(                                            \
+      const device T*,                                                    \
+      device T*,                                                          \
+      device long*,                                                       \
+      constant int&,                                                      \
+      constant long2&,                                                    \
+      constant bool&,                                                     \
+      constant int2&,                                                     \
+      uint3,                                                              \
+      uint3);
+
+#define INSTANTIATE_FKEY_ALL(T, KeyT)  \
+  INSTANTIATE_SORT_BLOCK_FKEY(T, 32)   \
+  INSTANTIATE_SORT_BLOCK_FKEY(T, 64)   \
+  INSTANTIATE_SORT_BLOCK_FKEY(T, 128)  \
+  INSTANTIATE_SORT_BLOCK_FKEY(T, 256)  \
+  INSTANTIATE_SORT_BLOCK_FKEY(T, 512)  \
+  INSTANTIATE_SORT_BLOCK_FKEY(T, 1024) \
+  INSTANTIATE_FKEY(T, KeyT, 256, 4)    \
+  INSTANTIATE_FKEY(T, KeyT, 512, 4)    \
   INSTANTIATE_FKEY(T, KeyT, 1024, 4)
 
 INSTANTIATE_FKEY_ALL(float, uint);

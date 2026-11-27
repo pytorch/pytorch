@@ -19,10 +19,6 @@
 #include <list>
 #include <optional>
 
-#ifdef C10_MOBILE
-#define C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
-#endif
-
 namespace c10 {
 
 class Dispatcher;
@@ -114,11 +110,7 @@ class TORCH_API OperatorEntry final {
     return name_;
   }
 
-#ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
-  using AnnotatedKernelContainer = std::array<AnnotatedKernel, 1>;
-#else
   using AnnotatedKernelContainer = std::list<AnnotatedKernel>;
-#endif
   using AnnotatedKernelContainerIterator = AnnotatedKernelContainer::iterator;
 
   // Why are kernels and fallback asymmetric?  It has to do with ownership.
@@ -181,7 +173,7 @@ class TORCH_API OperatorEntry final {
 
   const KernelFunction& lookup(DispatchKeySet ks) const {
     const auto idx = ks.getDispatchTableIndexForDispatchKeySet();
-    if (C10_UNLIKELY(idx == -1)) {
+    if (idx == -1) [[unlikely]] {
       reportError(ks.highestPriorityTypeId());
     }
     const auto& kernel = dispatchTable_[idx];
@@ -191,7 +183,7 @@ class TORCH_API OperatorEntry final {
     // should have an unboxed kernel. Checking the unboxed kernel
     // first will allow us to avoid touching the boxed kernel at all
     // in the common case.
-    if (C10_UNLIKELY(!kernel.isValidUnboxed())) {
+    if (!kernel.isValidUnboxed()) [[unlikely]] {
       if (!kernel.isValid()) {
         reportError(ks.highestPriorityTypeId());
       }
@@ -231,9 +223,7 @@ class TORCH_API OperatorEntry final {
  private:
   OperatorName name_;
   std::optional<AnnotatedSchema> schema_;
-#ifndef C10_MOBILE
   std::vector<at::Tag> tags_;
-#endif
   std::array<KernelFunction, c10::num_runtime_entries> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
   // Pointer to the torch.ops.ns.op.overload object for speed
@@ -270,16 +260,7 @@ class TORCH_API OperatorEntry final {
   // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<
-      DispatchKey,
-#ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
-      // On mobile, we needn't worry about Jupyter notebooks.
-      std::array<AnnotatedKernel, 1>
-#else
-      std::list<AnnotatedKernel>
-#endif
-      >
-      kernels_;
+  ska::flat_hash_map<DispatchKey, std::list<AnnotatedKernel>> kernels_;
 
   const AnnotatedKernel& missingKernel() const;
   const AnnotatedKernel& ambiguousAutogradOtherKernel() const;

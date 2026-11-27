@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from typing import Any, TypeVar
-from typing_extensions import ParamSpec, TypeVarTuple, Unpack
+from typing_extensions import ParamSpec, TypeVarTuple
 
 from torch._prims.context import TorchRefsMode
 from torch.fx import GraphModule
@@ -14,7 +14,7 @@ Ts = TypeVarTuple("Ts")
 
 def execute(
     gm: GraphModule,
-    *args: Unpack[Ts],
+    *args: *Ts,
     executor: str = "aten",
     executor_parameters: dict | None = None,
 ) -> Any:

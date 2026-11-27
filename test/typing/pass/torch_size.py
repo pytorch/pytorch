@@ -1,6 +1,6 @@
 # mypy: enable-error-code=unused-ignore
 
-from typing_extensions import assert_type, Never
+from typing import assert_type, Never
 
 from torch import Size
 

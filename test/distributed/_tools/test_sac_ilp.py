@@ -15,8 +15,12 @@ from torch.distributed._tools.ilp_utils import (
 from torch.distributed._tools.mem_tracker import _ModState, MemTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -45,16 +49,17 @@ except ImportError:
 # spec (torch/_inductor/analysis/device_info.py) to make them hardware-independent.
 @pytest.mark.multigpu
 class TestSACILP(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
-        self.device = torch.cuda.current_device()
         self.estimate_mode = "operator-level-cost-model"
-        # Pin the roofline device spec so runtime estimates are deterministic
-        # across the physical GPU the test happens to run on.
+        # Pin the roofline device spec so runtime estimates stay deterministic
+        # across accelerator backends.
         self.gpu_type = "NVIDIA H100"
 
     def _init_model_input_optimizer(
-        self,
+        self, device
     ) -> tuple[torch.nn.Module, torch.optim.Optimizer, torch.Tensor]:
         bsz = 8
         model_args = ModelArgs(
@@ -65,11 +70,11 @@ class TestSACILP(TestCase):
             dim=768,
             dropout_p=0.1,
         )
-        with torch.device(self.device):
+        with torch.device(device):
             model = Transformer(model_args)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
         inp = torch.randint(
-            0, model_args.vocab_size, (bsz, model_args.max_seq_len), device=self.device
+            0, model_args.vocab_size, (bsz, model_args.max_seq_len), device=device
         )
         return (model, optimizer, inp)
 
@@ -134,9 +139,10 @@ class TestSACILP(TestCase):
         loss.backward()
         return sac_estimator
 
-    def _collect_module_info_with_fake_tensor_mode(self) -> ModuleInfo:
+    def _collect_module_info_with_fake_tensor_mode(self, device) -> ModuleInfo:
+        device = torch.device(device)
         with FakeTensorMode():
-            model, optimizer, inp = self._init_model_input_optimizer()
+            model, optimizer, inp = self._init_model_input_optimizer(device)
             mem_tracker = self._run_and_get_memTracker(model, optimizer, inp)
             runtime_estimator = self._run_and_get_runtime_estimator(
                 model, optimizer, inp
@@ -147,18 +153,17 @@ class TestSACILP(TestCase):
                 mem_tracker,
                 runtime_estimator,
                 sac_estimator,
-                torch.device(self.device),
+                device,
             )
         return mod_info
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
-    def test_sac_ilp_case1(self):
+    def test_sac_ilp_case1(self, device):
         """
         This is a case where the memory budget is either binding or too tight,
         meaning that with some AC, the model can fit into GPU memory.
         """
-        mod_info = self._collect_module_info_with_fake_tensor_mode()
+        mod_info = self._collect_module_info_with_fake_tensor_mode(device)
         g = parse_module_info(mod_info)
 
         memory_budget = 1.6
@@ -195,14 +200,13 @@ class TestSACILP(TestCase):
                 ratio, 1, lambda msg: f"{msg}\ndiscard ratio for {fqn} should be <= 1"
             )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
-    def test_sac_ilp_case2(self):
+    def test_sac_ilp_case2(self, device):
         """
         This is a case where the memory budget is not binding, meaning that no
         AC is needed to fit the model into memory.
         """
-        mod_info = self._collect_module_info_with_fake_tensor_mode()
+        mod_info = self._collect_module_info_with_fake_tensor_mode(device)
         g = parse_module_info(mod_info)
         ac_decisions, recomputation_time, peak_mem = sac_milp(
             g, memory_budget=2.4, world_size=4
@@ -211,14 +215,13 @@ class TestSACILP(TestCase):
         self.assertEqual(recomputation_time, 0)
         self.assertGreater(peak_mem, 1)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
-    def test_sac_ilp_case3(self):
+    def test_sac_ilp_case3(self, device):
         """
         This is a case where the memory budget is too tight, meaning that even with
         aggressive AC, the model cannot fit into memory.
         """
-        mod_info = self._collect_module_info_with_fake_tensor_mode()
+        mod_info = self._collect_module_info_with_fake_tensor_mode(device)
         g = parse_module_info(mod_info)
         ac_decisions, recomputation_time, peak_mem = sac_milp(
             g, memory_budget=0.8, world_size=4
@@ -231,6 +234,8 @@ class TestSACILP(TestCase):
 class TestOptimalCheckpointingPolicy(TestCase):
     # tests are adapted from tests in xformers
     # https://github.com/facebookresearch/xformers/blob/c6c0ac31f1b08542a0bc27278c6ed10f825f6963/tests/test_checkpoint.py#L222
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         data = [
@@ -254,7 +259,6 @@ class TestOptimalCheckpointingPolicy(TestCase):
             force_store_random=False,
         )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
     def test_get_optimial_checkpointing_policy_per_module(self):
         for memory_budget, optimal_soln in [
@@ -271,6 +275,13 @@ class TestOptimalCheckpointingPolicy(TestCase):
             )
             self.assertEqual(optimal_soln, soln)
 
+
+instantiate_device_type_tests(
+    TestSACILP,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()

@@ -444,12 +444,35 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     }
   };
 
+  // The device branch of round_to_odd_float in
+  // torch/headeronly/util/floating_point_utils.h (NVRTC and hiprtc both have
+  // __double2float_rz).
+  inline float round_to_odd_float(double x) {
+    const float t = __double2float_rz(x);
+    return __uint_as_float(
+        __float_as_uint(t) | ((static_cast<double>(t) != x) & (x == x)));
+  }
+
+  // Like detail::rounds_through_float in TypeCast.h, for the jiterator's only
+  // narrower types (its Half and BFloat16 have no numeric_limits), plus
+  // complex<Half>, whose conversion from double is handled here rather than by
+  // a separate complex branch.
+  template <typename T>
+  constexpr bool rounds_through_float = std::is_same<T, at::Half>::value ||
+      std::is_same<T, at::BFloat16>::value ||
+      std::is_same<T, std::complex<at::Half>>::value;
+
   template <typename dest_t, typename src_t>
   struct static_cast_with_inter_type {
     static inline dest_t apply(
         src_t src) {
       constexpr bool real = needs_real<dest_t, src_t>::value;
-      return static_cast<dest_t>(maybe_real<real, src_t>::apply(src));
+      auto r = maybe_real<real, src_t>::apply(src);
+      if constexpr (std::is_same<decltype(r), double>::value && rounds_through_float<dest_t>) {
+        return static_cast<dest_t>(round_to_odd_float(r));
+      } else {
+        return static_cast<dest_t>(r);
+      }
     }
   };
 
@@ -482,7 +505,8 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
       std::complex<at::Half>,
       std::complex<double>> {
     static inline std::complex<at::Half> apply(std::complex<double> src) {
-      return static_cast<std::complex<at::Half>>(static_cast<std::complex<float>>(src));
+      return static_cast<std::complex<at::Half>>(std::complex<float>(
+          round_to_odd_float(src.real()), round_to_odd_float(src.imag())));
     }
   };
 
@@ -824,49 +848,6 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   }
 )ESCAPE";
 
-static void replace_all(std::string& s, const std::string& to_replace, const std::string& replace_with) {
-  std::ostringstream oss;
-  std::size_t pos = 0;
-  std::size_t prev_pos = pos;
-
-  while (true) {
-    prev_pos = pos;
-    pos = s.find(to_replace, pos);
-    if (pos == std::string::npos)
-      break;
-    oss << s.substr(prev_pos, pos - prev_pos);
-    oss << replace_with;
-    pos += to_replace.size();
-  }
-
-  oss << s.substr(prev_pos);
-  s = std::move(oss).str();
-}
-
-// hipify replaces certain device math functions, e.g., std::max -> ::max
-// See torch/utils/hipify/cuda_to_hip_mappings.py.
-// Replace them back. Search for " ::<name>" to avoid duplicate replacements.
-static std::string unhipify_math_functions(const std::string &original) {
-  static std::vector<std::pair<std::string,std::string>> mappings = {
-    {" std::max", " ::max"},
-    {" std::min", " ::min"},
-    {" std::ceil", " ::ceil"},
-    {" std::floor", " ::floor"},
-    {" std::exp", " ::exp"},
-    {" std::log", " ::log"},
-    {" std::pow", " ::pow"},
-    {" std::fabs", " ::fabs"},
-    {" std::fmod", " ::fmod"},
-    {" std::remainder", " ::remainder"},
-    {" std::frexp", " ::frexp"}
-  };
-  std::string ret = original;
-  for (const auto& mapping : mappings) {
-    replace_all(ret, mapping.second, mapping.first);
-  }
-  return ret;
-}
-
 // The following is copied from fused_kernel.cpp
 // TODO: refactor codegenOutputQuery into its own file
 //   that can be included by both files
@@ -1156,11 +1137,6 @@ std::string generate_code(
     env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
-#ifdef USE_ROCM
-    // unhipify math functions, but only if std::complex is used.
-    func = unhipify_math_functions(func);
-    env.s("functor", func);
-#endif
   } else if (dynamic_casting) {
     env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
@@ -1429,10 +1405,6 @@ std::string generate_reduction_code(
         env.s("complex_body_string", get_complex_body_string());
         env.s("complex_math_string", get_complex_math_string());
         env.s("complex", std::to_string(1));
-#ifdef USE_ROCM
-        // unhipify math functions, but only if std::complex is used.
-        func = unhipify_math_functions(func);
-#endif
       } else {
         env.s("traits_string", "");
         env.s("complex_body_string", "");

@@ -133,7 +133,7 @@ static grid_sample_batch_rule(const Tensor& input, std::optional<int64_t> input_
     auto new_input = reshape_dim_into(*input_bdim, 0, input);
     auto new_grid = reshape_dim_into(*grid_bdim, 0, grid);
     auto out = Func(new_input, new_grid, std::forward<ExtraArgs>(extra_args)...);
-    out = reshape_dim_outof(0, input.sizes()[*grid_bdim], out);
+    out = reshape_dim_outof(0, input.sizes()[*input_bdim], out);
     result = std::make_tuple(std::move(out), 0);
   } else {
     result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), std::nullopt);
@@ -378,6 +378,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   EXISTING_BDIM(upsample_trilinear3d);
   EXISTING_BDIM(_upsample_bilinear2d_aa);
   EXISTING_BDIM(_upsample_bicubic2d_aa);
+  EXISTING_BDIM(_upsample_inter_area2d);
 
   UPSAMPLE_BACKWARD(upsample_bicubic2d_backward);
   UPSAMPLE_BACKWARD(upsample_bilinear2d_backward);

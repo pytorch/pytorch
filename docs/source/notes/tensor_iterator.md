@@ -155,7 +155,7 @@ own buffers. They are valid for the lifetime of the iterator; copy via
 * **Pre-dispatch layout analysis.** Build a TI on the same operands an aten
   kernel would, then pattern-match `it.ndim` / `it.strides(i)` to decide
   whether your custom kernel can handle the shape. The
-  `_scatter_add_eligibility` helper in `torch/_native/ops/scatter_add/`
+  `_compute_eligibility` helper in `torch/_native/ops/scatter_add/`
   is a worked example.
 * **Debugging dtype/promotion surprises.** Construct a TI with the flags you
   think a kernel uses; `it.common_dtype` and `it.dtype(i)` show what the

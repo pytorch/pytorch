@@ -7,10 +7,6 @@ ARG UBUNTU_VERSION
 ENV DEBIAN_FRONTEND noninteractive
 ENV PIP_NO_CACHE_DIR=1
 
-# Set AMD gpu targets to build for
-ARG PYTORCH_ROCM_ARCH
-ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
-
 # Install common dependencies (so that this step can be cached separately)
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh

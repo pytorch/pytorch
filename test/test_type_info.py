@@ -135,6 +135,26 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(xinfo.resolution, 1.0)
         self.assertEqual(xinfo.dtype, "float8_e4m3fn")
 
+        # Special test case for Float8_E4M3FNUZ
+        xinfo = torch.finfo(torch.float8_e4m3fnuz)
+        self.assertEqual(xinfo.bits, 8)
+        self.assertEqual(xinfo.max, 240.0)
+        self.assertEqual(xinfo.min, -240.0)
+        self.assertEqual(xinfo.eps, 0.125)
+        self.assertEqual(xinfo.tiny, 0.0078125)
+        self.assertEqual(xinfo.resolution, 1.0)
+        self.assertEqual(xinfo.dtype, "float8_e4m3fnuz")
+
+        # Special test case for Float8_E5M2FNUZ
+        xinfo = torch.finfo(torch.float8_e5m2fnuz)
+        self.assertEqual(xinfo.bits, 8)
+        self.assertEqual(xinfo.max, 57344.0)
+        self.assertEqual(xinfo.min, -57344.0)
+        self.assertEqual(xinfo.eps, 0.25)
+        self.assertEqual(xinfo.tiny, 3.05176e-05)
+        self.assertEqual(xinfo.resolution, 1.0)
+        self.assertEqual(xinfo.dtype, "float8_e5m2fnuz")
+
     def test_to_complex(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/124868
         # If reference count is leaked this would be a set of 10 elements

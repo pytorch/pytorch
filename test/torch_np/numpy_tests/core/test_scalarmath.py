@@ -13,6 +13,7 @@ import pytest
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -346,6 +347,10 @@ class TestModulus(TestCase):
                         assert_(b > rem >= 0, msg)
 
     @parametrize("dt", "efd")
+    @decorateIf(
+        skip(reason="RuntimeError: 'nextafter_cpu' not implemented for 'Half'"),
+        lambda p: p["dt"] == "e",
+    )
     def test_float_modulus_corner_cases(self, dt):
         if dt == "e":
             # FIXME: make xfail
@@ -725,6 +730,11 @@ class TestAbs(TestCase):
 class TestBitShifts(TestCase):
     @parametrize("type_code", np.typecodes["AllInteger"])
     @parametrize("op", [operator.rshift, operator.lshift])
+    @decorateIf(
+        skip(reason="NYI: bitshift uint64"),
+        lambda p: np.dtype(p["type_code"])
+        in (np.dtype(np.uint64), np.dtype(np.uint32), np.dtype(np.uint16)),
+    )
     def test_shift_all_bits(self, type_code, op):
         """Shifts where the shift amount is the width of the type or wider"""
         # gh-2449

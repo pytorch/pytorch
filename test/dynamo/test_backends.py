@@ -15,6 +15,7 @@ from torch._dynamo.testing import same
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyHPU,
+    preserves_device_selection,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -50,6 +51,11 @@ class Conv_Bn_Relu(torch.nn.Module):
 
 
 class TestOptimizations(torch._dynamo.test_case.TestCase):
+    setUp = preserves_device_selection(torch._dynamo.test_case.TestCase.setUp)
+    setUpClass = classmethod(
+        preserves_device_selection(torch._dynamo.test_case.TestCase.setUpClass.__func__)
+    )
+
     def test_example_inputs(self):
         def fn(a, bc, d):
             b, c = bc
@@ -715,6 +721,26 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             )
         )
 
+    def test_torch_compile_wrapper_passes_name(self):
+        captured_kwargs = {}
+
+        def my_custom_backend(gm, example_inputs, **kwargs):
+            captured_kwargs.update(kwargs)
+            return gm.forward
+
+        wrapper = torch._TorchCompileWrapper(
+            my_custom_backend, None, None, None, name="test_name"
+        )
+        self.assertEqual(wrapper.name, "test_name")
+        self.assertEqual(wrapper.kwargs.get("name"), "test_name")
+
+        @torch.compile(backend=my_custom_backend, name="test_compile_name")
+        def fn(x):
+            return x + 1
+
+        fn(torch.ones(2))
+        self.assertEqual(captured_kwargs.get("name"), "test_compile_name")
+
     def test_lookup_backend_suggestion(self):
         from torch._dynamo.backends.registry import lookup_backend
         from torch._dynamo.exc import InvalidBackend
@@ -886,7 +912,7 @@ class TestDefaultBackend(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(eager_and_record.graphs), 0)
 
 
-instantiate_device_type_tests(TestOptimizations, globals())
+instantiate_device_type_tests(TestOptimizations, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

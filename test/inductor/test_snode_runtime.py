@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
-from unittest import skipIf
+from unittest import skipIf, skipUnless
 
 import torch
 import torch.distributed as dist
@@ -10,7 +10,9 @@ from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import requires_triton, RUN_CPU
 
 
 aten = torch.ops.aten
@@ -32,27 +34,23 @@ def calculate_runtime(f, *args) -> float:
     """
     metrics.reset()
     torch._logging.set_logs(inductor_metrics=True)
-    torch.compile(f, backend=compile_but_use_eager)(*args)
-    print(metrics.node_runtimes)
+    try:
+        torch.compile(f, backend=compile_but_use_eager)(*args)
+        print(metrics.node_runtimes)
 
-    ret = 0.0
-    for pair in metrics.node_runtimes:
-        ret += pair[1]
-
-    torch._logging.set_logs()
+        ret = 0.0
+        for pair in metrics.node_runtimes:
+            ret += pair[1]
+    finally:
+        torch._logging.set_logs()
     return ret
 
 
-DEVICE = GPU_TYPE
-
-
-def T(*size, dtype=torch.float32, device=DEVICE, grad=False) -> torch.Tensor:
+def T(*size, device, dtype=torch.float32, grad=False) -> torch.Tensor:
     return torch.randn(size, dtype=dtype, device=device, requires_grad=grad)
 
 
 class TestCase(InductorTestCase):
-    device = DEVICE
-
     """
     Helper methods to compare runtime estimate against 0. Since this estimate is hardware dependent,
     stronger comparisons may fail depending on the host's specs.
@@ -84,133 +82,145 @@ class TestCase(InductorTestCase):
         super().assertNotEqual(x, 0.0, atol=0, rtol=0)
 
 
-class UnsupportedTests(TestCase):
-    device = DEVICE
+# The test compiles through the C++ backend, so it needs a working C++
+# toolchain; skip instead of erroring where one is missing. RUN_CPU, not HAS_CPU:
+# GPU shards set PYTORCH_TESTING_DEVICE_ONLY_FOR and must not pay this compile.
+@skipUnless(RUN_CPU, "requires CPU and a working C++ compiler")
+class UnsupportedTestsCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
 
-    def test_no_op(self):
+    def test_runtime_is_zero_on_non_gpu_device(self):
         def f(a):
-            return a
-
-        inp = (T(10, 10),)
-        self.assertZero(calculate_runtime(f, *inp))
-
-    def test_no_cuda(self):
-        def f(a):
-            return a
+            return torch.relu(a) + 1
 
         inp = (torch.randn((10, 10), device="cpu"),)
+        # Use a real op so Inductor compiles and estimates a graph: with
+        # `return a`, Dynamo traces no ops, compile_but_use_eager never runs
+        # and the estimate is zero for that reason alone, which would make
+        # the assertion below unfalsifiable.
         self.assertZero(calculate_runtime(f, *inp))
+        self.assertGreater(len(metrics.node_runtimes), 0)
 
 
+# When the process has no Triton, Scheduler.create_backend raises TritonMissing
+# for non-MPS GPU-type devices (GPUTooOldForTriton on pre-sm_70 CUDA) instead
+# of skipping, so the kernel-lowering classes state the requirement.
+# requires_triton is the process-wide inductor_utils.HAS_TRITON, evaluated once
+# at import, not a query about the device under test.
+@requires_triton()
 class ComputeBoundedTests(TestCase):
-    device = DEVICE
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_conv1d(self):
+    def test_conv1d(self, device):
         def f(x, y):
             return torch.nn.functional.conv1d(x, y)
 
-        inp = (T(33, 16, 30), T(20, 16, 5))
+        inp = (T(33, 16, 30, device=device), T(20, 16, 5, device=device))
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    def test_conv2d(self):
+    def test_conv2d(self, device):
         def f(x, y):
             return torch.nn.functional.conv2d(x, y, padding=1)
 
-        inp = (T(8, 4, 3, 3), T(1, 4, 5, 5))
+        inp = (T(8, 4, 3, 3, device=device), T(1, 4, 5, 5, device=device))
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    def test_conv2d_transpose(self):
+    def test_conv2d_transpose(self, device):
         def f(x, y):
             return torch.nn.functional.conv_transpose2d(x, y, padding=1)
 
-        inp = (T(8, 1, 1, 1), T(1, 4, 5, 5))
+        inp = (T(8, 1, 1, 1, device=device), T(1, 4, 5, 5, device=device))
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    def test_conv3d(self):
+    def test_conv3d(self, device):
         def f(x, y):
             return torch.nn.functional.conv3d(x, y)
 
-        inp = (T(20, 16, 50, 10, 20), T(33, 16, 3, 3, 3))
+        inp = (T(20, 16, 50, 10, 20, device=device), T(33, 16, 3, 3, 3, device=device))
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    def test_mm(self):
+    def test_mm(self, device):
         def f(a, b):
             return torch.mm(a, b)
 
         inp = (
-            T(10, 10),
-            T(10, 10),
+            T(10, 10, device=device),
+            T(10, 10, device=device),
         )
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    def test_addmm(self):
+    def test_addmm(self, device):
         def f(a, b, c):
             return torch.addmm(a, b, c)
 
         inp = (
-            T(10, 10),
-            T(10, 10),
-            T(10, 10),
+            T(10, 10, device=device),
+            T(10, 10, device=device),
+            T(10, 10, device=device),
         )
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    def test_bmm(self):
+    def test_bmm(self, device):
         def f(a, b):
             return torch.bmm(a, b)
 
         inp = (
-            T(10, 10, 10),
-            T(10, 10, 10),
+            T(10, 10, 10, device=device),
+            T(10, 10, 10, device=device),
         )
         self.assertNotZero(calculate_runtime(f, *inp))
 
 
+@requires_triton()
 class MemoryBoundedTests(TestCase):
-    device = DEVICE
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_relu(self):
+    def test_relu(self, device):
         def f(a):
             return torch.nn.functional.relu(a)
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    def test_horizontal_reduction_pointwise(self):
+    def test_horizontal_reduction_pointwise(self, device):
         def f(a):
             b = a.sum(dim=1)
             c = a.cos()
             return b, c
 
-        inp = (T(10, 10),)
+        inp = (T(10, 10, device=device),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    def test_pointwise(self):
+    def test_pointwise(self, device):
         def f(x):
             return x.cos()
 
-        inp = (T(10),)
+        inp = (T(10, device=device),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
-    def test_dynamic(self):
+    def test_dynamic(self, device):
         def f(x):
             return x.cos()
 
-        inp = (T(10),)
+        inp = (T(10, device=device),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
 
+@requires_triton()
 class InputDistanceTests(TestCase):
-    device = DEVICE
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _get_snodes(self, f, *args):
         metrics.reset()
         torch._logging.set_logs(inductor_metrics=True)
-        torch.compile(f, backend=compile_but_use_eager)(*args)
-        torch._logging.set_logs()
+        try:
+            torch.compile(f, backend=compile_but_use_eager)(*args)
+        finally:
+            torch._logging.set_logs()
         return [snode for snode, _ in metrics.nodes_num_elem]
 
-    def test_chain_with_reduction(self):
+    def test_chain_with_reduction(self, device):
         """
         input -> sum (depth 0) -> sum (depth 1)
         Reductions prevent full fusion, giving us distinct depth levels.
@@ -220,13 +230,13 @@ class InputDistanceTests(TestCase):
             a = x.sum(dim=-1)
             return a.sum(dim=-1)
 
-        snodes = self._get_snodes(f, T(10, 10, 10))
+        snodes = self._get_snodes(f, T(10, 10, 10, device=device))
         all_min = [s.min_input_distance for s in snodes]
         all_max = [s.max_input_distance for s in snodes]
         self.assertEqual(min(all_min), 0)
         self.assertEqual(max(all_max), 1)
 
-    def test_fused_node_depth_range(self):
+    def test_fused_node_depth_range(self, device):
         """
         A reduction fused with its pointwise epilogue should have
         min_input_distance=0 and max_input_distance=1.
@@ -236,13 +246,13 @@ class InputDistanceTests(TestCase):
             a = x.sum(dim=-1)
             return a.cos()
 
-        snodes = self._get_snodes(f, T(10, 10))
+        snodes = self._get_snodes(f, T(10, 10, device=device))
         # The reduction and pointwise get fused
         self.assertEqual(len(snodes), 1)
         self.assertEqual(snodes[0].min_input_distance, 0)
         self.assertEqual(snodes[0].max_input_distance, 1)
 
-    def test_extern_kernel_chain(self):
+    def test_extern_kernel_chain(self, device):
         """
         mm (depth 0, extern) -> cos+sum fused (depth 1)
         """
@@ -252,13 +262,13 @@ class InputDistanceTests(TestCase):
             d = c.cos()
             return d.sum(dim=-1)
 
-        snodes = self._get_snodes(f, T(10, 10), T(10, 10))
+        snodes = self._get_snodes(f, T(10, 10, device=device), T(10, 10, device=device))
         all_min = [s.min_input_distance for s in snodes]
         all_max = [s.max_input_distance for s in snodes]
         self.assertEqual(min(all_min), 0)
         self.assertEqual(max(all_max), 1)
 
-    def test_foreach_basic(self):
+    def test_foreach_basic(self, device):
         """
         foreach_add on graph inputs should have depth 0.
         """
@@ -266,14 +276,15 @@ class InputDistanceTests(TestCase):
         def f(xs, ys):
             return torch._foreach_add(xs, ys)
 
-        xs = [T(10), T(20)]
-        ys = [T(10), T(20)]
+        xs = [T(10, device=device), T(20, device=device)]
+        ys = [T(10, device=device), T(20, device=device)]
         snodes = self._get_snodes(f, xs, ys)
+        self.assertGreater(len(snodes), 0)
         for s in snodes:
             self.assertEqual(s.min_input_distance, 0)
             self.assertEqual(s.max_input_distance, 0)
 
-    def test_foreach_after_extern(self):
+    def test_foreach_after_extern(self, device):
         """
         mm (extern, depth 0) -> foreach_add (depth 1)
         The extern kernel creates a fusion barrier so the foreach
@@ -284,7 +295,12 @@ class InputDistanceTests(TestCase):
             c = torch.mm(a, b)
             return torch._foreach_add([c, c], ys)
 
-        snodes = self._get_snodes(f, T(10, 10), T(10, 10), [T(10, 10), T(10, 10)])
+        snodes = self._get_snodes(
+            f,
+            T(10, 10, device=device),
+            T(10, 10, device=device),
+            [T(10, 10, device=device), T(10, 10, device=device)],
+        )
         all_min = [s.min_input_distance for s in snodes]
         all_max = [s.max_input_distance for s in snodes]
         self.assertEqual(min(all_min), 0)
@@ -292,8 +308,9 @@ class InputDistanceTests(TestCase):
 
 
 @skipIf(not dist.is_available(), "requires distributed")
+@requires_triton()
 class TestCommAnalysis(TestCase):
-    device = DEVICE
+    hw_classification = HardwareClassification.ACCELERATOR
 
     WORLD_SIZE: int = 8
     RANKS = list(range(8))
@@ -302,6 +319,12 @@ class TestCommAnalysis(TestCase):
         from torch.testing._internal.distributed.fake_pg import FakeStore
 
         store = FakeStore()
+        fake_devices = dist.Backend.backend_capability.get(dist.Backend.FAKE, [])
+        if self.device_type not in fake_devices:
+            self.skipTest(
+                f"the c10d fake backend is registered for {fake_devices}, "
+                f"not for {self.device_type}"
+            )
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.WORLD_SIZE, store=store
         )
@@ -324,27 +347,27 @@ class TestCommAnalysis(TestCase):
                 self.assertNotZero(runtime)
             # Make sure a collective kernel is found in graph
             self.assertTrue(found_collective)
-            torch._logging.set_logs()
         finally:
+            torch._logging.set_logs()
             dist.destroy_process_group()
 
-    def test_legacy_all_reduce(self):
+    def test_legacy_all_reduce(self, device):
         def fn(x):
             r = c10d.all_reduce(x, "sum", "", self.RANKS, self.WORLD_SIZE)
             return c10d.wait_tensor(r)
 
-        inp = T(10, 10)
+        inp = T(10, 10, device=device)
         self._verify_runtime_estimation(fn, (inp,))
 
-    def test_legacy_all_reduce_coalesced(self):
+    def test_legacy_all_reduce_coalesced(self, device):
         def fn(x):
             rs = c10d.all_reduce_coalesced(x, "sum", "", self.RANKS, self.WORLD_SIZE)
             return [c10d.wait_tensor(r) for r in rs]
 
-        inp = [T(10, 10), T(15, 15)]
+        inp = [T(10, 10, device=device), T(15, 15, device=device)]
         self._verify_runtime_estimation(fn, (inp,))
 
-    def test_legacy_all_gather_into_tensor_coalesced(self):
+    def test_legacy_all_gather_into_tensor_coalesced(self, device):
         def fn(x):
             rs = c10d.all_gather_into_tensor_coalesced(
                 x,
@@ -354,26 +377,26 @@ class TestCommAnalysis(TestCase):
             )
             return [c10d.wait_tensor(r) for r in rs]
 
-        inp = [T(10, 10), T(15, 15)]
+        inp = [T(10, 10, device=device), T(15, 15, device=device)]
         self._verify_runtime_estimation(fn, (inp,))
 
-    def test_all_reduce(self):
+    def test_all_reduce(self, device):
         def fn(x):
             r = _c10d.all_reduce(x, "sum", "0")
             return _c10d.wait_tensor(r)
 
-        inp = T(10, 10)
+        inp = T(10, 10, device=device)
         self._verify_runtime_estimation(fn, (inp,))
 
-    def test_all_reduce_coalesced(self):
+    def test_all_reduce_coalesced(self, device):
         def fn(x):
             rs = _c10d.all_reduce_coalesced(x, "sum", "0")
             return [_c10d.wait_tensor(r) for r in rs]
 
-        inp = [T(10, 10), T(15, 15)]
+        inp = [T(10, 10, device=device), T(15, 15, device=device)]
         self._verify_runtime_estimation(fn, (inp,))
 
-    def test_all_gather_into_tensor(self):
+    def test_all_gather_into_tensor(self, device):
         def fn(x):
             rs = _c10d.all_gather_into_tensor(
                 x,
@@ -382,10 +405,10 @@ class TestCommAnalysis(TestCase):
             )
             return [_c10d.wait_tensor(r) for r in rs]
 
-        inp = T(10, 10)
+        inp = T(10, 10, device=device)
         self._verify_runtime_estimation(fn, (inp,))
 
-    def test_all_gather_into_tensor_coalesced(self):
+    def test_all_gather_into_tensor_coalesced(self, device):
         def fn(x):
             rs = _c10d.all_gather_into_tensor_coalesced(
                 x,
@@ -394,10 +417,10 @@ class TestCommAnalysis(TestCase):
             )
             return [_c10d.wait_tensor(r) for r in rs]
 
-        inp = [T(10, 10), T(15, 15)]
+        inp = [T(10, 10, device=device), T(15, 15, device=device)]
         self._verify_runtime_estimation(fn, (inp,))
 
-    def test_reduce_scatter_tensor(self):
+    def test_reduce_scatter_tensor(self, device):
         def fn(x):
             rs = _c10d.reduce_scatter_tensor(
                 x,
@@ -407,10 +430,10 @@ class TestCommAnalysis(TestCase):
             )
             return [_c10d.wait_tensor(r) for r in rs]
 
-        inp = T(self.WORLD_SIZE, 10)
+        inp = T(self.WORLD_SIZE, 10, device=device)
         self._verify_runtime_estimation(fn, (inp,))
 
-    def test_reduce_scatter_tensor_coalesced(self):
+    def test_reduce_scatter_tensor_coalesced(self, device):
         def fn(x):
             rs = _c10d.reduce_scatter_tensor_coalesced(
                 x,
@@ -420,12 +443,28 @@ class TestCommAnalysis(TestCase):
             )
             return [_c10d.wait_tensor(r) for r in rs]
 
-        inp = [T(self.WORLD_SIZE, 10), T(self.WORLD_SIZE, 15)]
+        inp = [
+            T(self.WORLD_SIZE, 10, device=device),
+            T(self.WORLD_SIZE, 15, device=device),
+        ]
         self._verify_runtime_estimation(fn, (inp,))
+
+
+instantiate_device_type_tests(
+    ComputeBoundedTests, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    MemoryBoundedTests, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    InputDistanceTests, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestCommAnalysis, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU:
-        run_tests(needs="filelock")
+    run_tests(needs="filelock")

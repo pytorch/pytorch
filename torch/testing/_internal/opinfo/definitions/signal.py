@@ -329,12 +329,12 @@ def make_signal_windows_opinfo(
             DecorateInfo(unittest.skip("Skipped!"), "TestMathBits", "test_neg_view"),
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestVmapOperatorsOpInfo",
+                "TestVmapOperatorsOpInfoDevice",
                 "test_vmap_exhaustive",
             ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestVmapOperatorsOpInfo",
+                "TestVmapOperatorsOpInfoDevice",
                 "test_op_has_batch_rule",
             ),
             DecorateInfo(

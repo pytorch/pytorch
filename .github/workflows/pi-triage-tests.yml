@@ -1,0 +1,52 @@
+# Owner(s): ["module: ci"]
+name: Pi triage tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/issue_triage_pi/**"
+      - ".github/pi/**"
+      - ".github/actions/pi-agent/**"
+      - ".github/workflows/*triage*.yml"
+      - ".agents/skills/triaging-issues/**"
+  pull_request:
+    paths:
+      - "scripts/issue_triage_pi/**"
+      - ".github/pi/**"
+      - ".github/actions/pi-agent/**"
+      - ".github/workflows/*triage*.yml"
+      - ".agents/skills/triaging-issues/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Install pi from the action lockfile
+        run: |
+          mkdir -p "$RUNNER_TEMP/pi-install"
+          cp .github/actions/pi-agent/package{,-lock}.json "$RUNNER_TEMP/pi-install/"
+          npm ci --prefix "$RUNNER_TEMP/pi-install" --ignore-scripts --no-fund --no-audit
+      - name: Test read-only issue tools offline
+        run: |
+          export PI_TEST_RUNTIME="$RUNNER_TEMP/pi-install/node_modules/@earendil-works/pi-coding-agent"
+          node --test .github/pi/tests/github-issue-tools.mjs
+      - name: Test triage plans and workflow contracts
+        run: |
+          python3 -m pip install --quiet pyyaml==6.0.2
+          python3 -m unittest discover -s scripts/issue_triage_pi -v

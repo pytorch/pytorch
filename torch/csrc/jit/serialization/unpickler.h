@@ -136,7 +136,7 @@ class TORCH_API Unpickler {
   void readGlobal(
       const std::string& module_name,
       const std::string& class_name);
-  void rebuildTensor(bool quantized);
+  void rebuildTensor(bool quantized, bool has_explicit_dtype = false);
   void rebuildParameter();
   void rebuildTensorFromTypeV2();
   void rebuildSparseTensor();

@@ -31,14 +31,12 @@ from torch.testing._internal.common_nn import (
     TestBase,
 )
 from torch.testing._internal.common_utils import (
-    ACCELERATOR_TYPE,
     freeze_rng_state,
     HardwareClassification,
     make_tensor,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
-    TEST_ACCELERATOR,
     TestCase,
 )
 from torch.utils._pytree import tree_map_only
@@ -482,9 +480,11 @@ class TestExpandedWeightFunctional(TestCase):
             self.assertEqual(res, exp, atol=atol, rtol=rtol)
 
     def _compute_tolerances(self, device):
-        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(
-            0
-        ) == (8, 6)
+        # sm86 fused kernels need a looser tolerance; there is no
+        # device-agnostic capability query, so this stays CUDA-specific.
+        is_cuda_sm86 = torch.device(device).type == "cuda" and (
+            torch.cuda.get_device_capability(device) == (8, 6)
+        )
         return (9e-3, 5e-5) if is_cuda_sm86 else (1e-4, 5e-5)
 
     @tf32_off()
@@ -616,7 +616,7 @@ class TestExpandedWeightFunctional(TestCase):
 
         N = 3
         C = 5
-        inp = torch.randn(N, C)
+        inp = torch.randn(N, C, device=device)
         with self.assertRaisesRegex(
             RuntimeError, r"Expected number of channels in input to be divisible"
         ):
@@ -969,16 +969,14 @@ class TestExpandedWeightModule(TestCase):
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
         self.test_cpu = kwargs.get("test_cpu", True)
-        self.test_accelerator = kwargs.get(
-            "test_accelerator", kwargs.get("test_cuda", True)
-        )
+        self.test_accelerator = kwargs.get("test_accelerator", True)
         super().__init__(*args, **kwargs)
 
     @property
     def constructor_args(self):
         return self._get_arg("constructor_args", False)
 
-    def test_context_manager(self, test_case, device):
+    def run_context_manager(self, test_case, device):
         kwargs = {"device": device, "dtype": torch.double}
         module = self.constructor(*self.constructor_args).to(**kwargs)
         if "Embedding" in self.get_name():
@@ -994,7 +992,7 @@ class ContextManagerTests(TestBase):
             )
         test_case._do_test(module, input)
 
-    def test_context_manager_multiple_inputs(self, test_case, device):
+    def run_context_manager_multiple_inputs(self, test_case, device):
         module = self.constructor(*self.constructor_args).to(device)
         input = self._get_input().detach().clone()
         if len(input.shape) == 0 or input.shape[0] == 0:
@@ -1028,7 +1026,6 @@ def filter_supported_tests(t):
 supported_tests = [
     t for t in module_tests + get_new_module_tests() if filter_supported_tests(t)
 ]
-accelerator = ACCELERATOR_TYPE._value
 for test_param in supported_tests:
     if "constructor" not in test_param:
         name = test_param.pop("module_name")
@@ -1041,32 +1038,27 @@ for test_param in supported_tests:
     test_name_multi_input = test.get_name() + "_multiple_inputs"
     if hasattr(TestExpandedWeightModule, test_name_multi_input):
         raise RuntimeError("Found two tests with the same name: " + test_name)
-    if test.test_cpu:
-        setattr(
-            TestExpandedWeightModule,
-            test_name,
-            decorator(lambda self, test=test: test.test_context_manager(self, "cpu")),
-        )
-        setattr(
-            TestExpandedWeightModule,
-            test_name_multi_input,
-            decorator(
-                lambda self, test=test: test.test_context_manager_multiple_inputs(
-                    self, "cpu"
-                )
-            ),
-        )
-    if TEST_ACCELERATOR and test.test_accelerator:
-        # since this checks derivatives, only use double for precision
-        setattr(
-            TestExpandedWeightModule,
-            test_name + f"_{accelerator}_double",
-            decorator(
-                lambda self, test=test, acc=accelerator: test.test_context_manager(
-                    self, acc
-                )
-            ),
-        )
+
+    def context_manager(self, device, test=test):
+        device_type = torch.device(device).type
+        if device_type == "cpu" and not test.test_cpu:
+            raise unittest.SkipTest(f"{test.get_name()} is not run on CPU")
+        if device_type != "cpu" and not test.test_accelerator:
+            raise unittest.SkipTest(f"{test.get_name()} is not run on accelerators")
+        test.run_context_manager(self, device)
+
+    def context_manager_multiple_inputs(self, device, test=test):
+        # this variant keeps the input on the CPU, so it only runs there
+        if torch.device(device).type != "cpu":
+            raise unittest.SkipTest("multiple-input variant is CPU-only")
+        test.run_context_manager_multiple_inputs(self, device)
+
+    setattr(TestExpandedWeightModule, test_name, decorator(context_manager))
+    setattr(
+        TestExpandedWeightModule,
+        test_name_multi_input,
+        decorator(context_manager_multiple_inputs),
+    )
 
 # ------------- HELPER FUNCTIONS -----------------
 

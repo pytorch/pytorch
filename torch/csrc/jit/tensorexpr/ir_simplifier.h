@@ -42,9 +42,7 @@ Dtype promoteTypesVec(const ExprPtr& s, const std::vector<ExprType>& v) {
 
 template <class ExprType>
 Dtype promoteTypesVec(const std::vector<ExprType>& v) {
-  if (v.empty()) {
-    throw malformed_input("empty list of types");
-  }
+  TORCH_CHECK(!v.empty(), "MALFORMED INPUT: empty list of types");
 
   Dtype t = v[0]->dtype();
   for (const auto& e : v) {

@@ -10,26 +10,80 @@ import torch
 from torch.utils._triton import has_triton_package
 
 
+# The python wrapper global mapping a module-level kernel's name to the config it
+# launches with (written by _KernelConfigs in codegen/wrapper.py, read by
+# cached_autotune).
+KERNEL_CONFIGS_NAME = "KERNEL_CONFIGS"
+
+
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
     "X": 8192 if torch.version.hip else 4096,
     "Y": 1024,
-    "Z": 1024,
+    "Z0_": 1024,
     "R0_": 4096 * 16,  # * 16 is multi-kernel only
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
+    "R2_": 2048 * 16,  # * 16 is multi-kernel only
 }
+TRITON_MAX_MIX_ORDER_XBLOCK = 16
 TRITON_MAX_RSPLIT = 64
 TRITON_MAX_TENSOR_NUMEL = 1 << 20
 TRITON_DOT_MIN_BLOCK = 16
 TRITON_DEFAULT_BLOCK_SIZES = {
     "XBLOCK": 128,
     "YBLOCK": 1,
-    "ZBLOCK": 1,
+    "Z0_BLOCK": 1,
     "R0_BLOCK": 1,
 }
 TRITON_DEFAULT_RSPLIT = 1
 TRITON_DEFAULT_RSPLIT_SIZE = 1
+
+
+def mix_order_reduction_max_num_stages(
+    rnumel_hint: int | None, inductor_meta: typing.Mapping[str, typing.Any]
+) -> int:
+    if not inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
+        return 1
+    # tl.range pipelining cannot predicate device-side tensor-map creation.
+    if inductor_meta.get("uses_device_tma"):
+        return 1
+    return 2 if rnumel_hint is not None and rnumel_hint > 8192 else 3
+
+
+def is_valid_mix_order_reduction_xblock(
+    xblock: typing.Any, rsplit_size: int, max_xblock: int | None = None
+) -> bool:
+    return (
+        type(xblock) is int
+        and xblock > 0
+        and xblock & (xblock - 1) == 0
+        and (max_xblock is None or xblock <= max_xblock)
+        and rsplit_size % xblock == 0
+    )
+
+
+def is_valid_mix_order_reduction_config(
+    config: typing.Mapping[str, typing.Any],
+    rsplit_size: int,
+    rnumel_hint: int | None,
+    inductor_meta: typing.Mapping[str, typing.Any],
+) -> bool:
+    xblock = config.get("XBLOCK")
+    min_xblock = inductor_meta.get("tma_min_block_sizes", {}).get("XBLOCK", 1)
+    num_stages = config.get("NUM_STAGES")
+    if type(xblock) is not int or type(num_stages) is not int:
+        return False
+    xblock = typing.cast(int, xblock)
+    num_stages = typing.cast(int, num_stages)
+    max_num_stages = mix_order_reduction_max_num_stages(rnumel_hint, inductor_meta)
+    return (
+        is_valid_mix_order_reduction_xblock(
+            xblock, rsplit_size, TRITON_MAX_MIX_ORDER_XBLOCK
+        )
+        and xblock >= min_xblock
+        and 1 <= num_stages <= max_num_stages
+    )
 
 
 def native_matmul_block_numel(
@@ -38,7 +92,7 @@ def native_matmul_block_numel(
     return (
         kwargs.get("XBLOCK", 1)
         * kwargs.get("YBLOCK", 1)
-        * kwargs.get("ZBLOCK", 1)
+        * kwargs.get("Z0_BLOCK", 1)
         * (kwargs.get("R0_BLOCK", 1) if r0_block is None else r0_block)
     )
 
@@ -180,6 +234,7 @@ class DeviceProperties(typing.NamedTuple):
     max_threads_per_multi_processor: int | None = None
     max_threads_per_block: int | None = None
     warp_size: int | None = None
+    xcc_count: int | None = None
 
     @property
     def warp_size_or_default(self) -> int:
@@ -215,6 +270,7 @@ class DeviceProperties(typing.NamedTuple):
             ),
             max_threads_per_block=getattr(props, "max_threads_per_block", 1024),
             warp_size=getattr(props, "warp_size", None),
+            xcc_count=getattr(props, "xcc_count", None),
         )
 
 
@@ -285,8 +341,11 @@ class InductorMeta(typing.TypedDict, total=False):
     force_disable_caches: bool
     dynamic_scale_rblock: bool
     incremental_autotune: bool
+    incremental_autotune_reduction: bool
+    incremental_autotune_max_dispatches: int
     max_autotune: bool
     max_autotune_pointwise: bool
+    max_autotune_reduction: bool
     min_split_scan_rblock: int
     spill_threshold: int
     store_cubin: bool
@@ -297,6 +356,7 @@ class InductorMeta(typing.TypedDict, total=False):
     dynamic_disable_pipelining: bool
     are_deterministic_algorithms_enabled: bool
     is_hip: bool | None
+    sm100_outer_reduction_r0_block_8: bool
     is_fbcode: bool
     profile_bandwidth: bool
     profile_bandwidth_regex: str
@@ -318,6 +378,7 @@ class InductorMeta(typing.TypedDict, total=False):
     tma_min_block_sizes: dict[str, int]
     uses_tma: bool
     uses_device_tma: bool
+    asserts_need_real_inputs: bool
     host_tma_descriptor_args: dict[str, dict[str, typing.Any]]
     tiling_scores: typing.Any
     min_xblock: int
@@ -332,6 +393,8 @@ class InductorMeta(typing.TypedDict, total=False):
 
     # Kernel identity / launch (codegen_kernel literal)
     grid_type: str
+    # Number of pointwise axes, excluding reductions, used by GridND.
+    rank: int
     kernel_name: str
     mutated_arg_names: typing.Any
     optimize_mem: bool
@@ -349,6 +412,7 @@ class InductorMeta(typing.TypedDict, total=False):
     extra_launcher_args: typing.Any
     fixed_grid: typing.Any
     precomputed_grids: typing.Any
+    declared_constexpr_names: list[str]
     config_args: typing.Any
     use_fast_triton_launcher: bool
 

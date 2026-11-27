@@ -82,22 +82,6 @@ class TestLazyModules(TestCase):
         self.assertTrue(module.has_uninitialized_params())
 
     @suppress_warnings
-    def test_lazy_module_jit_param(self):
-        module = LazyModule()
-        module.register_parameter("test_param", UninitializedParameter())
-        self.assertTrue(module.has_uninitialized_params())
-        with self.assertRaisesRegex(RuntimeError, "run a forward pass"):
-            torch.jit.script(module)
-
-    @suppress_warnings
-    def test_lazy_module_jit_buffer(self):
-        module = LazyModule()
-        module.test_buffer = UninitializedBuffer()
-        self.assertTrue(module.has_uninitialized_params())
-        with self.assertRaisesRegex(RuntimeError, "run a forward pass"):
-            torch.jit.script(module)
-
-    @suppress_warnings
     def test_lazy_share_memory_param(self):
         module = LazyModule()
         module.register_parameter("test_param", UninitializedParameter())

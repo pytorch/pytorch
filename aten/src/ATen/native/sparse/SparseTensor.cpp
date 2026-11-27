@@ -1,6 +1,7 @@
 // Basic functions on sparse tensors
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -667,7 +668,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
     const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
-    scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
+    scalar_t* newValues_ptr = newValues.mutable_data_ptr<scalar_t>();
     for (const auto j : c10::irange(nnz)) {
       int64_t pos = indicesPermutationAccessor[j];
       int64_t curr = indicesBufferAccessor[j];

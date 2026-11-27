@@ -68,9 +68,8 @@ RegisterHandler pingHandler{"ping", [](const Request&, Response& res) {
                             }};
 
 // Each hooked backend records into its own FlightRecorder instance, so the
-// caller says which one to read. Defaulting to the instance ProcessGroupGloo
-// records into keeps existing callers -- the debug server's "FlightRecorder
-// CPU" page among them -- seeing what they always did.
+// caller says which one to read. Defaults to gloo's instance, which existing
+// callers -- the debug server's "FlightRecorder CPU" page among them -- read.
 std::string frBackendParam(const Request& req) {
   auto backend = req.getParam("backend");
   return backend.empty() ? ::c10d::kDefaultFRBackend : backend;
@@ -99,16 +98,18 @@ RegisterHandler frDumpFileHandler(
         return;
       }
 
-      // Single-flight guard: a polling health check must not spawn one worker
-      // per request, all writing the same file. The previous future's state is
-      // the signal - once wait_for(0) reports ready the worker has exited, so
-      // reassigning cannot block on a join; otherwise a dump is still running
-      // and we coalesce into it.
+      // Single-flight guard per backend: a polling health check must not spawn
+      // one worker per request, all writing the same file. Different backends
+      // have different recorders and must be allowed to dump concurrently.
+      // The previous future's state is the signal - once wait_for(0) reports
+      // ready the worker has exited, so reassigning cannot block on a join;
+      // otherwise a dump is still running and we coalesce into it.
       static std::mutex dumpFutureMutex;
-      static std::future<void> dumpFuture;
+      static std::unordered_map<std::string, std::future<void>> dumpFutures;
 
       {
         std::lock_guard<std::mutex> lock(dumpFutureMutex);
+        auto& dumpFuture = dumpFutures[backend];
         if (dumpFuture.valid() &&
             dumpFuture.wait_for(std::chrono::seconds(0)) !=
                 std::future_status::ready) {
@@ -192,7 +193,7 @@ RegisterHandler pyspyHandler{
 } // namespace
 
 void registerHandler(const std::string& name, HandlerFunc f) {
-  return getHandlerRegistry().registerHandler(name, std::move(f));
+  getHandlerRegistry().registerHandler(name, std::move(f));
 }
 
 HandlerFunc getHandler(const std::string& name) {

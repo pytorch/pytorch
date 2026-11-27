@@ -6,15 +6,20 @@ namespace test {
 
 namespace {
 __global__ void waitClocks(const uint64_t count) {
-  // Few AMD specific GPUs have different clock intrinsic
-#if defined(__GFX11__) && defined(USE_ROCM) && !defined(__CUDA_ARCH__)
+  // On gfx11/gfx12, clock64() reads a per-CU counter that follows the shader
+  // clock (not synced across CUs on gfx1250); wall_clock64() has a fixed rate.
+#if (defined(__GFX11__) || defined(__GFX12__)) && defined(USE_ROCM) && !defined(__CUDA_ARCH__)
   clock_t start = wall_clock64();
 #else
   clock_t start = clock64();
 #endif
   clock_t offset = 0;
   while (offset < count) {
+#if (defined(__GFX11__) || defined(__GFX12__)) && defined(USE_ROCM) && !defined(__CUDA_ARCH__)
+    offset = wall_clock64() - start;
+#else
     offset = clock() - start;
+#endif
   }
 }
 

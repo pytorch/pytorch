@@ -6,6 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import shutil
 import socket
 import sys
 import unittest
@@ -13,7 +14,11 @@ from unittest import mock
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
+from torch.distributed.elastic.rendezvous.etcd_server import (
+    EtcdServer,
+    find_free_port,
+    stop_etcd,
+)
 
 
 if os.getenv("CIRCLECI"):
@@ -60,6 +65,48 @@ class EtcdServerTest(unittest.TestCase):
             self.assertEqual(1, rdzv_info.world_size)
         finally:
             server.stop()
+
+
+class EtcdServerTerminationHandlerTest(unittest.TestCase):
+    def _make_server(self):
+        server = EtcdServer()
+        self.addCleanup(shutil.rmtree, server._base_data_dir, ignore_errors=True)
+        return server
+
+    def test_registers_termination_handler_on_success(self):
+        # start() must register the atexit handler that shuts the etcd
+        # subprocess down and removes the data dir when the process exits.
+        server = self._make_server()
+        fake_proc = mock.Mock()
+
+        def fake_start(data_dir, timeout, stderr):
+            server._etcd_proc = fake_proc
+
+        with (
+            mock.patch.object(server, "_start", side_effect=fake_start),
+            mock.patch("atexit.register") as mock_register,
+        ):
+            server.start()
+
+        mock_register.assert_called_once_with(
+            stop_etcd, fake_proc, server._base_data_dir
+        )
+
+    def test_does_not_register_when_all_start_attempts_fail(self):
+        # No live server means there is nothing to clean up at exit.
+        server = self._make_server()
+        with (
+            mock.patch.object(
+                server, "_start", side_effect=RuntimeError("no etcd binary")
+            ),
+            mock.patch("atexit.register") as mock_register,
+            mock.patch("shutil.rmtree") as mock_rmtree,
+        ):
+            with self.assertRaises(RuntimeError):
+                server.start(num_retries=1)
+
+        mock_register.assert_not_called()
+        mock_rmtree.assert_called_once_with(server._base_data_dir, ignore_errors=True)
 
 
 class FindFreePortTest(unittest.TestCase):

@@ -44,4 +44,5 @@ The following are aliases to their counterparts in ``torch.cuda`` in the nested 
     Stream
     ExternalStream
     Event
+    execute_on_streams
 ```

@@ -16,6 +16,7 @@
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -62,8 +63,8 @@ TORCH_META_FUNC(topk)
       "selected index k out of range");
   int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
   TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
-  TORCH_CHECK_TYPE(!self.is_complex(), " topk does not support complex dtypes on CPU");
-  TORCH_CHECK_NOT_IMPLEMENTED(!(self.scalar_type() == kBool), "topk does not support bool dtypes on CPU");
+  TORCH_CHECK_TYPE(!self.is_complex(), "topk does not support complex dtypes");
+  TORCH_CHECK_NOT_IMPLEMENTED(!(self.scalar_type() == kBool), "topk does not support bool dtypes");
 
   // Build the output size, which is the dim being selected set to
   // size k
@@ -79,7 +80,7 @@ TORCH_META_FUNC2(sort, stable)
 (const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending) {
   maybe_wrap_dim(dim, self.dim());
 
-  TORCH_CHECK_TYPE(!self.is_complex(), " Sort does not support complex dtypes on CPU");
+  TORCH_CHECK_TYPE(!self.is_complex(), "Sort does not support complex dtypes");
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
   // Strides should be dense, so as not to allocate too much memory.
@@ -103,6 +104,15 @@ void _fill_indices(const TensorBase &indices, int64_t dim) {
   auto ndim = indices.dim();
   assert(0 <= dim && dim < ndim);
   auto dim_size = indices.size(dim);
+  if (indices.scalar_type() == at::kLong && indices.is_contiguous() &&
+      c10::multiply_integers(indices.sizes().slice(dim + 1)) == 1) {
+    auto* data = indices.mutable_data_ptr<int64_t>();
+    auto* const end = data + indices.numel();
+    for (; data != end; data += dim_size) {
+      std::iota(data, data + dim_size, int64_t{0});
+    }
+    return;
+  }
   auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
   auto idx_dim_sizes = std::vector<int64_t>(ndim, 1);
   auto idx_dim_strides = std::vector<int64_t>(ndim, 0);

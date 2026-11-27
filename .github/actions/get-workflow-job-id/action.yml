@@ -28,3 +28,4 @@ runs:
         python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        CHECK_RUN_ID: ${{ job.check_run_id }}

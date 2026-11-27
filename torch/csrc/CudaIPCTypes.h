@@ -1,6 +1,7 @@
 #pragma once
 #ifdef USE_CUDA
 #include <c10/core/Allocator.h>
+#include <c10/core/Event.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/util/Logging.h>
@@ -23,7 +24,7 @@ struct CudaIPCSentData final {
   uint64_t offset_;
   uint64_t* counter_ptr_; // Reference counter shared memory block
   at::DataPtr original_ptr_; // Original mem allocation
-  cudaEvent_t event_; // Sync cuEventDestroy
+  std::optional<c10::Event> event_; // Optional event for synchronization
   bool event_sync_required_;
   at::Device device_;
 
@@ -109,7 +110,7 @@ struct CudaIPCRefCountersFile final {
     used_slots_++;
   }
 
-  void return_offset(uint64_t offset /* unused */) {
+  void return_offset(uint64_t /*offset*/ /* unused */) {
     used_slots_--;
   }
 

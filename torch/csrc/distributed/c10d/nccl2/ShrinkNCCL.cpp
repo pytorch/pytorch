@@ -23,6 +23,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::Options> cloneOptions(
   options->group_desc = source->group_desc;
   options->global_ranks_in_group = source->global_ranks_in_group;
   options->enable_reconfigure = source->enable_reconfigure;
+  options->encryption_psk = source->encryption_psk;
   return options;
 }
 
@@ -75,6 +76,16 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
   auto childOptions =
       cloneOptions(overrideOptions ? overrideOptions : options_c10d_);
 
+  ncclConfig_t config = childOptions->config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  if (!overrideOptions && config.commName == nullptr) {
+    // Like stock, the shrunk comm keeps this group's name. NCCL keeps the
+    // pointer for the comm's lifetime, which may outlast this group, so leak
+    // it as split does.
+    config.commName = strdup(commConfig().commName);
+  }
+#endif
+
   c10::cuda::CUDAGuard guard(device_);
   ncclComm_t childComm = nullptr;
   auto shrinkStatus = nccl_api_->commShrink(
@@ -82,7 +93,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
       excluded.data(),
       static_cast<int>(excluded.size()),
       &childComm,
-      &childOptions->config,
+      &config,
       shrink_flags);
   try {
     waitForNcclChildComm(
@@ -95,17 +106,31 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
         "NCCL commShrink failed");
   } catch (...) {
     comm_state_ = CommState::ERROR;
+    // The failed call may have aborted the parent; drop its symmetric-memory
+    // registration while nccl_comm_ still names it.
+    retireComm();
     nccl_comm_ = nullptr;
     throw;
   }
 
   auto excludedBeforeRank = static_cast<int>(std::ranges::count_if(
       excluded, [this](int rank) { return rank < getRank(); }));
-  auto child = c10::make_intrusive<ProcessGroupNCCL>(
-      store_->clone(),
-      getRank() - excludedBeforeRank,
-      getSize() - static_cast<int>(excluded.size()),
-      childOptions);
+  c10::intrusive_ptr<ProcessGroupNCCL> child;
+  try {
+    // Throws if childOptions->encryption_psk can't be applied.
+    child = c10::make_intrusive<ProcessGroupNCCL>(
+        store_->clone(),
+        getRank() - excludedBeforeRank,
+        getSize() - static_cast<int>(excluded.size()),
+        childOptions);
+  } catch (...) {
+    abortCommIgnoringErrors(
+        *nccl_api_,
+        childComm,
+        childOptions->timeout,
+        "NCCL abort of shrink child failed");
+    throw;
+  }
   child->initFromComm(childComm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }
