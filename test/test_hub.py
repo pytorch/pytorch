@@ -1,6 +1,7 @@
 # Owner(s): ["module: hub"]
 
 import os
+import pathlib
 import tempfile
 import unittest
 import warnings
@@ -158,14 +159,14 @@ class TestHub(TestCase):
         )
         self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
 
-        def test_load_state_dict_from_url_file_name_cannot_escape_model_dir(self):
+    def test_load_state_dict_from_url_file_name_cannot_escape_model_dir(self):
         # file_name is caller-supplied: a value that resolves outside of
         # model_dir must be rejected instead of writing the checkpoint there.
         with tempfile.TemporaryDirectory() as tmp_dir:
             model_dir = os.path.join(tmp_dir, "checkpoints")
             src = os.path.join(tmp_dir, "src.pth")
             torch.save({"w": torch.ones(2)}, src)
-            url = "file://" + src
+            url = pathlib.Path(src).as_uri()
 
             with self.assertRaisesRegex(ValueError, "outside of model_dir"):
                 torch.hub.load_state_dict_from_url(
