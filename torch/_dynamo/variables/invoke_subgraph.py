@@ -51,6 +51,7 @@ from torch._guards import (
 )
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 from torch.fx.experimental import symbolic_shapes
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.graph_module import GraphModule
 from torch.fx.proxy import Proxy
 from torch.utils import _pytree as pytree
@@ -105,7 +106,7 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #
 # Paired with an InvokeSubgraphReuseCondition containing:
 #   - input_checks: (tag, tensor_metadata) per input
-#   - guards, source dependencies, dictionary order and captured alias patterns
+#   - guards, source dependencies, key order, and capture metadata and aliases to validate before replay
 #   - treespec: pytree structure of the args
 #   - traced_sources: sources accessed during the trace
 #
@@ -116,7 +117,7 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #   2. Source replacement -- clone each guard's source with a replacement map
 #      (old: L['self'].layers[0].weight -> new: L['self'].layers[1].weight),
 #      then evaluate against the new source's runtime value.
-#   3. Reject mutations and validate aliases and capture metadata before replaying guards.
+#   3. Mutation check -- reject if the subgraph mutated any captured var.
 #
 # A shared resolve_cache memoizes intermediate source resolution (e.g.
 # L['self'].layers is evaluated once and reused across all guards).
@@ -385,14 +386,12 @@ def sym_num_key(sym_num: Any) -> Any:
 
 
 def input_aliases(
-    tx: "InstructionTranslatorBase",
-    fingerprint: InputFingerprint,
-    tensors: Iterable[Any],
+    tx: "InstructionTranslatorBase", inputs: InputFingerprint, tensors: Iterable[Any]
 ) -> tuple[int, ...]:
     from .builder import lookup_tracked_variable
 
     values = []
-    for tag, vt in fingerprint.flat_vts:
+    for tag, vt in inputs.flat_vts:
         if tag in (InputTag.TENSOR, InputTag.SYMNODE):
             node = vt.as_proxy().node
             values.append(node)  # Stamp-out deduplicates placeholder operands by node.
@@ -799,11 +798,10 @@ class SubgraphReuseMatch:
             dim = prop() if source.idx is None else prop(source.idx)
         else:
             vt = self.build_capture(source)
-            dim = (
-                vt.sym_num
-                if isinstance(vt, SymNodeVariable)
-                else vt.as_python_constant()
-            )
+            if isinstance(vt, SymNodeVariable):
+                dim = vt.sym_num
+            else:
+                dim = vt.as_python_constant()
         raw = dim.node._expr if isinstance(dim, torch.SymInt) else sympy.Integer(dim)
         self.symbol_replacements[lifted.expr] = raw
         return raw
@@ -856,8 +854,7 @@ class SubgraphReuseMatch:
             static, _ = utils.tensor_always_has_static_shape(value, True, new_source)
             context = _automatic_dynamic(value, tx, new_source, static)
             if isinstance(context, symbolic_shapes.StatelessSymbolicContext) and all(
-                dim is symbolic_shapes.DimDynamic.STATIC
-                for dim in context.dynamic_sizes
+                dim is DimDynamic.STATIC for dim in context.dynamic_sizes
             ):
                 self.static_metadata[new_source] = {
                     "size": value.size(),
@@ -915,7 +912,7 @@ def _reject_reuse(reason: str, *args: object, exc_info: bool = False) -> bool:
     return False
 
 
-def _range_implies_bound(env: symbolic_shapes.ShapeEnv, expr: sympy.Basic) -> bool:
+def _range_implies_bound(env: ShapeEnv, expr: sympy.Basic) -> bool:
     if isinstance(expr, (sympy.Ge, sympy.Le)) and isinstance(expr.rhs, sympy.Integer):
         if (vr := env.var_to_range.get(expr.lhs)) is not None:
             edge = vr.lower if isinstance(expr, sympy.Ge) else vr.upper
@@ -923,9 +920,7 @@ def _range_implies_bound(env: symbolic_shapes.ShapeEnv, expr: sympy.Basic) -> bo
     return False
 
 
-def _shape_guards_match(
-    env: symbolic_shapes.ShapeEnv, match: SubgraphReuseMatch
-) -> bool:
+def _shape_guards_match(env: ShapeEnv, match: SubgraphReuseMatch) -> bool:
     for predicate in match.entry.shape_guards:
         try:
             expr = predicate.xreplace(match.symbol_replacements)
@@ -1078,8 +1073,14 @@ def is_reusable(
 
     bindings: dict[Source, Source | None] = {}
     for old, new in zip(cached_entry.arg_sources, fingerprint.arg_sources):
-        if old is not None and bindings.setdefault(old, new) != new:
+        if old is None:
+            continue
+        if bindings.setdefault(old, new) != new:
             return _reject_reuse("conflicting argument binding")
+        if new is None:
+            prop = sources.TensorProperty.STORAGE_OFFSET
+            if sources.TensorPropertySource(old, prop) in condition.traced_sources:
+                return _reject_reuse("sourceless operand has a storage offset guard")
         if isinstance(old, sources.ConstDictKeySource) and type(old) is not type(new):
             return _reject_reuse("incompatible dictionary key source")
     for old in condition.overlapping_args:

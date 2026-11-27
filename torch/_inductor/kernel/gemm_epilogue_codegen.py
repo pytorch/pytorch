@@ -438,6 +438,16 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
     """Normalize ATen spellings before emitting CuTeDSL expressions."""
 
     @staticmethod
+    def index_expr(expr: Any, dtype: torch.dtype) -> Any:
+        # GemmEpilogueCuteDSLKernel takes no symbolic size arguments, so only a
+        # constant can be emitted. Declining lets the caller skip the fusion.
+        if not (isinstance(expr, int) or getattr(expr, "is_Integer", False)):
+            raise NotImplementedError(
+                f"CuTeDSL GEMM epilogue cannot emit symbolic index_expr {expr}"
+            )
+        return CuteDSLOpOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def add(a: Any, b: Any, *, alpha: Any = 1) -> Any:
         rhs = b if alpha == 1 else CuteDSLOpOverrides.mul(b, alpha)
         rhs_expr = str(rhs)

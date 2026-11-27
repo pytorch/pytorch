@@ -980,10 +980,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
             mapping = OrderedDict(obj)
             return x + mapping.get("a", 0), tuple(mapping)
 
-        obj = Input()
+        obj, x = Input(), torch.ones(1)
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
         self.assertEqual(compiled(x, obj), (x + 1, ("a",)))
         obj.keys = lambda: ["b"]
         self.assertEqual(compiled(x, obj), (x, ("b",)))
@@ -1004,11 +1003,11 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, od), (x + 1, (None, None), expected))
         self.assertEqual(snapshot(od), expected)
 
-    @parametrize("receiver, name", [([], "__add__"), ((1, 2), "__getitem__")])
-    def test_binary_slot_keyword_error(self, receiver, name):
+    @parametrize("name", ["__add__", "__mul__", "__getitem__"])
+    def test_binary_slot_keyword_error(self, name):
         def fn(x):
             try:
-                getattr(receiver, name)(other=2)
+                getattr(() if name == "__getitem__" else [], name)(other=2)
             except TypeError as error:
                 return x + 1, error.args
 
@@ -1209,14 +1208,13 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual((list(mapping.items()), list(dict.items(mapping))), before)
         self.assertEqual(counter.frame_count, 4)
 
-    _owners = (dict, OrderedDict)
-    _ordered_layouts = itertools.product(_owners, (OrderedDict,), (False, True))
+    _layouts = itertools.product((dict, OrderedDict), (OrderedDict,), (False, True))
     _views = ("keys", "values", "items", "__reversed__")
     _bindings = [(name, "unbound") for name in ("__iter__", "__eq__", "__ne__")]
     _bindings += [("keys", "input"), ("__len__", "input")]
     _bindings += list(itertools.product(_views, ("bound", "unbound")))
 
-    @parametrize("owner, kind, moved", [(dict, dict, False), *_ordered_layouts])
+    @parametrize("owner, kind, moved", [(dict, dict, False), *_layouts])
     @parametrize("method, binding", _bindings)
     @parametrize("new", [False, True])
     def test_dict_view_iteration_order(self, owner, kind, method, moved, binding, new):
@@ -1284,13 +1282,12 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, mapping):
             view = getattr(mapping, name)()
-            attributes = tuple(hasattr(view, attr) for attr in names)
+            attributes = tuple(hasattr(view, attr) for attr in (*names, "missing"))
             attributes += (view.__len__() == len(mapping),)
             try:
                 view.missing
             except AttributeError as error:
                 absent = error.name == "missing" and error.obj is view
-            absent = absent and not hasattr(view, "missing")
             absent = absent and getattr(view, "missing", None) is None
             return x + 1, view, isinstance(view, view_type), attributes, absent
 
@@ -1780,9 +1777,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
             if update:
                 result = mapping_type()
                 result.update(pairs)
-            else:
-                result = mapping_type(pairs)
-            return result
+                return result
+            return mapping_type(pairs)
 
         actual = self._check_local_mapping(fn)
         self.assertIs(type(actual), mapping_type)
@@ -1802,11 +1798,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
             def __getitem__(self, key):
                 return 2
 
-        def fn(x, source):
-            return x + OrderedDict(source)["a"]
-
         setattr(Mapping, method, Mapping.get_attribute)
-        self._check_local_mapping(fn, Mapping())
+        self._check_local_mapping(
+            lambda x, source: x + OrderedDict(source)["a"], Mapping()
+        )
 
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("source_type", [dict, OrderedDict])
@@ -2792,14 +2787,12 @@ class DictTests(torch._dynamo.test_case.TestCase):
     @parametrize("kind", [dict, OrderedDict, type("Mapping", (OrderedDict,), {})])
     @parametrize("popitem", [False, True])
     def test_sourced_ordered_dict_pop_preserves_storage_views(self, kind, popitem):
-        def fn(x, mapping):
+        def fn(x, data):
             if popitem:
-                key, value = (
-                    mapping.popitem(False) if kind is not dict else mapping.popitem()
-                )
+                key, value = data.popitem() if kind is dict else data.popitem(False)
             else:
-                key, value = "c", mapping.pop("c")
-            return x + value, key, mapping.keys(), dict.keys(mapping)
+                key, value = "c", data.pop("c")
+            return x + value, key, data.keys(), dict.keys(data)
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
