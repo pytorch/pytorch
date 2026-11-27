@@ -1,9 +1,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
+#include <cmath>
 #include <functional>
 #include <type_traits>
 
@@ -164,6 +167,196 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
       });
 }
 
+namespace {
+
+template <
+    typename T,
+    typename src_t,
+    int depth,
+    int r_args_depth,
+    int res_arg_index>
+struct BinaryOpListAlphaMixedFunctor {
+  static_assert(r_args_depth == 2);
+  static_assert(
+      (depth == 2 && res_arg_index == 0) || (depth == 3 && res_arg_index == 2));
+  using opmath_t = at::opmath_type<T>;
+  using out_t = std::conditional_t<res_arg_index == 0, T, opmath_t>;
+  __device__ __forceinline__ void operator()(
+      int64_t chunk_size,
+      TensorListMetadata<depth>& tl,
+      opmath_t alpha) {
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    auto n = tl.numel_for_tensor[tensor_loc];
+
+    T* self_ptr = (T*)tl.addresses[0][tensor_loc] + chunk_idx * chunk_size;
+    src_t* src_ptr =
+        (src_t*)tl.addresses[1][tensor_loc] + chunk_idx * chunk_size;
+    out_t* out_ptr = (out_t*)tl.addresses[res_arg_index][tensor_loc] +
+        chunk_idx * chunk_size;
+    const bool all_aligned =
+        is_aligned(self_ptr) && is_aligned(src_ptr) && is_aligned(out_ptr);
+
+    n -= chunk_idx * chunk_size;
+    T self_args[kILP];
+    src_t src_args[kILP];
+    out_t out_args[kILP];
+
+    if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+      for (int64_t i_start = threadIdx.x;
+           i_start * kILP < n && i_start * kILP < chunk_size;
+           i_start += blockDim.x) {
+        load_store(self_args, self_ptr, 0, i_start);
+        load_store(src_args, src_ptr, 0, i_start);
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          out_args[ii] = static_cast<out_t>(std::fma(
+              static_cast<opmath_t>(src_args[ii]),
+              alpha,
+              static_cast<opmath_t>(self_args[ii])));
+        }
+        load_store(out_ptr, out_args, i_start, 0);
+      }
+    } else {
+      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+           i_start += blockDim.x * kILP) {
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          const auto i = i_start + threadIdx.x + ii * blockDim.x;
+          self_args[ii] = 0;
+          src_args[ii] = 0;
+          if (i < n && i < chunk_size) {
+            self_args[ii] = self_ptr[i];
+            src_args[ii] = src_ptr[i];
+          }
+        }
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          out_args[ii] = static_cast<out_t>(std::fma(
+              static_cast<opmath_t>(src_args[ii]),
+              alpha,
+              static_cast<opmath_t>(self_args[ii])));
+        }
+        store_args(out_ptr, out_args, i_start, chunk_size, n);
+      }
+    }
+  }
+};
+
+inline bool is_mixed_dtype_fused_type(ScalarType t) {
+  return t == kFloat || t == kHalf || t == kBFloat16;
+}
+
+// Mixed-dtype add/sub supports fp32<->fp16 and fp32<->bf16, with each
+// list having one dtype. These pairs compute in fp32; fp16<->bf16 uses
+// the slow path. Bool alpha and partially overlapping pairs also use
+// the slow path to preserve its validation and error behavior.
+bool can_use_mixed_dtype_fast_route(
+    TensorList tensors1,
+    TensorList tensors2,
+    const Scalar& alpha) {
+  const auto self_dtype = tensors1[0].scalar_type();
+  const auto other_dtype = tensors2[0].scalar_type();
+  if (self_dtype == other_dtype || !is_mixed_dtype_fused_type(self_dtype) ||
+      !is_mixed_dtype_fused_type(other_dtype) ||
+      (self_dtype != kFloat && other_dtype != kFloat) || alpha.isBoolean() ||
+      !check_fast_path_restrictions(
+          {tensors1, tensors2},
+          alpha,
+          /* does_op_promote_integer_inputs_to_float */ false,
+          /* skip_cross_list_dtype_check */ true)) {
+    return false;
+  }
+  for (const auto i : c10::irange(tensors1.size())) {
+    const auto overlap = at::get_overlap_status(tensors1[i], tensors2[i]);
+    if (overlap != MemOverlapStatus::No && overlap != MemOverlapStatus::Full) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <template <class> class Op, int depth, int res_arg_index>
+void foreach_tensor_list_op_mixed_dtype_apply(
+    std::vector<std::vector<Tensor>>& tensor_lists,
+    const Scalar& alpha) {
+  static_assert(
+      std::is_same_v<Op<float>, std::plus<float>> ||
+          std::is_same_v<Op<float>, std::minus<float>>,
+      "mixed-dtype foreach path only supports add/sub");
+  constexpr const char* dispatch_name = res_arg_index == 0
+      ? "foreach_tensor_list_op_mixed_dtype_"
+      : "foreach_tensor_list_op_mixed_dtype";
+  AT_DISPATCH_V2(
+      tensor_lists[0][0].scalar_type(),
+      dispatch_name,
+      AT_WRAP([&] {
+        using self_t = scalar_t;
+        using opmath_t = at::opmath_type<self_t>;
+        // Convert before negating to avoid integer overflow and preserve -0.
+        auto signed_alpha = alpha.to<opmath_t>();
+        if constexpr (std::is_same_v<Op<opmath_t>, std::minus<opmath_t>>) {
+          signed_alpha = -signed_alpha;
+        }
+        AT_DISPATCH_V2(
+            tensor_lists[1][0].scalar_type(),
+            dispatch_name,
+            AT_WRAP([&] {
+              if constexpr (
+                  !std::is_same_v<self_t, scalar_t> &&
+                  (std::is_same_v<self_t, float> ||
+                   std::is_same_v<scalar_t, float>)) {
+                multi_tensor_apply<depth>(
+                    tensor_lists,
+                    BinaryOpListAlphaMixedFunctor<
+                        self_t,
+                        scalar_t,
+                        depth,
+                        /* r_args_depth */ 2,
+                        res_arg_index>(),
+                    signed_alpha);
+              } else {
+                TORCH_INTERNAL_ASSERT(
+                    false, "unsupported dtype pair for mixed-dtype foreach");
+              }
+            }),
+            kFloat,
+            kHalf,
+            kBFloat16);
+      }),
+      kFloat,
+      kHalf,
+      kBFloat16);
+}
+
+template <template <class> class Op>
+void foreach_tensor_list_op_mixed_dtype_(
+    TensorList tensors1,
+    TensorList tensors2,
+    const Scalar& alpha) {
+  auto tensor_lists = c10::make_nested<Tensor>(tensors1.vec(), tensors2.vec());
+  foreach_tensor_list_op_mixed_dtype_apply<Op, 2, 0>(tensor_lists, alpha);
+  increment_version(tensors1);
+}
+
+template <template <class> class Op>
+std::vector<Tensor> foreach_tensor_list_op_mixed_dtype(
+    TensorList tensors1,
+    TensorList tensors2,
+    const Scalar& alpha) {
+  std::vector<Tensor> vec_res;
+  vec_res.reserve(tensors1.size());
+  for (const auto& t : tensors1) {
+    vec_res.emplace_back(at::native::empty_like(t, kFloat));
+  }
+  auto tensor_lists = c10::make_nested<Tensor>(
+      tensors1.vec(), tensors2.vec(), std::move(vec_res));
+  foreach_tensor_list_op_mixed_dtype_apply<Op, 3, 2>(tensor_lists, alpha);
+  return std::move(tensor_lists[2]);
+}
+
+} // anonymous namespace
+
 #define FOREACH_BINARY_OP_LIST(FUNCTION, NAME, OP, DIVISION_OP)     \
   void foreach_tensor_##NAME##_list_kernel_cuda_(                   \
       TensorList tensors1, TensorList tensors2) {                   \
@@ -191,23 +384,29 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
   void foreach_tensor_##NAME##_list_kernel_cuda_(                      \
       TensorList tensors1, TensorList tensors2, const Scalar& alpha) { \
     check_foreach_api_restrictions(tensors1, tensors2);                \
-    if (!can_use_fast_route({tensors1, tensors2}, alpha)) {            \
-      return at::native::foreach_tensor_##NAME##_list_kernel_slow_(    \
+    if (can_use_fast_route({tensors1, tensors2}, alpha)) {             \
+      return FUNCTION##_<OP>(tensors1, tensors2, alpha);               \
+    }                                                                  \
+    if (can_use_mixed_dtype_fast_route(tensors1, tensors2, alpha)) {   \
+      return foreach_tensor_list_op_mixed_dtype_<OP>(                  \
           tensors1, tensors2, alpha);                                  \
     }                                                                  \
-                                                                       \
-    FUNCTION##_<OP>(tensors1, tensors2, alpha);                        \
+    at::native::foreach_tensor_##NAME##_list_kernel_slow_(             \
+        tensors1, tensors2, alpha);                                    \
   }                                                                    \
                                                                        \
   std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(        \
       TensorList tensors1, TensorList tensors2, const Scalar& alpha) { \
     check_foreach_api_restrictions(tensors1, tensors2);                \
-    if (!can_use_fast_route({tensors1, tensors2}, alpha)) {            \
-      return at::native::foreach_tensor_##NAME##_list_kernel_slow(     \
+    if (can_use_fast_route({tensors1, tensors2}, alpha)) {             \
+      return FUNCTION<OP>(tensors1, tensors2, alpha);                  \
+    }                                                                  \
+    if (can_use_mixed_dtype_fast_route(tensors1, tensors2, alpha)) {   \
+      return foreach_tensor_list_op_mixed_dtype<OP>(                   \
           tensors1, tensors2, alpha);                                  \
     }                                                                  \
-                                                                       \
-    return FUNCTION<OP>(tensors1, tensors2, alpha);                    \
+    return at::native::foreach_tensor_##NAME##_list_kernel_slow(       \
+        tensors1, tensors2, alpha);                                    \
   }
 
 FOREACH_BINARY_OP_LIST_ALPHA(

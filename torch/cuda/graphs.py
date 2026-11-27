@@ -8,8 +8,8 @@ import warnings
 import weakref
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import Any, overload, TYPE_CHECKING, TypeAlias, TypeGuard, Union
-from typing_extensions import ParamSpec, Self, TypeVar
+from typing import Any, overload, Self, TYPE_CHECKING, TypeAlias, TypeGuard, Union
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch import Tensor
@@ -28,7 +28,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
-    from torch.cuda import _POOL_HANDLE, MemPool
+    from torch.cuda import _POOL_HANDLE, HostMemPool, MemPool
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
     from torch.utils.hooks import RemovableHandle
 
@@ -70,6 +70,8 @@ def _get_pool_id(pool: _GraphPool | None) -> _POOL_HANDLE | None:
         return None
     if _is_mem_pool(pool):
         return typing.cast("_POOL_HANDLE", pool.id)
+    if isinstance(pool, torch.cuda.HostMemPool):
+        raise TypeError("A HostMemPool cannot be used as a graph capture pool")
     return typing.cast("_POOL_HANDLE", pool)
 
 
@@ -307,6 +309,11 @@ class CUDAGraph(_CUDAGraph):
             ``instantiate``, but the user must call ``instantiate`` again
             manually to make sure the instantiated graph has these
             changes. Pytorch has no means of tracking these changes.
+        num_rng_states (int, optional): Number of RNG seed/offset pairs to
+            allocate before capture. Each distinct generator state first used
+            during capture takes one pair; repeated use shares that pair.
+            Exceeding this count raises an error. Unused pairs are released
+            after capture. Default: ``8``. Set to ``0`` for non-RNG graphs.
 
     .. warning::
         This API is in beta and may change in future releases.
@@ -332,6 +339,7 @@ class CUDAGraph(_CUDAGraph):
     # state must be removed when this capture is reset or destroyed.
     _recorded_exec_ids: set[int]
     _keep_graph: bool
+    _capture_device: int | None
     # User hooks fired by capture_begin / capture_end / instantiate (see register_*_hook).
     _capture_start_hooks: dict[int, Callable[[CUDAGraph], None]]
     _capture_end_hooks: dict[int, Callable[[CUDAGraph], None]]
@@ -353,14 +361,15 @@ class CUDAGraph(_CUDAGraph):
     _retained: _RetainedCallbacks
     _retained_finalizer: weakref.finalize | None
 
-    def __new__(cls, keep_graph: bool = False) -> Self:
-        instance = super().__new__(cls, keep_graph)
+    def __new__(cls, keep_graph: bool = False, num_rng_states: int = 8) -> Self:
+        instance = super().__new__(cls, keep_graph, num_rng_states)
         instance._tracker = None
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
         instance._annotation_key_by = "exec"
         instance._recorded_exec_ids = set()
         instance._keep_graph = keep_graph
+        instance._capture_device = None
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
         instance._capture_start_hooks = OrderedDict()
         instance._capture_end_hooks = OrderedDict()
@@ -503,7 +512,8 @@ class CUDAGraph(_CUDAGraph):
         until interpreter exit (it is never collected, hence never fired).
         Returns a handle whose ``remove()`` deregisters the callback.
 
-        Teardown does not synchronize CUDA, and ``cudaGraphExecDestroy`` frees an
+        Teardown may synchronize CUDA to release retained RNG buffers, but
+        callbacks must not rely on this. ``cudaGraphExecDestroy`` frees an
         in-flight graph only asynchronously, so a callback that frees device
         memory the graph reads/writes is a use-after-free if a replay is still
         in flight. Pass ``synchronize_before_release=True`` to synchronize every
@@ -624,9 +634,12 @@ class CUDAGraph(_CUDAGraph):
         if self._tracker is not None:
             self._tracker.stop()
             self._tracker = None
+        if _is_mem_pool(pool):
+            torch.cuda.memory._check_mem_pool_device(pool, torch.cuda.current_device())
         super().capture_begin(
             pool=_get_pool_id(pool), capture_error_mode=capture_error_mode
         )
+        self._capture_device = torch.cuda.current_device()
         if check_input_liveness:
             from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
 
@@ -645,6 +658,9 @@ class CUDAGraph(_CUDAGraph):
         live (for both ``keep_graph`` modes) so it can be inspected before
         :meth:`capture_end_post` instantiates and/or destroys it."""
         super().capture_end_pre()
+        buffers = self._get_rng_state_buffers()
+        if buffers:
+            self.retain_object(buffers, synchronize_before_release=True)
 
     def capture_end_post(self) -> None:
         r"""Finalize a capture started by :meth:`capture_end_pre`: destroy the
@@ -687,6 +703,32 @@ class CUDAGraph(_CUDAGraph):
         by ``raw_cuda_graph``.
         """
         super().instantiate()
+        self._post_instantiate()
+
+    def set_raw_cuda_graph_exec(self, graph_exec: int) -> None:
+        r"""Adopt an externally instantiated executable for this CUDA graph.
+
+        Requires ``keep_graph=True`` and a completed capture. ``graph_exec`` must
+        be a live executable created from this instance's ``raw_cuda_graph()``.
+        To match PyTorch's CUDA instantiation, create it with
+        ``cudaGraphInstantiateFlagAutoFreeOnLaunch`` and
+        ``cudaGraphInstantiateFlagUseNodePriority``.
+        This object owns the installed executable and destroys it on reset or
+        collection. The replaced executable is not destroyed: save its handle
+        before this call and manage its lifetime in caller code. Finish outstanding
+        work and destroy detached executables before resetting or collecting this
+        object, since they still reference its captured resources.
+
+        Passing ``0`` clears the installed executable without destroying it;
+        a subsequent ``replay()`` uses the usual on-demand instantiation.
+        Nonzero handles run annotation remapping and instantiate hooks.
+        Ownership transfers before hooks run, even if a hook raises.
+        """
+        super().set_raw_cuda_graph_exec(graph_exec)
+        if graph_exec:
+            self._post_instantiate()
+
+    def _post_instantiate(self) -> None:
         self._maybe_remap_annotations()
         # Fire registered instantiate hooks (e.g. a profiler observer inspecting the freshly
         # instantiated graph). Registering a hook is the opt-in; no consumer -> a no-op.
@@ -703,14 +745,13 @@ class CUDAGraph(_CUDAGraph):
             self._instantiate_graph_data = None
 
     def replay(self) -> None:
-        r"""Replay the CUDA work captured by this graph."""
+        r"""Replay the CUDA work captured by this graph.
+
+        When replaying on a different stream, first make that stream wait for
+        any work queued on the capture stream before capture began.
+        """
         if self._tracker is not None:
             self._tracker.check_alive(self.pools())
-        if self._retained.sync_before_fire:
-            # Record the replay stream on the holder so fire() can drain it
-            # before releasing graph-referenced resources, without the holder
-            # referencing the graph. Only recorded when a caller opted into sync.
-            self._retained.replay_streams.add(torch.cuda.current_stream())
         # With keep_graph=True the exec graph is instantiated on demand here on
         # the first replay; the C++ replay() requires it to already exist. The
         # annotation remap rides on instantiate(), so it is handled by that call.
@@ -721,6 +762,10 @@ class CUDAGraph(_CUDAGraph):
         if self._replay_start_hooks:
             for hook in list(self._replay_start_hooks.values()):
                 hook(self)
+        if self._retained.sync_before_fire:
+            self._retained.replay_streams.add(
+                torch.cuda.current_stream(self._capture_device)
+            )
         try:
             super().replay()
         finally:
@@ -749,6 +794,7 @@ class CUDAGraph(_CUDAGraph):
         # reset(); on death it dies with the object.
         self._capture_graph_id = None
         self._remapped_exec_id = None
+        self._capture_device = None
         super().reset()
 
     def pool(self) -> _POOL_HANDLE:
@@ -763,7 +809,11 @@ class CUDAGraph(_CUDAGraph):
         r"""Return opaque tokens for all memory pools retained by this graph."""
         return [torch.cuda._POOL_HANDLE(pool) for pool in super().pools()]
 
-    def _retain_pool(self, pool: _GraphPool) -> None:
+    def _retain_pool(self, pool: _GraphPool | HostMemPool) -> None:
+        # A HostMemPool cannot be a graph's pool, but a graph that routes to it
+        # during capture keeps it.
+        if isinstance(pool, torch.cuda.HostMemPool):
+            return super()._retain_pool(typing.cast("_POOL_HANDLE", pool.id))
         pool_id = _get_pool_id(pool)
         if pool_id is None:
             raise RuntimeError("CUDAGraph._retain_pool expected a memory pool")
@@ -801,7 +851,12 @@ class CUDAGraph(_CUDAGraph):
         return super().raw_cuda_graph()
 
     def raw_cuda_graph_exec(self) -> int:
-        r"""Returns the underlying cudaGraphExec_t. ``instantiate`` must have been called if ``keep_graph`` is True, or ``capture_end`` must have been called if ``keep_graph`` is False. If you call ``instantiate()`` after ``raw_cuda_graph_exec()``, the previously returned cudaGraphExec_t will be destroyed. It is your responsibility not to use this object after destruction.
+        r"""Return the currently installed cudaGraphExec_t.
+
+        An executable must have been instantiated or installed through
+        :meth:`set_raw_cuda_graph_exec`. Calling ``instantiate()`` afterwards
+        destroys the previously returned executable; do not use it after
+        destruction.
 
         See the following for APIs for how to manipulate this object: `Graph Execution <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH__EXEC.html>`_ and `cuda-python Graph Execution bindings <https://nvidia.github.io/cuda-python/cuda-bindings/latest/module/runtime.html#graph-execution>`_
         """
@@ -810,8 +865,8 @@ class CUDAGraph(_CUDAGraph):
     def get_graph_data(self) -> dict:
         r"""Return a dictionary describing the graph's topology and node metadata.
 
-        ``keep_graph`` must be True.  The graph must have been instantiated
-        (via :meth:`instantiate`) before calling this method.
+        ``keep_graph`` must be True. An executable must be available through
+        :meth:`instantiate` or :meth:`set_raw_cuda_graph_exec` before this call.
         Requires the ``cuda.bindings`` package.
 
         Returns a dictionary with structure::
@@ -1219,7 +1274,10 @@ class graph:
             recording on entry and automatically calls
             :func:`~torch.cuda._graph_annotations.resolve_pending_annotations` before
             the capture ends.  Annotations are **not** cleared on exit so that multiple
-            graphs in the same workload can accumulate annotations.
+            graphs in the same workload can accumulate annotations. The kernels of
+            captured c10d collectives are tagged with the fields ``record_param_comms``
+            gives them in eager mode (``"Collective name"``, ``"Process Group Name"``,
+            ``"Seq"``, ...).
             Requires ``cuda.bindings`` package and cuda-compat >= 13.1 or CUDA driver >= 13.1.
             Requires single-threaded autograd; wrap the capture in
             ``torch.autograd.grad_mode.set_multithreading_enabled(False)``.
@@ -1294,10 +1352,10 @@ class graph:
         if stream is None and self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.cuda.Stream()
 
-        pool_id = _get_pool_id(pool)
-        self.pool: tuple[()] | tuple[_POOL_HANDLE] = (
-            () if pool_id is None else (pool_id,)
-        )
+        # Keep a MemPool object so that capture_begin can check its device.
+        if not _is_mem_pool(pool):
+            pool = _get_pool_id(pool)
+        self.pool: tuple[()] | tuple[_GraphPool] = () if pool is None else (pool,)
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
@@ -1399,9 +1457,9 @@ class graph:
                 )
                 raise RuntimeError(
                     f"{reason} could not register CUPTI node-creation callbacks. "
-                    "This requires cupti-python, CUPTI >= 13.3, and a CUPTI subscription "
-                    "not already held by another profiler (e.g. Kineto or Nsight Systems). "
-                    + fallback
+                    "This requires cupti-python, CUDA >= 13.5, CUPTI >= 13.5, and a CUPTI "
+                    "subscription not already held by another profiler (e.g. Kineto or Nsight "
+                    "Systems). " + fallback
                 )
 
         # Scope annotation recording to this capture: the capture-root stamp and
@@ -1444,7 +1502,19 @@ class graph:
                     )
                 backend = "edge_walk"
             _set_annotation_backend(backend)
+            if self._enable_annotations and torch.distributed.is_available():
+                from torch.distributed._hooks.collective_annotations import (
+                    register_graph_capture_annotation_hooks,
+                )
+
+                register_graph_capture_annotation_hooks(self)
         except BaseException:
+            if self._enable_annotations and torch.distributed.is_available():
+                from torch.distributed._hooks.collective_annotations import (
+                    unregister_collective_annotation_hooks,
+                )
+
+                unregister_collective_annotation_hooks(self)
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
             try:
@@ -1492,6 +1562,12 @@ class graph:
             # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
             # idempotent, so repeating it here just covers a capture that raised before the
             # call above (it must not stay armed past this context either way).
+            if self._enable_annotations and torch.distributed.is_available():
+                from torch.distributed._hooks.collective_annotations import (
+                    unregister_collective_annotation_hooks,
+                )
+
+                unregister_collective_annotation_hooks(self)
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
@@ -1509,6 +1585,7 @@ def make_graphed_callables(
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
     enable_annotations: bool = False,
+    num_rng_states: int = 8,
 ) -> _ModuleOrCallable: ...
 
 
@@ -1521,6 +1598,7 @@ def make_graphed_callables(
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
     enable_annotations: bool = False,
+    num_rng_states: int = 8,
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
@@ -1532,6 +1610,7 @@ def make_graphed_callables(
     pool: _GraphPool | None = None,
     capture_error_mode: str = "global",
     enable_annotations: bool = False,
+    num_rng_states: int = 8,
 ) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -1571,6 +1650,8 @@ def make_graphed_callables(
             :func:`torch.cuda.graph_annotations.mark_kernels` scopes inside the
             callables (backward kernels are tagged via the scopes' autograd node
             hooks). See :mod:`torch.cuda.graph_annotations`. Default: ``False``.
+        num_rng_states (int, optional): Maximum number of distinct generator states
+            used by each forward or backward graph. Default: ``8``.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
@@ -1660,10 +1741,16 @@ def make_graphed_callables(
         for i in range(len(callables))
     ]
 
-    fwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
-    bwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
+    fwd_graphs = [
+        torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
+        for _ in range(len(callables))
+    ]
+    bwd_graphs = [
+        torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
+        for _ in range(len(callables))
+    ]
 
-    mempool = graph_pool_handle() if pool is None else _get_pool_id(pool)
+    mempool = graph_pool_handle() if pool is None else pool
 
     # Warmup
     # Hopefully prevents cudnn benchmarking and other lazy-initialization cuda work

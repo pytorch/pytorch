@@ -16,7 +16,7 @@ from torch.fx.passes.splitter_base import (
     NODES_SUFFIX,
     ShapeProp,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 # Wrappepr function to make it supported
@@ -26,6 +26,8 @@ def sup_f(x):
 
 
 class TestFxSplitNodeFinder(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.save_path = sys.path[:]

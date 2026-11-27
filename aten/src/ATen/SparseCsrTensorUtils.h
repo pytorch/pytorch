@@ -456,6 +456,35 @@ inline std::tuple<Tensor, Tensor> create_acc_buffer(
   }
 }
 
+// Whether `result` is a sparse compressed tensor with non-contiguous values,
+// which the kernels cannot write through (see run_on_contiguous_clone). The
+// layout is checked first: values() raises on, e.g., an uncoalesced COO
+// tensor, which must reach the kernels' input checks instead.
+inline bool has_noncontiguous_values(const Tensor& result) {
+  return is_sparse_compressed(result) && !result.values().is_contiguous();
+}
+
+// For a `result` whose values are non-contiguous, which the kernels cannot
+// write through: runs `fn` on a clone with contiguous values and copies the
+// result back through the strides of `result.values()`.
+template <typename F>
+inline Tensor& run_on_contiguous_clone(Tensor& result, const F& fn) {
+  // Not result.clone(): clone() preserves the strides of non-overlapping and
+  // dense values, such as transposed BSR blocks, and fn would end up here
+  // again.
+  auto [compressed_indices, plain_indices] = getCompressedPlainIndices(result);
+  auto tmp = at::_sparse_compressed_tensor_unsafe(
+      compressed_indices.clone(),
+      plain_indices.clone(),
+      result.values().clone(at::MemoryFormat::Contiguous),
+      result.sizes(),
+      result.options());
+  fn(tmp);
+  at::native::resize_as_sparse_compressed_(result, tmp);
+  result.copy_(tmp);
+  return result;
+}
+
 inline void copy_from_acc_buffer(Tensor& new_values, Tensor& new_values_acc) {
   if (!new_values_acc.is_same(new_values)) {
     new_values.copy_(new_values_acc);

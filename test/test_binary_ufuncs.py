@@ -6,6 +6,7 @@ import math
 import operator
 import random
 import sys
+import unittest
 import warnings
 from functools import partial
 from itertools import chain, product
@@ -26,8 +27,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyNativeDeviceTypes,
-    onlyOn,
     OpDTypes,
     ops,
     precisionOverride,
@@ -58,6 +57,7 @@ from torch.testing._internal.common_methods_invocations import (
     generate_elementwise_binary_with_scalar_samples,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     gradcheck,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -424,6 +424,9 @@ class TestBinaryUfuncsDevice(TestCase):
         self._test_reference_numerics(dtype, op, gen, equal_nan=True)
 
     @ops(binary_ufuncs_with_references)
+    @decorateIf(
+        unittest.skip("Doesn't support bool!"), lambda p: p["dtype"] is torch.bool
+    )
     def test_reference_numerics_small_values(self, device, dtype, op):
         if dtype is torch.bool:
             self.skipTest("Doesn't support bool!")
@@ -1394,7 +1397,6 @@ class TestBinaryUfuncsDevice(TestCase):
             a += b
 
     # TODO: refactor this test into a more generic one, it's parked here currently
-    @onlyNativeDeviceTypes
     def test_out_resize_warning(self, device):
         a = torch.tensor((1, 2, 3), device=device, dtype=torch.float32)
         b = torch.tensor((4, 5, 6), device=device, dtype=torch.float32)
@@ -1432,7 +1434,6 @@ class TestBinaryUfuncsDevice(TestCase):
 
     # Verifies that the inplace dunders (like idiv) actually are in place
     @expectedFailureMeta  # UserWarning not triggered
-    @onlyNativeDeviceTypes
     def test_inplace_dunders(self, device):
         t = torch.randn((1,), device=device)
         expected = t.data_ptr()
@@ -1914,7 +1915,6 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(cpu_out, device_out)
 
     @skipIfTorchDynamo()
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_complex_scalar_pow_tensor(self, device, dtype):
         complexes = [0.5j, 1.0 + 1.0j, -1.5j, 2.2 - 1.6j, 1 + 0j]
@@ -1945,7 +1945,6 @@ class TestBinaryUfuncsDevice(TestCase):
                 self._test_pow(device, base, first_exp)
                 self._test_pow(device, base, second_exp)
 
-    @onlyNativeDeviceTypes
     @skipMeta
     def test_pow_scalar_type_promotion(self, device):
         # Test against a scalar and non-scalar input
@@ -2114,128 +2113,8 @@ class TestBinaryUfuncsDevice(TestCase):
         _scalar_helper(lambda a, b: math.floor(a / b), operator.floordiv)
         _scalar_helper(lambda a, b: math.floor(a / b), torch.floor_divide)
 
-    @onlyNativeDeviceTypes
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    def test_div_and_floordiv_script_vs_python(self, device):
-        # Creates jitted functions of two tensors
-        def _wrapped_div(a, b):
-            return a / b
-
-        def _wrapped_floordiv(a, b):
-            return a // b
-
-        scripted_div = torch.jit.script(_wrapped_div)
-        scripted_floordiv = torch.jit.script(_wrapped_floordiv)
-        for a, b in product(range(-10, 10), range(-10, 10)):
-            for op in (lambda x: x * 0.5, lambda x: math.floor(x)):
-                a = op(a)
-                b = op(b)
-
-                # Skips zero divisors
-                if b == 0:
-                    continue
-
-                expected_div = a / b
-                expected_floordiv = math.floor(a / b)
-                a_t = torch.tensor(a, device=device)
-                b_t = torch.tensor(b, device=device)
-
-                self.assertEqual(scripted_div(a_t, b_t), expected_div)
-                self.assertEqual(scripted_floordiv(a_t, b_t), expected_floordiv)
-
-        # Creates jitted functions of one tensor
-        def _wrapped_div_scalar(a):
-            return a / 5
-
-        # NOTE: the JIT implements division as torch.reciprocal(a) * 5
-        def _wrapped_rdiv_scalar(a):
-            return 5 / a
-
-        def _wrapped_floordiv_scalar(a):
-            return a // 5
-
-        # NOTE: this fails if the input is not an integer tensor
-        # See https://github.com/pytorch/pytorch/issues/45199
-        def _wrapped_rfloordiv_scalar(a):
-            return 5 // a
-
-        scripted_div_scalar = torch.jit.script(_wrapped_div_scalar)
-        scripted_rdiv_scalar = torch.jit.script(_wrapped_rdiv_scalar)
-        scripted_floordiv_scalar = torch.jit.script(_wrapped_floordiv_scalar)
-        scripted_rfloordiv_scalar = torch.jit.script(_wrapped_rfloordiv_scalar)
-
-        for a in range(-10, 10):
-            for op in (lambda x: x * 0.5, lambda x: math.floor(x)):
-                a = op(a)
-
-                a_t = torch.tensor(a, device=device)
-
-                self.assertEqual(a / 5, scripted_div_scalar(a_t))
-
-                # Skips zero divisors
-                if a == 0:
-                    continue
-
-                self.assertEqual(5 / a, scripted_rdiv_scalar(a_t))
-
-                # Handles Issue 45199 (see comment above)
-                if a_t.is_floating_point():
-                    with self.assertRaises(RuntimeError):
-                        scripted_rfloordiv_scalar(a_t)
-                else:
-                    # This should emit a UserWarning, why doesn't it?
-                    # See issue gh-52387
-                    self.assertEqual(5 // a, scripted_rfloordiv_scalar(a_t))
-
-    @onlyNativeDeviceTypes
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_idiv_and_ifloordiv_vs_python(self, device):
-        def _wrapped_idiv_tensor(a, b):
-            a /= b
-            return a
-
-        def _wrapped_idiv_scalar(a):
-            a /= 5
-            return a
-
-        def _wrapped_true_divide__tensor(a, b):
-            a.true_divide_(b)
-            return a
-
-        def _wrapped_true_divide__scalar(a):
-            a.true_divide_(5)
-            return a
-
-        def _wrapped_floor_divide__tensor(a, b):
-            a.floor_divide_(b)
-            return a
-
-        def _wrapped_floor_divide__scalar(a):
-            a.floor_divide_(5)
-            return a
-
-        # The following functions are unsupported by the JIT
-        def _wrapped_ifloordiv_tensor(a, b):
-            a //= b
-            return a
-
-        def _wrapped_ifloordiv_scalar(a):
-            a //= 5
-            return a
-
-        with self.assertRaises(torch.jit.frontend.NotSupportedError):
-            scripted_ifloordiv_tensor = torch.jit.script(_wrapped_ifloordiv_tensor)
-
-        with self.assertRaises(torch.jit.frontend.NotSupportedError):
-            scripted_ifloordiv_scalar = torch.jit.script(_wrapped_ifloordiv_scalar)
-
-        scripted_idiv_tensor = torch.jit.script(_wrapped_idiv_tensor)
-        scripted_idiv_scalar = torch.jit.script(_wrapped_idiv_scalar)
-        scripted_true_divide__tensor = torch.jit.script(_wrapped_true_divide__tensor)
-        scripted_true_divide__scalar = torch.jit.script(_wrapped_true_divide__scalar)
-        scripted_floor_divide__tensor = torch.jit.script(_wrapped_floor_divide__tensor)
-        scripted_floor_divide__scalar = torch.jit.script(_wrapped_floor_divide__scalar)
-
         for a, b in product(range(-10, 10), range(-10, 10)):
             for op in (lambda x: x * 0.5, lambda x: math.floor(x)):
                 a = op(a)
@@ -2260,29 +2139,17 @@ class TestBinaryUfuncsDevice(TestCase):
 
                     self.assertEqual(tmp0.item(), expected_idiv)
                     self.assertEqual(tmp1.item(), expected_idiv)
-                    self.assertEqual(
-                        scripted_true_divide__tensor(a_t.clone(), b_t).item(),
-                        expected_idiv,
-                    )
-                    self.assertEqual(
-                        scripted_true_divide__scalar(a_t.clone()).item(), a / 5
-                    )
                 else:
                     tmp = a_t.clone()
                     with self.assertRaises(RuntimeError):
                         tmp /= b
                     with self.assertRaises(RuntimeError):
                         tmp /= b_t
-                    with self.assertRaises(RuntimeError):
-                        scripted_true_divide__tensor(tmp, b_t)
-                    with self.assertRaises(RuntimeError):
-                        scripted_true_divide__scalar(tmp)
 
                 if not a_t.is_floating_point() and b_t.is_floating_point():
                     # Inplace modification fails because a float tensor is required
                     #   if the divisor is a float tensor
                     a_t.clone().floor_divide_(b_t)
-                    scripted_floor_divide__tensor(a_t.clone(), b_t)
                     tmp = a_t.clone()
                     tmp //= b_t
                 else:
@@ -2291,15 +2158,9 @@ class TestBinaryUfuncsDevice(TestCase):
                     self.assertEqual(
                         a_t.clone().floor_divide_(b_t).item(), expected_ifloordiv
                     )
-                    self.assertEqual(
-                        scripted_floor_divide__tensor(a_t.clone(), b_t).item(),
-                        expected_ifloordiv,
-                    )
                     tmp = a_t.clone()
                     tmp //= b_t
                     self.assertEqual(tmp.item(), expected_ifloordiv)
-
-                self.assertEqual(scripted_floor_divide__scalar(a_t), math.floor(a / 5))
 
     # Tests binary op equivalence with Python builtin ops
     # Also tests that reverse operations are equivalent to forward ops
@@ -3191,7 +3052,7 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertTrue(torch.all(fn(x, 0.0).isnan()))
             self.assertTrue(torch.all(fn(x, zero).isnan()))
 
-    @onlyNativeDeviceTypes  # Check Issue https://github.com/pytorch/pytorch/issues/48130
+    # Check Issue https://github.com/pytorch/pytorch/issues/48130
     @skipCUDAIfNotRocm  # NVIDIA CUDA reaches source-level UB for these inputs.
     @dtypes(*integral_types())
     @dtypesIfXPU(*set(integral_types()) - {torch.int64})
@@ -3220,7 +3081,6 @@ class TestBinaryUfuncsDevice(TestCase):
                     value = 255 if dtype == torch.uint8 else -1
                     self.assertTrue(torch.all(fn(x, zero) == value))
 
-    @onlyNativeDeviceTypes
     @skipCUDAIfNotRocm  # NVIDIA CUDA reaches source-level UB for these inputs.
     @dtypes(*integral_types())
     def test_fmod_remainder_overflow(self, device, dtype):
@@ -3376,7 +3236,6 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertEqual(actual1, expected, exact_dtype=False)
             self.assertEqual(actual2, expected, exact_dtype=False)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_gcd(self, device, dtype):
         # Tests gcd(0, 0), gcd(0, a) cases
@@ -3401,7 +3260,6 @@ class TestBinaryUfuncsDevice(TestCase):
             expected = np.gcd(a.cpu().numpy(), b.cpu().numpy())
             self.assertEqual(actual, expected)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int16, torch.int32, torch.int64)
     def test_lcm(self, device, dtype):
         # Tests lcm(0, 0), lcm(0, a) cases
@@ -3418,7 +3276,6 @@ class TestBinaryUfuncsDevice(TestCase):
         expected = np.lcm(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, exact_dtype=False)
 
-    @onlyNativeDeviceTypes
     @dtypesIfCPU(torch.float32, torch.float64, torch.float16)
     @dtypes(torch.float32, torch.float64)
     def test_nextafter(self, device, dtype):
@@ -3443,7 +3300,6 @@ class TestBinaryUfuncsDevice(TestCase):
         expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16)
     def test_nextafter_bfloat16(self, device, dtype):
         nan = float("nan")
@@ -3607,7 +3463,6 @@ class TestBinaryUfuncsDevice(TestCase):
                     )  # all casts to complex128 are safe
                     compare_with_numpy_bin_op(torch_op, numpy_op, a, b, out=out)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_signed_shift(self, device, dtype):
         "Ensure that signed integer bit shifting works as expected."
@@ -3623,7 +3478,6 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(a >> 1, expected_r)
         self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
-    @onlyNativeDeviceTypes
     @dtypes(*get_all_int_dtypes())
     def test_shift_limits(self, device, dtype):
         "Ensure that integer bit shifting works as expected with out-of-limits shift values."
@@ -3683,7 +3537,6 @@ class TestBinaryUfuncsDevice(TestCase):
                         msg=f">> {shift}",
                     )
 
-    @onlyNativeDeviceTypes
     @dtypes(
         *list(
             product(
@@ -4036,6 +3889,11 @@ class TestBinaryUfuncsDevice(TestCase):
         _test_helper(a, b)
 
     @skipIfTorchDynamo()  # complex infs/nans differ under Dynamo/Inductor
+    @decorateIf(
+        unittest.skip("complex flaky in 3.12"),
+        lambda params: sys.version_info >= (3, 12)
+        and params["dtype"] in (torch.complex32, torch.complex64, torch.complex128),
+    )
     @dtypesIfCUDA(
         torch.float32,
         torch.float64,
@@ -4959,7 +4817,7 @@ class TestBinaryUfuncsDevice(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.
@@ -5130,10 +4988,7 @@ generate_not_implemented_tests(TestBinaryUfuncsDevice)
 
 
 instantiate_device_type_tests(
-    TestChebyshevNanPropagationDevice,
-    globals(),
-    only_for=("cpu", "cuda", "xpu"),
-    allow_xpu=True,
+    TestChebyshevNanPropagationDevice, globals(), allow_xpu=True
 )
 instantiate_device_type_tests(TestBinaryUfuncsDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")

@@ -1,6 +1,34 @@
 # @lint-ignore-every FBCODEBZLADDLOADS
 load("@fbsource//tools/build_defs:glob_defs.bzl", "subdir_glob")
 
+_AUTOGRAD_RESOURCES = [
+    "autograd/deprecated.yaml",
+    "autograd/derivatives.yaml",
+    "autograd/templates/ADInplaceOrViewType.cpp",
+    "autograd/templates/Functions.cpp",
+    "autograd/templates/Functions.h",
+    "autograd/templates/TraceType.cpp",
+    "autograd/templates/VariableType.cpp",
+    "autograd/templates/VariableType.h",
+    "autograd/templates/ViewFuncs.cpp",
+    "autograd/templates/ViewFuncs.h",
+    "autograd/templates/annotated_fn_args.py.in",
+    "autograd/templates/python_enum_tag.cpp",
+    "autograd/templates/python_fft_functions.cpp",
+    "autograd/templates/python_functions.cpp",
+    "autograd/templates/python_functions.h",
+    "autograd/templates/python_linalg_functions.cpp",
+    "autograd/templates/python_nested_functions.cpp",
+    "autograd/templates/python_nn_functions.cpp",
+    "autograd/templates/python_return_types.h",
+    "autograd/templates/python_return_types.cpp",
+    "autograd/templates/python_sparse_functions.cpp",
+    "autograd/templates/python_special_functions.cpp",
+    "autograd/templates/python_torch_functions.cpp",
+    "autograd/templates/python_variable_methods.cpp",
+    "autograd/templates/variable_factories.h",
+]
+
 # shared by internal and OSS BUCK
 def define_tools_targets(
         python_binary,
@@ -8,7 +36,12 @@ def define_tools_targets(
         python_test,
         third_party,
         torchgen_deps,
-        contacts = []):
+        contacts = [],
+        # Internal builds pass versions that also cover directories that are
+        # separate Buck packages there.
+        glob_impl = None,
+        source_file = None):
+    glob_impl = glob_impl or glob
     python_library(
         name = "substitutelib",
         srcs = ["substitute.py"],
@@ -26,7 +59,7 @@ def define_tools_targets(
 
     python_library(
         name = "jit",
-        srcs = glob([
+        srcs = glob_impl([
             "jit/*.py",
             "jit/templates/*",
         ]),
@@ -109,35 +142,9 @@ def define_tools_targets(
 
     python_library(
         name = "autograd",
-        srcs = glob(["autograd/*.py"]),
+        srcs = glob_impl(["autograd/*.py"]),
         base_module = "tools",
-        resources = [
-            "autograd/deprecated.yaml",
-            "autograd/derivatives.yaml",
-            "autograd/templates/ADInplaceOrViewType.cpp",
-            "autograd/templates/Functions.cpp",
-            "autograd/templates/Functions.h",
-            "autograd/templates/TraceType.cpp",
-            "autograd/templates/VariableType.cpp",
-            "autograd/templates/VariableType.h",
-            "autograd/templates/ViewFuncs.cpp",
-            "autograd/templates/ViewFuncs.h",
-            "autograd/templates/annotated_fn_args.py.in",
-            "autograd/templates/python_enum_tag.cpp",
-            "autograd/templates/python_fft_functions.cpp",
-            "autograd/templates/python_functions.cpp",
-            "autograd/templates/python_functions.h",
-            "autograd/templates/python_linalg_functions.cpp",
-            "autograd/templates/python_nested_functions.cpp",
-            "autograd/templates/python_nn_functions.cpp",
-            "autograd/templates/python_return_types.h",
-            "autograd/templates/python_return_types.cpp",
-            "autograd/templates/python_sparse_functions.cpp",
-            "autograd/templates/python_special_functions.cpp",
-            "autograd/templates/python_torch_functions.cpp",
-            "autograd/templates/python_variable_methods.cpp",
-            "autograd/templates/variable_factories.h",
-        ],
+        resources = {r: source_file(r) for r in _AUTOGRAD_RESOURCES} if source_file else _AUTOGRAD_RESOURCES,
         visibility = ["PUBLIC"],
         deps = [
             third_party("pyyaml"),
@@ -256,15 +263,28 @@ def define_tools_targets(
         ],
     )
 
+    python_library(
+        name = "pyi",
+        srcs = ["pyi/gen_pyi.py"],
+        base_module = "tools",
+        deps = [
+            ":autograd",
+            torchgen_deps,
+        ],
+    )
+
     python_test(
         name = "test_codegen",
         srcs = [
             "test/test_codegen.py",
         ],
+        package_style = "inplace",
         contacts = contacts,
         visibility = ["PUBLIC"],
         deps = [
+            "//xplat/caffe2:codegen_test_utils",
             torchgen_deps,
             ":autograd",
+            ":pyi",
         ],
     )

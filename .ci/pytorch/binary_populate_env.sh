@@ -67,6 +67,20 @@ if [[ "$(uname)" == 'Darwin' ]]; then
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
 fi
+# Keep stable HUD names while recording the exact preview pin in wheel metadata.
+if [[ "$DESIRED_CUDA" == "rocmpreview" ]]; then
+  ROCM_PREVIEW_PIN=$(tr -d '[:space:]' < "${PYTORCH_ROOT}/.ci/docker/ci_commit_pins/rocm-preview.txt")
+  export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+rocm${ROCM_PREVIEW_PIN}"
+  # The generated matrix leaves the preview rocm requirement unpinned.
+  if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
+    export PYTORCH_EXTRA_INSTALL_REQUIREMENTS=$(sed -E \
+      "s/(^|\| *)(rocm\[[^]]*\])( *(\||$))/\1\2==${ROCM_PREVIEW_PIN}\3/" <<< "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS}")
+    if [[ "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS}" != *"]==${ROCM_PREVIEW_PIN}"* ]]; then
+      echo "ERROR: could not pin rocm==${ROCM_PREVIEW_PIN} in: ${PYTORCH_EXTRA_INSTALL_REQUIREMENTS}" >&2
+      exit 1
+    fi
+  fi
+fi
 
 export PYTORCH_BUILD_NUMBER=1
 
@@ -92,13 +106,17 @@ if [[ -n "${FBTRITON:-}" && "${FBTRITON}" != "0" ]]; then
     TRITON_PIN_TO_SHORTHASH=0
 fi
 
-if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* && ! "$PYTORCH_BUILD_VERSION" =~ .*rocm.* ]]; then
+if [[ "$PACKAGE_TYPE" =~ .*wheel.* && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* && ! "$PYTORCH_BUILD_VERSION" =~ .*rocm.* ]]; then
   TRITON_REQUIREMENT="${TRITON_CUDA_PKG}~=${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
   if [[ "${TRITON_PIN_TO_SHORTHASH}" == "1" && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
       TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
       TRITON_REQUIREMENT="${TRITON_CUDA_PKG}==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
   fi
-  export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
+  if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
+    export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
+  elif [[ "$DESIRED_CUDA" == cu* ]]; then
+    export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${TRITON_REQUIREMENT}"
+  fi
 fi
 
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton rocm package

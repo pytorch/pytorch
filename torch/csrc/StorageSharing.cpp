@@ -11,6 +11,7 @@
 #include <torch/csrc/copy_utils.h>
 
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #include <torch/csrc/Storage.h>
@@ -322,15 +323,15 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* /*noargs*/) {
     _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
     _ref_counter_offset = THPUtils_packUInt64(sent_data->offset());
 
-    cudaIpcEventHandle_t ipc_event_handle{};
+    std::string ipc_event_handle_str;
 
     if (sent_data->event_sync_required_) {
-      C10_CUDA_CHECK(
-          cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
+      ipc_event_handle_str = sent_data->event_->ipcHandle();
     }
 
     _event_handle = PyBytes_FromStringAndSize(
-        reinterpret_cast<const char*>(&ipc_event_handle), CUDA_IPC_HANDLE_SIZE);
+        ipc_event_handle_str.c_str(),
+        static_cast<Py_ssize_t>(ipc_event_handle_str.size()));
     _event_sync_required = PyBool_FromLong(sent_data->event_sync_required_);
   }
 
@@ -448,7 +449,7 @@ static PyObject* THPStorage_newSharedCuda(
   ptrdiff_t storage_offset_bytes =
       static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
 
-  const auto device = c10::checked_convert<c10::DeviceIndex>(
+  const auto device = c10::safe_conv<c10::DeviceIndex>(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
   at::cuda::CUDAGuard device_guard(device);
 

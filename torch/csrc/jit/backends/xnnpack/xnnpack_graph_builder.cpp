@@ -195,7 +195,6 @@ void XNNGraph::defineAllNodes(std::shared_ptr<torch::jit::Graph>& graph) {
             "The node of ",
             node->kind().toQualString(),
             " is not supported yet");
-        break;
       }
     }
   }

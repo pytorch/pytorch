@@ -1,16 +1,10 @@
 #pragma once
 #include <c10/util/Exception.h>
+#include <torch/headeronly/core/TransposeType.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 
 namespace at::native {
-
-// Used as an interface between the different BLAS-like libraries
-enum class TransposeType {
-  NoTranspose,
-  Transpose,
-  ConjTranspose,
-};
 
 // Transforms TransposeType into the BLAS / LAPACK format
 [[maybe_unused]] static inline char to_blas(TransposeType trans) {

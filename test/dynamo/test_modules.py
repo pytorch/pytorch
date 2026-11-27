@@ -2890,6 +2890,49 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         x = torch.randn(10)
         self.assertEqual(f(x), opt_f(x))
 
+    def test_specialized_module_partial_staticmethod(self):
+        def get_value(mod, scale):
+            return mod.weight * scale
+
+        class Mod(torch.nn.Module):
+            value = staticmethod(partial(get_value, scale=2))
+
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(3))
+
+            def forward(self, x):
+                return x + self.value(self)
+
+        mod = Mod()
+        mod.torchdynamo_force_dynamic = False
+        x = torch.randn(3)
+        opt_mod = torch.compile(mod, backend="eager")
+        self.assertEqual(opt_mod(x), mod(x))
+
+        def check_alias(x, original):
+            alias = mod.value
+            y = alias(mod)
+            torch._dynamo.graph_break()
+            return x + y, alias is mod.value, alias is original, alias
+
+        original = mod.value
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_check_alias = torch.compile(check_alias, backend=counter)
+        for _ in range(2):
+            result = opt_check_alias(x, original)
+            self.assertEqual(result[:3], check_alias(x, original)[:3])
+            self.assertIs(result[3], original)
+        self.assertEqual(counter.frame_count, 1)
+
+        Mod.value = staticmethod(partial(get_value, scale=2))
+        for _ in range(2):
+            result = opt_check_alias(x, original)
+            self.assertEqual(result[:3], check_alias(x, original)[:3])
+            self.assertIs(result[3], mod.value)
+            self.assertIsNot(result[3], original)
+        self.assertEqual(counter.frame_count, 1)
+
     def test_module_dict_iter_keys(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -3812,6 +3855,24 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, x + 1)
         # Make sure Dynamo actually traced the method.
         self.assertEqual(cache.bool_invoked, 1)
+
+    def test_optimized_module_bool(self):
+        # Modules without __bool__/__len__ used to raise TypeError via __len__
+        opt_mod = torch.compile(torch.nn.Linear(2, 2), backend="eager")
+        self.assertTrue(bool(opt_mod))
+        with self.assertRaisesRegex(TypeError, "does not support len"):
+            len(opt_mod)
+
+        # Sized containers keep their len-based truthiness
+        for mod in [torch.nn.Sequential(), torch.nn.ModuleDict()]:
+            self.assertFalse(bool(torch.compile(mod, backend="eager")))
+
+        # A user-defined __bool__ on the original module is respected
+        class Falsy(torch.nn.Module):
+            def __bool__(self):
+                return False
+
+        self.assertFalse(bool(torch.compile(Falsy(), backend="eager")))
 
     def test_patch_module(self):
         def set_attrs_from_orig_model(cls_instance, mod, *func_names):

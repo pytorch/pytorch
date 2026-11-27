@@ -29,9 +29,10 @@ from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
+from torch._inductor.runtime.hints import DeviceProperties, get_warp_size
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
@@ -55,6 +56,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
+    IS_SM10X,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
 )
@@ -70,6 +72,7 @@ from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
     largeTensorTest,
+    preserves_device_selection,
     skipCPUIf,
     skipCUDAIf,
     skipMPSIf,
@@ -77,10 +80,12 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (
+    decorateIf,
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
     serialTest,
+    skipIfCppFakeTensor,
     skipIfRocm,
     skipIfRocmArch,
     TEST_MULTIACCELERATOR,
@@ -232,6 +237,11 @@ def expected_not_implemented_on_mps(test_func):
         self.fail("expected NotImplementedError on MPS but test passed")
 
     return wrapper
+
+
+def _assert_xcc_remapped(code, num_xccs):
+    checker = FileCheck().check(f"NUM_XCCS : tl.constexpr = {num_xccs}")
+    checker.check("tl.program_id(0) % NUM_XCCS").run(code)
 
 
 def rmse(ref, res):
@@ -880,8 +890,9 @@ def _descriptor_load_pattern(operand):
 
 def _pointer_load_pattern(operand):
     # load_checked_2d is defined unconditionally in every generated kernel, so
-    # only an operand-qualified call establishes the fallback.
-    return rf"\bload_checked_2d\(\s*{operand.upper()}\s*,"
+    # only an operand-qualified call establishes the fallback. A kernel defined at
+    # module level calls it by a name suffixed with the kernel's own.
+    return rf"\bload_checked_2d(?:_\w+)?\(\s*{operand.upper()}\s*,"
 
 
 def _check_int64_decode_narrows_coordinates(
@@ -1308,12 +1319,10 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
 
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
-    def setUp(self):
-        super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
+    setUp = preserves_device_selection(InductorTestCase.setUp)
+    setUpClass = classmethod(
+        preserves_device_selection(InductorTestCase.setUpClass.__func__)
+    )
 
     def _check_equal(
         self,
@@ -2294,9 +2303,9 @@ class TestFlexAttention(InductorTestCase):
         self.run_test_with_paged_attention(*inputs)
 
     @supported_platform
-    @dtypes(*device_configs["cpu"].dtypes)
-    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
-    @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @dtypes(*device_configs["cpu"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("BLOCK_SIZE", test_block_size)
     def test_builtin_score_mods_different_block_size(
@@ -4689,9 +4698,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
-    @dtypes(*device_configs["cpu"].dtypes)
-    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
-    @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @dtypes(*device_configs["cpu"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
@@ -4699,6 +4708,36 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(
             score_mod, dtype, device, B, H, S, qk_d, B, H, S, V_D=v_d
         )
+
+    @supported_platform
+    @dtypes(*device_configs["cpu"].dtypes)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @common_utils.parametrize(
+        "BLOCK_SIZE,head_dims",
+        [
+            (128, (D, D // 2)),
+            (256, (D // 2, D)),
+            ((128, 256), (D, D // 2)),
+            ((256, 128), (D // 2, D)),
+        ],
+    )
+    def test_block_size_and_head_dims_all_dtypes(
+        self,
+        device,
+        dtype: torch.dtype,
+        BLOCK_SIZE: int | tuple[int, int],
+        head_dims: tuple[int, int],
+    ):
+        # The score_mod sweeps over block sizes and head dims use fast dtypes;
+        # keep one score_mod across all dtypes for these config-selection inputs.
+        qk_d, v_d = head_dims
+        block_mask = create_block_mask(
+            noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE, device=device
+        )
+        inputs = (_rel_causal, dtype, device, B, H, S, qk_d, B, H, S)
+        self.run_test(*inputs, V_D=v_d, block_mask=block_mask)
+        self.run_test_with_paged_attention(*inputs, V_D=v_d, block_mask=block_mask)
 
     @supported_platform
     @skip_on_cpu
@@ -4789,6 +4828,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(_rel_bias, dtype, device, B, H, S, head_dim, B, H, S, head_dim)
+
+    @supported_platform
+    @skip_on_cpu
+    @skipUnless(IS_SM10X, "guards an sm_10x Triton miscompile")
+    @common_utils.parametrize("qk_head_dim", [64, 512])
+    def test_head_dim_512_default_configs(self, device, qk_head_dim):
+        # https://github.com/triton-lang/triton/issues/10309
+        self.run_test(_identity, torch.bfloat16, device, B, H, S, qk_head_dim, V_D=512)
 
     @supported_platform
     def test_GQA_causal_mask(self, device):
@@ -5242,6 +5289,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         for eager, compiled in zip(eager_grads, compiled_grads):
             torch.testing.assert_close(eager, compiled, atol=9e-3, rtol=0)
 
+    @decorateIf(
+        unittest.skip("paged attention captures the page table; not supported on MPS"),
+        lambda params: params["mode"] == "paged_attention"
+        and _is_mps_device(params["device"]),
+    )
     @supported_platform
     @skip_on_cpu
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
@@ -5520,6 +5572,213 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             kernel_options={"BLOCK_M": 16},
         )
         FileCheck().check("BLOCK_M : tl.constexpr = 16").run(code[0])
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap(self, device):
+        # 2 * 5 * cdiv(448, BLOCK_M) programs is not a multiple of 3 for any
+        # power-of-two BLOCK_M in 16..128, so some XCCs get one program fewer.
+        q, k, v = (torch.randn(2, 5, 448, 64, device=device) for _ in range(3))
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
+        )
+
+        def run(num_xccs):
+            compiled = torch.compile(flex_attention, fullgraph=True)
+            options = {"NUM_XCCS": num_xccs}
+            return run_and_get_code(
+                compiled, q, k, v, block_mask=block_mask, kernel_options=options
+            )
+
+        out, code = run(3)
+        _assert_xcc_remapped(code[0], 3)
+        ref, code = run(0)
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run(code[0])
+        self.assertEqual(out, ref)
+        # The decode kernel has no remap and must not receive NUM_XCCS.
+        compiled = torch.compile(flex_attention, fullgraph=True)
+        options = {"NUM_XCCS": 3}
+        _, code = run_and_get_code(compiled, q[:, :, :1], k, v, kernel_options=options)
+        FileCheck().check("SPLIT_KV : tl.constexpr").run(code[0])
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run(code[0])
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_backward(self, device):
+        # With batch 5, 2 kv heads and GQA 2, 5 * 2 * (2 * cdiv(400, BLOCK_M2) +
+        # cdiv(272, BLOCK_N1)) programs is not a multiple of 3 for any
+        # power-of-two block sizes in 16..128. Batch != kv heads, so a decode
+        # that confuses the batch and head counts is caught.
+        q = torch.randn(5, 4, 400, 64, device=device, requires_grad=True)
+        k, v = (
+            torch.randn(5, 2, 272, 64, device=device, requires_grad=True)
+            for _ in range(2)
+        )
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 400, 272, device=device
+        )
+
+        def run(num_xccs):
+            compiled = torch.compile(flex_attention, fullgraph=True)
+            options = {"NUM_XCCS": num_xccs}
+
+            def fwd_bwd():
+                kwargs = {"enable_gqa": True, "kernel_options": options}
+                out = compiled(q, k, v, block_mask=block_mask, **kwargs)
+                return torch.autograd.grad(out.sum(), (q, k, v))
+
+            return run_and_get_code(fwd_bwd)
+
+        grads, code = run(3)
+        self.assertEqual(len(code), 2)
+        for c in code:
+            _assert_xcc_remapped(c, 3)
+        ref, code = run(0)
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run("\n".join(code))
+        self.assertEqual(grads, ref)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_dynamic_batch(self, device):
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
+        )
+
+        def make_inputs(batch):
+            inputs = [
+                torch.randn(batch, 4, 448, 64, device=device, requires_grad=True)
+                for _ in range(3)
+            ]
+            for t in inputs:
+                torch._dynamo.mark_dynamic(t, 0)
+            return inputs
+
+        def fwd_bwd(fn, num_xccs, q, k, v):
+            options = {"NUM_XCCS": num_xccs}
+            out = fn(q, k, v, block_mask=block_mask, kernel_options=options)
+            return out, torch.autograd.grad(out.sum(), (q, k, v))
+
+        remapped = torch.compile(flex_attention, fullgraph=True)
+        small, large = make_inputs(2), make_inputs(5)
+        res_small, code = run_and_get_code(fwd_bwd, remapped, 3, *small)
+        self.assertEqual(len(code), 2)
+        for c in code:
+            _assert_xcc_remapped(c, 3)
+        # Batch 5 reuses the batch-2 graphs: the grid-size guard does not force
+        # a recompile on the batch.
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            res_large = fwd_bwd(remapped, 3, *large)
+
+        reference = torch.compile(flex_attention, fullgraph=True)
+        self.assertEqual(res_small, fwd_bwd(reference, 0, *small))
+        self.assertEqual(res_large, fwd_bwd(reference, 0, *large))
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_grid_limit_guard(self, device):
+        from torch._inductor.kernel.flex import flex_attention as flex_lowering
+
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
+        )
+        options = {"NUM_XCCS": 3, "BLOCK_M": 64, "BLOCK_N": 64, "num_warps": 4}
+
+        def make_inputs(batch):
+            inputs = [torch.randn(batch, 4, 448, 64, device=device) for _ in range(3)]
+            for t in inputs:
+                torch._dynamo.mark_dynamic(t, 0)
+            return inputs
+
+        def run(fn, batch):
+            inputs = make_inputs(batch)
+            return fn(*inputs, block_mask=block_mask, kernel_options=options)
+
+        # cdiv(448, 64) * 4 heads programs of 4 warps per batch element. A limit
+        # between batch 2 and batch 5 remaps batch 2, and the guard on the
+        # flattened grid must then recompile batch 5 rather than reuse it.
+        limit = 3 * 7 * 4 * 4 * get_warp_size(torch.device(device))
+        compiled = torch.compile(flex_attention, fullgraph=True)
+        with mock.patch.object(flex_lowering, "_MAX_GRID_WORK_ITEMS", limit):
+            _, code = run_and_get_code(run, compiled, 2)
+            _assert_xcc_remapped(code[0], 3)
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                with self.assertRaises(torch._dynamo.exc.RecompileError):
+                    run(compiled, 5)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_default(self, device):
+        from torch._inductor.kernel.flex import flex_attention as flex_lowering
+
+        q, k, v = (
+            torch.randn(2, 4, 256, 64, device=device, requires_grad=True)
+            for _ in range(3)
+        )
+
+        def fwd_bwd():
+            out = torch.compile(flex_attention, fullgraph=True)(q, k, v)
+            return torch.autograd.grad(out.sum(), (q, k, v))
+
+        remap_by_default = False
+        xcc_count = None
+        if torch.version.hip is not None and torch.device(device).type == "cuda":
+            props = torch.cuda.get_device_properties(device)
+            remap_by_default = props.gcnArchName.split(":")[0] in ("gfx942", "gfx950")
+            xcc_count = props.xcc_count
+
+        # A stubbed count shows the default is read from the device, not assumed.
+        class ThreeXccs:
+            @staticmethod
+            def create(device):
+                return DeviceProperties.create(device)._replace(xcc_count=3)
+
+        for count, props_cls in ((xcc_count, DeviceProperties), (3, ThreeXccs)):
+            patched = mock.patch.object(flex_lowering, "DeviceProperties", props_cls)
+            with fresh_cache(), patched:
+                _, code = run_and_get_code(fwd_bwd)
+            self.assertEqual(len(code), 2)
+            for c in code:
+                if remap_by_default and count is not None and count > 1:
+                    _assert_xcc_remapped(c, count)
+                else:
+                    FileCheck().check_not("NUM_XCCS : tl.constexpr").run(c)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_fewer_programs_than_xccs(self, device):
+        # 2 forward and 2 + 2 backward programs, fewer than NUM_XCCS=8.
+        q, k, v = (
+            torch.randn(1, 1, 128, 64, device=device, requires_grad=True)
+            for _ in range(3)
+        )
+        blocks = {"fwd_BLOCK_M": 64, "fwd_BLOCK_N": 64, "bwd_BLOCK_M1": 32}
+        blocks |= {"bwd_BLOCK_N1": 64, "bwd_BLOCK_M2": 64, "bwd_BLOCK_N2": 32}
+
+        def run(num_xccs):
+            compiled = torch.compile(flex_attention, fullgraph=True)
+
+            def fwd_bwd():
+                options = {**blocks, "NUM_XCCS": num_xccs}
+                out = compiled(q, k, v, kernel_options=options)
+                return torch.autograd.grad(out.sum(), (q, k, v))
+
+            return run_and_get_code(fwd_bwd)
+
+        grads, code = run(8)
+        self.assertEqual(len(code), 2)
+        for c in code:
+            _assert_xcc_remapped(c, 8)
+        ref, _ = run(0)
+        self.assertEqual(grads, ref)
+        # One XCC needs no remap.
+        _, code = run(1)
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run("\n".join(code))
 
     @supported_platform
     @skip_on_cpu
@@ -6135,6 +6394,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 return_lse=True,
                 kernel_options={"BACKEND": "INVALID"},
             )
+
+    @supported_platform
+    def test_num_xccs_rejects_invalid(self, device):
+        q, k, v = (torch.randn(1, 1, 4, 8, device=device) for _ in range(3))
+        for name in ("NUM_XCCS", "fwd_NUM_XCCS", "bwd_NUM_XCCS"):
+            _apply_kernel_options(q, k, v, False, {name: 8})
+            for value in (-1, True, 2.0, "8"):
+                with self.assertRaisesRegex(
+                    ValueError, f"^{name} must be a non-negative int"
+                ):
+                    _apply_kernel_options(q, k, v, False, {name: value})
+        # Rejected before lowering, also on paths that don't use NUM_XCCS.
+        compiled = torch.compile(flex_attention)
+        with self.assertRaisesRegex(ValueError, "^bwd_NUM_XCCS must be"):
+            compiled(q, k, v, kernel_options={"bwd_NUM_XCCS": -1})
 
     @supported_platform
     @skip_on_cpu
@@ -6911,6 +7185,100 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_mps
+    def test_forward_refine_hook_receives_lowering_context(self, device):
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.virtualized import V
+
+        class RecordingChoices(InductorChoices):
+            def __init__(self):
+                self.contexts = []
+
+            def refine_flex_attention_fwd_configs(self, configs, context):
+                self.contexts.append(context)
+                return configs
+
+        def lowering_context(query, key, value, **kwargs):
+            choices = RecordingChoices()
+            torch._dynamo.reset()
+            with (
+                config.patch(force_disable_caches=True),
+                V.set_choices_handler(choices),
+            ):
+                torch.compile(flex_attention, fullgraph=True)(
+                    query, key, value, **kwargs
+                )
+            self.assertEqual(len(choices.contexts), 1)
+            return choices.contexts[0]
+
+        # Distinct sizes so that swapped context fields fail.
+        dense = lowering_context(
+            torch.randn(3, 4, 128, 64, device=device, dtype=torch.float16),
+            torch.randn(3, 2, 256, 64, device=device, dtype=torch.float16),
+            torch.randn(3, 2, 256, 32, device=device, dtype=torch.float16),
+            enable_gqa=True,
+        )
+        self.assertEqual(
+            (
+                dense.batch_size,
+                dense.num_heads,
+                dense.num_kv_heads,
+                dense.seq_len_q,
+                dense.seq_len_kv,
+                dense.qk_head_dim,
+                dense.v_head_dim,
+                dense.qk_head_dim_rounded,
+                dense.v_head_dim_rounded,
+            ),
+            (3, 4, 2, 128, 256, 64, 32, 64, 32),
+        )
+        self.assertTrue(dense.is_noop_block_mask)
+        self.assertTrue(dense.inputs_contiguous)
+        self.assertFalse(dense.score_mod_reads_buffers)
+        self.assertEqual(
+            (dense.dtype, dense.key_dtype, dense.value_dtype), (torch.float16,) * 3
+        )
+
+        query, key, value = (
+            torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
+            for _ in range(3)
+        )
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # A block mask with the query's batch also allows broadcasting K/V.
+        block_mask = create_block_mask(causal, 2, 1, 256, 256, device=device)
+        masked = lowering_context(
+            torch.randn(2, 2, 256, 64, device=device, dtype=torch.float16),
+            key,
+            value,
+            block_mask=block_mask,
+        )
+        self.assertFalse(masked.is_noop_block_mask)
+        self.assertEqual((masked.batch_size, masked.kv_batch_size), (2, 1))
+
+        bias = torch.randn(256, device=device, dtype=torch.float16)
+
+        def add_bias(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        self.assertTrue(
+            lowering_context(
+                query, key, value, score_mod=add_bias
+            ).score_mod_reads_buffers
+        )
+
+        transposed = (
+            torch.randn(1, 256, 2, 64, device=device, dtype=torch.float16).transpose(
+                1, 2
+            )
+            for _ in range(3)
+        )
+        self.assertFalse(lowering_context(*transposed).inputs_contiguous)
+
+    @supported_platform
+    @skip_on_cpu
     @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
     def test_backward_calls_flex_attention_backward_choices_hook(self, device):
         from torch._inductor.choices import InductorChoices
@@ -7129,12 +7497,15 @@ class GraphModule(torch.nn.Module):
 
         choices = RecordingChoices()
         torch._dynamo.reset()
+        # V.set_choices_handler is thread-local; keep the lazily compiled
+        # backward on this thread instead of the reused autograd device thread.
         with (
             config.patch(
                 force_disable_caches=True,
                 inductor_choices_class=lambda: choices,
             ),
             V.set_choices_handler(choices),
+            torch.autograd.set_multithreading_enabled(False),
         ):
             torch.compile(compiled_attention, fullgraph=True)(
                 query, key, value, score_bias
@@ -7773,6 +8144,7 @@ class GraphModule(torch.nn.Module):
         ):
             attention(query, key, value, return_lse=True)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @supported_platform
     @skip_on_cpu
     @skip_on_xpu
@@ -8620,6 +8992,11 @@ class GraphModule(torch.nn.Module):
 
 
 class TestBlockMask(InductorTestCase):
+    setUpClass = classmethod(
+        preserves_device_selection(InductorTestCase.setUpClass.__func__)
+    )
+
+    @preserves_device_selection
     def setUp(self):
         super().setUp()
 
@@ -10068,13 +10445,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
-    def setUp(self):
-        super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
-
     def _check_equal(
         self,
         golden_out: torch.Tensor,
@@ -10580,15 +10950,29 @@ supports_learnable_bias = unittest.skipUnless(
 )
 
 
+def _skip_rocm_flaky_learnable_bias(test_name):
+    return common_utils.decorateIf(
+        unittest.skip(
+            "Flaky on ROCm: https://github.com/pytorch/pytorch/issues/167271 and https://github.com/pytorch/pytorch/issues/167296"
+        ),
+        lambda p: TEST_WITH_ROCM
+        and (
+            p["params"].batch_size,
+            p["params"].num_heads,
+            p["params"].seq_length,
+            p["params"].head_dim,
+            p["params"].dtype,
+            p["mode"],
+        )
+        in ROCM_FLAKY_LEARNABLE_BIAS_CASES[test_name],
+    )
+
+
 @supports_learnable_bias
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
         self.dtype = torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2
@@ -10671,6 +11055,7 @@ class TestLearnableBiases(InductorTestCase):
         ):
             self._gold_check(eager, compiled, gold, name)
 
+    @_skip_rocm_flaky_learnable_bias("relative_1d_bias")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -10989,6 +11374,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @_skip_rocm_flaky_learnable_bias("symmetric_bias")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11062,6 +11448,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @_skip_rocm_flaky_learnable_bias("head_specific_gate")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11778,6 +12165,19 @@ instantiate_device_type_tests(
     allow_xpu=True,
     allow_mps=True,
 )
+
+if LONG_COMPILATION_ON_CPU:
+    for name in (
+        "TestFlexAttentionCPU",
+        "TestPagedAttentionCPU",
+        "TestLearnableBiasesCPU",
+    ):
+        if name in globals() and not getattr(
+            globals()[name], "__unittest_skip__", False
+        ):
+            unittest.skip("skip UT for CPU due to long compilation time found in CI")(
+                globals()[name]
+            )
 
 
 if __name__ == "__main__":

@@ -91,7 +91,6 @@ static Tensor binary_op_preprocess_other_arg(const Tensor& other_arg) {
             false,
             "binary_op_tensor, doesn't support type ",
             other.scalar_type());
-        break;
     }
     other = other.vulkan();
   }

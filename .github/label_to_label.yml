@@ -1,54 +1,15 @@
-# Use this to auto apply labels based on other labels.  Applies to both PRs and
-# issues. Currently only supports any and all
-- any:
-  - "module: opcheck"
-  then:
-  - "module: custom-operators"
-- any:
-  - "module: custom-operators"
-  - "module: functionalization"
-  - "module: aotdispatch"
-  - "module: higher order operators"
-  - "module: fakeTensor"
-  - "module: ProxyTensor"
-  - "module: library"
-  - "module: reinplacing"
-  then:
-  - "module: pt2-dispatcher"
+# Use this to auto apply labels based on other labels. The label bot applies these
+# rules to issues only, not PRs. Currently only supports any and all
 - any:
   - "vllm-compile"
   then:
   - "module: vllm"
   - "oncall: pt2"
 - any:
-  - "module: vmap"
-  then:
-  - "module: functorch"
-- any:
   - "module: reinplacing"
   then:
-  - "module: inductor"
-- any:
-  - "module: pt2 optimizer"
-  then:
-  - "module: dynamo"
-- any:
-  - "module: aotinductor"
-  then:
-  - "oncall: export"
-- any:
-  - "module: dynamo"
   - "module: pt2-dispatcher"
   - "module: inductor"
-  - "module: aotinductor"
-  - "module: cudagraphs"
-  - "oncall: export"
-  - "module: compile-time"
-  - "module: compiled autograd"
-  - "module: flex attention"
-  - "module: dynamic shapes"
-  then:
-  - "oncall: pt2"
 - any:
   - "release notes: distributed (c10d)"
   - "release notes: distributed (symm_mem)"
@@ -62,3 +23,88 @@
   - "good first issue"
   then:
   - "actionable"
+# BEGIN label_parents rules, generated from OWNERSHIP.yaml by scripts/codeowners/generate_codeowners.py
+- any:
+  - "module: dynamo"
+  - "module: inductor"
+  - "module: pt2-dispatcher"
+  - "oncall: export"
+  - "module: compiled autograd"
+  - "module: dynamic shapes"
+  - "module: flex attention"
+  - "module: compile-time"
+  then:
+  - "oncall: pt2"
+- any:
+  - "module: tvm"
+  - "module: pt2 optimizer"
+  then:
+  - "module: dynamo"
+- any:
+  - "module: aotdispatch"
+  - "module: fakeTensor"
+  - "module: ProxyTensor"
+  - "module: higher order operators"
+  - "module: custom-operators"
+  - "module: functionalization"
+  - "module: library"
+  then:
+  - "module: pt2-dispatcher"
+- any:
+  - "module: opcheck"
+  then:
+  - "module: custom-operators"
+- any:
+  - "module: aotinductor"
+  - "module: nativert"
+  then:
+  - "oncall: export"
+- any:
+  - "module: vmap"
+  then:
+  - "module: functorch"
+- any:
+  - "module: c10d"
+  - "module: ddp"
+  - "module: fsdp"
+  - "module: dtensor"
+  - "module: tensorpipe"
+  - "oncall: distributed infra"
+  then:
+  - "oncall: distributed"
+- any:
+  - "module: android"
+  - "module: ios"
+  - "module: mobile delegates"
+  - "module: vulkan"
+  then:
+  - "oncall: mobile"
+- any:
+  - "module: cublas"
+  - "module: cudnn"
+  - "module: jiterator"
+  then:
+  - "module: cuda"
+- any:
+  - "module: hipify"
+  then:
+  - "module: rocm"
+- any:
+  - "module: nn.utils.parametrize"
+  - "module: sdpa"
+  then:
+  - "module: nn"
+- any:
+  - "module: headeronly"
+  then:
+  - "module: abi"
+- any:
+  - "module: github automation"
+  then:
+  - "module: ci"
+- any:
+  - "module: operator benchmarks"
+  - "module: models"
+  then:
+  - "module: benchmark"
+# END label_parents rules

@@ -55,6 +55,12 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("validate_full_updates"),
           py::arg("user_managed") = false)
       .def(
+          "run_const_fold",
+          [](AOTIModelContainerRunnerCpu& self, bool use_inactive) {
+            self.run_const_fold(use_inactive);
+          },
+          py::arg("use_inactive"))
+      .def(
           "swap_constant_buffer",
           &AOTIModelContainerRunnerCpu::swap_constant_buffer)
       .def(
@@ -100,6 +106,11 @@ void initAOTIRunnerBindings(PyObject* module) {
           &AOTIModelContainerRunnerCuda::run,
           py::arg("inputs"),
           py::arg("stream_handle") = nullptr)
+      .def(
+          "run_with_lazy_cuda_graphs",
+          &AOTIModelContainerRunnerCuda::run_with_lazy_cuda_graphs,
+          py::arg("inputs"),
+          py::arg("stream_handle") = nullptr)
       .def("get_call_spec", &AOTIModelContainerRunnerCuda::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -127,6 +138,12 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("tensor_map"),
           py::arg("use_inactive"),
           py::arg("validate_full_updates"))
+      .def(
+          "run_const_fold",
+          [](AOTIModelContainerRunnerCuda& self, bool use_inactive) {
+            self.run_const_fold(use_inactive);
+          },
+          py::arg("use_inactive"))
       .def(
           "swap_constant_buffer",
           &AOTIModelContainerRunnerCuda::swap_constant_buffer)
@@ -195,6 +212,12 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("use_inactive"),
           py::arg("validate_full_updates"))
       .def(
+          "run_const_fold",
+          [](AOTIModelContainerRunnerXpu& self, bool use_inactive) {
+            self.run_const_fold(use_inactive);
+          },
+          py::arg("use_inactive"))
+      .def(
           "swap_constant_buffer",
           &AOTIModelContainerRunnerXpu::swap_constant_buffer)
       .def(
@@ -244,6 +267,12 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("tensor_map"),
           py::arg("use_inactive"),
           py::arg("validate_full_updates"))
+      .def(
+          "run_const_fold",
+          [](AOTIModelContainerRunnerMps& self, bool use_inactive) {
+            self.run_const_fold(use_inactive);
+          },
+          py::arg("use_inactive"))
       .def(
           "swap_constant_buffer",
           &AOTIModelContainerRunnerMps::swap_constant_buffer)

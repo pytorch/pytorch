@@ -50,8 +50,8 @@ struct MPSHooks : public at::MPSHooksInterface {
   // MPSEvent interface
   uint32_t acquireEvent(bool enable_timing) const override;
   void releaseEvent(uint32_t event_id) const override;
-  void recordEvent(uint32_t event_id) const override;
-  void waitForEvent(uint32_t event_id) const override;
+  void recordEvent(uint32_t event_id, int64_t stream_id) const override;
+  void waitForEvent(uint32_t event_id, int64_t stream_id) const override;
   void synchronizeEvent(uint32_t event_id) const override;
   bool queryEvent(uint32_t event_id) const override;
   double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id)

@@ -28,6 +28,7 @@
 
 #include <c10/mobile/CPUCachingAllocator.h>
 
+#include <c10/util/irange.h>
 #include <chrono>
 using namespace std::chrono;
 
@@ -60,7 +61,7 @@ int main(int argc, char** argv) {
   caffe2::Timer timer;
   std::vector<long> times;
 
-  for (int i = 0; i < FLAGS_iter; ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(FLAGS_iter)) {
     auto start = high_resolution_clock::now();
 
 #if BUILD_LITE_INTERPRETER

@@ -151,7 +151,7 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
       auto inputTensor = inputs[spec.get_input_tensor_index()];
       if (inputTensor.is_mkldnn()) {
         auto dataType = spec.dtype();
-        if (C10_UNLIKELY(!useOpaqueLayout(i))) {
+        if (!useOpaqueLayout(i)) [[unlikely]] {
           // If the input tensor was between two partitions, it would've been
           // wrapped with LlgaTensorImpl. But if it's being reused as the output
           // tensor, which is not between two partitions, then we'd have to

@@ -85,6 +85,7 @@ mode snapshots the global registry during initialization.
 """
 from types import NoneType
 import logging
+import math
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
@@ -417,17 +418,24 @@ def conv_backward_flop(
 
     return flop_count
 
+def _sdpa_batch_size(*shapes) -> int:
+    """Number of (batch) attention problems: the leading dims before (heads, seq, dim) broadcast."""
+    return math.prod(torch.broadcast_shapes(*(s[:-3] for s in shapes)))
+
+
 def sdpa_flop_count(query_shape, key_shape, value_shape):
     """
     Count flops for self-attention.
 
     Supports GQA (grouped-query attention) where key/value have fewer heads
     than the query. The kernel broadcasts KV heads to match query heads.
+    Leading batch dims may be any number and broadcast, as on MPS.
     """
-    b, h_q, s_q, d_q = query_shape
-    _b2, h_kv, s_k, _d2 = key_shape
-    _b3, _h3, _s3, d_v = value_shape
-    if not (b == _b2 == _b3 and h_kv == _h3 and d_q == _d2 and s_k == _s3):
+    b = _sdpa_batch_size(query_shape, key_shape, value_shape)
+    h_q, s_q, d_q = query_shape[-3:]
+    h_kv, s_k, _d2 = key_shape[-3:]
+    _h3, _s3, d_v = value_shape[-3:]
+    if not (h_kv == _h3 and d_q == _d2 and s_k == _s3):
         raise AssertionError(
             f"sdpa_flop_count: query/key/value shapes are incompatible: "
             f"q={query_shape}, k={key_shape}, v={value_shape}"
@@ -651,11 +659,12 @@ def _efficient_attention_forward_flop(
 
 
 def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape):
-    b, h_q, s_q, d_q = query_shape
-    _b2, h_kv, s_k, _d2 = key_shape
-    _b3, _h3, _s3, d_v = value_shape
-    _b4, _h4, _s4, _d4 = grad_out_shape
-    if not (b == _b2 == _b3 == _b4 and h_kv == _h3 and h_q == _h4):
+    b = _sdpa_batch_size(grad_out_shape, query_shape, key_shape, value_shape)
+    h_q, s_q, d_q = query_shape[-3:]
+    h_kv, s_k, _d2 = key_shape[-3:]
+    _h3, _s3, d_v = value_shape[-3:]
+    _h4, _s4, _d4 = grad_out_shape[-3:]
+    if not (h_kv == _h3 and h_q == _h4):
         raise AssertionError(
             "sdpa_backward_flop_count: batch/heads mismatch among tensors"
         )

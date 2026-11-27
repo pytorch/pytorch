@@ -405,6 +405,10 @@ class TORCH_API Context {
   void setAllowTF32CuBLAS(bool /*b*/);
   Float32MatmulPrecision float32MatmulPrecision() const;
   Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
+  // The setting as stored, before inheritance is resolved (may be NONE or
+  // DEFAULT), so that it can be saved and restored exactly.
+  Float32Precision rawFloat32Precision(Float32Backend backend, Float32Op op)
+      const;
   CuBLASReductionOption allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(
       bool allow_reduced_precision,
@@ -416,6 +420,9 @@ class TORCH_API Context {
   bool allowFP16AccumulationCuBLAS() const;
   void setAllowFP16AccumulationCuBLAS(bool /*b*/);
   bool rocmAllowGroupGemmCk() const;
+  // ROCM_ALLOW_GROUP_GEMM_CK_TILE: true forces CK-tile grouped GEMM, false
+  // disables it, nullopt (unset) lets a heuristic pick per call.
+  std::optional<bool> rocmAllowGroupGemmCkTile() const;
   bool preferCublasltGroupedGemm() const;
   void setPreferCublasltGroupedGemm(bool /*b*/);
 

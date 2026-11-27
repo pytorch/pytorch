@@ -136,7 +136,7 @@ PyObject* THPCppFunction_call(
 
 } // namespace
 
-PyObject* THPCppFunction_next_functions(PyObject* self, void* _unused) {
+PyObject* THPCppFunction_next_functions(PyObject* self, void* /*_unused*/) {
   auto cdata = reinterpret_cast<const THPCppFunction*>(self)->cdata;
   const auto num_next = cdata->num_outputs();
   THPObjectPtr py_functions(PyTuple_New(num_next));
@@ -160,7 +160,7 @@ PyObject* THPCppFunction_next_functions(PyObject* self, void* _unused) {
   return py_functions.release();
 }
 
-PyObject* THPCppFunction_metadata(PyObject* self, void* _unused) {
+PyObject* THPCppFunction_metadata(PyObject* self, void* /*_unused*/) {
   auto* metadata =
       static_cast<PyAnomalyMetadata*>(
           reinterpret_cast<THPCppFunction*>(self)->cdata->metadata())
@@ -169,7 +169,7 @@ PyObject* THPCppFunction_metadata(PyObject* self, void* _unused) {
   return Py_XNewRef(metadata);
 }
 
-PyObject* THPCppFunction_requires_grad(PyObject* self, void* unused) {
+PyObject* THPCppFunction_requires_grad(PyObject* /*self*/, void* /*unused*/) {
   Py_RETURN_TRUE;
 }
 
@@ -195,12 +195,12 @@ PyObject* THPCppFunction_register_prehook(PyObject* self, PyObject* hook) {
   return registerFunctionPreHook(fn, hook);
 }
 
-PyObject* THPCppFunction_name(PyObject* self, PyObject* noargs) {
+PyObject* THPCppFunction_name(PyObject* self, PyObject* /*noargs*/) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   return THPUtils_packString(fn.name());
 }
 
-PyObject* THPCppFunction_sequence_nr(PyObject* self, PyObject* noargs) {
+PyObject* THPCppFunction_sequence_nr(PyObject* self, PyObject* /*noargs*/) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   return THPUtils_packUInt64(fn.sequence_nr());
 }
@@ -215,7 +215,7 @@ static PyObject* THPCppFunction_set_sequence_nr(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPCppFunction_input_metadata(PyObject* self, void* closure) {
+PyObject* THPCppFunction_input_metadata(PyObject* self, void* /*closure*/) {
   HANDLE_TH_ERRORS;
   auto& fn = *((THPCppFunction*)self)->cdata;
   const auto num_inputs =

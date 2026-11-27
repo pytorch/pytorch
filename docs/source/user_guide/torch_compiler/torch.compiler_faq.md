@@ -244,14 +244,18 @@ torch.compile(toy_example, fullgraph=True, backend=<compiler>)(a, b)
 
 ### Why didn’t my code recompile when I changed it?
 
-If you enabled dynamic shapes by setting
-`env TORCHDYNAMO_DYNAMIC_SHAPES=1 python model.py` then your code
-won’t recompile on shape changes. We’ve added support for dynamic shapes
-which avoids recompilations in the case when shapes vary by less than a
-factor of 2. This is especially useful in scenarios like varying image
-sizes in CV or variable sequence length in NLP. In inference scenarios
-it’s often not possible to know what a batch size will be beforehand
-because you take what you can get from different client apps.
+By default, `torch.compile` uses automatic dynamic shapes (`dynamic=None`).
+The initial compilation assumes static input shapes. If an input shape change
+triggers recompilation, `torch.compile` attempts to make the changed dimensions
+dynamic so that subsequent shape changes can reuse the compiled graph. Guards
+or operations that require specialization can still cause recompilation; there
+is no factor-of-two restriction on supported shape changes.
+
+This is useful for varying image sizes, sequence lengths, or batch sizes. See
+{ref}`dynamic_shapes` for details and {ref}`enable-dynamic-behavior` for explicit
+control options. Prefer marking specific dimensions as dynamic when needed;
+`torch.compile(dynamic=True)` attempts to make all sizes dynamic and is not
+recommended as a general performance optimization.
 
 In general, TorchDynamo tries very hard not to recompile things
 unnecessarily so if for example TorchDynamo finds 3 graphs and your
@@ -278,13 +282,23 @@ and triton then you can enable `torch._inductor.config.fallback_random = True`
 
 ## Why am I getting OOMs?
 
-Dynamo is still an alpha product so there’s a few sources of OOMs and if
-you’re seeing an OOM try disabling the following configurations in this
-order and then open an issue on GitHub so we can solve the root problem
-1\. If you’re using dynamic shapes try disabling them, we’ve disabled
-them by default: `env TORCHDYNAMO_DYNAMIC_SHAPES=0 python model.py` 2.
-CUDA graphs with Triton are enabled by default in inductor but removing
-them may alleviate some OOM issues: `torch._inductor.config.triton.cudagraphs = False`.
+If you encounter an out-of-memory (OOM) error only with `torch.compile`,
+compare with eager execution and try the following to help isolate the cause:
+
+1. If CUDA graphs are enabled (for example, with `mode="reduce-overhead"`),
+   try disabling them with `torch._inductor.config.triton.cudagraphs = False`
+   before compiling. CUDA graphs can increase memory usage by retaining memory
+   in a separate pool and recording graphs for different input shapes.
+2. If you suspect dynamic-shape compilation is involved, compare with
+   `torch.compile(model, dynamic=False)` to disable automatic dynamic shapes.
+   This is a diagnostic experiment, not a general OOM mitigation: changing
+   input sizes can cause additional recompilations, and disabling automatic
+   dynamic shapes does not necessarily reduce memory usage. See
+   {ref}`dynamic_shapes` for details.
+
+If the OOM persists, open an issue on GitHub with a minimal reproducer and
+include whether it occurs during compilation or execution. See
+{ref}`torch.compiler_troubleshooting` for more debugging guidance.
 
 ## Does `torch.func` work with `torch.compile` (for `grad` and `vmap` transforms)?
 

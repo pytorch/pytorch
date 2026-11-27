@@ -7,6 +7,7 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/EmbeddingBag.h>
+#include <c10/util/safe_conv.h>
 
 #include <fmt/format.h>
 
@@ -89,11 +90,11 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   EmbeddingBagParams<uint32_t> params;
 
   for (const auto dim : c10::irange(weight.dim())) {
-    params.weight_strides[dim] = safe_downcast<uint32_t, int64_t>(weight.stride(dim));
-    params.output_strides[dim] = safe_downcast<uint32_t, int64_t>(output.stride(dim));
+    params.weight_strides[dim] = c10::safe_conv<uint32_t, int64_t>(weight.stride(dim), "uint32_t");
+    params.output_strides[dim] = c10::safe_conv<uint32_t, int64_t>(output.stride(dim), "uint32_t");
 
     if (mode == EmbeddingBagMode::MAX) {
-      params.max_indices_strides[dim] = safe_downcast<uint32_t, int64_t>(max_indices.stride(dim));
+      params.max_indices_strides[dim] = c10::safe_conv<uint32_t, int64_t>(max_indices.stride(dim), "uint32_t");
     }
   }
 
@@ -208,11 +209,11 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
   EmbeddingBagBackwardParams<uint32_t> params;
 
   for (const auto dim : c10::irange(2)) {
-    params.output_grad_strides[dim] = output_grad.stride(dim);
-    params.weight_grad_strides[dim] = weight_grad.stride(dim);
+    params.output_grad_strides[dim] = c10::safe_conv<uint32_t, int64_t>(output_grad.stride(dim), "uint32_t");
+    params.weight_grad_strides[dim] = c10::safe_conv<uint32_t, int64_t>(weight_grad.stride(dim), "uint32_t");
 
     if (mode == EmbeddingBagMode::MAX) {
-      params.max_indices_strides[dim] = safe_downcast<uint32_t, int64_t>(max_indices.stride(dim));
+      params.max_indices_strides[dim] = c10::safe_conv<uint32_t, int64_t>(max_indices.stride(dim), "uint32_t");
     }
   }
 

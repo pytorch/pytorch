@@ -213,7 +213,9 @@ else
     fi
 
     # Default use Intel® oneAPI Deep Learning Essentials 2026.0
-    if [[ "$XPU_VERSION" == "2026.1" ]]; then
+    if [[ "$XPU_VERSION" == "2026.2" ]]; then
+        XPU_PACKAGES_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/aef232d2-aac5-4cd6-bceb-911019bbb6a8/intel-deep-learning-essentials-2026.2.0.640_offline.sh"
+    elif [[ "$XPU_VERSION" == "2026.1" ]]; then
         XPU_PACKAGES_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/bedab612-cf6b-4ece-872e-e72e9534ccab/intel-deep-learning-essentials-2026.1.3.17_offline.sh"
     elif [[ "$XPU_VERSION" == "2026.0" ]]; then
         XPU_PACKAGES_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/8170208e-86db-4faa-a0d6-1ecf62699574/intel-deep-learning-essentials-2026.0.0.624_offline.sh"

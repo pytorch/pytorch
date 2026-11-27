@@ -45,8 +45,6 @@ call "internal\install_python.bat"
 if "%DESIRED_PYTHON%" == "3.13" %PYTHON_EXEC% -m pip install --pre numpy==2.1.2 protobuf
 if "%DESIRED_PYTHON%" == "3.12" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
 if "%DESIRED_PYTHON%" == "3.11" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
-if "%DESIRED_PYTHON%" == "3.10" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
-if "%DESIRED_PYTHON%" == "3.9" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf networkx
 
 if errorlevel 1 exit /b 1
 
@@ -70,6 +68,10 @@ if ERRORLEVEL 1 exit /b 1
 
 echo Checking that MKL is available
 %PYTHON_EXEC% -c "import torch; exit(0 if torch.backends.mkl.is_available() else 1)"
+if ERRORLEVEL 1 exit /b 1
+
+echo Checking that MKL has the LAPACK DLASD2 fix
+%PYTHON_EXEC% %PYTORCH_ROOT%\.ci\pytorch\smoke_test\smoke_test.py --mkl-version-only
 if ERRORLEVEL 1 exit /b 1
 
 if "%NVIDIA_GPU_EXISTS%" == "0" (

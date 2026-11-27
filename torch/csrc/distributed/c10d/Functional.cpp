@@ -439,6 +439,67 @@ at::Tensor broadcast(
   return broadcast_(output, src, std::move(group));
 }
 
+at::Tensor reduce(
+    const at::Tensor& input,
+    int64_t dst,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    c10::intrusive_ptr<c10d::ReduceOp> reduce_op,
+    c10::intrusive_ptr<c10d::ProcessGroup> group) {
+  c10d::ReduceOptions opts;
+  opts.reduceOp = *reduce_op;
+  opts.rootRank = dst;
+  std::vector<at::Tensor> inputs{input.clone(at::MemoryFormat::Contiguous)};
+  auto work = group->reduce(inputs, opts);
+  // Non-dst ranks return zeros so that autograd is rank agnostic. The work
+  // keeps the reduce buffer alive.
+  auto output = group->getRank() == dst ? inputs[0] : at::zeros_like(inputs[0]);
+  c10d::register_work(output, work);
+  return output;
+}
+
+at::Tensor gather(
+    const at::Tensor& input,
+    int64_t dst,
+    c10::intrusive_ptr<c10d::ProcessGroup> group) {
+  auto group_size = group->getSize();
+  std::vector<at::Tensor> inputs{input.contiguous()};
+  std::vector<std::vector<at::Tensor>> outputs;
+  auto output = allocate_all_gather_output(input, group_size);
+  if (group->getRank() == dst) {
+    outputs.push_back(output.chunk(group_size));
+  } else {
+    output.zero_();
+  }
+  c10d::GatherOptions opts;
+  opts.rootRank = dst;
+  auto work = group->gather(outputs, inputs, opts);
+  c10d::register_work(output, work);
+  return output;
+}
+
+at::Tensor scatter(
+    const at::Tensor& input,
+    int64_t src,
+    c10::intrusive_ptr<c10d::ProcessGroup> group) {
+  auto group_size = group->getSize();
+  TORCH_CHECK(
+      input.dim() > 0 && input.size(0) % group_size == 0,
+      "scatter: the first dimension of the input must be divisible by the group size (",
+      group_size,
+      ")");
+  std::vector<std::vector<at::Tensor>> inputs;
+  if (group->getRank() == src) {
+    inputs.push_back(input.contiguous().chunk(group_size));
+  }
+  std::vector<at::Tensor> outputs{
+      allocate_reduce_scatter_output(input, group_size)};
+  c10d::ScatterOptions opts;
+  opts.rootRank = src;
+  auto work = group->scatter(outputs, inputs, opts);
+  c10d::register_work(outputs[0], work);
+  return outputs[0];
+}
+
 at::Tensor isend(
     at::Tensor& input,
     int64_t dst,
@@ -786,6 +847,41 @@ TORCH_LIBRARY(_c10d_functional, m) {
               -> at::Tensor& {
             return c10d::broadcast_(
                 input, src, get_process_group(group, "broadcast_"));
+          }),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "reduce(Tensor input, int dst, Any reduce_op, Any group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          [](const at::Tensor& input,
+             int64_t dst,
+             const c10::IValue& reduce_op,
+             const c10::IValue& group) {
+            return c10d::reduce(
+                input,
+                dst,
+                get_reduce_op(reduce_op, "reduce"),
+                get_process_group(group, "reduce"));
+          }),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "gather(Tensor input, int dst, Any group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          [](const at::Tensor& input, int64_t dst, const c10::IValue& group) {
+            return c10d::gather(input, dst, get_process_group(group, "gather"));
+          }),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "scatter(Tensor input, int src, Any group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          [](const at::Tensor& input, int64_t src, const c10::IValue& group) {
+            return c10d::scatter(
+                input, src, get_process_group(group, "scatter"));
           }),
       {at::Tag::pt2_compliant_tag});
 
