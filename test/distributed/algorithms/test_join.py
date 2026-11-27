@@ -4,6 +4,7 @@ import contextlib
 import os
 import sys
 from typing import Any
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -18,7 +19,13 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     require_n_gpus_for_nccl_backend,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -138,6 +145,36 @@ class AllReducer(Joinable):
         if not (common_rank >= 0):
             raise AssertionError(f"Expected common_rank >= 0, got {common_rank}")
         return common_rank
+
+
+class TestJoinCompilerSynchronization(TestCase):
+    @parametrize("sync_cache", (False, True))
+    @parametrize("enable", (False, True))
+    @parametrize("throw", (False, True))
+    def test_cache_sync_requires_early_termination(self, sync_cache, enable, throw):
+        from torch._functorch import config
+
+        reducer = AllReducer(torch.device("cpu"), object())
+        with (
+            config.patch(
+                _sync_cache_decision_cross_ranks=sync_cache,
+                _sync_decision_cross_ranks=True,
+            ),
+            patch.object(dist, "get_rank", return_value=0),
+        ):
+            if sync_cache and enable and not throw:
+                with self.assertRaisesRegex(
+                    RuntimeError, "Join requires throw_on_early_termination=True"
+                ):
+                    Join([reducer], enable=enable, throw_on_early_termination=throw)
+                self.assertFalse(reducer._join_config.enable)
+            else:
+                join = Join([reducer], enable=enable, throw_on_early_termination=throw)
+                self.assertEqual(join._enable, enable)
+                self.assertEqual(reducer._join_config.throw_on_early_termination, throw)
+
+
+instantiate_parametrized_tests(TestJoinCompilerSynchronization)
 
 
 class TestJoin(MultiProcessTestCase):

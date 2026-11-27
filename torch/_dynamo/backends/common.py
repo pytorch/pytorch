@@ -69,6 +69,7 @@ class AotAutogradKwargs(TypedDict, total=False):
     disable_functionalization: bool
     pre_grad_passes: Callable[..., Any] | None
     compile_region_name: str | None
+    preserve_tangent_layout: bool
 
 
 class AotAutograd:
