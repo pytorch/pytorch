@@ -2111,7 +2111,10 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     )
                     buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
                     buf.writeline(f"_bases[{base_idx}] = _b")
-                    # The storage-backed base has its own version counter.
+                    # The storage-backed base has its own version counter, so
+                    # invalidate outer autograd graphs through the original inputs.
+                    # Notify only visible data mutations; storage aliases can have
+                    # independent counters, and hidden mutations must not bump them.
                     mutated_args = ", ".join(
                         f"args[{i}]" for i in group if i in self.data_mutation_indices
                     )

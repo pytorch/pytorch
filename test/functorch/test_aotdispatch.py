@@ -9788,6 +9788,68 @@ def forward(self, primals_1, tangents_1):
 
     # --- AOTSyntheticBaseWrapper codegen tests ---
 
+    @parametrize("alias_kind", ["detach", "detached_slice", "view", "clone"])
+    def test_synthetic_base_mutation_version(self, alias_kind):
+        def mutate(weight, alias):
+            alias.add_(1)
+            return weight.sum()
+
+        # Views and clones are controls for the storage-backed synthetic base path.
+        compiled = torch.compile(mutate, backend="aot_eager", fullgraph=True)
+        eager_delta = None
+        for fn in (mutate, compiled, compiled):
+            weight = torch.tensor([1.0, 3.0, 5.0])
+            if alias_kind == "detach":
+                alias = weight.detach()
+            elif alias_kind == "detached_slice":
+                alias = weight[1:2].detach()
+            elif alias_kind == "view":
+                alias = weight[1:2]
+            else:
+                alias = weight.clone()
+            x = torch.ones_like(weight, requires_grad=True)
+            loss = (x * weight).sum()
+            version = weight._version
+            fn(weight, alias)
+            delta = weight._version - version
+            if fn is mutate:
+                eager_delta = delta
+            elif alias_kind in ("detach", "detached_slice"):
+                self.assertEqual(delta, eager_delta)
+
+            if alias_kind == "clone":
+                self.assertEqual(weight._version, version)
+                self.assertEqual(torch.autograd.grad(loss, x)[0], weight)
+            else:
+                with self.assertRaisesRegex(
+                    RuntimeError, "modified by an inplace operation"
+                ):
+                    torch.autograd.grad(loss, x)
+                self.assertGreater(weight._version, version)
+
+    @parametrize("keep_input_mutations", [False, True])
+    def test_synthetic_base_independent_version_counters(self, keep_input_mutations):
+        def mutate(weight, alias):
+            alias.add_(1)
+            return weight.sum()
+
+        compiled = aot_function(
+            mutate, nop, keep_inference_input_mutations=keep_input_mutations
+        )
+        eager_delta = None
+        for fn in (mutate, compiled, compiled):
+            weight = torch.ones(3)
+            # Sharing storage alone does not share the version counter.
+            alias = torch.empty(0).set_(weight.untyped_storage())
+            weight_version, alias_version = weight._version, alias._version
+            fn(weight, alias)
+            self.assertEqual(weight._version, weight_version)
+            delta = alias._version - alias_version
+            if fn is mutate:
+                eager_delta = delta
+            else:
+                self.assertEqual(delta, eager_delta)
+
     @xfailIfTorchDynamo
     def test_synthetic_base_codegen_emitted(self):
         from functorch.compile import nop
@@ -13741,80 +13803,6 @@ class TestAOTAutogradDeviceWithCache(
     """
 
     hw_classification = HardwareClassification.ACCELERATOR
-
-
-class TestSyntheticBaseMutationVersion(TestCase):
-    @parametrize("alias_kind", ["detach", "detached_slice", "view", "clone"])
-    def test_synthetic_base_mutation_version(self, device, alias_kind):
-        def mutate(weight, alias):
-            alias.add_(1)
-            return weight.sum()
-
-        # Views and clones are controls for the storage-backed synthetic base path.
-        compiled = torch.compile(mutate, backend="aot_eager", fullgraph=True)
-        eager_delta = None
-        for fn in (mutate, compiled, compiled):
-            weight = torch.tensor([1.0, 3.0, 5.0], device=device)
-            if alias_kind == "detach":
-                alias = weight.detach()
-            elif alias_kind == "detached_slice":
-                alias = weight[1:2].detach()
-            elif alias_kind == "view":
-                alias = weight[1:2]
-            else:
-                alias = weight.clone()
-            x = torch.ones_like(weight, requires_grad=True)
-            loss = (x * weight).sum()
-            version = weight._version
-            fn(weight, alias)
-            delta = weight._version - version
-            if fn is mutate:
-                eager_delta = delta
-            elif alias_kind in ("detach", "detached_slice"):
-                self.assertEqual(delta, eager_delta)
-
-            if alias_kind == "clone":
-                self.assertEqual(weight._version, version)
-                self.assertEqual(torch.autograd.grad(loss, x)[0], weight)
-            else:
-                with self.assertRaisesRegex(
-                    RuntimeError, "modified by an inplace operation"
-                ):
-                    torch.autograd.grad(loss, x)
-                self.assertGreater(weight._version, version)
-
-    @parametrize("keep_input_mutations", [False, True])
-    def test_synthetic_base_independent_version_counters(
-        self, device, keep_input_mutations
-    ):
-        def mutate(weight, alias):
-            alias.add_(1)
-            return weight.sum()
-
-        compiled = aot_function(
-            mutate, nop, keep_inference_input_mutations=keep_input_mutations
-        )
-        eager_delta = None
-        for fn in (mutate, compiled, compiled):
-            weight = torch.ones(3, device=device)
-            # Sharing storage alone does not share the version counter.
-            alias = torch.empty(0, device=device).set_(weight.untyped_storage())
-            weight_version, alias_version = weight._version, alias._version
-            fn(weight, alias)
-            self.assertEqual(weight._version, weight_version)
-            delta = alias._version - alias_version
-            if fn is mutate:
-                eager_delta = delta
-            else:
-                self.assertEqual(delta, eager_delta)
-
-
-instantiate_device_type_tests(
-    TestSyntheticBaseMutationVersion,
-    globals(),
-    only_for=("cpu", "cuda", "xpu"),
-    allow_xpu=True,
-)
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
