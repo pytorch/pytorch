@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import functools
 import itertools
 from pprint import pformat
 from typing import NamedTuple
@@ -19,6 +20,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor._ops.utils import is_tensor_partial, normalize_dim
+from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -26,6 +28,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -171,27 +174,33 @@ POOL_BACKWARD_PARTIAL_FNS = {
 BOOL_REDUCTION_OPINFOS = [op for op in op_db if op.name in ("any", "all")]
 
 
-class _AssertAsyncTensorCaptureMode(TorchDispatchMode):
+class _AllReduceInputShapeMode(TorchDispatchMode):
     def __init__(self):
         super().__init__()
-        self.predicates: list[torch.Tensor] = []
+        self.shapes: list[torch.Size] = []
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if any(t == DTensor for t in types):
+        if any(t is DTensor for t in types):
             return NotImplemented
-        if func == aten._assert_async.msg:
-            self.predicates.append(args[0].clone())
-            return None
+        if func == torch.ops._c10d_functional.all_reduce.default:
+            self.shapes.append(args[0].shape)
+        return func(*args, **(kwargs or {}))
+
+
+class _CountTensorAnyMode(TorchFunctionMode):
+    def __init__(self):
+        super().__init__()
+        self.count = 0
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        if func in (torch.Tensor.any, torch.any):
+            self.count += 1
         return func(*args, **(kwargs or {}))
 
 
 class _DTensorBoolReductionTestBase(DTensorContinuousTestBase):
     mesh_shape: tuple[int, ...] | None = None
     _mesh: DeviceMesh | None = None
-
-    @classmethod
-    def backend_str(cls):
-        return dist.get_default_backend_for_device(cls.device_type)
 
     def _get_mesh(self, device):
         cls = type(self)
@@ -219,87 +228,6 @@ class DTensorBoolReductionTest(_DTensorBoolReductionTestBase):
     world_size = 2
 
     @ops(
-        [op for op in BOOL_REDUCTION_OPINFOS if op.name == "any"],
-        allowed_dtypes=(torch.bool, torch.uint8, torch.float32),
-    )
-    @skipGPUIf(torch.accelerator.device_count() < 2, "requires two accelerator devices")
-    @parametrize("partial_first", [True, False])
-    @parametrize("keepdim", [False, True])
-    def test_bool_reduction_out_warm_cache(
-        self, device, dtype, op, partial_first, keepdim
-    ):
-        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
-
-        mesh = self._get_mesh(device)
-        tensor = torch.zeros((4, 3), dtype=dtype, device=mesh.device_type)
-        tensor[-1, -1] = 255 if dtype == torch.uint8 else -1
-        dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
-        expected = op(tensor, dim=0, keepdim=keepdim)
-        placements = (
-            (Partial("max"), Replicate())
-            if partial_first
-            else (Replicate(), Partial("max"))
-        )
-        _clear_sharding_prop_cache()
-        for placement in placements * 2:
-            out = DTensor.from_local(torch.empty_like(expected), mesh, [placement])
-            with CommDebugMode() as compute:
-                result = op(dtensor, dim=0, keepdim=keepdim, out=out)
-            is_partial = isinstance(placement, Partial)
-            self.assertIs(result, out)
-            self.assertEqual(result.placements, (placement,))
-            self.assertEqual(
-                compute.get_comm_counts(),
-                {} if is_partial else {funcol.all_gather_into_tensor: 1},
-            )
-            local_expected = (
-                op(dtensor.to_local(), dim=0, keepdim=keepdim)
-                if is_partial
-                else expected
-            )
-            self.assertEqual(result.to_local(), local_expected)
-            self._assert_full_tensor(
-                result, expected, {funcol.all_reduce: 1} if is_partial else {}
-            )
-
-    @ops(BOOL_REDUCTION_OPINFOS, allowed_dtypes=(torch.bool,))
-    @skipGPUIf(torch.accelerator.device_count() < 2, "requires two accelerator devices")
-    @parametrize("message", ["global predicate must be true", ""])
-    def test_bool_reduction_assert_async(self, device, dtype, op, message):
-        mesh = self._get_mesh(device)
-        tensor = torch.tensor([1, 0], dtype=dtype, device=mesh.device_type)
-        dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
-        expected = op(tensor)
-        with CommDebugMode() as compute:
-            predicate = op(dtensor)
-        self.assertEqual(compute.get_comm_counts(), {})
-        self.assertEqual(
-            predicate.placements, (Partial("min" if op.name == "all" else "max"),)
-        )
-        assert_op = aten._assert_async.msg
-        call_args = (predicate, message)
-
-        # A failing accelerator assert poisons the reused worker's device context.
-        # Observe the post-redistribution predicate without launching that kernel.
-        # Also execute real passing assertions and CPU failures below.
-        with CommDebugMode() as consume, _AssertAsyncTensorCaptureMode() as capture:
-            self.assertIsNone(assert_op(*call_args))
-        self.assertEqual(consume.get_comm_counts(), {funcol.all_reduce: 1})
-        self.assertEqual(len(capture.predicates), 1)
-        self.assertEqual(capture.predicates[0], expected)
-        if mesh.device_type == "cpu" or bool(expected):
-            with CommDebugMode() as real_consume:
-                if bool(expected):
-                    self.assertIsNone(assert_op(*call_args))
-                else:
-                    error = message or "Assertion is failed"
-                    with self.assertRaisesRegex(RuntimeError, error):
-                        assert_op(*call_args)
-            self.assertEqual(real_consume.get_comm_counts(), {funcol.all_reduce: 1})
-            if mesh.device_type != "cpu":
-                torch.accelerator.synchronize()
-
-    @ops(
         BOOL_REDUCTION_OPINFOS,
         allowed_dtypes=(torch.bool, torch.uint8, torch.float32),
     )
@@ -316,6 +244,7 @@ class DTensorBoolReductionTest(_DTensorBoolReductionTestBase):
             subtest(((4, 3, 2), (2, 0), False, 0, None), name="dims"),
             subtest(((4, 3, 2), 1, False, 2, 1), name="nonreduced_remap"),
             subtest(((4, 3, 2), 1, True, 2, 2), name="nonreduced_keepdim"),
+            subtest(((1, 3, 2), (1,), False, 0, 0), name="empty_shard_nonreduced_dims"),
             subtest(((4, 3, 2), (), False, 0, 0), name="empty_dims"),
             subtest(((5, 3, 2), 0, False, 0, None), name="uneven"),
             subtest(((1, 3, 2), 0, False, 0, None), name="empty_shard"),
@@ -337,158 +266,223 @@ class DTensorBoolReductionTest(_DTensorBoolReductionTestBase):
 
         with CommDebugMode() as compute:
             result = op(dtensor, **kwargs)
-        self.assertEqual(compute.get_comm_counts(), {})
 
         if out_dim is None:
-            output_placement = Partial("min" if op.name == "all" else "max")
-            expected_comms = {funcol.all_reduce: 1}
+            # The shard is reduced locally; only the reduced output is all-reduced.
+            self.assertEqual(compute.get_comm_counts(), {funcol.all_reduce: 1})
+            self.assertEqual(result.placements, (Replicate(),))
+            self._assert_full_tensor(result, expected, {})
         else:
-            output_placement = Shard(out_dim)
-            expected_comms = {funcol.all_gather_into_tensor: 1}
-        self.assertEqual(result.placements, (output_placement,))
+            self.assertEqual(compute.get_comm_counts(), {})
+            self.assertEqual(result.placements, (Shard(out_dim),))
+            self._assert_full_tensor(
+                result, expected, {funcol.all_gather_into_tensor: 1}
+            )
 
-        self._assert_full_tensor(result, expected, expected_comms)
+    @ops(BOOL_REDUCTION_OPINFOS, allowed_dtypes=(torch.bool,))
+    @skipGPUIf(torch.accelerator.device_count() < 2, "requires two accelerator devices")
+    def test_bool_reduction_result_is_global(self, device, dtype, op):
+        mesh = self._get_mesh(device)
+        tensor = torch.full((4, 3), op.identity, dtype=dtype, device=mesh.device_type)
+        tensor[-1, -1] = not op.identity
+        expected = bool(op(tensor))
+        result = op(distribute_tensor(tensor, mesh, [Shard(0)]))
+        self.assertEqual(result.placements, (Replicate(),))
+        self.assertEqual(result.item(), expected)
+        self.assertEqual(bool(result), expected)
 
     @ops(
         BOOL_REDUCTION_OPINFOS,
         allowed_dtypes=(torch.bool, torch.int64, torch.float32),
     )
     @skipGPUIf(torch.accelerator.device_count() < 2, "requires two accelerator devices")
-    def test_bool_reduction_resolves_partial_input(self, device, dtype, op):
+    def test_bool_reduction_partial_input(self, device, dtype, op):
         mesh = self._get_mesh(device)
         if dtype == torch.bool:
-            reduce_op = "min" if op.name == "any" else "max"
-            local_value = self.rank == 0
-            global_value = reduce_op != "min"
+            local = torch.tensor([self.rank == 0, self.rank == 1])
+            cases = [("min", local), ("max", local)]
         else:
-            reduce_op = "sum"
-            local_value = 1 if self.rank == 0 else -1
-            global_value = 0
-        local = torch.tensor(local_value, dtype=dtype, device=mesh.device_type)
-        dtensor = DTensor.from_local(local, mesh, [Partial(reduce_op)])
-        expected = op(torch.tensor(global_value, dtype=dtype, device=mesh.device_type))
-
-        with CommDebugMode() as compute:
-            result = op(dtensor)
-        self.assertEqual(compute.get_comm_counts(), {funcol.all_reduce: 1})
-        self.assertEqual(result.placements, (Replicate(),))
-        self._assert_full_tensor(result, expected, {})
+            # Every local value is nonzero but the global value is [0, 0], so
+            # reducing each rank's values to bool before combining them gives
+            # the wrong answer; numeric partials must be resolved first.
+            cases = [("sum", torch.full((2,), 1 - 2 * self.rank, dtype=dtype))]
+        matching_op = "min" if op.name == "all" else "max"
+        for reduce_op, local in cases:
+            dtensor = DTensor.from_local(
+                local.to(mesh.device_type), mesh, [Partial(reduce_op)]
+            )
+            expected = op(dtensor.full_tensor())
+            with CommDebugMode() as compute, _AllReduceInputShapeMode() as shapes:
+                result = op(dtensor)
+            self.assertEqual(compute.get_comm_counts(), {funcol.all_reduce: 1})
+            # A matching bool partial is reduced locally first, so only the
+            # reduced output is all-reduced; other partials are resolved on the
+            # input, before the reduction.
+            reduced_first = dtype == torch.bool and reduce_op == matching_op
+            self.assertEqual(
+                shapes.shapes, [expected.shape if reduced_first else local.shape]
+            )
+            self.assertEqual(result.placements, (Replicate(),))
+            self._assert_full_tensor(result, expected, {})
 
     @ops(BOOL_REDUCTION_OPINFOS, allowed_dtypes=(torch.bool,))
     @skipGPUIf(torch.accelerator.device_count() < 2, "requires two accelerator devices")
-    def test_bool_reduction_partial_chain(self, device, dtype, op):
+    def test_bool_reduction_explicit_redistribution_context(self, device, dtype, op):
         mesh = self._get_mesh(device)
-        tensor = torch.full((4, 3), op.identity, dtype=dtype, device=mesh.device_type)
-        tensor[-1, -1] = not op.identity
-        dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
-        partial = Partial("min" if op.name == "all" else "max")
-        with CommDebugMode() as compute:
-            intermediate = op(dtensor, dim=0)
-            result = op(intermediate)
-        self.assertEqual(compute.get_comm_counts(), {})
-        self.assertEqual(intermediate.placements, (partial,))
-        self.assertEqual(result.placements, (partial,))
-        self.assertEqual(result.to_local().numel(), 1)
-        self.assertEqual(result.dtype, torch.bool)
-        expected = op(tensor)
-        for consumer in (torch.Tensor.item, bool):
-            with CommDebugMode() as consume:
-                actual = consumer(result)
-            self.assertEqual(consume.get_comm_counts(), {funcol.all_reduce: 1})
-            self.assertEqual(actual, expected.item())
-            self.assertEqual(result.placements, (partial,))
+        dtensor = distribute_tensor(
+            torch.ones(4, 3, dtype=dtype, device=mesh.device_type), mesh, [Shard(0)]
+        )
+        with ExplicitRedistributionContext():
+            self.assertEqual(op(dtensor, dim=1).placements, (Shard(0),))
+            with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
+                op(dtensor)
+
+    @skipGPUIf(torch.accelerator.device_count() < 2, "requires two accelerator devices")
+    def test_bool_reduction_in_decompositions(self, device):
+        # isin and binary_cross_entropy get their strategies by tracing their
+        # decompositions, which call any/all. Those strategies must not see a
+        # Partial from any/all: isin would return a rank-local bool tensor and
+        # binary_cross_entropy would average uneven shards.
+        mesh = self._get_mesh(device)
+        elements = torch.arange(6, device=mesh.device_type)
+        test_elements = torch.tensor([5, 7, 9, 11], device=mesh.device_type)
+        result = torch.isin(
+            distribute_tensor(elements, mesh, [Replicate()]),
+            distribute_tensor(test_elements, mesh, [Shard(0)]),
+        )
+        self.assertFalse(any(p.is_partial() for p in result.placements))
+        self.assertEqual(result.full_tensor(), torch.isin(elements, test_elements))
+
+        torch.manual_seed(0)
+        inp = torch.rand(5, 2, device=mesh.device_type) * 0.98 + 0.01
+        target = torch.rand(5, 2, device=mesh.device_type)
+        loss = F.binary_cross_entropy(
+            distribute_tensor(inp, mesh, [Shard(0)]),
+            distribute_tensor(target, mesh, [Shard(0)]),
+        )
+        self.assertEqual(loss.full_tensor(), F.binary_cross_entropy(inp, target))
+
+    @skipGPUIf(torch.accelerator.device_count() < 2, "requires two accelerator devices")
+    def test_trunc_normal_rejection_loop_stays_in_sync(self, device):
+        mesh = self._get_mesh(device)
+        std = 0.02
+        for seed in range(16):
+            # DTensor's RNG tracker needs the same seed on every rank; without it
+            # (CPU meshes) per-rank seeds make the shards differ.
+            torch.manual_seed(seed if mesh.device_type != "cpu" else seed + self.rank)
+            weight = DTensor.from_local(
+                torch.empty(16, 8, device=mesh.device_type), mesh, [Shard(0)]
+            )
+            with CommDebugMode() as comm, _CountTensorAnyMode() as any_calls:
+                torch.nn.init.trunc_normal_(weight, std=std, a=-2 * std, b=2 * std)
+            self.assertNotIn(funcol.all_gather_into_tensor, comm.get_comm_counts())
+            self.assertTrue(bool(weight.to_local().abs().le(2 * std).all()))
+            self.assertGreater(any_calls.count, 0)
+            # Every rank must leave the rejection loop at the same iteration;
+            # otherwise ranks run different numbers of random ops and DTensor's
+            # RNG offsets diverge.
+            counts = [None] * self.world_size
+            dist.all_gather_object(counts, any_calls.count)
+            self.assertEqual(counts, [any_calls.count] * self.world_size)
 
 
-class DTensorNumericPartialBoolReductionTest(_DTensorBoolReductionTestBase):
+class DTensorBoolReduction2DMeshTest(_DTensorBoolReductionTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
     world_size = 4
     mesh_shape = (2, 2)
 
-    @ops(BOOL_REDUCTION_OPINFOS, allowed_dtypes=(torch.float32,))
-    @skip_if_lt_x_gpu(4, allow_cpu=True)
-    @parametrize("partial_axis", [0, 1])
-    @parametrize("reduce_op", ["min", "max"])
-    @parametrize(
-        "shape,dim,flavor",
-        [
-            subtest(((4, 4), None, "nan0"), name="full_nan"),
-            subtest(((5, 3), 0, "nan1"), name="uneven_dim_nan"),
-            subtest(((4, 4), 1, "nan0"), name="nonreduced_dim_nan"),
-            subtest(((4, 4), None, "negative"), name="full_finite"),
-        ],
-    )
-    def test_numeric_partial_materializes_before_bool(
-        self, device, dtype, op, shape, partial_axis, reduce_op, flavor, dim
-    ):
-        mesh = self._get_mesh(device)
-        pc, sc = (
-            (self.rank // 2, self.rank % 2)
-            if partial_axis == 0
-            else (self.rank % 2, self.rank // 2)
-        )
-        full_local = torch.full(
-            shape, op.identity, dtype=dtype, device=mesh.device_type
-        )
-        if flavor == "negative":
-            value = -1.0 if pc == 0 else 0.0
-        else:
-            value = float("nan") if pc == int(flavor[-1]) else 0.0
-        if op.name == "all":
-            full_local[0, :] = value
-        else:
-            full_local[0, -1] = value
-        local = full_local.chunk(2, dim=0)[sc].clone()
-        placements = (
-            (Partial(reduce_op), Shard(0))
-            if partial_axis == 0
-            else (Shard(0), Partial(reduce_op))
-        )
-        dtensor = DTensor.from_local(
-            local, mesh, placements, shape=torch.Size(shape), stride=(shape[1], 1)
-        )
-        kwargs = {} if dim is None else {"dim": dim}
-        expected = op(dtensor.full_tensor(), **kwargs)
-        with CommDebugMode() as compute:
-            result = op(dtensor, **kwargs)
-        self.assertEqual(compute.get_comm_counts(), {funcol.all_reduce: 1})
-        output_shard_axis = (
-            Partial("min" if op.name == "all" else "max")
-            if dim in (None, 0)
-            else Shard(0)
-        )
-        expected_placements = (
-            (Replicate(), output_shard_axis)
-            if partial_axis == 0
-            else (output_shard_axis, Replicate())
-        )
-        self.assertEqual(result.placements, expected_placements)
-        expected_consume = (
-            {funcol.all_reduce: 1}
-            if dim in (None, 0)
-            else {funcol.all_gather_into_tensor: 1}
-        )
-        self._assert_full_tensor(result, expected, expected_consume)
-
     @ops(BOOL_REDUCTION_OPINFOS, allowed_dtypes=(torch.bool, torch.float32))
     @skip_if_lt_x_gpu(4, allow_cpu=True)
     @parametrize(
-        "placements",
-        [(Shard(0), Shard(1)), (Shard(0), Shard(0))],
+        "placements,kwargs,out_placements,all_reduces",
+        [
+            subtest(
+                ((Shard(0), Replicate()), {"dim": 0}, (Replicate(), Shard(0)), 1),
+                name="move_shard",
+            ),
+            subtest(
+                ((Shard(1), Replicate()), {"dim": 1}, (Replicate(), Shard(0)), 1),
+                name="move_shard_dim1",
+            ),
+            subtest(
+                ((Replicate(), Shard(0)), {"dim": 0}, (Replicate(), Replicate()), 1),
+                name="replicate",
+            ),
+            subtest(
+                ((Shard(1), Shard(0)), {"dim": 0}, (Shard(0), Replicate()), 1),
+                name="keep_shard",
+            ),
+            subtest(
+                ((Shard(0), Shard(1)), {}, (Replicate(), Replicate()), 2), name="full"
+            ),
+            subtest(
+                ((Shard(0), Shard(0)), {}, (Replicate(), Replicate()), 2),
+                name="full_same_dim",
+            ),
+            subtest(
+                (
+                    (Shard(0), Replicate()),
+                    {"dim": 1, "keepdim": True},
+                    (Shard(0), Replicate()),
+                    0,
+                ),
+                name="nonreduced",
+            ),
+        ],
     )
-    def test_pure_shards_still_reduce_locally(self, device, dtype, op, placements):
+    def test_mixed_placements_reduce_locally(
+        self, device, dtype, op, placements, kwargs, out_placements, all_reduces
+    ):
+        # The output placements are what the any/all strategy chooses when it
+        # redistributes the input; only the collective changes, from gathering
+        # the input to reducing the reduced output.
         mesh = self._get_mesh(device)
-        tensor = torch.full((4, 4), op.identity, dtype=dtype, device=mesh.device_type)
+        tensor = torch.full((8, 4), op.identity, dtype=dtype, device=mesh.device_type)
         tensor[-1, -1] = not op.identity
         dtensor = distribute_tensor(tensor, mesh, placements)
         with CommDebugMode() as compute:
-            result = op(dtensor)
-        self.assertEqual(compute.get_comm_counts(), {})
-        partial = Partial("min" if op.name == "all" else "max")
+            result = op(dtensor, **kwargs)
         self.assertEqual(
-            result.placements,
-            tuple(partial if isinstance(p, Shard) else Replicate() for p in placements),
+            compute.get_comm_counts(),
+            {funcol.all_reduce: all_reduces} if all_reduces else {},
         )
-        self.assertEqual(result.full_tensor(), op(tensor))
+        self.assertEqual(result.placements, out_placements)
+        self.assertEqual(result.full_tensor(), op(tensor, **kwargs))
+
+    @ops(BOOL_REDUCTION_OPINFOS, allowed_dtypes=(torch.bool, torch.float32))
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_partial_and_shard_input(self, device, dtype, op):
+        # A matching bool partial is reduced locally like a shard of a reduced
+        # dim; a numeric partial is resolved on the input first.
+        mesh = self._get_mesh(device)
+        reduce_op = "min" if op.name == "all" else "max"
+        tensor = torch.full((8, 4), op.identity, dtype=dtype, device=mesh.device_type)
+        local = distribute_tensor(tensor, mesh, (Replicate(), Shard(0))).to_local()
+        if dtype == torch.bool:
+            if self.rank == 3:
+                local[-1, -1] = not op.identity
+        elif self.rank in (1, 3):
+            # Ranks 1 and 3 hold partial values of the same element. Combined,
+            # it is zero for any (max(-1, 0)) and nonzero for all (min(0, -1)),
+            # so reducing each rank's values before combining would be wrong.
+            local[-1, -1] = -1.0 if (self.rank == 3) == (op.name == "any") else 0.0
+        dtensor = DTensor.from_local(
+            local,
+            mesh,
+            (Partial(reduce_op), Shard(0)),
+            shape=tensor.shape,
+            stride=tensor.stride(),
+        )
+        expected = op(dtensor.full_tensor())
+        with CommDebugMode() as compute, _AllReduceInputShapeMode() as shapes:
+            result = op(dtensor)
+        self.assertEqual(compute.get_comm_counts(), {funcol.all_reduce: 2})
+        reduced_first = dtype == torch.bool
+        self.assertEqual(
+            shapes.shapes[0], expected.shape if reduced_first else local.shape
+        )
+        self.assertEqual(result.placements, (Replicate(), Replicate()))
+        self.assertEqual(result.full_tensor(), expected)
 
 
 class DistMathOpsTest(DTensorContinuousTestBase):
@@ -582,6 +576,78 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         dt_dim1 = dtensor.nansum(dim=1)
         self.assertEqual(dt_dim1.full_tensor(), tensor.nansum(dim=1))
         self.assertEqual(dt_dim1.placements, (Shard(0),))
+
+        # Pending Partial(sum) input is reduced first: nansum would drop a NaN
+        # held by one rank, but the reduced input is NaN there.
+        rows = torch.zeros(self.world_size, 2, device=self.device_type)
+        rows[0] = torch.tensor([float("nan"), 1.0])
+        rows[1] = torch.tensor([2.0, 3.0])
+        # Local value on rank r is rows[r]
+        partial = distribute_tensor(rows, device_mesh, [Shard(0)]).sum(0)
+        self.assertEqual(partial.placements, (Partial("sum"),))
+        self.assertEqual(partial.nansum().full_tensor(), partial.full_tensor().nansum())
+
+    @with_comms
+    @parametrize(
+        "op_str",
+        [
+            "sum",
+            "mean",
+            "amax",
+            "amin",
+            "nansum",
+            "std",
+            "var",
+            "logsumexp",
+            "norm",
+            "norm_inf",
+        ],
+    )
+    @parametrize("shard_dim", [0, 1])
+    def test_reduction_empty_dim(self, op_str, shard_dim):
+        device_mesh = self.build_device_mesh()
+        # 3 * world_size - 1 columns: uneven shards, none of them empty.
+        tensor = torch.randn(
+            2 * self.world_size, 3 * self.world_size - 1, device=self.device_type
+        )
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
+        if op_str.startswith("norm"):
+            norm_ord = float("inf") if op_str == "norm_inf" else 2
+            fn = functools.partial(torch.linalg.vector_norm, ord=norm_ord)
+        else:
+            fn = getattr(torch, op_str)
+
+        for keepdim in (True, False):
+            # Eager logsumexp(dim=[], keepdim=False) raises: amax reads the empty
+            # list as all dims but squeeze reads it as none, so the shapes mismatch.
+            # https://github.com/pytorch/pytorch/issues/206379
+            if op_str == "logsumexp" and not keepdim:
+                continue
+            out = fn(dtensor, dim=[], keepdim=keepdim)
+            self.assertFalse(any(p.is_shard() for p in out.placements))
+            self.assertEqual(out.full_tensor(), fn(tensor, dim=[], keepdim=keepdim))
+
+            # Eager var/std(dim=[]) backward is itself wrong (var_backward counts an
+            # empty dim list as one element), so there is no reference gradient:
+            # https://github.com/pytorch/pytorch/issues/206384
+            if op_str in ("std", "var"):
+                continue
+            ref = tensor.clone().requires_grad_()
+            fn(ref, dim=[], keepdim=keepdim).sum().backward()
+            grad_dt = dtensor.detach().requires_grad_()
+            fn(grad_dt, dim=[], keepdim=keepdim).sum().backward()
+            self.assertEqual(grad_dt.grad.full_tensor(), ref.grad)
+
+    @with_comms
+    def test_bool_reduction_empty_dim(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(2 * self.world_size, 3, device=self.device_type) > 0
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
+        # any/all read dim=[] as no reduction.
+        for op_str in ("any", "all"):
+            out = getattr(dtensor, op_str)(dim=[])
+            self.assertEqual(out.placements, (Shard(0),))
+            self.assertEqual(out.full_tensor(), getattr(tensor, op_str)(dim=[]))
 
     @with_comms
     def test_prims_amax_amin(self):
@@ -1465,6 +1531,42 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertEqual(out_0.placements[0].reduce_op, "sum")
 
     @with_comms
+    def test_inf_norm_of_pending_partial(self):
+        # inf/-inf norms reduce a pending Partial("max"/"min") input first: abs
+        # is not monotone, so norms of the local values can disagree with the
+        # norm of the reduced input. E.g. Partial("max") with local values
+        # [-9, 1] on rank 0 and [1, 2] on the other ranks: the input is [1, 2]
+        # and its inf-norm is 2, but max(norm([-9, 1]), norm([1, 2])) = 9.
+        device_mesh = self.build_device_mesh()
+        inf = float("inf")
+        rows = torch.tensor([[1.0, 2.0]], device=self.device_type).repeat(
+            self.world_size, 1
+        )
+        rows[0] = torch.tensor([-9.0, 1.0])
+        # Local value on rank r is rows[r]
+        partial_max = distribute_tensor(rows, device_mesh, [Shard(0)]).amax(0)
+        self.assertEqual(partial_max.placements, (Partial("max"),))
+        full_max = partial_max.full_tensor()
+        self.assertEqual(
+            torch.linalg.vector_norm(partial_max, inf).full_tensor(),
+            torch.linalg.vector_norm(full_max, inf),
+        )
+        self.assertEqual(
+            torch._foreach_norm([partial_max], inf)[0].full_tensor(),
+            torch._foreach_norm([full_max], inf)[0],
+        )
+
+        # Partial("min") of [-9, 4] and [1, 2]: the input is [-9, 2] and its
+        # -inf-norm is 2, but min(norm([-9, 4]), norm([1, 2])) = 1.
+        rows[0] = torch.tensor([-9.0, 4.0])
+        partial_min = distribute_tensor(rows, device_mesh, [Shard(0)]).amin(0)
+        self.assertEqual(partial_min.placements, (Partial("min"),))
+        self.assertEqual(
+            torch.linalg.vector_norm(partial_min, -inf).full_tensor(),
+            torch.linalg.vector_norm(partial_min.full_tensor(), -inf),
+        )
+
+    @with_comms
     def test_foreach_powsum_sharded(self):
         """Test that _foreach_powsum produces correct values and placements for sharded input."""
         device_mesh = self.build_device_mesh()
@@ -2059,7 +2161,10 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         )
 
     @with_comms
-    def test_matching_partial_reduction_ops(self):
+    def test_max_of_partial_max_reduces_input(self):
+        # max does not pass a pending Partial("max") through: NCCL's all_reduce
+        # MAX ignores NaN, so a NaN in one rank's local values would hide that
+        # rank's other values. The input is reduced first.
         mesh = self.build_device_mesh()
         rank = dist.get_rank()
 
@@ -2068,16 +2173,10 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         dt = DTensor.from_local(
             local_tensor, device_mesh=mesh, placements=[Partial("max")]
         )
-        out_without_redistribute = torch.max(dt)
+        out = torch.max(dt)
 
-        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
-        out_with_redistribute = torch.max(dt)
-
-        self.assertTrue(out_without_redistribute.placements[0].is_partial())
-        self.assertTrue(out_with_redistribute.placements[0].is_replicate())
-        self.assertEqual(
-            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
-        )
+        self.assertTrue(out.placements[0].is_replicate())
+        self.assertEqual(out.full_tensor(), torch.max(dt.full_tensor()))
 
     @skip_if_lt_x_gpu(4)
     @with_comms
@@ -2427,6 +2526,19 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertEqual(result.full_tensor(), expected)
 
     @with_comms
+    def test_inter_area_uint8_partial(self):
+        if self.device_type != "cpu":
+            self.skipTest("inter-area is CPU only")
+        mesh = self.build_device_mesh()
+        local = torch.tensor([0, 1], dtype=torch.uint8, device=self.device_type)
+        local = local.reshape(1, 1, 1, 2).repeat(1, 5, 1, 1)
+        partial = DTensor.from_local(local, mesh, [Partial("sum")])
+
+        result = F.interpolate(partial, size=(1, 1), mode="inter-area")
+        expected = F.interpolate(partial.full_tensor(), size=(1, 1), mode="inter-area")
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
     def test_interpolation_upsample_ops(self):
         """Test forward and backward for F.interpolate with DTensor.
 
@@ -2662,7 +2774,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
 
 
 instantiate_device_type_tests(DTensorBoolReductionTest, globals())
-instantiate_device_type_tests(DTensorNumericPartialBoolReductionTest, globals())
+instantiate_device_type_tests(DTensorBoolReduction2DMeshTest, globals())
 instantiate_parametrized_tests(DistMathOpsTest)
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest, base_class=LocalDTensorContinuousTestBase

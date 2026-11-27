@@ -330,15 +330,21 @@ void upsample_avx_bilinear_bicubic_uint8(
     input = input.contiguous(at::MemoryFormat::ChannelsLast);
   }
 
-  auto need_horizontal = xout != xin;
-  auto need_vertical = yout != yin;
+  auto need_horizontal = F::needs_pass(xin, xout, scales[1]);
+  auto need_vertical = F::needs_pass(yin, yout, scales[0]);
 
   int ksize_horiz, ksize_vert;
   std::vector<at::Tensor> horiz_indices_weights, vert_indices_weights;
   unsigned int horiz_weights_precision, vert_weights_precision;
 
   bool skip_unpacking = (num_channels == 3 || num_channels == 4) && input.is_contiguous(at::MemoryFormat::ChannelsLast);
-  bool skip_packing = (num_channels == 3 || num_channels == 4) && output.is_contiguous(at::MemoryFormat::ChannelsLast);
+  // The unpacked data has 4 channels (RGBA) unless unpacking was skipped, so
+  // writing it straight into the output is only valid when the output has 4
+  // channels or holds the input's own layout. The two memory format checks can
+  // disagree because a tensor whose spatial dims are all 1 is contiguous in
+  // both formats, e.g. a (3, H, 1) -> (3, 1, 1) resize of a channels first
+  // input: it has to be unpacked, and the 3-channel output has to be packed.
+  bool skip_packing = (num_channels == 4 || skip_unpacking) && output.is_contiguous(at::MemoryFormat::ChannelsLast);
 
   if (need_horizontal) {
     int interp_dim = 3;
