@@ -379,6 +379,79 @@ an error is raised. This ensures that if you're using in-place
 functions and not seeing any errors, you can be sure that the computed
 gradients are correct.
 
+(disallow-implicit-grad-accumulation)=
+
+## Disallowing implicit gradient accumulation
+
+When a tensor is used by more than one operation in forward, for example ``h`` in a
+residual connection ``h + attn(norm(h))``, the autograd engine is responsible for
+accumulating the gradient contributions from each use during the backward.
+
+Passing ``disallow_implicit_grad_accumulation=True`` to {meth}`torch.Tensor.backward`,
+{func}`torch.autograd.backward` or {func}`torch.autograd.grad` makes it so that whenever
+such an accumulation is needed, we raise an error instead. This is useful for finding
+places in your code relies on autograd to accumulate gradients, when you might actually
+want to do it explicitly so you can have finer control over it. For example, you may
+want to control what precision the accumulation or how the rounding is performed
+when casting to the desired precision.
+
+Note that while a leaf tensor used twice during a forward raises an error during backward
+under this flag, a leaf tensor that is only used once, but whose ``.grad`` field is
+accumulated into over several ``.backward()`` calls is not covered by this flag and does
+NOT raise an error.
+
+```python
+a = torch.randn(3, requires_grad=True)
+x = a.sin()
+loss = (x * 2 + x * 3).sum()
+loss.backward(disallow_implicit_grad_accumulation=True)
+# RuntimeError: Gradients would be summed implicitly into output 0 of SinBackward0
+# (shape [3], dtype float): it already received a gradient, and MulBackward0
+# produced another. ...
+```
+
+Run under {func}`torch.autograd.detect_anomaly` to also print the forward traceback
+of the operation that produced the second gradient.
+
+To do the accumulation explicitly, give each use its own tensor with a custom
+{class}`torch.autograd.Function` whose forward returns the tensor once per use and
+whose backward sums the gradients of those uses:
+
+```python
+class Split(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x, x
+
+    @staticmethod
+    def backward(ctx, grad_a, grad_b):
+        # Accumulate here however you need, e.g. in float32.
+        return grad_a + grad_b
+
+a = torch.randn(3, requires_grad=True)
+x = a.sin()
+x1, x2 = Split.apply(x)
+loss = (x1 * 2 + x2 * 3).sum()
+loss.backward(disallow_implicit_grad_accumulation=True)  # no error
+```
+
+Autograd returns each input that ``forward`` returns as a new view of it, so
+``x1`` and ``x2`` are separate tensors, each used once: backward does not accumulate
+into either, and ``Split.backward`` combines their gradients. Because they are views
+of ``x``, do not modify them in place.
+
+If you are using
+{attr}`ctx.input_grad_buffers <torch.autograd.function.FunctionCtx.input_grad_buffers>`
+and returned ``None``, this flag will not raise.
+
+A backward started while another one runs, such as the recomputation done by
+{func}`torch.utils.checkpoint.checkpoint` with ``use_reentrant=True``, inherits the
+setting. Derivative formulas can use their inputs more than once, so a graph built
+with ``create_graph=True`` accumulates gradients when it is differentiated; do not
+pass the flag when computing such higher-order gradients. The flag is not supported
+with compiled autograd, and is only available from Python for now: the C++
+``torch::autograd::backward`` and ``torch::autograd::grad`` do not accept it.
+
 ## Multithreaded Autograd
 
 The autograd engine is responsible for running all the backward operations

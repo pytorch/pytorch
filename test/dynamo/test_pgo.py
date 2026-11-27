@@ -18,7 +18,11 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.utils import clear_caches, fresh_cache
-from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    skipIfCppFakeTensor,
+)
 
 
 class PgoTest(torch._dynamo.test_case.TestCase):
@@ -254,6 +258,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             run()
             self.assertEqual(cnts.frame_count, 1)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_njt(self):
         cnts = CompileCounter()
 

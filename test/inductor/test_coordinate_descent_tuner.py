@@ -59,6 +59,103 @@ def mock_compare_config_prefer_larger_XBLOCK(
 
 @instantiate_parametrized_tests
 class TestCoordinateDescentTuner(TestCase):
+    @parametrize(
+        "max_tiles,expected",
+        [
+            (1, ["XBLOCK", "R0_BLOCK"]),
+            (2, ["XBLOCK", "YBLOCK", "R0_BLOCK", "R1_BLOCK"]),
+            (3, ["XBLOCK", "YBLOCK", "Z0_BLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"]),
+            (
+                None,
+                ["XBLOCK", "YBLOCK", "Z0_BLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"],
+            ),
+            (
+                4,
+                [
+                    "XBLOCK",
+                    "YBLOCK",
+                    "Z0_BLOCK",
+                    "Z1_BLOCK",
+                    "R0_BLOCK",
+                    "R1_BLOCK",
+                    "R2_BLOCK",
+                    "R3_BLOCK",
+                ],
+            ),
+            (
+                5,
+                [
+                    "XBLOCK",
+                    "YBLOCK",
+                    "Z0_BLOCK",
+                    "Z1_BLOCK",
+                    "Z2_BLOCK",
+                    "R0_BLOCK",
+                    "R1_BLOCK",
+                    "R2_BLOCK",
+                    "R3_BLOCK",
+                    "R4_BLOCK",
+                ],
+            ),
+        ],
+    )
+    def test_tunable_fields_follow_max_tiles(self, max_tiles, expected):
+        with config.patch({"triton.max_tiles": max_tiles}):
+            self.assertEqual(
+                CoordescTuner().tunable_fields,
+                expected + ["BLOCK_M", "BLOCK_N", "BLOCK_K", "num_warps"],
+            )
+
+    @config.patch("triton.max_tiles", 1)
+    def test_tunable_fields_use_size_hints(self):
+        self.assertEqual(
+            CoordescTuner(size_hints={"z10_": 32, "x": 64, "r10_": 128}).tunable_fields,
+            [
+                "XBLOCK",
+                "Z10_BLOCK",
+                "R10_BLOCK",
+                "BLOCK_M",
+                "BLOCK_N",
+                "BLOCK_K",
+                "num_warps",
+            ],
+        )
+
+    @parametrize("axis", ["y", "z0_", "z1_"])
+    def test_nd_grid_overflow_neighbors(self, axis):
+        hints = {"x": 16, "y": 1, "z0_": 1, "z1_": 1}
+        hints[axis] = 65536 if axis == "y" else 65534
+        if axis != "y":
+            hints["z1_" if axis == "z0_" else "z0_"] = 2
+        tuner = CoordescTuner(size_hints=hints)
+        blocks = {f"{p.upper()}BLOCK": 1 for p in hints}
+        blocks[f"{axis.upper()}BLOCK"] = 2
+        baseline = triton.Config(blocks)
+        self.assertTrue(tuner.is_valid_config(baseline))
+        neighbors = tuner.get_neighbour_configs(baseline, f"{axis.upper()}BLOCK")
+        self.assertEqual([c.kwargs[f"{axis.upper()}BLOCK"] for c in neighbors], [4])
+        invalid = triton.Config({**blocks, f"{axis.upper()}BLOCK": 1})
+        self.assertFalse(tuner.is_valid_config(invalid))
+        hints[axis] = 65535 if axis == "y" else 32767
+        self.assertTrue(tuner.is_valid_config(invalid))
+
+    @parametrize("axis", ["y", "z0_"])
+    def test_3d_rounded_size_hint_keeps_tuning_neighbors(self, axis):
+        hints = {"x": 64, "y": 8, "z0_": 8, axis: 1 << 26}
+        baseline = triton.Config(
+            {"XBLOCK": 16, "YBLOCK": 8, "Z0_BLOCK": 8, f"{axis.upper()}BLOCK": 1024}
+        )
+        tuner = CoordescTuner(size_hints=hints)
+        self.assertTrue(tuner.is_valid_config(baseline))
+        neighbors = tuner.get_neighbour_configs(baseline, "XBLOCK")
+        self.assertCountEqual([c.kwargs["XBLOCK"] for c in neighbors], [8, 32])
+
+    def test_y_grid_overflow_without_z(self):
+        tuner = CoordescTuner(size_hints={"x": 16, "y": 65536})
+        self.assertTrue(
+            tuner.is_valid_config(triton.Config({"XBLOCK": 1, "YBLOCK": 1}))
+        )
+
     def test_abs_function(self):
         """
         The benchmark result is simply abs(XBLOCK - 15)
@@ -551,6 +648,38 @@ class TestCoordinateDescentTuner(TestCase):
             ],
             [8],
         )
+
+    @config.patch({"coordinate_descent_tuning": True})
+    def test_split_scan_respects_min_split_scan_rblock(self):
+        def fn(x):
+            return torch.cumsum(x, dim=-1)
+
+        # A single long row is split across blocks on every GPU, whatever its
+        # SM/CU count. Small integers keep the float32 cumsum exact.
+        x = torch.randint(0, 4, (2**20,), device=GPU_TYPE).to(torch.float32)
+        ref = fn(x)
+        min_rblock = config.triton.min_split_scan_rblock
+        observed_min_rblocks = []
+        orig_value_too_small = CoordescTuner.value_too_small
+
+        def spy_value_too_small(tuner_self, name, val):
+            if (
+                name == "R0_BLOCK"
+                and tuner_self.inductor_meta.get("grid_type") == "SplitScanGrid"
+            ):
+                observed_min_rblocks.append(tuner_self.inductor_meta.get("min_rblock"))
+            return orig_value_too_small(tuner_self, name, val)
+
+        with (
+            torch._inductor.utils.fresh_cache(),
+            mock.patch.object(CoordescTuner, "value_too_small", spy_value_too_small),
+        ):
+            got = torch.compile(fn, backend="inductor")(x)
+
+        self.assertEqual(got, ref, atol=0, rtol=0)
+        self.assertTrue(observed_min_rblocks, "expected a split-scan kernel")
+        for meta_min_rblock in observed_min_rblocks:
+            self.assertEqual(meta_min_rblock, min_rblock)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@
 #include "XpuptiTestUtilities.h"
 
 #include "src/ActivityBuffers.h"
+#include "src/ThrowUtil.h"
 #include "src/plugin/xpupti/XpuptiActivityProfiler.h"
 #include "test/xpupti/compute/XpuptiScopeProfilerCompute.h"
 
@@ -18,6 +19,8 @@
 #include <fmt/ranges.h>
 
 #include <gtest/gtest.h>
+
+#include <stdexcept>
 
 namespace KN = KINETO_NAMESPACE;
 
@@ -219,6 +222,13 @@ RunProfilerTest(
   EXPECT_TRUE(profiler.name() == "__xpu_profiler__");
 
   auto pSession = profiler.configure(activities, cfg);
+  // This helper returns a value, so it can't use ASSERT_NE. gtest reports an
+  // exception from a test body as a failure and moves on to the next test.
+  if (!pSession) {
+    KINETO_THROW(
+        std::runtime_error,
+        "XPUActivityProfiler::configure returned no session. Is PTI's local view available?");
+  }
 
   int64_t startTime = std::chrono::duration_cast<std::chrono::nanoseconds>(
                           std::chrono::system_clock::now().time_since_epoch())

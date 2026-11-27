@@ -82,6 +82,12 @@ class LoweringException(OperatorIssue):
         super().__init__(msg)
 
 
+class NonAffineIndexingError(RuntimeError):
+    """Raised by test_configs.raise_on_modular_indexing when a kernel's
+    load/store index is not affine in the loop variables (ModularIndexing,
+    FloorDiv, Min/Max/Abs/Where or a product of loop variables)."""
+
+
 class SubgraphLoweringException(RuntimeError):
     pass
 

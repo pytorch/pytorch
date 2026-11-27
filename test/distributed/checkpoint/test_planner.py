@@ -49,6 +49,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     create_read_items_for_chunk_list,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -103,6 +104,8 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
 
 
 class TestCheckpointableTensorDistributed(DTensorTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 4
@@ -166,6 +169,8 @@ class TestCheckpointableTensorDistributed(DTensorTestBase):
 
 
 class TestTensorPropertiesStrides(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_create_from_tensor_populates_strides(self):
         tensor = torch.rand(4, 8)  # shape [4, 8], strides (8, 1)
         props = TensorProperties.create_from_tensor(tensor)
@@ -193,6 +198,8 @@ class TestTensorPropertiesStrides(TestCase):
 
 
 class TestSavePlan(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_fake_comms(rank=1, world_size=4)
     def test_local_plan(self):
         tensor = torch.rand(10)
@@ -647,6 +654,8 @@ class TestSavePlan(TestCase):
 
 
 class TestPlannerHelpers(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_create_read_item_from_chunks(self):
         tensor_md = TensorStorageMetadata(
             properties=TensorProperties.create_from_tensor(torch.empty([16])),
@@ -740,6 +749,8 @@ class TestPlannerHelpers(TestCase):
 
 
 class TestValidateGlobalPlan(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_metadata(self, chunks, size):
         storage = TensorStorageMetadata(
             properties=TensorProperties(dtype=torch.float32),
@@ -766,6 +777,8 @@ class TestValidateGlobalPlan(TestCase):
 
 
 class TestLoadPlanner(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_temp_dir
     def test_strict(self):
         original_module = nn.Linear(2, 2)

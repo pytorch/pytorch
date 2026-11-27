@@ -41,7 +41,9 @@ void clear_old_frame_if_python_312_plus(
     THP_EVAL_API_FRAME_OBJECT* frame);
 #endif
 
+PyObject* eval_frame_callback_get(void);
 void eval_frame_callback_set(PyObject* obj);
+PyObject* dynamo_set_eval_frame(PyObject* callback, PyObject* module);
 
 int64_t get_current_isolate_recompiles_id(void);
 

@@ -596,6 +596,43 @@ Mutating object of type list (source name: L['my_list'])
 """,
         )
 
+    def test_side_effects_stacks_captured_only_when_consumed(self):
+        from torch._dynamo.side_effects import SideEffects
+        from torch._logging._internal import trace_log
+        from torch.testing._internal.logging_utils import log_api
+
+        seen_stacks = []
+        orig = SideEffects.codegen_update_mutated
+
+        def spy(self_, cg, log_side_effects=False):
+            seen_stacks.append(dict(self_.mutation_user_stacks))
+            return orig(self_, cg, log_side_effects)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, lst):
+            lst.append(4)
+            return x + len(lst)
+
+        with unittest.mock.patch.object(SideEffects, "codegen_update_mutated", spy):
+            # The dynamo TestCase installs a trace_log handler; drop it so no
+            # consumer of the user stacks is active.
+            with unittest.mock.patch.object(trace_log, "handlers", []):
+                lst = [1, 2, 3]
+                self.assertEqual(fn(torch.ones(1), lst), torch.ones(1) + 4)
+                self.assertEqual(lst, [1, 2, 3, 4])
+                self.assertTrue(seen_stacks)
+                self.assertTrue(all(not stacks for stacks in seen_stacks))
+
+            torch._dynamo.reset()
+            seen_stacks.clear()
+            records = []
+            with log_api(side_effects=True), self._handler_watcher(records):
+                lst = [1, 2, 3]
+                fn(torch.ones(1), lst)
+            self.assertTrue(any(stacks for stacks in seen_stacks))
+            self.assertEqual(len(records), 1)
+            self.assertIn("lst.append(4)", records[0].getMessage())
+
     @make_logging_test(side_effects=True)
     def test_side_effects_multiple_mutations_same_object(self, records):
         my_list = [1, 2, 3]
@@ -1457,6 +1494,16 @@ fn(torch.randn(5))
                 """,
                 env=env,
             )
+            torch_log_line = re.compile(
+                r"(\[rank\d+\]:)?[VIWEC]\d{4} \d{2}:\d{2}:\d{2}\.\d{6} \d+ \S+\.py:\d+\]"
+            )
+            # Other libraries (e.g. kineto) may write to stderr concurrently,
+            # without an atomic trailing newline; compare only torch log lines.
+            stderr_logs = "".join(
+                line[m.start() :] + "\n"
+                for line in stderr.decode("utf-8").splitlines()
+                if (m := torch_log_line.search(line))
+            )
             with open(
                 file_path, encoding="utf-8"
             ) as fd:  # encoding file to UTF-8 for Windows.
@@ -1466,7 +1513,7 @@ fn(torch.randn(5))
                 try:
                     self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
                         empty_line_normalizer(lines),
-                        empty_line_normalizer(stderr.decode("utf-8")),
+                        empty_line_normalizer(stderr_logs),
                     )
                 except Exception:
                     unittest.TestCase.maxDiff = orig_maxDiff

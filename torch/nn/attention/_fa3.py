@@ -572,8 +572,16 @@ def _fa3_flash_attention_backward_impl(
     scale: float | None = None,
     window_size_left: int | None = None,
     window_size_right: int | None = None,
+    grad_logsumexp: torch.Tensor | None = None,
 ):
     """FA3 implementation of _flash_attention_backward."""
+    if grad_logsumexp is not None:
+        raise NotImplementedError(
+            "FA3 flash_attention backward does not support grad_logsumexp; it requires "
+            'the FA4 implementation (torch.nn.attention.activate_flash_attention_impl("FA4")). '
+            "If the lse does not reach the loss, detach it (for example before "
+            "returning it from a torch.compile region)"
+        )
     error = _fa3_backward_support_error(
         grad_out,
         query,

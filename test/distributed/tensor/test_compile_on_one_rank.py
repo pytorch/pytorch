@@ -5,6 +5,7 @@ import functools
 import os
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
 from unittest.mock import patch
@@ -2002,6 +2003,19 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
+    def test_current_stream_explicit_index_refused_under_coor(self):
+        def f(x):
+            return device_module.current_stream(1), x + 1
+
+        x = torch.zeros(1, device=f"{device_type}:0")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.CompileOnOneRankUnsupported,
+            "current_stream with an explicit device index",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x)
+
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @compiler_config.patch(compile_on_one_rank=True)
     def test_cpu_stream_equality_under_coor(self):
         def f(x, stream):
             return x + (1 if stream == torch.accelerator.current_stream() else 2)
@@ -2221,11 +2235,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_device_index_symbol_is_not_size_like(self):
-        # The index is unbacked, but it is not a *size*. Allocating it with
-        # new_dynamic_size() files it under ShapeEnv.size_like, which carries the
-        # size-oblivious assumption that a value is never 0 or 1 -- here, that this
-        # rank is never cuda:0 or cuda:1.
+    def test_device_index_symbol_preserves_zero_one(self):
+        # Accelerator indices zero and one must remain valid symbolic values.
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -2233,9 +2244,10 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         with FakeTensorMode(shape_env=shape_env):
             index = torch.ops.coor.current_device_index.default()
 
-        self.assertEqual(shape_env.size_like, set())
-        # The >= 0 bound is the part worth keeping.
-        self.assertEqual(shape_env.var_to_range[index.node.expr].lower, 0)
+        index_range = shape_env.var_to_range[index.node.expr]
+        self.assertEqual(index_range.lower, 0)
+        self.assertIn(0, index_range)
+        self.assertIn(1, index_range)
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
@@ -2853,6 +2865,65 @@ class TestCompileOnOneRankLocalShapeAndChunks(TestCase):
                         finally:
                             dist.destroy_process_group()
                 self.assertEqual(len(graphs), 1)
+
+
+@unittest.skipIf(not dist.is_available(), "distributed not available")
+class TestCompileOnOneRankPrecompile(TestCase):
+    def test_dtensor_package_loads_in_fresh_process(self):
+        # Rank 0 saves a package and rank 1 serves it without tracing, so only an
+        # import can have registered the device_mesh ops the compiled graph calls.
+        # Needs fresh processes: an op this process traced stays registered.
+        script = textwrap.dedent(
+            """
+            import sys
+
+            import torch
+            import torch.distributed as dist
+            from torch._dynamo.precompile_context import PrecompileContext
+            from torch.distributed.device_mesh import init_device_mesh
+            from torch.distributed.tensor import DTensor, Replicate, Shard
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
+            rank = int(sys.argv[1])
+            torch.compiler.config.compile_on_one_rank = True
+            torch._dynamo.config.caching_precompile = True
+            dist.init_process_group("fake", store=FakeStore(), rank=rank, world_size=2)
+            mesh = init_device_mesh("cpu", (2,))
+
+
+            def fn(x):
+                d = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+                return d.redistribute(mesh, [Shard(0)]).to_local()
+
+
+            with torch.compiler.set_stance("default" if rank == 0 else "fail_on_recompile"):
+                out = torch.compile(fn, fullgraph=True)(torch.arange(4.0))
+            assert out.tolist() == [[0.0, 1.0], [2.0, 3.0]][rank], out
+            if rank == 0:
+                saved = PrecompileContext.save_to_dynamo_cache()
+                assert saved["dynamo"] and saved["backends"], saved
+            """
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "script.py")
+            with open(path, "w") as f:
+                f.write(script)
+            env = {
+                **os.environ,
+                "TORCHINDUCTOR_CACHE_DIR": os.path.join(tmp, "cache"),
+                "TORCHINDUCTOR_COMPILE_THREADS": "1",
+            }
+            for rank, step in enumerate(("save", "load")):
+                proc = subprocess.run(
+                    [sys.executable, path, str(rank)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    check=False,
+                )
+                msg = f"rank {rank} ({step}) failed:\n{proc.stderr[-3000:]}"
+                self.assertEqual(proc.returncode, 0, msg)
 
 
 if __name__ == "__main__":

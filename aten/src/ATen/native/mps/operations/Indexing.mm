@@ -124,9 +124,9 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
                                              0};
     for (uint32_t idx = 0; idx < num_indices; idx++) {
       const auto& indexTensor = iter.tensor_base(idx + 2);
-      indexAB.push_back(getMTLBufferStorage(indexTensor).gpuAddress + iter_tensor_offset(iter, idx + 2));
       TORCH_CHECK(indexTensor.scalar_type() == ScalarType::Long, "index(): Expected dtype int64 for Index");
-      [computeEncoder useResource:getMTLBufferStorage(indexTensor) usage:MTLResourceUsageRead];
+      indexAB.push_back(
+          mtl_useBufferAddress(computeEncoder, indexTensor, iter_tensor_offset(iter, idx + 2), MTLResourceUsageRead));
     }
     [computeEncoder setComputePipelineState:indexSelectPSO];
     bind_iter_tensors(computeEncoder, iter, 2);
