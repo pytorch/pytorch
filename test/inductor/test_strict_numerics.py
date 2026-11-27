@@ -7897,10 +7897,6 @@ BITPATTERN_SLOW = frozenset(
     {
         "polygamma",
         "special.polygamma",
-        "special.shifted_chebyshev_polynomial_t",
-        "special.shifted_chebyshev_polynomial_u",
-        "special.shifted_chebyshev_polynomial_v",
-        "special.shifted_chebyshev_polynomial_w",
         "special.laguerre_polynomial_l",
         "special.legendre_polynomial_p",
     }

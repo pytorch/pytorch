@@ -4753,6 +4753,40 @@ class TestBinaryUfuncsDevice(TestCase):
         _compare_helper(t, 0.0, *xlog1py_fns)
 
     @dtypes(torch.float32, torch.float64)
+    @parametrize("kind", ["t", "u", "v", "w"])
+    def test_shifted_chebyshev_recurrence_overflow(self, device, dtype, kind):
+        op = getattr(torch.special, f"shifted_chebyshev_polynomial_{kind}")
+        eps = torch.finfo(dtype).eps
+        x = torch.tensor([-eps / 2, 1 + eps], device=device, dtype=dtype)
+        self.assertEqual(op(x, 2**40), torch.full_like(x, float("nan")))
+        x = torch.tensor([-0.25, 1.25], device=device, dtype=dtype)
+        values = {"t": [3.5, 3.5], "u": [8, 8], "v": [11, 5], "w": [5, 11]}
+        expected = torch.tensor(values[kind], device=device, dtype=dtype)
+        self.assertEqual(op(x, 2), expected, atol=0, rtol=0)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("kind", ["v", "w"])
+    def test_shifted_chebyshev_endpoint_degree_overflow(self, device, dtype, kind):
+        op = getattr(torch.special, f"shifted_chebyshev_polynomial_{kind}")
+        x = torch.full((4,), int(kind == "w"), device=device, dtype=dtype)
+        expected = torch.full_like(x, 2**63)
+        self.assertEqual(op(x, 2**62), expected, atol=0, rtol=0)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("kind", ["t", "u", "v", "w"])
+    @parametrize("degree", [2**24 - 1, 2**24 + 2])
+    def test_shifted_chebyshev_rounded_endpoint(self, device, dtype, kind, degree):
+        op = getattr(torch.special, f"shifted_chebyshev_polynomial_{kind}")
+        tiny = torch.finfo(dtype).tiny
+        zero = torch.zeros((), device=device, dtype=dtype)
+        subnormal = torch.nextafter(zero, torch.ones_like(zero))
+        x = torch.tensor([tiny, -tiny], device=device, dtype=dtype)
+        x = torch.cat((x, subnormal.reshape(1), -subnormal.reshape(1)))
+        self.assertEqual(x + x - 1, torch.full_like(x, -1))
+        expected = op(torch.zeros_like(x), degree)
+        self.assertEqual(op(x, degree), expected, atol=0, rtol=0)
+
+    @dtypes(torch.float32, torch.float64)
     @parametrize("layout", ["contiguous", "strided", "broadcast"])
     def test_zeta_large_even_exponents(self, device, dtype, layout):
         threshold = float(2 ** (24 if dtype == torch.float32 else 53))

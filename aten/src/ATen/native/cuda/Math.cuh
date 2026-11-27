@@ -2823,7 +2823,22 @@ const auto scaled_modified_bessel_k1_string = modified_bessel_i1_string + jitera
     } // T scaled_modified_bessel_k1_forward(T x)
 ); // scaled_modified_bessel_k1_string
 
-const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
+const auto shifted_chebyshev_recurrence_overflow_string = jiterator_stringify(
+    template<typename T>
+    bool shifted_chebyshev_recurrence_overflows(T z, int64_t n) {
+        // See note [Shifted Chebyshev recurrence overflow] in Math.h.
+        z = abs(z);
+        if (z > T(1.0) && z <= T(2.0)) {
+            const int shift = (1 - ilogb(z - T(1.0))) / 2;
+            const int max_exponent = sizeof(T) == sizeof(float) ? 128 : 1024;
+            const int64_t bound = (int64_t(8) * (max_exponent + 2)) << shift;
+            return n > bound + 4;
+        }
+        return false;
+    }
+);
+
+const auto shifted_chebyshev_polynomial_t_string = shifted_chebyshev_recurrence_overflow_string + jiterator_stringify(
     template<typename T>
     T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
         if (n < 0) {
@@ -2834,7 +2849,7 @@ const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
             return T(1.0);
         }
 
-        if (x == T(0.0)) {
+        if (x + x - T(1.0) == T(-1.0)) {
             if (n % 2 == 0) {
                 return T(1.0);
             }
@@ -2852,6 +2867,10 @@ const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
 
         if (n == 1) {
             return x + x - T(1.0);
+        }
+
+        if (shifted_chebyshev_recurrence_overflows(x + x - T(1.0), n)) {
+            return NAN;
         }
 
         T p = T(1.0);
@@ -2873,23 +2892,25 @@ const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
     } // shifted_chebyshev_polynomial_t_forward(T x, T n)
 ); // shifted_chebyshev_polynomial_t_string
 
-const auto shifted_chebyshev_polynomial_u_string = jiterator_stringify(
+const auto shifted_chebyshev_polynomial_u_string = shifted_chebyshev_recurrence_overflow_string + jiterator_stringify(
     template<typename T>
     T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
         }
 
+        const uint64_t degree = static_cast<uint64_t>(n);
+
         if (x == T(1.0)) {
-            return n + 1;
+            return T(degree + 1);
         }
 
-        if (x == T(0.0)) {
+        if (x + x - T(1.0) == T(-1.0)) {
             if (n % 2 == 0) {
-                return n + 1;
+                return T(degree + 1);
             }
 
-            return -(n + 1);
+            return -T(degree + 1);
         }
 
         if ((n > 6) && (abs(x + x - T(1.0)) < T(1.0))) {
@@ -2906,6 +2927,10 @@ const auto shifted_chebyshev_polynomial_u_string = jiterator_stringify(
 
         if (n == 1) {
             return x + x - T(1.0) + (x + x - T(1.0));
+        }
+
+        if (shifted_chebyshev_recurrence_overflows(x + x - T(1.0), n)) {
+            return NAN;
         }
 
         T p = T(1.0);
@@ -2927,23 +2952,25 @@ const auto shifted_chebyshev_polynomial_u_string = jiterator_stringify(
     } // shifted_chebyshev_polynomial_u_forward(T x, T n)
 ); // shifted_chebyshev_polynomial_u_string
 
-const auto shifted_chebyshev_polynomial_v_string = jiterator_stringify(
+const auto shifted_chebyshev_polynomial_v_string = shifted_chebyshev_recurrence_overflow_string + jiterator_stringify(
     template<typename T>
     T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
         }
 
+        const uint64_t degree = static_cast<uint64_t>(n);
+
         if (x == T(1.0)) {
             return T(1.0);
         }
 
-        if (x == T(0.0)) {
+        if (x + x - T(1.0) == T(-1.0)) {
             if (n % 2 == 0) {
-                return (n + n + 1);
+                return T(degree + degree + 1);
             }
 
-            return -(n + n + 1);
+            return -T(degree + degree + 1);
         }
 
         if ((n > 6) && (abs(x + x - T(1.0)) < T(1.0))) {
@@ -2952,10 +2979,10 @@ const auto shifted_chebyshev_polynomial_v_string = jiterator_stringify(
             }
 
             if (n % 2 == 0) {
-                return n + n + 1;
+                return T(degree + degree + 1);
             }
 
-            return -(n + n + 1);
+            return -T(degree + degree + 1);
         }
 
         if (n == 0) {
@@ -2964,6 +2991,10 @@ const auto shifted_chebyshev_polynomial_v_string = jiterator_stringify(
 
         if (n == 1) {
             return x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
+        }
+
+        if (shifted_chebyshev_recurrence_overflows(x + x - T(1.0), n)) {
+            return NAN;
         }
 
         T p = T(1.0);
@@ -2985,18 +3016,20 @@ const auto shifted_chebyshev_polynomial_v_string = jiterator_stringify(
     } // shifted_chebyshev_polynomial_v_forward(T x, T n)
 ); // shifted_chebyshev_polynomial_v_string
 
-const auto shifted_chebyshev_polynomial_w_string = jiterator_stringify(
+const auto shifted_chebyshev_polynomial_w_string = shifted_chebyshev_recurrence_overflow_string + jiterator_stringify(
     template<typename T>
     T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
         }
 
+        const uint64_t degree = static_cast<uint64_t>(n);
+
         if (x == T(1.0)) {
-            return n + n + 1;
+            return T(degree + degree + 1);
         }
 
-        if (x == T(0.0)) {
+        if (x + x - T(1.0) == T(-1.0)) {
             if (n % 2 == 0) {
                 return T(1.0);
             }
@@ -3022,6 +3055,10 @@ const auto shifted_chebyshev_polynomial_w_string = jiterator_stringify(
 
         if (n == 1) {
             return x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
+        }
+
+        if (shifted_chebyshev_recurrence_overflows(x + x - T(1.0), n)) {
+            return NAN;
         }
 
         T p = T(1.0);
