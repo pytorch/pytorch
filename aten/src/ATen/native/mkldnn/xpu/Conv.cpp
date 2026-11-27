@@ -7,6 +7,7 @@
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/ops/empty.h>
 #include <c10/util/Exception.h>
+#include <c10/util/strides.h>
 #include <torch/library.h>
 #include <optional>
 
@@ -252,6 +253,23 @@ static at::Tensor view3d(const at::Tensor& tensor) {
 
 using namespace impl;
 
+// is_contiguous(fmt) ignores strides of size-1 dims; rewrite them to the
+// canonical ones (no copy) so the oneDNN format tags match the real strides.
+static Tensor with_canonical_strides(const Tensor& t, at::MemoryFormat fmt) {
+  c10::DimVector expected;
+  if (fmt == at::MemoryFormat::Contiguous) {
+    expected = c10::contiguous_strides(t.sizes());
+  } else if (fmt == at::MemoryFormat::ChannelsLast) {
+    expected = c10::get_channels_last_strides_2d(t.sizes());
+  } else {
+    expected = c10::get_channels_last_strides_3d(t.sizes());
+  }
+  if (t.strides() == at::IntArrayRef(expected)) {
+    return t;
+  }
+  return t.as_strided(t.sizes(), expected);
+}
+
 Tensor _convolution_out(
     Tensor& output_r,
     const Tensor& input_r,
@@ -325,6 +343,17 @@ Tensor _convolution_out(
   auto bias = bias_r.defined() ? make_contiguous_and_aligned(bias_r) : bias_r;
   input = make_contiguous_and_aligned(input, mfmt);
   weight = make_contiguous_and_aligned(weight, mfmt);
+  auto input_c = with_canonical_strides(input, mfmt);
+  auto weight_c = with_canonical_strides(weight, mfmt);
+  // Best-effort: oneDNN wrappers re-derive the layout from the tensors; use the
+  // re-strided ones only if that still equals mfmt (and a user-provided output
+  // already has it, as dst is tagged from src/weight), else keep the originals.
+  if (use_channels_last_for_conv(input_c, weight_c) ==
+          is_channels_last_suggested &&
+      (!output_r.defined() || output_r.is_contiguous(mfmt))) {
+    input = input_c;
+    weight = weight_c;
+  }
   check_shape_forward(input, weight, bias, params);
 
   Tensor output;
@@ -529,9 +558,24 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   auto mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input_.ndimension())
       : at::MemoryFormat::Contiguous;
+
   grad_output_ = make_contiguous_and_aligned(grad_output_, mfmt);
   weight_ = make_contiguous_and_aligned(weight_, mfmt);
   input_ = make_contiguous_and_aligned(input_, mfmt);
+  auto grad_output_c = with_canonical_strides(grad_output_, mfmt);
+  auto weight_c = with_canonical_strides(weight_, mfmt);
+  auto input_c = with_canonical_strides(input_, mfmt);
+  // Best-effort: the wrappers re-derive the layout from the (input,
+  // grad_output) and (grad_output, weight) pairs; use the re-strided tensors
+  // only if both still equal mfmt, else keep the originals.
+  if (use_channels_last_for_conv(input_c, grad_output_c) ==
+          is_channels_last_suggested &&
+      use_channels_last_for_conv(grad_output_c, weight_c) ==
+          is_channels_last_suggested) {
+    grad_output_ = grad_output_c;
+    weight_ = weight_c;
+    input_ = input_c;
+  }
 
   auto opt = grad_output_.options();
   Tensor grad_input;

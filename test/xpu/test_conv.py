@@ -1418,6 +1418,163 @@ class TestConvolutionNNDeviceType(NNTestCase):
         ):
             self.assertTrue(torch.backends.mkldnn.allow_tf32)
 
+    @onlyXPU
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_conv3d_backward_nondense_strides(self, device, dtype):
+        def _make_inputs(seed=0):
+            torch.manual_seed(seed)
+            input = torch.randn(1, 1, 4, 4, 4, device=device, dtype=dtype)
+            weight = torch.randn(1, 1, 4, 4, 4, device=device, dtype=dtype)
+            bias = torch.randn(1, device=device, dtype=dtype)
+            cotangent = torch.randn(1, 1, 1, 1, 1, device=device, dtype=dtype)
+            return input, weight, bias, cotangent
+
+        def _batch_last(tensor, batch_size):
+            # distinct values per batch sample, batch in the last dim
+            return torch.stack([tensor * (i + 1) for i in range(batch_size)], dim=-1)
+
+        batch_size = 2
+        input, weight, bias, cotangent = _make_inputs()
+
+        def conv_fn(input, weight, bias):
+            return F.conv3d(input, weight, bias, stride=(2, 2, 2))
+
+        def vjp_fn(input, weight, bias, cotangent):
+            _, back = torch.func.vjp(conv_fn, input, weight, bias)
+            return back(cotangent)
+
+        # Batch all four args at the last dimension
+        batched_input = _batch_last(input, batch_size)  # [1, 1, 4, 4, 4, batch_size]
+        batched_weight = _batch_last(weight, batch_size)  # [1, 1, 4, 4, 4, batch_size]
+        batched_bias = _batch_last(bias, batch_size)  # [1, batch_size]
+        batched_cotangent = _batch_last(
+            cotangent, batch_size
+        )  # [1, 1, 1, 1, 1, batch_size]
+
+        # Reference: loop over the samples manually (no vmap batch rule).
+        loop_out = [
+            vjp_fn(
+                batched_input[..., i],
+                batched_weight[..., i],
+                batched_bias[..., i],
+                batched_cotangent[..., i],
+            )
+            for i in range(batch_size)
+        ]
+        loop_grad_input = torch.stack([g[0] for g in loop_out])
+        loop_grad_weight = torch.stack([g[1] for g in loop_out])
+        loop_grad_bias = torch.stack([g[2] for g in loop_out])
+
+        # vmap applies the conv3d batch rule, which internally calls
+        # reshape_dim_into(src=-1, dst=1, tensor). This can ultimately
+        # leave size-1 dims with non-dense strides
+        vmap_grad_input, vmap_grad_weight, vmap_grad_bias = torch.func.vmap(
+            vjp_fn, in_dims=(-1, -1, -1, -1)
+        )(batched_input, batched_weight, batched_bias, batched_cotangent)
+
+        self.assertEqual(vmap_grad_input, loop_grad_input)
+        self.assertEqual(vmap_grad_weight, loop_grad_weight)
+        self.assertEqual(vmap_grad_bias, loop_grad_bias)
+
+    @onlyXPU
+    @dtypes(torch.float)
+    def test_conv_size1_dims_noncanonical_strides(self, device, dtype):
+        # Size-1 dims with arbitrary strides must not change forward/backward results.
+        def check(conv, x, w):
+            x_ref = x.detach().cpu().contiguous().requires_grad_()
+            w_ref = w.detach().cpu().contiguous().requires_grad_()
+            x = x.detach().requires_grad_()
+            w = w.detach().requires_grad_()
+            for pad in (0, 1):
+                out = conv(x, w, padding=pad)
+                ref = conv(x_ref, w_ref, padding=pad)
+                self.assertEqual(out.cpu(), ref)
+                g = torch.randn_like(ref)
+                gx, gw = torch.autograd.grad(out, (x, w), g.to(device))
+                rgx, rgw = torch.autograd.grad(ref, (x_ref, w_ref), g)
+                self.assertEqual(gx.cpu(), rgx)
+                self.assertEqual(gw.cpu(), rgw)
+
+        # non-canonical strides on the size-1 channel dim
+        xb = torch.randn(2, 8, 4, 4, device=device, dtype=dtype)
+        x = xb.as_strided((2, 1, 4, 4), (16, 5, 4, 1))
+        wb = torch.randn(4, 9, 3, 3, device=device, dtype=dtype)
+        w = wb.as_strided((4, 1, 3, 3), (9, 7, 3, 1))
+        check(F.conv2d, x, w)
+
+        # all-size-1 input whose strides look channels-last
+        for conv, mf, nd in (
+            (F.conv2d, torch.channels_last, 2),
+            (F.conv3d, torch.channels_last_3d, 3),
+        ):
+            x = torch.randn(1, 2, *[1] * nd, device=device, dtype=dtype)
+            x = x.to(memory_format=mf)[:, :1]
+            w = torch.randn(4, 1, *[1] * nd, device=device, dtype=dtype)
+            check(conv, x, w)
+
+    @dtypes(torch.float)
+    def test_conv_backward_size1_input_cl_grad_output(self, device, dtype):
+        # aten.convolution_backward with a channels-last grad_output whose
+        # size-1 batch stride is non-canonical, and an all-size-1 CL-like input.
+        for nd, mf in ((2, torch.channels_last), (3, torch.channels_last_3d)):
+            xb = torch.randn(1, 2, *[1] * nd, dtype=dtype)
+            w = torch.randn(4, 1, *[1] * nd, dtype=dtype)
+            go_shape = (1, 4) + (3,) * nd
+            go_cpu = torch.randn(go_shape, dtype=dtype).to(memory_format=mf)
+            go_strides = (4,) + go_cpu.stride()[1:]
+            args = (
+                [1] * nd,
+                [1] * nd,
+                [1] * nd,
+                False,
+                [0] * nd,
+                1,
+                [True, True, False],
+            )
+            res = []
+            for dev in ("cpu", device):
+                x_in = torch.empty_strided(
+                    (1, 1) + (1,) * nd, (2, 1) + (2,) * nd, device=dev, dtype=dtype
+                )
+                x_in.copy_(xb[:, :1])
+                go = torch.empty_strided(go_shape, go_strides, device=dev, dtype=dtype)
+                go.copy_(go_cpu)
+                res.append(
+                    torch.ops.aten.convolution_backward(
+                        go, x_in, w.to(dev), None, *args
+                    )
+                )
+            self.assertEqual(res[1][0].cpu(), res[0][0])
+            self.assertEqual(res[1][1].cpu(), res[0][1])
+
+    @dtypes(torch.float)
+    def test_conv_pointwise_binary_inplace_size1_input(self, device, dtype):
+        # in-place binary conv writes into `other`, whose layout must match the
+        # one oneDNN derives from an all-size-1 channels-last-like input
+        for other_mf in (torch.contiguous_format, torch.channels_last):
+            xb = torch.randn(2, 2, 1, 1, device=device, dtype=dtype)
+            x = xb.to(memory_format=torch.channels_last)[:, :1]
+            w = torch.randn(4, 1, 2, 2, device=device, dtype=dtype)
+            other = torch.randn(2, 4, 2, 2, device=device, dtype=dtype)
+            other = other.contiguous(memory_format=other_mf)
+            ref = F.conv2d(x.cpu(), w.cpu(), padding=1) + other.cpu()
+            torch.ops.mkldnn._convolution_pointwise_.binary(
+                other,
+                x,
+                w,
+                None,
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                1,
+                "add",
+                None,
+                None,
+                [],
+                None,
+            )
+            self.assertEqual(other.cpu(), ref)
+
     @dtypes(torch.float)
     def test_conv_cow_input(self, device, dtype):
         # 1D
