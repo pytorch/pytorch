@@ -391,6 +391,40 @@ softmax_strided_finalize(
   }
 }
 
+// Forward softmax for many short rows that are not contiguous, on which the 2D
+// kernel spends its time in tree reductions. One thread walks one row, and
+// adjacent threads own adjacent rows, so when the reduction dim is not the
+// innermost one every step reads contiguous memory across the simdgroup.
+template <typename T, typename idx_t, bool log_softmax>
+[[max_total_threads_per_threadgroup(kSoftmaxThreads)]] [[kernel]] void
+softmax_serial(
+    device const T* input,
+    device const T*,
+    device T* output,
+    constant SoftmaxParams<idx_t>& params,
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]]) {
+  const idx_t row = idx_t(tgid) * tptg + tid;
+  if (row >= params.num_rows) {
+    return;
+  }
+  const auto dim_size = params.dim_size;
+  const auto inner_size = params.inner_size;
+  const idx_t base = input_row_offset(row, params);
+  const idx_t out_base = out_row_offset(row, dim_size, inner_size);
+  const idx_t dim_stride = params.strides[params.dim];
+  float2 acc(-INFINITY, 0.f);
+  for (idx_t r = 0; r < dim_size; ++r) {
+    const float value = float(input[base + r * dim_stride]);
+    acc = softmax_combine(acc, float2(value, 1.f));
+  }
+  const SoftmaxOp<log_softmax> op(acc.x, acc.y);
+  for (idx_t r = 0; r < dim_size; ++r) {
+    output[out_base + r * inner_size] = op(input, input, base + r * dim_stride);
+  }
+}
+
 #define REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, NAME, OP)                    \
   template [[host_name(#NAME "_row_" #DTYPE "_" #SUFFIX)]] [[kernel]] void     \
   softmax_row<DTYPE, IDX_T, OP>(                                               \
@@ -453,12 +487,26 @@ softmax_strided_finalize(
       uint2 tptg [[threads_per_threadgroup]],                                  \
       uint2 tgid [[threadgroup_position_in_grid]]);
 
+#define REGISTER_SOFTMAX_SERIAL(DTYPE, IDX_T, SUFFIX, NAME, LOG_SOFTMAX)      \
+  template [[host_name(#NAME "_serial_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
+  softmax_serial<DTYPE, IDX_T, LOG_SOFTMAX>(                                  \
+      device const DTYPE* input,                                              \
+      device const DTYPE* aux,                                                \
+      device DTYPE* output,                                                   \
+      constant SoftmaxParams<IDX_T>& params,                                  \
+      uint tgid [[threadgroup_position_in_grid]],                             \
+      uint tid [[thread_position_in_threadgroup]],                            \
+      uint tptg [[threads_per_threadgroup]]);
+
 #define REGISTER_SOFTMAX_IDX(DTYPE, IDX_T, SUFFIX)                        \
   REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, softmax, SoftmaxOp<false>)    \
   REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, log_softmax, SoftmaxOp<true>) \
   REGISTER_SOFTMAX_OP(                                                    \
       DTYPE, IDX_T, SUFFIX, log_softmax_backward, LogSoftmaxBackwardOp)   \
-  REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, softmax_backward, SoftmaxBackwardOp)
+  REGISTER_SOFTMAX_OP(                                                    \
+      DTYPE, IDX_T, SUFFIX, softmax_backward, SoftmaxBackwardOp)          \
+  REGISTER_SOFTMAX_SERIAL(DTYPE, IDX_T, SUFFIX, softmax, false)           \
+  REGISTER_SOFTMAX_SERIAL(DTYPE, IDX_T, SUFFIX, log_softmax, true)
 
 #define REGISTER_SOFTMAX(DTYPE)          \
   REGISTER_SOFTMAX_IDX(DTYPE, uint, u32) \

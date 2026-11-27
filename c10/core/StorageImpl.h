@@ -339,11 +339,17 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void set_throw_on_mutable_data_ptr() {
+    if (throw_on_mutable_data_ptr_) {
+      return;
+    }
     throw_on_mutable_data_ptr_ = true;
     refresh_has_data_ptr_check();
   }
 
   void set_warn_deprecated_on_mutable_data_ptr() {
+    if (warn_deprecated_on_mutable_data_ptr_) {
+      return;
+    }
     warn_deprecated_on_mutable_data_ptr_ = true;
     refresh_has_data_ptr_check();
   }

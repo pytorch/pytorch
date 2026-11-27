@@ -48,7 +48,7 @@ class SymT(Enum):
     # Inductor: iteration domain for blockIdx.x/blockIdx.y
     XBLOCK = auto()
     YBLOCK = auto()
-    ZBLOCK = auto()
+    Z0_BLOCK = auto()
     # Inductor: this is used solely for dynamic_reshape_indexer
     VIEW = auto()
     # Alternate (non-modular) indexing used in halide kernels
@@ -74,11 +74,15 @@ prefix_str = {
     SymT.TEMPLATE_INDEX: "idx",
     SymT.XBLOCK: "x",
     SymT.YBLOCK: "y",
-    SymT.ZBLOCK: "z",
+    SymT.Z0_BLOCK: "z0_",
     SymT.INDIRECT: "indirect",  # false aliasing?
     SymT.VIEW: "view",
     SymT.HALIDE: "h",
 }
+
+
+def symt_to_block_prefix(symt: SymT) -> str:
+    return prefix_str[symt].upper()
 
 
 def make_symbol(prefix: SymT, idx: int, **kwargs: bool | None) -> sympy.Symbol:

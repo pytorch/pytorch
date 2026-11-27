@@ -92,6 +92,9 @@ jobs:
       build-environment: ${{ needs.linux-noble-xpu-n-py3_11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-xpu-n-py3_11-build.outputs.test-matrix }}
+      # Unlike main, viable/strict is not keep-going by default; without it a
+      # consistent failure hides the rest of its test file until a rerun.
+      keep-going: ${{ github.ref == 'refs/heads/viable/strict' }}
     secrets: inherit
 
   linux-noble-xpu-n-py3_11-client-build:
@@ -119,6 +122,9 @@ jobs:
       build-environment: ${{ needs.linux-noble-xpu-n-py3_11-client-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_11-client-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-xpu-n-py3_11-client-build.outputs.test-matrix }}
+      # Unlike main, viable/strict is not keep-going by default; without it a
+      # consistent failure hides the rest of its test file until a rerun.
+      keep-going: ${{ github.ref == 'refs/heads/viable/strict' }}
     secrets: inherit
 
   windows-xpu-n-1-build:
@@ -130,7 +136,7 @@ jobs:
       build-environment: win-vs2022-xpu-n-1-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2026.0'
+      xpu-version: '2026.1'
       vc-year: '2022'
     secrets: inherit
 
@@ -143,6 +149,6 @@ jobs:
       build-environment: win-vs2022-xpu-n-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2026.1'
+      xpu-version: '2026.2'
       vc-year: '2022'
     secrets: inherit

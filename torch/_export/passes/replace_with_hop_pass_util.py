@@ -130,6 +130,9 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
     Helper function for replacing graph nodes with higher order nodes.
     For each subgraph in `new_gm`, decides whether to construct a HOO subgraph, or inline the calls
     back into the parent graph module, depending on `maybe_inline_or_replace_with_hop`.
+    The callback may leave the code of `new_gm` stale, as inlining with
+    ``recompile=False`` does, so nothing here runs `new_gm` or reads its code
+    before the ``recompile()`` after the loop.
     """
     # new_gm is a new graph module that could have different output args names.
     # We need to fix the graph signature.
@@ -173,6 +176,7 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
                 else node
             ),
         )
+    # Inlining skips recompile: regenerating all code per inlined piece is quadratic.
     new_gm.recompile()
     new_gm.graph.lint()
     return new_gm, new_signature
