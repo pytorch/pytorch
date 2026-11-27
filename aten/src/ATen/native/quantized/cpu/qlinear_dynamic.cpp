@@ -570,7 +570,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   const std::vector<float>& src_scales = std::vector<float>(1, 1.0/q_params.scale);
   const std::vector<float>& weights_scales = w.get_scale();
   // Compute -> f32
-  // Use ideep::matmul_forward instead of ideep::inner_product_forward,
+  // Use mkldnn::matmul_forward instead of mkldnn::inner_product_forward,
   // since the latter does not support asymmetric quantization
   // Allocate output Tensor
   at::Tensor output = at::empty(dst_dims, input.options().dtype(at::kFloat));

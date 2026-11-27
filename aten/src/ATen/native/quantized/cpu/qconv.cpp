@@ -1548,8 +1548,8 @@ static at::Tensor _quantized_convolution_onednn(
   if (fp32_output || bfloat16_output) {
     // When fp32 or bf16 output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
     // So, we will use default output_scale as 1.0 and output_zero_point as 0, since
-    // when output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
-    // when output_zero_point is 0, we will skip invoking of op_attr.set_zero_points in ideep.
+    // when output_scale is 1.0, we will skip invoking of op_attr.set_scales;
+    // when output_zero_point is 0, we will skip invoking of op_attr.set_zero_points.
     TORCH_CHECK(output_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, output_scale must be 1.0.");
     TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 or bf16 output, output_zero_point must be 0");
   }
@@ -1763,8 +1763,8 @@ static at::Tensor _quantized_convolution_onednn(
   }
 
 #if DNNL_PREREQ(3, 1, 0)
-  // Use oneDNN's APIs instead of prepare/compute from ideep to reduce integration overhead.
-  // The functions from ideep are heavy because they have complex data structures for unified API
+  // Use oneDNN's APIs instead of the prepare/compute ported from ideep to reduce integration overhead.
+  // The ported functions are heavy because they have complex data structures for unified API
   // oneDNN version >= 3.1.0 is required.
   auto weight_grouped = packed_weight.make_grouped_weights(groups, /* is_deconv */false);
   auto weights_desc = tensor::desc(weight_grouped.get_dims(), packed_weight.get_data_type(), dnnl::memory::format_tag::any);

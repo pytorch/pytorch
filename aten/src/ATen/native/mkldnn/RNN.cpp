@@ -366,7 +366,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     auto cy = itensor_view_from_const_dense(
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_.scalar_type())));
 
-  // Create diff_* ATen tensor and corresponding ideep tensor as fp32
+  // Create diff_* ATen tensor and corresponding MkldnnMemory as fp32
   auto diff_x_ =
       at::empty(input.sizes(), input.options().dtype(at::ScalarType::Float));
   auto diff_hx_ =
@@ -439,7 +439,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 //   a. mkldnn will use plain formats for input, hx/cx, output, hy/cy
 //      and possibly use blocked formats for weights depending shape info.
 //   b. All mkldnn memories are created (in plain format) as views on ATen tensor,
-//      the weight reorder(if any) is handed automatically inside ideep (mkldnn bridge)
+//      the weight reorder(if any) is handed automatically inside the oneDNN wrappers (mkldnn bridge)
 //
 // II. MKLDNN Primitive Mapping
 //   a. mkldnn rnn primitive doesn't support training with dropout or padded input sequence.
