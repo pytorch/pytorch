@@ -107,17 +107,11 @@ class DeterministicTestRun2Run(TestCase):
         The test assumes benchmarks/dynamo/huggingface.py can be found from
         the current working directory.
         """
-        # Pass --device explicitly: without it the benchmark subprocess falls
-        # back to torch.accelerator.current_accelerator(), which only accepts
-        # cuda/privateuse1 and otherwise silently runs on cpu.
+        # Pass --devices explicitly: without it the benchmark subprocess falls
+        # back to torch.accelerator.current_accelerator(), which only
+        # auto-detects a subset of accelerators and otherwise silently runs on
+        # cpu. --devices takes a device type, not an indexed device string.
         device_type = torch.device(device).type
-        if device_type not in ("cuda", "xpu"):
-            # The benchmark runs in a subprocess that never imports third-party
-            # accelerator backends, so the injected backend name cannot be parsed
-            # by torch.device there (benchmarks/dynamo/common.py only consults
-            # torch._C._get_privateuse1_backend_name()). Skip instead of failing
-            # until the benchmark imports the active backend itself.
-            self.skipTest(f"benchmark subprocess cannot run on {device_type}")
 
         def _setup_env(env):
             env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"  # disable autotune cache
@@ -134,7 +128,7 @@ class DeterministicTestRun2Run(TestCase):
             cmd = (
                 f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
-                + f" --device {device_type} --disable-cudagraphs"
+                + f" --devices {device_type} --disable-cudagraphs"
                 + f" --save-model-outputs-to={saved_pkl}"
             )
             print("Command", cmd)
@@ -151,7 +145,7 @@ class DeterministicTestRun2Run(TestCase):
             cmd = (
                 f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
-                + f" --device {device_type} --disable-cudagraphs"
+                + f" --devices {device_type} --disable-cudagraphs"
                 + f" --compare-model-outputs-with={saved_pkl}"
             )
             print("Command", cmd)
