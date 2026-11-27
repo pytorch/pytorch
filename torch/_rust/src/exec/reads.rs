@@ -1138,15 +1138,51 @@ impl Trace {
         }
     }
 
-    // What a call of `obj` reads from it, for the two classes of C whose
+    // What `f`, which something of C calls for the run (a bound method its
+    // function, a functools.partial its func), does with what it is handed
+    // there: true if `f` is C code that may read it (the caller then hands
+    // it over as an instruction would: see used). A Python function, a
+    // method of one, a Python class and an instance of one hand it to a
+    // frame, which records what it reads. Any other callable of C (another
+    // partial, an operator.itemgetter) is refused: nothing here says what
+    // it reads.
+    unsafe fn hands_to_c(&mut self, f: *mut PyObject, of: &str) -> bool {
+        let method = ffi::Py_TYPE(f) == &raw mut super::ffi::PyMethod_Type;
+        if tr_calls_builtin(f) != 0 {
+            // (A method of C bound to an object: the object is handed too.)
+            self.used(f, false);
+            return true;
+        }
+        if method && tr_calls_builtin(tr_bound_function(f)) != 0 {
+            self.walked.clear();
+            self.used(tr_bound_self(f), true);
+            return true;
+        }
+        if !method && ffi::PyFunction_Check(f) == 0 && ffi::PyType_Check(f) == 0 {
+            if tr_type_heap(ffi::Py_TYPE(f)) == 0 {
+                self.refused = Some(format!("it calls {of} a {}, which reads what it is handed where no check covers it", type_name(f)));
+            }
+            self.special(f, c"__call__");
+        }
+        false
+    }
+
+    // What a call of `obj` reads from it, for the classes of C whose
     // objects a region may call: a functools.partial's function, arguments
-    // and keywords (a dict: whole); and the cache of a function behind
-    // functools.lru_cache, which nothing here can look at.
+    // and keywords (a dict: whole), and where the function is C code, what
+    // those hold (see hands_to_c); what a method object of a function of C
+    // is bound to (`types.MethodType(dict.get, d)`); and the cache of a
+    // function behind functools.lru_cache, which nothing here can look at.
     unsafe fn state_called(&mut self, obj: *mut PyObject) {
         if obj.is_null() {
             return;
         }
-        if ffi::PyObject_TypeCheck(obj, builtins().partial as *mut ffi::PyTypeObject) != 0 {
+        if ffi::Py_TYPE(obj) == &raw mut super::ffi::PyMethod_Type {
+            if tr_calls_builtin(tr_bound_function(obj)) != 0 {
+                self.used(tr_bound_self(obj), false);
+            }
+        } else if ffi::PyObject_TypeCheck(obj, builtins().partial as *mut ffi::PyTypeObject) != 0 {
+            let mut c_code = false;
             for name in [c"func", c"args", c"keywords"] {
                 let n = ffi::PyUnicode_InternFromString(name.as_ptr());
                 let v = if n.is_null() { n } else { ffi::PyObject_GenericGetAttr(obj, n) };
@@ -1154,6 +1190,11 @@ impl Trace {
                     ffi::PyErr_Clear();
                     self.refused = Some("it calls a functools.partial it cannot read".into());
                 } else {
+                    if name == c"func" {
+                        c_code = self.hands_to_c(v, "a functools.partial of");
+                    } else if c_code {
+                        self.used(v, true);
+                    }
                     if self.seen.insert((obj as usize, n as usize)) {
                         self.count += 1;
                         self.entries.reads.push(Read { obj: counted(obj), name: Some(own(n)), want: Want::Is, value: Some(counted(v)), at: place(), after: self.wrote.len() });
@@ -1539,6 +1580,20 @@ pub unsafe fn cell(cell: *mut PyObject, value: *mut PyObject) {
 // are read whole.
 pub unsafe fn used(objs: &[*mut PyObject]) {
     with(|t| objs.iter().for_each(|o| t.used(*o, false)));
+}
+
+// `f(*o)` ran with a callee of C, which reads what it is handed. A lone
+// starred operand that is no tuple is made into the call's tuple by the
+// instruction itself: what it holds reaches the callee without an
+// instruction of its own. A tuple, a frozenset, a list, a set, a dict and a
+// view of one are read as any operand is (see used), and an iterator the
+// run made is over something that was read when it was made (made.rs).
+// Anything else (a deque, an array, a generator, a map object) hands on
+// members that no check covers: refused.
+pub unsafe fn spread(o: *mut PyObject) {
+    if !o.is_null() && fixed(o).is_none() && Trace::container(o).is_none() && !super::made::is(o) {
+        refuse(format!("it stars a {} into C code, whose members no check covers", type_name(o)));
+    }
 }
 
 // `f(*o)` ran with a Python callee. A lone starred operand that is no tuple

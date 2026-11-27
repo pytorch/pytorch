@@ -7133,8 +7133,176 @@ class TestVmAskedDomain(TestCase):
         self.assertGreater(region_runs(compiled), 0)
         self.assertEqual(torch._rust._region_read_misses(), 0)
 
+    @parametrize("ask", ["attribute", "operand"])
+    @isolated
+    def test_tensor_that_no_read_leads_to_refuses_the_trace(self, device, ask):
+        # A callable of C the program declared to only compute hands out a
+        # tensor held by a deque, which no read of the call stands for: a
+        # question about that tensor (or handing it on to C code) cannot be
+        # checked on a later call, so no region is formed.
+        global MODES_UNLED
+        MODES_UNLED = collections.deque([torch.ones(8, device=device)])
+        fn = modes_unled_asked if ask == "attribute" else modes_unled_handed
+        pure = {"pure": (operator.getitem,)}
+        compiled = vm(fn, passes=vm.configure(EARLY, pure_calls=pure))
+        for call in range(13):
+            if call in (5, 9):
+                MODES_UNLED[0].resize_(13 - MODES_UNLED[0].shape[0])
+            torch.manual_seed(call)
+            x = torch.randn(4, MODES_UNLED[0].shape[0], device=device)
+            self.assertEqual(compiled(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        rows = [r for r in vm.regions(compiled) if r["function"] == fn.__name__]
+        reasons = [str(r.get("why")) for r in rows if r["state"] == "refused"]
+        self.assertTrue(
+            any("none of its reads leads to" in r for r in reasons), msg=str(rows)
+        )
+
 
 instantiate_device_type_tests(TestVmAskedDomain, globals())
+
+
+# What C code is handed without an instruction of its own handing it: the
+# arguments of a functools.partial of C code, what a method object of a
+# function of C is bound to, a lone starred operand. By name: what makes the
+# state (the read, the change made in place before call 5, and what takes
+# it back before call 9), and whether a region is to be entered again (else
+# the trace is to be refused).
+def modes_unseen_tensor(make):
+    def kind(device):
+        t = torch.ones(8, device=device)
+        read = make(t)
+        return (read, lambda: t.resize_(5), lambda: t.resize_(8))
+
+    return kind
+
+
+def modes_unseen_dict(make):
+    def kind(device):
+        d = {"k": 2.0}
+        read = make(d)
+        return (read, lambda: d.update(k=3.0), lambda: d.update(k=2.0))
+
+    return kind
+
+
+def modes_unseen_generator(t):
+    return lambda: torch.numel(*(x for x in [t]))
+
+
+MODES_HANDED = {
+    "partial_argument": (
+        modes_unseen_tensor(lambda t: functools.partial(torch.numel, t)),
+        True,
+    ),
+    "partial_keyword": (
+        modes_unseen_tensor(lambda t: functools.partial(torch.numel, input=t)),
+        True,
+    ),
+    "partial_of_a_bound_method": (
+        modes_unseen_tensor(lambda t: functools.partial(t.numel)),
+        True,
+    ),
+    "partial_of_dict_get": (
+        modes_unseen_dict(lambda d: functools.partial(dict.get, d, "k")),
+        True,
+    ),
+    "partial_of_getitem": (
+        modes_unseen_dict(lambda d: functools.partial(operator.getitem, d, "k")),
+        True,
+    ),
+    "partial_of_a_dict_method": (
+        modes_unseen_dict(lambda d: functools.partial(d.get, "k")),
+        True,
+    ),
+    "partial_of_a_method_object": (
+        modes_unseen_dict(
+            lambda d: functools.partial(types.MethodType(dict.get, d), "k")
+        ),
+        True,
+    ),
+    "method_object_of_dict_get": (
+        modes_unseen_dict(lambda d: lambda m=types.MethodType(dict.get, d): m("k")),
+        True,
+    ),
+    "method_object_of_numel": (
+        modes_unseen_tensor(lambda t: types.MethodType(torch.numel, t)),
+        True,
+    ),
+    "star_of_an_iterator": (
+        modes_unseen_tensor(lambda t: lambda: torch.numel(*iter([t]))),
+        True,
+    ),
+    "star_of_a_deque": (
+        modes_unseen_tensor(lambda t: lambda d=collections.deque([t]): torch.numel(*d)),
+        False,
+    ),
+    "star_of_a_generator": (modes_unseen_tensor(modes_unseen_generator), False),
+}
+MODES_HANDED_READ = None
+
+
+def modes_unseen_reading(x):
+    y = modes_work(x)
+    k = MODES_HANDED_READ()
+    return modes_work(y * float(k))
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmHandedUnseen(TestCase):
+    """What C code reads of something it is handed where no instruction of
+    the call hands it over is checked like anything else the call read, or
+    the trace is refused."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def log(self, device, what, fn):
+        global MODES_HANDED_READ
+        MODES_HANDED_READ, change, back = MODES_HANDED[what][0](device)
+        out = []
+        for call in range(13):
+            if call == 5:
+                change()
+            if call == 9:
+                back()
+            torch.manual_seed(call)
+            out.append(fn(torch.randn(4, 8, device=device)))
+        return out
+
+    @parametrize("what", list(MODES_HANDED))
+    @isolated
+    def test_what_c_code_is_handed_unseen(self, device, what):
+        want = self.log(device, what, modes_unseen_reading)
+        compiled = vm(modes_unseen_reading, passes=EARLY)
+        self.assertEqual(self.log(device, what, compiled), want, atol=0, rtol=0)
+        name = modes_unseen_reading.__name__
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        if MODES_HANDED[what][1]:
+            # Entered while the state is as it was traced, and not while it
+            # is changed.
+            self.assertGreater(region_runs(compiled), 0, msg=str(rows))
+            self.assertGreater(torch._rust._region_read_misses(), 0, msg=str(rows))
+        else:
+            reasons = [str(r.get("why")) for r in rows if r["state"] == "refused"]
+            unseen = "into C code, whose members no check covers"
+            self.assertTrue(any(unseen in r for r in reasons), msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmHandedUnseen, globals())
+
+
+MODES_UNLED = None
+
+
+def modes_unled_asked(x):
+    y = modes_work(x)
+    t = operator.getitem(MODES_UNLED, 0)
+    return modes_work(y * float(t.shape[0]))
+
+
+def modes_unled_handed(x):
+    y = modes_work(x)
+    t = operator.getitem(MODES_UNLED, 0)
+    return modes_work(y * t)
 
 
 # The pass lists a rule about writes is tested under: with the default one a

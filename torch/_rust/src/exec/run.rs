@@ -2171,6 +2171,7 @@ impl Act<'_> {
                 if reads::reads_args(a(0)) {
                     let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
                     reads::used(&all);
+                    reads::spread(a(1));
                 } else {
                     reads::called(a(0));
                     reads::starred(a(1));
