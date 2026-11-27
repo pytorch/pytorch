@@ -131,26 +131,6 @@ if HAS_TRITON:
     import triton.language as alias_tl
     from triton import language as tl
 
-    if torch.cuda.is_available():
-        try:
-            from triton.language.extra import libdevice as alias_libdevice
-            from triton.language.extra.libdevice import (  # @manual
-                fast_dividef,
-                fast_dividef as my_fast_dividef,
-            )
-        except ImportError:
-            from triton.language.extra.cuda import libdevice as alias_libdevice
-            from triton.language.extra.cuda.libdevice import (  # @manual
-                fast_dividef,
-                fast_dividef as my_fast_dividef,
-            )
-    elif torch.xpu.is_available():
-        from triton.language.extra.intel import libdevice as alias_libdevice
-        from triton.language.extra.intel.libdevice import (  # @manual
-            fast_dividef,
-            fast_dividef as my_fast_dividef,
-        )
-
     def _triton_get_ast_equal_to_str(params):
         try:
             from triton.backends.compiler import AttrsDescriptor  # noqa: F401
@@ -2842,7 +2822,14 @@ class KernelTestsRuntime(_KernelTestsBase):
 
     @onlyAccelerator
     def test_triton_kernel_with_imported_submodule(self, device):
-        if torch.device(device).type not in ("cuda", "xpu"):
+        if torch.device(device).type == "cuda":
+            try:
+                from triton.language.extra import libdevice as alias_libdevice
+            except ImportError:
+                from triton.language.extra.cuda import libdevice as alias_libdevice
+        elif torch.device(device).type == "xpu":
+            from triton.language.extra.intel import libdevice as alias_libdevice
+        else:
             self.skipTest("requires CUDA or XPU libdevice")
 
         @triton.jit
@@ -4879,7 +4866,14 @@ class KernelTestsImportedSymbols(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_triton_kernel_with_imported_symbol(self, device):
-        if torch.device(device).type not in ("cuda", "xpu"):
+        if torch.device(device).type == "cuda":
+            try:
+                from triton.language.extra.libdevice import fast_dividef  # @manual
+            except ImportError:
+                from triton.language.extra.cuda.libdevice import fast_dividef  # @manual
+        elif torch.device(device).type == "xpu":
+            from triton.language.extra.intel.libdevice import fast_dividef  # @manual
+        else:
             self.skipTest("requires CUDA or XPU libdevice")
 
         @triton.jit
@@ -4912,7 +4906,20 @@ class KernelTestsImportedSymbols(torch._inductor.test_case.TestCase):
         self.assertEqual(compiled_out, eager_out)
 
     def test_triton_kernel_with_imported_symbol_with_custom_name(self, device):
-        if torch.device(device).type not in ("cuda", "xpu"):
+        if torch.device(device).type == "cuda":
+            try:
+                from triton.language.extra.libdevice import (  # @manual
+                    fast_dividef as my_fast_dividef,
+                )
+            except ImportError:
+                from triton.language.extra.cuda.libdevice import (  # @manual
+                    fast_dividef as my_fast_dividef,
+                )
+        elif torch.device(device).type == "xpu":
+            from triton.language.extra.intel.libdevice import (  # @manual
+                fast_dividef as my_fast_dividef,
+            )
+        else:
             self.skipTest("requires CUDA or XPU libdevice")
 
         @triton.jit
