@@ -763,6 +763,7 @@ python_ref_db: list[OpInfo] = [
                 dtypes=(torch.float16,),
                 device_type="cuda",
             ),
+            # https://github.com/intel/torch-xpu-ops/issues/6390
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
@@ -851,6 +852,7 @@ python_ref_db: list[OpInfo] = [
                 dtypes=(torch.float16,),
                 device_type="xpu",
             ),
+            # https://github.com/intel/torch-xpu-ops/issues/6390
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
