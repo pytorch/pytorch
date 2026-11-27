@@ -7095,7 +7095,7 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
     # type promotion cases
     # int x float
     if torch.float in supported_dtypes and torch.long in supported_dtypes:
-        a = make_arg((), dtype=torch.long)
+        a = make_arg((), dtype=torch.long, requires_grad=False)
         b = make_arg((1, 4), dtype=torch.float)
         c = make_arg((3, 4))
 
