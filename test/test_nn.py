@@ -18606,6 +18606,35 @@ if __name__ == '__main__':
         if dbeta_ref is not None:
             self.assertEqual(dbeta.cpu().double(), dbeta_ref, atol=1, rtol=1e-2)
 
+    @parametrize_test("ndim", (1, 3))
+    def test_ReflectionPad_backward_deterministic(self, device, ndim):
+        # Pads that reach past the middle put a left and a right reflection on the same element.
+        cases = {
+            1: [((2, 3, 8), (1, 2)), ((3, 8), (7, 7)), ((2, 3, 8), (5, -3)), ((2, 3, 8), (-9, 7)),
+                ((70000, 2, 5), (3, 4))],
+            3: [((2, 3, 4, 5, 6), (1, 2, 3, 4, 2, 1)), ((3, 4, 5, 6), (5, 5, 4, 4, 3, 3)),
+                ((2, 3, 4, 5, 6), (-2, 5, 4, -3, 3, 0)), ((1, 66000, 2, 2, 3), (2, 1, 1, 1, 1, 1))],
+        }[ndim]
+        with DeterministicGuard(True):
+            for shape, pad in cases:
+                x = torch.randn(shape, device=device, dtype=torch.double, requires_grad=True)
+                ref_x = x.detach().cpu().requires_grad_()
+                out = F.pad(x, pad, mode='reflect')
+                ref_out = F.pad(ref_x, pad, mode='reflect')
+                grad = torch.randn_like(out)
+                out.backward(grad)
+                ref_out.backward(grad.cpu())
+                self.assertEqual(x.grad, ref_x.grad, atol=0, rtol=0)
+
+            # Only the backward op itself can get an empty grad_output; the gradient is then zero.
+            backward, shape, pad, grad_shape = {
+                1: (torch.ops.aten.reflection_pad1d_backward, (2, 3, 4), [-4, 0], (2, 3, 0)),
+                3: (torch.ops.aten.reflection_pad3d_backward, (2, 3, 4, 5, 6), [0, 0, -5, 0, 0, 0], (2, 3, 4, 0, 6)),
+            }[ndim]
+            x = torch.randn(shape, device=device, dtype=torch.double)
+            grad = torch.empty(grad_shape, device=device, dtype=torch.double)
+            self.assertEqual(backward(grad, x, pad), torch.zeros_like(x), atol=0, rtol=0)
+
 
 class TestFunctionalPickle(TestCase):
     hw_classification = HardwareClassification.GENERIC

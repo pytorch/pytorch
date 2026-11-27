@@ -1810,6 +1810,7 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors, except for a sparse
           CSR tensor on ROCm
@@ -1869,9 +1870,6 @@ def use_deterministic_algorithms(
           - ``bicubic``
           - ``trilinear``
 
-        * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
