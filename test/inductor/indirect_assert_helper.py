@@ -81,8 +81,7 @@ if __name__ == "__main__":
         if callable(obj) and obj.__module__ == __name__
     ]
 
-    _, fn_name, dims, dyn_shape, one_size, *device_args = sys.argv
-    device = device_args[0] if device_args else GPU_TYPE
+    _, fn_name, dims, dyn_shape, one_size = sys.argv
     if fn_name not in fns:
         raise AssertionError(f"Unknown function: {fn_name}")
     if one_size not in ("True", "False"):
@@ -101,13 +100,13 @@ if __name__ == "__main__":
         raise AssertionError(f"dyn_shape must be 'True' or 'False', got {dyn_shape}")
     dynamic_shapes = dyn_shape == "True"
 
-    x = torch.randn(shape_x, device=device)
-    y = torch.arange(4, device=device)
+    x = torch.randn(shape_x, device=GPU_TYPE)
+    y = torch.arange(4, device=GPU_TYPE)
     fn = vars()[fn_name]
     fn = torch.compile(dynamic=dynamic_shapes)(fn)
     if fn_name == "store":
         shape = (y.numel(),) + x.shape[2:]
-        z = torch.randn(shape, device=device)
+        z = torch.randn(shape, device=GPU_TYPE)
         fn(x, y, z)
         # On Windows, Python will optimize away a function call if its updated value is not used.
         # Touch the memory of x so that the fn(x, y, z) will not be optimized away
