@@ -234,6 +234,11 @@ def _repr_hash_with_local_id(value: int) -> str:
     return repr(token_id + value - token_id)
 
 
+def _mutate(sequence, operation, *args, **kwargs):
+    operation(sequence, *args, **kwargs)
+    return list(sequence)
+
+
 _HASH_ESCAPE = "Conversion of compile-time-only hash value"
 
 
@@ -330,13 +335,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         first, bind = {}, dict.__setitem__.__get__
         cases = [(bind(first), bind(other)) for other in (first, {}, first)]
         if capture != "ordinary":
-            self._check_capture_refusal(fn, cases[1], capture, "slot-wrapper identity")
+            self._refuses_capture(fn, cases[1], capture, "slot-wrapper identity")
             return
         compiled, counter = self._check_reuse(fn, cases)
         x = torch.ones(1)
         with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
-            for methods in cases:
-                self.assertEqual(compiled(x, methods), fn(x, methods))
+            self.assertEqual([compiled(x, p) for p in cases], [fn(x, p) for p in cases])
         self.assertEqual(counter.frame_count, 2)
 
     def test_shared_mro_owner_base_replacement(self):
@@ -7598,9 +7602,7 @@ class GraphModule(torch.nn.Module):
             methods.append([].count)
         self._check_method_bindings(fn, methods, capture, (1, 1, 2, 2, 3))
         if capture in ("aot", "cache"):
-            self._check_capture_refusal(
-                fn, [1].count, capture, "binding prebound builtin"
-            )
+            self._refuses_capture(fn, [1].count, capture, "binding prebound builtin")
 
     def test_export_calls_instance_bound_builtin(self):
         class Model(torch.nn.Module):
@@ -7625,7 +7627,7 @@ class GraphModule(torch.nn.Module):
         self.assertIsNot(saved, fresh)
         pair = (saved, saved)
         if capture == "saved":
-            self._check_capture_refusal(fn, pair, "cache", "requires wrapper guards")
+            self._refuses_capture(fn, pair, "cache", "requires wrapper guards")
             return
         self._check_reuse(fn, (pair, (saved, fresh), pair))
 
@@ -7644,19 +7646,6 @@ class GraphModule(torch.nn.Module):
             self._check_reuse(fn, receivers, frames=1)
         else:
             self._check_fallback(fn, receivers, "unstable receiver")
-
-    def test_builtin_method_tuple_subclass_key(self):
-        class Keys(tuple):
-            __slots__ = ()
-            __iter__ = unittest.mock.Mock(side_effect=AssertionError("iterated key"))
-
-        def fn(x, receiver, mapping):
-            key = (list.count.__get__(receiver, list),)
-            return x + mapping.get(key, 0)
-
-        first, second = [], []
-        mapping = {Keys([first.count]): 7}
-        self._check_reuse(fn, (second, [], first, second), mapping)
 
     def test_bound_builtin_method_hash(self):
         receiver = [1, 1]
@@ -7696,9 +7685,7 @@ class GraphModule(torch.nn.Module):
         [None, lambda s: s.upper, lambda s: str.__dict__["upper"].__get__(s, str)],
     )
     def test_bound_method_constant_receiver_hash(self, bind):
-        def fn(x, receiver):
-            return x + 1, hash(bind(receiver) if bind else receiver)
-
+        fn = lambda x, s: (x + 1, hash(bind(s) if bind else s))
         a, b = ("".join(("hello", "world")) for _ in range(2))
         self.assertIsNot(a, b)
         inputs = (a, b, a) if bind else tuple(s.__hash__ for s in (a, b, a))
@@ -7715,7 +7702,7 @@ class GraphModule(torch.nn.Module):
                 m = (value if source == "captured" else m).upper
             return x + 1, hash(frozenset((m,)) if source == "aggregate" else m)
 
-        self._check_capture_refusal(fn, value, capture, _HASH_ESCAPE)
+        self._refuses_capture(fn, value, capture, _HASH_ESCAPE)
 
     @parametrize("mode", ["hash", "literal", "alias"])
     def test_bound_builtin_method_integer_receiver(self, mode):
@@ -7728,8 +7715,7 @@ class GraphModule(torch.nn.Module):
                 return x + method.__self__, x + method(), len({method: 1})
             return x + 1, descriptor.__get__(10001, int) == method
 
-        literal = next(c for c in fn.__code__.co_consts if c == 10001)
-        other = int(str(literal))
+        literal, other = 10001, int("10001")
         self.assertIsNot(literal, other)
         if mode == "alias":
             self._check_reuse(fn, (other, literal), literal)
@@ -8295,8 +8281,7 @@ class GraphModule(torch.nn.Module):
             def count(self, value):
                 return 99
 
-            def __add__(self, other):
-                return ["override"]
+            __add__ = lambda self, other: ["override"]
 
         class D(dict):
             def get(self, key, default=None):
@@ -8639,19 +8624,19 @@ class GraphModule(torch.nn.Module):
     )
     def test_constructed_container_keys_guard_lazy_elements(self, wrap, first, other):
         def fn(x, second, first):
-            hashes = (hash(first), hash(second))
+            h = hash(first), hash(second)
             if wrap is not None:
                 first, second = wrap([first]), wrap([second])
-            keys = (
-                len(dict.fromkeys(hashes)),
-                len(set(hashes)),
-                list(hashes).index(hashes[1]),
-            )
+            keys = len(dict.fromkeys(h)), len(set(h)), list(h).index(h[1])
             return x + len({first: 1, second: 2}), len({first, second}), keys
 
         self._check_reuse(fn, (other, first, other), first)
 
-    def test_method_key_guards_avoid_metaclass_callbacks(self):
+    def test_method_key_guards_avoid_callbacks(self):
+        class Keys(tuple):
+            __slots__ = ()
+            __iter__ = unittest.mock.Mock(side_effect=AssertionError("iterated key"))
+
         class Meta(type):
             __hash__ = type.__hash__
             __module__ = property(unittest.mock.Mock(side_effect=AssertionError))
@@ -8660,13 +8645,23 @@ class GraphModule(torch.nn.Module):
                 self.assertIsNot(other, object)
                 return type.__eq__(cls, other)
 
-        def fn(x, mapping, key, method):
-            keys = {list.count.__get__(receiver)}
-            return x + mapping[key] + len(keys), method.__name__
+        def fn(x, pair, key, method):
+            receiver, mapping = pair
+            bound = list.count.__get__(receiver, list)
+            return (
+                x + mapping[key] + len({bound}),
+                mapping.get((bound,), 0),
+                method.__name__,
+            )
 
-        key, receiver = Meta("Key", (), {})(), []
-        mappings = ({key: torch.tensor([v])} for v in (7, 8))
-        self._check_reuse(fn, mappings, key, Meta("D", (dict,), {}).fromkeys, frames=1)
+        first, other = [], []
+        key, method = Meta("Key", (), {})(), Meta("D", (dict,), {}).fromkeys
+        mapping = {key: torch.tensor([7]), Keys([first.count]): 7}
+        self._check_reuse(
+            fn, [(r, mapping) for r in (other, [], first, other)], key, method
+        )
+        mappings = ((first, {key: torch.tensor([v])}) for v in (7, 8))
+        self._check_reuse(fn, mappings, key, method, frames=1)
 
     def _check_method_bindings(self, fn, methods, capture, frames):
         x = torch.ones(1)
@@ -8680,23 +8675,21 @@ class GraphModule(torch.nn.Module):
                 compiled = compiled.aot_compile(((x, methods[0]), {}))
                 first, equivalent, invalid = methods[:3]
                 self.assertIsNot(first, equivalent)
-                self.assertTrue(compiled.guard_check(x, equivalent))
-                self.assertFalse(compiled.guard_check(x, None))
-                self.assertFalse(compiled.guard_check(x, invalid))
+                for m in (equivalent, None, invalid):
+                    self.assertEqual(compiled.guard_check(x, m), m is equivalent)
                 with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
                     compiled(x, invalid)
                 methods = (first, equivalent)
             for method, count in zip(methods, frames):
                 actual = compiled(x, method)
                 self.assertEqual(actual, fn(x, method))
-                result = actual[-1]
-                returned = next(iter(result)) if capture in ("dict", "set") else result
-                self.assertIs(returned, method)
+                wrapped = capture in ("dict", "set")
+                self.assertIs(next(iter(actual[-1])) if wrapped else actual[-1], method)
                 if counter is not None:
                     self.assertEqual(counter.frame_count, count)
 
     @torch._dynamo.config.patch(debug_force_nested_calls=False)
-    def _check_capture_refusal(self, fn, value, capture, error):
+    def _refuses_capture(self, fn, value, capture, error):
         args = (torch.ones(1), value)
         cache = config.patch(caching_precompile=capture == "cache")
         with cache, self.assertRaisesRegex(Unsupported, error):
@@ -8708,9 +8701,8 @@ class GraphModule(torch.nn.Module):
 
     @parametrize(
         "convert",
-        [None, repr, str, bool, hex, bin, oct, format]
-        + [_repr_hash_with_local_id, lambda h: repr(h % 997), lambda h: repr(-h)]
-        + [operator.setitem, list.insert, list.sort, collections.deque.rotate]
+        [repr, str, bool, hex, bin, oct, format, _repr_hash_with_local_id]
+        + [lambda h: h % 997, lambda h: repr(h % 997), lambda h: repr(-h)]
         + [
             lambda h: ["0", "1"][h % 2],
             lambda h: [1, 2][: h % 2],
@@ -8722,54 +8714,41 @@ class GraphModule(torch.nn.Module):
             lambda h: range(3).index(h % 3),
             lambda h: len(range(h % 3)),
             lambda h: sorted([2, 1], reverse=h % 2),
+            lambda h: _mutate([2, 1], operator.setitem, h % 2, 3),
+            lambda h: _mutate([2, 1], list.insert, h % 2, 3),
+            lambda h: _mutate([2, 1], list.sort, reverse=h % 2),
+            lambda h: _mutate(
+                collections.deque([2, 1]), collections.deque.rotate, h % 2
+            ),
         ],
     )
     def test_skipped_builtin_hash_guard(self, convert):
-        def fn(x, method):
-            h = hash(method)
-            seq = [2, 1]
-            if convert is operator.setitem or convert is list.insert:
-                convert(seq, h % 2, 3)
-            elif convert is list.sort:
-                convert(seq, reverse=h % 2)
-            elif convert is collections.deque.rotate:
-                seq = collections.deque(seq)
-                convert(seq, h % 2)
-            else:
-                return x + 1, h % 997 if convert is None else convert(h)
-            return x + 1, list(seq)
-
+        fn = lambda x, m: (x + 1, convert(hash(m)))
         method = random.Random().random
         self._check_fallback(fn, (method,), _HASH_ESCAPE)
-        self._check_capture_refusal(fn, method, "aot", _HASH_ESCAPE)
+        self._refuses_capture(fn, method, "aot", _HASH_ESCAPE)
 
-    @parametrize("base", [object, int, float, str, enum.Enum, enum.IntEnum])
-    def test_format_sourced_object(self, base):
-        class Label(base):
-            member = 1
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_format_created_enum_guards_base(self):
+        Base = enum.IntFlag("Base", {})
 
-        def fn(x, label, mutate=False):
-            if mutate:
-                Label.__format__ = lambda self, spec: self.tag + spec
-                return x + 1, "{[label]:>8}".format({"label": label})
-            basic = format(label, ">8"), str.format("{}", label), f"{label:>8}"
-            mixed = str.format("{0:>8}/{name} {{{0}}}={1}", label, x, name=label)
-            if base is enum.Enum:
-                basic += ("{!r} {.name[0]} {:>{}}".format(label, label, label, 8),)
-            return x + 1, basic, mixed
+        def fn(x, write):
+            if write:
+                Base.__format__ = lambda self, spec: "pending"
 
-        x = torch.ones(1)
-        label = Label.member if issubclass(base, enum.Enum) else Label()
-        compiled = torch.compile(fn, backend="eager")
-        if base is not object:
-            self._check_reuse(fn, (label,), frames=1)
-        for mutate, label.tag in ((True, "a"), (False, "b")):
-            if base in (int, object) and mutate:
-                with self.assertRaisesRegex(
-                    Unsupported, "pending class mutation: __format__"
-                ):
-                    torch.compile(fn, backend="eager", fullgraph=True)(x, label, mutate)
-            self.assertEqual(compiled(x, label, mutate), fn(x, label, mutate))
+            class Child(Base):
+                one = 1
+
+            return x + 1, format(Child.one)
+
+        def inputs():
+            yield False
+            for text in ("first", "second"):
+                Base.__format__ = lambda self, spec, text=text: text
+                yield False
+
+        self._check_reuse(fn, inputs(), frames=3)
+        self._check_fallback(fn, (True,), "pending class mutation: __format__")
 
     def test_format_enum_members_and_tensor_conversions(self):
         def lookup_member(ctx):
@@ -8778,21 +8757,27 @@ class GraphModule(torch.nn.Module):
             build = builder.SourcelessBuilder.create
             build(tx, type(member)).call_function(tx, [build(tx, member.value)], {})
 
+        class Text(list):
+            def __str__(self):
+                self.append("str")
+                return "text"
+
         class Field(list):
             def __repr__(self):
-                self.append("repr")
+                self.calls.append("repr")
                 return "é"
 
             def __format__(self, spec):
-                self.append("width")
+                self.calls.append("width")
                 return "3"
 
         def fn(offset, pair):
             x, obj, opaque = pair
-            key, field = re.RegexFlag.IGNORECASE, Field()
-            rendered = "{0} {1!r:{1}} {1!s:{1}} {1!a:{1}}".format(key, field)
+            key, field = re.IGNORECASE, Field()
+            field.calls = calls = Text()
+            rendered = "{0} {2} {1!r:{1}} {1!s:{1}} {1!a:{1}}".format(key, field, calls)
             comptime(lookup_member)
-            spec = "{:>4} {!r} {!s} {} {!r} {} {!a}"
+            spec = "{.name[0]:>4} {!r} {!s} {} {!r} {} {!a}"
             text = spec.format(key, x, x, re.RegexFlag(4), x.shape[0], x.shape, [x])
             mixed = "{:>{}} {} {o} {o!r} {o!s} {o!a}".format(
                 key, x.shape[0], opaque, o=obj
@@ -8804,7 +8789,7 @@ class GraphModule(torch.nn.Module):
                 except (ValueError, IndexError) as exc:
                     errors.append((type(exc), exc.args))
             output = (format(torch._C.DispatchKey.CPU), text, mixed, errors)
-            return x + offset, output, rendered, tuple(field)
+            return x + offset, output, rendered, tuple(calls)
 
         class OpaqueRepr:
             __repr__ = torch.compiler.disable(lambda self: "opaque")
@@ -8814,28 +8799,36 @@ class GraphModule(torch.nn.Module):
 
     @parametrize(
         "render",
-        [format, "{!r}".format, "{!s}".format]
+        [format, str.format, "{!r}".format, "{!s}".format]
         + [lambda v: f"{v}", lambda v: f"{v!r}", lambda v: f"{v!s}"],
     )
     def test_format_pending_class_mutation(self, render):
         Label = type("Label", (), {})
 
         class Stable(Label):
-            def __repr__(self):
-                return "shadowed"
-
-            __str__ = __repr__
+            __str__ = __repr__ = __format__ = lambda *args: "shadowed"
 
         def fn(x, member):
+            if render is str.format:
+                Label.__format__ = lambda self, spec: "changed" + spec
+                return x + 1, str.format("{{{v[label]:>8}}}", v={"label": member})
             Label.__str__ = Label.__repr__ = lambda self: "changed"
             Label.__float__ = lambda self: 42.0
             return x + 1, render(member)
 
-        self._check_fallback(fn, (Label(),), r"pending class mutation: __(str|repr)__")
-        del Label.__repr__, Label.__str__
-        self._check_reuse(fn, (Stable(),), frames=1)
-        self.assertEqual((repr(Stable()), repr(Label())), ("shadowed", "changed"))
+        self._check_fallback(
+            fn, (Label(),), r"pending class mutation: __(str|repr|format)__"
+        )
+        slot = "__format__" if render is str.format else "__repr__"
+        delattr(Label, slot)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = "{shadowed}" if render is str.format else "shadowed"
+        self.assertEqual(compiled(torch.ones(1), Stable())[1], expected)
+        self.assertEqual(format(Label()), "changed")
         self._check_reuse(fn, (re.IGNORECASE,), frames=1)
+        if render is str.format:
+            for base in (int, float, str):
+                self._check_reuse(fn, (type("Value", (base,), {})(),), frames=1)
 
     @parametrize(
         "value", [CustomDictSubclass(a=1), time.time, dict.__setitem__.__get__({})]

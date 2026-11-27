@@ -18,12 +18,7 @@ from torch._subclasses.fake_tensor import maybe_get_fake_constant
 
 from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, unimplemented
-from ..guards import (
-    _method_identity_guards_filtered,
-    GuardBuilder,
-    install_builtin_method_guard,
-    install_guard,
-)
+from ..guards import GuardBuilder, install_builtin_method_guard, install_guard
 from ..source import (
     AttrSource,
     ConstDictKeySource,
@@ -108,26 +103,6 @@ def is_hashable(x: VariableTracker) -> bool:
         return True
 
     return x.is_hashable()
-
-
-def _guard_lazy_key(vt: "variables.LazyVariableTracker") -> bool:
-    if isinstance(vt.source, ConstDictKeySource):
-        return True
-    from ..symbolic_convert import InstructionTranslator
-    from .builder import bound_builtin_method_descriptor
-
-    value = vt.original_value()
-    if vt.source is None or type(value) is not types.BuiltinMethodType:
-        return False
-    if bound_builtin_method_descriptor(value) is None:
-        return False
-    tx = InstructionTranslator.current_tx()
-    if tx.output.tracing_context.guards_context.skip_install:
-        return True
-    if _method_identity_guards_filtered(tx):
-        return False
-    install_builtin_method_guard(tx, vt.source, value)
-    return True
 
 
 # Note [Builtin method key summaries]
@@ -512,38 +487,41 @@ class HashableTracker:
         # Fast path for unrealized LazyVariableTrackers: check and hash without
         # realizing, to avoid inserting guards.  If the fast-path check fails,
         # fall through to realize the VT and try the full is_hashable check.
+        from .builder import bound_builtin_method_descriptor
+
         if (
             isinstance(vt, variables.LazyVariableTracker)
             and not vt.is_realized()
             and vt.is_hashable_lazy()
-            and _guard_lazy_key(vt)
+            and (
+                isinstance(vt.source, ConstDictKeySource)
+                or (
+                    vt.source is not None
+                    and type(vt.original_value()) is types.BuiltinMethodType
+                    and bound_builtin_method_descriptor(vt.original_value()) is not None
+                    and TracingContext.get().guards_context.skip_install
+                )
+            )
         ):
-            from .builder import bound_builtin_method_descriptor
-
-            value = vt.original_value()
-            source = cast(Source, vt.source)
-            self.method_keys_guarded = not isinstance(vt.source, ConstDictKeySource)
-            if self.method_keys_guarded:
-                input_methods = (source,)
-                self._key_types = ()
-            else:
-                # Lazy hashability accepts only functions/classes and flat exact tuples.
-                entries = (
-                    [(item, GetItemSource(source, i)) for i, item in enumerate(value)]
-                    if type(value) is tuple
-                    else [(value, source)]
-                )
-                input_methods = tuple(
-                    source
-                    for item, source in entries
-                    if type(item) is types.BuiltinMethodType
-                    and bound_builtin_method_descriptor(item) is not None
-                )
-                self._key_types = [
-                    (type(item), TypeSource(source))
-                    for item, source in entries
-                    if type(item) is not types.BuiltinMethodType
-                ]
+            value, source = vt.original_value(), cast(Source, vt.source)
+            self.method_keys_guarded = not isinstance(source, ConstDictKeySource)
+            # Lazy hashability accepts only functions/classes and flat exact tuples.
+            entries = (
+                [(item, GetItemSource(source, i)) for i, item in enumerate(value)]
+                if type(value) is tuple
+                else [(value, source)]
+            )
+            input_methods: list[Source] = []
+            key_types: list[tuple[type, TypeSource]] = []
+            for item, item_source in entries:
+                if type(item) is not types.BuiltinMethodType:
+                    key_types.append((type(item), TypeSource(item_source)))
+                elif (
+                    self.method_keys_guarded
+                    or bound_builtin_method_descriptor(item) is not None
+                ):
+                    input_methods.append(item_source)
+            self._key_types = key_types
             if input_methods:
                 from ..symbolic_convert import InstructionTranslator
 
@@ -557,7 +535,9 @@ class HashableTracker:
                         tracker.track(tx, unguarded=False)
                     else:
                         tracker.has_method_keys = True
-                self.input_methods = () if self.method_keys_guarded else input_methods
+                self.input_methods = (
+                    () if self.method_keys_guarded else tuple(input_methods)
+                )
                 self.has_builtin_method = True
                 self.method_receivers = tuple(
                     AttrSource(source, "__self__") for source in input_methods
