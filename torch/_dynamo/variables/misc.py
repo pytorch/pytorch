@@ -1381,7 +1381,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         no_keywords(tx, "mark_dirty", kwargs)
-        if getattr(self, "proxy", None) is None:
+        if not self.inference:
             unimplemented(
                 gb_type="Unsupported autograd.Function context `mark_dirty`",
                 context=f"call_method {self} mark_dirty",
