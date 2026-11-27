@@ -79,8 +79,8 @@ changes harder to audit.
 
 ## Check encoding stability
 
-Call out any encodings between an extension and the library that a change may
-implicitly force to remain stable, for example raw casts between enums and
+Call out any encodings between an extension and the library that the change may
+implicitly require to remain stable, for example raw casts between enums and
 integers. Reuse `torch::stable::detail::from` and `torch::stable::detail::to`
 instead; if no conversion exists, define and document how an encoding must be
 kept stable.
