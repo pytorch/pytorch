@@ -3340,6 +3340,7 @@ def unsupported_output_tensor(t: torch.Tensor, node=None):
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
+    r"""Identify input and output types that require native execution."""
     # These wrappers must be decomposed regardless of tensor type. The resulting
     # operators are checked independently for unsupported types during lowering.
     if node.target in (
@@ -3351,6 +3352,87 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     # Custom fallback lowering
     if node.target is aten.view_as_complex.default:
         return False
+
+    if node.target == prims.convert_element_type.default:
+        value = node.meta.get("val")
+        input = node.args[0]
+        source = input.meta.get("val") if isinstance(input, torch.fx.Node) else None
+        if (
+            isinstance(value, torch.Tensor)
+            and value.dtype != torch.bcomplex32
+            and not (
+                isinstance(source, torch.Tensor) and source.dtype == torch.bcomplex32
+            )
+            and is_strict_cuda_triton(value.device)
+        ):
+            return False
+
+    if node.target in (
+        aten.mv.default,
+        aten.clone.default,
+        aten.full.default,
+        aten.complex.default,
+        aten.lerp.Scalar,
+        aten.lerp.Tensor,
+        aten.addcdiv.default,
+        aten.addr.default,
+        inductor_prims.masked_sum,
+        inductor_prims.force_stride_order,
+    ) or (node.target == aten.add.Tensor and node.meta.get("is_gradient_acc", False)):
+        value = node.meta.get("val")
+        if (
+            isinstance(value, torch.Tensor)
+            and (
+                value.dtype in (torch.complex64, torch.complex128)
+                or (
+                    node.target
+                    in (
+                        inductor_prims.masked_sum,
+                        inductor_prims.force_stride_order,
+                        aten.clone.default,
+                        aten.full.default,
+                        aten.complex.default,
+                        aten.lerp.Scalar,
+                        aten.lerp.Tensor,
+                        aten.add.Tensor,
+                    )
+                    and value.dtype == torch.complex32
+                )
+            )
+            and is_strict_cuda_triton(value.device)
+        ):
+            return False
+
+    if node.target in (aten.mul.Tensor, aten.mul.Scalar):
+        value = node.meta.get("val")
+        if (
+            isinstance(value, torch.Tensor)
+            and value.dtype in (torch.complex64, torch.complex128)
+            and is_strict_cuda_triton(value.device)
+            and any(isinstance(arg, (int, float, complex)) for arg in node.args)
+        ):
+            return False
+
+    if node.target in (aten.where.self, prims.where.default):
+        value = node.meta.get("val")
+        if (
+            isinstance(value, torch.Tensor)
+            and value.dtype in (torch.complex32, torch.complex64, torch.complex128)
+            and is_strict_cuda_triton(value.device)
+        ):
+            return False
+
+    if node.target == inductor_prims.cuda_pointwise_iteration:
+        values = [
+            arg.meta.get("val") for arg in cast(list[torch.fx.Node], node.args[0])
+        ]
+        if values and all(
+            isinstance(value, torch.Tensor)
+            and value.dtype in (torch.float64, torch.complex64, torch.complex128)
+            and is_strict_cuda_triton(value.device)
+            for value in values
+        ):
+            return False
 
     if node.op == "placeholder":
         return False
@@ -10354,6 +10436,131 @@ def complex_components(x):
     components = TensorBox.create(ir.ComplexView.create(aten.view_as_real.default, x))
     real, imag = select(components, -1, 0), select(components, -1, 1)
     return real, neg(imag) if conjugate else imag
+
+
+def _jiterator_complex_mul(a, b, c, d, dtype, fused=None, reverse_imag=False):
+    ac, bd, ad, bc = ops.mul(a, c), ops.mul(b, d), ops.mul(a, d), ops.mul(b, c)
+    real = ops.sub(ac, bd)
+    imag = ops.add(ad, bc)
+    if fused is not None:
+        real = ops.where(fused, ops.fma(a, c, ops.neg(bd)), real)
+        fused_imag = ops.fma(b, c, ad) if reverse_imag else ops.fma(a, d, bc)
+        imag = ops.where(fused, fused_imag, imag)
+    both_nan = ops.logical_and(ops.isnan(real), ops.isnan(imag))
+    zero, one = ops.constant(0.0, dtype), ops.constant(1.0, dtype)
+    left_inf = ops.logical_or(ops.isinf(a), ops.isinf(b))
+    right_inf = ops.logical_or(ops.isinf(c), ops.isinf(d))
+
+    def normalized(x):
+        return ops.copysign(ops.where(ops.isinf(x), one, zero), x)
+
+    def without_nan(x):
+        return ops.where(ops.isnan(x), ops.copysign(zero, x), x)
+
+    a = ops.where(left_inf, normalized(a), a)
+    b = ops.where(left_inf, normalized(b), b)
+    c = ops.where(left_inf, without_nan(c), c)
+    d = ops.where(left_inf, without_nan(d), d)
+    c = ops.where(right_inf, normalized(c), c)
+    d = ops.where(right_inf, normalized(d), d)
+    a = ops.where(right_inf, without_nan(a), a)
+    b = ops.where(right_inf, without_nan(b), b)
+    recalc = ops.logical_or(left_inf, right_inf)
+    overflow = ops.logical_or(
+        ops.logical_or(ops.isinf(ac), ops.isinf(bd)),
+        ops.logical_or(ops.isinf(ad), ops.isinf(bc)),
+    )
+    overflow = ops.logical_and(ops.logical_not(recalc), overflow)
+    a = ops.where(overflow, without_nan(a), a)
+    b = ops.where(overflow, without_nan(b), b)
+    c = ops.where(overflow, without_nan(c), c)
+    d = ops.where(overflow, without_nan(d), d)
+    repair = ops.logical_and(both_nan, ops.logical_or(recalc, overflow))
+    infinity = ops.constant(float("inf"), dtype)
+    fixed_real = ops.mul(infinity, ops.sub(ops.mul(a, c), ops.mul(b, d)))
+    fixed_imag = ops.mul(infinity, ops.add(ops.mul(a, d), ops.mul(b, c)))
+    return ops.where(repair, fixed_real, real), ops.where(repair, fixed_imag, imag)
+
+
+@register_lowering([aten.lerp.Scalar, aten.lerp.Tensor], type_promotion_kind=None)
+def complex_lerp(start, end, weight):
+    r"""Generate complex CUDA lerp with the native Jiterator formulas."""
+    if not (start.get_dtype().is_complex and is_strict_cuda_triton(start.get_device())):
+        overload = (
+            aten.lerp.Tensor if isinstance(weight, TensorBox) else aten.lerp.Scalar
+        )
+        return fallback_handler(overload)(start, end, weight)
+    dtype = torch.float64 if start.get_dtype() == torch.complex128 else torch.float32
+    scalar_weight = not isinstance(weight, TensorBox)
+    fused = None
+    if start.get_dtype() in (torch.complex32, torch.complex64):
+        node = V.graph.current_node
+        operands = [start, end] if scalar_weight else [start, end, weight]
+        values = [
+            arg.meta["val"]
+            for arg in cast(tuple[torch.fx.Node, ...], node.args[: len(operands)])
+        ]
+        fused, _ = _cuda_pointwise_prefix_masks(
+            operands, values, node.meta["val"], True, 128
+        )
+    sr, si = complex_components(start)
+    er, ei = complex_components(end)
+    inputs = [to_dtype(x, dtype) for x in (sr, si, er, ei)]
+    if scalar_weight:
+        weight_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
+        scale = complex(torch.tensor(weight, dtype=weight_dtype).item())
+        wr = full([], scale.real, dtype=dtype, device=start.get_device())
+        wi = full([], scale.imag, dtype=dtype, device=start.get_device())
+    else:
+        wr, wi = complex_components(to_device(weight, start.get_device()))
+        wr, wi = to_dtype(wr, dtype), to_dtype(wi, dtype)
+    inputs.extend((wr, wi))
+    if fused is not None:
+        inputs.append(fused)
+    inputs = broadcast_tensors(*inputs)
+
+    def component(imaginary):
+        def fn(sr, si, er, ei, wr, wi, fused=None):
+            dr, di = ops.sub(er, sr), ops.sub(ei, si)
+            small = ops.lt(ops.hypot(wr, wi), ops.constant(0.5, dtype))
+            lr, li = _jiterator_complex_mul(
+                wr, wi, dr, di, dtype, fused, reverse_imag=scalar_weight
+            )
+            hr, hi = _jiterator_complex_mul(
+                dr,
+                di,
+                ops.sub(ops.constant(1.0, dtype), wr),
+                ops.sub(ops.constant(0.0, dtype), wi),
+                dtype,
+                fused if scalar_weight else None,
+            )
+            return (
+                ops.where(small, ops.add(si, li), ops.sub(ei, hi))
+                if imaginary
+                else ops.where(small, ops.add(sr, lr), ops.sub(er, hr))
+            )
+
+        return make_pointwise(fn)(*inputs)
+
+    real, imag = component(False), component(True)
+    component_dtype = sr.get_dtype()
+    parts = cat(
+        (
+            unsqueeze(to_dtype(real, component_dtype), -1),
+            unsqueeze(to_dtype(imag, component_dtype), -1),
+        ),
+        -1,
+    )
+    parts = ir.ExternKernel.require_contiguous_strides(parts)
+    result = TensorBox.create(
+        ir.ComplexView.create(aten.view_as_complex.default, parts)
+    )
+    node = V.graph.current_node
+    return (
+        constrain_to_fake_tensor(result, node.meta.get("val"))
+        if node is not None
+        else result
+    )
 
 
 pointwise_add = add
