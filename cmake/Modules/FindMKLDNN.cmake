@@ -73,7 +73,7 @@ IF(NOT MKLDNN_FOUND)
       endif()
       ExternalProject_Add(xpu_mkldnn_proj
         GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
-        GIT_TAG v3.14
+        GIT_TAG v3.14.2
         PREFIX "${_xpu_mkldnn_prefix}"
         BUILD_IN_SOURCE 0
         CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}
@@ -105,12 +105,12 @@ IF(NOT MKLDNN_FOUND)
     target_include_directories(xpu_mkldnn INTERFACE ${XPU_MKLDNN_INCLUDE})
   endif()
 
-  IF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
+  IF(NOT APPLE AND NOT WIN32)
     MESSAGE("-- Will build oneDNN Graph")
     SET(LLGA_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
     SET(BUILD_ONEDNN_GRAPH ON)
     SET(ONEDNN_BUILD_GRAPH ON CACHE BOOL "" FORCE)
-  ENDIF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
+  ENDIF(NOT APPLE AND NOT WIN32)
 
   IF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
     IF(CPU_POWER OR CPU_RISCV)

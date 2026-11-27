@@ -117,9 +117,24 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& philox_offset,
     std::optional<double> scale,
     std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right) {
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& grad_logsumexp) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
+  // These kernels have no dLSE input; the FA4 override handles grad_logsumexp.
+#if defined(USE_ROCM)
+  constexpr const char* grad_logsumexp_unsupported =
+      "grad_logsumexp is not supported on ROCm";
+#else
+  constexpr const char* grad_logsumexp_unsupported =
+      "grad_logsumexp requires the FA4 flash attention implementation "
+      "(torch.nn.attention.activate_flash_attention_impl(\"FA4\"), SM90/SM100 only)";
+#endif
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !grad_logsumexp.has_value() || !grad_logsumexp->defined(),
+      "_flash_attention_backward: ", grad_logsumexp_unsupported,
+      ". If the lse does not reach the loss, detach it (for example before ",
+      "returning it from a torch.compile region)");
   //  CUDA code assumes that dout is contiguous and 16-byte aligned. Autograd
   //  may pass a misaligned grad_out view (e.g. from cat backward).
   auto contiguous_grad_out =
@@ -128,20 +143,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
       : grad_out.clone(at::MemoryFormat::Contiguous);
   auto contiguous_out = out.contiguous();
 
-#ifdef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
-#ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
-  const auto window_left = window_size_left;
-  const auto window_right = window_size_right;
-#else  // AOTriton implements "generalized" SWA and negative size means negative shifting.
-  // aotriton_adapter::parse_window_size tries to match the behavior of CUTLASS backend
-  using sdp::aotriton_adapter::parse_window_size;
-  const auto [window_left, window_right] = parse_window_size(window_size_left,
-                                                             window_size_right);
-#endif
-#else  // USE_ROCM
   const int window_left = window_size_left.value_or(-1);
   const int window_right = window_size_right.value_or(-1);
-#endif  // USE_ROCM
 
   std::optional<at::Tensor> dq{std::nullopt};
   std::optional<at::Tensor> dk{std::nullopt};
@@ -431,14 +434,10 @@ _efficient_attention_backward(
   const int64_t nHkv = key.size(2);
   TORCH_CHECK(nHkv == value.size(2));
   TORCH_CHECK(nH == grad_out_.size(2));
-#ifdef USE_ROCM
-  TORCH_CHECK(nH == nHkv);
-#else
   TORCH_CHECK(
       (nH == 0 && nHkv == 0) ||
           (nH > 0 && nHkv > 0 && nH % nHkv == 0),
       "Number of heads in key/value must divide number of heads in query");
-#endif
 
   // Embedding per head
   TORCH_CHECK(query.size(3) == key.size(3));
@@ -593,10 +592,11 @@ _efficient_attention_backward(
     const auto my_softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     // Store grad_bias in optional
     std::optional<at::Tensor> opt_grad_bias = grad_bias;
+    // CK reads the int64 seed/offset of the forward as uint64.
     const auto ck_philox_seed =
-        use_dropout ? philox_seed : at::zeros({}, at::dtype(at::kLong));
+        use_dropout ? philox_seed.view(at::kUInt64) : at::zeros({}, at::dtype(at::kLong));
     const auto ck_philox_offset =
-        use_dropout ? philox_offset : at::zeros({}, at::dtype(at::kLong));
+        use_dropout ? philox_offset.view(at::kUInt64) : at::zeros({}, at::dtype(at::kLong));
     auto
         [dQ,
          dK,
@@ -621,7 +621,8 @@ _efficient_attention_backward(
                      max_seqlen_k,
                      float(dropout_p),
                      my_softmax_scale,
-                     custom_mask_type == 0 ? false : true, // is_causal
+                     custom_mask_type != static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask), // is_causal
+                     custom_mask_type == static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft), // causal_top_left
                      false, // deterministic
                      false, // zero_tensors
                      ck_philox_seed,
@@ -634,8 +635,6 @@ _efficient_attention_backward(
 #ifndef DISABLE_AOTRITON
     TORCH_CHECK(!num_splits_key.has_value(),
               "ROCM does not support num_split_keys in _efficient_attention_forward");
-    TORCH_CHECK(!window_size.has_value(),
-              "ROCM does not support window_size in _efficient_attention_forward");
     auto ret = aotriton::v2::flash::check_gpu(stream);
     if (hipSuccess != ret) {
       TORCH_CHECK(false,
@@ -741,6 +740,12 @@ _efficient_attention_backward(
       params.varlen_type = VarlenType::None;
     }
 #endif
+    sdp::aotriton_adapter::mem_eff_apply_window(params,
+                                                window_size,
+                                                custom_mask_type,
+                                                max_seqlen_q,
+                                                max_seqlen_k,
+                                                cu_seqlens_q.has_value());
     aotriton::v3::flash::attn_options opts;
     opts.deterministic = deterministic;
     AT_CUDA_CHECK(aotriton::v3::flash::attn_bwd(

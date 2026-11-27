@@ -241,8 +241,7 @@ class CompileArtifacts:
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     def check_compatibility(self) -> None:
-        current_system = SystemInfo.current()
-        current_system.check_compatibility(self.system_info, self.device_type)
+        self.system_info.check_compatibility(SystemInfo.current(), self.device_type)
 
 
 def _open_aot_compile_payload(data: bytes) -> io.BytesIO:

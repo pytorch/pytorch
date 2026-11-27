@@ -40,11 +40,19 @@ void SyncActivityProfilerHandler::startTrace() {
   profiler_.startTrace(std::chrono::system_clock::now());
 }
 
-std::unique_ptr<ActivityTraceInterface> SyncActivityProfilerHandler::
-    stopTrace() {
+void SyncActivityProfilerHandler::stopCollection() {
+  if (collectionStopped_.exchange(true)) {
+    return;
+  }
   profiler_.stopTrace(std::chrono::system_clock::now());
   USDT_EMIT_STOP_TRACE();
   UST_LOGGER_MARK_COMPLETED(kCollectionStage);
+}
+
+std::unique_ptr<ActivityTraceInterface> SyncActivityProfilerHandler::
+    stopTrace() {
+  stopCollection();
+  collectionStopped_ = false;
   auto logger = std::make_unique<MemoryTraceLogger>(profiler_.config());
   profiler_.processTrace(*logger);
   // Will follow up with another patch for logging URLs when ActivityTrace
@@ -68,12 +76,18 @@ void SyncActivityProfilerHandler::cancel() {
   if (libkineto::api().client() != nullptr) {
     libkineto::api().client()->stop();
   }
-  profiler_.cancelTrace(std::chrono::system_clock::now());
+  if (collectionStopped_.exchange(false)) {
+    profiler_.reset();
+  } else {
+    profiler_.cancelTrace(std::chrono::system_clock::now());
+  }
   active_ = false;
 }
 
 void SyncActivityProfilerHandler::toggleCollectionDynamic(const bool enable) {
-  profiler_.toggleCollectionDynamic(enable);
+  if (!collectionStopped_) {
+    profiler_.toggleCollectionDynamic(enable);
+  }
 }
 
 } // namespace KINETO_NAMESPACE

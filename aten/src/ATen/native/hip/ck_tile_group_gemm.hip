@@ -1,3 +1,7 @@
+// Round float to bf16 to nearest even, like hipBLASLt. CK-tile defaults to truncation where it has no native conversion
+// (gfx942); must precede every ck_tile include.
+#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_STANDARD
+
 #include <ATen/native/hip/ck_tile_group_gemm.h>
 #include <ATen/native/hip/ck_tile_group_gemm/four_wave_tail_comp_v3.h>
 #include <ATen/native/hip/ck_tile_group_gemm/no_split_k_epilogue.h>
@@ -746,7 +750,8 @@ namespace at::hip::detail {
             with_ck_type(mat_a.scalar_type(), [&](auto data_tag) {
                 constexpr amdgcn_target_id Arch = decltype(arch_tag)::value;
                 using DataType = decltype(data_tag);
-                if constexpr (GroupGemmConfigs<CkTileGroupGemmConfigs<Arch, DataType>>) {
+                if constexpr (ck_tile::get_warp_size() == 64 &&
+                              GroupGemmConfigs<CkTileGroupGemmConfigs<Arch, DataType>>) {
                     launch_ck_tile_group_gemm<Arch, DataType>(
                             mat_a, mat_b, offs, out, group_args, a_row_major, b_row_major,
                             static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count),

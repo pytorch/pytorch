@@ -285,8 +285,8 @@ def putmem_signal_block(
     """Put ``nbytes`` bytes and update a remote uint64 signal.
 
     ``sig_op`` is a ``ROCSHMEM_SIGNAL_OPS`` value: ``ROCSHMEM_SIGNAL_SET`` (0)
-    or ``ROCSHMEM_SIGNAL_ADD`` (1). ``ROCSHMEM_SIGNAL_ADD`` is 1;
-    ``NVSHMEM_SIGNAL_ADD`` is 5.
+    or ``ROCSHMEM_SIGNAL_ADD`` (1). Do not reuse numeric NVSHMEM signal-op
+    values here; the two backends have different enum layouts.
     ``sig_val`` is zero-extended to uint64. A kernel ``int`` is 32-bit, and
     sign-extending it would set the high half of any value with bit 31 set.
     Every thread in the block must call this with the same arguments.
