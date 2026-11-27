@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import os
 from collections import deque
 
 import torch
@@ -32,11 +33,22 @@ from ..pattern_matcher import (
 )
 from ..select_algorithm import (
     autotune_select_algorithm,
+    NoValidChoicesError,
     SymbolicGridFn,
     TritonTemplate,
     TritonTemplateCaller,
 )
 from ..utils import ceildiv, is_bf16x9_matmul, is_gpu
+from ..virtualized import V
+
+
+# On XPU the fused B2B kernel is faster end-to-end than the two-kernel
+# unoptimized choice while the serial N*O reduction is small; the measured
+# crossover on Arc Pro B60 is between 8192 and 12288. Override the env var to
+# tune or disable the policy (0 = never fuse, a large value = always fuse).
+_XPU_B2B_FUSED_MAX_N_O = int(
+    os.environ.get("TORCHINDUCTOR_XPU_B2B_FUSED_MAX_N_O", 8192)
+)
 
 
 B2B_GEMM_PASS = PatternMatcherPass(
@@ -98,6 +110,8 @@ b2b_gemm_left_template = TritonTemplate(
         c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
         c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
         c = tl.load(c_ptrs, mask=c_mask, other=0.0)  # BLOCK_SIZE_O * BLOCK_SIZE_P
+        if c.dtype != tl.float16 and c.dtype != tl.bfloat16:
+            c = c.to(tl.float32)
         acc_ab = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_O), dtype=tl.float32)
         offs_n = tl.arange(0, BLOCK_SIZE_N)
         for __ in range(num_n_block):
@@ -107,6 +121,10 @@ b2b_gemm_left_template = TritonTemplate(
             b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
             b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
             b = tl.load(b_ptrs, mask=b_mask, other=0.0)  # BLOCK_SIZE_N * BLOCK_SIZE_O
+            if a.dtype != tl.float16 and a.dtype != tl.bfloat16:
+                a = a.to(tl.float32)
+            if b.dtype != tl.float16 and b.dtype != tl.bfloat16:
+                b = b.to(tl.float32)
             acc_ab += tl.dot(a, b, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_INNER)
             offs_n += BLOCK_SIZE_N
         # apply the subgraph
@@ -183,6 +201,8 @@ b2b_gemm_right_template = TritonTemplate(
         a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
         a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
         a = tl.load(a_ptrs, mask=a_mask, other=0.0)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+        if a.dtype != tl.float16 and a.dtype != tl.bfloat16:
+            a = a.to(tl.float32)
         acc_bc = tl.zeros((BLOCK_SIZE_N, BLOCK_SIZE_P), dtype=tl.float32)
         offs_o = tl.arange(0, BLOCK_SIZE_O)
         for __ in range(num_o_block):
@@ -192,6 +212,10 @@ b2b_gemm_right_template = TritonTemplate(
             c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
             c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
             c = tl.load(c_ptrs, mask=c_mask, other=0.0)  # BLOCK_SIZE_O * BLOCK_SIZE_P
+            if b.dtype != tl.float16 and b.dtype != tl.bfloat16:
+                b = b.to(tl.float32)
+            if c.dtype != tl.float16 and c.dtype != tl.bfloat16:
+                c = c.to(tl.float32)
             acc_bc += tl.dot(b, c, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_INNER)
             offs_o += BLOCK_SIZE_O
         # apply the subgraph
@@ -579,7 +603,12 @@ def tuned_b2b_gemm(
     *,
     layout=None,
 ) -> torch._inductor.ir.TensorBox:
-    """Autotune the fused B2B GEMM template against the unoptimized two-kernel fallback."""
+    """Choose B2B GEMM candidates and autotune the fused template.
+
+    On XPU with 16-bit inputs the fused template and the unoptimized two-kernel
+    choice are not ranked correctly by the autotuner's kernel timing, so only the
+    kind that wins for this serial N*O reduction is built.
+    """
     # call .realize() to get rid of Pointwise
     A.realize()
     B.realize()
@@ -603,35 +632,21 @@ def tuned_b2b_gemm(
     inner_m, inner_n, inner_k = (M, O, N) if is_left_assoc else (N, P, O)
     allow_tf32_inner = mm_allow_tf32(inner_m, inner_n, inner_k, device_type)
     allow_tf32_outer = mm_allow_tf32(M, P, O if is_left_assoc else N, device_type)
-    # On XPU the fused template (one kernel) and the unoptimized choice (two
-    # kernels) rank differently end-to-end than the autotuner's kernel timing
-    # suggests: the fused kernel wins while the serial N*O reduction is small and
-    # loses once it is large, because that reduction runs inside a single
-    # program. Build only the winning kind of candidate on XPU.
+    # On XPU with 16-bit inputs the fused template (one kernel) and the
+    # unoptimized choice (two kernels) rank differently end-to-end than the
+    # autotuner's kernel timing suggests: the fused kernel wins while the serial
+    # N*O reduction is small and loses once it is large because that reduction
+    # runs inside a single program. Build only the winning kind on XPU.
     force_fused = force_unoptimized = False
     is_16bit = inner_dtype in (torch.float16, torch.bfloat16) and outer_dtype in (
         torch.float16,
         torch.bfloat16,
     )
     if device_type == "xpu" and is_16bit:
-        try:
-            n_hint = (
-                optimization_hint(N, fallback=None)
-                if isinstance(N, torch.SymInt)
-                else int(N)
-            )
-            o_hint = (
-                optimization_hint(O, fallback=None)
-                if isinstance(O, torch.SymInt)
-                else int(O)
-            )
-        except Exception:
-            n_hint = o_hint = None
-        if n_hint is not None and o_hint is not None:
-            if n_hint * o_hint <= 8192:
-                force_fused = True
-            else:
-                force_unoptimized = True
+        n_o_hint = V.graph.sizevars.optimization_hint(N * O, fallback=None)
+        if n_o_hint is not None:
+            force_fused = n_o_hint <= _XPU_B2B_FUSED_MAX_N_O
+            force_unoptimized = not force_fused
 
     if not force_unoptimized:
         for config in b2b_gemm_configs:
@@ -655,12 +670,17 @@ def tuned_b2b_gemm(
                     ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
                     **config,
                 )
-    if not force_fused or not choices:
-        choices.append(
-            _make_unoptimized_b2b_gemm_choice(
-                is_left_assoc, subgraph, [A, B, C], layout
-            )
-        )
+    if force_fused:
+        # If every fused candidate fails to precompile or benchmark, fall back to
+        # the two-kernel choice instead of raising NoValidChoicesError.
+        try:
+            node, _ = autotune_select_algorithm("b2b_gemm", choices, [A, B, C], layout)
+            return node
+        except NoValidChoicesError:
+            choices = []
+    choices.append(
+        _make_unoptimized_b2b_gemm_choice(is_left_assoc, subgraph, [A, B, C], layout)
+    )
     # autotune
     node, _ = autotune_select_algorithm("b2b_gemm", choices, [A, B, C], layout)
     return node

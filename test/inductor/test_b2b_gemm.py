@@ -552,6 +552,135 @@ class B2BGEMMTest(TestCase):
                 (flags["ALLOW_TF32_INNER"], flags["ALLOW_TF32_OUTER"]), expected
             )
 
+    def check_xpu_selection(
+        self,
+        left_assoc,
+        device_type,
+        inner_dtype,
+        outer_dtype,
+        shape,
+        sizevars,
+        autotune=None,
+    ):
+        m, n, o, p = shape
+        tensors = [
+            TensorBox.create(
+                InputBuffer(
+                    name=name,
+                    layout=FixedLayout(torch.device(device_type), dtype, dims),
+                )
+            )
+            for name, dims, dtype in (
+                ("a", [m, n], inner_dtype),
+                ("b", [n, o], inner_dtype),
+                ("c", [o, p], outer_dtype),
+            )
+        ]
+        calls = []
+
+        def fake_append(choices, *args, **kwargs):
+            choices.append("triton")
+
+        def fake_autotune(name, choices, *args, **kwargs):
+            calls.append(list(choices))
+            return None, None
+
+        template = (
+            b2b_gemm.b2b_gemm_left_template
+            if left_assoc
+            else b2b_gemm.b2b_gemm_right_template
+        )
+        with (
+            V.set_graph_handler(Mock(sizevars=sizevars)),
+            patch.object(b2b_gemm, "build_subgraph_buffer", return_value=None),
+            patch.object(
+                b2b_gemm,
+                "_make_unoptimized_b2b_gemm_choice",
+                side_effect=lambda *args, **kwargs: "unoptimized",
+            ),
+            patch.object(template, "maybe_append_choice", fake_append),
+            patch.object(
+                b2b_gemm,
+                "autotune_select_algorithm",
+                side_effect=autotune or fake_autotune,
+            ),
+        ):
+            b2b_gemm.tuned_b2b_gemm(left_assoc, None, *tensors)
+        return calls
+
+    @parametrize("left_assoc", (False, True))
+    @parametrize(
+        "device_type,inner_dtype,outer_dtype,shape,expected",
+        (
+            ("xpu", torch.float16, torch.float16, (128, 16, 128, 16), "fused"),
+            ("xpu", torch.bfloat16, torch.bfloat16, (128, 16, 512, 16), "fused"),
+            ("xpu", torch.float16, torch.float16, (128, 16, 1024, 16), "unoptimized"),
+            ("xpu", torch.float32, torch.float32, (128, 16, 128, 16), "both"),
+            ("cuda", torch.float16, torch.float16, (128, 16, 128, 16), "both"),
+        ),
+    )
+    def test_b2b_gemm_xpu_selection(
+        self, left_assoc, device_type, inner_dtype, outer_dtype, shape, expected
+    ):
+        calls = self.check_xpu_selection(
+            left_assoc,
+            device_type,
+            inner_dtype,
+            outer_dtype,
+            shape,
+            SizeVarAllocator(),
+        )
+        choices = calls[0]
+        if expected == "fused":
+            self.assertEqual(len(choices), len(b2b_gemm.b2b_gemm_configs))
+            self.assertTrue(all(c == "triton" for c in choices))
+        elif expected == "unoptimized":
+            self.assertEqual(choices, ["unoptimized"])
+        else:
+            self.assertEqual(
+                choices,
+                ["triton"] * len(b2b_gemm.b2b_gemm_configs) + ["unoptimized"],
+            )
+
+    @parametrize("left_assoc", (False, True))
+    def test_b2b_gemm_xpu_selection_symbolic(self, left_assoc):
+        shape_env = ShapeEnv()
+        n = shape_env.create_symbol(
+            16, source=ConstantSource("n"), dynamic_dim=DimDynamic.DYNAMIC
+        )
+        o = shape_env.create_symbol(
+            1024, source=ConstantSource("o"), dynamic_dim=DimDynamic.DYNAMIC
+        )
+        sizevars = SizeVarAllocator(shape_env)
+        calls = self.check_xpu_selection(
+            left_assoc, "xpu", torch.float16, torch.float16, (128, n, o, 16), sizevars
+        )
+        # The N*O hint is 16384, above the fused threshold.
+        self.assertEqual(calls[0], ["unoptimized"])
+        self.assertEqual(shape_env.guards, [])
+
+    def test_b2b_gemm_xpu_fused_safety_net(self):
+        calls = []
+
+        def failing_then_fallback(name, choices, *args, **kwargs):
+            calls.append(list(choices))
+            if len(calls) == 1:
+                raise b2b_gemm.NoValidChoicesError("all fused candidates failed")
+            return None, None
+
+        self.check_xpu_selection(
+            True,
+            "xpu",
+            torch.float16,
+            torch.float16,
+            (128, 16, 128, 16),
+            SizeVarAllocator(),
+            autotune=failing_then_fallback,
+        )
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(c == "triton" for c in calls[0]))
+        self.assertEqual(calls[1], ["unoptimized"])
+
     @parametrize("left_assoc", (False, True))
     @parametrize(
         "device_type,cuda_tf32,xpu_tf32,shape,expected_left,expected_right",
