@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 
 from .._core import ComplexTensor
@@ -18,9 +20,17 @@ aten = torch.ops.aten
 
 # TODO (hameerabbasi): Not being tested
 @register_force_test(prims.convert_element_type)
-def convert_element_type_impl(x: ComplexTensor, dtype: torch.dtype) -> ComplexTensor:
-    dtype = complex_to_real_dtype(dtype)
+def convert_element_type_impl(
+    x: ComplexTensor, dtype: torch.dtype
+) -> ComplexTensor | torch.Tensor:
     u, v = split_complex_tensor(x)
+    if not dtype.is_complex:
+        warnings.warn(
+            "Casting complex values to real discards the imaginary part", UserWarning
+        )
+        return prims.convert_element_type(u, dtype)
+
+    dtype = complex_to_real_dtype(dtype)
     u_out = prims.convert_element_type(u, dtype)
     v_out = prims.convert_element_type(v, dtype)
 
