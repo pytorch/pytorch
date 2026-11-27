@@ -10,6 +10,7 @@ __all__ = [
     "get_name",
     "is_built",
     "is_available",
+    "is_mpp_available",
     "is_macos13_or_newer",
     "is_macos_or_newer",
 ]
@@ -29,6 +30,12 @@ def is_built() -> bool:
 def is_available() -> bool:
     r"""Return a bool indicating if MPS is currently available."""
     return torch._C._mps_is_available()
+
+
+@_lru_cache
+def is_mpp_available() -> bool:
+    r"""Return a bool indicating whether MetalPerformancePrimitives kernels can run."""
+    return torch._C._mps_has_mpp()
 
 
 @_lru_cache

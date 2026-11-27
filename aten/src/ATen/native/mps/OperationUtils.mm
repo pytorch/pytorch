@@ -185,6 +185,8 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
       return "bfloat";
     case ScalarType::Float8_e4m3fn:
       return "float8_e4m3fn";
+    case ScalarType::Float8_e8m0fnu:
+      return "float8_e8m0fnu";
     case ScalarType::Int:
       return "int";
     case ScalarType::Long:
@@ -613,6 +615,8 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
       return {.size = sizeof(short), .type = type, .value = {.bf16 = scalar.to<BFloat16>()}};
     case ScalarType::Float8_e4m3fn:
       return {.size = sizeof(Float8_e4m3fn), .type = type, .value = {.f8 = scalar.to<Float8_e4m3fn>()}};
+    case ScalarType::Float8_e8m0fnu:
+      return {.size = sizeof(Float8_e8m0fnu), .type = type, .value = {.f8e8m0 = scalar.to<Float8_e8m0fnu>()}};
     case ScalarType::ComplexHalf:
       return {.size = sizeof(int32_t), .type = type, .value = {.ch = scalar.to<c10::complex<Half>>()}};
     case ScalarType::ComplexFloat:
@@ -640,6 +644,21 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported scalar type '", type, "' on MPS backend.");
   }
+}
+
+MPSScalar getMPSScalar(const TensorBase& cpu_scalar) {
+  TORCH_CHECK(cpu_scalar.dim() == 0, "Passed CPU tensor to MPS op");
+  const auto type = cpu_scalar.scalar_type();
+  if (type == kDouble) [[unlikely]] {
+    return getMPSScalar(*cpu_scalar.const_data_ptr<double>(), type);
+  }
+  if (type == kComplexDouble) [[unlikely]] {
+    return getMPSScalar(*cpu_scalar.const_data_ptr<c10::complex<double>>(), type);
+  }
+  MPSScalar s{.size = static_cast<size_t>(cpu_scalar.element_size()), .type = type};
+  TORCH_CHECK(s.size <= sizeof(s.value), "Unsupported CPU scalar type ", type);
+  std::memcpy(&s.value, cpu_scalar.const_data_ptr(), s.size);
+  return s;
 }
 
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar) {
@@ -1782,6 +1801,14 @@ void MetalKernelFunction::startEncoding() {
 }
 
 void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> group_size) {
+  // thread_position_in_grid is at most 32-bit per axis; Metal silently truncates larger grids
+  TORCH_CHECK_VALUE(length <= std::numeric_limits<uint32_t>::max(),
+                    "Dispatch grid ",
+                    length,
+                    " exceeds 2^32 - 1 threads along one axis");
+  if (length == 0) {
+    return;
+  }
   const auto max_tg_size = getMaxThreadsPerThreadgroup();
   const auto group_size_val = group_size.value_or(std::min(length, max_tg_size));
   TORCH_CHECK_VALUE(group_size_val <= max_tg_size, "Threadgroup size exceeds ", max_tg_size, " limit");
@@ -1792,17 +1819,30 @@ void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::Optional
   TORCH_CHECK(!length.empty() && length.size() < 4, "Dispatch dimensions must be less than 3 and non-empty");
   TORCH_CHECK(!group_size.has_value() || group_size->size() == length.size(),
               "size and group_size must have same number of dimensions");
+  if (length.size() == 1) {
+    return dispatch(length[0], group_size.has_value() ? std::optional(group_size->at(0)) : std::nullopt);
+  }
+  // thread_position_in_grid is at most 32-bit per axis; Metal silently truncates larger grids
+  TORCH_CHECK_VALUE(
+      std::all_of(length.begin(), length.end(), [](auto dim) { return dim <= std::numeric_limits<uint32_t>::max(); }),
+      "Dispatch grid ",
+      c10::Join("x", length),
+      " exceeds 2^32 - 1 threads along one axis");
+  if (std::find(length.begin(), length.end(), 0) != length.end()) {
+    return;
+  }
+  const auto dim = [](c10::ArrayRef<uint64_t> v, size_t i) -> NSUInteger { return i < v.size() ? v[i] : 1; };
+  // A (max, 1, 1) threadgroup leaves a grid that is narrow along x on tiny threadgroups, so pack the outer axes
+  if (!group_size.has_value()) {
+    return mtl_dispatch3DJob(encoder, cps, length[0], dim(length, 1), dim(length, 2));
+  }
   const auto max_tg_size = getMaxThreadsPerThreadgroup();
-  const auto group_size_length = group_size.has_value() ? group_size->size() : 0;
-  auto tg_size = MTLSizeMake(group_size_length > 0 ? group_size->at(0) : max_tg_size,
-                             group_size_length > 1 ? group_size->at(1) : 1,
-                             group_size_length > 2 ? group_size->at(2) : 1);
+  auto tg_size = MTLSizeMake(group_size->at(0), dim(*group_size, 1), dim(*group_size, 2));
   TORCH_CHECK_VALUE(tg_size.width * tg_size.height * tg_size.depth <= max_tg_size,
                     "Threadgroup size exceeds ",
                     max_tg_size,
                     " limit");
-  [encoder dispatchThreads:MTLSizeMake(length[0], length.size() > 1 ? length[1] : 1, length.size() == 3 ? length[2] : 1)
-      threadsPerThreadgroup:tg_size];
+  [encoder dispatchThreads:MTLSizeMake(length[0], dim(length, 1), dim(length, 2)) threadsPerThreadgroup:tg_size];
 }
 
 void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
@@ -1812,6 +1852,10 @@ void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
 void MetalKernelFunction::setArg(unsigned idx, const void* ptr, uint64_t size) {
   TORCH_CHECK(size > 0);
   [encoder setBytes:ptr length:size atIndex:idx];
+}
+
+void MetalKernelFunction::setTensorListArg(unsigned idx, c10::ArrayRef<at::Tensor> tensors) {
+  mtl_setTensorList(encoder, tensors, idx);
 }
 
 void MetalKernelFunction::setErrorBufferIndex(unsigned idx) {

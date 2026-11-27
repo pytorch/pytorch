@@ -18,7 +18,9 @@ from torch._inductor.pattern_matcher import (
    CallMethodVarArgs,
    CallModule,
    CallModuleVarArgs,
+   CanonicalDims,
    ExclusiveKeywordArg,
+   GetAttr,
    Ignored,
    KeywordArg,
    ListOf,
@@ -140,15 +142,17 @@ view_default_6 = CallFunction(aten.view.default, KeywordArg('tangents_1'), Ignor
 permute_default_1 = CallFunction(aten.permute.default, view_default_4, Ignored())
 bmm_default_2 = CallFunction(aten.bmm.default, view_default_6, permute_default_1)
 view_default_7 = CallFunction(aten.view.default, bmm_default_2, Ignored())
-convert_element_type_default_3 = CallFunction(prims.convert_element_type.default, gt_Scalar, Ignored())
-mul_Tensor_2 = CallFunction(aten.mul.Tensor, convert_element_type_default_3, Ignored())
-mul_Tensor_3 = CallFunction(aten.mul.Tensor, view_default_7, mul_Tensor_2)
-convert_element_type_default_4 = CallFunction(prims.convert_element_type.default, mul_Tensor_3, Ignored())
-mul_Tensor_4 = CallFunction(aten.mul.Tensor, convert_element_type_default_4, convert_element_type_default_2, _users=2)
+convert_element_type_default_3 = CallFunction(prims.convert_element_type.default, view_default_7, Ignored())
+convert_element_type_default_4 = CallFunction(prims.convert_element_type.default, gt_Scalar, Ignored())
+mul_Tensor_2 = CallFunction(aten.mul.Tensor, convert_element_type_default_4, Ignored())
+mul_Tensor_3 = CallFunction(aten.mul.Tensor, convert_element_type_default_3, mul_Tensor_2)
+convert_element_type_default_5 = CallFunction(prims.convert_element_type.default, mul_Tensor_3, Ignored())
+convert_element_type_default_6 = CallFunction(prims.convert_element_type.default, convert_element_type_default_5, Ignored())
+mul_Tensor_4 = CallFunction(aten.mul.Tensor, convert_element_type_default_6, convert_element_type_default_2, _users=2)
 sum_dim_IntList_1 = CallFunction(aten.sum.dim_IntList, mul_Tensor_4, Ignored(), True)
 fma_default = CallFunction(prims.fma.default, neg_default, sum_dim_IntList_1, mul_Tensor_4)
-convert_element_type_default_5 = CallFunction(prims.convert_element_type.default, fma_default, Ignored())
-div_Tensor_2 = CallFunction(aten.div.Tensor, convert_element_type_default_5, KeywordArg('inv_scale'))
+convert_element_type_default_7 = CallFunction(prims.convert_element_type.default, fma_default, Ignored())
+div_Tensor_2 = CallFunction(aten.div.Tensor, convert_element_type_default_7, KeywordArg('inv_scale'))
 view_default_8 = CallFunction(aten.view.default, div_Tensor_2, Ignored(), _users=2)
 permute_default_2 = CallFunction(aten.permute.default, view_default_1, Ignored())
 bmm_default_3 = CallFunction(aten.bmm.default, view_default_8, permute_default_2)

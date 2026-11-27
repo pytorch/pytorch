@@ -49,6 +49,7 @@ class TritonSplitScanKernel(TritonKernel):
             **kwargs,
         )
         self.no_x_dim = True
+        self.min_rblock = config.triton.min_split_scan_rblock
 
     def should_use_persistent_reduction(self) -> bool:
         return False

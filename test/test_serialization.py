@@ -31,7 +31,6 @@ from unittest.mock import patch
 import torch
 from torch.utils.serialization import config as serialization_config
 from torch._subclasses.fake_tensor import (
-    FakeTensorConverter,
     FakeTensorMode,
     is_fake_tensor,
 )
@@ -66,6 +65,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfCppFakeTensor,
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
@@ -4552,21 +4552,23 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertTrue(id(sd_loaded['t_view'].untyped_storage()) == id(sd_loaded['t'].untyped_storage()))
             self.assertTrue(id(sd_loaded['t_slice'].untyped_storage()) == id(sd_loaded['t'].untyped_storage()))
 
-    def test_skip_data_serialization_error_cases(self):
-        def _save_load(t):
-            with BytesIOContext() as f:
-                with skip_data():
-                    torch.save(t, f)
-                f.seek(0)
-                torch.load(f, weights_only=True)
+    def _skip_data_save_load(self, t):
+        with BytesIOContext() as f:
+            with skip_data():
+                torch.save(t, f)
+            f.seek(0)
+            torch.load(f, weights_only=True)
 
+    @skipIfCppFakeTensor("no nested tensor support")
+    def test_skip_data_serialization_error_nested(self):
         nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)])
-        t = torch.randn(2, 3, device="meta")
         with self.assertRaisesRegex(RuntimeError, "Cannot serialize nested tensor under skip_data context manager"):
-            _save_load(nt)
+            self._skip_data_save_load(nt)
 
+    def test_skip_data_serialization_error_cases(self):
+        t = torch.randn(2, 3, device="meta")
         with self.assertWarnsRegex(UserWarning, "meta device under skip_data context manager is a no-op"):
-            _save_load(t)
+            self._skip_data_save_load(t)
 
     @parametrize("force_weights_only", (True, False))
     def test_weights_only_env_variables(self, force_weights_only):
@@ -4663,6 +4665,7 @@ class TestSerialization(TestCase, SerializationMixin):
             finally:
                 torch._weights_only_unpickler._get_allowed_globals = old_get_allowed_globals
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @parametrize("should_import", [False, True])
     def test_load_njt_weights_only(self, should_import):
         with TemporaryFileName() as filename:
@@ -4676,6 +4679,7 @@ class TestSerialization(TestCase, SerializationMixin):
             )
             self._attempt_load_from_subprocess(filename, import_string, err_msg)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @serialTest()
     def test_load_njt_weights_only_safe_globals(self):
         from torch.nested._internal.nested_tensor import _rebuild_njt, NestedTensor
@@ -5281,7 +5285,8 @@ class TestSerializationAccelerator(TestCase):
             st = torch.sparse_coo_tensor(i, v, (2, 4))
         tt = TwoTensor(torch.randn(2, device=device), torch.randn(2, device=device))
 
-        mode, converter = FakeTensorMode(), FakeTensorConverter()
+        mode = FakeTensorMode()
+        converter = mode.fake_tensor_converter
 
         def fn(t):
             return converter.from_real_tensor(mode, t) if materialize_fake else t
