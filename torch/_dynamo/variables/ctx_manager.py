@@ -1623,20 +1623,19 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return nodes
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends()
-        self.prev_priority = (
-            tuple(torch._C._get_sdp_priority_order())
-            if self.set_priority and torch._C._has_user_sdp_priority_order()
-            else None
-        )
+        prev_state = torch.nn.attention._save_sdpa_kernel(self.set_priority)
         self.set_cleanup_hook(
-            tx,
-            lambda: torch.nn.attention._restore_sdpa_kernel(
-                self.prev_backends, self.set_priority, self.prev_priority
-            ),
+            tx, lambda: torch.nn.attention._restore_sdpa_kernel(prev_state)
         )
         torch.nn.attention._sdpa_kernel(
             self.target_values, set_priority=self.set_priority
+        )
+        # SDP state is not guarded, so capture the state to restore at runtime.
+        self.proxy = tx.output.create_node(
+            "call_function",
+            torch.nn.attention._save_sdpa_kernel,
+            (bool(self.set_priority),),
+            {},
         )
         arg = self._backends_to_nodes(tx, self.target_values)
         tx.output.create_node(
@@ -1651,11 +1650,10 @@ class SDPAKernelVariable(ContextWrappingVariable):
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         self.cleanup_assert()
-        arg = self._backends_to_nodes(tx, self.prev_backends)
         tx.output.create_node(
             "call_function",
             torch.nn.attention._restore_sdpa_kernel,
-            (arg, bool(self.set_priority), self.prev_priority),
+            (self.proxy,),
             {},
         )
         return variables.ConstantVariable.create(None)

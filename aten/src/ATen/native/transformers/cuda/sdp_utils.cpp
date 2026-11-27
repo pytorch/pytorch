@@ -10,12 +10,12 @@
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/core/ScalarType.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <array>
 #include <c10/util/Exception.h>
 #include <algorithm>
-#include <mutex>
 #include <string_view>
 #include <vector>
 
@@ -77,10 +77,10 @@ constexpr bool kCuDNNFrontendSupportsD256 = false;
 
 // Initialize the platform default priority order once, only when no
 // user-specified priority order is active.
-std::once_flag priority_order_init_flag_;
+c10::once_flag priority_order_init_flag_;
 
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
-// Needs to be kept in-sync with test_fused_chocie in test_transformers.py
+// Needs to be kept in-sync with _cudnn_sdp_preferred_by_default in test_transformers.py
 bool check_prefer_cudnn_attention() {
   static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_DEPRIORITIZED") != true;
   if (!prefer_cudnn) {
@@ -116,7 +116,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   if (ctx.hasUserSetSDPPriorityOrder()) {
     return ctx.sDPPriorityOrder();
   }
-  std::call_once(priority_order_init_flag_, [&]() {
+  c10::call_once(priority_order_init_flag_, [&]() {
     if (check_prefer_cudnn_attention()) {
       const std::vector<int64_t> cudnn_order = {
           static_cast<int64_t>(at::SDPBackend::cudnn_attention),

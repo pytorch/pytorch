@@ -284,6 +284,18 @@ class TORCH_API Context {
   // the math SDP kernel, you can force your code to use flash kernels.
   // The math SDP kernel can be disabled by setting
   // at::globalContext().setUserEnabledMathSDP(false) flag.
+
+  // Note [SDP Priority Order]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~
+  // The SDP backend priority is process-global. It has a platform default and
+  // an optional user order that overrides the default.
+  // setSDPPriorityOrder sets the user order, which stays active until
+  // resetSDPPriorityOrder. A backend that installs its own default must call
+  // setDefaultSDPPriorityOrder, which does not change the user order.
+  // If order has fewer than num_sdp_backends entries, setSDPPriorityOrder
+  // keeps the remaining positions of the effective order, and
+  // setDefaultSDPPriorityOrder keeps those of the default order.
+  // sDPPriorityOrder returns the effective order.
   void setSDPPriorityOrder(const std::vector<int64_t>& order);
   void setDefaultSDPPriorityOrder(const std::vector<int64_t>& order);
   void resetSDPPriorityOrder();

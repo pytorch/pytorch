@@ -1198,7 +1198,7 @@ def _set_sdp_use_overrideable(
 ) -> None: ...  # THPModule_setSDPUseOverrideable
 def _get_sdp_priority_order() -> list[_int]: ...  # THPModule_getSDPPriorityOrder
 def _set_sdp_priority_order(
-    arg: list[_int] | tuple[_int, ...],
+    arg: list[_int],
 ) -> None: ...  # THPModule_setSDPPriorityOrder
 def _reset_sdp_priority_order() -> None: ...  # THPModule_resetSDPPriorityOrder
 def _has_user_sdp_priority_order() -> (

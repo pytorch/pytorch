@@ -491,6 +491,54 @@ class TestVarlenAttentionDevice(NNTestCase):
                 torch.empty_like(q), q, k, v, cu_seq, cu_seq, seq_len, seq_len
             )
 
+    @parametrize("compile", [False, True])
+    def test_lse_gradient_backend_priority(self, device, compile):
+        """FA4 takes a differentiable lse unless the user set a backend priority."""
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device, requires_grad=True)
+        args = (q, k, v, cu_seq, cu_seq, q.size(0), [-1, 0])
+
+        def select_default(x):
+            return x + varlen_attention._select_backend(*args, return_lse=True)
+
+        def select_cudnn_first(x):
+            order = [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION]
+            with sdpa_kernel(order, set_priority=True):
+                return x + varlen_attention._select_backend(*args, return_lse=True)
+
+        # Backend selection happens before dispatch, so this needs neither FA4 nor cuDNN.
+        with (
+            patch(
+                "torch.nn.attention._registry._FLASH_ATTENTION_ACTIVE", ("FA4", None)
+            ),
+            patch.object(
+                varlen_attention, "_cudnn_rejection_reasons", new=lambda *_args: []
+            ),
+            patch.object(torch._C, "_is_cudnn_sdp_deprioritized", return_value=False),
+        ):
+            for select, expected in (
+                (select_default, SDPBackend.FLASH_ATTENTION),
+                (select_cudnn_first, SDPBackend.CUDNN_ATTENTION),
+            ):
+                torch._dynamo.reset()
+                fn = (
+                    torch.compile(select, backend="eager", fullgraph=True)
+                    if compile
+                    else select
+                )
+                backend = fn(torch.zeros((), device=device)).item()
+                self.assertEqual(backend, expected.value)
+
+    @parametrize("deprioritized", [False, True])
+    def test_cudnn_deprioritized_env(self, device, deprioritized):
+        # The variable is read once per process, so check it in a fresh process.
+        code = "from torch.nn.attention import varlen; print(varlen._get_sdp_priority_order()[0])"
+        env = os.environ | {"TORCH_CUDNN_SDPA_DEPRIORITIZED": str(int(deprioritized))}
+        stdout, stderr = self.run_process_no_exception(code, env=env)
+        expected = (
+            SDPBackend.FLASH_ATTENTION if deprioritized else SDPBackend.CUDNN_ATTENTION
+        )
+        self.assertEqual(stdout.decode().strip(), str(expected.value), stderr.decode())
+
 
 class _VarlenVsSdpaMixin:
     # Shared by the flash and the cuDNN test class, which cannot inherit from
@@ -2455,7 +2503,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
             patch.object(
                 varlen_attention, "_should_use_cudnn", new=lambda _device_index: True
             ),
-            patch.dict(os.environ, {"TORCH_CUDNN_SDPA_DEPRIORITIZED": "0"}),
+            patch.object(torch._C, "_is_cudnn_sdp_deprioritized", return_value=False),
         ):
             for backend_order in (
                 [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
@@ -2493,7 +2541,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
             )
 
     @parametrize("compile", [False, True])
-    def test_cudnn_deprioritized_env(self, device, compile):
+    def test_cudnn_deprioritized(self, device, compile):
         q, k, v, cu_seq = _make_causal_varlen_inputs(device)
         args = (q, k, v, cu_seq, cu_seq, q.size(0), [-1, 0])
 
@@ -2501,7 +2549,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
             patch.object(
                 varlen_attention, "_should_use_cudnn", new=lambda _device_index: True
             ),
-            patch.dict(os.environ, {"TORCH_CUDNN_SDPA_DEPRIORITIZED": "1"}),
+            patch.object(torch._C, "_is_cudnn_sdp_deprioritized", return_value=True),
         ):
             if compile:
                 torch._dynamo.reset()
@@ -2515,7 +2563,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
                 backend = varlen_attention._select_backend(*args)
             self.assertEqual(backend, SDPBackend.FLASH_ATTENTION.value)
 
-            # Explicit set_priority=True overrides TORCH_CUDNN_SDPA_DEPRIORITIZED.
+            # Explicit set_priority=True overrides the deprioritization.
             if compile:
                 torch._dynamo.reset()
 

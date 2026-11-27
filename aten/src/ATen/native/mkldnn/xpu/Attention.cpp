@@ -6,9 +6,9 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/native/transformers/xpu/sdp_utils.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
+#include <c10/util/CallOnce.h>
 #include <torch/library.h> // NOLINT(misc-header-include-cycle)
 #include <array>
-#include <mutex>
 #include <utility>
 
 namespace {
@@ -217,7 +217,7 @@ bool can_use_mem_efficient_attention(
   return true;
 }
 
-std::once_flag priority_order_init_flag;
+c10::once_flag priority_order_init_flag;
 
 std::array<sdp::SDPBackend, sdp::num_backends> priority_order(
     sdp::sdp_params const& params) {
@@ -225,7 +225,7 @@ std::array<sdp::SDPBackend, sdp::num_backends> priority_order(
   if (ctx.hasUserSetSDPPriorityOrder()) {
     return ctx.sDPPriorityOrder();
   }
-  std::call_once(priority_order_init_flag, [&]() {
+  c10::call_once(priority_order_init_flag, [&]() {
     const std::vector<int64_t> default_order = {
         static_cast<int64_t>(at::SDPBackend::overrideable),
         static_cast<int64_t>(at::SDPBackend::flash_attention),

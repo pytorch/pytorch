@@ -1043,7 +1043,10 @@ static PyObject* THPModule_isCuDNNSDPDeprioritized(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  if (c10::utils::check_env("TORCH_CUDNN_SDPA_DEPRIORITIZED") == true)
+  // Read once to match check_prefer_cudnn_attention in cuda/sdp_utils.cpp.
+  static const bool deprioritized =
+      c10::utils::check_env("TORCH_CUDNN_SDPA_DEPRIORITIZED") == true;
+  if (deprioritized)
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;

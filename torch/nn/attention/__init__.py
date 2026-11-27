@@ -105,12 +105,23 @@ def _sdpa_kernel(backends: Iterable, set_priority: bool = False) -> None:
         torch._C._set_sdp_priority_order(user_priority)
 
 
-def _restore_sdpa_kernel(
-    backends: Iterable,
+def _save_sdpa_kernel(
     set_priority: bool,
-    previous_priority: list[int] | tuple[int, ...] | None = None,
+) -> tuple[list[SDPBackend], bool, list[int] | None]:
+    """Return the state that _restore_sdpa_kernel needs to undo _sdpa_kernel."""
+    previous_priority = (
+        torch._C._get_sdp_priority_order()
+        if set_priority and torch._C._has_user_sdp_priority_order()
+        else None
+    )
+    return _cur_sdpa_kernel_backends(), set_priority, previous_priority
+
+
+def _restore_sdpa_kernel(
+    state: tuple[list[SDPBackend], bool, list[int] | None],
 ) -> None:
-    _sdpa_kernel(backends, set_priority=False)
+    previous_backends, set_priority, previous_priority = state
+    _sdpa_kernel(previous_backends, set_priority=False)
     if set_priority:
         if previous_priority is not None:
             torch._C._set_sdp_priority_order(previous_priority)
@@ -151,7 +162,11 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
             scaled_dot_product_attention(...)
 
     This context manager can be used to select which backend to use for scaled dot product attention.
-    Upon exiting the context manager, the previous state of the flags will be restored, enabling all backends.
+    Upon exiting the context manager, the previously enabled backends are restored. If ``set_priority=True``, the
+    priority order also reverts to the one set by an enclosing ``sdpa_kernel(..., set_priority=True)``, or to the
+    platform default if there is none.
+
+    .. note:: The enabled backends and the priority order are process-wide, so they also affect other threads.
     """
     if not isinstance(backends, (list, SDPBackend)):
         raise AssertionError(
@@ -163,17 +178,12 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
 
     backends = list(dict.fromkeys(backends))
 
-    previous_backends = _cur_sdpa_kernel_backends()
-    previous_priority = (
-        torch._C._get_sdp_priority_order()
-        if set_priority and torch._C._has_user_sdp_priority_order()
-        else None
-    )
+    previous_state = _save_sdpa_kernel(set_priority)
     try:
         _sdpa_kernel(backends, set_priority)
         yield {}
     finally:
-        _restore_sdpa_kernel(previous_backends, set_priority, previous_priority)
+        _restore_sdpa_kernel(previous_state)
 
 
 # variadic versions of sdpa_kernel for dynamo to use while reconstructing

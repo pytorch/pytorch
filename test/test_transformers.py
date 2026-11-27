@@ -117,6 +117,16 @@ def _device_memory_capacity(device):
     return torch.accelerator.get_memory_info(device)[1]
 
 
+def _cudnn_sdp_preferred_by_default():
+    # Keep in sync with check_prefer_cudnn_attention in ATen/native/transformers/cuda/sdp_utils.cpp
+    if torch.version.cuda is None or torch._C._is_cudnn_sdp_deprioritized():
+        return False
+    major, minor = torch.cuda.get_device_capability()
+    cuda_major = int(torch.version.cuda.split(".")[0])
+    cudnn_version = torch.backends.cudnn.version() or 0
+    return cudnn_version > 91500 and major in (9, 10) and (cuda_major >= 13 or minor in (0, 3))
+
+
 def _cudnn_supports_d256_attention():
     if not torch.cuda.is_available() or not torch.backends.cudnn.is_available():
         return False
@@ -405,6 +415,20 @@ class TestTransformersGeneric(NNTestCase):
     def test_sdp_backend_pickle(self):
         for backend in SDPBackend.__members__.values():
             self.assertEqual(pickle.loads(pickle.dumps(backend)), backend)
+
+    def test_sdp_priority_order_bounds_and_reset(self):
+        self.addCleanup(torch._C._reset_sdp_priority_order)
+        default_order = torch._C._get_sdp_priority_order()
+        with self.assertRaisesRegex(RuntimeError, "expected at most"):
+            torch._C._set_sdp_priority_order(list(range(len(default_order) + 1)))
+        self.assertFalse(torch._C._has_user_sdp_priority_order())
+        reversed_order = list(reversed(default_order))
+        torch._C._set_sdp_priority_order(reversed_order)
+        self.assertTrue(torch._C._has_user_sdp_priority_order())
+        self.assertEqual(torch._C._get_sdp_priority_order(), reversed_order)
+        torch._C._reset_sdp_priority_order()
+        self.assertFalse(torch._C._has_user_sdp_priority_order())
+        self.assertEqual(torch._C._get_sdp_priority_order(), default_order)
 
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_encoder_padding_and_src_mask_bool(self):
@@ -5845,14 +5869,7 @@ class TestSDPAAccelerator(NNTestCase):
         value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        device_capability = None
-        if "cuda" in str(device):
-            device_capability = torch.cuda.get_device_capability()
-        prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
-        # cuDNN prioritization requires cuDNN > 9.15.0 (91500) per sdp_utils.cpp:83
-        cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
-        is_hopper_or_newer = device_capability and (device_capability[0] == 9 or device_capability[0] == 10)
-        prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version > 91500
+        prefer_cudnn = _cudnn_sdp_preferred_by_default()
 
         # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN > 9.15.0 (per #169849)
         # For older cuDNN versions or other architectures, Flash Attention is preferred
@@ -5937,24 +5954,6 @@ class TestSDPAAccelerator(NNTestCase):
         reset_order = torch._C._get_sdp_priority_order()
         self.assertEqual(default_order, reset_order, "expected SDPA context manager to reset priority order.")
 
-    def test_sdp_priority_order_bounds_and_reset(self, device):
-        default_order = torch._C._get_sdp_priority_order()
-        had_user_priority = torch._C._has_user_sdp_priority_order()
-        try:
-            with self.assertRaisesRegex(RuntimeError, "expected at most"):
-                torch._C._set_sdp_priority_order(list(range(len(default_order) + 1)))
-            reversed_order = list(reversed(default_order))
-            torch._C._set_sdp_priority_order(reversed_order)
-            self.assertTrue(torch._C._has_user_sdp_priority_order())
-            self.assertEqual(torch._C._get_sdp_priority_order(), reversed_order)
-            torch._C._reset_sdp_priority_order()
-            self.assertFalse(torch._C._has_user_sdp_priority_order())
-        finally:
-            if had_user_priority:
-                torch._C._set_sdp_priority_order(default_order)
-            else:
-                torch._C._reset_sdp_priority_order()
-
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention is not supported on this system")
@@ -5963,6 +5962,10 @@ class TestSDPAAccelerator(NNTestCase):
         # sdpa_kernel(..., set_priority=True) is not overwritten by lazy
         # platform-default priority initialization, and that the platform
         # default still applies after exiting the context manager.
+        # The default order differs from the initial one only if it prefers cuDNN.
+        if not _cudnn_sdp_preferred_by_default():
+            self.skipTest("cuDNN is not the default SDPA backend on this system")
+
         import subprocess
 
         script = """
@@ -5975,31 +5978,12 @@ with sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION], set_p
 outside = torch._fused_sdp_choice(q, q, q)
 print(f"{inside},{outside}")
 """
-        env = os.environ.copy()
-        env["TORCH_CUDNN_SDPA_DEPRIORITIZED"] = "0"
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-        )
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
         inside_backend, outside_backend = (
             int(v) for v in result.stdout.strip().splitlines()[-1].split(",")
         )
         self.assertEqual(inside_backend, SDPBackend.FLASH_ATTENTION.value)
-        major, minor = torch.cuda.get_device_capability(device)
-        cudnn_version = torch.backends.cudnn.version() or 0
-        cuda_major = int((torch.version.cuda or "0").split(".")[0])
-        prefer_cudnn = cudnn_version > 91500 and major in (9, 10) and (
-            cuda_major >= 13 or minor in (0, 3)
-        )
-        expected_outside = (
-            SDPBackend.CUDNN_ATTENTION.value
-            if prefer_cudnn
-            else SDPBackend.FLASH_ATTENTION.value
-        )
-        self.assertEqual(outside_backend, expected_outside)
+        self.assertEqual(outside_backend, SDPBackend.CUDNN_ATTENTION.value)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
