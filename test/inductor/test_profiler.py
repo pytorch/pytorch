@@ -397,7 +397,7 @@ class DynamoProfilerTestsGeneric(torch._inductor.test_case.TestCase):
 
 
 instantiate_device_type_tests(
-    DynamoProfilerTests, globals(), except_for="cpu", allow_xpu=True
+    DynamoProfilerTests, globals(), except_for="cpu", allow_xpu=True, allow_mps=True,
 )
 
 
