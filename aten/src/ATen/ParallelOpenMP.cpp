@@ -92,8 +92,7 @@ void set_thread_num(int id) {
 
 void set_thread_local_num_threads(int nthreads) {
   TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
-  // Initialize first: otherwise this thread's first parallel region would
-  // initialize from the process-wide setting and replace this one.
+  // Otherwise this thread's first parallel region would overwrite it.
   lazy_init_num_threads();
 #ifdef _OPENMP
   omp_set_num_threads(nthreads);

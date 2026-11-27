@@ -215,7 +215,6 @@ void init_num_threads() {
 namespace internal {
 void set_thread_local_num_threads(int nthreads) {
   TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
-  // One intra-op pool serves the whole process: there is no per-thread count.
 }
 } // namespace internal
 

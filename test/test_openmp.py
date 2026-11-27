@@ -71,20 +71,28 @@ class TestOpenMP_ParallelFor(TestCase):
 
 
 def _num_threads_in_new_thread(setup=None):
-    counts = []
+    result = []
 
     def run():
-        if setup is not None:
-            setup()
-        counts.append(torch.get_num_threads())
+        try:
+            if setup is not None:
+                setup()
+            result.append(torch.get_num_threads())
+        except Exception as e:
+            result.append(e)
 
     thread = threading.Thread(target=run)
     thread.start()
     thread.join()
-    return counts[0]
+    if isinstance(result[0], Exception):
+        raise result[0]
+    return result[0]
 
 
-@unittest.skipIf(not torch.backends.openmp.is_available(), "Requires OpenMP")
+OPENMP_BACKEND = "ATen parallel backend: OpenMP" in torch.__config__.parallel_info()
+
+
+@unittest.skipIf(not OPENMP_BACKEND, "Requires the OpenMP parallel backend")
 class TestOpenMP_ThreadLocalNumThreads(TestCase):
     def setUp(self):
         super().setUp()
@@ -100,13 +108,12 @@ class TestOpenMP_ThreadLocalNumThreads(TestCase):
             torch._C._set_thread_local_num_threads(1)
 
         self.assertEqual(_num_threads_in_new_thread(set_one), 1)
-        # Neither this thread nor threads started afterwards are affected
         self.assertEqual(torch.get_num_threads(), 2)
         self.assertEqual(_num_threads_in_new_thread(), 2)
 
     def test_set_thread_local_num_threads_invalid(self):
         for invalid in (0, -1):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "expects a positive integer"):
                 torch._C._set_thread_local_num_threads(invalid)
 
 

@@ -45,10 +45,8 @@ inline void lazy_init_num_threads() {
 
 TORCH_API void set_thread_num(int /*id*/);
 
-// Sets the number of intra-op threads for the calling thread only. Unlike
-// at::set_num_threads, it leaves the process-wide setting alone, so threads
-// that initialize later (autograd's worker threads, for one) are unaffected.
-// Only the OpenMP backend has a per-thread count; elsewhere this is a no-op.
+// Like set_num_threads, but for the calling thread only. No-op on the native
+// backend.
 TORCH_API void set_thread_local_num_threads(int /*nthreads*/);
 
 class TORCH_API ThreadIdGuard {

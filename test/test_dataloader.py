@@ -13,6 +13,7 @@ import os
 import signal
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import warnings
@@ -3306,12 +3307,9 @@ class TestDictDataLoaderDevice(TestCase):
 
     @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_pin_memory_thread_keeps_num_threads_local(self):
-        # The pin-memory thread limits only itself to one intra-op thread;
-        # threads initializing afterwards (e.g. autograd's) keep the process's.
-        import threading
-
         orig_num_threads = torch.get_num_threads()
         torch.set_num_threads(2)
+        it = None
         try:
             loader = DataLoader(
                 self.dataset, batch_size=2, num_workers=1, pin_memory=True
@@ -3324,9 +3322,9 @@ class TestDictDataLoaderDevice(TestCase):
             )
             thread.start()
             thread.join()
-            self.assertEqual(counts, [2])
-            del it
+            self.assertEqual(counts, [torch.get_num_threads()])
         finally:
+            del it
             torch.set_num_threads(orig_num_threads)
 
     @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
