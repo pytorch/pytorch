@@ -361,7 +361,7 @@ class DeterministicTestAccelerator(TestCase):
 instantiate_device_type_tests(
     DeterministicTestAccelerator,
     globals(),
-    except_for="cpu",
+    except_for=("cpu", "privateuse1", "hpu"),
     allow_xpu=True,
 )
 
@@ -373,5 +373,4 @@ instantiate_device_type_tests(
 
 
 if __name__ == "__main__":
-    if has_triton():
-        run_tests()
+    run_tests()
