@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 
+import gc
 import importlib.util
 import logging
 import subprocess
@@ -1717,6 +1718,58 @@ class TokenSwitchMoRITest(
         self.assertEqual(
             t2.grad.float(), torch.full_like(x2, 2 * k, dtype=torch.float32)
         )
+
+
+@requires_nccl_ep()
+class TokenSwitchLifecycleTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    def _inputs(self):
+        torch.cuda.set_device(self.rank)
+        dist.barrier()
+        switch = TokenSwitchNCCL(
+            dist.distributed_c10d._get_default_group(),
+            self.world_size,
+            16,
+            self.world_size * 16,
+            128,
+        )
+        ids = torch.full(
+            (16, 1),
+            (self.rank + 1) % self.world_size,
+            device="cuda",
+            dtype=torch.int64,
+        )
+        routing = switch.create_routing(ids, layout="flat")
+        return switch, routing
+
+    def _buffers(self, rank):
+        capacity = self.world_size * 16
+        rows = torch.arange(16, device="cuda") + rank * 16 + 1
+        tokens = rows[:, None].expand(16, 64).to(torch.bfloat16)
+        weights = (rows[:, None] / 100).float()
+        received = tokens.new_zeros(capacity, 64)
+        scores = weights.new_zeros(capacity, 1)
+        ids = torch.full((capacity, 1), -1, device="cuda", dtype=torch.int64)
+        return tokens, weights, received, scores, ids
+
+    @skip_if_lt_x_gpu(2)
+    def test_handle_retains_group(self):
+        switch, routing = self._inputs()
+        ep = switch._ep
+        del switch
+        gc.collect()
+        self.assertEqual(routing.handle.get_num_recv_tokens(), 16)
+        tokens, weights, received, scores, ids = self._buffers(self.rank)
+        ep._nccl_ep_dispatch(routing.handle, tokens, weights, received, scores, ids)
+        source, _, _, _, _ = self._buffers((self.rank - 1) % self.world_size)
+        self.assertEqual(received[:16], source)
+        del routing
+        gc.collect()
 
 
 if __name__ == "__main__":
