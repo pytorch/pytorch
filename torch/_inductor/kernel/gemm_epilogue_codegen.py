@@ -451,7 +451,7 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
         return CuteDSLOpOverrides.add(a, rhs)
 
     @staticmethod
-    def mul(a: Any, b: Any) -> Any:
+    def mul(a: Any, b: Any, *, native_cuda_execution=None) -> Any:
         rhs_expr = str(b)
         try:
             float(rhs_expr)
