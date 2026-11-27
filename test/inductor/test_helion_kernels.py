@@ -1,9 +1,9 @@
 # Owner(s): ["module: inductor"]
 import torch
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
     HAS_HELION,
     requires_helion,
     requires_triton,
@@ -16,9 +16,11 @@ if HAS_HELION:
 
 
 class HelionTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_triton()
     @requires_helion()
-    def test_add_kernel(self):
+    def test_add_kernel(self, device):
         @helion.kernel(config=helion.Config(block_sizes=[1, 2]))
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             # match pytorch broadcasting rules
@@ -37,8 +39,8 @@ class HelionTests(TestCase):
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             return add(x, y)
 
-        x = torch.randn(4, 8, device=GPU_TYPE, dtype=torch.float16)
-        y = torch.randn(4, 8, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(4, 8, device=device, dtype=torch.float16)
+        y = torch.randn(4, 8, device=device, dtype=torch.float16)
 
         out = add(x, y)
         compiled_add = torch.compile(f, fullgraph=True, backend="inductor")
@@ -49,7 +51,7 @@ class HelionTests(TestCase):
 
     @requires_triton()
     @requires_helion()
-    def test_softmax_view_reshape(self):
+    def test_softmax_view_reshape(self, device):
         @helion.kernel(config={"block_size": 1})
         def softmax(x: torch.Tensor) -> torch.Tensor:
             n, _m = x.size()
@@ -62,14 +64,14 @@ class HelionTests(TestCase):
                 out[tile_n, :] = exp / sum_exp
             return out
 
-        x = torch.randn([1024, 1024], device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn([1024, 1024], device=device, dtype=torch.float16)
         result = softmax(x)
         self.assertEqual(
             result, torch.nn.functional.softmax(x, dim=1), rtol=1e-2, atol=1e-1
         )
 
 
-instantiate_parametrized_tests(HelionTests)
+instantiate_device_type_tests(HelionTests, globals(), except_for="cpu", allow_xpu=True)
 
 
 if __name__ == "__main__":
