@@ -1812,6 +1812,20 @@ inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, T n) {
     return hermite_polynomial_he_forward(x, static_cast<int64_t>(n));
 } // hermite_polynomial_he_forward(T x, T n)
 
+template<typename T, bool is_cuda=false>
+inline C10_HOST_DEVICE int64_t polynomial_degree(T n) {
+    if (n >= T(9223372036854775808.0)) {
+        if constexpr (is_cuda) {
+            return std::numeric_limits<int64_t>::max();
+        }
+        return std::numeric_limits<int64_t>::min();
+    }
+    if (!(n >= T(-9223372036854775808.0))) {
+        return std::numeric_limits<int64_t>::min();
+    }
+    return static_cast<int64_t>(n);
+}
+
 template<typename T>
 inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     if (n < 0) {
@@ -1835,7 +1849,7 @@ inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     T r = q;
 
     for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
-        r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
+        r = ((static_cast<uint64_t>(k) * 2 + (T(1.0) - x)) * q - k * p) / (k + 1);
         p = q;
         q = r;
     }
@@ -1845,7 +1859,7 @@ inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
 
 template<typename T, bool is_cuda=false>
 inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, T n) {
-    return laguerre_polynomial_l_forward(x, static_cast<int64_t>(n));
+    return laguerre_polynomial_l_forward(x, polynomial_degree<T, is_cuda>(n));
 } // laguerre_polynomial_l_forward(T x, T n)
 
 template<typename T>
@@ -1875,7 +1889,7 @@ inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
     T r = q;
 
     for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
-        r = ((k + k + 1) * x * q - k * p) / (k + 1);
+        r = ((static_cast<uint64_t>(k) * 2 + 1) * x * q - k * p) / (k + 1);
         p = q;
         q = r;
     }
@@ -1885,7 +1899,7 @@ inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
 
 template<typename T, bool is_cuda=false>
 inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, T n) {
-    return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
+    return legendre_polynomial_p_forward(x, polynomial_degree<T, is_cuda>(n));
 } // legendre_polynomial_p_forward(T x, T n)
 
 template<typename T>

@@ -13,6 +13,8 @@ Copies, representation views and evaluation dropout may match without a kernel;
 these comparisons have a separate matched_without_kernel status.
 Matching graphs with native fallback calls report matched_with_fallback, even
 when they also generate Triton kernels for copies or other operations.
+Exact calls to deterministic native kernels report native_call_equivalent.
+Their probe outputs are not numerical comparisons; their counts are separate.
 
 The combined forward/backward cases report comparison counts for ordinary and
 edge samples separately. A run missing either family is unverified. Routine
@@ -126,6 +128,10 @@ class CoverageRecord:
     filters: Counter = field(default_factory=Counter)
     required_sample_kinds: tuple[str, ...] = ()
     compared_by_sample_kind: Counter = field(default_factory=Counter)
+    native_calls_compared: int = 0
+    native_calls_matched: int = 0
+    native_calls_by_sample_kind: Counter = field(default_factory=Counter)
+    native_calls_by_source: Counter = field(default_factory=Counter)
     status: str = "not_run"
     reason: str = ""
 
@@ -148,6 +154,10 @@ class CoverageRecord:
             "filters": dict(self.filters),
             "required_sample_kinds": self.required_sample_kinds,
             "compared_by_sample_kind": dict(self.compared_by_sample_kind),
+            "native_calls_compared": self.native_calls_compared,
+            "native_calls_matched": self.native_calls_matched,
+            "native_calls_by_sample_kind": dict(self.native_calls_by_sample_kind),
+            "native_calls_by_source": dict(self.native_calls_by_source),
         }
 
 
@@ -180,7 +190,10 @@ def record_result(record, result, test):
                             )
                         elif name == "addSuccess":
                             if any(
-                                not record.compared_by_sample_kind[kind]
+                                not (
+                                    record.compared_by_sample_kind[kind]
+                                    or record.native_calls_by_sample_kind[kind]
+                                )
                                 for kind in record.required_sample_kinds
                             ):
                                 record.status = "unverified"
@@ -188,7 +201,19 @@ def record_result(record, result, test):
                                 record.status = "known_mismatch"
                             elif (
                                 not record.expected_mismatch
+                                and not record.mismatches
+                                and record.compared == 0
+                                and record.native_calls_compared > 0
+                                and record.native_calls_matched
+                                == record.native_calls_compared
+                                and record.native_baseline_verified
+                                and record.numerical_fallbacks > 0
+                            ):
+                                record.status = "native_call_equivalent"
+                            elif (
+                                not record.expected_mismatch
                                 and record.compared > 0
+                                and record.native_calls_compared == 0
                                 and record.matched == record.compared
                                 and (
                                     record.generated_kernels > 0
@@ -261,6 +286,7 @@ def summarize(directory):
         "unverified": 3,
         "skipped": 4,
         "matched_with_fallback": 5,
+        "native_call_equivalent": 5,
         "matched": 6,
         "matched_without_kernel": 6,
         "not_run": 7,
@@ -296,6 +322,12 @@ def summarize(directory):
             Counter(event["status"] for event in class_fixtures)
         ),
         "counts": dict(Counter(row["status"] for row in rows)),
+        "numerical_tensor_call_comparisons": sum(
+            row.get("compared", 0) for row in rows
+        ),
+        "native_call_equivalence_checks": sum(
+            row.get("native_calls_compared", 0) for row in rows
+        ),
         "filter_events_across_attempts": dict(filters),
         "rows": rows,
     }
