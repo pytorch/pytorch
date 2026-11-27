@@ -885,6 +885,15 @@ def load_state_dict_from_url(
     if file_name is not None:
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
+    # A caller-supplied file_name must not be able to place the downloaded
+    # file outside of model_dir (e.g. "../escaped.pth" or an absolute path).
+    model_dir = os.path.abspath(model_dir)
+    cached_file = os.path.abspath(cached_file)
+    if os.path.commonpath([cached_file, model_dir]) != model_dir:
+        raise ValueError(
+            f"file_name '{file_name}' would place the downloaded file "
+            f"outside of model_dir '{model_dir}'"
+        )
     if not os.path.exists(cached_file):
         sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
