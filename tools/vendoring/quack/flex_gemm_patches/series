@@ -7,3 +7,4 @@
 0009-sm100-m64-configs.patch
 0010-explicit-constexpr-if.patch
 0011-sm110-configs.patch
+0012-sm120-pdl-griddepcontrol.patch  # backport of Dao-AILab/quack@60d8808 (v0.6.5); drop when PINNED_SHA includes it

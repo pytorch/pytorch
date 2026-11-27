@@ -111,6 +111,52 @@ class TestQuackFlexGemmPatches(TestCase):
         ]
         self.assertFalse(offenders, f"mixed const_expr if tests: {offenders}")
 
+    def test_pdl_gemms_wait_in_ab_load_warps(self):
+        # QuACK launches these GEMMs with PDL (use_pdl=True), so the warps that
+        # TMA-load A and B must execute griddepcontrol.wait first. No CI runner
+        # has sm_120, so check the vendored source for GemmSm120's wait here.
+        def is_wait(node):
+            if not isinstance(node, ast.Call):
+                return False
+            name = getattr(node.func, "attr", None)
+            if name == "griddepcontrol_wait":
+                return True
+            return name == "griddepcontrol" and any(
+                getattr(arg, "attr", None) == "WAIT" for arg in node.args
+            )
+
+        # origin is the package's __init__.py; in an editable install the first
+        # search location is a build directory without the vendored sources.
+        vendor_root = Path(
+            importlib.util.find_spec("torch._vendor.quack").origin
+        ).parent
+        for module, cls in (
+            ("gemm_sm90.py", "GemmSm90"),
+            ("gemm_sm100.py", "GemmSm100"),
+            ("gemm_sm120.py", "GemmSm120"),
+        ):
+            with self.subTest(cls=cls):
+                tree = ast.parse((vendor_root / module).read_text())
+                kernel = next(
+                    fn
+                    for c in ast.walk(tree)
+                    if isinstance(c, ast.ClassDef) and c.name == cls
+                    for fn in c.body
+                    if isinstance(fn, ast.FunctionDef) and fn.name == "kernel"
+                )
+                load_branches = [
+                    node
+                    for node in ast.walk(kernel)
+                    if isinstance(node, ast.If)
+                    and "self.ab_load_warp_id + self.num_ab_load_warps"
+                    in ast.unparse(node.test)
+                ]
+                self.assertTrue(load_branches, f"{cls}: no AB load warp branch")
+                self.assertTrue(
+                    any(is_wait(n) for b in load_branches for n in ast.walk(b)),
+                    f"{cls}: AB load warps never execute griddepcontrol.wait",
+                )
+
     def test_patch_series_holds_only_hooks(self):
         series = [
             line.split("#")[0].strip()
