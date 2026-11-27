@@ -1987,6 +1987,7 @@ class StorageOverlapAnalysisTests(torch._inductor.test_case.TestCase):
             patch.object(input_output_analysis, "_hinted_views", hinted_views),
         ):
             torch.compile(f, backend="aot_eager", dynamic=True, fullgraph=True)(inputs)
+        self.assertEqual(inputs, [torch.ones(4)] * 10)
         self.assertTrue(hinted)
         self.assertTrue(all(h is not None for h in hinted))
         self.assertEqual(calls_in_analysis, 0)
