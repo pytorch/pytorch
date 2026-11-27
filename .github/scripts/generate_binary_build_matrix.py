@@ -164,7 +164,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "tbb==2023.2.0 | "
         "tcmlib==1.6.0 | "
         "umf==1.2.0 | "
-        "intel-pti==1.2.0 | "
+        "intel-pti==1.2.1 | "
         "pyzes==0.1.3; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
