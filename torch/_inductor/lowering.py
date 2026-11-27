@@ -589,8 +589,7 @@ def _register_lowering(
                     and isinstance(out.data.data.get_layout(), ir.FixedLayout)
                 ):
                     # External conversions already own a fixed allocation.
-                    ir.InplaceCopyFallback.create(destination, out)
-                    out = destination
+                    out = copy_(destination, out)
                 else:
                     out = mutate_to(destination, out, unsafe_alias=True)
                 V.graph.preserve_input_alignment((out.get_name(),))
@@ -668,6 +667,8 @@ def promote_constants(
     round_scalar_constants (e.g. remainder); on CPU and MPS only for ops
     passing round_scalars_to_tensor_dtype (e.g. add/sub, whose CUDA eager
     kernels keep scalars at opmath precision).
+    Strict CUDA add/sub/mul use float32 Constants for narrow tensor dtypes
+    so precision barriers retain that scalar opmath precision.
     """
     if not (override_return_dtype is None or type_promotion_kind is None):
         raise AssertionError(
@@ -697,6 +698,13 @@ def promote_constants(
         return [const_func(x) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     tensor_dtype = ex.get_dtype()
+    scalar_dtype = tensor_dtype
+    if (
+        round_scalars_to_tensor_dtype
+        and tensor_dtype in (torch.float16, torch.bfloat16)
+        and is_strict_cuda_triton(ex.get_device())
+    ):
+        scalar_dtype = torch.float32
 
     # Round scalars to the tensor's dtype where eager does; see docstring.
     if tensor_dtype in (
@@ -721,7 +729,7 @@ def promote_constants(
                 ExpandView.create(
                     ir.Constant(
                         value=_round_scalar(x),
-                        dtype=tensor_dtype,
+                        dtype=scalar_dtype,
                         device=ex.get_device_or_error(),
                     ),
                     list(ex.get_size()),
@@ -731,7 +739,7 @@ def promote_constants(
             out.append(
                 ExpandView.create(
                     IndexingConstant(
-                        index=x, dtype=tensor_dtype, device=ex.get_device_or_error()
+                        index=x, dtype=scalar_dtype, device=ex.get_device_or_error()
                     ),
                     list(ex.get_size()),
                 )
@@ -885,18 +893,36 @@ def make_pointwise(
         current_node = (
             getattr(V.graph, "current_node", None) if V.graph is not None else None
         )
+        input_dtype = next(
+            (x.get_dtype() for x in inputs if isinstance(x, IRNode)), None
+        )
         # pyrefly: ignore [bad-assignment]
         inputs = promote_constants(
             inputs,
             override_return_dtype,
             round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
         )
+        dtype = override_return_dtype or input_dtype or inputs[0].get_dtype()
+        if (
+            round_scalars_to_tensor_dtype
+            and dtype in (torch.float16, torch.bfloat16)
+            and any(inp.get_dtype() == torch.float32 for inp in inputs)
+            and any(is_strict_cuda_triton(inp.get_device()) for inp in inputs)
+        ):
+            # CUDA scalar arithmetic computes in opmath before the narrow cast.
+            result = make_pointwise(
+                fn,
+                override_device=override_device,
+                allow_alpha=allow_alpha,
+                use_fma_for_alpha=use_fma_for_alpha,
+                strict_sub_alpha=strict_sub_alpha,
+            )(*(to_dtype(inp, torch.float32) for inp in inputs), alpha=alpha)
+            return to_dtype(result, dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
                 if strict_sub_alpha and any(
                     is_strict_cuda_triton(inp.get_device()) for inp in inputs
                 ):
-                    dtype = inputs[0].get_dtype()
                     if dtype.is_floating_point:
                         compute_dtype = (
                             torch.float32
@@ -916,7 +942,7 @@ def make_pointwise(
                                 ops.to_dtype(a, compute_dtype),
                             )
 
-                        return make_pointwise(sub_fma)(*inputs)
+                        return to_dtype(make_pointwise(sub_fma)(*inputs), dtype)
                 # Use FMA for add-with-alpha on Triton GPU floating-point.
                 # Eager CUDA/ROCm computes a + alpha * b as fma(b, alpha, a).
                 if use_fma_for_alpha and isinstance(inputs[0], IRNode):
@@ -935,7 +961,9 @@ def make_pointwise(
                                 lambda a, b, scale: ops.fma(b, scale, a),
                                 preserve_cuda_scalar_precision=True,
                             )(*original_inputs, alpha)
-                        return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
+                        return to_dtype(
+                            _add_with_alpha_fma(inputs[0], inputs[1], alpha), dtype
+                        )
 
                 # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
@@ -948,7 +976,6 @@ def make_pointwise(
                 raise AssertionError("expected: alpha is None")
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
-        dtype = override_return_dtype or inputs[0].get_dtype()
 
         for other in inputs[1:]:
             if not (
@@ -1131,6 +1158,33 @@ def to_dtype(
     src_dtype = x.get_dtype()
     if src_dtype == dtype:
         return clone(x) if copy else x
+    if (dtype.is_complex or src_dtype.is_complex) and is_strict_cuda_triton(
+        x.get_device()
+    ):
+        if src_dtype.is_complex:
+            real, imag = complex_components(x)
+        else:
+            real = x
+            imag = full(x.get_size(), 0, device=x.get_device(), dtype=src_dtype)
+        if not dtype.is_complex:
+            if dtype == torch.bool:
+                return logical_or(to_dtype(real, dtype), to_dtype(imag, dtype))
+            return to_dtype(real, dtype, copy=copy, use_compute_types=use_compute_types)
+        component_dtype = (
+            torch.float64
+            if dtype == torch.complex128
+            else torch.float16
+            if dtype == torch.complex32
+            else torch.float32
+        )
+        real = to_dtype(real, component_dtype, use_compute_types=use_compute_types)
+        imag = to_dtype(imag, component_dtype, use_compute_types=use_compute_types)
+        parts = ir.ExternKernel.require_contiguous_strides(
+            cat((unsqueeze(real, -1), unsqueeze(imag, -1)), -1)
+        )
+        return TensorBox.create(
+            ir.ComplexView.create(aten.view_as_complex.default, parts)
+        )
 
     def _to_dtype(x):
         result = ops.to_dtype(
@@ -1255,6 +1309,18 @@ def _foreach_map(subgraph, *args, **kwargs):
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def _convert_element_type(x: TensorBox, dtype: torch.dtype):
     if dtype.is_complex or x.get_dtype().is_complex:
+        if (
+            is_strict_cuda_triton(x.get_device())
+            and dtype != torch.bcomplex32
+            and x.get_dtype() != torch.bcomplex32
+        ):
+            result = to_dtype(x, dtype, copy=True, use_compute_types=False)
+            node = V.graph.current_node
+            return (
+                constrain_to_fake_tensor(result, node.meta.get("val"))
+                if node is not None
+                else result
+            )
         if x.get_size():
             # Decompose since aa aten fallback is more friendly for c++ codegen.
             # This decomposition doesn't work for empty tensor, which needs more investigation.
@@ -1471,8 +1537,13 @@ def register_foreach_pointwise(
     return fn
 
 
-@register_lowering(aten.where, broadcast=False, type_promotion_kind=None)
+@register_lowering([aten.where, prims.where], broadcast=False, type_promotion_kind=None)
 def where(cond, a, b):
+    r"""Lower selection while preserving native operand precision and strides."""
+    if cond.get_dtype() not in (torch.bool, torch.uint8):
+        raise RuntimeError("where expected condition to be a boolean tensor")
+    cond = to_dtype(cond, torch.bool)
+
     def fn(*args):
         return ops.where(*args)
 
@@ -1485,6 +1556,69 @@ def where(cond, a, b):
     dtype = get_promoted_dtype(
         args[1], args[2], type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
+    device = next(
+        (
+            x.get_device_or_error()
+            for x in args
+            if isinstance(x, TensorBox) and is_gpu(x.get_device_or_error().type)
+        ),
+        cond.get_device_or_error(),
+    )
+    if dtype in (
+        torch.complex32,
+        torch.complex64,
+        torch.complex128,
+    ) and is_strict_cuda_triton(device):
+        cond = to_device(cond, device)
+        real_dtype = {
+            torch.complex32: torch.float16,
+            torch.complex64: torch.float32,
+            torch.complex128: torch.float64,
+        }[dtype]
+        int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[
+            real_dtype.itemsize
+        ]
+
+        def component_bits(x):
+            # Eager promotes on the original device before copying CPU scalars.
+            if (
+                x.get_device().type == "cpu"
+                and not x.get_size()
+                and x.get_dtype() != dtype
+            ):
+                if x.get_dtype().is_complex:
+                    real, imag = complex_components(x)
+                else:
+                    real, imag = (
+                        x,
+                        full([], 0, dtype=x.get_dtype(), device=x.get_device()),
+                    )
+                real, imag = to_dtype(real, real_dtype), to_dtype(imag, real_dtype)
+                components = cat(
+                    (
+                        unsqueeze(to_device(real, device), -1),
+                        unsqueeze(to_device(imag, device), -1),
+                    ),
+                    -1,
+                )
+                return to_dtype_bitcast(components, int_dtype)
+            if x.get_dtype() != dtype:
+                x = _convert_element_type(x, dtype)
+            x = to_device(x, device)
+            components = TensorBox.create(
+                ir.ComplexView.create(aten.view_as_real.default, x)
+            )
+            return to_dtype_bitcast(components, int_dtype)
+
+        # Integer selection preserves signed zeros and signaling NaN payloads.
+        selected = where(unsqueeze(cond, -1), component_bits(a), component_bits(b))
+        components = to_dtype_bitcast(selected, real_dtype)
+        return TensorBox.create(
+            ir.ComplexView.create(
+                aten.view_as_complex.default,
+                ir.ExternKernel.require_contiguous_strides(components),
+            )
+        )
     indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
         args[i] = x
@@ -3080,6 +3214,10 @@ def glu(x, dim=-1):
     # no need to clamp, index is int based on input size
     a = slice_(x, dim, 0, new_len, clamp=False)
     b = slice_(x, dim, new_len, new_len * 2, clamp=False)
+    if is_strict_cuda_triton(x.get_device()):
+        dtype = get_computation_dtype(x.get_dtype())
+        a, b = to_dtype(a, dtype), to_dtype(b, dtype)
+        return to_dtype(mul(a, sigmoid(b)), x.get_dtype())
     return mul(a, sigmoid(b))
 
 
@@ -3450,6 +3588,17 @@ def randn(*args, **kwargs):
 @register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
 def inductor_force_stride_order(input_tensor, stride):
     stride_order = ir.get_stride_order(stride, V.graph.sizevars.shape_env)
+    if input_tensor.get_dtype().is_complex and is_strict_cuda_triton(
+        input_tensor.get_device()
+    ):
+        real, imag = complex_components(input_tensor)
+        parts = cat((unsqueeze(real, -1), unsqueeze(imag, -1)), -1)
+        parts = ir.ExternKernel.require_stride_order(
+            parts, [*[s + 1 for s in stride_order], 0]
+        )
+        return TensorBox.create(
+            ir.ComplexView.create(aten.view_as_complex.default, parts)
+        )
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
@@ -4015,6 +4164,40 @@ fallback_batch_norm_update_stats = fallback_handler(
 )
 
 
+@register_lowering(aten.batch_norm_update_stats.default, type_promotion_kind=None)
+def batch_norm_update_stats(input, running_mean, running_var, momentum):
+    if (
+        config.strict_reduction
+        and is_strict_cuda_triton(input.get_device())
+        and running_mean is None
+        and running_var is None
+    ):
+        input_node = V.graph.current_node.args[0]
+        if not isinstance(input_node, torch.fx.Node):
+            raise AssertionError(f"Expected torch.fx.Node, got {type(input_node)!r}")
+        value = input_node.meta["val"]
+        if value.is_neg():
+            input = clone(input)
+            value = value.clone()
+        channels_last = (
+            value.is_contiguous()
+            and value.stride(1) == 1
+            or value.is_contiguous(memory_format=torch.channels_last)
+        )
+        if channels_last:
+            from .kernel.cuda_batch_norm import cuda_bn_channels_last_statistics
+
+            return cuda_bn_channels_last_statistics(input, value)
+        if value.is_contiguous():
+            from .kernel.cuda_batch_norm import cuda_bn_statistics
+
+            return cuda_bn_statistics(input)
+        from .kernel.cuda_native_welford import cuda_native_bn_welford
+
+        return cuda_native_bn_welford(input, value)
+    return fallback_batch_norm_update_stats(input, running_mean, running_var, momentum)
+
+
 for _batch_norm_op in NATIVE_BATCH_NORM_OPS:
     if not isinstance(_batch_norm_op, torch._ops.OpOverload):
         raise AssertionError(
@@ -4430,6 +4613,97 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 
 
 # Need templated kernel
+@register_lowering(aten.addr.default, type_promotion_kind=None)
+def addr(self, vec1, vec2, *, beta=1, alpha=1):
+    r"""Lower the outer product using native CUDA arithmetic in strict mode."""
+    dtype = get_promoted_dtype(
+        self, vec1, vec2, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    if dtype.is_complex and not is_strict_cuda_triton(self.get_device()):
+        return fallback_handler(aten.addr.default, add_to_fallback_set=False)(
+            self, vec1, vec2, beta=beta, alpha=alpha
+        )
+    shape = [vec1.get_size()[0], vec2.get_size()[0]]
+    self = expand(to_dtype(self, dtype), shape)
+    vec1 = expand(view(to_dtype(vec1, dtype), [shape[0], 1]), shape)
+    vec2 = expand(view(to_dtype(vec2, dtype), [1, shape[1]]), shape)
+    if dtype.is_complex:
+        sr, si = complex_components(self)
+        vr, vi = complex_components(vec1)
+        wr, wi = complex_components(vec2)
+        component_dtype = sr.get_dtype()
+        alpha, beta = complex(alpha), complex(beta)
+
+        def component(a, b, c, d, e, f, imaginary):
+            ar, ai = (
+                ops.constant(alpha.real, component_dtype),
+                ops.constant(alpha.imag, component_dtype),
+            )
+            real = ops.fma(ar, c, ops.neg(ops.mul(ai, d)))
+            imag = ops.fma(ar, d, ops.mul(ai, c))
+            product_real = ops.fma(real, e, ops.neg(ops.mul(imag, f)))
+            product_imag = ops.fma(real, f, ops.mul(imag, e))
+            if beta == 0:
+                return product_imag if imaginary else product_real
+            br, bi = (
+                ops.constant(beta.real, component_dtype),
+                ops.constant(beta.imag, component_dtype),
+            )
+            accumulator_real = ops.fma(br, a, ops.neg(ops.mul(bi, b)))
+            accumulator_imag = ops.fma(br, b, ops.mul(bi, a))
+            return (
+                ops.add(accumulator_imag, product_imag)
+                if imaginary
+                else ops.add(accumulator_real, product_real)
+            )
+
+        inputs = (sr, si, vr, vi, wr, wi)
+        real = make_pointwise(
+            lambda a, b, c, d, e, f: component(a, b, c, d, e, f, False)
+        )(*inputs)
+        imag = make_pointwise(
+            lambda a, b, c, d, e, f: component(a, b, c, d, e, f, True)
+        )(*inputs)
+        parts = ir.ExternKernel.require_contiguous_strides(
+            cat((unsqueeze(real, -1), unsqueeze(imag, -1)), -1)
+        )
+        return TensorBox.create(
+            ir.ComplexView.create(aten.view_as_complex.default, parts)
+        )
+    lowp = dtype in (torch.float16, torch.bfloat16)
+    compute_dtype = torch.float32 if lowp else dtype
+
+    def round_lowp(value):
+        if lowp:
+            value = ops.to_dtype(value, dtype, use_compute_types=False)
+            value = ops.to_dtype(value, compute_dtype)
+        return value
+
+    def inner(a, b, c):
+        scale = round_lowp(
+            ops.index_expr(alpha, compute_dtype)
+            if isinstance(alpha, sympy.Basic)
+            else ops.constant(alpha, compute_dtype)
+        )
+        product = round_lowp(ops.mul(scale, b))
+        product = round_lowp(ops.mul(product, c))
+        if beta == 0:
+            return product
+        scale = round_lowp(
+            ops.index_expr(beta, compute_dtype)
+            if isinstance(beta, sympy.Basic)
+            else ops.constant(beta, compute_dtype)
+        )
+        result = (
+            ops.fma(scale, a, product)
+            if dtype.is_floating_point and not lowp
+            else ops.add(round_lowp(ops.mul(scale, a)), product)
+        )
+        return ops.where(ops.eq(scale, ops.constant(0, compute_dtype)), product, result)
+
+    return make_pointwise(inner, override_return_dtype=dtype)(self, vec1, vec2)
+
+
 make_fallback(aten.addbmm)
 make_fallback(aten._addmm_activation, warn=False)
 
@@ -4663,6 +4937,18 @@ make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
 def copy(self, src, non_blocking=False):
     if not isinstance(src, ir.IRNode):
         src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
+    from torch.fx.experimental.proxy_tensor import _is_original_aten_mutation
+
+    node = V.graph.current_node
+    if is_strict_cuda_triton(self.get_device()) and _is_original_aten_mutation(node):
+        mutation = node.meta.get("original_aten_mutation")
+        native = mutation[0] if isinstance(mutation, tuple) else None
+        if isinstance(native, torch.Tensor):
+            destination = _cuda_consistent_alias_destination(
+                _cuda_native_typed_destinations(native, native)
+            )
+            if destination is not None:
+                return copy_(destination, src, non_blocking)
     x = src
     if self.get_device() != src.get_device():
         x = to_device(x, self.get_device())
@@ -5326,6 +5612,30 @@ def copy_strided(x, stride):
 def full(size, fill_value, **kwargs):
     if kwargs.get("dtype") is None:
         raise AssertionError("dtype should be handled by decomposition")
+    dtype = decode_dtype(kwargs["dtype"])
+    if dtype.is_complex and is_strict_cuda_triton(decode_device(kwargs.get("device"))):
+        value = (
+            complex(fill_value)
+            if isinstance(fill_value, (int, float, complex))
+            else None
+        )
+        real_dtype = (
+            torch.float64
+            if dtype == torch.complex128
+            else torch.float16
+            if dtype == torch.complex32
+            else torch.float32
+        )
+        component_kwargs = {**kwargs, "dtype": real_dtype}
+        real = full(
+            size, value.real if value is not None else fill_value, **component_kwargs
+        )
+        imag = full(size, value.imag if value is not None else 0.0, **component_kwargs)
+        parts = cat((unsqueeze(real, -1), unsqueeze(imag, -1)), -1)
+        parts = ir.ExternKernel.require_contiguous(parts)
+        return TensorBox.create(
+            ir.ComplexView.create(aten.view_as_complex.default, parts)
+        )
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
@@ -9704,6 +10014,29 @@ fallback_sum = fallback_handler(aten.sum.dim_IntList, add_to_fallback_set=False)
 
 @register_lowering([aten.sum, prims.sum])
 def sum_(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        config.strict_reduction
+        and is_strict_cuda_triton(x.get_device())
+        and x.get_dtype()
+        in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+        and (
+            dtype is None
+            or dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+        )
+    ):
+        from torch._native.registry import native_decomp_table
+
+        if aten.sum.dim_IntList in native_decomp_table(
+            overrides_only=True
+        ) and _strict_reduction_layout_eligible(axis, dtype):
+            fn = make_reduction(
+                "sum", override_return_dtype=dtype, strict_reduction=True
+            )
+            return fn(x, axis, keepdims, dtype=dtype)
+
+        from .kernel.cuda_native_sum import cuda_native_sum
+
+        return cuda_native_sum(x, axis, keepdims, dtype)
     strict_reduction = _strict_reduction_layout_eligible(axis, dtype)
     if (
         config.strict_reduction
@@ -9711,9 +10044,20 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         and x.get_device().type == "cuda"
         and torch.version.hip is None
         and (x.get_dtype().is_floating_point or x.get_dtype().is_complex)
+        and (dtype is None or dtype.is_floating_point or dtype.is_complex)
     ):
-        # Broadcast gradients also reduce outer and multiple dimensions. Until
-        # their eager reduction order is implemented, preserve it with ATen.
+        if (
+            dtype is None
+            or dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+        ) and x.get_dtype() in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+        ):
+            from .kernel.cuda_native_sum import cuda_native_sum
+
+            return cuda_native_sum(x, axis, keepdims, dtype)
         node = V.graph.current_node
         if (
             node is not None
@@ -10280,146 +10624,178 @@ register_lowering(aten.sub.Scalar, type_promotion_kind=None)(
 )
 
 
-@register_lowering(aten.addcmul, broadcast=True)
-def addcmul(self, tensor1, tensor2, *, value=1):
-    """
-    Computes self + value * tensor1 * tensor2 using FMA for better precision.
-
-    Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
-    This is computed as: fma(value, tensor1 * tensor2, self)
-
-    Note: FMA is used for floating-point types on CUDA and ROCm (via tl.fma). For
-    integer types we fall back to regular arithmetic since FMA doesn't support integers.
-
-    For floating-point types, we use mul_rn (round-to-nearest multiplication)
-    to force rounding of the product before the FMA. This prevents Triton's
-    compiler from fusing the multiplication with the FMA, matching eager's
-    rounding behavior. On ROCm, mul_rn falls back to regular multiplication since
-    libdevice.mul_rn is not available; the FMA itself (tl.fma) is still used.
-    """
+def _addc_pointwise(self, tensor1, tensor2, value, multiply):
     dtype = get_promoted_dtype(
         self,
         tensor1,
         tensor2,
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        type_promotion_kind=(
+            ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            if multiply
+            else ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        ),
     )
-
-    self_loader = self.make_loader()
-    t1_loader = tensor1.make_loader()
-    t2_loader = tensor2.make_loader()
-
+    loaders = tuple(inp.make_loader() for inp in (self, tensor1, tensor2))
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
         and device is not None
-        and device.type in ["cuda", "xpu"]
+        and device.type in ("cuda", "xpu")
     )
 
-    def inner_fn(idx):
-        self_val = self_loader(idx)
-        t1_val = t1_loader(idx)
-        t2_val = t2_loader(idx)
-
-        if value == 1 and use_fma:
-            return ops.fma(t1_val, t2_val, self_val)
-
-        # Match eager order: self + value * (tensor1 * tensor2)
-        # Compute tensor1 * tensor2 first
-        if use_fma:
-            # Use mul_rn to force rounding of the product, preventing Triton
-            # from fusing t1*t2 with the subsequent FMA
-            t1_times_t2 = ops.mul_rn(t1_val, t2_val)
-        else:
-            t1_times_t2 = ops.mul(t1_val, t2_val)
-
-        # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
-        if isinstance(value, sympy.Basic):
-            value_expr = ops.index_expr(value, dtype)
-        else:
-            value_expr = ops.constant(value, dtype)
-
-        if use_fma:
-            # Use FMA for floating-point types for better precision
-            return ops.fma(value_expr, t1_times_t2, self_val)
-        else:
-            # Fall back to regular arithmetic for integer types
-            return ops.add(self_val, ops.mul(value_expr, t1_times_t2))
+    def inner_fn(index):
+        accumulator, a, b = (load(index) for load in loaders)
+        if multiply and use_fma and value == 1:
+            return ops.fma(a, b, accumulator)
+        operation = (
+            (ops.mul_rn if multiply else ops.div_rn)
+            if use_fma
+            else (ops.mul if multiply else ops.truediv)
+        )
+        combined = operation(a, b)
+        if not multiply and value == 1:
+            return ops.add(accumulator, combined)
+        scale = (
+            ops.index_expr(value, dtype)
+            if isinstance(value, sympy.Basic)
+            else ops.constant(value, dtype)
+        )
+        result = (
+            ops.fma(scale, combined, accumulator)
+            if use_fma
+            else ops.add(accumulator, ops.mul(scale, combined))
+        )
+        if isinstance(value, sympy.Basic) and is_strict_cuda_triton(device):
+            # The unit scale uses a direct FMA for addcmul, and plain addition for addcdiv.
+            unit = (
+                ops.fma(a, b, accumulator)
+                if multiply and use_fma
+                else ops.add(accumulator, combined)
+            )
+            result = ops.where(ops.eq(scale, ops.constant(1, dtype)), unit, result)
+        return result
 
     return Pointwise.create(
-        device=self.get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=self.get_size(),
+        device=device, dtype=dtype, ranges=self.get_size(), inner_fn=inner_fn
     )
+
+
+@register_lowering(aten.addcmul, broadcast=True)
+def addcmul(self, tensor1, tensor2, *, value=1):
+    return _addc_pointwise(self, tensor1, tensor2, value, True)
 
 
 @register_lowering(aten.addcdiv, broadcast=True)
 def addcdiv(self, tensor1, tensor2, *, value=1):
-    """
-    Computes self + value * (tensor1 / tensor2) using FMA for better precision.
+    r"""Lower scaled division using native real or complex CUDA arithmetic."""
+    if self.get_dtype() in (
+        torch.complex64,
+        torch.complex128,
+    ) and is_strict_cuda_triton(self.get_device()):
+        ar, ai = complex_components(self)
+        br, bi = complex_components(tensor1)
+        cr, ci = complex_components(tensor2)
+        dtype = ar.get_dtype()
+        scale = complex(value)
 
-    Matches eager CUDA kernel order: self + value * (tensor1 / tensor2)
-    This is computed as: fma(value, tensor1 / tensor2, self)
+        def component(a, b, c, d, e, f, imaginary):
+            zero = ops.constant(0, dtype)
+            one = ops.constant(1, dtype)
+            inf = ops.constant(float("inf"), dtype)
+            largest = ops.maximum(ops.abs(e), ops.abs(f))
+            _, exponent = ops.frexp(largest)
+            exponent = ops.where(
+                ops.and_(ops.lt(ops.abs(largest), inf), ops.ne(largest, zero)),
+                ops.sub(exponent, ops.constant(1, torch.int32)),
+                ops.constant(0, torch.int32),
+            )
+            e, f = ops.ldexp(e, ops.neg(exponent)), ops.ldexp(f, ops.neg(exponent))
+            denominator = ops.fma(e, e, ops.mul(f, f))
+            real = ops.ldexp(
+                ops.div_rn(ops.fma(c, e, ops.mul(d, f)), denominator), ops.neg(exponent)
+            )
+            imag = ops.ldexp(
+                ops.div_rn(ops.fma(d, e, ops.neg(ops.mul(c, f))), denominator),
+                ops.neg(exponent),
+            )
+            both_nan = ops.and_(ops.isnan(real), ops.isnan(imag))
+            divide_zero = ops.and_(
+                ops.eq(denominator, zero),
+                ops.or_(ops.logical_not(ops.isnan(c)), ops.logical_not(ops.isnan(d))),
+            )
+            numerator_inf = ops.and_(
+                ops.or_(ops.isinf(c), ops.isinf(d)),
+                ops.and_(ops.lt(ops.abs(e), inf), ops.lt(ops.abs(f), inf)),
+            )
+            denominator_inf = ops.and_(
+                ops.isinf(largest),
+                ops.and_(ops.lt(ops.abs(c), inf), ops.lt(ops.abs(d), inf)),
+            )
+            cn = ops.copysign(ops.where(ops.isinf(c), one, zero), c)
+            dn = ops.copysign(ops.where(ops.isinf(d), one, zero), d)
+            en = ops.copysign(ops.where(ops.isinf(e), one, zero), e)
+            fn = ops.copysign(ops.where(ops.isinf(f), one, zero), f)
+            real = ops.where(
+                ops.and_(both_nan, divide_zero), ops.mul(ops.copysign(inf, e), c), real
+            )
+            imag = ops.where(
+                ops.and_(both_nan, divide_zero), ops.mul(ops.copysign(inf, e), d), imag
+            )
+            real = ops.where(
+                ops.and_(both_nan, numerator_inf),
+                ops.mul(inf, ops.fma(cn, e, ops.mul(dn, f))),
+                real,
+            )
+            imag = ops.where(
+                ops.and_(both_nan, numerator_inf),
+                ops.mul(inf, ops.fma(dn, e, ops.neg(ops.mul(cn, f)))),
+                imag,
+            )
+            real = ops.where(
+                ops.and_(both_nan, denominator_inf),
+                ops.mul(zero, ops.fma(c, en, ops.mul(d, fn))),
+                real,
+            )
+            imag = ops.where(
+                ops.and_(both_nan, denominator_inf),
+                ops.mul(zero, ops.fma(d, en, ops.neg(ops.mul(c, fn)))),
+                imag,
+            )
+            sr, si = ops.constant(scale.real, dtype), ops.constant(scale.imag, dtype)
+            product_real = ops.fma(sr, real, ops.neg(ops.mul(si, imag)))
+            product_imag = ops.fma(sr, imag, ops.mul(si, real))
+            recalculate = ops.and_(
+                ops.and_(ops.isnan(product_real), ops.isnan(product_imag)),
+                ops.or_(ops.isinf(real), ops.isinf(imag)),
+            )
+            rn = ops.copysign(ops.where(ops.isinf(real), one, zero), real)
+            im = ops.copysign(ops.where(ops.isinf(imag), one, zero), imag)
+            product_real = ops.where(
+                recalculate,
+                ops.mul(inf, ops.fma(sr, rn, ops.neg(ops.mul(si, im)))),
+                product_real,
+            )
+            product_imag = ops.where(
+                recalculate,
+                ops.mul(inf, ops.fma(sr, im, ops.mul(si, rn))),
+                product_imag,
+            )
+            return ops.add(b, product_imag) if imaginary else ops.add(a, product_real)
 
-    For value=1: self + tensor1 / tensor2 (no FMA needed, just add the division)
-    For value!=1: fma(value, div_rn(tensor1, tensor2), self)
-
-    Note: FMA is used for floating-point types on CUDA and ROCm (via tl.fma). For
-    integer types we fall back to regular arithmetic since FMA doesn't support integers.
-
-    We use div_rn (round-to-nearest division) to force proper rounding, preventing
-    Triton from fusing operations in ways that change the rounding behavior.
-    div_rn emits triton.language.div_rn on both CUDA and ROCm (unlike mul_rn, which
-    falls back to regular multiplication on ROCm where libdevice.mul_rn is unavailable).
-    """
-    dtype = get_promoted_dtype(
-        self,
-        tensor1,
-        tensor2,
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    )
-
-    self_loader = self.make_loader()
-    t1_loader = tensor1.make_loader()
-    t2_loader = tensor2.make_loader()
-
-    device = self.get_device()
-    use_fma = (
-        dtype.is_floating_point
-        and device is not None
-        and device.type in ["cuda", "xpu"]
-    )
-
-    def inner_fn(idx):
-        self_val = self_loader(idx)
-        t1_val = t1_loader(idx)
-        t2_val = t2_loader(idx)
-
-        if use_fma:
-            t1_div_t2 = ops.div_rn(t1_val, t2_val)
-        else:
-            t1_div_t2 = ops.truediv(t1_val, t2_val)
-
-        if value == 1:
-            return ops.add(self_val, t1_div_t2)
-
-        # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
-        if isinstance(value, sympy.Basic):
-            value_expr = ops.index_expr(value, dtype)
-        else:
-            value_expr = ops.constant(value, dtype)
-
-        if use_fma:
-            return ops.fma(value_expr, t1_div_t2, self_val)
-        else:
-            return ops.add(self_val, ops.mul(value_expr, t1_div_t2))
-
-    return Pointwise.create(
-        device=self.get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=self.get_size(),
-    )
+        inputs = (ar, ai, br, bi, cr, ci)
+        real = make_pointwise(
+            lambda a, b, c, d, e, f: component(a, b, c, d, e, f, False)
+        )(*inputs)
+        imag = make_pointwise(
+            lambda a, b, c, d, e, f: component(a, b, c, d, e, f, True)
+        )(*inputs)
+        parts = ir.ExternKernel.require_contiguous_strides(
+            cat((unsqueeze(real, -1), unsqueeze(imag, -1)), -1)
+        )
+        return TensorBox.create(
+            ir.ComplexView.create(aten.view_as_complex.default, parts)
+        )
+    return _addc_pointwise(self, tensor1, tensor2, value, False)
 
 
 _foreach_addcmul_scalar = register_foreach_pointwise(
@@ -10477,20 +10853,6 @@ logical_xor = register_pointwise(
 )
 
 
-def _strict_minmax(a, b, fn, dtype):
-    int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[dtype.itemsize]
-
-    def inner(x, y):
-        # Keep NaN selection in the logical dtype across shared opmath casts.
-        xb = ops.to_dtype_bitcast(x, int_dtype, src_dtype=dtype)
-        yb = ops.to_dtype_bitcast(y, int_dtype, src_dtype=dtype)
-        finite = ops.to_dtype_bitcast(fn(x, y), int_dtype, src_dtype=dtype)
-        bits = ops.where(ops.isnan(x), xb, ops.where(ops.isnan(y), yb, finite))
-        return ops.to_dtype_bitcast(bits, dtype, src_dtype=int_dtype)
-
-    return make_pointwise(inner)(a, b)
-
-
 def _register_minmax(aten_fn):
     pointwise = register_pointwise(aten_fn)
     prim = getattr(prims, aten_fn.__name__)
@@ -10524,36 +10886,13 @@ def _register_minmax(aten_fn):
                 and not scalar.get_size()
             ):
                 continue
-            scalar_dtype = scalar.get_dtype()
             scalar = to_dtype(scalar, dtype)
-            if not selects_nan:
-                scalar.realize()
-                a, b = scalar, tensor
-                break
-            int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[dtype.itemsize]
-            # Extract integer bits so the wrapper's .item() preserves scalar NaNs.
-            raw = clone(to_dtype_bitcast(scalar, int_dtype))
-            raw.realize()
-            if (
-                dtype == torch.float16
-                and scalar_dtype.is_floating_point
-                and scalar_dtype != dtype
-            ):
-                # scalar_value<Half> canonicalizes NaNs during the host cast.
-                raw = where(
-                    gt(bitwise_and(raw, 0x7FFF), 0x7C00),
-                    bitwise_or(bitwise_and(raw, -0x8000), 0x7E00),
-                    raw,
-                )
-            scalar = to_dtype_bitcast(raw, dtype)
-            # Eager's symmetric scalar kernel makes the CPU scalar win NaN ties.
+            scalar.realize()
             a, b = scalar, tensor
             break
         args, _ = transform_args(
             [a, b], {}, True, ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, False
         )
-        if selects_nan:
-            return _strict_minmax(args[0], args[1], fn, dtype)
         return make_pointwise(fn)(*args)
 
     # Keep the existing helper semantics for foreach and clamp callers.
@@ -10624,7 +10963,12 @@ def signbit(x):
     return make_pointwise(fn, override_return_dtype=torch.bool)(x)
 
 
-register_lowering(aten._neg_view)(neg)
+@register_lowering(aten._neg_view, type_promotion_kind=None)
+def neg_view(x):
+    if is_strict_cuda_triton(x.get_device()):
+        return TensorBox.create(ir.NegativeView(x))
+    return neg(x)
+
 
 register_pointwise(aten.le, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, override_return_dtype=torch.bool)
