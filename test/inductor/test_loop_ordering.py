@@ -2927,19 +2927,19 @@ class TestIndexInversion(TestCase):
 instantiate_device_type_tests(
     LoopOrderingTest,
     globals(),
-    except_for=("cpu", "privateuse1", "hpu"),
+    except_for="cpu",
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     MemoryCoalescingTest,
     globals(),
-    except_for=("cpu", "privateuse1", "hpu"),
+    except_for="cpu",
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestTiling,
     globals(),
-    except_for=("cpu", "privateuse1", "hpu"),
+    except_for="cpu",
     allow_xpu=True,
 )
 
