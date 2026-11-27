@@ -11,6 +11,11 @@ reruns. A matched row describes the executed comparisons, with kernel generation
 checked per test; it does not prove every signature used a generated kernel.
 Copies, representation views and evaluation dropout may match without a kernel;
 these comparisons have a separate matched_without_kernel status.
+
+The combined forward/backward cases report comparison counts for ordinary and
+edge samples separately. A run missing either family is unverified. Routine
+runs use representative OpInfo samples and small raw-bit vectors; set
+PYTORCH_ALL_SAMPLES=1 for complete reference inputs and large raw-bit sweeps.
 """
 
 import argparse
@@ -113,6 +118,8 @@ class CoverageRecord:
     kernel_required: bool = True
     mismatches: Counter = field(default_factory=Counter)
     filters: Counter = field(default_factory=Counter)
+    required_sample_kinds: tuple[str, ...] = ()
+    compared_by_sample_kind: Counter = field(default_factory=Counter)
     status: str = "not_run"
     reason: str = ""
 
@@ -129,6 +136,8 @@ class CoverageRecord:
             "kernel_required": self.kernel_required,
             "mismatches": dict(self.mismatches),
             "filters": dict(self.filters),
+            "required_sample_kinds": self.required_sample_kinds,
+            "compared_by_sample_kind": dict(self.compared_by_sample_kind),
         }
 
 
@@ -160,7 +169,12 @@ def record_result(record, result, test):
                                 str(args[0][1]),
                             )
                         elif name == "addSuccess":
-                            if record.expected_mismatch and record.mismatches:
+                            if any(
+                                not record.compared_by_sample_kind[kind]
+                                for kind in record.required_sample_kinds
+                            ):
+                                record.status = "unverified"
+                            elif record.expected_mismatch and record.mismatches:
                                 record.status = "known_mismatch"
                             elif (
                                 not record.expected_mismatch
