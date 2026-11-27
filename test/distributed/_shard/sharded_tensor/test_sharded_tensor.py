@@ -2726,9 +2726,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             local_shard.metadata.shard_offsets,
         )
         self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
-        self.assertEqual(
-            f"rank:0/{device_type}:0", str(local_shard.metadata.placement)
-        )
+        self.assertEqual(f"rank:0/{device_type}:0", str(local_shard.metadata.placement))
 
         # Verify global metadata.
         shards_metadata = st_base.metadata().shards_metadata
@@ -3352,9 +3350,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         wrong_dtype_shards = [
             sharded_tensor.Shard(
-                torch.ones(
-                    5, 5, device=f"{device_type}:{self.rank}", dtype=torch.int
-                ),
+                torch.ones(5, 5, device=f"{device_type}:{self.rank}", dtype=torch.int),
                 local_shard_metadata,
             )
         ]
@@ -3432,6 +3428,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_custom_op(self, device):
         device_type = torch.device(device).type
+
         @custom_sharded_op_impl(torch.asin)
         def my_sharded_asin(types, args, kwargs, process_group):
             return torch.asin(args[0].local_shards()[0].tensor)
