@@ -4,6 +4,7 @@
 #include <ATen/native/GridSamplerUtils.h>
 
 #include <limits>
+#include <type_traits>
 
 namespace at::native {
 
@@ -218,6 +219,9 @@ scalar_t grid_sampler_compute_source_index_set_grad(
   return coord;
 }
 
+// The bounds checks take int, like the sizes the coordinate helpers above
+// work with: checking a coordinate computed from an int-narrowed size against
+// the full extent would admit positions that the narrowed size produced.
 __forceinline__ __device__
 bool within_bounds_2d(int h, int w, int H, int W) {
   return h >= 0 && h < H && w >= 0 && w < W;
@@ -228,10 +232,18 @@ bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
 }
 
-template<typename scalar_t>
+// The helpers below keep integer coordinates and spatial sizes as int, like
+// the bounds checks, and strides as index_t, so the offset products are in the
+// kernel's index type: with int64 indexing a stride can exceed the 32-bit range
+// even when every coordinate fits in int. safe_add_2d and safe_add_3d deduce
+// index_t from NC_offset and memory_span only, because callers pass strides of
+// other integer types, e.g. the int64_t grad_input strides of the 3D backward
+// kernel.
+
+template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t get_value_bounded(
-    const scalar_t *data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
+    const scalar_t *data, scalar_t x, scalar_t y, int W, int H, index_t sW, index_t sH,
     GridSamplerPadding padding_mode,
     bool align_corners) {
 
@@ -250,7 +262,8 @@ scalar_t get_value_bounded(
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 void safe_add_2d(scalar_t *data, int h, int w,
-                 int sH, int sW, int H, int W,
+                 std::type_identity_t<index_t> sH, std::type_identity_t<index_t> sW,
+                 int H, int W,
                  scalar_t delta,
                  const index_t NC_offset,
                  const index_t memory_span) {
@@ -266,7 +279,8 @@ void safe_add_2d(scalar_t *data, int h, int w,
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 void safe_add_3d(scalar_t *data, int d, int h, int w,
-                 int sD, int sH, int sW, int D, int H, int W,
+                 std::type_identity_t<index_t> sD, std::type_identity_t<index_t> sH,
+                 std::type_identity_t<index_t> sW, int D, int H, int W,
                  scalar_t delta,
                  const index_t NC_offset,
                  const index_t memory_span) {
@@ -282,7 +296,7 @@ void safe_add_3d(scalar_t *data, int d, int h, int w,
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 void add_value_bounded(
-    scalar_t* data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
+    scalar_t* data, scalar_t x, scalar_t y, int W, int H, index_t sW, index_t sH,
     scalar_t delta,
     GridSamplerPadding padding_mode,
     bool align_corners,

@@ -1378,7 +1378,7 @@ const auto airy_ai_string = jiterator_stringify(
                 afn = afn * (z * z) + AFN[index];
             }
 
-            T afd = 0.0;
+            T afd = 1.0;
 
             for (uint8_t index = 0; index <= 8; index++) {
                 afd = afd * (z * z) + AFD[index];
@@ -1390,7 +1390,7 @@ const auto airy_ai_string = jiterator_stringify(
                 agn = agn * (z * z) + AGN[index];
             }
 
-            T agd = 0.0;
+            T agd = 1.0;
 
             for (uint8_t index = 0; index <= 10 - 1; index++) {
                 agd = agd * (z * z) + AGD[index];
@@ -1535,7 +1535,7 @@ const auto bessel_j0_string = jiterator_stringify(
                 rp = rp * (x * x) + RP[index];
             }
 
-            T rq = 0.0;
+            T rq = 1.0;
 
             for (uint8_t index = 0; index <= 7; index++) {
                 rq = rq * (x * x) + RQ[index];
@@ -1562,7 +1562,7 @@ const auto bessel_j0_string = jiterator_stringify(
             qp = qp * (T(25.0) / (x * x)) + QP[index];
         }
 
-        T qq = 0.0;
+        T qq = 1.0;
 
         for (uint8_t index = 0; index <= 6; index++) {
             qq = qq * (T(25.0) / (x * x)) + QQ[index];
@@ -1652,7 +1652,7 @@ const auto bessel_y0_string = bessel_j0_string + jiterator_stringify(
                 yp = yp * (x * x) + YP[index];
             }
 
-            T yq = 0.0;
+            T yq = 1.0;
 
             for (uint8_t index = 0; index <= 6; index++) {
                 yq = yq * (x * x) + YQ[index];
@@ -1679,7 +1679,7 @@ const auto bessel_y0_string = bessel_j0_string + jiterator_stringify(
             qp = qp * (T(25.0) / (x * x)) + QP[index];
         }
 
-        T qq = 0.0;
+        T qq = 1.0;
 
         for (uint8_t index = 0; index <= 6; index++) {
             qq = qq * (T(25.0) / (x * x)) + QQ[index];
@@ -1762,7 +1762,7 @@ const auto bessel_j1_string = jiterator_stringify(
                 rp = rp * (x * x) + RP[index];
             }
 
-            T rq = 0.0;
+            T rq = 1.0;
 
             for (uint8_t index = 0; index <= 7; index++) {
                 rq = rq * (x * x) + RQ[index];
@@ -1789,7 +1789,7 @@ const auto bessel_j1_string = jiterator_stringify(
             qp = qp * (T(5.0) / x * (T(5.0) / x)) + QP[index];
         }
 
-        T qq = 0.0;
+        T qq = 1.0;
 
         for (uint8_t index = 0; index <= 6; index++) {
             qq = qq * (T(5.0) / x * (T(5.0) / x)) + QQ[index];
@@ -1878,7 +1878,7 @@ const auto bessel_y1_string = bessel_j1_string + jiterator_stringify(
                 yp = yp * (x * x) + YP[index];
             }
 
-            T yq = 0.0;
+            T yq = 1.0;
 
             for (uint8_t index = 0; index <= 7; index++) {
                 yq = yq * (x * x) + YQ[index];
@@ -1905,7 +1905,7 @@ const auto bessel_y1_string = bessel_j1_string + jiterator_stringify(
             qp = qp * (T(5.0) / x * (T(5.0) / x)) + QP[index];
         }
 
-        T qq = 0.0;
+        T qq = 1.0;
 
         for (uint8_t index = 0; index <= 6; index++) {
             qq = qq * (T(5.0) / x * (T(5.0) / x)) + QQ[index];

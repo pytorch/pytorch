@@ -540,31 +540,37 @@ static PyObject* THPStorage_newSharedDevice(
 static PyObject* THPStorage_shareCudaDeprecated(
     PyObject* self,
     PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  TORCH_WARN_ONCE(
-      "UntypedStorage._share_cuda_ is deprecated, use _share_device_ instead.");
+  if (PyErr_WarnEx(
+          PyExc_UserWarning,
+          "_share_cuda_ is deprecated, use _share_device_ instead.",
+          1) < 0) {
+    return nullptr;
+  }
   return THPStorage_shareDevice(self, noargs);
-  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_newSharedCudaDeprecated(
     PyObject* unused,
     PyObject* args) {
-  HANDLE_TH_ERRORS
-  TORCH_WARN_ONCE(
-      "UntypedStorage._new_shared_cuda is deprecated, use _new_shared_device instead.");
+  if (PyErr_WarnEx(
+          PyExc_UserWarning,
+          "_new_shared_cuda is deprecated, use _new_shared_device instead.",
+          1) < 0) {
+    return nullptr;
+  }
   return THPStorage_newSharedDevice(unused, args);
-  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_releaseIPCCounterCudaDeprecated(
     PyObject* unused,
     PyObject* args) {
-  HANDLE_TH_ERRORS
-  TORCH_WARN_ONCE(
-      "UntypedStorage._release_ipc_counter_cuda is deprecated, use _release_ipc_counter_device instead.");
+  if (PyErr_WarnEx(
+          PyExc_UserWarning,
+          "_release_ipc_counter_cuda is deprecated, use _release_ipc_counter_device instead.",
+          1) < 0) {
+    return nullptr;
+  }
   return THPStorage_releaseIPCCounter(unused, args);
-  END_HANDLE_TH_ERRORS
 }
 
 // Returns an object that holds a "weak" pointer to the c10::StorageImpl.  This

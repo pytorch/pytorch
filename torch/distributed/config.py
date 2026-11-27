@@ -12,7 +12,6 @@ from torch.utils._config_module import Config, install_config_module
 
 __all__ = [
     "compile_on_one_rank",
-    "use_torchcomms",
     "pipeline_per_edge_p2p",
 ]
 
@@ -25,22 +24,13 @@ compile_on_one_rank: bool = Config(
     deprecation_message="use torch.compiler.config.compile_on_one_rank instead",
 )
 
-# When enabled, uses TorchComms for communication backend instead of the
-# traditional ProcessGroup backends (NCCL, Gloo, etc.).
-use_torchcomms: bool = Config(
-    default=False,
-    env_name_default="TORCH_DISTRIBUTED_USE_TORCHCOMMS",
-)
-
 # When enabled, each adjacent directed physical-rank edge uses a separate
 # communicator. Opposite directions and distinct rank pairs are isolated;
 # logical-stage edges mapped to the same directed rank pair share one FIFO.
 #
-# This flag force-enables the behavior; it is auto-enabled when TorchComms is in
-# use regardless of this flag (see PipelineStage), so it mainly matters for the
-# non-TorchComms backends. Schedule initialization creates one child
-# communicator per directed physical-rank edge, then preconnects its
-# send/receive path before execution or graph capture.
+# Schedule initialization creates one child communicator per directed
+# physical-rank edge, then preconnects its send/receive path before execution
+# or graph capture.
 # Setup cost is proportional to the stage assignment's disjoint edge rounds;
 # children are cached until full process-group teardown. A lazy NCCL parent still
 # creates eager two-rank split children; pipeline P2P submits their operations in
