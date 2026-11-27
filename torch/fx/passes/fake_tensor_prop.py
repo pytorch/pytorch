@@ -10,7 +10,12 @@ from torch._subclasses.fake_tensor import (
 )
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
-from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
+from torch.fx.experimental.proxy_tensor import (
+    _original_aten_mutation_storages,
+    _preserve_original_aten_mutation_storage,
+    py_sym_types,
+    snapshot_fake,
+)
 from torch.fx.node import map_aggregate
 from torch.utils._ordered_set import OrderedSet
 
@@ -44,6 +49,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         self._mode = mode
         mode.epoch += 1
         mode.reset_nt_tensor_id_counter()
+        self._native_mutation_storages: set[int] = set()
         self.seen_subgraphs: OrderedSet[str] = OrderedSet()
 
     def run_node(self, n: Node) -> Any:
@@ -84,7 +90,12 @@ class FakeTensorProp(torch.fx.Interpreter):
                 getattr(self.module, n.args[0].target), mode=self._mode
             ).propagate(*example_inputs)
 
+        old_value = n.meta.get("val")
+        args_kwargs = self.fetch_args_kwargs_from_env(n)
         result = super().run_node(n)
+        _preserve_original_aten_mutation_storage(
+            n, old_value, result, self._native_mutation_storages, args_kwargs
+        )
         rebind_unbacked(self._mode.shape_env, n, result)
 
         def extract_val(obj: Any) -> Any:
@@ -120,6 +131,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         # In-place ops like shallow_copy_data_ can mutate fake_device on
         # input FakeTensors during propagation. Save and restore so the
         # caller's inputs are not permanently corrupted.
+        self._native_mutation_storages = _original_aten_mutation_storages(self.graph)
         saved_devices = [
             (a, device)
             for a in args
