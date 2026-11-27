@@ -36,13 +36,13 @@ from torch._inductor.runtime.runtime_utils import assert_tensor_metadata
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.inductor_utils import patch_custom_fallback_pass
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._triton import has_triton, has_triton_for_device
@@ -890,7 +890,7 @@ class FxirTestCase(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
 
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
-    def test_debug(self, device, mock_output_code):
+    def test_debug(self, mock_output_code, device):
         # Compile in debug mode.
         args = [torch.randn(11, device=device) for _ in range(2)]
         self._compile_and_check(torch.sub, args)
