@@ -4969,6 +4969,19 @@ def copy(self, src, non_blocking=False):
 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=None):
+    if x.get_dtype().is_complex and is_strict_cuda_triton(x.get_device()):
+        real, imag = complex_components(x)
+        parts = cat((unsqueeze(real, -1), unsqueeze(imag, -1)), -1)
+        with V.graph.fake_mode:
+            example = ir.ir_node_to_tensor(x).clone(
+                memory_format=memory_format or torch.preserve_format
+            )
+            parts_example = torch.view_as_real(example)
+        parts = constrain_to_fake_tensor(parts, parts_example)
+        return TensorBox.create(
+            ir.ComplexView.create(aten.view_as_complex.default, parts)
+        )
+
     # Don't materialize the layout here based on memory_format,
     # as we want to give the scheduler opportunity to perform layout optimization.
     # Let the downstream op handle the input stride as needed.
@@ -10312,6 +10325,27 @@ add = register_pointwise(
 )
 
 
+@register_lowering(aten.complex, type_promotion_kind=None)
+def complex_tensor(real, imag):
+    if not is_strict_cuda_triton(real.get_device()):
+        return fallback_handler(aten.complex.default, add_to_fallback_set=False)(
+            real, imag
+        )
+    real, imag = broadcast_tensors(real, imag)
+    parts = ir.ExternKernel.require_contiguous_strides(
+        cat((unsqueeze(real, -1), unsqueeze(imag, -1)), -1)
+    )
+    result = TensorBox.create(
+        ir.ComplexView.create(aten.view_as_complex.default, parts)
+    )
+    node = V.graph.current_node
+    return (
+        constrain_to_fake_tensor(result, node.meta.get("val"))
+        if node is not None
+        else result
+    )
+
+
 def complex_components(x):
     x.realize()
     conjugate = V.graph.is_conjugate_buffer(x.get_name())
@@ -10323,6 +10357,64 @@ def complex_components(x):
 
 
 pointwise_add = add
+
+
+@register_lowering(aten.add.Tensor, type_promotion_kind=None)
+def add(a, b, *, alpha=1):
+    if (
+        isinstance(a, TensorBox)
+        and isinstance(b, TensorBox)
+        and a.get_dtype() in (torch.complex32, torch.complex64, torch.complex128)
+        and b.get_dtype() == a.get_dtype()
+        and is_strict_cuda_triton(a.get_device())
+    ):
+        ar, ai = complex_components(a)
+        br, bi = complex_components(b)
+        component_dtype = ar.get_dtype()
+        dtype = torch.float32 if component_dtype == torch.float16 else component_dtype
+        ar, ai, br, bi = broadcast_tensors(
+            *(to_dtype(x, dtype) for x in (ar, ai, br, bi))
+        )
+        scale = complex(alpha)
+
+        def real(x, y, z):
+            product = ops.fma(
+                ops.constant(scale.real, dtype),
+                y,
+                ops.neg(ops.mul(ops.constant(scale.imag, dtype), z)),
+            )
+            return ops.add(x, product)
+
+        def imag(x, y, z):
+            product = ops.fma(
+                ops.constant(scale.real, dtype),
+                y,
+                ops.mul(ops.constant(scale.imag, dtype), z),
+            )
+            return ops.add(x, product)
+
+        parts = cat(
+            (
+                unsqueeze(
+                    to_dtype(make_pointwise(real)(ar, br, bi), component_dtype), -1
+                ),
+                unsqueeze(
+                    to_dtype(make_pointwise(imag)(ai, bi, br), component_dtype), -1
+                ),
+            ),
+            -1,
+        )
+        parts = ir.ExternKernel.require_contiguous_strides(parts)
+        result = TensorBox.create(
+            ir.ComplexView.create(aten.view_as_complex.default, parts)
+        )
+        node = V.graph.current_node
+        return (
+            constrain_to_fake_tensor(result, node.meta.get("val"))
+            if node is not None
+            else result
+        )
+    return pointwise_add(a, b, alpha=alpha)
 
 
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)

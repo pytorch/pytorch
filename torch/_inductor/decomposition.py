@@ -75,6 +75,7 @@ from torch._refs import (
     native_layer_norm as decomp_native_layer_norm,
     roll as decomp_roll,
     sgn as decomp_sgn,
+    sinc as decomp_sinc,
     xlogy as decomp_xlogy,
 )
 from torch._refs.nn.functional import (
@@ -839,7 +840,50 @@ def clamp_max(x: torch.Tensor, max: torch.types.Number | torch.Tensor) -> torch.
 @register_decomposition([aten.silu])
 @pw_cast_for_opmath
 def silu(x: torch.Tensor) -> torch.Tensor:
+    if is_strict_cuda_triton(x.device) and x.dtype in (
+        torch.complex64,
+        torch.complex128,
+    ):
+        x = x.resolve_conj().resolve_neg()
+        er, ei = _cuda_complex_exp_neg_parts(x)
+        return torch.complex(*_cuda_complex_c10_divide(x.real, x.imag, 1 + er, 0 + ei))
     return x / (1 + x.neg().exp())
+
+
+def _cuda_complex_exp_neg_parts(x):
+    """Thrust's complex exp(-x), including its scaled overflow interval."""
+    xr, yi = -x.real, -x.imag
+    exp_x, cos_y, sin_y = torch.exp(xr), torch.cos(yi), torch.sin(yi)
+    if xr.dtype == torch.float64:
+        int_dtype, mantissa, bias = torch.int64, 52, 1023
+        k, kln2, lower, upper = 1799, 1246.97177782734161156, 0x40862E42, 0x4096B8E4
+        word = (xr.view(int_dtype) >> 32) & 0xFFFFFFFF
+    else:
+        int_dtype, mantissa, bias = torch.int32, 23, 127
+        k, kln2, lower, upper = 235, 162.88958740, 0x42B17218, 0x43400074
+        word = xr.view(int_dtype).to(torch.int64) & 0xFFFFFFFF
+    scale_region = (word >= lower) & (word <= upper)
+    reduced_bits = torch.exp(xr - kln2).view(int_dtype)
+    shift = (reduced_bits >> mantissa) - 2 * bias + k
+    scaled = ((reduced_bits & ((1 << mantissa) - 1)) | (2 * bias << mantissa)).view(
+        xr.dtype
+    )
+    half = torch.div(shift, 2, rounding_mode="trunc")
+    scale1 = ((bias + half) << mantissa).to(int_dtype).view(xr.dtype)
+    scale2 = ((bias + shift - half) << mantissa).to(int_dtype).view(xr.dtype)
+    er = torch.where(scale_region, cos_y * scaled * scale1 * scale2, exp_x * cos_y)
+    ei = torch.where(scale_region, sin_y * scaled * scale1 * scale2, exp_x * sin_y)
+    # nvcc cancels the input negation in Thrust's y - y expression.
+    ynan = x.imag - x.imag
+    nonfinite_y = ~torch.isfinite(yi)
+    er = torch.where(
+        nonfinite_y,
+        torch.where(torch.isinf(xr), torch.where(xr < 0, 0.0, xr), ynan),
+        er,
+    )
+    ei = torch.where(nonfinite_y, torch.where(torch.isneginf(xr), 0.0, ynan), ei)
+    er, ei = torch.where(xr == 0, cos_y, er), torch.where(xr == 0, sin_y, ei)
+    return torch.where(yi == 0, exp_x, er), torch.where(yi == 0, yi, ei)
 
 
 @register_decomposition(aten.gelu.default)
@@ -1495,12 +1539,218 @@ def silu_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor
     one = torch.ones((), dtype=self.dtype, device=self.device)
     factor = torch.addcmul(one, self, 1 - s)
     product = grad_output * s
-    # CUDA float64 gives the final derivative factor priority over an upstream NaN.
-    return (factor * product if dtype == torch.float64 else product * factor).to(dtype)
+    return (product * factor).to(dtype)
+
+
+def _cuda_complex_c10_divide(a, b, c, d):
+    """c10::complex division used by CUDA SiLU (distinct from LLVM division)."""
+    abs_c, abs_d = c.abs(), d.abs()
+    ratio_c, ratio_d = d / c, c / d
+    scale_c = 1 / inductor_prims.fma(ratio_c, d, c)
+    scale_d = 1 / inductor_prims.fma(ratio_d, c, d)
+    real_c = inductor_prims.fma(ratio_c, b, a) * scale_c
+    imag_c = inductor_prims.fma(ratio_c, -a, b) * scale_c
+    real_d = inductor_prims.fma(ratio_d, a, b) * scale_d
+    imag_d = inductor_prims.fma(ratio_d, b, -a) * scale_d
+    real = torch.where(abs_c >= abs_d, real_c, real_d)
+    imag = torch.where(abs_c >= abs_d, imag_c, imag_d)
+    both_zero = (abs_c == 0) & (abs_d == 0)
+    return torch.where(both_zero, a / abs_c, real), torch.where(
+        both_zero, b / abs_d, imag
+    )
+
+
+def _cuda_complex_mul_recovery(ar, ai, br, bi, real, imag):
+    """Apply the IEEE recovery in ATen's cuda/llvm_complex.cpp multiplication."""
+    ac, bd, ad, bc = ar * br, ai * bi, ar * bi, ai * br
+    both_nan = torch.isnan(real) & torch.isnan(imag)
+    left_inf = torch.isinf(ar) | torch.isinf(ai)
+    right_inf = torch.isinf(br) | torch.isinf(bi)
+    overflow = torch.isinf(ac) | torch.isinf(bd) | torch.isinf(ad) | torch.isinf(bc)
+    zero, one = torch.zeros_like(ar), torch.ones_like(ar)
+    a = torch.where(
+        left_inf, torch.copysign(torch.where(torch.isinf(ar), one, zero), ar), ar
+    )
+    b = torch.where(
+        left_inf, torch.copysign(torch.where(torch.isinf(ai), one, zero), ai), ai
+    )
+    c = torch.where(left_inf & torch.isnan(br), torch.copysign(zero, br), br)
+    d = torch.where(left_inf & torch.isnan(bi), torch.copysign(zero, bi), bi)
+    c = torch.where(
+        right_inf, torch.copysign(torch.where(torch.isinf(c), one, zero), c), c
+    )
+    d = torch.where(
+        right_inf, torch.copysign(torch.where(torch.isinf(d), one, zero), d), d
+    )
+    a = torch.where(right_inf & torch.isnan(a), torch.copysign(zero, a), a)
+    b = torch.where(right_inf & torch.isnan(b), torch.copysign(zero, b), b)
+    finite_overflow = ~(left_inf | right_inf) & overflow
+    a = torch.where(finite_overflow & torch.isnan(a), torch.copysign(zero, a), a)
+    b = torch.where(finite_overflow & torch.isnan(b), torch.copysign(zero, b), b)
+    c = torch.where(finite_overflow & torch.isnan(c), torch.copysign(zero, c), c)
+    d = torch.where(finite_overflow & torch.isnan(d), torch.copysign(zero, d), d)
+    recalculate = both_nan & (left_inf | right_inf | overflow)
+    infinity = torch.full_like(ar, float("inf"))
+    return (
+        torch.where(recalculate, infinity * (a * c - b * d), real),
+        torch.where(recalculate, infinity * (a * d + b * c), imag),
+    )
+
+
+def _cuda_complex_divide(ar, ai, br, bi):
+    """Scaled division and IEEE recovery from ATen's cuda/llvm_complex.cpp."""
+    magnitude = torch.fmax(br.abs(), bi.abs())
+    _, exponent = torch.frexp(magnitude)
+    shift = torch.where(torch.isfinite(magnitude) & (magnitude != 0), exponent - 1, 0)
+    br, bi = torch.ldexp(br, -shift), torch.ldexp(bi, -shift)
+    denominator = inductor_prims.fma(br, br, bi * bi)
+    real = torch.ldexp(inductor_prims.fma(ar, br, ai * bi) / denominator, -shift)
+    imag = torch.ldexp(inductor_prims.fma(ai, br, -ar * bi) / denominator, -shift)
+    both_nan = torch.isnan(real) & torch.isnan(imag)
+    zero_divisor = both_nan & (denominator == 0) & (~torch.isnan(ar) | ~torch.isnan(ai))
+    infinite_numerator = (
+        both_nan
+        & ~zero_divisor
+        & (torch.isinf(ar) | torch.isinf(ai))
+        & torch.isfinite(br)
+        & torch.isfinite(bi)
+    )
+    infinite_divisor = (
+        both_nan
+        & ~zero_divisor
+        & ~infinite_numerator
+        & torch.isinf(magnitude)
+        & torch.isfinite(ar)
+        & torch.isfinite(ai)
+    )
+    zero, one, infinity = (
+        torch.zeros_like(ar),
+        torch.ones_like(ar),
+        torch.full_like(ar, float("inf")),
+    )
+    a = torch.copysign(torch.where(torch.isinf(ar), one, zero), ar)
+    b = torch.copysign(torch.where(torch.isinf(ai), one, zero), ai)
+    c = torch.copysign(torch.where(torch.isinf(br), one, zero), br)
+    d = torch.copysign(torch.where(torch.isinf(bi), one, zero), bi)
+    real = torch.where(zero_divisor, torch.copysign(infinity, br) * ar, real)
+    imag = torch.where(zero_divisor, torch.copysign(infinity, br) * ai, imag)
+    real = torch.where(infinite_numerator, infinity * (a * br + b * bi), real)
+    imag = torch.where(infinite_numerator, infinity * (b * br - a * bi), imag)
+    return (
+        torch.where(infinite_divisor, zero * (ar * c + ai * d), real),
+        torch.where(infinite_divisor, zero * (ai * c - ar * d), imag),
+    )
+
+
+@register_decomposition(aten.sinc)
+def sinc(x):
+    if not (
+        is_strict_cuda_triton(x.device)
+        and x.dtype in (torch.complex64, torch.complex128)
+    ):
+        return decomp_sinc(x)
+    x = x.resolve_conj().resolve_neg()
+    real, imag = x.real, x.imag
+    pi, zero = torch.full_like(real, math.pi), torch.zeros_like(real)
+    product_real, product_imag = _cuda_complex_mul_recovery(
+        pi,
+        zero,
+        real,
+        imag,
+        inductor_prims.fma(pi, real, -zero * imag),
+        inductor_prims.fma(pi, imag, zero * real),
+    )
+    # Native complex sin rotates sinh(-imag, real), including its nonfinite cases.
+    sinh_real = torch.sinh(-product_imag) * torch.cos(product_real)
+    sinh_imag = torch.cosh(-product_imag) * torch.sin(product_real)
+    special = (torch.isinf(product_imag) | (product_imag == 0)) & ~torch.isfinite(
+        product_real
+    )
+    # ATen's NAN macro is float32 0x7fffffff, widened for complex128.
+    integer_dtype = torch.int64 if real.dtype == torch.float64 else torch.int32
+    nan_bits = 0x7FFFFFFFE0000000 if real.dtype == torch.float64 else 0x7FFFFFFF
+    native_nan = torch.full_like(real, nan_bits, dtype=integer_dtype).view(real.dtype)
+    sinh_real = torch.where(special, -product_imag, sinh_real)
+    sinh_imag = torch.where(special, native_nan, sinh_imag)
+    preserve_zero = (product_real == 0) & ~torch.isfinite(product_imag) & ~special
+    sinh_real = torch.where(preserve_zero, -product_imag, sinh_real)
+    sinh_imag = torch.where(preserve_zero, product_real, sinh_imag)
+    result_real, result_imag = _cuda_complex_divide(
+        sinh_imag, -sinh_real, product_real, product_imag
+    )
+    is_zero = (real == 0) & (imag == 0)
+    return torch.complex(
+        torch.where(is_zero, 1, result_real), torch.where(is_zero, 0, result_imag)
+    )
+
+
+def _cuda_complex_activation_backward_math(
+    grad, output, fused, derivative_fused, *, sigmoid
+):
+    """Native complex activation arithmetic; masks describe its iteration schedule."""
+    gr, gi, yr, yi = grad.real, grad.imag, output.real, output.imag
+
+    def multiply(ar, ai, br, bi, mask, *, gradient=False):
+        ac, bd, ad, bc = ar * br, ai * bi, ar * bi, ai * br
+        square = not sigmoid and not gradient
+        fr = (
+            inductor_prims.fma(ar, br, -bd)
+            if gradient
+            else inductor_prims.fma(br, ar, -bd)
+        )
+        fi = (
+            inductor_prims.fma(ai, br, ad)
+            if gradient
+            else inductor_prims.fma(bi, ar, bc)
+        )
+        tail_real, tail_imag = ac - bd, ad + bc
+        real = torch.where(mask, fr, tail_real)
+        imag = tail_imag if square else torch.where(mask, fi, tail_imag)
+        return _cuda_complex_mul_recovery(ar, ai, br, bi, real, imag)
+
+    if sigmoid:
+        dr, di = multiply(1 - yr, 0 - yi, yr, yi, derivative_fused)
+    else:
+        sr, si = multiply(yr, yi, yr, yi, derivative_fused)
+        dr, di = 1 - sr, 0 - si
+    real, imag = multiply(gr, gi, dr, -di, fused, gradient=True)
+    return torch.complex(real, imag)
+
+
+def _strict_complex_activation_backward(grad, output, *, sigmoid):
+    if not (
+        is_strict_cuda_triton(output.device)
+        and grad.device == output.device
+        and grad.dtype == output.dtype
+        and output.dtype in (torch.complex64, torch.complex128)
+    ):
+        return None
+    if has_free_unbacked_symbols(
+        (grad.shape, grad.stride(), output.shape, output.stride())
+    ):
+        return NotImplemented
+    grad = grad.resolve_conj().resolve_neg()
+    output = output.resolve_conj().resolve_neg()
+    fused, _ = inductor_prims.cuda_pointwise_iteration(
+        [grad, output], False, vectorized_tail=True, unroll_prefix=128
+    )
+    derivative_fused = fused
+    if output.dtype == torch.complex64:
+        derivative_fused, _ = inductor_prims.cuda_pointwise_iteration(
+            [grad, output], False, vectorized_tail=True, unroll_prefix=256
+        )
+    return _cuda_complex_activation_backward_math(
+        grad, output, fused, derivative_fused, sigmoid=sigmoid
+    )
 
 
 @register_decomposition(aten.tanh_backward.default)
 def tanh_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
+    complex_result = _strict_complex_activation_backward(
+        grad_output, output, sigmoid=False
+    )
+    if complex_result is not None:
+        return complex_result
     inputs = _strict_pointwise_inputs(grad_output, output)
     if inputs is None:
         return decomp_tanh_backward(grad_output, output)
@@ -1516,6 +1766,11 @@ def tanh_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tens
 
 @register_decomposition(aten.sigmoid_backward.default)
 def sigmoid_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
+    complex_result = _strict_complex_activation_backward(
+        grad_output, output, sigmoid=True
+    )
+    if complex_result is not None:
+        return complex_result
     inputs = _strict_pointwise_inputs(grad_output, output)
     if inputs is None:
         return decomp_sigmoid_backward(grad_output, output)
