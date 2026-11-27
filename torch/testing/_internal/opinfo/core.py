@@ -2402,10 +2402,14 @@ def generate_elementwise_binary_noncontiguous_tensors(
     rhs = make_arg((1026,), noncontiguous=True, **op.rhs_make_tensor_kwargs)
 
     yield SampleInput(
-        lhs.clone(), args=(rhs.clone(),), kwargs=op.sample_kwargs(device, dtype, lhs)[0]
+        lhs.clone().requires_grad_(requires_grad),
+        args=(rhs.clone().requires_grad_(requires_grad),),
+        kwargs=op.sample_kwargs(device, dtype, lhs)[0],
     )
     yield SampleInput(
-        lhs.contiguous(), args=(rhs,), kwargs=op.sample_kwargs(device, dtype, lhs)[0]
+        lhs.contiguous().requires_grad_(requires_grad),
+        args=(rhs,),
+        kwargs=op.sample_kwargs(device, dtype, lhs)[0],
     )
 
     # Transposed
@@ -2424,18 +2428,18 @@ def generate_elementwise_binary_noncontiguous_tensors(
         rhs = make_arg(shape, **op.rhs_make_tensor_kwargs)
 
         lhs_non_contig = torch.empty(shape + (2,), device=device, dtype=dtype)[..., 0]
-        lhs_non_contig.copy_(lhs)
+        lhs_non_contig.copy_(lhs).requires_grad_(requires_grad)
 
         rhs_non_contig = torch.empty(shape + (2,), device=device, dtype=dtype)[..., 0]
-        rhs_non_contig.copy_(rhs)
+        rhs_non_contig.copy_(rhs).requires_grad_(requires_grad)
 
         yield SampleInput(
-            lhs_non_contig.clone(),
-            args=(rhs_non_contig.clone(),),
+            lhs_non_contig.clone().requires_grad_(requires_grad),
+            args=(rhs_non_contig.clone().requires_grad_(requires_grad),),
             kwargs=op.sample_kwargs(device, dtype, lhs)[0],
         )
         yield SampleInput(
-            lhs_non_contig.contiguous(),
+            lhs_non_contig.contiguous().requires_grad_(requires_grad),
             args=(rhs_non_contig,),
             kwargs=op.sample_kwargs(device, dtype, lhs)[0],
         )
@@ -2449,12 +2453,12 @@ def generate_elementwise_binary_noncontiguous_tensors(
     rhs_non_contig = rhs[:, 1, ...]
 
     yield SampleInput(
-        lhs_non_contig.clone(),
-        args=(rhs_non_contig.clone(),),
+        lhs_non_contig.clone().requires_grad_(requires_grad),
+        args=(rhs_non_contig.clone().requires_grad_(requires_grad),),
         kwargs=op.sample_kwargs(device, dtype, lhs)[0],
     )
     yield SampleInput(
-        lhs_non_contig.contiguous(),
+        lhs_non_contig.contiguous().requires_grad_(requires_grad),
         args=(rhs_non_contig,),
         kwargs=op.sample_kwargs(device, dtype, lhs)[0],
     )
