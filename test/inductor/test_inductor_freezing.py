@@ -4,7 +4,6 @@ import copy
 import functools
 import importlib
 import os
-import sys
 import unittest
 import weakref
 
@@ -30,10 +29,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW_GRADCHECK,
 )
 
-
-# Make the helper files in test/ importable
-pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.append(pytorch_test_dir)
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
@@ -674,7 +669,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
                     convolution, [2, 2, 2, 2], 0.0
                 )
-                # as_strided inputs are depend on input's size and stride.
                 as_strided = torch.ops.aten.as_strided.default(
                     constant_pad_nd, [8, 384, 2, 20, 12], [153600, 400, 160, 1, 20]
                 )
@@ -1004,8 +998,6 @@ class OptimizeForInferenceAcceleratorTemplate(TestCase):
 
     @skipIf(not HAS_TRITON, "requires triton")
     def test_param_deallocated(self, device):
-        # TODO: cpu path keeps an extra copy of graph around somewhere,
-        # memory not as important for cpu
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
