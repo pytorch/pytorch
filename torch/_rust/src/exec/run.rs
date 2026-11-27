@@ -979,6 +979,9 @@ impl Act<'_> {
     unsafe fn after_origin(&mut self, b: BlockId, result: Outcome) -> Result<BlockId, Outcome> {
         match result {
             Outcome::Leave(outs) => {
+                if super::calls::record::on() {
+                    super::calls::record::again_outs((self.p as *const Prepared as usize, b.0), self.f, &outs);
+                }
                 let next = self.take_exit(b, &outs, None);
                 for o in outs {
                     ffi::Py_XDECREF(o);
@@ -1094,6 +1097,9 @@ impl Act<'_> {
     // An exception is set; find where the segment covering body[at] of the
     // version sends it, and enter the handler if it's in this Cfg.
     unsafe fn unwind(&mut self, b: BlockId, ver: usize, at: usize, how: Exc) -> Unwound {
+        if self.shadow != 0 {
+            super::calls::record::unseen("an exception was raised under the body: which handler takes it is a later unit");
+        }
         if how == Exc::Error {
             // A failure replaces the pending exception, which is what CPython
             // does too.
@@ -1173,6 +1179,10 @@ impl Act<'_> {
                 rec.at(Site::Block(b));
             }
             let mut shadow: Option<Held> = None;
+            // TORCH_RUST_CALLS=shadow: the list recorded of this place ran on
+            // this arrival's operands, and awaits what the block makes.
+            let mut again: Option<super::calls::record::Again> = None;
+            let place = (self.p as *const Prepared as usize, b.0);
             let (mut vi, first) = match resume.take() {
                 Some(r) => r,
                 None if self.p.autograd[b.idx()].load(std::sync::atomic::Ordering::Relaxed) && self.wants_autograd(b) => match self.bootstrap(b) {
@@ -1185,6 +1195,10 @@ impl Act<'_> {
                 None => {
                     // The params as they are before a version is selected
                     // (select drops those its version does not use).
+                    if super::calls::record::on() && self.shadow == 0 && self.c.is_some() && super::calls::record::again_due(place) {
+                        let params: Vec<*mut PyObject> = blk.params.iter().map(|p| self.val(*p)).collect();
+                        again = super::calls::record::again_begin(place, &params, self.f);
+                    }
                     let held = (super::calls::record::on() && self.shadow_due(b)).then(|| Held(blk.params.iter().map(|p| xincref(self.val(*p))).collect()));
                     match self.select(b) {
                         Some(vi) => {
@@ -1285,7 +1299,14 @@ impl Act<'_> {
                         self.count(&self.cfg[step.v], None, true);
                     }
                     if shadowed {
-                        super::calls::record::tick(if let Fast::StoreLocal(_, x) = step.op { Some(x.0) } else { None });
+                        use super::calls::record::Plain;
+                        let plain = match step.op {
+                            Fast::Const(_) => Plain::Const,
+                            Fast::LoadLocal(slot) => Plain::Load(slot),
+                            Fast::StoreLocal(slot, x) => Plain::Store(slot, x.0),
+                            Fast::No => unreachable!(),
+                        };
+                        super::calls::record::tick(step.v.0, plain);
                     }
                     // A value is null until its instr defines it.
                     let vals = self.vals.as_mut_ptr();
@@ -1321,9 +1342,17 @@ impl Act<'_> {
                     Next::Done(outcome) => return outcome,
                 }
             }
+            if let Some(awaited) = again.take() {
+                let made: Vec<*mut PyObject> = ver.outputs.iter().map(|o| self.vals[o.idx()]).collect();
+                super::calls::record::again_outs(place, self.f, &made);
+                drop(awaited);
+            }
             let edge = match &blk.term {
                 Terminator::Jump(_) => code.edges[0].as_ref(),
                 Terminator::Branch { cond, .. } => {
+                    if shadowed {
+                        super::calls::record::jump(ver.outputs[*cond as usize].0);
+                    }
                     let taken = self.vals[ver.outputs[*cond as usize].idx()] == ffi::Py_True();
                     code.edges[if taken { 0 } else { 1 }].as_ref()
                 }
@@ -1950,6 +1979,9 @@ impl Act<'_> {
         if flags & FLAG_YIELD != 0 {
             if self.reading && super::hist::on() {
                 self.count(ins, None, false);
+            }
+            if self.shadow != 0 {
+                super::calls::record::unseen("a generator of the run yielded: no instruction of a list says it");
             }
             let (value, stack) = ins.args.split_last().expect("Yield has the yielded value");
             for a in stack {

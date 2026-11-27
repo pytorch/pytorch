@@ -25,8 +25,8 @@
 //     it (it could store it, append to it, hand it on), and a container that
 //     comes any other way has no origin;
 //   - an operand of the closed immutable list is a constant BY VALUE at the
-//     recorded run: nothing says where the value came from (by_value counts
-//     them);
+//     recorded run (by_value counts them); unless known.rs knows it for a
+//     constant of the code, it is told as baked: the list is not the body;
 //   - a plain tensor with no origin is LOOSE: something that was there
 //     before, found by reads nobody recorded here (the executor's read hooks
 //     work under today's trace only). It is taken as a pin WITHOUT a check
@@ -95,8 +95,14 @@ pub struct Origins {
     held: HashMap<usize, (Py<PyAny>, Origin)>,
     // A weak reference's address -> its tensor's address.
     weak: HashMap<usize, usize>,
-    // (activation, value) -> the container that value's BUILD made.
-    built: HashMap<(u32, u32), Made>,
+    // (activation, value) -> the container that value's BUILD made, and the
+    // operands of it taken by value that are no constants of the code.
+    built: HashMap<(u32, u32), (Made, Vec<String>)>,
+    // What is known of the values that are no tensors (known.rs).
+    pub known: super::known::Known,
+    // Operands taken by value, since record.rs last looked, that are no
+    // constants of the code: the class and what made the value.
+    pub baked: Vec<String>,
     pub consts: Vec<Py<PyAny>>,
     pub ninputs: u32,
     // Inputs, then pins (all loose), held weakly for the validation.
@@ -110,15 +116,35 @@ pub unsafe fn plain_tensor(o: *mut PyObject) -> bool {
     unsafe { !o.is_null() && Group::PlainTensor.holds(ffi::Py_TYPE(o)) }
 }
 
-// Of the closed list: an immutable class, a constant class of torch, or an
-// exact tuple of those.
-unsafe fn immutable(o: *mut PyObject, depth: u8) -> bool {
+// Every plain tensor a call can reach through `o`: `o` itself, or the
+// members of exact lists and dicts and of tuples (a struct sequence too),
+// as deep as REACH. The ONE walk of containers: what the witness is told a
+// call's operands are, and what an output is asked to hold. A tensor deeper
+// than REACH is not reached: a write to it is a write outside (refused), and
+// an output that holds it is an output the list does not state anyway.
+pub const REACH: u8 = 4;
+pub unsafe fn reach(o: *mut PyObject, depth: u8, f: &mut dyn FnMut(*mut PyObject)) {
     unsafe {
-        let tp = ffi::Py_TYPE(o);
-        if Group::Immutable.holds(tp) || Group::TorchConstant.holds(tp) {
-            return true;
+        if o.is_null() {
+            return;
         }
-        tp == &raw mut ffi::PyTuple_Type && depth < 4 && (0..ffi::PyTuple_GET_SIZE(o)).all(|i| immutable(ffi::PyTuple_GET_ITEM(o, i), depth + 1))
+        if plain_tensor(o) {
+            return f(o);
+        }
+        if depth >= REACH {
+            return;
+        }
+        let tp = ffi::Py_TYPE(o);
+        if super::slots::tuple_like(o) {
+            (0..ffi::PyTuple_GET_SIZE(o)).for_each(|i| reach(ffi::PyTuple_GET_ITEM(o, i), depth + 1, f));
+        } else if tp == &raw mut ffi::PyList_Type {
+            (0..ffi::PyList_GET_SIZE(o)).for_each(|i| reach(ffi::PyList_GET_ITEM(o, i), depth + 1, f));
+        } else if tp == &raw mut ffi::PyDict_Type {
+            let (mut at, mut k, mut v) = (0, std::ptr::null_mut(), std::ptr::null_mut());
+            while ffi::PyDict_Next(o, &mut at, &mut k, &mut v) != 0 {
+                reach(v, depth + 1, f);
+            }
+        }
     }
 }
 
@@ -188,33 +214,15 @@ impl Origins {
         self.held.iter().filter_map(slot).collect()
     }
 
-    // Whether the exact tuple, list or dict `o` (a result tuple too) holds a
-    // tensor that an entry made.
-    pub unsafe fn holds(&self, o: *mut PyObject, depth: u8) -> bool {
-        unsafe {
-            let tp = ffi::Py_TYPE(o);
-            if plain_tensor(o) {
-                return matches!(self.get(o), Some(Origin::Res(_) | Origin::Part(..)));
-            }
-            let items: Vec<*mut PyObject> = if super::slots::tuple_like(o) {
-                (0..ffi::PyTuple_GET_SIZE(o)).map(|i| ffi::PyTuple_GET_ITEM(o, i)).collect()
-            } else if tp == &raw mut ffi::PyList_Type {
-                (0..ffi::PyList_GET_SIZE(o)).map(|i| ffi::PyList_GET_ITEM(o, i)).collect()
-            } else if tp == &raw mut ffi::PyDict_Type {
-                let (mut at, mut k, mut v, mut values) = (0, std::ptr::null_mut(), std::ptr::null_mut(), Vec::new());
-                while ffi::PyDict_Next(o, &mut at, &mut k, &mut v) != 0 {
-                    values.push(v);
-                }
-                values
-            } else {
-                return false;
-            };
-            depth < 4 && items.into_iter().any(|x| !x.is_null() && self.holds(x, depth + 1))
-        }
+    // Whether `o` is, or holds (reach), a tensor that an entry made.
+    pub unsafe fn holds(&self, o: *mut PyObject) -> bool {
+        let mut found = false;
+        unsafe { reach(o, 0, &mut |t| found |= matches!(self.get(t), Some(Origin::Res(_) | Origin::Part(..)))) };
+        found
     }
 
     pub fn built(&mut self, at: (u32, u32), made: Made) {
-        self.built.insert(at, made);
+        self.built.insert(at, (made, std::mem::take(&mut self.baked)));
     }
 
     // An instruction that is no entry and no BUILD names these values.
@@ -227,6 +235,7 @@ impl Origins {
     // An activation is over: what its values built is gone.
     pub fn left(&mut self, depth: u32) {
         self.built.retain(|(d, _), _| *d != depth);
+        self.known.left(depth);
     }
 
     fn constant(&mut self, o: *mut PyObject) -> Tmpl {
@@ -241,7 +250,8 @@ impl Origins {
     // `depth`; `loose`: counts the tensors taken with no origin.
     pub unsafe fn template(&mut self, o: *mut PyObject, at: (u32, u32), loose: &mut u32) -> Made {
         unsafe {
-            if let Some(made) = self.built.remove(&at) {
+            if let Some((made, baked)) = self.built.remove(&at) {
+                self.baked.extend(baked);
                 return made;
             }
             if o.is_null() {
@@ -266,7 +276,10 @@ impl Origins {
                 };
                 return Ok((tmpl, vec![class_of(o)]));
             }
-            if immutable(o, 0) {
+            if super::immutable(o, 0) {
+                if !self.known.lit(at) {
+                    self.baked.push(format!("{} from {}", class_text(o), self.known.maker(at)));
+                }
                 *self.by_value.entry(std::ffi::CStr::from_ptr((*ffi::Py_TYPE(o)).tp_name).to_str().unwrap_or("?")).or_default() += 1;
                 return Ok((self.constant(o), vec![class_of(o)]));
             }

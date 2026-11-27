@@ -8817,7 +8817,7 @@ class TestVmRulesTorch(TestCase):
 
 
 SHADOW_PROGRAM = """
-import json, sys, torch, torch.nn.functional as F
+import functools, hashlib, json, sys, weakref, torch, torch.nn.functional as F
 from torch import vm
 
 torch.manual_seed(0)
@@ -8826,6 +8826,10 @@ m = torch.randn(8, 8)
 bn = torch.nn.BatchNorm2d(3)
 buf = torch.zeros(2, 3, 8, 8)
 PAIR = [m, m]
+RELU = functools.partial(torch.relu)
+STATE = {"double": True, "scale": 2.0, "dead": []}
+SCALE = 2.0
+KEEP = []
 
 def chain(x):
     y = torch.conv2d(x, w, None, 1, 1)
@@ -8875,23 +8879,157 @@ def raised(x):
 def state(x):
     return bn(x).sum()
 
-fn = globals()[sys.argv[1]]
+def operators(x):
+    y = x * 2 + 1
+    return y[:, 1:3] - x[:, 0:2]
+
+def global_number(x):
+    return x * SCALE
+
+def flag_helper(y):
+    if STATE["double"]:
+        return y * 2
+    return y - 3
+
+def flag_under(x):
+    return flag_helper(x + 1) + 1
+
+def flag_operand(x):
+    return F.relu(x + 1, inplace=STATE["double"] is False) * 2
+
+def default_helper(y, k=3):
+    return y * k
+
+def default_operand(x):
+    return default_helper(x + 1) + 1
+
+def length_of_a_global(x):
+    return x.reshape(len(m), -1) + 1
+
+def method_of_a_global(x):
+    return x + m.sin()
+
+def reads_value(x):
+    return torch.linalg.cond(x) + 1
+
+def through_partial(x):
+    return RELU(x) + 1
+
+def bound(x):
+    f = x.relu
+    return f() + 1
+
+def leaves_by_exception(x):
+    try:
+        y = x * 2
+        return y + PAIR[5]
+    except IndexError:
+        return x + 1
+
+def died(reference):
+    STATE["dead"].append(len(STATE["dead"]))
+
+def tag(t):
+    KEEP.append(weakref.ref(t, died))
+    return t
+
+def callback(x):
+    return torch.relu(tag(x + 1)) * 2
+
+def lost(x):
+    y = torch.relu(x)
+    torch.relu_(y)
+    return F.relu(y) + 1
+
+BETWEEN = {
+    "global_number": lambda: globals().__setitem__("SCALE", 3.0),
+    "flag_under": lambda: STATE.__setitem__("double", False),
+    "flag_operand": lambda: STATE.__setitem__("double", False),
+    "default_operand": lambda: setattr(default_helper, "__defaults__", (5,)),
+    "length_of_a_global": lambda: globals().__setitem__("m", torch.randn(4, 16)),
+}
+M0 = m.clone()
+name = sys.argv[1]
+fn = globals()[name]
 inputs = [torch.randn(2, 3, 8, 8) for _ in range(6)]
 flat = lambda r: r if isinstance(r, tuple) else (r,)
 def run(f):
     bn.reset_running_stats()
-    outs = [flat(f(x.clone())) for x in inputs]
-    return outs, bn.running_mean.clone(), int(bn.num_batches_tracked)
+    STATE.update(double=True, dead=[])
+    KEEP.clear()
+    globals().update(SCALE=2.0, m=M0)
+    M0.copy_(M0C)
+    default_helper.__defaults__ = (3,)
+    outs = []
+    for i, x in enumerate(inputs):
+        if i == 4 and name in BETWEEN:
+            BETWEEN[name]()
+        outs.append(flat(f(x.clone())))
+    return outs, bn.running_mean.clone(), int(bn.num_batches_tracked), list(STATE["dead"]), M0.clone()
+M0C = M0.clone()
+def equal(a, b):
+    if torch.is_tensor(a):
+        return torch.is_tensor(b) and a.shape == b.shape and torch.equal(a, b)
+    return type(a) is type(b) and a == b
 want = run(fn)
 compiled = vm(fn, passes=vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1))
 got = run(compiled)
-same = all(torch.equal(p, q) for a, b in zip(want[0], got[0]) for p, q in zip(a, b))
-same = same and torch.equal(want[1], got[1]) and want[2] == got[2]
+same = all(equal(p, q) for a, b in zip(want[0], got[0]) for p, q in zip(a, b))
+same = same and all(equal(p, q) for p, q in zip(want[1:], got[1:]))
 regions = [(r.get("state"), r.get("runs")) for r in vm.regions(compiled)]
-print(json.dumps({"same": same, "regions": regions, "shadow": torch._rust._calls_shadow()}))
+digest = hashlib.sha256()
+for out in got[0]:
+    for p in out:
+        digest.update(p.detach().numpy().tobytes() if torch.is_tensor(p) else repr(p).encode())
+print(json.dumps({"same": same, "regions": regions, "digest": digest.hexdigest(), "shadow": torch._rust._calls_shadow()}))
 """
 
 
+# program: (the instruction a recording of it stopped at, why): each a part of
+# the text the recorder gives.
+SHADOW_STOPS = {
+    "writer": ("relu_ (later: writes)", "ran under an instruction that is no entry (the last: aten::relu_)"),
+    "value_read": ("item (later: facts)", "aten::item"),
+    "no_row": ("add", "has no row for these operands: it passes out="),
+    "kept_list": ("cat", "a container the body did not build for this instruction: list"),
+    "starred": ("add", "a star call of C code"),
+    "raised": ("torch.add", "the call of an entry raised"),
+    "through_partial": ("functools.partial", "it is called through a functools.partial"),
+    "bound": ("relu", "a builtin bound to its receiver"),
+    "leaves_by_exception": ("the end of the body", "the block left by an exception"),
+    "callback": ("died", "a frame that no instruction of the body called"),
+    "lost": ("relu_", "aten::relu_"),
+}  # fmt: skip
+
+# program: (a reason its recording must give, whether the list must differ
+# from the block on a later arrival: the program changes at its fifth call
+# what the list took by value).
+SHADOW_PARTIAL = {
+    "chain": ("a tensor taken as a pin: no read of it is recorded as a check", False),
+    "frame_under": ("no row: call py torch.nn.functional.relu", False),
+    "in_place": ("a read with no check, or a kind the recorder does not list: LoadGlobal", False),
+    "method_of_a_global": ("a tensor taken as a pin: no read of it is recorded as a check", False),
+    "reads_value": ("the witness of an entry disagrees with it: torch._C._linalg.linalg_cond", False),
+    "global_number": ("an operand taken by value that is no constant of the code: float", True),
+    "flag_under": ("a jump under the body tested the result of ToBool", True),
+    "flag_operand": ("a jump under the body tested the result of ToBool", False),
+    "default_operand": ("an operand taken by value that is no constant of the code: int", True),
+    "length_of_a_global": ("no row: call c builtins.len x torch.Tensor", True),
+}  # fmt: skip
+
+# What the recorder's validation answers for a list of one entry, a slice of
+# its input, when the block made something else: (what the block made of the
+# input, the answer).
+SHADOW_VALIDATIONS = {
+    "the_same_view": (lambda x: x[0:1], "equal"),
+    "other_values": (lambda x: x[0:1] + 1, "DIFFERENT: output 0 of 1"),
+    "another_key": (lambda x: x[0:2], "DIFFERENT: output 0 of 1"),
+    "a_copy_of_the_view": (lambda x: x[0:1].clone(), "DIFFERENT: output 0 of 1 shares memory with operand 0, the block's with nothing"),
+    "a_view_elsewhere": (lambda x: x[1:2], "DIFFERENT: output 0 of 1 shares memory with operand 0, the block's with operand 0"),
+}  # fmt: skip
+
+
+@instantiate_parametrized_tests
 @unittest.skipUnless(
     CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
 )
@@ -8901,12 +9039,18 @@ class TestVmCallsShadow(TestCase):
     body's own C calls it would have made, or where and why it stopped. It
     changes nothing: every program computes what eager computes, leaves the
     state eager leaves, and has the regions it has without the variable.
+    A recording's status is "replayable" only if the recorder met nothing
+    that the list does not say; else it is "partial" with the reasons,
+    "stopped" or "refused".
     """
 
     hw_classification = HardwareClassification.GENERIC
     RAN: dict = {}
+    PROGRAMS = sorted(
+        {*SHADOW_STOPS, *SHADOW_PARTIAL, "part", "sliced", "state", "operators"}
+    )
 
-    def program(self, name, mode="shadow"):
+    def program(self, name, mode="shadow", same=True):
         if (name, mode) not in self.RAN:
             env = {k: v for k, v in os.environ.items() if k != "TORCH_RUST_CALLS"}
             if mode is not None:
@@ -8918,54 +9062,122 @@ class TestVmCallsShadow(TestCase):
             self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
             self.RAN[name, mode] = json.loads(ran.stdout.splitlines()[-1])
         out = self.RAN[name, mode]
-        # The program is eager's program, with the recorder or without.
-        self.assertTrue(out["same"], name)
+        if same:
+            # The program is eager's program, with the recorder or without.
+            self.assertTrue(out["same"], name)
         return out
 
-    def recorded(self, name):
-        """The recording of the block that holds the body of ``name``."""
+    def places(self, name, same=True):
+        """The recordings of the blocks of the function ``name``."""
         found = [
-            s for s in self.program(name)["shadow"] if s["place"].startswith(name + ":")
+            s
+            for s in self.program(name, same=same)["shadow"]
+            if s["place"].startswith(name + ":")
         ]
         self.assertTrue(found, name)
-        return found[0]
-
-    def complete(self, name):
-        found = self.recorded(name)
-        self.assertEqual(
-            (found["status"], found["stop"], found["refused"]),
-            ("complete", None, None),
-            found,
-        )
         return found
 
-    def stopped(self, name, at, why):
-        found = self.recorded(name)
-        self.assertEqual(found["status"], "stopped", found)
-        self.assertIn(at, found["stop"][0])
-        self.assertIn(why, found["stop"][1])
-        self.assertEqual(found["validated"], "")
+    def reached(self, name, same=True):
+        """The first recording of ``name``, which reached the block's end."""
+        found = self.places(name, same)[0]
+        self.assertEqual((found["stop"], found["refused"]), (None, None), found)
+        self.assertNotIn(found["status"], ("stopped", "refused"))
         return found
 
     def test_nothing_runs_without_the_variable(self):
-        for name in ("chain", "frame_under", "in_place", "writer", "state"):
+        # The engine's regions differ from eager in the last bits of
+        # linalg.cond with the recorder and without: the same bits.
+        for name in ("chain", "frame_under", "in_place", "writer", "state", "operators", "flag_under", "reads_value"):  # fmt: skip
             with self.subTest(name=name):
-                on = self.program(name)
+                same = name != "reads_value"
+                on = self.program(name, same=same)
                 for mode in (None, "0"):
-                    off = self.program(name, mode)
+                    off = self.program(name, mode, same=same)
                     self.assertEqual(off["shadow"], [])
-                    # The regions are where they are without the recorder.
+                    # The regions are where they are without the recorder,
+                    # and every output has the same bytes.
                     self.assertEqual(off["regions"], on["regions"])
+                    self.assertEqual(off["digest"], on["digest"])
                 self.assertTrue(on["shadow"])
 
-    def test_the_program_is_eagers_with_the_recorder(self):
-        programs = "chain frame_under in_place part sliced writer value_read no_row kept_list starred raised state"
-        for name in programs.split():
-            with self.subTest(name=name):
-                self.assertTrue(self.program(name)["shadow"], name)
+    @parametrize("name", PROGRAMS)
+    def test_a_status_is_of_the_closed_set_and_replayable_is_positive(self, name):
+        for found in self.program(name, same=name != "reads_value")["shadow"]:
+            with self.subTest(place=found["place"]):
+                status, reasons = found["status"], found["reasons"]
+                if found["stop"] is not None:
+                    self.assertEqual(status, "stopped")
+                elif found["refused"] is not None:
+                    self.assertEqual(status, "refused")
+                elif reasons:
+                    self.assertEqual(status, "partial: " + reasons[0][0])
+                else:
+                    self.assertEqual(status, "replayable")
+                    # Nothing the list does not say: no instruction left to
+                    # other code, no pin, no jump on an unknown value, every
+                    # output and release stated, and never a difference.
+                    for field in ("left", "handed", "notes"):
+                        self.assertEqual(found[field], [], field)
+                    for field in ("loose", "late", "unstated"):
+                        self.assertEqual(found[field], 0, field)
+                    self.assertEqual(found["jumps"][1], 0)
+                    self.assertFalse(found["validated"].startswith("DIFFERENT"))
+                    self.assertFalse(found["again"].startswith("DIFFERENT"))
+
+    def test_operators_on_inputs_and_constants_are_replayable(self):
+        found = self.reached("operators")
+        self.assertEqual(found["status"], "replayable", found)
+        self.assertEqual((found["entries"], found["reasons"]), (5, []))
+        self.assertEqual(found["validated"], "equal")
+        # The list gave the block's outputs on the next arrival too.
+        self.assertRegex(found["again"], r"^equal on [1-9]\d* later arrival")
+
+    @parametrize("name", list(SHADOW_PARTIAL))
+    def test_a_list_that_is_not_the_body_is_partial(self, name):
+        reason, differs = SHADOW_PARTIAL[name]
+        found = self.reached(name, same=name != "reads_value")
+        self.assertTrue(found["status"].startswith("partial: "), found["status"])
+        reasons = [why for why, _ in found["reasons"]]
+        self.assertTrue(any(why.startswith(reason) for why in reasons), reasons)
+        if differs:
+            # Equal on the recorded run; the program then changed what the
+            # list took by value, and the list is not what the block makes.
+            self.assertEqual(found["validated"], "equal")
+            self.assertTrue(
+                found["again"].startswith("DIFFERENT on a later arrival"), found
+            )
+        else:
+            self.assertFalse(found["again"].startswith("DIFFERENT"), found)
+
+    @parametrize("name", list(SHADOW_STOPS))
+    def test_a_stop_ends_the_recording_with_its_reason(self, name):
+        at, why = SHADOW_STOPS[name]
+        stops = [s["stop"] for s in self.places(name) if s["stop"] is not None]
+        self.assertTrue(
+            any(at in stop[0] and why in stop[1] for stop in stops), self.places(name)
+        )
+        for found in self.places(name):
+            if found["stop"] is not None:
+                self.assertEqual(
+                    (found["status"], found["validated"], found["again"]),
+                    ("stopped", "", ""),
+                )
+
+    @parametrize("name", list(SHADOW_VALIDATIONS))
+    def test_the_validation_compares_values_keys_and_memory(self, name):
+        block, answer = SHADOW_VALIDATIONS[name]
+        entry = _cl_entry(
+            ("getitem",),
+            [("in", 0), ("slice", ("const", 0), ("const", 1), ("null",))],
+            out=0,
+            classes=(torch.Tensor, (int, int, None)),
+        )
+        made = _calls_make((1, 0, (0, 1), [entry], [("res", 0)]))
+        x = torch.zeros(4, 3)
+        self.assertEqual(torch._rust._calls_validate(made, [x], [], [block(x)]), answer)
 
     def test_pure_tensor_calls_give_a_list_that_validates_equal(self):
-        found = self.complete("chain")
+        found = self.reached("chain")
         self.assertEqual(found["entries"], 3)
         self.assertEqual(found["validated"], "equal")
         self.assertTrue(found["traced"])
@@ -8979,77 +9191,83 @@ class TestVmCallsShadow(TestCase):
         self.assertEqual(found["outputs"][0], 1)
 
     def test_a_frame_under_the_body_gives_its_c_call(self):
-        found = self.complete("frame_under")
+        found = self.reached("frame_under")
         lines = found["text"].splitlines()
         self.assertIn("r0 = torch.relu(in0)", lines[0])
         self.assertIn("r1 = in0 * 2", lines[1])
         # A list the body built for the call, its parts by origin.
         self.assertIn("r2 = torch.cat([move r0, move r1], dim=1)", lines[2])
         self.assertEqual(found["validated"], "equal")
-        self.assertEqual(found["loose"], 0)
-        # What the rule table has not taken over is counted, not recorded.
+        self.assertEqual((found["loose"], found["frames"]), (0, 1))
+        # What the rule table has not taken over is counted, and a reason.
         self.assertIn(
             "call py torch.nn.functional.relu x torch.Tensor", dict(found["left"])
         )
         self.assertTrue(
             any("_has_torch_function_unary" in what for what, _ in found["handed"])
         )
+        # The frame branched on what that C code answered.
+        self.assertGreater(found["jumps"][1], 0)
 
     def test_an_in_place_operator_is_an_entry_that_is_not_run_again(self):
-        found = self.complete("in_place")
+        found = self.reached("in_place")
         line = next(line for line in found["text"].splitlines() if "+=" in line)
         self.assertIn("r0 += in0", line)
         self.assertIn("writes(0)", line)
         self.assertIn("is(operand 0)", line)
         self.assertEqual(found["validated"], "not validated: an entry writes")
+        self.assertEqual(found["again"], "")
         # The witness saw the write the entry states, and nothing else.
         self.assertEqual([note for note in found["notes"] if "+=" in note], [])
 
+    def test_a_witness_that_disagrees_with_its_entry_gates_the_validation(self):
+        # linalg.cond's row says it only computes; an operator under it
+        # reads a value out of a tensor. The list is never run.
+        found = self.reached("reads_value", same=False)
+        self.assertEqual(
+            found["validated"],
+            "not validated: the witness of an entry disagrees with what the entry says",
+        )
+        self.assertEqual(found["again"], "")
+        self.assertTrue(any("read a value" in note for note in found["notes"]))
+
+    def test_a_method_looked_up_on_a_tensor_leaves_the_tensor_what_it_was(self):
+        # LoadMethod hands the receiver back: it made no tensor.
+        found = self.reached("method_of_a_global")
+        self.assertIn("r0 = torch.Tensor.sin(pin0)", found["text"])
+        self.assertEqual(found["loose"], 1)
+
     def test_a_result_tuple_and_a_slice_built_for_a_subscript(self):
-        # Today's blocks end in front of a subscript of a result tuple, so
-        # the tuple leaves its block whole: an entry whose result the list
-        # has no output for, and whose release nothing saw.
-        found = self.complete("part")
+        # The tuple leaves its block whole: its release was not seen, and
+        # the list has no recipe for the output that holds it.
+        found = self.reached("part")
         lines = found["text"].splitlines()
         self.assertIn("r0 = torch.max(in0, 1)", lines[0])
         self.assertIn("count=2", lines[0])
-        self.assertEqual(
-            (found["late"], found["unstated"], found["outputs"][0]), (1, 1, 0)
+        reasons = [why for why, _ in found["reasons"]]
+        self.assertIn(
+            "the release of a result was not seen: stated at the end of the body",
+            reasons,
         )
+        self.assertTrue(any("which holds results of entries" in why for why in reasons))
         self.assertEqual(
             found["validated"],
             "not validated: no output of the block is a result of an entry",
         )
-        found = self.complete("sliced")
+        found = self.reached("sliced")
         self.assertIn("in0[(None:None:None, 1:3:None)]", found["text"].splitlines()[0])
         self.assertEqual(found["validated"], "equal")
 
-    def test_an_operator_under_no_entry_stops_the_recording(self):
-        found = self.stopped(
-            "writer",
-            "relu_ (later: writes)",
-            "ran under an instruction that is no entry (the last: aten::relu_)",
+    def test_a_recording_inside_a_stopped_one_keeps_both(self):
+        # The body stops at relu_; F.relu's blocks, entered behind the stop,
+        # are recorded on their own.
+        shadow = self.program("lost")["shadow"]
+        self.assertTrue(
+            any(s["place"].startswith("lost:") and s["stop"] for s in shadow)
         )
-        self.assertEqual(found["entries"], 1)
-        found = self.stopped("value_read", "item (later: facts)", "aten::item")
-        self.assertEqual(found["entries"], 1)
-
-    def test_no_row_stops_with_the_rows_reason(self):
-        found = self.stopped(
-            "no_row", "add", "has no row for these operands: it passes out="
+        self.assertTrue(
+            any(s["place"].startswith("relu:") and not s["stop"] for s in shadow)
         )
-        self.assertEqual(found["entries"], 0)
-
-    def test_a_container_the_body_kept_stops_the_recording(self):
-        self.stopped(
-            "kept_list",
-            "cat",
-            "a container the body did not build for this instruction: list",
-        )
-
-    def test_a_star_call_and_a_call_that_raises_stop_the_recording(self):
-        self.stopped("starred", "add", "a star call of C code")
-        self.stopped("raised", "torch.add", "the call of an entry raised")
 
     def test_state_is_eagers_and_its_writer_stops_the_recording(self):
         # Batch norm in training mode writes its running statistics.

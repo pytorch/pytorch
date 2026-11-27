@@ -132,13 +132,17 @@ pub unsafe fn class_name(tp: *mut ffi::PyTypeObject) -> String {
 }
 
 // The text of an exact str (borrowed, NULL allowed).
-unsafe fn text(s: *mut PyObject) -> Option<String> {
+pub unsafe fn text(s: *mut PyObject) -> Option<String> {
     if s.is_null() || ffi::PyUnicode_CheckExact(s) == 0 {
         return None;
     }
     let mut n = 0;
     let p = ffi::PyUnicode_AsUTF8AndSize(s, &mut n);
-    (!p.is_null()).then(|| String::from_utf8_lossy(std::slice::from_raw_parts(p as *const u8, n as usize)).into_owned())
+    if p.is_null() {
+        ffi::PyErr_Clear();
+        return None;
+    }
+    Some(String::from_utf8_lossy(std::slice::from_raw_parts(p as *const u8, n as usize)).into_owned())
 }
 
 // What a call calls, by kind and name: a function ("py") or a builtin ("c")

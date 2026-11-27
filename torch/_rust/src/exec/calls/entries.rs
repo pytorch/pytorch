@@ -51,14 +51,7 @@ pub fn blank(callee: Callee, at: u32) -> Entry {
 }
 
 pub unsafe fn text(s: *mut PyObject) -> String {
-    unsafe {
-        let p = if !s.is_null() && ffi::PyUnicode_CheckExact(s) != 0 { ffi::PyUnicode_AsUTF8(s) } else { std::ptr::null() };
-        if p.is_null() {
-            ffi::PyErr_Clear();
-            return "?".into();
-        }
-        std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
-    }
+    unsafe { hist::text(s) }.unwrap_or_else(|| "?".into())
 }
 
 pub struct Maker<'a> {

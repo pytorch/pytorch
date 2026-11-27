@@ -78,8 +78,11 @@
 // classes. Both are the license of a rule (the callee's row of the table),
 // which the recorder will ask; until then lists are made by tests only.
 
+mod again;
 mod check;
 mod entries;
+mod finish;
+mod known;
 mod origins;
 pub mod record;
 mod run;
@@ -284,6 +287,21 @@ pub unsafe fn plain(x: *mut PyObject) -> bool {
             || ffi::PyUnicode_CheckExact(x) != 0
             || ffi::PyBytes_CheckExact(x) != 0
             || x == ffi::Py_None()
+    }
+}
+
+// Whether `x` is a value a list may hold as a constant: of the rule table's
+// closed list of immutable classes, a constant class of torch, or an exact
+// tuple of those (at most four deep; a deeper one has no origin). The one
+// definition; `plain` above is the part of it whose hash and repr a list
+// itself runs.
+pub unsafe fn immutable(x: *mut PyObject, depth: u8) -> bool {
+    unsafe {
+        let tp = ffi::Py_TYPE(x);
+        if crate::exec::rules::Group::Immutable.holds(tp) || crate::exec::rules::Group::TorchConstant.holds(tp) {
+            return true;
+        }
+        tp == &raw mut ffi::PyTuple_Type && depth < 4 && (0..ffi::PyTuple_GET_SIZE(x)).all(|i| immutable(ffi::PyTuple_GET_ITEM(x, i), depth + 1))
     }
 }
 

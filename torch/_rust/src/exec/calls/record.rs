@@ -31,9 +31,32 @@
 //     happened; a result whose death was not seen is dropped at the end of
 //     the body and counted (late);
 //   - a finished recording goes through List::new, the one check of lists,
-//     and, if every entry is pure, is run and compared (shadow.rs).
+//     and, if every entry is pure and the witness of none disagreed with
+//     what the entry says, is run and compared (shadow.rs), here and on later
+//     arrivals at the place (again.rs);
+//   - A RECORDING THAT REACHED ITS END IS THE BODY ONLY IF NOTHING SAYS
+//     OTHERWISE, AND EVERYTHING NOT UNDERSTOOD SAYS OTHERWISE: each of these
+//     is a reason (Shadow::reasons), and a Shadow with one is "partial":
+//     an instruction that is no entry, no kind of known::neutral and no key
+//     fact of a tensor whose key the list compares; an operand taken by
+//     value that is no constant of the code; a conditional jump under the
+//     body on a value that is not known; a tensor taken as a pin (no read
+//     of it is recorded as a check); an output that the list does not state;
+//     a release that was not seen; an operator between the instructions;
+//     an exception raised under the body; a generator's yield; a witness
+//     that disagrees with its entry;
+//   - a Python frame is the body's only if an instruction that may enter
+//     one (no row, or a row that names frames) is in flight in the innermost
+//     activation of the run. Any other frame (a finalizer, a weak-reference
+//     callback, a signal handler: no instruction called it) is a STOP;
+//   - nothing is witnessed behind a stop: the entry's witness, if its call
+//     is in flight, and the run's are ended there;
+//   - every recording is kept: one that begins inside a stopped one (a
+//     block of a frame entered later) is recorded on top of it, and both end
+//     where their blocks end.
 // What it may not assume
-//   - that a value of an immutable class is a constant: it is taken by value;
+//   - that a value of an immutable class is a constant: it is taken by value
+//     and, unless it is one of the code, the list is partial;
 //   - that a tensor with no origin was found by a read a region checks.
 
 use std::cell::{Cell, RefCell};
@@ -43,13 +66,17 @@ use std::sync::LazyLock;
 use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;
 
+use super::again::{self, Armed};
 use super::entries::{blank, text, Call, Maker};
+use super::known::{self, Reasons};
+pub use super::known::Plain;
 use super::origins::{class_text, plain_tensor, Origin, Origins};
 use super::shadow::{self, Shadow};
-use super::{slots, witness, Assert, Callee, Entry, List, Tmpl, PURE};
+use super::{slots, witness, Assert, Callee, Entry, Tmpl, PURE};
 use crate::cfg::ir::{Instr, Op};
+use crate::cfg::opcodes::IS_OP;
 use crate::exec::ffi::{tr_frame_localsplus, tr_frame_nlocalsplus, tr_frame_qualname, Frame};
-use crate::exec::rules::{self, Class, License, Res, Site};
+use crate::exec::rules::{self, Class, Enters, License, Res, Site};
 use crate::exec::tensor_key::TensorKey;
 use crate::exec::hist;
 
@@ -63,7 +90,8 @@ pub fn on() -> bool {
 thread_local! {
     static LIVE: Cell<bool> = const { Cell::new(false) };
     static DEPTH: Cell<u32> = const { Cell::new(0) };
-    static REC: RefCell<Option<Rec>> = const { RefCell::new(None) };
+    // The recordings in flight, innermost last: all but the last stopped.
+    static REC: RefCell<Vec<Rec>> = const { RefCell::new(Vec::new()) };
     // The places (plan, block) a run was recorded of.
     static TAKEN: RefCell<std::collections::HashSet<(usize, u32)>> = RefCell::new(std::collections::HashSet::new());
 }
@@ -82,26 +110,45 @@ pub fn recording() -> bool {
 enum Pending {
     Entry(Box<Call>),
     // No entry: what it is; whether a tensor it leaves was made by it; why
-    // it is no entry though it runs C code on a tensor, if that is so.
-    Other { what: String, makes: bool, why: Option<String> },
+    // it is no entry though it runs C code on a tensor, if that is so; the
+    // tensors among its operands; whether it may enter a Python frame;
+    // whether its result is a known value (None: known.rs was told).
+    Other { what: String, makes: bool, why: Option<String>, operands: Vec<usize>, enters: bool, known: Option<bool> },
 }
 
-struct Rec {
-    shadow: Shadow,
-    origins: Origins,
-    entries: Vec<Entry>,
-    stack: Vec<(Pending, usize, usize)>,
+// An instruction in flight: with the operators the run's witness had seen
+// and claimed before it, its activation and its value.
+struct InFlight {
+    pending: Pending,
+    ops: usize,
+    claimed: usize,
+    at: (u32, u32),
+}
+
+pub(super) struct Rec {
+    pub(super) shadow: Shadow,
+    pub(super) origins: Origins,
+    pub(super) entries: Vec<Entry>,
+    stack: Vec<InFlight>,
     // The entry whose operands are being released; slots that died elsewhere.
     window: Option<usize>,
-    drops: Vec<u32>,
+    pub(super) drops: Vec<u32>,
     // Slots of tuple results: their release is never seen.
-    tuples: Vec<u32>,
+    pub(super) tuples: Vec<u32>,
     at: u32,
     // Operators the run's witness saw under entries.
-    claimed: usize,
-    pure: bool,
-    left: HashMap<String, u64>,
-    handed: HashMap<String, u64>,
+    pub(super) claimed: usize,
+    pub(super) pure: bool,
+    pub(super) left: HashMap<String, u64>,
+    pub(super) handed: HashMap<String, u64>,
+    pub(super) reasons: Reasons,
+    // The witness of an entry disagreed with what the entry says.
+    pub(super) disagreed: bool,
+    // The witness of the entry in flight is open; what it saw, if a stop
+    // ended it; what the run's saw, once it is ended.
+    entry_open: bool,
+    entry_seen: Option<witness::Witnessed>,
+    outer: Option<witness::Witnessed>,
 }
 
 impl Rec {
@@ -109,18 +156,40 @@ impl Rec {
         Maker { origins: &mut self.origins, loose: &mut self.shadow.loose, facts: &mut self.shadow.facts, at: self.at, depth: DEPTH.get() }
     }
 
-    fn stop(&mut self, at: &str, why: String) -> bool {
+    pub(super) fn stop(&mut self, at: &str, why: String) -> bool {
         if self.shadow.stop.is_none() {
             self.shadow.stop = Some((at.to_string(), why));
             self.shadow.entries = self.entries.iter().filter(|e| !matches!(e.callee, Callee::Drop(_))).count();
             LIVE.set(false);
+            // Nothing is witnessed from here on.
+            if std::mem::take(&mut self.entry_open) {
+                self.entry_seen = Some(witness::end());
+            }
+            self.outer = Some(witness::end());
         }
         false
     }
 
+    fn push(&mut self, pending: Pending, at: (u32, u32)) -> bool {
+        self.stack.push(InFlight { pending, ops: witness::top().0, claimed: self.claimed, at });
+        true
+    }
+
+    // Whether the tensor `o` is one whose key the list compares (an input)
+    // or asserts (a result).
+    unsafe fn keyed(&self, o: *mut PyObject) -> bool {
+        unsafe { plain_tensor(o) && matches!(self.origins.get(o), Some(Origin::In(_) | Origin::Res(_) | Origin::Part(..))) }
+    }
+
+    fn baked(&mut self) {
+        for what in std::mem::take(&mut self.origins.baked) {
+            self.reasons.add(format!("an operand taken by value that is no constant of the code: {what}"));
+        }
+    }
+
     // The deaths since the last instruction: of a slot the entry just made
     // names once, whole, that entry's move; else a drop here.
-    fn settle(&mut self) {
+    pub(super) fn settle(&mut self) {
         for j in self.origins.deaths() {
             let moved = self.window.is_some_and(|k| {
                 let mut leaves = Vec::new();
@@ -135,7 +204,7 @@ impl Rec {
         self.window = None;
     }
 
-    fn flush(&mut self) {
+    pub(super) fn flush(&mut self) {
         if !self.drops.is_empty() {
             self.entries.push(blank(Callee::Drop(std::mem::take(&mut self.drops).into()), self.at));
         }
@@ -153,6 +222,7 @@ impl Rec {
                 self.at = ins.origin;
             }
             let (all, depth) = (site.operands, DEPTH.get());
+            let at = (depth, v);
             let callee = callee.filter(|f| !f.is_null());
             let what = rules::ops::what(&ins.op, callee);
             let name = callee.map_or_else(|| hist::kind(&ins.op).to_string(), |f| format!("call {}", hist::callee_name(f)));
@@ -166,10 +236,10 @@ impl Rec {
                 License::NotMine => None,
             };
             if let Some(made) = self.maker().built(ins, all) {
-                self.origins.built((depth, v), made);
-                self.stack.push((Pending::Other { what: name, makes: false, why: None }, witness::top().0, self.claimed));
-                return true;
+                self.origins.built(at, made);
+                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), enters: false, known: Some(false) }, at);
             }
+            let facts = self.shadow.facts;
             let call = match (row, callee) {
                 (Some(row), Some(f)) if row.result == Res::Entry => Some(self.maker().vector(f, ins, all, site.kwnames)),
                 (None, None) => self.maker().slot(ins, site),
@@ -178,9 +248,11 @@ impl Rec {
             let why = match call {
                 Some(Ok(mut call)) => {
                     self.flush();
-                    call.operands.iter().enumerate().for_each(|(i, o)| shadow::tensors(*o, i, 0, &mut call.ids));
-                    self.stack.push((Pending::Entry(Box::new(call)), witness::top().0, self.claimed));
+                    self.baked();
+                    call.operands.iter().enumerate().for_each(|(i, o)| shadow::tensors(*o, i, &mut call.ids));
+                    self.push(Pending::Entry(Box::new(call)), at);
                     witness::begin();
+                    self.entry_open = true;
                     return true;
                 }
                 // A C callee with a row is an entry or nothing.
@@ -188,44 +260,75 @@ impl Rec {
                 Some(Err(why)) => Some(why),
                 None => None,
             };
+            self.origins.baked.clear();
             self.origins.used(depth, ins.args.iter().map(|x| x.0));
             let first = if all.first().is_some_and(|o| o.is_null()) { 2 } else { 1 };
             let given = callee.map_or(all, |_| &all[first.min(all.len())..]);
             let tensor = given.iter().any(|o| plain_tensor(*o));
             let later = rules::later(&what).map_or(String::new(), |family| format!(" (later: {family})"));
-            if row.is_none() {
-                *self.left.entry(format!("{name} x {}", given.first().map_or("-".into(), |o| class_text(*o)))).or_default() += 1;
-                let python = callee.is_some_and(|f| [&raw mut ffi::PyFunction_Type, &raw mut crate::exec::ffi::PyMethod_Type].contains(&ffi::Py_TYPE(f)));
-                if tensor && !python {
-                    *self.handed.entry(format!("{name}{later}")).or_default() += 1;
+            let class = given.first().map_or("-".into(), |o| class_text(*o));
+            // A key fact of a tensor (entries.rs counted it): what a line of
+            // the license of slots.rs reads off the key.
+            let fact = self.shadow.facts > facts;
+            let plain = Plain::of(&ins.op, &ins.args);
+            let known = match (&ins.op, &plain) {
+                (_, Some(_)) => None,
+                (Op::IsNone, _) => Some(self.origins.known.lit((depth, ins.args[0].0)) || self.keyed(all[0])),
+                (Op::Bytecode { opcode: IS_OP, .. }, _) => Some(ins.args.iter().all(|x| self.origins.known.lit((depth, x.0)))),
+                _ => Some(fact && self.keyed(all[0])),
+            };
+            if let Some(plain) = plain {
+                self.origins.known.plain(depth, v, plain);
+            }
+            match row {
+                None if fact => {}
+                None => {
+                    *self.left.entry(format!("{name} x {class}")).or_default() += 1;
+                    let python = callee.is_some_and(|f| [&raw mut ffi::PyFunction_Type, &raw mut crate::exec::ffi::PyMethod_Type].contains(&ffi::Py_TYPE(f)));
+                    if tensor && !python {
+                        *self.handed.entry(format!("{name}{later}")).or_default() += 1;
+                    }
+                    self.reasons.add(format!("no row: {name}{later} x {class}"));
                 }
+                Some(row) if known::neutral(&ins.op, row).is_some() => {}
+                Some(row) => self.reasons.add(format!("a read with no check, or a kind the recorder does not list: {name} (its row reads {:?})", row.reads)),
             }
             // C code of torch that is no entry makes what it returns; so does
             // an instruction that runs C code on a tensor.
             let makes = callee.map_or(row.is_none() && tensor, |f| rules::torch::name(f).is_some());
-            self.stack.push((Pending::Other { what: format!("{name}{later}"), makes, why }, witness::top().0, self.claimed));
-            true
+            let operands = all.iter().filter(|o| plain_tensor(**o)).map(|o| *o as usize).collect();
+            let enters = row.is_none_or(|r| r.enters == Enters::Named);
+            let what = if matches!(ins.op, Op::ToBool) { format!("{name} of {}", self.origins.known.maker((depth, ins.args[0].0))) } else { format!("{name}{later}") };
+            self.push(Pending::Other { what, makes, why, operands, enters, known }, at)
         }
     }
 
     unsafe fn after(&mut self, ok: bool, results: &[*mut PyObject]) {
         unsafe {
-            let Some((pending, ops, claimed)) = self.stack.pop() else { return };
-            let seen = matches!(pending, Pending::Entry(_)).then(witness::end);
-            let (now, last) = witness::top();
+            let Some(InFlight { pending, ops, claimed, at }) = self.stack.pop() else { return };
+            let seen = match pending {
+                Pending::Entry(_) if std::mem::take(&mut self.entry_open) => Some(witness::end()),
+                Pending::Entry(_) => self.entry_seen.take(),
+                Pending::Other { .. } => None,
+            };
             if self.shadow.stop.is_some() {
                 return;
             }
+            let (now, last) = witness::top();
             // Operators the dispatcher saw under this instruction and under no
             // entry inside it.
             let direct = now.saturating_sub(ops).saturating_sub(self.claimed - claimed);
             match pending {
-                Pending::Other { what, makes, why } => {
+                Pending::Other { what, makes, why, operands, known, .. } => {
+                    if let Some(known) = known {
+                        self.origins.known.set(at, known && ok, || format!("the result of {what}"));
+                    }
                     if direct > 0 {
                         let ran = format!("{direct} operator(s) ran under an instruction that is no entry (the last: {})", last.unwrap_or_default());
                         self.stop(&what, why.map_or(ran.clone(), |why| format!("{why}; {ran}")));
                     } else if makes {
-                        for r in results.iter().filter(|r| plain_tensor(**r)) {
+                        // What it hands back of its operands it did not make.
+                        for r in results.iter().filter(|r| plain_tensor(**r) && !operands.contains(&(**r as usize))) {
                             if self.origins.get(*r).is_none() {
                                 self.origins.mark(*r, Origin::Unknown(what.clone()));
                             }
@@ -237,6 +340,10 @@ impl Rec {
                     let Call { mut entry, label, ids, operands } = *call;
                     let k = self.entries.len() as u32;
                     let notes = shadow::disagreements(&seen.unwrap_or_default(), &ids, &entry.flags.writes);
+                    // A list with such an entry is never run again: the row
+                    // it rests on did not say what the call did.
+                    self.disagreed |= !notes.is_empty();
+                    notes.iter().for_each(|n| self.reasons.add(format!("the witness of an entry disagrees with it: {label}: {n}")));
                     self.shadow.notes.extend(notes.into_iter().map(|n| format!("{label}: {n}")));
                     if !ok {
                         self.stop(&label, "the call of an entry raised: which handler takes it is a later unit".into());
@@ -281,78 +388,15 @@ impl Rec {
             }
         }
     }
-
-    // The recording is over: `outs`, what the block hands on (None: it left
-    // by an exception).
-    unsafe fn end(mut self, outs: Option<&[*mut PyObject]>, outer: witness::Witnessed) -> Shadow {
-        unsafe {
-            self.settle();
-            let counts = |m: HashMap<String, u64>| {
-                let mut v: Vec<(String, u64)> = m.into_iter().collect();
-                v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-                v
-            };
-            self.shadow.left = counts(std::mem::take(&mut self.left));
-            self.shadow.handed = counts(std::mem::take(&mut self.handed));
-            self.shadow.by_value = counts(self.origins.by_value.iter().map(|(k, n)| (k.to_string(), *n)).collect());
-            let Some(outs) = outs.filter(|_| self.shadow.stop.is_none()) else {
-                self.stop("the end of the body", "the block left by an exception".into());
-                return self.shadow;
-            };
-            self.shadow.entries = self.entries.iter().filter(|e| !matches!(e.callee, Callee::Drop(_))).count();
-            let mut outputs = Vec::new();
-            let mut made = Vec::new();
-            for o in outs.iter().filter(|o| plain_tensor(**o)) {
-                match self.origins.get(*o) {
-                    Some(Origin::Res(j)) => outputs.push(Tmpl::Res(*j)),
-                    Some(Origin::Part(j, i)) => outputs.push(Tmpl::Part(*j, Box::new([*i]))),
-                    _ => continue,
-                }
-                made.push(*o);
-            }
-            self.shadow.outputs = (outputs.len(), outs.len() - outputs.len());
-            // An output that holds results of entries and is none itself: the
-            // list does not say how it is made.
-            self.shadow.unstated = outs.iter().filter(|o| !o.is_null() && !plain_tensor(**o)).filter(|o| self.origins.holds(**o, 0)).count() as u32;
-            // A result that is alive and no output, and every tuple no output
-            // is a part of: its release was not seen.
-            let named = |j: u32| outputs.iter().any(|t| matches!(t, Tmpl::Res(s) | Tmpl::Part(s, _) if *s == j));
-            let mut late: Vec<u32> = self.origins.alive().into_iter().map(|(j, _)| j).chain(self.tuples.iter().copied()).filter(|j| !named(*j)).collect();
-            late.sort();
-            self.shadow.late = late.len() as u32;
-            self.drops.extend(late);
-            self.flush();
-            let outside = outer.ops.len().saturating_sub(self.claimed);
-            if outer.flags().opaque {
-                self.shadow.notes.push(format!("the run's witness could not see: {}", outer.why));
-            } else if outside > 0 {
-                self.shadow.notes.push(format!("{outside} operator(s) ran between the instructions of the run"));
-            }
-            let (ninputs, npins) = (self.origins.ninputs, self.origins.pins.len() as u32);
-            let consts = self.origins.consts.iter().map(|c| c.clone_ref(Python::assume_attached())).collect();
-            match List::new(ninputs, npins, consts, std::mem::take(&mut self.entries), outputs) {
-                Err(why) => self.shadow.refused = Some(why),
-                Ok(list) => {
-                    let py = Python::assume_attached();
-                    self.shadow.text = (0..list.entries.len()).map(|k| list.line(py, k)).collect::<Vec<_>>().join("\n");
-                    let unsafe_to_run = [(!self.pure, "an entry writes"), (made.is_empty(), "no output of the block is a result of an entry"), (outer.flags().opaque || outside > 0, "operators ran that are under no entry, or could not be seen"), (Origins::lost(), "a death was not noted")];
-                    self.shadow.validated = match unsafe_to_run.iter().find(|(so, _)| *so) {
-                        Some((_, why)) => format!("not validated: {why}"),
-                        None => shadow::validate(py, &list, &self.origins.inputs, &self.origins.pins, &made),
-                    };
-                }
-            }
-            self.shadow
-        }
-    }
 }
 
 fn with<R: Default>(f: impl FnOnce(&mut Rec) -> R) -> R {
-    REC.with_borrow_mut(|r| r.as_mut().map_or_else(R::default, f))
+    REC.with_borrow_mut(|r| r.last_mut().map_or_else(R::default, f))
 }
 
 // A run of the block `place` (key: its plan and block) begins on `params`
-// in the frame `frame`.
+// in the frame `frame`. A recording in flight has stopped (shadow_due):
+// this one is recorded on top of it.
 pub unsafe fn begin(place: String, key: (usize, u32), params: &[*mut PyObject], frame: *mut Frame) {
     unsafe {
         TAKEN.with_borrow_mut(|t| t.insert(key));
@@ -362,7 +406,8 @@ pub unsafe fn begin(place: String, key: (usize, u32), params: &[*mut PyObject], 
         (0..tr_frame_nlocalsplus(frame) as usize).for_each(|i| origins.input(*locals.add(i)));
         let shadow = Shadow { place, key, ..Shadow::default() };
         witness::begin();
-        REC.set(Some(Rec { shadow, origins, entries: Vec::new(), stack: Vec::new(), window: None, drops: Vec::new(), tuples: Vec::new(), at: 0, claimed: 0, pure: true, left: HashMap::new(), handed: HashMap::new() }));
+        let rec = Rec { shadow, origins, entries: Vec::new(), stack: Vec::new(), window: None, drops: Vec::new(), tuples: Vec::new(), at: 0, claimed: 0, pure: true, left: HashMap::new(), handed: HashMap::new(), reasons: Reasons::default(), disagreed: false, entry_open: false, entry_seen: None, outer: None };
+        REC.with_borrow_mut(|r| r.push(rec));
         LIVE.set(true);
     }
 }
@@ -370,11 +415,18 @@ pub unsafe fn begin(place: String, key: (usize, u32), params: &[*mut PyObject], 
 pub unsafe fn end(outs: Option<&[*mut PyObject]>) {
     unsafe {
         LIVE.set(false);
-        let outer = witness::end();
+        let Some(mut rec) = REC.with_borrow_mut(|r| r.pop()) else { return };
+        let outer = rec.outer.take().unwrap_or_else(witness::end);
         // The block's exception, if it left by one, stays as it is.
         let raised = ffi::PyErr_GetRaisedException();
-        if let Some(rec) = REC.take() {
-            shadow::keep(rec.end(outs, outer));
+        let key = rec.shadow.key;
+        let (shadow, armed) = rec.end(outs, outer);
+        // What ran under this recording ran behind the stop of the one around it.
+        let seen = shadow.seen;
+        with(|r| (r.shadow.seen, r.shadow.left_behind) = (r.shadow.seen + seen, r.shadow.left_behind + seen));
+        let kept = shadow::keep(shadow);
+        if let Some(armed) = armed {
+            again::arm(key, Armed { kept, ..armed });
         }
         if !raised.is_null() {
             ffi::PyErr_SetRaisedException(raised);
@@ -391,14 +443,43 @@ pub unsafe fn after(ok: bool, results: &[*mut PyObject]) {
     with(|r| unsafe { r.after(ok, results) })
 }
 
-// An instruction of the executor's inline path; `stores`: the value it
-// stores into a local, if it does.
-pub fn tick(stores: Option<u32>) {
+// An instruction of the executor's inline path, which only moves the value
+// `v`: what it is.
+pub fn tick(v: u32, plain: Plain) {
     with(|r| {
         r.settle();
         r.shadow.seen += 1;
         r.shadow.left_behind += r.shadow.stop.is_some() as u64;
-        r.origins.used(DEPTH.get(), stores.into_iter());
+        if let Plain::Store(_, x) = plain {
+            r.origins.used(DEPTH.get(), std::iter::once(x));
+        }
+        r.origins.known.plain(DEPTH.get(), v, plain);
+    })
+}
+
+// A conditional jump of the recorded run tested the value `v`.
+pub fn jump(v: u32) {
+    with(|r| {
+        if r.shadow.stop.is_none() {
+            let at = (DEPTH.get(), v);
+            if r.origins.known.lit(at) {
+                r.shadow.jumps.0 += 1;
+            } else {
+                r.shadow.jumps.1 += 1;
+                let why = format!("a jump under the body tested {}", r.origins.known.maker(at));
+                r.reasons.add(why);
+            }
+        }
+    })
+}
+
+// Something of the recorded run that no instruction told of: a generator's
+// yield, an exception on its way to a handler.
+pub fn unseen(what: &str) {
+    with(|r| {
+        if r.shadow.stop.is_none() {
+            r.reasons.add(what.to_string());
+        }
     })
 }
 
@@ -419,15 +500,36 @@ pub fn scope(begins: bool) {
 // runs it (asked first), false: it is left to CPython.
 pub unsafe fn frame(frame: *mut Frame, runs: bool) {
     with(|r| unsafe {
+        if r.shadow.stop.is_some() {
+            return;
+        }
         let name = || text(tr_frame_qualname(frame));
+        let depth = DEPTH.get();
         if !runs {
             r.stop(&name(), "a frame the executor does not run: nothing of it is seen".into());
-        } else if let Some((Pending::Entry(call), ..)) = r.stack.last() {
-            let label = call.label.clone();
-            r.stop(&label, format!("the Python frame {} ran under the C call of an entry", name()));
+            return;
+        }
+        let stop = match r.stack.last() {
+            Some(InFlight { pending: Pending::Entry(call), .. }) => Some((call.label.clone(), format!("the Python frame {} ran under the C call of an entry", name()))),
+            // The innermost activation has an instruction in flight that may
+            // enter a frame: the frame is taken for the one it called.
+            Some(InFlight { pending: Pending::Other { enters: true, .. }, at, .. }) if at.0 == depth => None,
+            Some(InFlight { pending: Pending::Other { what, .. }, at, .. }) if at.0 == depth => Some((name(), format!("a frame that no instruction of the body called: it ran under {what}, which enters none"))),
+            _ => Some((name(), "a frame that no instruction of the body called: it ran between two instructions (a finalizer, a callback)".into())),
+        };
+        match stop {
+            Some((at, why)) => drop(r.stop(&at, why)),
+            None => r.shadow.frames += 1,
         }
     })
 }
+
+// Whether the list of the place `key` is to run on this arrival (again.rs).
+pub fn again_due(key: (usize, u32)) -> bool {
+    !LIVE.get() && again::armed(key)
+}
+
+pub use again::{begin as again_begin, outs as again_outs, Again};
 
 // Today's engine traces the place with this key.
 pub fn traced(key: (usize, u32)) {

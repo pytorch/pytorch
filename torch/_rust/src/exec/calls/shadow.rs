@@ -17,10 +17,18 @@
 //     TORCH_RUST_CALLS_DIR naming a directory the process leaves both there
 //     as <pid>.json when the interpreter is finalized (no Python runs for
 //     it);
+//   - A STATUS IS FROM A CLOSED SET AND "replayable" IS POSITIVE: a Shadow
+//     is "stopped" (the recording ended early), "refused" (the check of
+//     lists refused it), "partial: <the first reason>" (it reached the end
+//     and record.rs met at least one thing the list does not say), or
+//     "replayable" (none of those). Nothing here decides a reason;
 //   - validate() runs the list once, outside the executor, and compares bit
-//     for bit: each output must have the key of the block's and, on the CPU
-//     and contiguous, its bytes. It answers "not validated" for what it
-//     cannot compare; it never answers "equal" for what it did not compare.
+//     for bit (compare): each output must have the key of the block's, on
+//     the CPU and contiguous its bytes, and the same memory relation: it
+//     shares its storage with the same operands and earlier outputs as the
+//     block's does, and where it shares an operand's it is the same memory.
+//     It answers "not validated" for what it cannot compare; it never
+//     answers "equal" for what it did not compare.
 
 use std::cell::RefCell;
 
@@ -66,6 +74,17 @@ pub struct Shadow {
     pub facts: u64,
     pub notes: Vec<String>,
     pub validated: String,
+    // Why the recording, though it reached its end, is not the body: each
+    // distinct reason with how often it was met, in the order met.
+    pub reasons: Vec<(String, u64)>,
+    // Conditional jumps taken under the body: on a known value, on any other.
+    pub jumps: (u64, u64),
+    // Python frames that ran under the body.
+    pub frames: u64,
+    // Later arrivals at the place the list was run on (again.rs): how many
+    // gave the block's outputs, how many could not be compared, and the
+    // first that differed.
+    pub again: (u32, u32, Option<String>),
 }
 
 thread_local! {
@@ -74,11 +93,16 @@ thread_local! {
     static MISSED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-pub fn keep(shadow: Shadow) {
-    KEPT.with_borrow_mut(|kept| match kept.iter_mut().find(|s| s.place == shadow.place) {
-        Some(old) => *old = shadow,
-        None => kept.push(shadow),
-    });
+// Every recording is kept, a stopped one too. Its index, for amend().
+pub fn keep(shadow: Shadow) -> usize {
+    KEPT.with_borrow_mut(|kept| {
+        kept.push(shadow);
+        kept.len() - 1
+    })
+}
+
+pub fn amend(at: usize, f: impl FnOnce(&mut Shadow)) {
+    KEPT.with_borrow_mut(|kept| kept.get_mut(at).map(f));
 }
 
 pub fn traced(key: (usize, u32)) {
@@ -108,11 +132,20 @@ fn quoted(s: &str) -> String {
 }
 
 impl Shadow {
-    pub fn status(&self) -> &'static str {
-        match (&self.stop, &self.refused) {
-            (Some(_), _) => "stopped",
-            (None, Some(_)) => "refused",
-            (None, None) => "complete",
+    pub fn status(&self) -> String {
+        match (&self.stop, &self.refused, self.reasons.first()) {
+            (Some(_), ..) => "stopped".into(),
+            (None, Some(_), _) => "refused".into(),
+            (None, None, Some((why, _))) => format!("partial: {why}"),
+            (None, None, None) => "replayable".into(),
+        }
+    }
+
+    fn again_text(&self) -> String {
+        match &self.again {
+            (_, _, Some(different)) => different.clone(),
+            (0, 0, None) => String::new(),
+            (equal, skipped, None) => format!("equal on {equal} later arrival(s), {skipped} not comparable"),
         }
     }
 
@@ -120,10 +153,10 @@ impl Shadow {
         let counts = |v: &[(String, u64)]| format!("{{{}}}", v.iter().map(|(k, n)| format!("{}: {n}", quoted(k))).collect::<Vec<_>>().join(", "));
         let stop = self.stop.as_ref().map_or("null".into(), |(at, why)| format!("[{}, {}]", quoted(at), quoted(why)));
         format!(
-            "{{\"place\": {}, \"status\": {}, \"traced\": {}, \"entries\": {}, \"seen\": {}, \"left_behind\": {}, \"stop\": {stop}, \"refused\": {}, \"text\": {}, \"loose\": {}, \"late\": {}, \"outputs\": [{}, {}], \"unstated\": {}, \"by_value\": {}, \"left\": {}, \"handed\": {}, \"facts\": {}, \"notes\": [{}], \"validated\": {}}}",
-            quoted(&self.place), quoted(self.status()), self.traced, self.entries, self.seen, self.left_behind, self.refused.as_deref().map_or("null".into(), quoted), quoted(&self.text),
+            "{{\"place\": {}, \"status\": {}, \"traced\": {}, \"entries\": {}, \"seen\": {}, \"left_behind\": {}, \"stop\": {stop}, \"refused\": {}, \"text\": {}, \"loose\": {}, \"late\": {}, \"outputs\": [{}, {}], \"unstated\": {}, \"by_value\": {}, \"left\": {}, \"handed\": {}, \"facts\": {}, \"notes\": [{}], \"validated\": {}, \"reasons\": {}, \"jumps\": [{}, {}], \"frames\": {}, \"again\": {}}}",
+            quoted(&self.place), quoted(&self.status()), self.traced, self.entries, self.seen, self.left_behind, self.refused.as_deref().map_or("null".into(), quoted), quoted(&self.text),
             self.loose, self.late, self.outputs.0, self.outputs.1, self.unstated, counts(&self.by_value), counts(&self.left), counts(&self.handed), self.facts,
-            self.notes.iter().map(|n| quoted(n)).collect::<Vec<_>>().join(", "), quoted(&self.validated)
+            self.notes.iter().map(|n| quoted(n)).collect::<Vec<_>>().join(", "), quoted(&self.validated), counts(&self.reasons), self.jumps.0, self.jumps.1, self.frames, quoted(&self.again_text())
         )
     }
 }
@@ -139,11 +172,15 @@ extern "C" fn dump() {
 
 /// What the call-list recorder found on this thread
 /// (``TORCH_RUST_CALLS=shadow``; empty without it): a dict per place, the
-/// last recorded run of it. ``status``: "complete" (``text`` is the list),
-/// "stopped" (``stop`` = (instruction, why)) or "refused" (the check of lists
-/// refused what was recorded: ``refused``). ``traced``: today's engine went on
-/// to trace the place. ``validated``: "equal", "DIFFERENT: ..." or "not
-/// validated: ...". ``loose``: tensors taken as pins with no check.
+/// recorded run of it. ``status``: "replayable" (``text`` is the list and the
+/// recorder met nothing the list does not say), "partial: <first reason>"
+/// (``text`` is a list that is not the body; ``reasons``: every reason with
+/// its count), "stopped" (``stop`` = (instruction, why)) or "refused" (the
+/// check of lists refused what was recorded: ``refused``). ``traced``: today's
+/// engine went on to trace the place. ``validated``: "equal", "DIFFERENT: ..."
+/// or "not validated: ...", on the recorded run's operands; ``again``: the same
+/// on later arrivals at the place. ``loose``: tensors taken as pins with no
+/// check. ``jumps``: conditional jumps under the body on a (known, other) value.
 #[pyfunction]
 pub fn _calls_shadow(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
     KEPT.with_borrow(|kept| {
@@ -169,6 +206,10 @@ pub fn _calls_shadow(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
                 d.set_item("facts", s.facts)?;
                 d.set_item("notes", s.notes.clone())?;
                 d.set_item("validated", &s.validated)?;
+                d.set_item("reasons", s.reasons.clone())?;
+                d.set_item("jumps", s.jumps)?;
+                d.set_item("frames", s.frames)?;
+                d.set_item("again", s.again_text())?;
                 Ok(d.unbind())
             })
             .collect()
@@ -183,28 +224,15 @@ pub fn _calls_shadow_missed() -> u64 {
     MISSED.get()
 }
 
-// The tensors a call can reach through `o`, operand `position` of it: `o`
-// itself, or the members of exact lists, tuples and dicts, four deep.
-pub unsafe fn tensors(o: *mut PyObject, position: usize, depth: u8, into: &mut Vec<(TensorIdent, usize)>) {
+// The tensors a call can reach through `o`, operand `position` of it
+// (origins::reach, the one walk of containers).
+pub unsafe fn tensors(o: *mut PyObject, position: usize, into: &mut Vec<(TensorIdent, usize)>) {
     unsafe {
-        if o.is_null() || depth > 4 {
-            return;
-        }
-        let tp = ffi::Py_TYPE(o);
-        if super::origins::plain_tensor(o) {
+        super::origins::reach(o, 0, &mut |t| {
             let mut id = TensorIdent::default();
-            tffi::op_hook::tensor_ident(o as usize, &mut id);
+            tffi::op_hook::tensor_ident(t as usize, &mut id);
             into.push((id, position));
-        } else if tp == &raw mut ffi::PyTuple_Type {
-            (0..ffi::PyTuple_GET_SIZE(o)).for_each(|i| tensors(ffi::PyTuple_GET_ITEM(o, i), position, depth + 1, into));
-        } else if tp == &raw mut ffi::PyList_Type {
-            (0..ffi::PyList_GET_SIZE(o)).for_each(|i| tensors(ffi::PyList_GET_ITEM(o, i), position, depth + 1, into));
-        } else if tp == &raw mut ffi::PyDict_Type {
-            let (mut at, mut k, mut v) = (0, std::ptr::null_mut(), std::ptr::null_mut());
-            while ffi::PyDict_Next(o, &mut at, &mut k, &mut v) != 0 {
-                tensors(v, position, depth + 1, into);
-            }
-        }
+        })
     }
 }
 
@@ -254,6 +282,57 @@ unsafe fn same_tensor(a: *mut PyObject, b: *mut PyObject) -> Option<bool> {
     }
 }
 
+// The storage of the tensor `o` by address, 0 if it has none.
+pub unsafe fn storage(o: *mut PyObject) -> usize {
+    let mut id = TensorIdent::default();
+    tffi::op_hook::tensor_ident(o as usize, &mut id);
+    id.storage
+}
+
+// What `o` shares its storage with: the first of `operands` (storages), and
+// the first of `earlier`; and where in the storage its memory starts.
+unsafe fn relation(o: *mut PyObject, operands: &[usize], earlier: &[*mut PyObject]) -> (Option<usize>, Option<usize>, usize) {
+    unsafe {
+        let mine = storage(o);
+        let mut span = tffi::TensorSpan::default();
+        let at = match tffi::tensor_by_type(o as usize).as_ref() {
+            Some(t) if tffi::tensor_span(t, &mut span) => span.at,
+            _ => 0,
+        };
+        (operands.iter().position(|s| *s != 0 && *s == mine), earlier.iter().position(|e| mine != 0 && storage(*e) == mine), at)
+    }
+}
+
+// The outputs the list made (`made`, its tuple) against the block's (`outs`,
+// borrowed), in order; `operands`: the storages of the inputs and pins both
+// ran on.
+pub unsafe fn compare(made: *mut PyObject, outs: &[*mut PyObject], operands: &[usize]) -> String {
+    unsafe {
+        let mine: Vec<*mut PyObject> = (0..outs.len()).map(|i| ffi::PyTuple_GET_ITEM(made, i as ffi::Py_ssize_t)).collect();
+        let mut verdict = String::from("equal");
+        for (i, want) in outs.iter().enumerate() {
+            match same_tensor(mine[i], *want) {
+                Some(true) => {}
+                Some(false) => return format!("DIFFERENT: output {i} of {}", outs.len()),
+                None => verdict = "not validated: an output is not a contiguous tensor on the CPU".into(),
+            }
+            let (a, b) = (relation(mine[i], operands, &mine[..i]), relation(*want, operands, &outs[..i]));
+            if (a.0, a.1) != (b.0, b.1) || a.0.is_some() && a.2 != b.2 {
+                return format!("DIFFERENT: output {i} of {} shares memory with {}, the block's with {}", outs.len(), shared(a), shared(b));
+            }
+        }
+        verdict
+    }
+}
+
+fn shared(r: (Option<usize>, Option<usize>, usize)) -> String {
+    match (r.0, r.1) {
+        (Some(k), _) => format!("operand {k}"),
+        (None, Some(j)) => format!("output {j}"),
+        (None, None) => "nothing".into(),
+    }
+}
+
 // Runs `list` on the recorded run's inputs and pins and compares its
 // outputs with `outs`, the block's (borrowed), in order.
 pub unsafe fn validate(py: Python<'_>, list: &List, inputs: &[Pin], pins: &[Pin], outs: &[*mut PyObject]) -> String {
@@ -268,18 +347,20 @@ pub unsafe fn validate(py: Python<'_>, list: &List, inputs: &[Pin], pins: &[Pin]
                 return format!("DIFFERENT: the list stopped at entry {} ({})", stop.entry, stop.what.text());
             }
         };
-        let mut verdict = String::from("equal");
-        for (i, want) in outs.iter().enumerate() {
-            match same_tensor(ffi::PyTuple_GET_ITEM(made, i as ffi::Py_ssize_t), *want) {
-                Some(true) => {}
-                Some(false) => {
-                    verdict = format!("DIFFERENT: output {i} of {}", outs.len());
-                    break;
-                }
-                None => verdict = "not validated: an output is not a contiguous tensor on the CPU".into(),
-            }
-        }
+        let operands: Vec<usize> = inputs.iter().chain(&pins).map(|o| storage(o.as_ptr())).collect();
+        let verdict = compare(made, outs, &operands);
         ffi::Py_DECREF(made);
         verdict
+    }
+}
+
+/// For tests: what the recorder's validation answers for the hand-built
+/// ``list`` run on ``inputs`` and ``pins`` when the block made ``outs``.
+#[pyfunction]
+pub fn _calls_validate(list: &Bound<'_, List>, inputs: Vec<Py<PyAny>>, pins: Vec<Py<PyAny>>, outs: Vec<Py<PyAny>>) -> String {
+    unsafe {
+        let weak = |held: &[Py<PyAny>]| held.iter().map(|o| Pin::weak(o.as_ptr())).collect::<Vec<_>>();
+        let outs: Vec<*mut PyObject> = outs.iter().map(|o| o.as_ptr()).collect();
+        validate(list.py(), list.get(), &weak(&inputs), &weak(&pins), &outs)
     }
 }
