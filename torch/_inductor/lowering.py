@@ -3428,7 +3428,8 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
         ]
         if values and all(
             isinstance(value, torch.Tensor)
-            and value.dtype in (torch.float64, torch.complex64, torch.complex128)
+            and value.dtype
+            in (torch.float64, torch.complex32, torch.complex64, torch.complex128)
             and is_strict_cuda_triton(value.device)
             for value in values
         ):
@@ -4174,6 +4175,13 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs, *, fx_node):
         for arg, fake_arg in zip(args, fake_args)
     )
     kwargs = {k: constrain_to_fake_tensor(v, fake_kwargs[k]) for k, v in kwargs.items()}
+    for arg in pytree.tree_leaves((args, kwargs)):
+        if _is_tensor_irnode(arg) and is_strict_cuda_triton(arg.get_device()):
+            arg.realize()
+            V.graph.preserve_input_alignment(
+                (arg.get_name(),),
+                "strict CUDA exact-stride kernels require original input pointer alignment",
+            )
     return args, kwargs
 
 
@@ -8916,6 +8924,10 @@ fallback_pow_tensor_scalar = fallback_handler(
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
+    r"""pow(a, b) -> TensorBox
+
+    Lower powers, preserving CUDA scalar exponent specializations in strict mode.
+    """
     if isinstance(b, float) and b.is_integer():
         return pow(a, int(b))
     elif isinstance(b, float) and b == 0.5:
@@ -8931,6 +8943,12 @@ def pow(a, b):
     embed_exponent = isinstance(b, int) and (
         -32 < b < 32 or (is_integer_pow and b >= 0)
     )
+    if (
+        embed_exponent
+        and is_float_dtype(dtype)
+        and is_strict_cuda_triton(a.get_device())
+    ):
+        embed_exponent = b in (0, 2, 3, -1, -2)
     if embed_exponent:
         loader = a.make_loader()
 
@@ -8947,6 +8965,22 @@ def pow(a, b):
                     ops.mul(value, value), dtype, use_compute_types=False
                 )
                 return ops.mul(ops.to_dtype(square, dtype), value)
+            if (
+                b == -2
+                and is_float_dtype(dtype)
+                and is_strict_cuda_triton(a.get_device())
+            ):
+                value = loader(idx)
+                square = ops.to_dtype(
+                    ops.mul(value, value), dtype, use_compute_types=False
+                )
+                # PowKernel rounds the square in scalar_t before double division.
+                reciprocal = ops.truediv(
+                    ops.constant(1.0, torch.float64),
+                    ops.to_dtype(square, torch.float64),
+                )
+                rounded = ops.to_dtype(reciprocal, dtype, use_compute_types=False)
+                return ops.to_dtype(rounded, dtype)
             return pow_recursive(loader(idx), b, dtype)
 
         return Pointwise.create(
@@ -9774,7 +9808,8 @@ def cuda_pointwise_iteration(
 ):
     if not all(
         inp.get_dtype() == inputs[0].get_dtype()
-        and inp.get_dtype() in (torch.float64, torch.complex64, torch.complex128)
+        and inp.get_dtype()
+        in (torch.float64, torch.complex32, torch.complex64, torch.complex128)
         and is_strict_cuda_triton(inp.get_device())
         for inp in inputs
     ):

@@ -1038,6 +1038,16 @@ class GraphLowering(torch.fx.Interpreter):
                             storage_names.add(alias)
                             pending.append(alias)
         if input_names:
+            alias_users: dict[str, list[str]] = {}
+            for name, buffer in self.name_to_buffer.items():
+                for alias in buffer.get_inputs_that_alias_output():
+                    alias_users.setdefault(alias, []).append(name)
+            pending = list(storage_names)
+            while pending:
+                for name in alias_users.get(pending.pop(), ()):
+                    if name not in storage_names:
+                        storage_names.add(name)
+                        pending.append(name)
             self.input_alignment_to_preserve.update(input_names)
             # Neither codegen nor runtime may realign these backing input pointers.
             self.unaligned_buffers.update(storage_names)
