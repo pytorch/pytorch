@@ -1445,8 +1445,12 @@ class TestCachingAutotunerPlugin(TestCase):
     def _get_stream(self, device):
         from torch._dynamo.device_interface import get_interface_for_device
 
-        device_interface = get_interface_for_device(torch.device(device).type)
-        return device_interface.get_raw_stream(device_interface.current_device())
+        device = torch.device(device)
+        device_interface = get_interface_for_device(device.type)
+        device_index = device.index
+        if device_index is None:
+            device_index = device_interface.current_device()
+        return device_interface.get_raw_stream(device_index)
 
     def _make_kernel_inputs(self, device):
         in_ptr = torch.zeros(16, device=device, dtype=torch.float32)
@@ -1829,7 +1833,6 @@ class TestDumpLaunchTensors(TestCase):
                 os.environ["TORCHINDUCTOR_DUMP_LAUNCH_TENSORS"] = old_dump_env
 
 
-@requires_triton()
 @instantiate_parametrized_tests
 class TestStaticRecheckAutotuneCache(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -3087,7 +3090,7 @@ class TestPrecomputedGridAutotunedKernel(TestCase):
         def does_not_fit(cls, error):
             orig = cls.make_launcher
 
-            def make_launcher(self, device):
+            def make_launcher(self):
                 if self.config.num_stages > 1:
                     raise error
                 return orig(self)
