@@ -54,7 +54,7 @@ fn main() {
 
     // CPython-internal frame helpers for the CFG executor. Plain C: the 3.12
     // internal headers don't compile as C++.
-    let shim_srcs = ["frame_shim.c", "exec_ops.c"].map(|f| project_root.join("torch/_rust/csrc").join(f));
+    let shim_srcs = ["frame_shim.c", "exec_ops.c", "calls_slots.c"].map(|f| project_root.join("torch/_rust/csrc").join(f));
     let mut shim = cc::Build::new();
     shim.files(&shim_srcs).flag_if_supported("-Wno-unused-parameter");
     if let Ok(out) = &python_includes {

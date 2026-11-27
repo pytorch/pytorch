@@ -41,9 +41,10 @@ pub enum Group {
     // Exactly torch.Tensor or nn.Parameter: the classes whose Python
     // operators run as plain aten operators.
     PlainTensor,
+    ExactModule,
 }
 
-pub const GROUPS: &[Group] = &[Group::Immutable, Group::ExactList, Group::ExactTuple, Group::ExactDict, Group::ExactSet, Group::PlainTensor];
+pub const GROUPS: &[Group] = &[Group::Immutable, Group::ExactList, Group::ExactTuple, Group::ExactDict, Group::ExactSet, Group::PlainTensor, Group::ExactModule];
 
 // The immutable classes, each with why it is on the list.
 unsafe fn immutable() -> [(*mut ffi::PyTypeObject, &'static str); 7] {
@@ -68,6 +69,7 @@ impl Group {
             Group::ExactDict => tp == &raw mut ffi::PyDict_Type,
             Group::ExactSet => tp == &raw mut ffi::PySet_Type,
             Group::PlainTensor => super::super::plain_tensor_types().contains(&(tp as usize)),
+            Group::ExactModule => tp == &raw mut ffi::PyModule_Type,
         }
     }
 
@@ -82,6 +84,7 @@ impl Group {
             Group::ExactDict => one("exactly dict: a lookup is C code but for the hash and comparison of its keys"),
             Group::ExactSet => one("exactly set: a lookup is C code but for the hash and comparison of its members"),
             Group::PlainTensor => one("exactly torch.Tensor or torch.nn.Parameter: no __torch_function__ runs for it"),
+            Group::ExactModule => one("exactly types.ModuleType: an attribute of it is the item of its dict, else what the __getattr__ of that dict returns"),
         }
     }
 }

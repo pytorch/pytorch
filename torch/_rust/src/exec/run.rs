@@ -1956,7 +1956,8 @@ impl Act<'_> {
                     super::value_reads::at(ins.origin);
                 }
                 let operands: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
-                match super::covered::step(self.c, self.under_body, ins, &operands, callee, (*self.p.callees.get()).get(&v)) {
+                let site = super::rules::Site { frame: self.f, names: self.names, operands: &operands };
+                match super::covered::step(self.c, self.under_body, ins, &site, callee, (*self.p.callees.get()).get(&v)) {
                     Ok(trusted) => {
                         let _trusted = trusted.then(super::covered::Trusted::enter);
                         self.exec(v, ins)

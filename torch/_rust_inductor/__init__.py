@@ -2089,10 +2089,8 @@ def _split_host(gm: torch.fx.GraphModule, example: list[Any], consts: list[Any])
         t.layout is not torch.strided or t.is_conj() or t.is_neg()
         for t in traced_tensors
     ):
-        # A region with a prologue checks how its tensors share memory, as
-        # one with a lowering does: such a region takes no tensor with the
-        # conjugate or the negative bit (see trace_region), and the check
-        # looks at strided tensors.
+        # Which memory a write reaches is said of strided tensors whose
+        # memory is their values (_same_memory): no prologue for others.
         return None
     mem_of, tensor_nodes = _same_memory(gm, example + consts)
     order = {n: i for i, n in enumerate(gm.graph.nodes)}
@@ -2485,29 +2483,15 @@ def _input_types(args, plan, types, consts):
     return out + floats + [_types.exact(c, const=True) for c in consts]
 
 
-def _shares(example, consts):
-    """How the tensors of a traced call share memory, as a key: what is made
-    of its graph is made for that too (see exec/overlap.rs)."""
-    tensors = [t for t in example if isinstance(t, torch.Tensor)]
-    return _rust().Overlap(tensors, consts, True).key()
-
-
-def _overlap(tensors, consts, reads, checked, hosted=False):
-    """A region's check of how its call's tensors share memory (see
-    exec/overlap.rs), or None if it has nothing to check. What block passes
-    make of the graph is for the whole of it, and so is a graph whose reads
-    of values run first (``hosted``: see _split_host, which moves them past
-    writes to memory the traced call's tensors showed to be apart); the
-    graph run as traced only for which of its inputs are one tensor, or one
-    the body also read from somewhere. ``checked``: the reads look where
-    every constant's data is."""
-    as_traced = block_pipeline is not None and block_pipeline.as_traced and not hosted
-    also_read = reads.values(tensors) if reads is not None else []
-    overlap = _rust().Overlap(tensors, consts, not as_traced, also_read)
-    if not overlap.needed:
-        return None
-    if checked and not as_traced:
-        reads.shares(overlap)
+def _overlap(tensors, consts):
+    """How the tensors of a traced call stand to one another in memory (see
+    exec/overlap.rs): every region is entered only by a call whose tensors
+    stand so again, whatever runs for its graph, and what is made of a graph
+    is made for that too. Refuses a trace with a tensor whose place cannot be
+    said: it is not taken to be apart from the others."""
+    overlap = _rust().Overlap(tensors, consts)
+    if overlap.unplaced is not None:
+        raise _Refused(overlap.unplaced)
     return overlap
 
 
@@ -2543,9 +2527,10 @@ def _named(gm):
     return named
 
 
-def _compile(name, gm, example, consts, args, plan, types):
+def _compile(name, gm, example, consts, args, plan, types, shares):
     """What a region runs for its graph, and whether the graph's reads of
-    values run first, in a prologue of their own (_split_host)."""
+    values run first, in a prologue of their own (_split_host). ``shares``:
+    how the traced call's tensors stand in memory, as a key (_overlap)."""
     from torch._inductor.compile_fx import compile_fx
 
     if block_pipeline is None:
@@ -2554,7 +2539,7 @@ def _compile(name, gm, example, consts, args, plan, types):
             gm.code,
             tuple(_meta(t, "an input") for t in example + consts),
             torch.is_grad_enabled(),
-            _shares(example, consts),
+            shares,
             tuple(map(id, named)),
         )
         if key not in _compiled:
@@ -2579,6 +2564,7 @@ def _compile(name, gm, example, consts, args, plan, types):
             example + floats,
             consts,
             types[:k] + [_vm_types().FloatType() for _ in floats] + types[k:],
+            shares,
         )
 
         def run(*inputs):
@@ -2586,7 +2572,7 @@ def _compile(name, gm, example, consts, args, plan, types):
 
         return run, True
     types = _input_types(args, plan, types, consts)
-    return _compile_vm(name, gm, example, consts, types), False
+    return _compile_vm(name, gm, example, consts, types, shares), False
 
 
 def _vm_types():
@@ -2595,7 +2581,7 @@ def _vm_types():
     return _types
 
 
-def _compile_vm(name, gm, example, consts, input_types):
+def _compile_vm(name, gm, example, consts, input_types, shares):
     # Regions with the same graph and input metadata share the passes' output,
     # unless a pass read a weight's value. Those traced in the same autocast
     # state: a lowering compiles for the state it is called in (AOT Autograd
@@ -2611,7 +2597,7 @@ def _compile_vm(name, gm, example, consts, input_types):
         ),
         torch.is_grad_enabled(),
         autocast_on().raw_repr(),
-        _shares(example, consts),
+        shares,
         tuple(map(id, named)),
     )
     own = (*key, tuple(map(id, consts)))
@@ -3298,17 +3284,34 @@ def _trace_region(
         if DEBUG:
             print(f"region {name}: {n_ops} ops, too small")
         return None
+    lowered = block_pipeline is None or not block_pipeline.as_traced
     try:
         consts = _lift_constants(gm)
-        for const in consts:
-            _meta(const, "a tensor it reads from outside its arguments")
+        where = "a tensor it reads from outside its arguments"
+        keys = [_meta(const, where) for const in consts]
+        if lowered:
+            keys += [_meta(t, "an input") for t in example[:n_tensors]]
+        if lowered and any(key.marked for key in keys):
+            # What is made of a graph reads its tensors' memory as it is.
+            raise _Refused(
+                "a tensor with the conjugate or the negative bit under a lowering"
+            )
+        overlap = _overlap(example[:n_tensors], consts)
     except _Refused as e:
         stats["refused"] += 1
         _traced(name, "refused", str(e))
         if DEBUG:
             print(f"region {name}: refused: {e}")
         return None
-    compiled, hosted = _compile(name, gm, example, consts, args, plan, types)
+    shares = overlap.key()
+    compiled, hosted = _compile(name, gm, example, consts, args, plan, types, shares)
+    if overlap.two_storages and (lowered or hosted):
+        # What is made of a graph, and a graph whose reads of values run
+        # first (_same_memory), know shared memory by its storage.
+        stats["refused"] += 1
+        why = "two of its tensors overlap in two storages"
+        _traced(name, "refused", f"{why}: only the graph as traced runs on that")
+        return None
     checked = False
     bound: Any = None
     if reads is not None:
@@ -3338,13 +3341,15 @@ def _trace_region(
 
             bound = Binding(bind, consts)
             reads.bound(bound.rebind)
-    overlap = _overlap(example[:n_tensors], consts, reads, checked, hosted)
-    if overlap is not None and overlap.marked:
-        # What is made of a graph reads its tensors' memory as it is.
-        stats["refused"] += 1
-        why = "a tensor with the conjugate or the negative bit under a lowering"
-        _traced(name, "refused", why)
-        return None
+    if reads is not None:
+        # After `forget`: an input the body also read from somewhere is the
+        # one tensor the graph has for both.
+        overlap.also_read(example[:n_tensors], reads.values(example[:n_tensors]))
+    if not overlap.needed:
+        overlap = None
+    elif checked:
+        # The reads say when a constant's data is somewhere else.
+        reads.shares(overlap)
     record = _traced(
         name,
         "region",
@@ -3385,7 +3390,7 @@ def _trace_region(
         why = [] if DEBUG else None
         inputs = _inputs(region_args, plan, why)
         if inputs is not None and overlap is not None and not overlap.holds(inputs):
-            inputs, why = None, ["how its tensors share memory, or a conjugate or negative bit"]
+            inputs, why = None, ["how its tensors share memory"]
         if inputs is not None and arithmetic is not None and not arithmetic(inputs[n_tensors:]):
             inputs, why = None, ["a number its arithmetic does not take"]
         for i in unread if inputs is not None else ():

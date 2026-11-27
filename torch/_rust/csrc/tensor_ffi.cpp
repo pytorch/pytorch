@@ -304,34 +304,53 @@ int64_t tensor_version(const Tensor& t) {
   return t._version();
 }
 
-void tensor_span(const Tensor& t, TensorSpan& out) noexcept {
-  out.storage = 0;
-  out.low = 0;
-  out.high = 0;
-  out.marks = !t.defined() ? 0 : (t.is_conj() ? 1 : 0) | (t.is_neg() ? 2 : 0);
+bool tensor_span(const Tensor& t, TensorSpan& out) noexcept {
+  if (!t.defined()) {
+    return false;
+  }
   const c10::TensorImpl* impl = t.unsafeGetTensorImpl();
-  if (!t.defined() || impl->is_python_dispatch() || !impl->has_storage() ||
-      t.layout() != c10::kStrided) {
-    return;
+  if (impl->is_python_dispatch() || !impl->has_storage() ||
+      impl->has_symbolic_sizes_strides() || t.layout() != c10::kStrided) {
+    return false;
+  }
+  // The device types whose storages hold addresses of one address space.
+  const auto type = impl->device_type();
+  if (type != c10::DeviceType::CPU && type != c10::DeviceType::CUDA) {
+    return false;
   }
   try {
+    const c10::StorageImpl* storage =
+        impl->unsafe_storage().unsafeGetStorageImpl();
+    if (storage->device_type() != type) {
+      return false;
+    }
     const size_t item = impl->itemsize();
-    const size_t low = static_cast<size_t>(impl->storage_offset()) * item;
     // Where the last element starts, in elements from the first.
     size_t last = 0;
     const auto sizes = impl->sizes();
     const auto strides = impl->strides();
     for (size_t d = 0; d < sizes.size(); d++) {
-      if (sizes[d] > 0 && strides[d] > 0) {
-        last += static_cast<size_t>(sizes[d] - 1) * static_cast<size_t>(strides[d]);
+      if (strides[d] < 0) {
+        return false;
+      }
+      if (sizes[d] > 0) {
+        last += static_cast<size_t>(sizes[d] - 1) *
+            static_cast<size_t>(strides[d]);
       }
     }
-    out.low = low;
-    out.high = impl->numel() == 0 ? low : low + (last + 1) * item;
-    out.storage = reinterpret_cast<std::uintptr_t>(
-        impl->unsafe_storage().unsafeGetStorageImpl());
+    const size_t bytes = impl->numel() == 0 ? 0 : (last + 1) * item;
+    const auto data = reinterpret_cast<std::uintptr_t>(storage->data());
+    if (bytes != 0 && data == 0) {
+      return false;
+    }
+    out.storage = reinterpret_cast<std::uintptr_t>(storage);
+    out.at = static_cast<size_t>(impl->storage_offset()) * item;
+    out.space = static_cast<uint8_t>(type);
+    out.low = data + out.at;
+    out.high = out.low + bytes;
+    return true;
   } catch (...) {
-    out.storage = 0;
+    return false;
   }
 }
 

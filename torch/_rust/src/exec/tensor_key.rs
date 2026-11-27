@@ -78,6 +78,13 @@ impl TensorKey {
         unsafe { self.holds(x.as_ptr()) }
     }
 
+    /// Whether the tensor has the conjugate or the negative bit: its memory
+    /// is not its values, and code made to read memory takes no such tensor.
+    #[getter]
+    fn marked(&self) -> bool {
+        self.facts.bits & 6 != 0
+    }
+
     fn __repr__(&self) -> String {
         self.to_string()
     }

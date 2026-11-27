@@ -6,9 +6,9 @@ use pyo3::exceptions::PyValueError;
 use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;
 
-use super::{Assert, Callee, Entry, Flags, List, Tmpl, FLAG_NAMES, KEY_FIELDS, UNARY_OPS};
-use crate::bindings::ffi::{tensor_by_type, tensor_meta};
+use super::{Assert, Callee, Entry, Flags, List, Tmpl, FLAG_NAMES, UNARY_OPS};
 use crate::cfg::ir::{BINARY_OPS, COMPARE_OPS};
+use crate::exec::tensor_key::TensorKey;
 
 type P = *mut PyObject;
 type Decoded<T> = Result<T, String>;
@@ -79,6 +79,7 @@ unsafe fn tmpl(o: P) -> Decoded<Tmpl> {
             "in" => Tmpl::In(slot("an input")?),
             "pin" => Tmpl::Pin(slot("a pin")?),
             "res" => Tmpl::Res(slot("a result")?),
+            "move" => Tmpl::Move(slot("a result")?),
             "const" => Tmpl::Const(slot("a constant")?),
             "part" => {
                 fields(kind, &rest, 2)?;
@@ -168,27 +169,23 @@ unsafe fn asserts(o: P) -> Decoded<Option<Assert>> {
         let mut a = Assert::default();
         for item in &all {
             let (kind, rest) = tagged(*item, "an assert")?;
+            fields(kind, &rest, 1)?;
+            if matches!(kind, "key" | "class") && a.class.is_some() {
+                return Err("a result has one class: one key or one class".into());
+            }
             match kind {
                 "key" => {
-                    fields(kind, &rest, 2)?;
-                    for field in items(rest[0], "the fields of a key")? {
-                        let field = text(field, "a field of a key")?;
-                        a.mask |= 1 << KEY_FIELDS.iter().position(|f| *f == field).ok_or_else(|| format!("no key field {field:?}"))?;
+                    let Some(key) = TensorKey::of(rest[0]) else { return Err("the key of an assert is read off a tensor that has one: a plain torch.Tensor or Parameter, dense and strided".into()) };
+                    (a.key, a.class) = (Some(key), Some(object(ffi::Py_TYPE(rest[0]) as P)));
+                }
+                "class" => {
+                    if ffi::PyType_Check(rest[0]) == 0 {
+                        return Err("the class of an assert must be a type".into());
                     }
-                    let Some(t) = tensor_by_type(rest[1] as usize).as_ref() else { return Err("the key of an assert is read off a tensor".into()) };
-                    tensor_meta(t, &mut a.key);
-                    if !a.key.defined || !a.key.has_shape || !a.key.has_device {
-                        return Err("the key of an assert is read off a tensor that has sizes and a device".into());
-                    }
+                    a.class = Some(object(rest[0]));
                 }
-                "count" => {
-                    fields(kind, &rest, 1)?;
-                    a.count = Some(index(rest[0], "a count")? as usize);
-                }
-                "is" => {
-                    fields(kind, &rest, 1)?;
-                    a.same = Some(index(rest[0], "an operand")?);
-                }
+                "count" => a.count = Some(index(rest[0], "a count")? as usize),
+                "is" => a.same = Some(index(rest[0], "an operand")?),
                 other => return Err(format!("no assert kind {other:?}")),
             }
         }
@@ -196,23 +193,61 @@ unsafe fn asserts(o: P) -> Decoded<Option<Assert>> {
     }
 }
 
+// The pinned classes of the operand `t`, flat in the order of its leaves:
+// a type per leaf, None for a null, a tuple or list of the parts' classes
+// for what is built.
+unsafe fn classes(t: &Tmpl, o: P, into: &mut Vec<Option<Py<PyAny>>>) -> Decoded<()> {
+    unsafe {
+        let parts: &[Tmpl] = match t {
+            Tmpl::Seq(_, parts) | Tmpl::Map(_, parts) => parts,
+            Tmpl::Slice(parts) => &parts[..],
+            Tmpl::Null if o == ffi::Py_None() => return Ok(into.push(None)),
+            Tmpl::Null => return Err("the class of a null must be None".into()),
+            Tmpl::In(_) | Tmpl::Pin(_) | Tmpl::Res(_) | Tmpl::Move(_) | Tmpl::Part(..) | Tmpl::Const(_) => {
+                if ffi::PyType_Check(o) == 0 {
+                    return Err("the class of an operand must be a type".into());
+                }
+                return Ok(into.push(Some(object(o))));
+            }
+        };
+        let given = items(o, "the classes of the parts of a seq, map or slice")?;
+        if given.len() != parts.len() {
+            return Err(format!("{} classes for {} parts", given.len(), parts.len()));
+        }
+        parts.iter().zip(given).try_for_each(|(p, c)| classes(p, c, into))
+    }
+}
+
 unsafe fn entry(o: P) -> Decoded<Entry> {
     unsafe {
         let e = items(o, "an entry")?;
+        let none = ffi::Py_None();
+        let blank = |callee: Callee, at: u32| Entry { callee, args: Box::default(), kwnames: None, out: None, at, flags: Flags::default(), assert: None, classes: Box::default(), decided: Box::default(), release: Box::default() };
+        if e.first().is_some_and(|kind| ffi::PyUnicode_CheckExact(*kind) != 0) {
+            if text(e[0], "an entry")? != "drop" || e.len() != 3 {
+                return Err("an entry that starts with a str is (\"drop\", slots, at)".into());
+            }
+            return Ok(blank(Callee::Drop(indices(e[1], "a dropped slot")?), index(e[2], "at")?));
+        }
         if e.len() != 8 {
             return Err(format!("an entry has 8 fields, not {}", e.len()));
         }
-        let none = ffi::Py_None();
+        let args = tmpls(e[1])?;
+        let given = items(e[7], "classes")?;
+        if given.len() != args.len() {
+            return Err(format!("{} classes for {} operands", given.len(), args.len()));
+        }
+        let mut pinned = Vec::new();
+        args.iter().zip(given).try_for_each(|(t, c)| classes(t, c, &mut pinned))?;
         Ok(Entry {
-            callee: callee(e[0])?,
-            args: tmpls(e[1])?,
             // Its exact type is the list's to check.
             kwnames: if e[2] == none { None } else { Some(Py::from_borrowed_ptr(Python::assume_attached(), e[2])) },
             out: if e[3] == none { None } else { Some(index(e[3], "out")?) },
-            at: index(e[4], "at")?,
             flags: flags(e[5])?,
             assert: asserts(e[6])?,
-            kills: indices(e[7], "kills")?,
+            classes: pinned.into(),
+            args,
+            ..blank(callee(e[0])?, index(e[4], "at")?)
         })
     }
 }

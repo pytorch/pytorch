@@ -17,8 +17,23 @@
 // What it guarantees
 //   - license() is NoRow, with the reason, for a What that a family stops,
 //     and for one that families have rows for of which none takes these
-//     classes; Row for the first row that does; NotMine where no family has
-//     taken the What over: the code that decided before decides;
+//     classes, or these values; Row for the first row that does; NotMine
+//     where no family has taken the What over: the code that decided before
+//     decides;
+//   - A ROW WITH READS OF ITS OWN (Row::before). What an instruction reads
+//     besides its operands is recorded, as checks of the region being traced,
+//     by hooks of the executor for most kinds still. A row may carry that
+//     itself: a function of its family's file that license() calls once the
+//     classes fit, before the instruction runs, with the frame and the
+//     operands. It tests what the classes do not say (the VALUES the row is
+//     for) and, if they fit, hands every read the row's `reads` names to
+//     exec/reads.rs with the value it found, by reads of C containers only.
+//     That is before the instruction and not after it because such a row
+//     writes nothing and enters nothing: what it finds is what the
+//     instruction finds. Err is "no row for these values". covered.rs asks
+//     about such an instruction (records()) under a call it took at
+//     another's word too, where it asks about nothing else: the executor's
+//     hooks record there, and this is in their place;
 //   - advice() is Err where license() is NoRow for every class: a stop, or
 //     taken over with no row at all. It never says more than that: a verdict
 //     is advice on where a region may be, and license() is asked again;
@@ -31,10 +46,12 @@
 
 use pyo3::ffi::PyObject;
 
+use super::ffi::Frame;
 use crate::cfg::ir::Op;
 
 pub mod dump;
 pub mod groups;
+pub mod imports;
 pub mod ops;
 
 pub use groups::{Class, Group};
@@ -74,9 +91,11 @@ impl What {
 // of the frame, a constant of the code, the item of a globals or builtins
 // dict, the content of a cell, the closure of the frame's function, which
 // object an operand is, an operand's class and its MRO, the characters of a
-// str, the exception the thread handles, the interpreter's pending work.
+// str, the exception the thread handles, the interpreter's pending work, an
+// item of the interpreter's table of loaded modules, an attribute of an
+// object as its class resolves it.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Read { Slot, Constant, Global, Cell, Closure, Identity, Class, Text, Handled, Pending }
+pub enum Read { Slot, Constant, Global, Cell, Closure, Identity, Class, Text, Handled, Pending, Modules, Attribute }
 // What is written: a slot of the frame, the container at an operand (one
 // the frame is building), the exception the thread handles.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -98,6 +117,18 @@ pub enum Enters { Never, Named, Foreign }
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Scalars { None, Operand, Parts, Specialize }
 
+// Where an instruction is about to run: its frame, the names of the frame's
+// code (an oparg that is a name counts into them) and its operands, all
+// borrowed.
+pub struct Site<'a> {
+    pub frame: *mut Frame,
+    pub names: *const *mut PyObject,
+    pub operands: &'a [*mut PyObject],
+}
+
+// See "a row with reads of its own" at the head of the file.
+pub type Before = unsafe fn(&What, &Site) -> Result<(), String>;
+
 pub struct Row {
     // Operands by position (below 0: from the last) and the class each is to have.
     pub operands: &'static [(i8, Class)],
@@ -107,6 +138,7 @@ pub struct Row {
     pub enters: Enters,
     pub scalars: Scalars,
     pub why: &'static str,
+    pub before: Option<Before>,
 }
 
 impl Row {
@@ -145,7 +177,7 @@ pub struct Family {
     pub table: fn() -> Vec<(String, Taken)>,
 }
 
-static FAMILIES: &[Family] = &[ops::FAMILY];
+static FAMILIES: &[Family] = &[ops::FAMILY, imports::FAMILY];
 
 // What the families say of `what`: Err, why it stops; None, nobody took it
 // over; else the rows of every family that did.
@@ -163,16 +195,27 @@ fn rows(what: &What) -> Result<Option<Vec<&'static Row>>, String> {
 }
 
 // Asked before an instruction runs under a trace; `classes`: of every
-// operand, in order.
-pub unsafe fn license(what: &What, classes: &[Class]) -> License {
-    match rows(what) {
-        Err(why) => License::NoRow(why),
-        Ok(None) => License::NotMine,
-        Ok(Some(rows)) => rows.into_iter().find(|r| r.takes(classes)).map_or_else(
-            || License::NoRow(format!("{} has no row for operands of the classes ({})", what.name(), classes.iter().map(|c| c.name()).collect::<Vec<_>>().join(", "))),
-            License::Row,
-        ),
+// operand, in order; `site`: where it runs.
+pub unsafe fn license(what: &What, classes: &[Class], site: &Site) -> License {
+    let rows = match rows(what) {
+        Err(why) => return License::NoRow(why),
+        Ok(None) => return License::NotMine,
+        Ok(Some(rows)) => rows,
+    };
+    let mut why = format!("{} has no row for operands of the classes ({})", what.name(), classes.iter().map(|c| c.name()).collect::<Vec<_>>().join(", "));
+    for row in rows.into_iter().filter(|r| r.takes(classes)) {
+        match row.before.map_or(Ok(()), |before| before(what, site)) {
+            Ok(()) => return License::Row(row),
+            Err(values) => why = format!("{} has no row for these operands: {values}", what.name()),
+        }
     }
+    License::NoRow(why)
+}
+
+// Whether rows of `what` record what the instruction reads themselves: it
+// is asked about wherever it runs under a trace, also where nothing else is.
+pub fn records(what: &What) -> bool {
+    FAMILIES.iter().any(|family| matches!((family.rule)(what), Taken::Rows(rows) if rows.iter().any(|r| r.before.is_some())))
 }
 
 // Asked by a verdict, which knows no operand: Err, with the reason, if no

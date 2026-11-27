@@ -51,6 +51,7 @@ import operator
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import types
@@ -921,8 +922,10 @@ class TestVmSharedMemory(TestCase):
         MODES_READ = MODES_READ.to(device)
         self.calls(device, passes, "read", traced, fn=modes_reading)
 
-    def relation(self, inputs, consts=(), whole=True, read=()):
-        return torch._rust.Overlap(list(inputs), list(consts), whole, list(read))
+    def relation(self, inputs, consts=(), read=()):
+        relation = torch._rust.Overlap(list(inputs), list(consts))
+        relation.also_read(list(inputs), list(read))
+        return relation
 
     def test_relation_traced_apart(self, device):
         a, b, w = (torch.zeros(8, device=device) for _ in range(3))
@@ -969,35 +972,59 @@ class TestVmSharedMemory(TestCase):
 
     def test_relation_traced_with_one_tensor_twice(self, device):
         a, b = torch.zeros(8, device=device), torch.zeros(8, device=device)
-        for whole in (True, False):
-            r = self.relation([a, a, b], whole=whole)
-            self.assertTrue(r.needed)
-            self.assertTrue(r.holds([b, b, a]))
-            self.assertFalse(r.holds([a, a.detach(), b]), msg=f"whole {whole}")
-            self.assertFalse(r.holds([a, b, b]), msg=f"whole {whole}")
-        # A graph run as traced takes the call's tensors as they come.
-        r = self.relation([a, b], whole=False)
-        self.assertFalse(r.needed)
-        self.assertTrue(r.holds([a, a]))
+        r = self.relation([a, a, b])
+        self.assertTrue(r.needed)
+        self.assertTrue(r.holds([b, b, a]))
+        self.assertFalse(r.holds([a, a.detach(), b]))
+        self.assertFalse(r.holds([a, b, b]))
+        # Traced with two tensors, a graph is for two, as traced or lowered.
+        r = self.relation([a, b])
+        self.assertTrue(r.needed)
+        self.assertFalse(r.holds([a, a]))
+        # One tensor stands to no other.
+        self.assertFalse(self.relation([a]).needed)
 
     def test_relation_of_an_input_the_body_also_read(self, device):
         a, w = torch.zeros(8, device=device), torch.zeros(8, device=device)
-        for whole in (True, False):
-            r = self.relation([a, w], whole=whole, read=[1])
-            self.assertTrue(r.needed)
-            self.assertTrue(r.holds([torch.zeros(8, device=device), w]))
-            self.assertFalse(r.holds([a, torch.zeros(8, device=device)]))
+        r = self.relation([a, w], read=[1])
+        self.assertTrue(r.needed)
+        self.assertTrue(r.holds([torch.zeros(8, device=device), w]))
+        self.assertFalse(r.holds([a, torch.zeros(8, device=device)]))
+        r = self.relation([w], read=[0])
+        self.assertTrue(r.needed)
+        self.assertTrue(r.holds([w]))
+        self.assertFalse(r.holds([a]))
 
-    def test_documented_limit_memory_that_two_storages_share(self, device):
-        # Memory handed to PyTorch twice is two storages: nothing in PyTorch
-        # knows that they overlap, and the relation goes by storages.
+    def test_memory_that_two_storages_share(self, device):
+        # Memory handed to PyTorch twice is two storages over the same
+        # addresses: the relation goes by addresses.
         if torch.device(device).type != "cpu":
             self.skipTest("memory from a buffer is the CPU's")
         memory = bytearray(64)
         a = torch.frombuffer(memory, dtype=torch.float32)
         b = torch.frombuffer(memory, dtype=torch.float32)
         r = self.relation([torch.zeros(16), torch.zeros(16)])
-        self.assertTrue(r.holds([a, b]))
+        self.assertFalse(r.two_storages)
+        self.assertFalse(r.holds([a, b]))
+        r = self.relation([a, b])
+        self.assertTrue(r.two_storages)
+        self.assertTrue(r.holds([b, a]))
+        self.assertFalse(r.holds([a, a[:]]))
+
+    def test_documented_limit_memory_at_two_addresses(self, device):
+        # One file mapped twice is the same memory at two addresses: nothing
+        # in PyTorch knows that the two overlap.
+        if torch.device(device).type != "cpu":
+            self.skipTest("a mapped file is the CPU's")
+        with tempfile.NamedTemporaryFile() as file:
+            file.write(bytes(64))
+            file.flush()
+            a = torch.from_file(file.name, shared=True, size=16)
+            b = torch.from_file(file.name, shared=True, size=16)
+            a[0] = 1.0
+            self.assertEqual(b[0].item(), 1.0)
+            r = self.relation([torch.zeros(16), torch.zeros(16)])
+            self.assertTrue(r.holds([a, b]))
 
     def test_relation_follows_a_constant_whose_memory_moved(self, device):
         x, w, v = (torch.zeros(8, device=device) for _ in range(3))

@@ -313,9 +313,11 @@ unsafe fn whole(py: Python<'_>, f: *mut PyObject) -> bool {
 }
 
 // Asked before instruction `ins` of `c` runs in a traced body (`under`: in a
-// frame under it); `operands`: the objects of its operands, `callee`: what it
-// calls, if it is a call, and `seen`: the callee recorded for it.
-pub unsafe fn step(c: Option<&Compiled>, under: bool, ins: &Instr, operands: &[*mut PyObject], callee: Option<*mut PyObject>, seen: Option<&effects::Callee>) -> Result<bool, String> {
+// frame under it); `site`: its frame and the objects of its operands,
+// `callee`: what it calls, if it is a call, and `seen`: the callee recorded
+// for it.
+pub unsafe fn step(c: Option<&Compiled>, under: bool, ins: &Instr, site: &rules::Site, callee: Option<*mut PyObject>, seen: Option<&effects::Callee>) -> Result<bool, String> {
+    let operands = site.operands;
     // Kept whatever is answered below (see filled).
     if let Some(o) = kinds::filled(&ins.op).and_then(|k| operands.get(k)) {
         FILLED.with_borrow_mut(|f| {
@@ -326,18 +328,27 @@ pub unsafe fn step(c: Option<&Compiled>, under: bool, ins: &Instr, operands: &[*
     }
     // A trace that is refused already runs on to its end as the program
     // takes it (its handlers, its cleanup): nothing more is asked of it.
-    if TRUSTED.get() > 0 || super::region::refused() {
+    // Nor is what runs under a call taken at another's word, but for an
+    // instruction whose row records its reads itself: nothing else does.
+    let what = rules::ops::what(&ins.op, callee);
+    let trusted = TRUSTED.get() > 0;
+    if super::region::refused() || (trusted && !rules::records(&what)) {
         raises::over();
         return Ok(false);
     }
     // The rule table is asked before anything else (rules/mod.rs): what a
     // family of it has taken over runs under a trace by a row only. A row
-    // takes nothing away from what is asked below.
+    // takes nothing away from what is asked below; one that reads more than
+    // its operands records those reads here, before the instruction runs.
     let classes: Vec<rules::Class> = operands.iter().map(|o| rules::Class::of(*o)).collect();
-    if let rules::License::NoRow(why) = rules::license(&rules::ops::what(&ins.op, callee), &classes) {
+    if let rules::License::NoRow(why) = rules::license(&what, &classes, site) {
         AGAIN.set(false);
         let at = c.map_or(String::new(), |c| format!(" at line {} of {}", c.line(ins.origin), c.qualname));
         return Err(format!("it runs an instruction{at} that the engine's rules have no row for: {why}"));
+    }
+    if trusted {
+        raises::over();
+        return Ok(false);
     }
     // kinds.rs is asked about the instructions it names only.
     let operands = if kinds::asked(&ins.op) { operands } else { &[] };

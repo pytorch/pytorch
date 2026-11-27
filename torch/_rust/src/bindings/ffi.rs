@@ -40,10 +40,12 @@ pub mod ffi {
     #[derive(Default)]
     struct TensorSpan {
         storage: usize,
+        // Bytes from the storage's start to the first element.
+        at: usize,
+        // The device type whose memory `low` and `high` are addresses of.
+        space: u8,
         low: usize,
         high: usize,
-        // 1: the conjugate bit, 2: the negative bit.
-        marks: u8,
     }
 
     unsafe extern "C++" {
@@ -62,7 +64,7 @@ pub mod ffi {
         fn set_grad_mode(on: bool) -> bool;
         fn tensor_version(t: &Tensor) -> i64;
         fn tensor_data_address(t: &Tensor) -> usize;
-        fn tensor_span(t: &Tensor, out: &mut TensorSpan);
+        fn tensor_span(t: &Tensor, out: &mut TensorSpan) -> bool;
         fn tensor_is_cow(t: &Tensor) -> bool;
         fn forward_ad_active() -> bool;
         fn saved_tensor_hooks_active() -> bool;

@@ -8,7 +8,8 @@
 //     operands, identity tests, the handler's bookkeeping;
 //   - AS the kinds an opcode is lowered to (cfg/interp.rs), which have their
 //     own entries;
-//   - LATER, with the family that will take it: what the instruction does
+//   - LATER, with the family that takes it (imports.rs has the two import
+//     opcodes) or will take it: what the instruction does
 //     depends on the class of an operand (an attribute, a subscript, a truth
 //     test, an iteration, an operator, a call, a store), or it is something
 //     the optimizer put in place of an instruction. Until that family is
@@ -84,7 +85,7 @@ pub fn what(op: &Op, callee: Option<*mut PyObject>) -> What {
 }
 
 const fn row(operands: &'static [(i8, Class)], reads: &'static [Read], writes: Write, result: Res, enters: Enters, scalars: Scalars, why: &'static str) -> Row {
-    Row { operands, reads, writes, result, enters, scalars, why }
+    Row { operands, reads, writes, result, enters, scalars, why, before: None }
 }
 
 const CONST_ROW: Row = row(&[], &[Read::Constant], Write::None, Res::Lit, Never, Scalars::None, "A constant is part of the code object, and the code is what a region is found by.");
@@ -199,7 +200,7 @@ const OPCODES: &[(&[u8], Taken)] = &[
     (&[GET_LEN], Taken::Stop("it asks the subject of a match for its length: __len__ of any class")),
     (&[STORE_GLOBAL, DELETE_GLOBAL, STORE_NAME, DELETE_NAME, LOAD_NAME, LOAD_LOCALS, LOAD_FROM_DICT_OR_GLOBALS, SETUP_ANNOTATIONS], Taken::Stop(NAMESPACE)),
     (&[LOAD_BUILD_CLASS], Taken::Stop("it begins a class statement, which runs a metaclass and the class body")),
-    (&[IMPORT_NAME, IMPORT_FROM], Taken::Stop("it runs the import machinery (sys.modules, __import__, a module's code, a module's __getattr__), and a region checks none of it")),
+    (&[IMPORT_NAME, IMPORT_FROM], Taken::Later("imports")),
     (&[BEFORE_WITH, BEFORE_ASYNC_WITH, WITH_EXCEPT_START], Taken::Stop(WITH)),
     (&[GET_AWAITABLE, GET_AITER, GET_ANEXT, END_ASYNC_FOR, CLEANUP_THROW, GET_YIELD_FROM_ITER], Taken::Stop(AWAIT)),
     (&[CHECK_EG_MATCH], Taken::Stop("it splits an exception group through its split method, which a subclass may define")),

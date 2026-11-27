@@ -9,6 +9,7 @@ every instruction the engine knows), not over the cases somebody thought of.
 """
 
 import ast
+import builtins
 import collections
 import contextlib
 import dis
@@ -16,6 +17,7 @@ import enum
 import functools
 import gc
 import glob
+import importlib
 import json
 import math
 import opcode
@@ -1153,9 +1155,25 @@ if CHECKS_HAS_VM:
     from torch._rust import _calls_make, _calls_run, _calls_text
 
 
+def _cl_classes(t, one):
+    """The classes of the operand template ``t`` with every leaf of class
+    ``one``: None for a null, a tuple for what is built."""
+    kind = t[0] if isinstance(t, tuple) and t else None
+    if kind in ("seq", "map") and len(t) == 3:
+        return tuple(_cl_classes(part, one) for part in t[2])
+    if kind == "slice":
+        return tuple(_cl_classes(part, one) for part in t[1:])
+    return None if kind == "null" else one
+
+
 def _cl_entry(
-    callee, args, kwnames=None, out=None, at=0, flags=(), asserts=(), kills=()
+    callee, args, kwnames=None, out=None, at=0, flags=(), asserts=(), classes=None
 ):
+    """classes: the tuple parallel to ``args``, or one class for every
+    operand (torch.Tensor if not given)."""
+    if not isinstance(classes, tuple):
+        one = torch.Tensor if classes is None else classes
+        classes = tuple(_cl_classes(t, one) for t in args)
     return (
         callee,
         list(args),
@@ -1164,8 +1182,38 @@ def _cl_entry(
         at,
         tuple(flags),
         tuple(asserts),
-        tuple(kills),
+        classes,
     )
+
+
+def _cl_drop(*slots, at=0):
+    return ("drop", slots, at)
+
+
+def _cl_frames(f, *args):
+    """How many Python frames ``f(*args)`` enters: 0 for C code only."""
+    entered = []
+
+    def profile(frame, event, arg):
+        if event == "call":
+            entered.append(frame.f_code.co_name)
+
+    sys.setprofile(profile)
+    try:
+        f(*args)
+    finally:
+        sys.setprofile(None)
+    return len(entered)
+
+
+class _ClFinal:
+    """An object whose death is seen: it writes its name to a log."""
+
+    def __init__(self, name, log):
+        self.name, self.log = name, log
+
+    def __del__(self):
+        self.log.append(self.name)
 
 
 def _cl_vector(f):
@@ -1197,8 +1245,10 @@ class TestVmCallLists(TestCase):
     """A call list is a recorded run of C calls: the callee by identity and
     templates of its operands, run again in order with no frame. The rule:
     running a list does what the plain Python calls do (values, state, the
-    exception of a call that raises, where an intermediate dies), and a list
-    that is not understood in full is refused when it is made.
+    exception of a call that raises, where and in which order values die),
+    and a list that is not understood in full is refused when it is made: so
+    is a slot callee that would run a method written in Python for the
+    classes its operands are pinned to.
     """
 
     hw_classification = HardwareClassification.GENERIC
@@ -1209,7 +1259,15 @@ class TestVmCallLists(TestCase):
             len(inputs),
             0,
             [],
-            [_cl_entry(callee, args, kwnames, out=0)],
+            [
+                _cl_entry(
+                    callee,
+                    args,
+                    kwnames,
+                    out=0,
+                    classes=tuple(type(v) for v in inputs),
+                )
+            ],
             [("res", 0)],
         )
         return _cl_run(spec, inputs)[0]
@@ -1228,6 +1286,15 @@ class TestVmCallLists(TestCase):
                 x, y = (
                     ints if text.rstrip("=") in ("&", "<<", "|", ">>", "^") else floats
                 )
+                # Tensor's `**` and `//` are functions written in Python: a
+                # frame in the plain program, so no entry. `//=` has a C
+                # method, but the `__floordiv__` it could hand over to is not.
+                if _cl_frames(f, x.clone(), y) or text == "//=":
+                    with self.assertRaisesRegex(
+                        ValueError, "slot would run Python.*no C function"
+                    ):
+                        self.one(("binary", text), (x.clone(), y))
+                    continue
                 mine, eager = x.clone(), x.clone()
                 got, want = self.one(("binary", text), (mine, y)), f(eager, y)
                 self.assertTrue(torch.equal(got, want))
@@ -1286,6 +1353,7 @@ class TestVmCallLists(TestCase):
                     [("seq", "list", [("in", 0), ("in", 1)]), ("const", 0)],
                     ("dim",),
                     out=0,
+                    classes=((torch.Tensor, torch.Tensor), int),
                 )
             ],
             [("res", 0)],
@@ -1293,7 +1361,7 @@ class TestVmCallLists(TestCase):
         self.assertTrue(torch.equal(_cl_run(spec, (x, x))[0], torch.cat([x, x], dim=1)))
 
     def test_subscripts_and_attributes(self):
-        x = torch.arange(24.0).reshape(2, 3, 4)
+        x, T = torch.arange(24.0).reshape(2, 3, 4), torch.Tensor
         rows = torch.tensor([1, 0])
         box, names, items = types.SimpleNamespace(), {"a": 1, "b": 2}, [10, 20, 30]
         key = (
@@ -1307,13 +1375,13 @@ class TestVmCallLists(TestCase):
             ],
         )
         spec = (2, 3, [1, None, ..., "b", 0, 5.0], [
-            _cl_entry(("getitem",), [("in", 0), key], out=0),
-            _cl_entry(("getitem",), [("in", 0), ("slice", ("null",), ("null",), ("const", 0))], out=1),
-            _cl_entry(("getattr", "mT"), [("res", 0)], out=2),
-            _cl_entry(("setitem",), [("const", 5), ("res", 1), ("const", 4)]),
-            _cl_entry(("setattr", "kept"), [("res", 2), ("pin", 0)]),
-            _cl_entry(("setitem",), [("res", 0), ("pin", 1), ("const", 3)]),
-            _cl_entry(("delitem",), [("pin", 2), ("const", 4)]),
+            _cl_entry(("getitem",), [("in", 0), key], out=0, asserts=[("class", T)], classes=(T, ((int, None, None), type(None), type(...), T))),
+            _cl_entry(("getitem",), [("in", 0), ("slice", ("null",), ("null",), ("const", 0))], out=1, asserts=[("class", T)], classes=(T, (None, None, int))),
+            _cl_entry(("getattr", "mT"), [("res", 0)], out=2, asserts=[("class", T)]),
+            _cl_entry(("setitem",), [("const", 5), ("res", 1), ("const", 4)], classes=(float, T, int)),
+            _cl_entry(("setattr", "kept"), [("res", 2), ("pin", 0)], classes=(T, types.SimpleNamespace)),
+            _cl_entry(("setitem",), [("res", 0), ("pin", 1), ("const", 3)], classes=(T, dict, str)),
+            _cl_entry(("delitem",), [("pin", 2), ("const", 4)], classes=(list, int)),
         ], [("res", 0), ("res", 1), ("res", 2)])  # fmt: skip
         mine = x.clone()
         got = _cl_run(spec, (mine, rows), (box, names, items))
@@ -1341,9 +1409,10 @@ class TestVmCallLists(TestCase):
         )
         spec = (2, 1, [0, "k", 2.5], [
             # tuple() of an exact tuple is that tuple: ((x, w), y)
-            _cl_entry(_cl_vector(tuple), [nested], out=0),
-            _cl_entry(_cl_vector(torch.max), [("in", 0), ("const", 0)], out=1),
-            _cl_entry(_cl_vector(torch.add), [("part", 0, (0, 1)), ("part", 1, (0,))], out=2, kills=[1]),
+            _cl_entry(_cl_vector(tuple), [nested], out=0, asserts=[("class", tuple)]),
+            _cl_entry(_cl_vector(torch.max), [("in", 0), ("const", 0)], out=1, asserts=[("class", torch.return_types.max)], classes=(torch.Tensor, int)),
+            _cl_entry(_cl_vector(torch.add), [("part", 0, (0, 1)), ("part", 1, (0,))], out=2),
+            _cl_drop(1),
         ], [
             ("res", 2),
             ("part", 0, (1,)),
@@ -1377,36 +1446,40 @@ class TestVmCallLists(TestCase):
         self.assertIsNot(first[3][7], second[3][7])
 
     def test_text(self):
-        x = torch.zeros(2, 3)
-        spec = (2, 1, [2.0, (1, 0), "k", x], [
-            _cl_entry(("vector", torch.add, "torch.add"), [("in", 0), ("in", 1)], out=0, flags=["pure", "fresh"], asserts=[("key", ("sizes", "dtype", "device", "requires_grad"), x)]),
-            _cl_entry(("vector", torch.Tensor.mul_, "Tensor.mul_"), [("res", 0), ("pin", 0)], out=1, at=1, flags=[("writes", (0,))], asserts=[("is", 0)], kills=[0]),
-            _cl_entry(("binary", "*="), [("res", 1), ("const", 0)], out=2, at=2, flags=["opaque", "covered", ("writes", (0,)), ("rekeys", (0, 1))]),
-            _cl_entry(("vector", torch.permute, "torch.permute"), [("res", 2), ("const", 1)], ("dims",), out=3, at=3, flags=["draws", "effect"]),
-            _cl_entry(("vector", torch.max, "torch.max"), [("res", 3), ("const", 3)], out=4, at=4, asserts=[("count", 2)], kills=[1, 3]),
+        x, T = torch.zeros(2, 3), torch.Tensor
+        spec = (2, 1, [2.0, (1, 0), "k", x, b"k"], [
+            _cl_entry(("vector", torch.add, "torch.add"), [("in", 0), ("in", 1)], out=0, flags=["pure", "fresh"], asserts=[("key", x)]),
+            _cl_entry(("vector", torch.Tensor.mul_, "Tensor.mul_"), [("move", 0), ("pin", 0)], out=1, at=1, flags=[("writes", (0,))], asserts=[("is", 0), ("class", T)]),
+            _cl_entry(("binary", "*="), [("res", 1), ("const", 0)], out=2, at=2, flags=["opaque", "covered", ("writes", (0,)), ("rekeys", (0, 1))], asserts=[("class", T)], classes=(T, float)),
+            _cl_entry(("vector", torch.permute, "torch.permute"), [("res", 2), ("const", 1)], ("dims",), out=3, at=3, flags=["draws", "effect"], asserts=[("class", T)], classes=(T, tuple)),
+            _cl_entry(("vector", torch.max, "torch.max"), [("move", 3), ("const", 3)], out=4, at=4, asserts=[("count", 2), ("class", torch.return_types.max)]),
+            _cl_drop(1, at=4),
             _cl_entry(("compare", "<="), [("part", 4, (0,)), ("in", 0)], at=5),
-            _cl_entry(("unary", "-"), [("res", 2)], out=6, at=6),
-            _cl_entry(("getitem",), [("res", 6), ("seq", "tuple", [("slice", ("const", 0), ("null",), ("null",)), ("seq", "list", [("in", 1)])])], out=7, at=7),
-            _cl_entry(("setitem",), [("in", 0), ("res", 7), ("map", ("k", 1), [("in", 1), ("seq", "tuple", [("const", 2)])])], at=8),
-            _cl_entry(("delitem",), [("pin", 0), ("const", 2)], at=9),
-            _cl_entry(("getattr", "mT"), [("res", 7)], out=10, at=10),
-            _cl_entry(("setattr", "grad"), [("res", 10), ("pin", 0)], at=11, kills=[10, 7]),
+            _cl_entry(("unary", "-"), [("res", 2)], out=7, at=6, asserts=[("class", T)]),
+            _cl_entry(("getitem",), [("res", 7), ("seq", "tuple", [("slice", ("const", 0), ("null",), ("null",)), ("seq", "list", [("in", 1)])])], out=8, at=7, asserts=[("class", T)], classes=(T, ((float, None, None), (T,)))),
+            _cl_entry(("setitem",), [("in", 0), ("res", 8), ("map", ("k", 1, b"k"), [("in", 1), ("seq", "tuple", [("const", 2)]), ("const", 4)])], at=8, classes=(T, T, (T, (str,), bytes))),
+            _cl_entry(("delitem",), [("pin", 0), ("const", 2)], at=9, classes=(T, str)),
+            _cl_entry(("getattr", "mT"), [("res", 8)], out=11, at=10, asserts=[("class", T)]),
+            _cl_entry(("setattr", "grad"), [("move", 11), ("pin", 0)], at=11),
+            _cl_drop(8, 7, 4, 2, at=12),
         ], [])  # fmt: skip
         self.assertEqual(
             _calls_text(_calls_make(spec)).split("\n"),
             [
-                "  0  r0 = torch.add(in0, in1)  @0 [pure fresh] assert sizes=[2, 3] dtype=f32 device=cpu requires_grad=false",
-                "  1  r1 = Tensor.mul_(r0, pin0)  @1 [writes(0)] assert is(operand 0) kills r0",
-                "  2  r2 = r1 *= 2.0  @2 [opaque covered writes(0) rekeys(0, 1)]",
-                "  3  r3 = torch.permute(r2, dims=(1, 0))  @3 [draws effect]",
-                "  4  r4 = torch.max(r3, c3)  @4 assert count=2 kills r1 r3",
-                "  5  r4.0 <= in0  @5",
-                "  6  r6 = -r2  @6",
-                "  7  r7 = r6[(2.0::, [in1])]  @7",
-                "  8  r7[{'k': in1, 1: ('k',)}] = in0  @8",
-                "  9  del pin0['k']  @9",
-                " 10  r10 = r7.mT  @10",
-                " 11  pin0.grad = r10  @11 kills r10 r7",
+                "  0  r0 = torch.add(in0, in1) of (Tensor, Tensor)  @0 [pure fresh] assert key=tensor(f32 cpu [2, 3] stride [3, 1])",
+                "  1  r1 = Tensor.mul_(move r0, pin0) of (Tensor, Tensor)  @1 [writes(0)] assert class=Tensor is(operand 0)",
+                "  2  r2 = r1 *= 2.0 of (Tensor, float)  @2 [opaque covered writes(0) rekeys(0, 1)] assert class=Tensor",
+                "  3  r3 = torch.permute(r2, dims=(1, 0)) of (Tensor, tuple)  @3 [draws effect] assert class=Tensor",
+                "  4  r4 = torch.max(move r3, c3) of (Tensor, Tensor)  @4 assert class=max count=2",
+                "  5  drop r1  @4",
+                "  6  r4.0 <= in0 of (Tensor, Tensor)  @5",
+                "  7  r7 = -r2 of (Tensor)  @6 assert class=Tensor",
+                "  8  r8 = r7[(2.0::, [in1])] of (Tensor, float, -, -, Tensor)  @7 assert class=Tensor",
+                "  9  r8[{'k': in1, 1: ('k',), b'k': b'k'}] = in0 of (Tensor, Tensor, Tensor, str, bytes)  @8",
+                " 10  del pin0['k'] of (Tensor, str)  @9",
+                " 11  r11 = r8.mT of (Tensor)  @10 assert class=Tensor",
+                " 12  pin0.grad = move r11 of (Tensor, Tensor)  @11",
+                " 13  drop r8 r7 r4 r2  @12",
             ],
         )
 
@@ -1416,11 +1489,36 @@ class TestVmCallLists(TestCase):
         def spec(*entries, inputs=1, pins=1, consts=(1,), outputs=()):
             return (inputs, pins, list(consts), list(entries), list(outputs))
 
-        first = _cl_entry(add, [x, x], out=0)
+        first = _cl_entry(
+            add, [x, x], out=0, asserts=[("class", torch.Tensor)], classes=int
+        )
+        unknown = _cl_entry(add, [x, x], out=0, classes=int)
         self.assertEqual(
             _calls_run(_calls_make(spec(first, outputs=[("res", 0)])), (1,), (None,)),
             (2,),
         )
+
+        def on(*args, **more):
+            return _cl_entry(add, list(args), **more)
+
+        class Named:
+            @property
+            def shown(self):
+                return 1
+
+            def __getitem__(self, key):
+                return key
+
+            def __lt__(self, other):
+                return True
+
+            def __neg__(self):
+                return self
+
+        class Quiet(list):
+            __slots__ = ()
+
+        Tensor = torch.Tensor
 
         class Callable:
             def __call__(self, a):
@@ -1548,25 +1646,174 @@ class TestVmCallLists(TestCase):
                 "r0 is not held",
                 spec(_cl_entry(add, [x, x]), _cl_entry(add, [x, ("res", 0)])),
             ),
+            # a use behind the slot's release
+            ("r0 is not held", spec(first, _cl_drop(0), on(x, ("res", 0)))),
             (
                 "r0 is not held",
-                spec(
-                    first,
-                    _cl_entry(add, [x, x], kills=[0]),
-                    _cl_entry(add, [x, ("res", 0)]),
-                ),
+                spec(first, _cl_drop(0), on(x, ("seq", "list", [("part", 0, (1,))]))),
             ),
+            ("r0 is not held", spec(first, on(x, ("move", 0)), on(x, ("res", 0)))),
+            ("r0 is not held", spec(first, on(x, ("move", 0)), on(x, ("move", 0)))),
             (
-                "r0 is not held",
-                spec(
-                    first,
-                    _cl_entry(add, [x, x], kills=[0]),
-                    _cl_entry(add, [x, ("seq", "list", [("part", 0, (1,))])]),
-                ),
+                "output 0: r0 is not held",
+                spec(first, _cl_drop(0), outputs=[("res", 0)]),
             ),
             (
                 "output 0: r0 is not held",
-                spec(first, _cl_entry(add, [x, x], kills=[0]), outputs=[("res", 0)]),
+                spec(first, on(x, ("move", 0)), outputs=[("res", 0)]),
+            ),
+            # a slot with two releases, or with none
+            (
+                "drops r0, which is not an earlier",
+                spec(first, on(x, ("move", 0)), _cl_drop(0)),
+            ),
+            ("r0 is moved and named again", spec(first, on(("move", 0), ("move", 0)))),
+            ("r0 is moved and named again", spec(first, on(("res", 0), ("move", 0)))),
+            (
+                "r0 is moved and named again",
+                spec(first, on(x, ("seq", "list", [("move", 0), ("res", 0)]))),
+            ),
+            ("output 0: an output moves nothing", spec(first, outputs=[("move", 0)])),
+            ("r0 is never released", spec(first)),
+            (
+                "r1 is never released",
+                spec(first, _cl_entry(add, [x, x], out=1), outputs=[("res", 0)]),
+            ),
+            # classes
+            ("1 classes for 2 operands", spec(_cl_entry(add, [x, x], classes=(int,)))),
+            (
+                "3 classes for 2 operands",
+                spec(_cl_entry(add, [x, x], classes=(int, int, int))),
+            ),
+            ("classes must be a tuple or a list", spec(first[:7] + (None,))),
+            (
+                "the class of an operand must be a type",
+                spec(_cl_entry(add, [x, x], classes=(int, 1))),
+            ),
+            (
+                "the class of an operand must be a type",
+                spec(_cl_entry(add, [x, x], classes=(int, None))),
+            ),
+            (
+                "the class of an operand must be a type",
+                spec(_cl_entry(add, [x, x], classes=(int, (int,)))),
+            ),
+            (
+                "the class of a null must be None",
+                spec(
+                    _cl_entry(
+                        ("getitem",),
+                        [x, ("slice", ("null",), x, x)],
+                        classes=(list, (int, int, int)),
+                    )
+                ),
+            ),
+            (
+                "2 classes for 3 parts",
+                spec(
+                    _cl_entry(
+                        ("getitem",),
+                        [x, ("slice", ("null",), x, x)],
+                        classes=(list, (None, int)),
+                    )
+                ),
+            ),
+            (
+                "the classes of the parts of a seq, map or slice must be a tuple or a list",
+                spec(_cl_entry(add, [x, ("seq", "list", [x])], classes=(int, int))),
+            ),
+            (
+                "constant 0 is not of the class it is pinned to",
+                spec(_cl_entry(add, [x, ("const", 0)], classes=(int, float))),
+            ),
+            (
+                "r0 is an operand and its entry asserts no class of it",
+                spec(unknown, on(x, ("res", 0)), outputs=[("res", 0)]),
+            ),
+            (
+                "r0 is an operand and its entry asserts no class of it",
+                spec(unknown, on(x, ("move", 0))),
+            ),
+            (
+                "r0 is pinned to another class than its entry asserts",
+                spec(first, _cl_entry(add, [x, ("move", 0)], classes=(int, float))),
+            ),
+            (
+                "a part of r0, which its entry does not assert to be a tuple",
+                spec(first, on(x, ("part", 0, (0,))), _cl_drop(0)),
+            ),
+            (
+                "a part of r0, which its entry does not assert to be a tuple",
+                spec(unknown, on(x, ("part", 0, (0,))), _cl_drop(0)),
+            ),
+            # a slot that would run Python, or is not covered
+            (
+                "slot would run Python.*no C function: __getitem__ of the class .*Named",
+                spec(_cl_entry(("getitem",), [x, x], classes=(Named, int))),
+            ),
+            (
+                "slot would run Python.*no C function: __setitem__ of the class .*ModuleList",
+                spec(
+                    _cl_entry(
+                        ("setitem",), [x, x, x], classes=(int, torch.nn.ModuleList, int)
+                    )
+                ),
+            ),
+            (
+                "slot would run Python.*no C function: __delitem__ of the class .*ModuleList",
+                spec(
+                    _cl_entry(("delitem",), [x, x], classes=(torch.nn.ModuleList, int))
+                ),
+            ),
+            (
+                "slot would run Python.*__class_getitem__",
+                spec(_cl_entry(("getitem",), [x, x], classes=(type, int))),
+            ),
+            (
+                "slot would run Python.*no C function: __lt__ of the class .*Named",
+                spec(_cl_entry(("compare", "<"), [x, x], classes=(Named, int))),
+            ),
+            (
+                "slot would run Python.*no C function: __lt__ of the class .*Named",
+                spec(_cl_entry(("compare", ">"), [x, x], classes=(int, Named))),
+            ),
+            (
+                "slot would run Python.*no C function: __neg__ of the class .*Named",
+                spec(_cl_entry(("unary", "-"), [x], classes=(Named,))),
+            ),
+            (
+                "slot would run Python.*no C function: __rsub__ of the class Tensor",
+                spec(_cl_entry(("binary", "-"), [x, x], classes=(float, Tensor))),
+            ),
+            (
+                "slot would run Python.*no C function: __ipow__ of the class Tensor",
+                spec(_cl_entry(("binary", "**="), [x, x], classes=(Tensor, int))),
+            ),
+            (
+                "not covered: the __get__ of what the name is",
+                spec(_cl_entry(("getattr", "shown"), [x], classes=(Named,))),
+            ),
+            (
+                "not covered: its own __getattribute__ or __getattr__",
+                spec(_cl_entry(("getattr", "weight"), [x], classes=(torch.nn.Linear,))),
+            ),
+            (
+                "not covered: its own __getattribute__ or __getattr__",
+                spec(
+                    _cl_entry(("getattr", "float32"), [x], classes=(types.ModuleType,))
+                ),
+            ),
+            (
+                "not covered: its own __setattr__",
+                spec(
+                    _cl_entry(
+                        ("setattr", "weight"), [x, x], classes=(int, torch.nn.Linear)
+                    )
+                ),
+            ),
+            (
+                "not covered: the __set__ of what the name is",
+                spec(_cl_entry(("setattr", "shown"), [x, x], classes=(int, Named))),
             ),
             ("output 1: input 3 of 1", spec(first, outputs=[x, ("in", 3)])),
             (
@@ -1608,7 +1855,11 @@ class TestVmCallLists(TestCase):
             ("keyword names", spec(_cl_entry(add, [x, x], (Text("alpha"),)))),
             ("keyword names", spec(_cl_entry(add, [x], ("other", "alpha")))),
             ("keyword names", spec(_cl_entry(("binary", "+"), [x, x], ("other",)))),
-            # out, kills
+            (
+                "keyword names of which two are the same",
+                spec(_cl_entry(add, [x, x, x], ("other", "".join(["oth", "er"])))),
+            ),
+            # out, drops
             (
                 "out 1: the slot of an entry is its own index",
                 spec(_cl_entry(add, [x, x], out=1)),
@@ -1625,26 +1876,26 @@ class TestVmCallLists(TestCase):
                 "out 0: the slot of an entry is its own index",
                 spec(_cl_entry(("setattr", "a"), [x, x], out=0)),
             ),
+            ("drops r0, which is not an earlier", spec(_cl_drop(0))),
             (
-                "kills r0, which is not an earlier",
-                spec(_cl_entry(add, [x, x], out=0, kills=[0])),
+                "drops r1, which is not an earlier",
+                spec(first, _cl_entry(add, [x, x], out=1), _cl_drop(1, 1)),
             ),
             (
-                "kills r1, which is not an earlier",
-                spec(
-                    first,
-                    _cl_entry(add, [x, x], out=1),
-                    _cl_entry(add, [x, x], kills=[1, 1]),
-                ),
+                "drops r0, which is not an earlier",
+                spec(_cl_entry(add, [x, x]), _cl_drop(0)),
+            ),
+            ("drops r5, which is not an earlier", spec(first, _cl_drop(5))),
+            ("drops r1, which is not an earlier", spec(first, _cl_drop(0, 1))),
+            (
+                "an entry that starts with a str is ..drop., slots, at.",
+                spec(("drop", (0,))),
             ),
             (
-                "kills r0, which is not an earlier",
-                spec(_cl_entry(add, [x, x]), _cl_entry(add, [x, x], kills=[0])),
+                "an entry that starts with a str is ..drop., slots, at.",
+                spec(("keep", (0,), 0)),
             ),
-            (
-                "kills r5, which is not an earlier",
-                spec(first, _cl_entry(add, [x, x], kills=[5])),
-            ),
+            ("a dropped slot must be an int", spec(first, ("drop", ("0",), 0))),
             # flags
             (
                 'no flag "idempotent"',
@@ -1669,16 +1920,30 @@ class TestVmCallLists(TestCase):
                 spec(_cl_entry(add, [x, x], asserts=[("value", 1)])),
             ),
             (
-                'no key field "strides"',
+                "key takes 1 fields",
+                spec(
+                    _cl_entry(add, [x, x], asserts=[("key", ("sizes",), torch.ones(1))])
+                ),
+            ),
+            (
+                "the key of an assert is read off a tensor that has one",
+                spec(_cl_entry(add, [x, x], asserts=[("key", (1,))])),
+            ),
+            (
+                "the class of an assert must be a type",
+                spec(_cl_entry(add, [x, x], asserts=[("class", "int")])),
+            ),
+            (
+                "a result has one class",
                 spec(
                     _cl_entry(
-                        add, [x, x], asserts=[("key", ("strides",), torch.ones(1))]
+                        add, [x, x], asserts=[("class", Tensor), ("key", torch.ones(1))]
                     )
                 ),
             ),
             (
-                "the key of an assert is read off a tensor",
-                spec(_cl_entry(add, [x, x], asserts=[("key", ("sizes",), (1,))])),
+                "a result has one class",
+                spec(_cl_entry(add, [x, x], asserts=[("class", int), ("class", int)])),
             ),
             (
                 "an assert where there is no result",
@@ -1700,6 +1965,20 @@ class TestVmCallLists(TestCase):
             ("the count of inputs must be an int", ("1", 1, [], [], [])),
             ("at must be an int", spec(_cl_entry(add, [x, x], at=None))),
         ]
+        for name, without in KEY_WITHOUT.items():
+            if name != "a_wrapper_of_functorch":
+                cases.append(
+                    (
+                        "the key of an assert is read off a tensor that has one",
+                        spec(
+                            _cl_entry(
+                                add,
+                                [x, x],
+                                asserts=[("key", without(torch.ones(2, 2)))],
+                            )
+                        ),
+                    )
+                )
         for flag in ("draws", "effect", "opaque", ("writes", (0,)), ("rekeys", (0,))):
             cases.append(
                 ("pure beside", spec(_cl_entry(add, [x, x], flags=["pure", flag])))
@@ -1708,6 +1987,21 @@ class TestVmCallLists(TestCase):
             with self.subTest(why=why):
                 with self.assertRaisesRegex(ValueError, "torch.vm call list: .*" + why):
                     _calls_make(bad)
+        # What is like a refused class and is C code is taken: a subclass that
+        # adds nothing, a plain value on the class, a method.
+        for callee, classes in [
+            (("getitem",), (Quiet, int)),
+            (("getattr", "append"), (Quiet,)),
+            (("getattr", "__doc__"), (Named,)),
+            (("getattr", "missing"), (Named,)),
+            (("setattr", "missing"), (int, Named)),
+            (("compare", "=="), (Named, int)),
+            (("binary", "-"), (Tensor, float)),
+        ]:
+            with self.subTest(taken=callee, classes=classes):
+                _calls_make(
+                    spec(_cl_entry(callee, [x] * len(classes), classes=classes))
+                )
         h = _calls_make(spec(first, outputs=[("res", 0)]))
         one = torch.ones(1)
         for inputs, pins in [
@@ -1722,12 +2016,13 @@ class TestVmCallLists(TestCase):
                 _calls_run(h, inputs, pins)
 
     def step_list(self, second, flags=(("writes", (0,)),), asserts=()):
-        """x.add_(1.0); <second>(x, y); x.mul_(2.0); seen.append(x)"""
+        """x.add_(1.0); t = <second>(x, y); x.mul_(2.0); seen.append(t)"""
+        T = torch.Tensor
         return _calls_make((2, 1, [1.0, 2.0], [
-            _cl_entry(_cl_vector(torch.Tensor.add_), [("in", 0), ("const", 0)], flags=flags),
-            _cl_entry(_cl_vector(second), [("in", 0), ("in", 1)], out=1, flags=["pure"], asserts=asserts),
-            _cl_entry(_cl_vector(torch.Tensor.mul_), [("in", 0), ("const", 1)], flags=[("writes", (0,))]),
-            _cl_entry(_cl_vector(list.append), [("pin", 0), ("res", 1)], flags=["effect"], kills=[1]),
+            _cl_entry(_cl_vector(torch.Tensor.add_), [("in", 0), ("const", 0)], flags=flags, classes=(T, float)),
+            _cl_entry(_cl_vector(second), [("in", 0), ("in", 1)], out=1, flags=["pure"], asserts=asserts or [("class", T)]),
+            _cl_entry(_cl_vector(torch.Tensor.mul_), [("in", 0), ("const", 1)], flags=[("writes", (0,))], classes=(T, float)),
+            _cl_entry(_cl_vector(list.append), [("pin", 0), ("move", 1)], flags=["effect"], classes=(list, T)),
         ], [("in", 0)]))  # fmt: skip
 
     def test_an_entry_that_raises(self):
@@ -1744,7 +2039,7 @@ class TestVmCallLists(TestCase):
         # What ran before the entry stays done; nothing behind it ran.
         self.assertTrue(torch.equal(x, torch.full((2, 3), 2.0)))
         self.assertEqual(seen, [])
-        self.assertEqual(h.stopped, (1, "raised", False))
+        self.assertEqual(h.stopped, (1, "raised", False, {}))
         # The same list on operands that fit: the run goes through.
         y2 = torch.ones(3, 2)
         self.assertIs(_calls_run(h, (x, y2), (seen,))[0], x)
@@ -1755,20 +2050,27 @@ class TestVmCallLists(TestCase):
         h = self.step_list(torch.matmul, flags=["pure"])
         with self.assertRaises(RuntimeError):
             _calls_run(h, (x, y), (seen,))
-        self.assertEqual(h.stopped, (1, "raised", True))
+        self.assertEqual(h.stopped, (1, "raised", True, {}))
         # An exception of any class comes out as it is.
         h = _calls_make(
             (
                 1,
                 0,
                 ["k"],
-                [_cl_entry(("getitem",), [("in", 0), ("const", 0)], out=0)],
+                [
+                    _cl_entry(
+                        ("getitem",),
+                        [("in", 0), ("const", 0)],
+                        out=0,
+                        classes=(dict, str),
+                    )
+                ],
                 [("res", 0)],
             )
         )
         with self.assertRaisesRegex(KeyError, "'k'"):
             _calls_run(h, ({},), ())
-        self.assertEqual(h.stopped, (0, "raised", False))
+        self.assertEqual(h.stopped, (0, "raised", False, {}))
 
     def test_an_assert_that_fails(self):
         y, seen = torch.ones(3, 2), []
@@ -1776,133 +2078,125 @@ class TestVmCallLists(TestCase):
         for flags, restartable in ((["pure"], True), ([("writes", (0,))], False)):
             with self.subTest(restartable=restartable):
                 x = torch.ones(2, 3)
-                h = self.step_list(
-                    torch.matmul, flags=flags, asserts=[("key", ("sizes",), fits)]
-                )
+                h = self.step_list(torch.matmul, flags=flags, asserts=[("key", fits)])
                 self.assertIs(_calls_run(h, (x, y), (seen,))[0], x)
                 self.assertIsNone(h.stopped)
                 x = torch.ones(2, 3)
                 del seen[:]
-                h = self.step_list(
-                    torch.matmul, flags=flags, asserts=[("key", ("sizes",), other)]
-                )
+                h = self.step_list(torch.matmul, flags=flags, asserts=[("key", other)])
                 if restartable:
                     # A miss: no outputs, no exception.
                     self.assertIsNone(_calls_run(h, (x, y), (seen,)))
                 else:
                     with self.assertRaisesRegex(
                         RuntimeError,
-                        r"torch.vm: call list entry 1: the result is not what the traced call read of it \(sizes=\[2, 5\]\), and what ran before cannot be taken back: 1  r1 = .*matmul\(in0, in1\)",
+                        r"torch.vm: call list entry 1: the result is not what the traced call read of it \(key=tensor\(f32 cpu \[2, 5\] stride \[5, 1\]\)\), and what ran before cannot be taken back: 1  r1 = .*matmul\(in0, in1\)",
                     ):
                         _calls_run(h, (x, y), (seen,))
-                self.assertEqual(h.stopped, (1, "assert", restartable))
+                # The result that failed is in its slot: the caller's.
+                entry, what, again, live = h.stopped
+                self.assertEqual((entry, what, again), (1, "assert", restartable))
+                self.assertEqual(
+                    {j: tuple(t.shape) for j, t in live.items()}, {1: (2, 2)}
+                )
+                del live
                 # Nothing behind the entry ran.
                 self.assertTrue(torch.equal(x, torch.full((2, 3), 2.0)))
                 self.assertEqual(seen, [])
 
-    def test_every_field_of_an_assert(self):
-        x = torch.ones(2, 3)
-        grad = torch.ones(2, 3, requires_grad=True)
-        differs = {
-            "sizes": torch.ones(3, 2),
-            "dtype": torch.ones(2, 3, dtype=torch.float64),
-            "device": torch.ones(2, 3, device="meta"),
-            "requires_grad": grad,
-        }
+    def held(self, value, asserts, callee=None, operands=None):
+        """(outputs, stopped without the slots) of one pure entry that hands
+        back ``value`` (or of ``callee`` on ``operands``) under ``asserts``."""
+        operands = ({"k": value}, "k") if operands is None else operands
+        entry = _cl_entry(
+            callee or _cl_vector(dict.get),
+            [("in", k) for k in range(len(operands))],
+            out=0,
+            flags=["pure"],
+            asserts=asserts,
+            classes=tuple(type(v) for v in operands),
+        )
+        h = _calls_make((len(operands), 0, [], [entry, _cl_drop(0)], []))
+        return _calls_run(h, tuple(operands), ()), h.stopped and h.stopped[:3]
 
-        def run(callee, asserts, inputs=(x, x)):
-            args = [("in", k) for k in range(len(inputs))]
-            h = _calls_make(
-                (
-                    len(inputs),
-                    0,
-                    [],
-                    [_cl_entry(callee, args, out=0, flags=["pure"], asserts=asserts)],
-                    [],
-                )
-            )
-            return _calls_run(h, inputs, ()), h.stopped
-
-        add = _cl_vector(torch.add)
-        fields = tuple(differs)
-        self.assertEqual(run(add, [("key", fields, x)]), ((), None))
-        for field, other in differs.items():
+    def test_an_assert_of_a_key_is_the_whole_key(self):
+        missed = (None, (0, "assert", True))
+        for field, (base, other) in KEY_SWEEP.items():
             with self.subTest(field=field):
-                # The one field is compared, and only where it is asked for.
-                self.assertEqual(
-                    run(add, [("key", (field,), other)]), (None, (0, "assert", True))
-                )
-                self.assertEqual(
-                    run(add, [("key", fields, other)]), (None, (0, "assert", True))
-                )
-                rest = tuple(f for f in fields if f != field)
-                self.assertEqual(run(add, [("key", rest, other)]), ((), None))
-        self.assertEqual(
-            run(add, [("key", ("requires_grad",), grad)], (grad, x)), ((), None)
-        )
-        # A key is a tensor's.
-        self.assertEqual(
-            run(
-                _cl_vector(torch.Tensor.item),
-                [("key", ("dtype",), x)],
-                (torch.ones(()),),
-            ),
-            (None, (0, "assert", True)),
-        )
-        # The count of a result tuple.
-        max_ = _cl_vector(torch.max)
-        self.assertEqual(run(max_, [("count", 2)], (x, 0)), ((), None))
-        self.assertEqual(run(max_, [("count", 3)], (x, 0)), (None, (0, "assert", True)))
-        self.assertEqual(run(add, [("count", 1)]), (None, (0, "assert", True)))
+                x = torch.randn(4, 8)
+                traced, same, differs = base(x.clone()), base(x.clone()), other(x)
+                self.assertEqual(self.held(same, [("key", traced)]), ((), None))
+                # One field of the key is another: the assert fails.
+                self.assertEqual(self.held(differs, [("key", traced)]), missed)
+                self.assertEqual(self.held(same, [("key", differs)]), missed)
+        # A result that has no key has no key to compare.
+        x = torch.ones(2, 2)
+        for name, without in KEY_WITHOUT.items():
+            with self.subTest(without=name):
+                self.assertEqual(self.held(without(x), [("key", x)]), missed)
+        self.assertEqual(self.held(1.0, [("key", x)]), missed)
+
+    def test_the_other_asserts(self):
+        missed = (None, (0, "assert", True))
+        x, T = torch.ones(2, 3), torch.Tensor
+
+        class Pair(tuple):
+            __slots__ = ()
+
+        # The exact class.
+        self.assertEqual(self.held(x, [("class", T)]), ((), None))
+        self.assertEqual(self.held(torch.nn.Parameter(x), [("class", T)]), missed)
+        self.assertEqual(self.held(True, [("class", int)]), missed)
+        self.assertEqual(self.held(Pair((1, 2)), [("class", tuple)]), missed)
+        # The count: of an exact tuple or a struct sequence only.
+        pair = torch.max(x, 0)
+        self.assertEqual(self.held(pair, [("count", 2)]), ((), None))
+        self.assertEqual(self.held(pair, [("count", 3)]), missed)
+        self.assertEqual(self.held((1, 2), [("count", 2)]), ((), None))
+        self.assertEqual(self.held(Pair((1, 2)), [("count", 2)]), missed)
+        self.assertEqual(self.held([1, 2], [("count", 2)]), missed)
+        self.assertEqual(self.held(x, [("count", 2)]), missed)
         # The result is an operand.
-        add_ = _cl_vector(torch.Tensor.add_)
-        self.assertEqual(run(add_, [("is", 0)], (torch.ones(2), 1.0)), ((), None))
+        add_, add = _cl_vector(torch.Tensor.add_), _cl_vector(torch.add)
         self.assertEqual(
-            run(add_, [("is", 1)], (torch.ones(2), torch.ones(2))),
-            (None, (0, "assert", True)),
+            self.held(None, [("is", 0)], add_, (torch.ones(2), 1.0)), ((), None)
         )
-        self.assertEqual(run(add, [("is", 0)]), (None, (0, "assert", True)))
+        self.assertEqual(
+            self.held(None, [("is", 1)], add_, (torch.ones(2), torch.ones(2))), missed
+        )
+        self.assertEqual(self.held(None, [("is", 0)], add, (x, x)), missed)
         # Several at once: each is checked.
+        both = (torch.ones(2, 3), 1.0)
         self.assertEqual(
-            run(add_, [("is", 0), ("key", fields, x)], (torch.ones(2, 3), 1.0)),
-            ((), None),
+            self.held(None, [("is", 0), ("key", x)], add_, both), ((), None)
         )
         self.assertEqual(
-            run(add_, [("is", 0), ("key", fields, grad)], (torch.ones(2, 3), 1.0)),
-            (None, (0, "assert", True)),
+            self.held(None, [("is", 0), ("key", torch.ones(3, 2))], add_, both), missed
         )
 
     def test_a_part_that_is_not_there(self):
-        x = torch.ones(2, 3)
+        x, pair = torch.ones(2, 3), torch.return_types.max
+
+        class Pair(tuple):
+            __slots__ = ()
+
+            def __getitem__(self, i):
+                return "python"
+
         for flags, restartable in ((["pure"], True), ([], False)):
-            for callee, operands, path in [
-                (
-                    _cl_vector(list),
-                    [("seq", "tuple", [("in", 0)])],
-                    (0,),
-                ),  # a list is no tuple
-                (_cl_vector(torch.max), [("in", 0), ("const", 0)], (2,)),  # too short
-                (
-                    _cl_vector(torch.max),
-                    [("in", 0), ("const", 0)],
-                    (0, 0),
-                ),  # a tensor is no tuple
-            ]:
+            for path in [(2,), (0, 0)]:  # too short; a tensor is no tuple
                 with self.subTest(restartable=restartable, path=path):
-                    first = _cl_entry(callee, operands, out=0, flags=flags)
+                    first = _cl_entry(
+                        _cl_vector(torch.max),
+                        [("in", 0), ("const", 0)],
+                        out=0,
+                        flags=flags,
+                        asserts=[("class", pair)],
+                        classes=(torch.Tensor, int),
+                    )
+                    wants = _cl_entry(_cl_vector(torch.neg), [("part", 0, path)], out=1)
                     h = _calls_make(
-                        (
-                            1,
-                            0,
-                            [0],
-                            [
-                                first,
-                                _cl_entry(
-                                    _cl_vector(torch.neg), [("part", 0, path)], out=1
-                                ),
-                            ],
-                            [("res", 1)],
-                        )
+                        (1, 0, [0], [first, wants, _cl_drop(0)], [("res", 1)])
                     )
                     if restartable:
                         self.assertIsNone(_calls_run(h, (x,), ()))
@@ -1912,7 +2206,9 @@ class TestVmCallLists(TestCase):
                             "entry 1: a part of a result that the entry is called on is not there",
                         ):
                             _calls_run(h, (x,), ())
-                    self.assertEqual(h.stopped, (1, "part", restartable))
+                    # The entry that wanted it has not run: its slot is empty.
+                    self.assertEqual(h.stopped[:3], (1, "part", restartable))
+                    self.assertEqual(list(h.stopped[3]), [0])
                     h = _calls_make((1, 0, [0], [first], [("part", 0, path)]))
                     if restartable:
                         self.assertIsNone(_calls_run(h, (x,), ()))
@@ -1922,18 +2218,34 @@ class TestVmCallLists(TestCase):
                             "entry 1: a part of a result that an output is made of is not there",
                         ):
                             _calls_run(h, (x,), ())
-                    self.assertEqual(h.stopped, (1, "part", restartable))
+                    self.assertEqual(h.stopped[:3], (1, "part", restartable))
+        # A part is read off an exact tuple or a struct sequence: a list has
+        # none, and a subclass of tuple could answer `[0]` with its own code.
+        for value in ([1, 2], Pair((1, 2)), {0: 1}, "ab"):
+            with self.subTest(value=type(value).__name__):
+                got = _calls_make((1, 0, ["k"], [
+                    _cl_entry(_cl_vector(dict.get), [("in", 0), ("const", 0)], out=0, flags=["pure"], classes=(dict, str)),
+                ], [("part", 0, (0,))]))  # fmt: skip
+                self.assertIsNone(_calls_run(got, ({"k": value},), ()))
+                self.assertEqual(got.stopped[:3], (1, "part", True))
+        self.assertEqual(Pair((1, 2))[0], "python")
 
     def test_restartable_is_every_entry_up_to_the_one_that_stopped(self):
         x, y = torch.ones(2, 3), torch.ones(4, 5)
+        known = [("class", torch.Tensor)]
         fresh = _cl_entry(
             _cl_vector(torch.add),
             [("in", 0), ("in", 0)],
             out=0,
             flags=["pure", "fresh"],
+            asserts=known,
         )
         made = _cl_entry(
-            _cl_vector(torch.add), [("in", 0), ("in", 0)], out=0, flags=["pure"]
+            _cl_vector(torch.add),
+            [("in", 0), ("in", 0)],
+            out=0,
+            flags=["pure"],
+            asserts=known,
         )
         fails = _cl_entry(
             _cl_vector(torch.matmul), [("in", 0), ("in", 1)], flags=["pure"]
@@ -1970,92 +2282,413 @@ class TestVmCallLists(TestCase):
             ),  # the entry that raised counts
             (True, [fresh, fails, write(("in", 0))]),  # what is behind does not
         ]:
+            entries = entries + [_cl_drop(0)]
             with self.subTest(text=_calls_text(_calls_make((2, 0, [], entries, [])))):
                 h = _calls_make((2, 0, [], entries, []))
                 with self.assertRaises(RuntimeError):
                     _calls_run(h, (x.clone(), y), ())
-                self.assertEqual(h.stopped[1:], ("raised", restartable))
-
-    def test_an_intermediate_dies_where_the_list_kills_it(self):
-        """t = a + b; u = t * 2.0; v = u - 1.0: eager frees t when the multiply
-        returns (it was a temporary of the call), or when the local is rebound
-        later. `alive(k)` asks, between entries, whether t is still there.
-        """
-        a, b = torch.ones(3), torch.ones(3)
-
-        def program(kill_at):
-            entries = [
-                _cl_entry(_cl_vector(torch.add), [("in", 0), ("in", 1)], out=0),
-                _cl_entry(_cl_vector(weakref.ref), [("res", 0)], out=1),
-            ]
-
-            def alive():
-                k = len(entries)
-                entries.append(
-                    _cl_entry(_cl_vector(operator.call), [("res", 1)], out=k)
+                self.assertEqual(h.stopped[1:3], ("raised", restartable))
+        # A class that is not the pinned one stops in front of its entry: what
+        # counts is what ran before it. A drop takes nothing back.
+        for restartable, entries in [
+            (True, [fresh, _cl_drop(0), write(("in", 1))]),
+            (False, [fresh, write(("in", 0)), _cl_drop(0), write(("in", 1))]),
+        ]:
+            with self.subTest(restartable=restartable):
+                h = _calls_make((2, 0, [], entries, []))
+                if restartable:
+                    self.assertIsNone(_calls_run(h, (x.clone(), 1.0), ()))
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "entry 3: an operand is not of the class it had at the trace",
+                    ):
+                        _calls_run(h, (x.clone(), 1.0), ())
+                self.assertEqual(
+                    h.stopped, (len(entries) - 1, "class", restartable, {})
                 )
-                entries.append(
-                    _cl_entry(
-                        _cl_vector(operator.is_not),
-                        [("res", k), ("const", 2)],
-                        out=k + 1,
-                        kills=[k],
-                    )
-                )
-                return ("res", k + 1)
 
-            probes = [alive()]
-            entries.append(
-                _cl_entry(
-                    ("binary", "*"),
-                    [("res", 0), ("const", 0)],
-                    out=len(entries),
-                    kills=[0] if kill_at == "multiply" else [],
+    def logs(self, body, entries, operands, consts=()):
+        """What dies when: the log of the plain program ``body(*pins, log)``
+        and the log of the list on pins made the same way."""
+        both = []
+        for run in ("eager", "list"):
+            log = []
+            pins = operands(log)
+            if run == "eager":
+                body(*pins, log)
+            else:
+                spec = (0, len(pins) + 1, list(consts), entries, [])
+                self.assertEqual(_cl_run(spec, (), (*pins, log)), ())
+            del pins
+            both.append([x if isinstance(x, str) else "?" for x in log])
+        return both
+
+    def test_a_temporary_dies_when_its_call_returns(self):
+        """An operand that is a temporary goes when the callee has returned,
+        before the result is dropped; a local goes where it is deleted."""
+        F = _ClFinal
+
+        def temporary(src, d, log):
+            d.pop("k", src.pop())
+
+        def local(src, d, log):
+            a = src.pop()
+            d.pop("k", a)
+            del a
+
+        pop = _cl_entry(_cl_vector(list.pop), [("pin", 0)], out=0, asserts=[("class", F)], classes=(list,))  # fmt: skip
+
+        def call(operand):
+            return _cl_entry(_cl_vector(dict.pop), [("pin", 1), ("const", 0), operand], classes=(dict, str, F))  # fmt: skip
+
+        for body, entries, want in [
+            (temporary, [pop, call(("move", 0))], ["operand", "result"]),
+            (local, [pop, call(("res", 0)), _cl_drop(0)], ["result", "operand"]),
+        ]:
+            with self.subTest(body=body.__name__):
+                eager, mine = self.logs(
+                    body,
+                    entries,
+                    lambda log: ([F("operand", log)], {"k": F("result", log)}),
+                    ["k"],
                 )
+                self.assertEqual(eager, want)
+                self.assertEqual(mine, eager)
+
+    def test_arguments_die_in_their_order(self):
+        """What a call was given goes in the order of its arguments, and what
+        was built for it goes there as the built object lets go of it."""
+        F = _ClFinal
+
+        def body(src, log):
+            operator.is_([src.pop(), src.pop()], src.pop())
+            log.append("returned")
+            operator.is_(src.pop(), src.pop())
+
+        def pop(k):
+            return _cl_entry(_cl_vector(list.pop), [("pin", 0)], out=k, asserts=[("class", F)], classes=(list,))  # fmt: skip
+
+        is_ = _cl_vector(operator.is_)
+        entries = [
+            pop(0),
+            pop(1),
+            pop(2),
+            _cl_entry(is_, [("seq", "list", [("move", 0), ("move", 1)]), ("move", 2)], classes=((F, F), F)),
+            _cl_entry(_cl_vector(list.append), [("pin", 1), ("const", 0)], classes=(list, str)),
+            pop(5),
+            pop(6),
+            _cl_entry(is_, [("move", 5), ("move", 6)], classes=(F, F)),
+        ]  # fmt: skip
+        eager, mine = self.logs(
+            body,
+            entries,
+            lambda log: ([F(name, log) for name in ("e", "d", "c", "b", "a")],),
+            ["returned"],
+        )
+        self.assertEqual(eager, ["b", "a", "c", "returned", "d", "e"])
+        self.assertEqual(mine, eager)
+
+    def test_a_tensor_dies_where_the_program_lets_go_of_it(self):
+        """u = t * 2.0; v = u - 1.0 with t a temporary of the multiply, or a
+        local deleted behind the subtract. A weak reference's callback says
+        when t went."""
+        T = torch.Tensor
+
+        def temporary(src, log):
+            u = src.pop() * 2.0
+            log.append("multiplied")
+            v = u - 1.0
+            log.append("subtracted")
+
+        def local(src, log):
+            t = src.pop()
+            u = t * 2.0
+            log.append("multiplied")
+            v = u - 1.0
+            del t
+            log.append("subtracted")
+
+        def mark(k):
+            return _cl_entry(_cl_vector(list.append), [("pin", 1), ("const", k)], classes=(list, str))  # fmt: skip
+
+        pop = _cl_entry(_cl_vector(list.pop), [("pin", 0)], out=0, asserts=[("class", T)], classes=(list,))  # fmt: skip
+
+        def times(operand):
+            return _cl_entry(("binary", "*"), [operand, ("const", 2)], out=1, asserts=[("class", T)], classes=(T, float))  # fmt: skip
+
+        minus = _cl_entry(("binary", "-"), [("move", 1), ("const", 3)], out=3, classes=(T, float))  # fmt: skip
+        keep = []
+
+        def operands(log):
+            t = torch.ones(3)
+            keep.append(weakref.ref(t, lambda gone: log.append("t dies")))
+            return ([t],)
+
+        for body, entries, want in [
+            (
+                temporary,
+                [pop, times(("move", 0)), mark(0), minus, mark(1), _cl_drop(3)],
+                ["t dies", "multiplied", "subtracted"],
+            ),
+            (
+                local,
+                [
+                    pop,
+                    times(("res", 0)),
+                    mark(0),
+                    minus,
+                    _cl_drop(0),
+                    mark(1),
+                    _cl_drop(3),
+                ],
+                ["multiplied", "t dies", "subtracted"],
+            ),
+        ]:
+            with self.subTest(body=body.__name__):
+                eager, mine = self.logs(
+                    body, entries, operands, ["multiplied", "subtracted", 2.0, 1.0]
+                )
+                self.assertEqual(eager, want)
+                self.assertEqual(mine, eager)
+
+    def test_a_local_that_is_overwritten(self):
+        F = _ClFinal
+
+        def body(src, log):
+            a = src.pop()
+            log.append("popped")
+            a = src.pop()
+            log.append("rebound")
+
+        def pop(k):
+            return _cl_entry(_cl_vector(list.pop), [("pin", 0)], out=k, classes=(list,))
+
+        def mark(k):
+            return _cl_entry(_cl_vector(list.append), [("pin", 1), ("const", k)], classes=(list, str))  # fmt: skip
+
+        # The new value is stored, then the old one goes; the last one goes
+        # when the body ends.
+        entries = [pop(0), mark(0), pop(2), _cl_drop(0), mark(1), _cl_drop(2)]
+        eager, mine = self.logs(
+            body,
+            entries,
+            lambda log: ([F("second", log), F("first", log)],),
+            ["popped", "rebound"],
+        )
+        self.assertEqual(eager, ["popped", "first", "rebound", "second"])
+        self.assertEqual(mine, eager)
+
+    def test_a_tuple_result_partly_used(self):
+        F = _ClFinal
+
+        def unpacked(d, log):
+            a, b = d.pop("k")
+            del a
+            log.append("deleted")
+
+        def read(d, log):
+            t = d.pop("k")
+            log.append(t[1].name + " read")
+            del t
+            log.append("deleted")
+
+        pop = _cl_entry(_cl_vector(dict.pop), [("pin", 0), ("const", 0)], out=0, asserts=[("class", tuple)], classes=(dict, str))  # fmt: skip
+
+        def item(operand, i, k):
+            return _cl_entry(("getitem",), [operand, ("const", i)], out=k, asserts=[("class", F)], classes=(tuple, int))  # fmt: skip
+
+        def mark(operand, classes):
+            return _cl_entry(
+                _cl_vector(list.append), [("pin", 1), operand], classes=classes
             )
-            u = len(entries) - 1
-            probes.append(alive())
-            entries.append(
-                _cl_entry(
-                    ("binary", "-"),
-                    [("res", u), ("const", 1)],
-                    out=len(entries),
-                    kills=[u] + ([0] if kill_at == "subtract" else []),
+
+        name = _cl_entry(("getattr", "name"), [("part", 0, (1,))], out=1, asserts=[("class", str)], classes=(F,))  # fmt: skip
+        text = _cl_entry(("binary", "+"), [("move", 1), ("const", 4)], out=2, asserts=[("class", str)], classes=(str, str))  # fmt: skip
+        for body, entries, want in [
+            (
+                # The tuple goes with the unpacking: each item is on its own.
+                unpacked,
+                [
+                    pop,
+                    item(("res", 0), 1, 1),
+                    item(("move", 0), 2, 2),
+                    _cl_drop(1),
+                    mark(("const", 3), (list, str)),
+                    _cl_drop(2),
+                ],
+                ["first", "deleted", "second"],
+            ),
+            (
+                # A part is read off the tuple, which stays until it is deleted.
+                read,
+                [
+                    pop,
+                    name,
+                    text,
+                    mark(("move", 2), (list, str)),
+                    _cl_drop(0),
+                    mark(("const", 3), (list, str)),
+                ],
+                ["second read", "second", "first", "deleted"],
+            ),
+        ]:
+            with self.subTest(body=body.__name__):
+                eager, mine = self.logs(
+                    body,
+                    entries,
+                    lambda log: ({"k": (F("first", log), F("second", log))},),
+                    ["k", 0, 1, "deleted", " read"],
                 )
-            )
-            v = len(entries) - 1
-            probes.append(alive())
-            return (
-                2,
-                0,
-                [2.0, 1.0, None],
-                entries,
-                [("res", v), ("res", 1), ("seq", "list", probes)],
-            )
+                self.assertEqual(eager, want)
+                self.assertEqual(mine, eager)
 
-        for kill_at, want in (
-            ("multiply", [True, False, False]),
-            ("subtract", [True, True, False]),
-            ("never", [True, True, True]),
-        ):
-            with self.subTest(kill_at=kill_at):
-                v, t, alive = _cl_run(program(kill_at), (a, b))
-                self.assertEqual(alive, want)
-                self.assertTrue(torch.equal(v, (a + b) * 2.0 - 1.0))
-                # Behind the run only its outputs are left.
-                self.assertIsNone(t())
+    def test_a_stop_keeps_its_slots(self):
+        """a = src.pop(); b = src.pop(); torch.add(x, "bad") under a handler:
+        the frame the traceback holds keeps a and b until the handler is
+        done. A list that stops hands its slots over for that."""
+        x, F = torch.ones(2), _ClFinal
 
-    def test_slots_are_released_when_an_entry_raises(self):
-        a, seen = torch.ones(3), []
-        spec = (1, 1, [], [
-            _cl_entry(_cl_vector(torch.neg), [("in", 0)], out=0),
-            _cl_entry(_cl_vector(weakref.ref), [("res", 0)], out=1),
-            _cl_entry(_cl_vector(list.append), [("pin", 0), ("res", 1)], kills=[1]),
-            _cl_entry(_cl_vector(torch.matmul), [("res", 0), ("seq", "list", [("res", 0)])], out=3),
-        ], [("res", 3)])  # fmt: skip
+        def body(src):
+            a = src.pop()
+            b = src.pop()
+            torch.add(x, "bad")
+
+        def pop(k):
+            return _cl_entry(_cl_vector(list.pop), [("pin", 0)], out=k, classes=(list,))
+
+        fails = _cl_entry(_cl_vector(torch.add), [("in", 0), ("const", 0)], classes=(torch.Tensor, str))  # fmt: skip
+        h = _calls_make((1, 1, ["bad"], [pop(0), pop(1), fails, _cl_drop(0, 1)], []))
+        eager, mine = [], []
+        try:
+            body([F("b", eager), F("a", eager)])
+        except TypeError:
+            eager.append("handler")
+        eager.append("after")
+        try:
+            _calls_run(h, (x,), ([F("b", mine), F("a", mine)],))
+        except TypeError:
+            mine.append("handler")
+            entry, what, restartable, live = h.stopped
+            self.assertEqual((entry, what, restartable), (2, "raised", False))
+            self.assertEqual({j: f.name for j, f in live.items()}, {0: "a", 1: "b"})
+            del live
+            h.release()
+        mine.append("after")
+        self.assertEqual(eager, ["handler", "a", "b", "after"])
+        self.assertEqual(mine, eager)
+        self.assertEqual(h.stopped, (2, "raised", False, {}))
+        # Not released by hand, they stay until the next run starts.
+        del mine[:]
         with self.assertRaises(TypeError):
-            _cl_run(spec, (a,), (seen,))
-        self.assertIsNone(seen[0]())
+            _calls_run(h, (x,), ([F("b", mine), F("a", mine)],))
+        self.assertEqual(mine, [])
+        with self.assertRaises(IndexError):
+            _calls_run(h, (x,), ([],))
+        self.assertEqual(mine, ["a", "b"])
+        self.assertEqual(h.stopped, (0, "raised", False, {}))
+
+    def test_stopped_is_cleared_when_a_run_starts(self):
+        x = torch.ones(2)
+        entry = _cl_entry(_cl_vector(torch.add), [("in", 0), ("in", 1)], out=0, classes=(torch.Tensor, str))  # fmt: skip
+        h = _calls_make((2, 0, [], [entry], [("res", 0)]))
+        with self.assertRaises(TypeError):
+            _calls_run(h, (x, "bad"), ())
+        self.assertEqual(h.stopped, (0, "raised", False, {}))
+        # A call that is turned down before anything runs says nothing of the
+        # run before it.
+        with self.assertRaisesRegex(ValueError, "inputs must be a tuple of 2"):
+            _calls_run(h, (x,), ())
+        self.assertIsNone(h.stopped)
+
+    def test_an_operand_of_another_class_stops_its_entry(self):
+        ran, T = [], torch.Tensor
+
+        class Loud:
+            def __add__(self, other):
+                ran.append("__add__")
+                return 1
+
+            def __index__(self):
+                ran.append("__index__")
+                return 0
+
+        def run(callee, classes, operands):
+            args = [("in", k) for k in range(len(operands))]
+            entry = _cl_entry(callee, args, out=0, flags=["pure"], classes=classes)
+            h = _calls_make((len(operands), 0, [], [entry], [("res", 0)]))
+            return _calls_run(h, tuple(operands), ()), h.stopped
+
+        missed = (None, (0, "class", True, {}))
+        x, w = torch.ones(2), torch.nn.Parameter(torch.ones(2))
+        self.assertEqual(run(("binary", "+"), (int, int), (2, 3)), ((5,), None))
+        for callee, classes, operands in [
+            (("binary", "+"), (int, int), (Loud(), 1)),
+            (("binary", "+"), (int, int), (True, 1)),
+            (("getitem",), (list, int), ([1, 2], Loud())),
+            (_cl_vector(torch.add), (T, T), (x, 2.0)),
+            (_cl_vector(torch.add), (T, T), (w, x)),
+            (_cl_vector(torch.add), (T, T), (x, None)),
+        ]:
+            with self.subTest(callee=callee[0], operands=operands):
+                self.assertEqual(run(callee, classes, operands), missed)
+        # A part of what is built for the call is an operand too.
+        stack = _cl_entry(_cl_vector(torch.stack), [("seq", "list", [("in", 0), ("in", 1)])], out=0, flags=["pure"])  # fmt: skip
+        h = _calls_make((2, 0, [], [stack], [("res", 0)]))
+        self.assertTrue(torch.equal(_calls_run(h, (x, x), ())[0], torch.stack([x, x])))
+        self.assertIsNone(_calls_run(h, (x, w), ()))
+        self.assertEqual(h.stopped, (0, "class", True, {}))
+        self.assertEqual(ran, [])
+
+    def test_a_class_that_changed_since_the_list_was_made(self):
+        ran = []
+
+        class Box(list):
+            pass
+
+        entry = _cl_entry(("getitem",), [("in", 0), ("in", 1)], out=0, flags=["pure"], classes=(Box, int))  # fmt: skip
+        h = _calls_make((2, 0, [], [entry], [("res", 0)]))
+        self.assertEqual(_calls_run(h, (Box([5, 6]), 1), ()), (6,))
+        Box.__getitem__ = lambda self, i: ran.append(i)
+        # The class now answers a subscript with its own code: the list, which
+        # was made for the C one, stops in front of the entry.
+        self.assertIsNone(_calls_run(h, (Box([5, 6]), 1), ()))
+        self.assertEqual(h.stopped, (0, "class", True, {}))
+        self.assertEqual(ran, [])
+        with self.assertRaisesRegex(ValueError, "no C function: __getitem__"):
+            _calls_make((2, 0, [], [entry], [("res", 0)]))
+
+    def test_a_list_that_is_entered_while_it_runs(self):
+        count = []
+        nothing = _calls_make((0, 0, [], [], []))
+        CallList = type(nothing)
+        again = _cl_entry(_cl_vector(_calls_run), [("pin", 0), ("seq", "tuple", []), ("seq", "tuple", [("pin", 0), ("pin", 1)])], classes=(CallList, (), (CallList, list)))  # fmt: skip
+        h = _calls_make((0, 2, [1], [
+            _cl_entry(_cl_vector(list.append), [("pin", 1), ("const", 0)], classes=(list, int)),
+            again,
+        ], []))  # fmt: skip
+        with self.assertRaisesRegex(RuntimeError, "entered while this thread runs it"):
+            _calls_run(h, (), (h, count))
+        self.assertEqual(count, [1])
+        self.assertEqual(h.stopped, (1, "raised", False, {}))
+        # Lists that run one another: so many deep, and no deeper.
+        inner = _cl_entry(_cl_vector(_calls_run), [("pin", 0), ("seq", "tuple", []), ("pin", 1)], classes=(CallList, (), tuple))  # fmt: skip
+
+        def chain(depth):
+            first, pins = nothing, ()
+            for _ in range(depth):
+                first, pins = _calls_make((0, 2, [], [inner], [])), (first, pins)
+            return first, pins
+
+        first, pins = chain(31)
+        self.assertEqual(_calls_run(first, (), pins), ())
+        first, pins = chain(40)
+        with self.assertRaisesRegex(RecursionError, "call lists nested deeper than 32"):
+            _calls_run(first, (), pins)
+        # The marks are gone with the runs.
+        self.assertEqual(_calls_run(nothing, (), ()), ())
+        with self.assertRaisesRegex(RuntimeError, "entered while"):
+            _calls_run(h, (), (h, count))
 
 
 @unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
@@ -2116,14 +2749,19 @@ class TestVmCallListPrograms(TestCase):
             def pin(*ks):
                 return [("pin", k) for k in ks]
 
+            T, known = torch.Tensor, [("class", torch.Tensor)]
+            same = [("is", 0), *known]
+            as_conv = (T, T, type(None), tuple, tuple, tuple, int)
+            as_bn = (T, T, T, T, T, bool, float, float, bool)
+            # Each `out` is a temporary of the next call: moved into it.
             return _calls_make((1, 10, [None, (1, 1), 1, training, 0.1, 1e-05, cudnn], [
-                _cl_entry(conv, [("in", 0), ("pin", 0), *tail], out=0, at=0),
-                _cl_entry(bn, [("res", 0), *pin(1, 2, 3, 4), *norm], out=1, at=1, kills=[0]),
-                _cl_entry(relu_, [("res", 1)], out=2, at=2, asserts=[("is", 0)], kills=[1]),
-                _cl_entry(conv, [("res", 2), ("pin", 5), *tail], out=3, at=3, kills=[2]),
-                _cl_entry(bn, [("res", 3), *pin(6, 7, 8, 9), *norm], out=4, at=4, kills=[3]),
-                _cl_entry(("binary", "+="), [("res", 4), ("in", 0)], out=5, at=5, asserts=[("is", 0)], kills=[4]),
-                _cl_entry(relu_, [("res", 5)], out=6, at=6, kills=[5]),
+                _cl_entry(conv, [("in", 0), ("pin", 0), *tail], out=0, at=0, asserts=known, classes=as_conv),
+                _cl_entry(bn, [("move", 0), *pin(1, 2, 3, 4), *norm], out=1, at=1, asserts=known, classes=as_bn),
+                _cl_entry(relu_, [("move", 1)], out=2, at=2, asserts=same),
+                _cl_entry(conv, [("move", 2), ("pin", 5), *tail], out=3, at=3, asserts=known, classes=as_conv),
+                _cl_entry(bn, [("move", 3), *pin(6, 7, 8, 9), *norm], out=4, at=4, asserts=known, classes=as_bn),
+                _cl_entry(("binary", "+="), [("move", 4), ("in", 0)], out=5, at=5, asserts=same),
+                _cl_entry(relu_, [("move", 5)], out=6, at=6),
             ], [("res", 6)]))  # fmt: skip
 
         for training in (False, True):
@@ -2190,7 +2828,10 @@ class TestVmCallListPrograms(TestCase):
         matmul = _cl_vector(torch.matmul)
         entries = []
 
-        def call(callee, operands, kwnames=None, kills=()):
+        consts = [batch, length, heads, width // heads, 1, -1, -2, scale, width, 2]
+
+        def call(callee, operands, kwnames=None):
+            # Every intermediate is a temporary of the one call that takes it.
             entries.append(
                 _cl_entry(
                     callee,
@@ -2199,38 +2840,32 @@ class TestVmCallListPrograms(TestCase):
                     out=len(entries),
                     at=len(entries),
                     flags=["pure"],
-                    kills=kills,
+                    asserts=[("class", torch.Tensor)],
+                    classes=tuple(
+                        type(consts[t[1]]) if t[0] == "const" else torch.Tensor
+                        for t in operands
+                    ),
                 )
             )
-            return ("res", len(entries) - 1)
+            return ("move", len(entries) - 1)
 
         def head(weight):
             flat = call(lin, [("in", 0), ("pin", weight), ("pin", weight + 1)])
-            split_ = call(view, [flat, *split], kills=[flat[1]])
-            return call(
-                transpose, [split_, ("const", 4), ("const", 9)], kills=[split_[1]]
-            )
+            split_ = call(view, [flat, *split])
+            return call(transpose, [split_, ("const", 4), ("const", 9)])
 
         q, k, v = head(0), head(2), head(4)
-        kt = call(transpose, [k, ("const", 5), ("const", 6)], kills=[k[1]])
-        raw = call(matmul, [q, kt], kills=[q[1], kt[1]])
-        scores = call(("binary", "/"), [raw, ("const", 7)], kills=[raw[1]])
-        probs = call(
-            _cl_vector(torch.Tensor.softmax),
-            [scores, ("const", 5)],
-            ("dim",),
-            kills=[scores[1]],
-        )
-        mixed = call(matmul, [probs, v], kills=[probs[1], v[1]])
-        moved = call(transpose, [mixed, ("const", 4), ("const", 9)], kills=[mixed[1]])
-        packed = call(_cl_vector(torch.Tensor.contiguous), [moved], kills=[moved[1]])
-        context = call(
-            view, [packed, ("const", 0), ("const", 1), ("const", 8)], kills=[packed[1]]
-        )
-        dense = call(lin, [context, ("pin", 6), ("pin", 7)], kills=[context[1]])
-        out = call(("binary", "+"), [dense, ("in", 0)], kills=[dense[1]])
-        consts = [batch, length, heads, width // heads, 1, -1, -2, scale, width, 2]
-        h = _calls_make((1, 8, consts, entries, [out]))
+        kt = call(transpose, [k, ("const", 5), ("const", 6)])
+        raw = call(matmul, [q, kt])
+        scores = call(("binary", "/"), [raw, ("const", 7)])
+        probs = call(_cl_vector(torch.Tensor.softmax), [scores, ("const", 5)], ("dim",))
+        mixed = call(matmul, [probs, v])
+        moved = call(transpose, [mixed, ("const", 4), ("const", 9)])
+        packed = call(_cl_vector(torch.Tensor.contiguous), [moved])
+        context = call(view, [packed, ("const", 0), ("const", 1), ("const", 8)])
+        dense = call(lin, [context, ("pin", 6), ("pin", 7)])
+        out = call(("binary", "+"), [dense, ("in", 0)])
+        h = _calls_make((1, 8, consts, entries, [("res", out[1])]))
         self.assertEqual(len(entries), 19)
         for seed in (1, 2):
             gen.manual_seed(seed)
@@ -2255,11 +2890,14 @@ class TestVmCallListPrograms(TestCase):
         bufs = ("seq", "list", [("pin", n + k) for k in range(n)])
         grads = ("seq", "list", [("in", k) for k in range(n)])
         decayed = ("seq", "list", [("part", 0, (k,)) for k in range(n)])
+        three = (torch.Tensor,) * n
         h = _calls_make((n, 2 * n, [0.01, 0.9, -0.1], [
-            _cl_entry(_cl_vector(torch._foreach_add), [grads, params, ("const", 0)], ("alpha",), out=0, flags=["pure", "fresh"], asserts=[("count", n)]),
-            _cl_entry(_cl_vector(torch._foreach_mul_), [bufs, ("const", 1)], at=1, flags=[("writes", (0,))]),
-            _cl_entry(_cl_vector(torch._foreach_add_), [bufs, decayed], at=2, flags=[("writes", (0,))], kills=[0]),
-            _cl_entry(_cl_vector(torch._foreach_add_), [params, bufs, ("const", 2)], ("alpha",), at=3, flags=[("writes", (0,))]),
+            _cl_entry(_cl_vector(torch._foreach_add), [grads, params, ("const", 0)], ("alpha",), out=0, flags=["pure", "fresh"], asserts=[("count", n), ("class", tuple)], classes=(three, three, float)),
+            _cl_entry(_cl_vector(torch._foreach_mul_), [bufs, ("const", 1)], at=1, flags=[("writes", (0,))], classes=(three, float)),
+            _cl_entry(_cl_vector(torch._foreach_add_), [bufs, decayed], at=2, flags=[("writes", (0,))]),
+            _cl_entry(_cl_vector(torch._foreach_add_), [params, bufs, ("const", 2)], ("alpha",), at=3, flags=[("writes", (0,))], classes=(three, three, float)),
+            # `grads`, the local, goes when the body ends.
+            _cl_drop(0, at=4),
         ], []))  # fmt: skip
         gen.manual_seed(1)
         mine = tensors() + tensors()
@@ -2856,6 +3494,8 @@ RULES_LATER = (
     "stores",
     "recorder",
 )
+# The families that are written.
+RULES_FAMILIES = ("ops", "imports")
 RULES_COLUMNS = {
     "reads": (
         "Slot",
@@ -2868,6 +3508,8 @@ RULES_COLUMNS = {
         "Text",
         "Handled",
         "Pending",
+        "Modules",
+        "Attribute",
     ),
     "writes": r"None|Slot|Handled|Fills\(\d+\)",
     "result": r"None|Lit|Entry|Slot|Part|Made|Pinned|Return|Operand\(\d+\)",
@@ -2881,13 +3523,6 @@ RULES_LOWERED = {"LoadFromDictOrDeref": "LOAD_FROM_DICT_OR_DEREF"}
 
 RULES_K = "K = [2.0]"
 RULES_K_CHANGE = "K[0] = 5.0 if second else 2.0"
-RULES_MODULE = """import sys, types
-def module(k):
-    m = types.ModuleType('vm_rules_mod')
-    m.K = k
-    sys.modules['vm_rules_mod'] = m
-module(2.0)"""
-RULES_MODULE_CHANGE = "module(5.0 if second else 2.0)"
 RULES_MANAGER = """class Manager:
     def __enter__(self):
         return self.k
@@ -2972,20 +3607,6 @@ RULES_STOPS = {
         "global T\nk = T\ndel T",
         "globals()['T'] = 5.0 if second else 2.0",
         "'T' in globals()",
-    ),
-    "import_name": (
-        ("IMPORT_NAME",),
-        RULES_MODULE,
-        "import vm_rules_mod\nk = vm_rules_mod.K",
-        RULES_MODULE_CHANGE,
-        "None",
-    ),
-    "import_from": (
-        ("IMPORT_FROM",),
-        RULES_MODULE,
-        "from vm_rules_mod import K\nk = K",
-        RULES_MODULE_CHANGE,
-        "None",
     ),
     "with": (
         ("BEFORE_WITH",),
@@ -3093,8 +3714,8 @@ RULES_NOT_WRITTEN = {
 }
 
 
-def rules_source(name):
-    _, setup, construct, change, state = RULES_STOPS[name]
+def rules_source(name, programs=RULES_STOPS):
+    _, setup, construct, change, state = programs[name][:5]
     body = "\n".join(f"    {line}" for line in construct.splitlines())
     change = "\n".join(f"    {line}" for line in change.splitlines())
     return (
@@ -3200,12 +3821,12 @@ class TestVmRulesOps(TestCase):
                 if parts[0] == "group":
                     continue
                 how, family, what, *rest = parts
-                self.assertIn(family, ("ops", *RULES_LATER))
+                self.assertIn(family, RULES_FAMILIES)
                 dumped.add(
                     (what, how if how in ("row", "stop") else f"{how}:{rest[0]}")
                 )
                 if how == "later":
-                    self.assertIn(rest[0], RULES_LATER)
+                    self.assertIn(rest[0], (*RULES_FAMILIES, *RULES_LATER))
                 if how in ("row", "stop"):
                     # One sentence, or one reason.
                     self.assertGreater(len(rest[-1]), 20)
@@ -3801,6 +4422,788 @@ class TestVmPins(TestCase):
 
 
 instantiate_device_type_tests(TestVmPins, globals())
+
+
+# The ways two tensors of 16 elements' worth of memory overlap: what each
+# gives for (the first tensor's memory, the memory the second is in when the
+# two are apart, whether the two share). The second has the same sizes and
+# strides either way.
+MEMORY_OVERLAPS = {
+    "one_object": lambda base, other, shared: (
+        (base[0:8],) * 2 if shared else (base[0:8], other[0:8])
+    ),
+    "one_memory": lambda base, other, shared: (
+        base[0:8],
+        (base if shared else other)[0:8],
+    ),
+    "detached": lambda base, other, shared: (
+        base[0:8],
+        (base if shared else other)[0:8].detach(),
+    ),
+    "partial": lambda base, other, shared: (
+        base[0:6],
+        (base if shared else other)[4:10],
+    ),
+    "interleaved": lambda base, other, shared: (
+        base[0::2],
+        (base if shared else other)[1::2],
+    ),
+    "expanded": lambda base, other, shared: (
+        base[0:8],
+        (base if shared else other)[2:3].expand(8),
+    ),
+    "transposed": lambda base, other, shared: (
+        base.view(4, 4),
+        (base if shared else other).view(4, 4).T,
+    ),
+    "two_storages": lambda base, other, shared: (
+        base[0:8],
+        torch.from_numpy((base if shared else other).numpy())[0:8],
+    ),
+}
+# What cannot be: an expanded tensor is not written in place, and memory
+# from numpy is the CPU's.
+MEMORY_NOT_WRITTEN = {"expanded"}
+MEMORY_CPU_ONLY = {"two_storages"}
+
+
+def memory_first_written(a, b):
+    a.add_(1.0)
+    c = b * 2.0
+    a.mul_(c.sum().tanh())
+    return (a - b).tanh() + c
+
+
+def memory_second_written(a, b):
+    c = a * 2.0
+    b.add_(c)
+    d = (a + 1.0).cos()
+    b.mul_(0.5)
+    return (a - b).tanh() + d
+
+
+def memory_neither_written(a, b):
+    c = a * 2.0 + b
+    return (c - b).tanh() + (a * b).cos()
+
+
+class MemoryHolder(torch.nn.Module):
+    pass
+
+
+# Its `store` and `w` (elements 4 to 11 of the store) are put on the test's
+# device by the test.
+MEMORY_HELD = MemoryHolder()
+
+
+def memory_input_written(x, g):
+    x.sub_(g * 0.1)
+    c = MEMORY_HELD.w * 2.0
+    return (x - MEMORY_HELD.w).tanh() + c
+
+
+def memory_state_written(x, g):
+    # As an optimizer's step: the weight is updated in place.
+    y = x * 2.0
+    MEMORY_HELD.w.sub_(g * 0.1)
+    return (x - MEMORY_HELD.w).tanh() + y
+
+
+def memory_state_read(x, g):
+    y = x * 2.0 + MEMORY_HELD.w
+    return (y - g).tanh() + (x * MEMORY_HELD.w).cos()
+
+
+MEMORY_WRITTEN = {
+    "first": (memory_first_written, memory_input_written),
+    "second": (memory_second_written, memory_state_written),
+    "neither": (memory_neither_written, memory_state_read),
+}
+# How an input stands to the weight when the two share: what it is made of.
+MEMORY_OF_STATE = {
+    "one_object": lambda held: held.w,
+    "one_memory": lambda held: held.store[4:12],
+    "detached": lambda held: held.w.detach(),
+    "partial": lambda held: held.store[0:8],
+    "strided_through": lambda held: held.store[1::2],
+}
+MEMORY_APART_OF_STATE = {"strided_through": lambda base: base[1::2]}
+MEMORY_LISTS = {
+    "default": CHECKS_EARLY,
+    "effects": vm.configure(
+        (*vm.DEFAULT_PASSES, vm.passes.Effects()),
+        regions={"at": 3, "observe": 1},
+        pure_calls=1,
+    ),
+}
+MEMORY_MISS = "how its tensors share memory"
+
+
+def memory_unplaced(device):
+    """Tensors whose place in memory cannot be said, by kind."""
+    return {
+        "sparse": torch.zeros(8, device=device).to_sparse(),
+        "meta": torch.zeros(8, device="meta"),
+        "zero_tensor": torch._efficientzerotensor((8,), device=device),
+        "no_tensor": 3.0,
+    }
+
+
+def memory_with_a_meta_tensor(x, m):
+    y = x.sin() * 2 + 1
+    n = m * 2 + 1
+    return (y @ y.t()).cos().tanh().exp(), n.shape
+
+
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmMemoryRelation(TestCase):
+    """A region is entered only by a call whose tensors (its inputs and the
+    tensors its graph reads from state) stand to one another in memory as
+    the traced call's did, for every pair of them and on every pass list:
+    the same ones are one object, the same ones overlap and as far apart,
+    all the others are apart. Another call is a miss and is traced for
+    itself. A trace with a tensor whose place cannot be said is refused."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def counts(self, compiled, fn):
+        rows = [
+            r
+            for r in vm.regions(compiled)
+            if r["function"] == fn.__name__ and r["state"] == "region"
+        ]
+        missed = sum(dict(r.get("misses") or {}).get(MEMORY_MISS, 0) for r in rows)
+        return sum(r["runs"] for r in rows), missed
+
+    def phases(self, fn, passes, traced, make):
+        """Sixteen calls of ``fn`` on the VM and in eager: six with the
+        tensors standing as ``traced`` says, five the other way, five the
+        first way again. ``make(call, shared)`` gives a call's arguments
+        and the memory to compare after it."""
+        compiled = vm(fn, passes=MEMORY_LISTS[passes])
+        seen = []
+        for call in range(16):
+            shared = (6 <= call < 11) == (traced == "apart")
+            outcomes = []
+            for run in (fn, compiled):
+                args, memory = make(call, shared)
+                out = checks_outcome(run, *args)
+                self.assertNotIsInstance(out, Exception, msg=f"call {call}: {out!r}")
+                outcomes.append([out, *(m.clone() for m in memory)])
+            want, got = outcomes
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            seen.append(self.counts(compiled, fn))
+        self.ran_each_way(seen)
+
+    def ran_each_way(self, seen):
+        """``seen``: the counts after each of sixteen calls, of which the
+        calls 6 to 10 had the tensors standing the other way."""
+        (runs1, missed1), (runs2, missed2), (runs3, _) = seen[5], seen[10], seen[15]
+        # A region ran while the tensors stood as traced, and no call missed.
+        self.assertGreater(runs1, 0, msg=str(seen))
+        self.assertEqual(missed1, 0, msg=str(seen))
+        # The other way is a miss, and a region of its own from then on.
+        self.assertGreater(missed2, 0, msg=str(seen))
+        self.assertGreater(runs2, runs1, msg=str(seen))
+        # The first way again: its region is still there.
+        self.assertGreater(runs3, runs2, msg=str(seen))
+
+    def two_inputs(self, device, overlap, written, traced, passes):
+        if overlap in MEMORY_CPU_ONLY and torch.device(device).type != "cpu":
+            self.skipTest("memory handed over twice by numpy is the CPU's")
+
+        def make(call, shared):
+            torch.manual_seed(call)
+            base, other = (torch.randn(16, device=device) for _ in range(2))
+            return MEMORY_OVERLAPS[overlap](base, other, shared), [base, other]
+
+        self.phases(MEMORY_WRITTEN[written][0], passes, traced, make)
+
+    @parametrize("traced", ("apart", "shared"))
+    @parametrize("written", ("first", "second", "neither"))
+    @parametrize("overlap", list(MEMORY_OVERLAPS))
+    @checks_isolated
+    def test_two_inputs(self, device, overlap, written, traced):
+        if written == "second" and overlap in MEMORY_NOT_WRITTEN:
+            self.skipTest("an expanded tensor is not written in place")
+        self.two_inputs(device, overlap, written, traced, "default")
+
+    @parametrize("overlap", list(MEMORY_OVERLAPS))
+    @checks_isolated
+    def test_two_inputs_with_effects_held(self, device, overlap):
+        self.two_inputs(device, overlap, "first", "apart", "effects")
+
+    def input_and_state(self, device, overlap, written, traced, passes):
+        held = MEMORY_HELD
+        held.store = torch.zeros(16, device=device)
+        held.w = held.store[4:12]
+
+        def make(call, shared):
+            torch.manual_seed(call)
+            base = torch.randn(16, device=device)
+            g = torch.randn(8, device=device)
+            held.store.copy_(torch.arange(16.0, device=device) / 16 + call / 8)
+            apart = MEMORY_APART_OF_STATE.get(overlap, lambda base: base[0:8])
+            x = MEMORY_OF_STATE[overlap](held) if shared else apart(base)
+            return (x, g), [base, held.store]
+
+        self.phases(MEMORY_WRITTEN[written][1], passes, traced, make)
+
+    @parametrize("traced", ("apart", "shared"))
+    @parametrize("written", ("first", "second", "neither"))
+    @parametrize("overlap", list(MEMORY_OF_STATE))
+    @checks_isolated
+    def test_an_input_and_a_tensor_read_from_state(
+        self, device, overlap, written, traced
+    ):
+        self.input_and_state(device, overlap, written, traced, "default")
+
+    @parametrize("overlap", list(MEMORY_OF_STATE))
+    @checks_isolated
+    def test_an_input_and_a_tensor_read_from_state_with_effects_held(
+        self, device, overlap
+    ):
+        self.input_and_state(device, overlap, "second", "apart", "effects")
+
+    @checks_isolated
+    def test_a_weight_whose_memory_moves_onto_an_input(self, device):
+        # The tensors of every call are the same objects: what changes is
+        # where the weight's data is (the reads tell the relation).
+        held, fn = MEMORY_HELD, memory_state_written
+        held.store = torch.zeros(16, device=device)
+        held.w = torch.zeros(8, device=device)
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        seen = []
+        for call in range(16):
+            if call == 6:
+                held.w.data = held.store[4:12]
+            if call == 11:
+                held.w.data = torch.zeros(8, device=device)
+            outcomes = []
+            for run in (fn, compiled):
+                torch.manual_seed(call)
+                g = torch.randn(8, device=device)
+                held.store.copy_(torch.arange(16.0, device=device) / 16 + call / 8)
+                if not 6 <= call < 11:
+                    held.w.fill_(call / 4)
+                out = run(held.store[0:8], g)
+                outcomes.append([out, held.store.clone(), held.w.clone()])
+            want, got = outcomes
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            seen.append(self.counts(compiled, fn))
+        self.ran_each_way(seen)
+
+    def test_every_overlap_is_told_from_apart(self, device):
+        # The relation itself, for every way of overlapping, both ways.
+        for overlap, make in MEMORY_OVERLAPS.items():
+            if overlap in MEMORY_CPU_ONLY and torch.device(device).type != "cpu":
+                continue
+            base, other = (torch.randn(16, device=device) for _ in range(2))
+            shared, apart = make(base, other, True), make(base, other, False)
+            ways = ((shared, shared, apart), (apart, apart, shared))
+            for traced, same, differs in ways:
+                relation = torch._rust.Overlap(list(traced), [])
+                self.assertIsNone(relation.unplaced, msg=overlap)
+                self.assertTrue(relation.needed, msg=overlap)
+                self.assertTrue(relation.holds(list(same)), msg=overlap)
+                self.assertFalse(relation.holds(list(differs)), msg=overlap)
+                # With the second among the constants, the same.
+                relation = torch._rust.Overlap([traced[0]], [traced[1]])
+                self.assertTrue(relation.holds([same[0]]), msg=overlap)
+                if traced is apart:
+                    self.assertFalse(relation.holds([apart[1]]), msg=overlap)
+
+    def test_overlapping_tensors_are_where_they_were(self, device):
+        base, other = (torch.zeros(16, device=device) for _ in range(2))
+        relation = torch._rust.Overlap([base[0:8], base[4:12]], [])
+        self.assertTrue(relation.holds([other[0:8], other[4:12]]))
+        # As far apart, somewhere else in the storage; nearer; the other
+        # way around; in two storages.
+        self.assertFalse(relation.holds([other[2:10], other[6:14]]))
+        self.assertFalse(relation.holds([other[0:8], other[2:10]]))
+        self.assertFalse(relation.holds([other[4:12], other[0:8]]))
+        self.assertFalse(relation.holds([other[0:8], base[4:12]]))
+        # Three in a row, of which the outer two do not meet.
+        relation = torch._rust.Overlap([base[0:6], base[4:10], base[8:14]], [])
+        self.assertTrue(relation.holds([other[0:6], other[4:10], other[8:14]]))
+        self.assertFalse(relation.holds([other[0:6], other[4:10], base[8:14]]))
+        self.assertFalse(relation.holds([other[0:6], other[4:10], other[10:16]]))
+
+    def test_a_tensor_without_elements_overlaps_none(self, device):
+        base = torch.zeros(16, device=device)
+        a, b = torch.zeros(8, device=device), torch.zeros(0, device=device)
+        relation = torch._rust.Overlap([a, b], [])
+        self.assertTrue(relation.holds([base[0:8], base[4:4]]))
+        # It is still an object, which another tensor is or is not.
+        self.assertFalse(torch._rust.Overlap([b, b], []).holds([b, base[0:0]]))
+        self.assertFalse(torch._rust.Overlap([b, base[0:0]], []).holds([b, b]))
+
+    def test_a_tensor_whose_place_cannot_be_said(self, device):
+        a = torch.zeros(8, device=device)
+        for kind, t in memory_unplaced(device).items():
+            for inputs, consts in (([a, t], []), ([t, a], []), ([a], [t])):
+                relation = torch._rust.Overlap(inputs, consts)
+                self.assertIsNotNone(relation.unplaced, msg=kind)
+                self.assertFalse(relation.holds(inputs), msg=kind)
+            # Asked of a call, it is a miss.
+            relation = torch._rust.Overlap([a, torch.zeros(8, device=device)], [])
+            self.assertIsNone(relation.unplaced)
+            self.assertFalse(relation.holds([a, t]), msg=kind)
+            # One tensor stands to no other: nothing is asked of it.
+            relation = torch._rust.Overlap([t], [])
+            self.assertIsNone(relation.unplaced, msg=kind)
+            self.assertFalse(relation.needed, msg=kind)
+
+    def test_a_constant_that_moves_is_looked_at_again(self, device):
+        x, w, v = (torch.zeros(8, device=device) for _ in range(3))
+        base = torch.zeros(16, device=device)
+        relation = torch._rust.Overlap([x], [w, v])
+        self.assertTrue(relation.holds([base[0:8]]))
+        w.data = base[4:12]
+        self.assertFalse(relation.holds([base[0:8]]))
+        self.assertTrue(relation.holds([x]))
+        v.data = base[8:16]
+        self.assertFalse(relation.holds([x]))
+        v.data = torch.zeros(8, device=device)
+        self.assertTrue(relation.holds([x]))
+
+    @checks_isolated
+    def test_no_region_for_a_tensor_whose_place_cannot_be_said(self, device):
+        fn = memory_with_a_meta_tensor
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        for call in range(8):
+            torch.manual_seed(call)
+            x, m = torch.randn(4, 8, device=device), torch.zeros(8, device="meta")
+            got, want = compiled(x, m), fn(x, m)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        rows = [r for r in vm.regions(compiled) if r["function"] == fn.__name__]
+        whys = [why for r in rows for _, why in r.get("traces") or ()]
+        unplaced = [why for why in whys if "cannot be said" in (why or "")]
+        self.assertTrue(unplaced, msg=str(rows))
+        self.assertEqual(checks_region_runs(compiled, fn), 0, msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmMemoryRelation, globals())
+
+
+IMPORTS_SETUP = """import builtins, importlib, os, sys, tempfile, types
+def module(name, **items):
+    m = types.ModuleType(name)
+    m.__dict__.update(items)
+    return m
+def package(name, k):
+    p = module(name)
+    p.sub = module(name + '.sub', K=k)
+    return p
+def put(p):
+    sys.modules[p.__name__] = p
+    sys.modules[p.sub.__name__] = p.sub
+"""
+IMPORTS_MODULE = IMPORTS_SETUP + (
+    "A = module('vm_imp_m', K=2.0)\nB = module('vm_imp_m', K=5.0)\n"
+    "sys.modules['vm_imp_m'] = A"
+)
+IMPORTS_PACKAGE = IMPORTS_SETUP + (
+    "P = package('vm_imp_p', 2.0)\nP2 = package('vm_imp_p', 5.0)\nput(P)"
+)
+# A module that the import machinery loads from a file, which reads its K
+# from where the test puts it.
+IMPORTS_FILE = (
+    IMPORTS_SETUP
+    + """DIR = tempfile.TemporaryDirectory()
+with open(os.path.join(DIR.name, '{0}.py'), 'w') as file:
+    file.write('import sys\\nK = sys.vm_imp_k\\n')
+sys.dont_write_bytecode = True
+sys.path.insert(0, DIR.name)
+sys.vm_imp_k = 2.0
+"""
+)
+# Modules whose spec is importlib's, made by hand: it has no `_initializing`
+# of its own, as the spec of a reloaded module has none. The import waits for
+# a module whose spec says it is being initialized: WAITED counts that.
+IMPORTS_SPEC = (
+    IMPORTS_MODULE
+    + """
+Spec = importlib.machinery.ModuleSpec
+A.__spec__ = Spec('vm_imp_m', None)
+B.__spec__ = Spec('vm_imp_m', None)
+OWN_WAIT = importlib._bootstrap._lock_unlock_module
+WAITED = []
+def waited(name):
+    if name == 'vm_imp_m':
+        WAITED.append(name)
+    return OWN_WAIT(name)
+def waits():
+    sys.modules['vm_imp_m'] = A
+    importlib._bootstrap._lock_unlock_module = waited
+    A.__spec__.__dict__.pop('_initializing', None)
+    if '_initializing' in vars(Spec):
+        del Spec._initializing"""
+)
+IMPORTS_ONE = "import vm_imp_m\nk = vm_imp_m.K"
+IMPORTS_SUB = "import vm_imp_p.sub\nk = vm_imp_p.sub.K"
+IMPORTS_FROM = "from vm_imp_m import K\nk = K"
+
+# A program per way an import can differ between two calls: (the opcodes it
+# holds, what the module has, the construct, which sets `k`, what changes
+# before a call (`second`: for calls 7 to 9), the state the calls leave,
+# whether the import has a row as the program first runs it).
+IMPORTS_PROGRAMS = {
+    "module_replaced": (
+        ("IMPORT_NAME",),
+        IMPORTS_MODULE,
+        IMPORTS_ONE,
+        "sys.modules['vm_imp_m'] = B if second else A",
+        "None",
+        True,
+    ),
+    "module_removed": (
+        ("IMPORT_NAME",),
+        IMPORTS_MODULE,
+        IMPORTS_ONE,
+        "sys.modules['vm_imp_m'] = A\nif second:\n    del sys.modules['vm_imp_m']",
+        "None",
+        True,
+    ),
+    "module_is_none": (
+        ("IMPORT_NAME",),
+        IMPORTS_MODULE,
+        IMPORTS_ONE,
+        "sys.modules['vm_imp_m'] = None if second else A",
+        "None",
+        True,
+    ),
+    "import_function_replaced": (
+        ("IMPORT_NAME",),
+        IMPORTS_MODULE
+        + "\nOWN = builtins.__import__\nSEEN = []\n"
+        + "def other(name, *args, **kwargs):\n"
+        + "    if name != 'vm_imp_m':\n        return OWN(name, *args, **kwargs)\n"
+        + "    SEEN.append(name)\n    return B",
+        IMPORTS_ONE,
+        "sys.modules['vm_imp_m'] = A\nbuiltins.__import__ = other if second else OWN",
+        "len(SEEN)",
+        True,
+    ),
+    "package_replaced": (
+        ("IMPORT_NAME",),
+        IMPORTS_PACKAGE,
+        IMPORTS_SUB,
+        "put(P2 if second else P)",
+        "None",
+        True,
+    ),
+    "submodule_removed": (
+        ("IMPORT_NAME",),
+        IMPORTS_PACKAGE,
+        IMPORTS_SUB,
+        "put(P)\nif second:\n    del sys.modules['vm_imp_p.sub']",
+        "None",
+        True,
+    ),
+    "three_names": (
+        ("IMPORT_NAME",),
+        IMPORTS_SETUP
+        + "def deep(k):\n    x = module('vm_imp_x')\n"
+        + "    x.y = module('vm_imp_x.y')\n"
+        + "    x.y.z = module('vm_imp_x.y.z', K=k)\n    return x\n"
+        + "def put(x):\n    sys.modules['vm_imp_x'] = x\n"
+        + "    sys.modules['vm_imp_x.y'] = x.y\n"
+        + "    sys.modules['vm_imp_x.y.z'] = x.y.z\n"
+        + "X = deep(2.0)\nX2 = deep(5.0)\nput(X)",
+        "import vm_imp_x.y.z\nk = vm_imp_x.y.z.K",
+        "put(X2 if second else X)",
+        "None",
+        True,
+    ),
+    "submodule_under_another_name": (
+        ("IMPORT_NAME", "IMPORT_FROM"),
+        IMPORTS_PACKAGE + "\nS = P.sub",
+        "import vm_imp_p.sub as other\nk = other.K",
+        "P.sub = S\nput(P)\nP.sub = P2.sub if second else S",
+        "None",
+        True,
+    ),
+    "name_replaced": (
+        ("IMPORT_NAME", "IMPORT_FROM"),
+        IMPORTS_MODULE,
+        IMPORTS_FROM,
+        "sys.modules['vm_imp_m'] = A\nA.K = 5.0 if second else 2.0",
+        "None",
+        True,
+    ),
+    "name_deleted": (
+        ("IMPORT_NAME", "IMPORT_FROM"),
+        IMPORTS_MODULE,
+        IMPORTS_FROM,
+        "sys.modules['vm_imp_m'] = A\nA.K = 2.0\nif second:\n    del A.K",
+        "None",
+        True,
+    ),
+    "name_from_a_submodule_in_sys_modules": (
+        ("IMPORT_NAME", "IMPORT_FROM"),
+        IMPORTS_PACKAGE + "\ndel P.sub\nS = sys.modules['vm_imp_p.sub']",
+        "from vm_imp_p import sub\nk = sub.K",
+        "sys.modules['vm_imp_p'] = P\n"
+        "sys.modules['vm_imp_p.sub'] = P2.sub if second else S",
+        "None",
+        True,
+    ),
+    "reloaded": (
+        ("IMPORT_NAME",),
+        IMPORTS_FILE.format("vm_imp_file") + "import vm_imp_file",
+        "import vm_imp_file\nk = vm_imp_file.K",
+        "if sys.vm_imp_k != (5.0 if second else 2.0):\n"
+        "    sys.vm_imp_k = 5.0 if second else 2.0\n"
+        "    importlib.reload(sys.modules['vm_imp_file'])",
+        "None",
+        True,
+    ),
+    "spec_without_initializing_replaced": (
+        ("IMPORT_NAME",),
+        IMPORTS_SPEC,
+        IMPORTS_ONE,
+        "waits()\nsys.modules['vm_imp_m'] = B if second else A",
+        "len(WAITED)",
+        True,
+    ),
+    "spec_gets_initializing": (
+        ("IMPORT_NAME",),
+        IMPORTS_SPEC,
+        IMPORTS_ONE,
+        "waits()\nif second:\n    A.__spec__._initializing = True",
+        "len(WAITED)",
+        True,
+    ),
+    "spec_class_gets_initializing": (
+        ("IMPORT_NAME",),
+        IMPORTS_SPEC,
+        IMPORTS_ONE,
+        "waits()\nif second:\n    Spec._initializing = True",
+        "len(WAITED)",
+        True,
+    ),
+    "spec_class_gets_getattr": (
+        ("IMPORT_NAME",),
+        IMPORTS_SPEC + "\ndef busy(self, name):\n    return True",
+        IMPORTS_ONE,
+        "waits()\nif '__getattr__' in vars(Spec):\n    del Spec.__getattr__\n"
+        "if second:\n    Spec.__getattr__ = busy",
+        "len(WAITED)",
+        True,
+    ),
+    "spec_class_has_initializing": (
+        ("IMPORT_NAME",),
+        IMPORTS_SPEC,
+        IMPORTS_ONE,
+        "waits()\nSpec._initializing = True\n"
+        "sys.modules['vm_imp_m'] = B if second else A",
+        "len(WAITED)",
+        False,
+    ),
+    "spec_of_another_class": (
+        ("IMPORT_NAME",),
+        IMPORTS_MODULE + "\nA.__spec__ = B.__spec__ = types.SimpleNamespace()",
+        IMPORTS_ONE,
+        "sys.modules['vm_imp_m'] = B if second else A",
+        "None",
+        False,
+    ),
+    "name_from_a_module_getattr": (
+        ("IMPORT_NAME",),
+        IMPORTS_SETUP
+        + "STATE = [2.0]\ndef provide(name):\n    if name == 'K':\n"
+        + "        return STATE[0]\n    raise AttributeError(name)\n"
+        + "G = module('vm_imp_g', __getattr__=provide)\nsys.modules['vm_imp_g'] = G",
+        "from vm_imp_g import K\nk = K",
+        "sys.modules['vm_imp_g'] = G\nSTATE[0] = 5.0 if second else 2.0",
+        "None",
+        False,
+    ),
+    "relative": (
+        ("IMPORT_NAME",),
+        IMPORTS_PACKAGE + "\n__package__ = 'vm_imp_p'",
+        "from . import sub\nk = sub.K",
+        "put(P2 if second else P)",
+        "None",
+        False,
+    ),
+    "first_import": (
+        ("IMPORT_NAME",),
+        IMPORTS_FILE.format("vm_imp_first"),
+        "import vm_imp_first\nk = vm_imp_first.K",
+        "sys.vm_imp_k = 5.0 if second else 2.0\nsys.modules.pop('vm_imp_first', None)",
+        "None",
+        False,
+    ),
+}
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRulesImports(TestCase):
+    """An import of a loaded module has a row: it reads ``__import__`` of the
+    builtins and items of ``sys.modules``, runs no code and writes nothing.
+    What it read is what a region over it is checked on, so a region runs
+    over the import while nothing changes, and whatever changes between two
+    calls the program computes what eager computes. Any other import (a
+    module that is not loaded, a relative one, names taken from a module with
+    a ``__getattr__``) runs under no trace."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_the_imports_have_rows(self):
+        table = collections.defaultdict(list)
+        for name, status in torch._rust._rules_kinds():
+            table[name].append(status)
+        for name in ("IMPORT_NAME", "IMPORT_FROM"):
+            self.assertEqual(sorted(table[name]), ["later:imports", "row"])
+        rows = [
+            line.split("\t")
+            for line in torch._rust._rules_dump().splitlines()
+            if line.startswith("row\timports\t")
+        ]
+        self.assertEqual(
+            sorted((r[2], r[3]) for r in rows),
+            [
+                ("IMPORT_FROM", "0:ExactModule"),
+                ("IMPORT_NAME", "0:Immutable,1:ExactTuple"),
+                ("IMPORT_NAME", "0:Immutable,1:Immutable"),
+            ],
+        )
+        for row in rows:
+            # They read more than their operands, enter nothing, write nothing.
+            self.assertIn("Modules", row[4].split(","))
+            self.assertEqual(row[5:8], ["None", "Pinned", "Never"])
+
+        class Lazy(types.ModuleType):
+            pass
+
+        self.assertEqual(torch._rust._rules_groups(types), ["ExactModule"])
+        self.assertEqual(torch._rust._rules_groups(Lazy("lazy")), [])
+
+    def test_every_way_has_a_program(self):
+        for name, program in IMPORTS_PROGRAMS.items():
+            source = rules_source(name, IMPORTS_PROGRAMS)
+            held = rules_opnames(compile(source, "<imports>", "exec"))
+            self.assertLessEqual(set(program[0]), held, msg=name)
+            self.assertLessEqual(set(program[0]), {"IMPORT_NAME", "IMPORT_FROM"})
+
+    def outcome(self, fn, x, call):
+        got = checks_outcome(fn, x)
+        if isinstance(got, Exception):
+            return type(got), str(got)
+        self.assertIsInstance(got, torch.Tensor, msg=f"call {call}")
+        return got
+
+    @parametrize("name", list(IMPORTS_PROGRAMS))
+    @checks_isolated
+    def test_an_import_between_calls(self, name):
+        os.environ["TORCH_RUST_GATE_HIST"] = "1"
+        opcodes, _, construct, _, _, has_row = IMPORTS_PROGRAMS[name]
+        source = rules_source(name, IMPORTS_PROGRAMS)
+        eager, traced = {}, {}
+        exec(compile(source, "<imports eager>", "exec"), eager)
+        exec(compile(source, "<imports vm>", "exec"), traced)
+        compiled = vm(traced["f"], passes=CHECKS_EARLY)
+        own_import = builtins.__import__
+        own_wait = importlib._bootstrap._lock_unlock_module
+        raised = 0
+        try:
+            for call in range(13):
+                # What the import finds: A, then B, then A again.
+                second = 7 <= call < 10
+                torch.manual_seed(call)
+                x = torch.randn(4, 8)
+                eager["change"](second)
+                want = self.outcome(eager["f"], x, call)
+                traced["change"](second)
+                got = self.outcome(compiled, x, call)
+                raised += isinstance(want, tuple)
+                self.assertEqual(type(got), type(want), msg=f"call {call}: {got!r}")
+                if isinstance(want, tuple):
+                    self.assertTrue(got == want, msg=f"call {call}: {got!r}")
+                else:
+                    self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+                self.assertEqual(
+                    traced["state"](), eager["state"](), msg=f"call {call}"
+                )
+        finally:
+            builtins.__import__ = own_import
+            importlib._bootstrap._lock_unlock_module = own_wait
+            for added in ("_initializing", "__getattr__"):
+                if added in vars(importlib.machinery.ModuleSpec):
+                    delattr(importlib.machinery.ModuleSpec, added)
+        # Eager raises only where the change took away what the import finds.
+        self.assertIn(raised, (0, 3))
+        rows = torch._rust._gate_report()["rows"]
+        refusals = [
+            str(why)
+            for place in vm.regions(compiled)
+            for state, why in place.get("traces", ())
+            if state != "region"
+        ]
+        met = sum(traces for _, what, _, traces, _, _ in rows if what == opcodes[0])
+        named = sum(f"no row for: {opcodes[0]} " in why for why in refusals)
+        if not has_row:
+            # Every trace that met the import was refused for it.
+            self.assertEqual(met, named, msg=str(refusals))
+            return
+        line = source.splitlines().index("    " + construct.splitlines()[0]) + 1
+        runs = sum(
+            r["runs"]
+            for r in vm.regions(compiled)
+            if r["function"] == "f"
+            and r["state"] == "region"
+            and r["lines"][0] <= line <= r["lines"][1]
+        )
+        self.assertGreater(met, named, msg=str(refusals))
+        self.assertGreater(runs, 0, msg=str(vm.regions(compiled)))
+
+    @checks_isolated
+    def test_an_import_while_its_module_is_reloaded(self):
+        """importlib.reload gives the module a new spec, which has no
+        ``_initializing``, and runs the module's code with the module in
+        ``sys.modules``: an import of it from that code finds it at once."""
+        setup = IMPORTS_FILE.format("vm_imp_during").replace(
+            "K = sys.vm_imp_k", "K = sys.vm_imp_k\\nsys.vm_imp_body()\\nK += 1.0"
+        )
+        construct = "import vm_imp_during\nk = vm_imp_during.K"
+        source = rules_source(
+            "during", {"during": ((), setup, construct, "pass", "None")}
+        )
+        space = {}
+        exec(compile(source, "<imports during>", "exec"), space)
+        compiled = vm(space["f"], passes=CHECKS_EARLY)
+
+        def calls(fn):
+            """What 13 calls give, the module reloaded before calls 6 and
+            10, and what six calls from the module's code give meanwhile."""
+            seen, during = [], []
+            sys.vm_imp_k = 2.0
+            sys.vm_imp_body = lambda: None
+            sys.modules.pop("vm_imp_during", None)
+            module = importlib.import_module("vm_imp_during")
+            for call in range(13):
+                torch.manual_seed(call)
+                x = torch.randn(4, 8)
+                if call in (6, 10):
+                    sys.vm_imp_k = float(call)
+                    sys.vm_imp_body = lambda x=x: seen.extend(fn(x) for _ in range(6))
+                    before = checks_region_runs(compiled, space["f"])
+                    importlib.reload(module)
+                    during.append(checks_region_runs(compiled, space["f"]) - before)
+                    sys.vm_imp_body = lambda: None
+                seen.append(fn(x))
+            return seen, during
+
+        want, _ = calls(space["f"])
+        got, during = calls(compiled)
+        self.assertEqual(len(got), len(want))
+        for at, (a, b) in enumerate(zip(got, want)):
+            self.assertEqual(a, b, atol=0, rtol=0, msg=f"value {at}")
+        # A region ran over the import while the module was being reloaded.
+        self.assertGreater(during[0], 0, msg=str(vm.regions(compiled)))
 
 
 if __name__ == "__main__":

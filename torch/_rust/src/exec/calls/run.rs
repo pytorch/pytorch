@@ -1,40 +1,81 @@
-// Runs a call list. Per entry: the operands are built from the templates into
-// one argument array, the callee is called as the executor calls it for the
-// instruction (the same helpers), the result goes to the entry's slot, the
-// entry's assert is evaluated, and the slots the entry kills are released. No
-// frame, no gate, no dispatch hook.
+// Runs a call list. Per entry: every operand is built from its template and
+// its class compared with the pin, the callee is called as the executor
+// calls it for the instruction (the same helpers), the arguments are
+// released as CALL releases them (in their order: the slots the entry moves,
+// what was built for the call), the entry's assert is evaluated and the
+// result goes to the entry's slot or is dropped. A drop entry releases its
+// slots. No frame, no gate, no dispatch hook.
 //
-// A run ends with the tuple of its outputs, or with a Stop:
-//   Raised  An entry raised: the callee's own exception is set. What entries
-//           before it did stays done. `restartable` says whether every entry up
-//           to and with it can be taken back: the caller's license to make it
-//           a miss instead.
-//   Assert  A result does not have what the trace read of it.
-//   Part    A part of a result is not there: no tuple, or too short. The entry
-//           that wanted it has not run.
-// For Assert and Part: restartable -> no exception is set (a miss); else a
-// RuntimeError naming the entry is set, never a value.
-// In every case the slots are released before the run returns.
+// A run ends with the tuple of its outputs (the slots that are left, the
+// outputs', are released behind it), or with a Stop:
+//   Raised   An entry raised: the callee's own exception is set (a callee
+//            that returned nothing and set none: a SystemError). What entries
+//            before it did stays done. `restartable` says whether every entry
+//            up to and with it can be taken back: the caller's license to
+//            make it a miss instead.
+//   Assert   A result does not have what the trace read of it.
+//   Part     A part of a result is not there: no exact tuple or struct
+//            sequence, or too short. The entry that wanted it has not run.
+//   Class    An operand is not of the class it is pinned to, or a class a
+//            slot callee was resolved on has changed. The entry has not run.
+//   Refused  Nothing ran: this thread is already running this list
+//            (RuntimeError), or lists are nested deeper than MAX_DEPTH
+//            (RecursionError).
+// For Assert, Part and Class: restartable -> no exception is set (a miss);
+// else a RuntimeError naming the entry is set, never a value.
+// A stop releases no slot: `live` hands every slot that holds a result to the
+// caller, who puts them where the program's own run has them (the frame a
+// traceback holds keeps its locals until the handler is done).
 
+use std::cell::RefCell;
 use std::os::raw::c_int;
-use std::sync::atomic::Ordering;
 
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyRecursionError, PyRuntimeError, PySystemError, PyValueError};
 use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
-use super::super::ffi::{tr_binary_op, tr_call, tr_generic};
-use super::{witness, Assert, Callee, Entry, List, Tmpl};
+use super::super::ffi::{tr_binary_op, tr_call, tr_generic, tr_type_version_is};
+use super::slots::tuple_like;
+use super::{witness, Assert, Callee, Entry, List, Release, Tmpl};
 use crate::bindings::ffi::op_hook::{tensor_ident, TensorIdent};
-use crate::bindings::ffi::{tensor_by_type, tensor_meta, TensorMeta};
 use crate::cfg::opcodes;
+
+// How many lists may run inside one another on a thread.
+const MAX_DEPTH: usize = 32;
+
+thread_local! {
+    // The lists this thread is running, outermost first, by address.
+    static RUNNING: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+struct Entered;
+
+impl Drop for Entered {
+    fn drop(&mut self) {
+        RUNNING.with_borrow_mut(|r| r.pop());
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum What {
     Raised,
     Assert,
     Part,
+    Class,
+    Refused,
+}
+
+impl What {
+    pub fn text(self) -> &'static str {
+        match self {
+            What::Raised => "raised",
+            What::Assert => "assert",
+            What::Part => "part",
+            What::Class => "class",
+            What::Refused => "refused",
+        }
+    }
 }
 
 pub struct Stop {
@@ -42,13 +83,8 @@ pub struct Stop {
     pub entry: usize,
     pub what: What,
     pub restartable: bool,
-}
-
-impl Stop {
-    // For List::stopped: never 0.
-    fn code(&self) -> u64 {
-        ((self.entry as u64 + 1) << 8) | ((self.what as u64) << 1) | self.restartable as u64
-    }
+    // (slot, its result) of every slot that held one, in slot order.
+    pub live: Vec<(u32, Py<PyAny>)>,
 }
 
 struct Run<'a> {
@@ -56,33 +92,33 @@ struct Run<'a> {
     inputs: &'a [*mut PyObject],
     pins: &'a [*mut PyObject],
     slots: Vec<*mut PyObject>,
-    // What was built for the call in work: released behind it.
-    made: Vec<*mut PyObject>,
 }
 
-unsafe fn made(x: *mut PyObject, into: &mut Vec<*mut PyObject>) -> Result<*mut PyObject, What> {
-    if x.is_null() {
-        return Err(What::Raised);
-    }
-    into.push(x);
-    Ok(x)
-}
+type Pins<'a> = std::slice::Iter<'a, Option<Py<PyAny>>>;
 
 impl Run<'_> {
-    // A borrowed pointer (null for Tmpl::Null).
-    unsafe fn operand(&mut self, t: &Tmpl) -> Result<*mut PyObject, What> {
+    // The operand for the call: borrowed, or (Tmpl::made) a new reference.
+    // Null for Tmpl::Null. `pins`: the classes of the leaves from here on; an
+    // output has none.
+    unsafe fn operand(&mut self, t: &Tmpl, mut pins: Option<&mut Pins<'_>>) -> Result<*mut PyObject, What> {
         unsafe {
-            Ok(match t {
+            // A part of what is built: the container takes a reference.
+            let owned = |t: &Tmpl, x: *mut PyObject| {
+                if !t.made() {
+                    ffi::Py_XINCREF(x);
+                }
+                x
+            };
+            let leaf = match t {
                 Tmpl::In(k) => self.inputs[*k as usize],
                 Tmpl::Pin(i) => self.pins[*i as usize],
-                Tmpl::Res(j) => self.slots[*j as usize],
+                Tmpl::Res(j) | Tmpl::Move(j) => self.slots[*j as usize],
                 Tmpl::Const(i) => self.list.consts[*i as usize].as_ptr(),
                 Tmpl::Null => std::ptr::null_mut(),
                 Tmpl::Part(j, path) => {
                     let mut x = self.slots[*j as usize];
                     for i in path.iter() {
-                        // A tuple or a struct sequence, read at the C level.
-                        if ffi::PyTuple_Check(x) == 0 || *i as ffi::Py_ssize_t >= ffi::PyTuple_GET_SIZE(x) {
+                        if !tuple_like(x) || *i as ffi::Py_ssize_t >= ffi::PyTuple_GET_SIZE(x) {
                             return Err(What::Part);
                         }
                         x = ffi::PyTuple_GET_ITEM(x, *i as ffi::Py_ssize_t);
@@ -91,39 +127,76 @@ impl Run<'_> {
                 }
                 Tmpl::Seq(list, parts) => {
                     let n = parts.len() as ffi::Py_ssize_t;
-                    let seq = made(if *list { ffi::PyList_New(n) } else { ffi::PyTuple_New(n) }, &mut self.made)?;
+                    let seq = if *list { ffi::PyList_New(n) } else { ffi::PyTuple_New(n) };
+                    if seq.is_null() {
+                        return Err(What::Raised);
+                    }
                     for (k, p) in parts.iter().enumerate() {
-                        let item = self.operand(p)?;
-                        ffi::Py_INCREF(item);
+                        let item = match self.operand(p, pins.as_deref_mut()) {
+                            Ok(x) => owned(p, x),
+                            Err(what) => {
+                                ffi::Py_DECREF(seq);
+                                return Err(what);
+                            }
+                        };
                         if *list {
                             ffi::PyList_SET_ITEM(seq, k as ffi::Py_ssize_t, item);
                         } else {
                             ffi::PyTuple_SET_ITEM(seq, k as ffi::Py_ssize_t, item);
                         }
                     }
-                    seq
+                    return Ok(seq);
                 }
                 Tmpl::Map(keys, parts) => {
-                    let map = made(ffi::PyDict_New(), &mut self.made)?;
+                    let map = ffi::PyDict_New();
+                    if map.is_null() {
+                        return Err(What::Raised);
+                    }
                     for (key, p) in keys.iter().zip(parts.iter()) {
-                        let value = self.operand(p)?;
-                        if ffi::PyDict_SetItem(map, key.as_ptr(), value) < 0 {
-                            return Err(What::Raised);
+                        let stored = self.operand(p, pins.as_deref_mut()).and_then(|value| {
+                            let rc = ffi::PyDict_SetItem(map, key.as_ptr(), value);
+                            if p.made() {
+                                ffi::Py_DECREF(value);
+                            }
+                            if rc < 0 { Err(What::Raised) } else { Ok(()) }
+                        });
+                        if let Err(what) = stored {
+                            ffi::Py_DECREF(map);
+                            return Err(what);
                         }
                     }
-                    map
+                    return Ok(map);
                 }
                 Tmpl::Slice(p) => {
-                    let (start, stop, step) = (self.operand(&p[0])?, self.operand(&p[1])?, self.operand(&p[2])?);
-                    made(ffi::PySlice_New(start, stop, step), &mut self.made)?
+                    let mut bounds = [std::ptr::null_mut(); 3];
+                    let mut failed = None;
+                    for (bound, t) in bounds.iter_mut().zip(p.iter()) {
+                        match self.operand(t, pins.as_deref_mut()) {
+                            Ok(x) => *bound = x,
+                            Err(what) => {
+                                failed = Some(what);
+                                break;
+                            }
+                        }
+                    }
+                    let slice = if failed.is_none() { ffi::PySlice_New(bounds[0], bounds[1], bounds[2]) } else { std::ptr::null_mut() };
+                    for (bound, t) in bounds.iter().zip(p.iter()) {
+                        if t.made() {
+                            ffi::Py_XDECREF(*bound);
+                        }
+                    }
+                    return if slice.is_null() { Err(failed.unwrap_or(What::Raised)) } else { Ok(slice) };
                 }
-            })
-        }
-    }
-
-    unsafe fn release_made(&mut self) {
-        for m in self.made.drain(..) {
-            unsafe { ffi::Py_DECREF(m) };
+            };
+            // An operand of an entry has a pin: the class, or none for a null.
+            if let Some(pins) = pins {
+                match pins.next() {
+                    Some(None) if leaf.is_null() => {}
+                    Some(Some(class)) if !leaf.is_null() && class.as_ptr() == ffi::Py_TYPE(leaf) as *mut PyObject => {}
+                    Some(_) | None => return Err(What::Class),
+                }
+            }
+            Ok(leaf)
         }
     }
 
@@ -153,13 +226,21 @@ impl Run<'_> {
                 Callee::SetAttr(name) => {
                     if ffi::PyObject_SetAttr(argv[1], name.as_ptr(), argv[0]) < 0 { Err(What::Raised) } else { Ok(std::ptr::null_mut()) }
                 }
-                Callee::State(_) => unreachable!("refused when the list was made"),
+                Callee::State(_) | Callee::Drop(_) => unreachable!("a state setter is refused when the list is made; a drop is no call"),
             }
         }
     }
 
-    unsafe fn entry(&mut self, k: usize, e: &Entry, argv: &mut Vec<*mut PyObject>, meta: &mut TensorMeta) -> Result<(), What> {
+    unsafe fn release(&mut self, j: u32) {
+        unsafe { ffi::Py_XDECREF(std::mem::replace(&mut self.slots[j as usize], std::ptr::null_mut())) };
+    }
+
+    unsafe fn entry(&mut self, k: usize, e: &Entry, argv: &mut Vec<*mut PyObject>) -> Result<(), What> {
         unsafe {
+            if let Callee::Drop(slots) = &e.callee {
+                slots.iter().for_each(|j| self.release(*j));
+                return Ok(());
+            }
             argv.clear();
             let first = if let Callee::Vector(f, _) = &e.callee {
                 argv.extend([std::ptr::null_mut(), f.as_ptr()]);
@@ -167,9 +248,10 @@ impl Run<'_> {
             } else {
                 0
             };
+            let mut pins = e.classes.iter();
             let mut built = Ok(());
             for t in e.args.iter() {
-                match self.operand(t) {
+                match self.operand(t, Some(&mut pins)) {
                     Ok(x) => argv.push(x),
                     Err(what) => {
                         built = Err(what);
@@ -177,22 +259,34 @@ impl Run<'_> {
                     }
                 }
             }
-            let r = built.and_then(|()| Self::call(e, argv));
-            self.release_made();
+            if built.is_ok() && e.decided.iter().any(|(class, version)| tr_type_version_is(class.as_ptr() as *mut ffi::PyTypeObject, *version) == 0) {
+                built = Err(What::Class);
+            }
+            if let Err(what) = built {
+                // The entry has not run: what was built for it goes, every
+                // slot stays.
+                for (t, x) in e.args.iter().zip(&argv[first..]) {
+                    if t.made() {
+                        ffi::Py_DECREF(*x);
+                    }
+                }
+                return Err(what);
+            }
+            let r = Self::call(e, argv);
+            for release in e.release.iter() {
+                match release {
+                    Release::Slot(j) => self.release(*j),
+                    Release::Arg(at) => ffi::Py_DECREF(argv[first + *at as usize]),
+                }
+            }
             let r = r?;
-            let holds = e.assert.as_ref().is_none_or(|a| a.holds(r, &argv[first..], meta));
+            let holds = e.assert.as_ref().is_none_or(|a| a.holds(r, &argv[first..]));
             if e.out.is_some() {
                 self.slots[k] = r;
             } else {
                 ffi::Py_XDECREF(r);
             }
-            if !holds {
-                return Err(What::Assert);
-            }
-            for j in e.kills.iter() {
-                ffi::Py_DECREF(std::mem::replace(&mut self.slots[*j as usize], std::ptr::null_mut()));
-            }
-            Ok(())
+            if holds { Ok(()) } else { Err(What::Assert) }
         }
     }
 
@@ -204,44 +298,32 @@ impl Run<'_> {
                 return Err(What::Raised);
             }
             for (k, t) in outputs.iter().enumerate() {
-                match self.operand(t) {
+                match self.operand(t, None) {
                     Ok(x) => {
-                        ffi::Py_INCREF(x);
+                        if !t.made() {
+                            ffi::Py_INCREF(x);
+                        }
                         ffi::PyTuple_SET_ITEM(tuple, k as ffi::Py_ssize_t, x);
                     }
                     Err(what) => {
                         ffi::Py_DECREF(tuple);
-                        self.release_made();
                         return Err(what);
                     }
                 }
             }
-            self.release_made();
             Ok(tuple)
         }
     }
 }
 
 impl Assert {
-    unsafe fn holds(&self, r: *mut PyObject, operands: &[*mut PyObject], meta: &mut TensorMeta) -> bool {
+    // `operands` are compared by address only: a moved one may be gone.
+    unsafe fn holds(&self, r: *mut PyObject, operands: &[*mut PyObject]) -> bool {
         unsafe {
-            if self.count.is_some_and(|n| ffi::PyTuple_Check(r) == 0 || ffi::PyTuple_GET_SIZE(r) as usize != n) {
-                return false;
-            }
-            if self.same.is_some_and(|i| operands[i as usize] != r) {
-                return false;
-            }
-            if self.mask == 0 {
-                return true;
-            }
-            let Some(t) = tensor_by_type(r as usize).as_ref() else { return false };
-            tensor_meta(t, meta);
-            let (m, key) = (&*meta, &self.key);
-            m.defined
-                && (self.mask & 1 == 0 || (m.has_shape && m.sizes == key.sizes))
-                && (self.mask & 2 == 0 || m.dtype == key.dtype)
-                && (self.mask & 4 == 0 || (m.has_device && m.device_type == key.device_type && m.device_index == key.device_index))
-                && (self.mask & 8 == 0 || m.requires_grad == key.requires_grad)
+            self.count.is_none_or(|n| tuple_like(r) && ffi::PyTuple_GET_SIZE(r) as usize == n)
+                && self.same.is_none_or(|i| operands[i as usize] == r)
+                && self.class.as_ref().is_none_or(|class| class.as_ptr() == ffi::Py_TYPE(r) as *mut PyObject)
+                && self.key.as_ref().is_none_or(|key| key.holds(r))
         }
     }
 }
@@ -250,14 +332,29 @@ impl List {
     // Needs the GIL. `inputs` and `pins` are borrowed, as many as the list was
     // made for. Ok: a new reference to the tuple of the outputs.
     pub unsafe fn run(&self, py: Python<'_>, inputs: &[*mut PyObject], pins: &[*mut PyObject]) -> Result<*mut PyObject, Stop> {
+        let me = self as *const List as usize;
+        let refused = RUNNING.with_borrow_mut(|running| {
+            if running.contains(&me) {
+                return Some(PyRuntimeError::new_err("torch.vm: a call list was entered while this thread runs it"));
+            }
+            if running.len() >= MAX_DEPTH {
+                return Some(PyRecursionError::new_err(format!("torch.vm: call lists nested deeper than {MAX_DEPTH}")));
+            }
+            running.push(me);
+            None
+        });
+        if let Some(error) = refused {
+            error.restore(py);
+            return Err(Stop { entry: 0, what: What::Refused, restartable: true, live: Vec::new() });
+        }
+        let _entered = Entered;
         unsafe {
             let n = self.entries.len();
-            let mut run = Run { list: self, inputs, pins, slots: vec![std::ptr::null_mut(); n], made: Vec::new() };
+            let mut run = Run { list: self, inputs, pins, slots: vec![std::ptr::null_mut(); n] };
             let mut argv = Vec::with_capacity(self.max_args + 2);
-            let mut meta = TensorMeta::default();
             let mut ended = Ok(std::ptr::null_mut());
             for (k, e) in self.entries.iter().enumerate() {
-                if let Err(what) = run.entry(k, e, &mut argv, &mut meta) {
+                if let Err(what) = run.entry(k, e, &mut argv) {
                     ended = Err((k, what));
                     break;
                 }
@@ -265,25 +362,36 @@ impl List {
             if ended.is_ok() {
                 ended = run.outputs().map_err(|what| (n, what));
             }
-            for s in run.slots {
-                ffi::Py_XDECREF(s);
-            }
-            ended.map_err(|(entry, what)| {
-                // A part that is not there was found before its entry ran.
-                let restartable = if what == What::Part { entry <= self.first_irreversible } else { entry < self.first_irreversible };
-                if what != What::Raised && !restartable {
-                    let (why, line) = match what {
-                        What::Part if entry == n => ("a part of a result that an output is made of is not there".to_string(), String::new()),
-                        What::Part => ("a part of a result that the entry is called on is not there".to_string(), self.line(py, entry)),
-                        What::Assert | What::Raised => {
-                            let read = self.entries[entry].assert.as_ref().map_or(String::new(), |a| a.text());
-                            (format!("the result is not what the traced call read of it ({})", read.trim_start()), self.line(py, entry))
-                        }
-                    };
-                    PyRuntimeError::new_err(format!("torch.vm: call list entry {entry}: {why}, and what ran before cannot be taken back: {}", line.trim_start())).restore(py);
+            let slots = std::mem::take(&mut run.slots);
+            let (entry, what) = match ended {
+                Ok(outputs) => {
+                    slots.into_iter().for_each(|s| ffi::Py_XDECREF(s));
+                    return Ok(outputs);
                 }
-                Stop { entry, what, restartable }
-            })
+                Err(stop) => stop,
+            };
+            // What was found before its entry ran leaves that entry undone.
+            let restartable = match what {
+                What::Raised | What::Assert => entry < self.first_irreversible,
+                What::Part | What::Class | What::Refused => entry <= self.first_irreversible,
+            };
+            if what == What::Raised && ffi::PyErr_Occurred().is_null() {
+                PySystemError::new_err(format!("torch.vm: call list entry {entry}: the callee returned no result and set no exception: {}", self.line(py, entry).trim_start())).restore(py);
+            }
+            if what != What::Raised && !restartable {
+                let (why, line) = match what {
+                    What::Part if entry == n => ("a part of a result that an output is made of is not there".to_string(), String::new()),
+                    What::Part => ("a part of a result that the entry is called on is not there".to_string(), self.line(py, entry)),
+                    What::Class => ("an operand is not of the class it had at the trace, or that class has changed".to_string(), self.line(py, entry)),
+                    What::Assert | What::Raised | What::Refused => {
+                        let read = self.entries[entry].assert.as_ref().map_or(String::new(), |a| a.text());
+                        (format!("the result is not what the traced call read of it ({})", read.trim_start()), self.line(py, entry))
+                    }
+                };
+                PyRuntimeError::new_err(format!("torch.vm: call list entry {entry}: {why}, and what ran before cannot be taken back: {}", line.trim_start())).restore(py);
+            }
+            let live = slots.into_iter().enumerate().filter(|(_, s)| !s.is_null()).map(|(j, s)| (j as u32, Py::from_owned_ptr(py, s))).collect();
+            Err(Stop { entry, what, restartable, live })
         }
     }
 }
@@ -291,10 +399,14 @@ impl List {
 /// Runs a list made by `_calls_make` on a tuple of inputs and a tuple of pins.
 /// Returns the tuple of the outputs, or None for a miss (nothing that cannot
 /// be taken back was done); an entry's exception is raised as it is. How a run
-/// ended otherwise is on the list's `stopped`.
+/// ended otherwise is on the list's `stopped`, with the slots that were live:
+/// the list keeps them until the next run or `release()`.
 #[pyfunction]
 pub fn _calls_run<'py>(list: &Bound<'py, List>, inputs: &Bound<'py, PyAny>, pins: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let (py, l) = (list.py(), list.get());
+    // Out of the lock first: releasing a slot can run code that reads `stopped`.
+    let before = l.stopped.lock().unwrap().take();
+    drop(before);
     unsafe {
         let given = |o: &Bound<'py, PyAny>, n: u32, what: &str| {
             let o = o.as_ptr();
@@ -304,12 +416,16 @@ pub fn _calls_run<'py>(list: &Bound<'py, List>, inputs: &Bound<'py, PyAny>, pins
             Ok((0..n as ffi::Py_ssize_t).map(|i| ffi::PyTuple_GET_ITEM(o, i)).collect::<Vec<_>>())
         };
         let (inputs, pins) = (given(inputs, l.ninputs, "inputs")?, given(pins, l.npins, "pins")?);
-        l.stopped.store(0, Ordering::Relaxed);
         match l.run(py, &inputs, &pins) {
             Ok(outputs) => Ok(Bound::from_owned_ptr(py, outputs)),
             Err(stop) => {
-                l.stopped.store(stop.code(), Ordering::Relaxed);
-                PyErr::take(py).map_or_else(|| Ok(py.None().into_bound(py)), Err)
+                let raised = stop.what == What::Raised || stop.what == What::Refused;
+                *l.stopped.lock().unwrap() = Some(stop);
+                match PyErr::take(py) {
+                    Some(error) => Err(error),
+                    None if raised => Err(PySystemError::new_err("torch.vm call list: a stop that raises set no exception")),
+                    None => Ok(py.None().into_bound(py)),
+                }
             }
         }
     }

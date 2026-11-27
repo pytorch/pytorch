@@ -66,11 +66,15 @@ int64_t tensor_version(const Tensor& t);
 std::uintptr_t tensor_data_address(const Tensor& t) noexcept;
 // Defined by the cxx bridge (src/bindings/ffi.rs).
 struct TensorSpan;
-// The storage t's elements are in, and the bytes of it they span, [low, high)
-// from the storage's start (low == high for a tensor without elements). The
-// storage is 0 for a tensor with no memory of its own to point at (see
-// tensor_data_address). Nothing is asked of the storage's data.
-void tensor_span(const Tensor& t, TensorSpan& out) noexcept;
+// Where t's elements are: the storage and how many bytes into it the first
+// starts, and the addresses from the first element to the end of the last,
+// [low, high) (low == high for a tensor without elements), in the memory of
+// which device type. False, and nothing of `out` to be read, for a tensor
+// whose place cannot be said so: undefined, not strided, a Python-dispatch
+// tensor, without a storage or with one that gives no address for its
+// elements, or on a device type that is neither the CPU nor CUDA. Read
+// without asking for a mutable pointer (see tensor_data_address).
+bool tensor_span(const Tensor& t, TensorSpan& out) noexcept;
 // Whether t's storage is marked copy-on-write. The mark is cleared by the
 // first request for a mutable pointer to the storage, through whichever
 // tensor: torch.vm.Unwritten's "nothing wrote here" (see torch/vm/_guards.py).
