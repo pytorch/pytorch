@@ -673,6 +673,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
                     convolution, [2, 2, 2, 2], 0.0
                 )
+                # as_strided inputs are depend on input's size and stride.
                 as_strided = torch.ops.aten.as_strided.default(
                     constant_pad_nd, [8, 384, 2, 20, 12], [153600, 400, 160, 1, 20]
                 )
