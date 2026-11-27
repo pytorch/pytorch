@@ -169,6 +169,10 @@ class TestLibtorchAgnostic(TestCase):
         else:
             print(f"Skipping 2.16 extension (running on PyTorch {torch.__version__})")
 
+    def assertStableError(self, error_type, *, regex_before, regex_after):
+        regex = regex_before if _torchVersionLessThan(2, 13) else regex_after
+        return self.assertRaisesRegex(error_type, regex)
+
     @onlyCPU
     def test_slow_sgd(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
@@ -471,7 +475,11 @@ class TestLibtorchAgnostic(TestCase):
         result = libtorch_agnostic.ops.my_masked_select(t, broadcast_mask)
         self.assertEqual(result, torch.masked_select(t, broadcast_mask))
 
-        with self.assertRaisesRegex(RuntimeError, "expected BoolTensor for mask"):
+        with self.assertStableError(
+            RuntimeError,
+            regex_before="API call failed",
+            regex_after="expected BoolTensor for mask",
+        ):
             libtorch_agnostic.ops.my_masked_select(t, mask.to(torch.int64))
 
     @skipIfTorchVersionLessThan(2, 10)
@@ -771,8 +779,19 @@ class TestLibtorchAgnostic(TestCase):
         out = libtorch_agnostic.ops.my_transpose(t, 0, 1)
         self.assertEqual(out, torch.transpose(t, 0, 1))
 
-        with self.assertRaisesRegex(RuntimeError, "API call failed"):
-            libtorch_agnostic.ops.my_transpose(t, 1, 2)
+        if TEST_WITH_TORCHDYNAMO:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"(?s)RuntimeError when making fake tensor call.*API call failed",
+            ):
+                libtorch_agnostic.ops.my_transpose(t, 1, 2)
+        else:
+            with self.assertStableError(
+                RuntimeError,
+                regex_before="API call failed",
+                regex_after=r"Dimension out of range \(expected to be in range of \[-2, 1\], but got 2\)",
+            ):
+                libtorch_agnostic.ops.my_transpose(t, 1, 2)
 
     def test_my_empty_like(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
@@ -1604,8 +1623,11 @@ for warning in w:
         self.assertEqual(actual, x.repeat_interleave(2, dim=1, output_size=6))
         actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2)
         self.assertEqual(actual, x.repeat_interleave(2))
-        # TODO (qqaatw): add a helper that branches and checks the actual error message from Aten when torch >= 2.13.
-        with self.assertRaisesRegex(RuntimeError, "API call failed"):
+        with self.assertStableError(
+            RuntimeError,
+            regex_before="API call failed",
+            regex_after="repeat_interleave: Invalid output_size, expected 6 but got 5",
+        ):
             libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, output_size=5)
         ops = libtorch_agnostic.ops
         repeats = torch.tensor([1, 3, 0], device=device)
@@ -2147,6 +2169,32 @@ for warning in w:
         res = libtorch_agnostic.ops.my_get_curr_cuda_blas_handle()
         expected = torch.cuda.current_blas_handle()
         self.assertEqual(res, expected)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCUDA
+    def test_my_get_curr_cuda_blas_handle_v2(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        get_handle_stream = libtorch_agnostic.ops.my_get_curr_cuda_blas_handle_stream
+        original_stream = torch.cuda.current_stream(device)
+        other_stream = torch.cuda.Stream(device=device)
+        with torch.cuda.device(device):
+            try:
+                _, handle_stream = get_handle_stream(True)
+                self.assertEqual(handle_stream, original_stream.cuda_stream)
+                with torch.cuda.stream(other_stream):
+                    handle_without_setup, handle_stream = get_handle_stream(False)
+                    # ROCm can select a separate BLAS handle for each stream.
+                    if torch.version.hip is None:
+                        self.assertEqual(handle_stream, original_stream.cuda_stream)
+                    handle_with_setup, handle_stream = get_handle_stream(True)
+                    self.assertEqual(handle_stream, other_stream.cuda_stream)
+
+                    expected_handle = torch.cuda.current_blas_handle()
+                    self.assertEqual(handle_without_setup, expected_handle)
+                    self.assertEqual(handle_with_setup, expected_handle)
+            finally:
+                get_handle_stream(True)
 
     @skipIfWindows(msg="ValueError: vector too long")
     @skipIfTorchVersionLessThan(2, 10)
@@ -3164,30 +3212,22 @@ except RuntimeError as e:
             lambda: libtorch_agnostic.ops.our_subtract_torch_error_check(a, b),
         )
 
-        def make_exception_stable():
-            libtorch_agnostic.ops.our_subtract_stable_error_check(a, b)
-
-        if _torchVersionLessThan(2, 13):
+        with self.assertStableError(
+            RuntimeError,
             # Runtime predates the shim: dlsym returns null, so we fall back to
             # the same simple call-site message as the non-stable check.
-            self.assertRaisesRegex(RuntimeError, simple_re, make_exception_stable)
-        else:
+            regex_before=simple_re,
             # Runtime has the shim: the dynamic lookup succeeds and we get the
             # detailed error retrieved across the C ABI boundary, wrapped with the
             # "(originally from ...)" annotation naming the failing shim call.
-            detailed_re = (
-                "^The size of tensor a \\(\\d\\) must match the size of "
-                "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
-            )
-            with self.assertRaises(RuntimeError) as cm:
-                make_exception_stable()
-            stable_msg = str(cm.exception)
-            self.assertRegex(stable_msg, detailed_re)
-            self.assertRegex(
-                stable_msg,
-                r" \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
-                r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
-            )
+            regex_after=(
+                r"^The size of tensor a \(\d\) must match the size of "
+                r"tensor b \(\d\) at non-singleton dimension \d"
+                r"(?s:.*) \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
+                r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$"
+            ),
+        ):
+            libtorch_agnostic.ops.our_subtract_stable_error_check(a, b)
 
 
 @unittest.skipIf(
