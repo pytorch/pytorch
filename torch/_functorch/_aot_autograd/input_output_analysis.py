@@ -72,10 +72,12 @@ def _prepare_overlap_analysis(
     replaced by their hinted layouts where possible (see _hinted_views).
     """
     tracing_context = torch._guards.TracingContext.try_get()
-    if tracing_context is None or not aot_config.aot_autograd_arg_pos_to_source:
+    if tracing_context is None:
         return tensors, symbolic, contextlib.nullcontext()
     if tracing_context.fake_mode is None:
         raise AssertionError("tracing_context.fake_mode must not be None")
+    if not aot_config.aot_autograd_arg_pos_to_source:
+        return tensors, symbolic, contextlib.nullcontext()
     shape_env = tracing_context.fake_mode.shape_env
     if shape_env is None:
         return tensors, symbolic, contextlib.nullcontext()
@@ -429,8 +431,7 @@ def compute_overlapping_inputs(
     # This killswitch guards against the cost of symbolic pair checks, which
     # the hint path below removes for backed symbols with Dynamo sources. It
     # still keys on the original inputs, so those compiles keep falling back as
-    # before: this is deliberate, to keep behavior unchanged. Consider firing it
-    # only when the hint path isn't taken.
+    # before: this is deliberate, to keep behavior unchanged.
     if torch._inductor.config.is_fbcode():
         if symbolic and num_aliases > 400:
             from torch._subclasses.fake_tensor import (
