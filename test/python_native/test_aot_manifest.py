@@ -412,10 +412,8 @@ class TestEmbedDetectionDevice(TestCase):
         self.assertIn("LAZY_OK", proc.stdout)
 
 
-instantiate_device_type_tests(TestEmbedDetectionDevice, globals(), allow_xpu=True)
-
 instantiate_parametrized_tests(TestEmbeddedCoverage)
-
+instantiate_device_type_tests(TestEmbedDetectionDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
