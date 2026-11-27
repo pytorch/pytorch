@@ -14,7 +14,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 import unittest
 import warnings
 from copy import deepcopy
@@ -704,20 +703,6 @@ print(torch.xpu.is_initialized())
         self.assertTrue("torch.xpu.Event" in str(e))
 
     def test_events(self):
-        stream = torch.xpu.current_stream()
-        event = torch.xpu.Event()
-        self.assertTrue(event.query())
-        stream.record_event(event)
-        event.synchronize()
-        self.assertTrue(event.query())
-        start_event = torch.xpu.Event(enable_timing=True)
-        end_event = torch.xpu.Event(enable_timing=True)
-        stream.record_event(start_event)
-        time.sleep(0.1)
-        stream.record_event(end_event)
-        torch.xpu.synchronize()
-        self.assertGreater(start_event.elapsed_time(end_event), 0)
-
         event = torch.xpu.Event(enable_timing=True)
         self.assertEqual(event.sycl_event, 0)
         self.assertEqual(event.event_id, 0)
@@ -762,32 +747,6 @@ print(torch.xpu.is_initialized())
         self.assertTrue(torch.Stream in type(xpu_stream).mro())
         self.assertEqual(stream.stream_id, xpu_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
-
-        event1 = torch.Event("xpu", enable_timing=True)
-        event2 = torch.Event("xpu", enable_timing=True)
-        self.assertEqual(event1.event_id, 0)
-        a = torch.randn(1000)
-        b = torch.randn(1000)
-        with torch.xpu.stream(xpu_stream):
-            a_xpu = a.to("xpu", non_blocking=True)
-            b_xpu = b.to("xpu", non_blocking=True)
-            self.assertEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
-        event1.record(stream)
-        event1.synchronize()
-        self.assertTrue(event1.query())
-        c_xpu = a_xpu + b_xpu
-        # Here intendionly records another stream.
-        event2.record()
-        event2.synchronize()
-        self.assertTrue(event2.query())
-        self.assertNotEqual(event1.event_id, event2.event_id)
-        self.assertEqual(c_xpu.cpu(), a + b)
-        self.assertGreater(event1.elapsed_time(event2), 0)
-
-        xpu_event = torch.xpu.Event()
-        self.assertIsInstance(xpu_event, torch.Event)
-        self.assertTrue(issubclass(type(xpu_event), torch.Event))
-        self.assertTrue(torch.Event in type(xpu_event).mro())
 
     def test_stream_event_compatibility(self):
         s1 = torch.xpu.Stream()

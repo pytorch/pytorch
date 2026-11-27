@@ -136,7 +136,7 @@ bool MPSEvent::synchronize() {
 bool MPSEvent::query() const {
   const uint64_t signalCounter = m_signalCounter.load();
   // return false if not recorded or signaled yet
-  return m_recorded.load() && (m_event.signaledValue >= signalCounter);
+  return !m_recorded.load() || (m_event.signaledValue >= signalCounter);
 }
 
 void MPSEvent::reset(MPSStream* stream, bool enable_timing) {
@@ -249,10 +249,10 @@ double MPSEventPool::elapsedTime(id_t start_event_id, id_t end_event_id) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
   MPSEvent* start_event = getInUseEvent(start_event_id, false);
   MPSEvent* end_event = getInUseEvent(end_event_id, false);
-  TORCH_CHECK(start_event->isTimingEnabled() && end_event->isTimingEnabled(),
-              "Events were not created with argument 'enable_timing=True'");
-  TORCH_CHECK(start_event->isRecorded() && end_event->isRecorded(),
-              "Both events must be recorded before calculating elapsed time");
+  TORCH_CHECK_VALUE(start_event->isTimingEnabled() && end_event->isTimingEnabled(),
+                    "Both events must be created with argument 'enable_timing=True'");
+  TORCH_CHECK_VALUE(start_event->isRecorded() && end_event->isRecorded(),
+                    "Both events must be recorded before calculating elapsed time");
   const double start_time = start_event->waitForTiming();
   const double end_time = end_event->waitForTiming();
 

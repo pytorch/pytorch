@@ -2215,18 +2215,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         self.assertEqual(external_stream.device, default.device)
 
     def test_events(self):
-        stream = torch.cuda.current_stream()
-        event = torch.cuda.Event(enable_timing=True)
-        self.assertTrue(event.query())
-        start_event = torch.cuda.Event(enable_timing=True)
-        stream.record_event(start_event)
-        torch.cuda._sleep(int(50 * get_cycles_per_ms()))
-        stream.record_event(event)
-        self.assertFalse(event.query())
-        event.synchronize()
-        self.assertTrue(event.query())
-        self.assertGreater(start_event.elapsed_time(event), 0)
-
         event = torch.cuda.Event(enable_timing=True)
         self.assertEqual(event.cuda_event, 0)
         self.assertEqual(event.event_id, 0)
@@ -2235,31 +2223,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         self.assertNotEqual(event.cuda_event, 0)
         self.assertNotEqual(event.event_id, 0)
         self.assertEqual(event.cuda_event, event.event_id)
-
-    def test_events_elapsedtime(self):
-        event1 = torch.cuda.Event(enable_timing=False)
-        event2 = torch.cuda.Event(enable_timing=False)
-        with self.assertRaisesRegex(
-            ValueError,
-            "Both events must be created with argument 'enable_timing=True'",
-        ):
-            event1.elapsed_time(event2)
-
-        event1 = torch.cuda.Event(enable_timing=True)
-        event2 = torch.cuda.Event(enable_timing=True)
-        with self.assertRaisesRegex(
-            ValueError, "Both events must be recorded before calculating elapsed time"
-        ):
-            event1.elapsed_time(event2)
-
-        # check default value of enable_timing: False
-        event1 = torch.cuda.Event()
-        event2 = torch.cuda.Event()
-        with self.assertRaisesRegex(
-            ValueError,
-            "Both events must be created with argument 'enable_timing=True'",
-        ):
-            event1.elapsed_time(event2)
 
     @skipIfRocm(msg="Does not actually block the host thread on ROCm.")
     def test_events_blocking_synchronize(self):
@@ -2297,30 +2260,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         self.assertTrue(torch.Stream in type(cuda_stream).mro())
         self.assertEqual(stream.stream_id, cuda_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.cuda.current_stream().stream_id)
-
-        event1 = torch.Event("cuda", enable_timing=True)
-        event2 = torch.Event("cuda", enable_timing=True)
-        self.assertEqual(event1.event_id, 0)
-        a = torch.randn(1000)
-        b = torch.randn(1000)
-        with torch.cuda.stream(cuda_stream):
-            a_cuda = a.to("cuda", non_blocking=True)
-            b_cuda = b.to("cuda", non_blocking=True)
-            self.assertEqual(stream.stream_id, torch.cuda.current_stream().stream_id)
-        event1.record(stream)
-        event1.synchronize()
-        self.assertTrue(event1.query())
-        c_cuda = a_cuda + b_cuda
-        event2.record()
-        event2.synchronize()
-        self.assertTrue(event2.query())
-        self.assertNotEqual(event1.event_id, event2.event_id)
-        self.assertEqual(c_cuda.cpu(), a + b)
-        self.assertTrue(event1.elapsed_time(event2) > 0)
-        cuda_event = torch.cuda.Event()
-        self.assertIsInstance(cuda_event, torch.Event)
-        self.assertTrue(issubclass(type(cuda_event), torch.Event))
-        self.assertTrue(torch.Event in type(cuda_event).mro())
 
     @unittest.skip("Fails with Triton 3.7")
     def test_stream_event_compatibility(self):

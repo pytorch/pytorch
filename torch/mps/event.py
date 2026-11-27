@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import torch
-
-
-if TYPE_CHECKING:
-    from .streams import Stream
 
 
 __all__ = [
@@ -14,7 +8,7 @@ __all__ = [
 ]
 
 
-class Event:
+class Event(torch._C.Event):
     r"""Wrapper around an MPS event.
 
     MPS events are synchronization markers that can be used to monitor the
@@ -33,7 +27,7 @@ class Event:
         if hasattr(torch._C, "_mps_releaseEvent") and self.__eventId > 0:
             torch._C._mps_releaseEvent(self.__eventId)
 
-    def record(self, stream: Stream | None = None) -> None:
+    def record(self, stream: torch.Stream | None = None) -> None:
         r"""Records the event in a given stream.
 
         Args:
@@ -45,7 +39,7 @@ class Event:
             raise RuntimeError(f"expected an MPS stream, but got {stream.device.type}")
         torch._C._mps_recordEvent(self.__eventId, stream.stream_id)
 
-    def wait(self, stream: Stream | None = None) -> None:
+    def wait(self, stream: torch.Stream | None = None) -> None:
         r"""Makes all future work submitted to the given stream wait for this event.
 
         Args:
