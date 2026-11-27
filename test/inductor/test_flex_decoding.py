@@ -27,6 +27,7 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf32_off
 from torch.testing._internal.common_device_type import (
+    skipIf,
     Capability,
     E4M3_MAX_POS,
     e4m3_type,
@@ -922,7 +923,7 @@ class TestFlexDecoding(InductorTestCase):
         )
         self.run_test(score_mod, dtype, block_mask=block_mask, device=device)
 
-    @unittest.skipIf(not has_triton_tma_device(), "Skip when TMA is not available")
+    @skipIf(not has_triton_tma_device(), "Skip when TMA is not available")
     @skip_on_cpu
     @parametrize_device_dtype("dtypes_fast")
     def test_tma_decoding(self, device, dtype: torch.dtype):
