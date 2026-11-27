@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest import mock
 
-from sympy import I, Max, Min, Symbol, sympify
+from sympy import Float, I, Integer, Max, Min, nan, Rational, Symbol, sympify
 
 import torch
 from torch._dynamo import device_interface as di
@@ -574,19 +574,32 @@ class TestUtils(TestCase):
         result = sympy_subs(expr, {q0: I})
         self.assertTrue(result.has(I))
 
+    def testSympySubsIdentityNumberInMinMax(self):
+        q0 = Symbol("q0", integer=True, nonnegative=True)
+        self.assertEqual(sympy_subs(Max(-4, -Identity(q0)), {q0: 0}), 0)
+        self.assertTrue(sympy_subs(Max(-4, -Identity(q0)), {q0: Float(0.0)}).is_zero)
+        self.assertTrue(sympy_subs(Max(-4, -Identity(q0)), {q0: nan}).has(Identity))
+
+    def testIdentityOfComparableNumberCollapses(self):
+        self.assertIsInstance(Identity(sympify("-6")), Integer)
+        self.assertEqual(Identity(sympify("1/7")), Rational(1, 7))
+        self.assertIsInstance(Identity(Float(0.0)), Float)
+        self.assertIsInstance(Identity(nan), Identity)
+        self.assertIsInstance(Identity(I), Identity)
+
     def testIdentityComparisonNoRecursion(self):
-        self.assertTrue(Identity(sympify("0")) >= 0)
-        self.assertFalse(Identity(sympify("-6")) >= 0)
-        self.assertTrue(0 >= Identity(sympify("-6")))
+        self.assertTrue(Identity(sympify("0"), evaluate=False) >= 0)
+        self.assertFalse(Identity(sympify("-6"), evaluate=False) >= 0)
+        self.assertTrue(0 >= Identity(sympify("-6"), evaluate=False))
 
     def testIdentityComparableNumbersInMinMax(self):
-        expr = Identity(sympify("-6"))
+        expr = Identity(sympify("-6"), evaluate=False)
         self.assertTrue(expr.is_number)
         self.assertTrue(expr.is_comparable)
         self.assertEqual(Max(0, expr), 0)
 
     def testIdentityRationalComparisonNoRecursion(self):
-        expr = Identity(sympify("1/7"))
+        expr = Identity(sympify("1/7"), evaluate=False)
         self.assertTrue(expr >= 0)
         self.assertTrue(Max(0, expr).has(expr))
 
