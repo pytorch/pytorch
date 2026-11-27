@@ -49,7 +49,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, IS_APPLE_M1, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
+    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, TEST_XPU,
     TEST_CUDA, skipIfNoFlyDSL, skipIfRocmArch, MI200_ARCH
 )
 from torch.testing._utils import wrapper_set_seed
@@ -13480,18 +13480,6 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            decorators=[skipCPUIfNoLapack],
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/165294
-               DecorateInfo(skipIfRocm, "TestCommon", "test_noncontiguous_samples", dtypes=(torch.complex64,)),
-               # https://github.com/pytorch/pytorch/issues/164192
-               # https://github.com/pytorch/pytorch/issues/164232
-               DecorateInfo(unittest.skip, "TestBwdGradients", "test_fn_grad", device_type="cuda", dtypes=(torch.float64, torch.complex128), active_if=TEST_WITH_ROCM or TEST_WITH_TORCHINDUCTOR),
-               # https://github.com/pytorch/pytorch/issues/164193
-               DecorateInfo(skipIfRocm, "TestBwdGradients", "test_fn_gradgrad", dtypes=(torch.complex128,)),
-               # https://github.com/pytorch/pytorch/issues/164194
-               # https://github.com/pytorch/pytorch/issues/164235
-               DecorateInfo(skipIfRocm, "TestFwdGradients", "test_forward_mode_AD", dtypes=(torch.float64, torch.complex128)),
-           )
     ),
     OpInfo('chunk',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),

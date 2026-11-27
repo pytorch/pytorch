@@ -27,7 +27,6 @@ from common_utils import (
     is_valid_inplace_sample_input,
     opsToleranceOverride,
     skip,
-    skipIf,
     tol1,
     xfail,
     xfailIf,
@@ -4610,8 +4609,6 @@ class TestVmapOperatorsOpInfoDevice(TestCase):
                         sample.kwargs["memory_format"] == torch.channels_last
                     ),
                 ),
-                # https://github.com/pytorch/pytorch/issues/164556
-                skipIf("cholesky_solve", lambda *args: TEST_WITH_ROCM),
             }
         ),
     )
