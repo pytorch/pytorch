@@ -70,6 +70,7 @@ def get_mem_and_flops(f, memory_budget=None):
         return round(get_act_mem(f), 1), get_bw_flops(f)
 
 
+@unittest.skipUnless(HAS_TRITON and not TEST_WITH_ROCM, "Requires Triton without ROCm")
 class MemoryBudgetTestDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -426,6 +427,4 @@ instantiate_device_type_tests(MemoryBudgetTestDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
-    # I'm using the accelerator memory allocator to verify memory allocations
-    if HAS_TRITON and not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()
