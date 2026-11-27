@@ -1,11 +1,16 @@
 # Owner(s): ["oncall: quantization"]
 
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
 
 from .common import AOMigrationTestCase
 
 
 class TestAOMigrationNNQuantized(AOMigrationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_functional_import(self):
         r"""Tests the migration of the torch.nn.quantized.functional"""
         function_list = [
@@ -226,6 +231,8 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
 
 
 class TestAOMigrationNNIntrinsic(AOMigrationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_modules_import_nn_intrinsic(self):
         module_list = [
             # Modules

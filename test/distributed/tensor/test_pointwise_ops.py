@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorOpTestBase,
+    DTensorTestBase,
     LocalDTensorOpTestBase,
     map_local_for_rank,
     skip_unless_torch_gpu,
@@ -651,9 +652,11 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     @parametrize("op,reduce_op", [(torch.maximum, "max"), (torch.minimum, "min")])
-    def test_partial_propagation(self, op, reduce_op):
-        # Test that torch.maximum/minimum preserves Partial("max"/"min") placements
-        # since max(max(a), max(b)) == max(a, b) and min(min(a), min(b)) == min(a, b)
+    def test_two_partial_inputs_reduce_one(self, op, reduce_op):
+        # torch.maximum/minimum of two Partial("max"/"min") inputs reduces one
+        # input first. Passing both through is not allowed: NCCL's all_reduce
+        # MAX/MIN ignores NaN, so a NaN in one input would hide that rank's value
+        # of the other input.
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
@@ -666,10 +669,85 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         with comm_mode:
             result = op(d_input1, d_input2)
 
-        # Should not require any communication
-        self.assertEqual(comm_mode.get_total_counts(), 0)
-        # Result should still be Partial with the same reduce_op
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        # P(max), R -> P(max) keeps the other input pending
         self.assertEqual(result.placements, (Partial(reduce_op),))
+        self.assertEqual(
+            result.full_tensor(), op(d_input1.full_tensor(), d_input2.full_tensor())
+        )
+
+    @with_comms
+    @parametrize("reduce_op", ["max", "min"])
+    def test_partial_max_min_with_nan(self, reduce_op):
+        # sign, sgn, nan_to_num, fmax and fmin map NaN to a number, so they must
+        # not pass a pending Partial("max"/"min") through: the reduced input is
+        # NaN, but applying the op first turns rank 0's NaN into a number that
+        # loses the reduction to the other ranks' values.
+        device_mesh = self.build_device_mesh()
+        rows = torch.tensor([[5.0, -3.0]], device=self.device_type).repeat(
+            self.world_size, 1
+        )
+        rows[0] = float("nan")
+        sharded = distribute_tensor(rows, device_mesh, [Shard(0)])
+        # Pending Partial(reduce_op) whose local value on rank r is rows[r]
+        d_input = sharded.amax(0) if reduce_op == "max" else sharded.amin(0)
+        self.assertEqual(d_input.placements, (Partial(reduce_op),))
+        full_input = d_input.full_tensor()
+        other = torch.full((2,), 2.0, device=self.device_type)
+        d_other = distribute_tensor(other, device_mesh, [Replicate()])
+
+        for op in (torch.sign, torch.sgn, torch.nan_to_num):
+            self.assertEqual(op(d_input).full_tensor(), op(full_input))
+        for op in (torch.fmax, torch.fmin):
+            self.assertEqual(op(d_input, d_other).full_tensor(), op(full_input, other))
+            self.assertEqual(op(d_other, d_input).full_tensor(), op(other, full_input))
+
+        # fmax of two pending Partial("max") (fmin of two Partial("min")):
+        # rank 0's NaN is replaced by its local value of the other input.
+        rows2 = torch.full((self.world_size, 2), 2.0, device=self.device_type)
+        rows2[0] = 1.0
+        sharded2 = distribute_tensor(rows2, device_mesh, [Shard(0)])
+        d_input2 = sharded2.amax(0) if reduce_op == "max" else sharded2.amin(0)
+        op = torch.fmax if reduce_op == "max" else torch.fmin
+        self.assertEqual(
+            op(d_input, d_input2).full_tensor(), op(full_input, d_input2.full_tensor())
+        )
+
+    @with_comms
+    @parametrize("reduce_op", ["max", "min"])
+    def test_inplace_on_partial_max_min_raises(self, reduce_op):
+        # The out-of-place versions of these ops reduce a pending
+        # Partial("max"/"min") input first. An in-place op cannot change its
+        # input's placement, so it raises instead.
+        device_mesh = self.build_device_mesh()
+        rows = torch.arange(
+            2 * self.world_size, dtype=torch.float32, device=self.device_type
+        ).reshape(self.world_size, 2)
+        sharded = distribute_tensor(rows, device_mesh, [Shard(0)])
+        d_input = sharded.amax(0) if reduce_op == "max" else sharded.amin(0)
+        self.assertEqual(d_input.placements, (Partial(reduce_op),))
+        d_other = distribute_tensor(
+            torch.ones(2, device=self.device_type), device_mesh, [Replicate()]
+        )
+
+        inplace_ops = {
+            "sign_": lambda x: x.sign_(),
+            "sgn_": lambda x: x.sgn_(),
+            "nan_to_num_": lambda x: x.nan_to_num_(),
+            "add_": lambda x: x.add_(d_other),
+            "sub_": lambda x: x.sub_(d_other),
+            "_foreach_add_": lambda x: torch._foreach_add_([x], [d_other]),
+            "_foreach_sub_": lambda x: torch._foreach_sub_([x], [d_other]),
+        }
+        for name, op in inplace_ops.items():
+            with (
+                self.subTest(op=name),
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "in-place operations that require placement changes are not supported",
+                ),
+            ):
+                op(d_input)
 
     @with_comms
     def test_neg_partial(self):
@@ -750,8 +828,9 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     def test_add_partial_with_replicate_rules(self):
-        # P(x) + R -> P(x) for x in {avg, max, min}: adding a replicated constant
-        # preserves the partial reduce type (constant is the same on all ranks)
+        # P(avg) + R -> P(avg): adding a replicated constant preserves the
+        # average. P(max/min) + R reduces the input first: inf - inf would create
+        # a NaN on one rank only, which NCCL's all_reduce MAX/MIN ignores.
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
@@ -777,8 +856,11 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             with comm_mode:
                 result = d_input + d_other
 
-            self.assertEqual(comm_mode.get_total_counts(), 0)
-            self.assertEqual(result.placements, (Partial(reduce_op),))
+            if reduce_op == "avg":
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+                self.assertEqual(result.placements, (Partial(reduce_op),))
+            else:
+                self.assertEqual(comm_mode.get_total_counts(), 1)
             self.assertEqual(
                 result.full_tensor(),
                 torch.full((8, 8), expected_full[reduce_op], device=self.device_type),
@@ -1395,14 +1477,12 @@ class TestPointwiseRuleValidation(TestCase):
 
         representative_ops = [
             # (op_name, category, expected_true_positives)
-            ("add", "binary_additive", 81),
+            ("add", "binary_additive", 61),
             ("mul", "binary_mul", 49),
             ("div", "binary_div", 67),
             ("sigmoid", "non_decreasing_unary", 5),
             ("erfc", "non_increasing_unary", 5),
             ("neg", "neg", 6),
-            ("maximum", "monotonic_max_preserving", 57),
-            ("minimum", "monotonic_min_preserving", 57),
             ("logaddexp", "monotonic_binary", 49),
             ("abs", "pointwise_generic", 2),
         ]
@@ -1435,6 +1515,125 @@ class TestPointwiseRuleValidation(TestCase):
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
 )
+
+
+class DistPartialNaNInfTest(DTensorTestBase):
+    @with_comms
+    def test_partial_input_matches_reducing_first(self):
+        # Each case is an input that a removed Partial pass-through rule gets
+        # wrong on NCCL: applying the op to each rank's local value and reducing
+        # afterwards must match reducing first. Gloo catches only some of these
+        # cases. Rank 0 holds NaN, inf or an int at the dtype limit; the other
+        # ranks hold ordinary values. NCCL's
+        # all_reduce MAX/MIN ignores NaN (the result is NaN only if every rank
+        # holds NaN). Rules that break only when NaN propagates are covered by
+        # test_partial_max_min_with_nan and test_bucketize_partial_input, and
+        # the inf-norm rules, which break on every backend, by
+        # test_inf_norm_of_pending_partial in test_math_ops.py.
+        nan, inf = float("nan"), float("inf")
+        mesh = self.build_device_mesh()
+
+        def pending(reduce_op, rank0, other_ranks, dtype=torch.float32):
+            # Pending Partial(reduce_op) whose local value is rank0 on rank 0
+            # and other_ranks on every other rank.
+            rows = torch.tensor(
+                [rank0] + [other_ranks] * (self.world_size - 1),
+                dtype=dtype,
+                device=self.device_type,
+            )
+            sharded = distribute_tensor(rows, mesh, [Shard(0)])
+            reduce = {"sum": torch.sum, "max": torch.amax, "min": torch.amin}
+            out = reduce[reduce_op](sharded, 0)
+            self.assertEqual(out.placements, (Partial(reduce_op),))
+            return out
+
+        def replicate(values, dtype=torch.float32):
+            t = torch.tensor(values, dtype=dtype, device=self.device_type)
+            return distribute_tensor(t, mesh, [Replicate()])
+
+        # The op maps rank 0's NaN to a number. The reduction drops the NaN
+        # from the input, but applied first, the number competes.
+        nan_max = pending("max", [nan, nan], [5.0, -3.0])
+        nan_min = pending("min", [nan, nan], [5.0, -3.0])
+        two = replicate([2.0, 2.0])
+        cases = {}
+        for name, x in (("P(max)", nan_max), ("P(min)", nan_min)):
+            cases |= {
+                f"sign {name}": (torch.sign, x),
+                f"sgn {name}": (torch.sgn, x),
+                f"nan_to_num {name}": (torch.nan_to_num, x),
+            }
+        cases |= {
+            "fmin P(max), R": (torch.fmin, nan_max, two),
+            "fmin R, P(max)": (torch.fmin, two, nan_max),
+            "fmax P(min), R": (torch.fmax, nan_min, two),
+            "fmax R, P(min)": (torch.fmax, two, nan_min),
+            "bucketize P(max), R": (
+                torch.bucketize,
+                nan_max,
+                replicate([1.0, 3.0, 5.0, 7.0]),
+            ),
+            "nansum P(sum)": (
+                torch.nansum,
+                pending("sum", [nan, nan], [5.0, -3.0]),
+            ),
+        }
+
+        # The op combines several values per rank, so rank 0's local result
+        # is NaN, and the reduction drops it together with the value that
+        # should win (9 or -9).
+        hidden_max = pending("max", [nan, 9.0], [1.0, 2.0])
+        hidden_min = pending("min", [nan, -9.0], [-1.0, -2.0])
+        win_max = pending("max", [9.0, 9.0], [2.0, 2.0])
+        win_min = pending("min", [-9.0, -9.0], [2.0, 2.0])
+        cases |= {
+            "maximum P(max), P(max)": (torch.maximum, nan_max, win_max),
+            "clamp_min P(max), P(max)": (torch.clamp_min, nan_max, win_max),
+            "minimum P(min), P(min)": (torch.minimum, nan_min, win_min),
+            "clamp_max P(min), P(min)": (torch.clamp_max, nan_min, win_min),
+            "amax P(max)": (torch.amax, hidden_max),
+            "max P(max)": (torch.max, hidden_max),
+            "_foreach_max P(max)": (
+                lambda x: torch._foreach_max([x])[0],
+                hidden_max,
+            ),
+            "amin P(min)": (torch.amin, hidden_min),
+            "min P(min)": (torch.min, hidden_min),
+        }
+
+        # inf - inf makes NaN on rank 0 only. Column 1 breaks when the
+        # reduction ignores NaN, column 0 when it propagates NaN.
+        inf_max = pending("max", [-inf, inf], [1.0, 1.0])
+        inf_min = pending("min", [inf, -inf], [1.0, 1.0])
+        int_max = torch.iinfo(torch.int32).max
+        cases |= {
+            "add P(max), R": (torch.add, inf_max, replicate([inf, -inf])),
+            "sub P(max), R": (torch.sub, inf_max, replicate([-inf, inf])),
+            "add P(min), R": (torch.add, inf_min, replicate([-inf, inf])),
+            "sub P(min), R": (torch.sub, inf_min, replicate([inf, -inf])),
+            # Integer overflow wraps around, so the rank holding the max ends
+            # up holding the min. Breaks on every backend.
+            "add P(max), R int32 overflow": (
+                torch.add,
+                pending("max", [int_max], [0], torch.int32),
+                replicate([1], torch.int32),
+            ),
+        }
+
+        # Collect every mismatch instead of using subTest: the multi-process
+        # runner stops at the first failing subTest.
+        mismatches = []
+        for name, (op, *args) in cases.items():
+            expected = op(*(a.full_tensor() for a in args))
+            actual = op(*args).full_tensor()
+            same = (actual == expected) | (actual.isnan() & expected.isnan())
+            if not same.all():
+                mismatches.append(
+                    f"{name}: got {actual.tolist()}, "
+                    f"reducing first gives {expected.tolist()}"
+                )
+        if mismatches:
+            self.fail("\n".join(mismatches))
 
 
 if __name__ == "__main__":

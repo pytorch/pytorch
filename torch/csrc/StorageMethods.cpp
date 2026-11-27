@@ -5,6 +5,7 @@
 #include <structmember.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/overflows.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
@@ -40,14 +41,14 @@
 #define LSEEK lseek
 #endif
 
-static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_nbytes(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   return py::cast(THPStorage_Unpack(self).sym_nbytes()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self_ = THPStorage_Unpack(self);
   // See Note [Invalid Python Storages]
@@ -60,7 +61,7 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_resizable(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_resizable(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   return PyBool_FromLong(THPStorage_Unpack(self).resizable());
@@ -99,21 +100,27 @@ static PyObject* THPStorage_copy_(
       src.nbytes(),
       " bytes");
 
-  at::storage_copy(self_, src, non_blocking);
+  // Match Tensor.copy_: blocking CUDA->CPU copies may wait on prior GPU work,
+  // so release the GIL around the native copy so other Python threads can run.
+  // See https://github.com/pytorch/pytorch/issues/200410
+  {
+    pybind11::gil_scoped_release no_gil;
+    at::storage_copy(self_, src, non_blocking);
+  }
 
   return Py_NewRef(self);
 
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* noargs) {
+static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(_self);
   return THPUtils_packInt64(sizeof(uint8_t));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_new(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   c10::Allocator* allocator = THPStorage_Unpack(self).allocator();
@@ -250,7 +257,7 @@ static void decodeWrapper(
 }
 
 static PyObject* THPStorage_fromBuffer(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args,
     PyObject* keywds) {
   HANDLE_TH_ERRORS
@@ -362,7 +369,8 @@ static PyObject* THPStorage_fromBuffer(
   uint8_t* src = static_cast<uint8_t*>(buffer.buf);
   auto fake_mode_active =
       c10::impl::TorchDispatchModeTLS::get_mode(
-          c10::impl::TorchDispatchModeKey::FAKE) != std::nullopt;
+          c10::impl::TorchDispatchModeKey::FAKE) != std::nullopt ||
+      c10::impl::FakeTensorModeTLS::get_state() != nullptr;
   auto storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
@@ -404,7 +412,7 @@ static PyObject* THPStorage_fromBuffer(
 }
 
 static PyObject* THPStorage_fromFile(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args,
     PyObject* keywds) {
   HANDLE_TH_ERRORS
@@ -480,7 +488,7 @@ static PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
+static PyObject* THPStorage_newWithFile(PyObject* /*_unused*/, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyTuple_Size(args) == 2, "_new_with_file takes exactly two arguments");
@@ -655,13 +663,15 @@ static PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_fix_weakref(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_fix_weakref(PyObject* self, PyObject* /*noargs*/) {
   const auto& storage = THPStorage_Unpack(self);
   Py_DECREF(THPStorage_Wrap(storage));
   Py_RETURN_NONE;
 }
 
-static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage__get_filename(
+    PyObject* self,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
 
   const auto& self_ = THPStorage_Unpack(self);

@@ -134,16 +134,6 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--use-jit",
-        "--use_jit",
-        type=benchmark_utils.str2bool,
-        nargs="?",
-        const=True,
-        default=False,
-        help="Run operators with PyTorch JIT mode",
-    )
-
-    parser.add_argument(
         "--use-compile",
         "--use_compile",
         type=benchmark_utils.str2bool,
@@ -183,7 +173,14 @@ def parse_args():
         default="benchmark-results.json",
     )
 
-    args, _ = parser.parse_known_args()
+    args, unknown_args = parser.parse_known_args()
+    retired_args = [
+        arg
+        for arg in unknown_args
+        if arg.split("=", 1)[0] in ("--use-jit", "--use_jit")
+    ]
+    if retired_args:
+        parser.error(f"unrecognized arguments: {' '.join(retired_args)}")
 
     if args.omp_num_threads:
         # benchmark_utils.set_omp_threads sets the env variable OMP_NUM_THREADS

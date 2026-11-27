@@ -81,7 +81,7 @@ struct Layout final {
     // XNNPACK denotes that operator with an _nc suffix and expects all dimensions,
     // except channels, to be flattened into one argument: batch_size.
     static int64_t batch(const IntArrayRef tensor) {
-      if (C10_UNLIKELY(tensor.empty())) {
+      if (tensor.empty()) [[unlikely]] {
         return -1;
       }
 
@@ -96,7 +96,7 @@ struct Layout final {
     }
 
     static int64_t channel(const IntArrayRef tensor) {
-      if (C10_UNLIKELY(tensor.empty())) {
+      if (tensor.empty()) [[unlikely]] {
         return -1;
       }
 

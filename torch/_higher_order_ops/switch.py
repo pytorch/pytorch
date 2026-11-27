@@ -10,6 +10,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
+    _fake_mode_handler,
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
@@ -369,6 +370,9 @@ def switch_fake_tensor_mode(mode, index, branches, operands):
     for branches_out in zip(*flat_branch_outs):
         merged_outs.append(_merge_output(branches_out, mode))
     return pytree.tree_unflatten(merged_outs, branch_out_spec[0])
+
+
+switch_op.py_impl(DispatchKey.Fake)(_fake_mode_handler(switch_fake_tensor_mode))
 
 
 def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMode):

@@ -441,7 +441,7 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
   // so we have to check the Storages each time we deallocate.
   unsigned group_idx = 0;
   const bool first_time = storages_.empty();
-  if (C10_UNLIKELY(first_time)) {
+  if (first_time) [[unlikely]] {
     if (storages_.is_allocated()) {
       storages_.deallocate();
     }
@@ -455,7 +455,7 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
       const auto& storage = tensor->storage();
       size_t current_size = compute_aligned_tensor_size(storage.nbytes());
       at::StorageImpl* tensorStorageImpl = storage.unsafeGetStorageImpl();
-      if (C10_UNLIKELY(first_time)) {
+      if (first_time) [[unlikely]] {
         tensorStorageImpl->reset();
 
         DCHECK(
@@ -480,7 +480,7 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
         tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
             c10::intrusive_ptr<at::StorageImpl>::
                 unsafe_adapt_non_heap_allocated(newImpl, tensors.size())));
-      } else if (C10_UNLIKELY(tensorStorageImpl != &storages_[group_idx])) {
+      } else if (tensorStorageImpl != &storages_[group_idx]) [[unlikely]] {
         tensorStorageImpl->reset();
 
         // If somehow the tensor got different storage, put it back to

@@ -4,12 +4,14 @@
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
+#include <torch/csrc/dynamo/disable.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/stackref_bridge.h>
 
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <optional>
 #include <unordered_set>
@@ -17,6 +19,37 @@
 extern "C" {
 extern PyObject* guard_complete_hook;
 }
+
+namespace torch::dynamo {
+
+DisableDynamoGuard::DisableDynamoGuard() {
+  if (eval_frame_callback_get() != Py_None) {
+    py::gil_scoped_acquire gil;
+    // Keep the module alive without a decref during Python finalization.
+    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+        storage;
+    module_ = storage
+                  .call_once_and_store_result([]() -> py::object {
+                    return py::module::import("torch._C")
+                        .attr("_dynamo")
+                        .attr("eval_frame");
+                  })
+                  .get_stored()
+                  .ptr();
+    callback_ = dynamo_set_eval_frame(Py_None, module_);
+  }
+}
+
+DisableDynamoGuard::~DisableDynamoGuard() {
+  if (callback_ != nullptr) {
+    auto gil = PyGILState_Ensure();
+    Py_DECREF(dynamo_set_eval_frame(callback_, module_));
+    Py_DECREF(callback_);
+    PyGILState_Release(gil);
+  }
+}
+
+} // namespace torch::dynamo
 
 // Bytecode debugger callback - stored as raw PyObject* to avoid
 // shutdown issues with static py::object destructor running after Python
@@ -103,7 +136,6 @@ py::list _get_frame_value_stack_with_depth(
     return result;
   }
 
-#if IS_PYTHON_3_11_PLUS
   PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
   _PyInterpreterFrame* iframe = frame->f_frame;
   if (iframe == nullptr) {
@@ -151,7 +183,7 @@ py::list _get_frame_value_stack_with_depth(
     return result;
   }
   _PyStackRef* stack_base = iframe->localsplus + nlocalsplus;
-  for (int i = 0; i < depth; i++) {
+  for (const auto i : c10::irange(depth)) {
     PyObject* obj = THP_PyStackRef_AsPyObjectBorrow(&stack_base[i]);
     if (obj == nullptr) {
       result.append(get_null_stack_value());
@@ -161,7 +193,7 @@ py::list _get_frame_value_stack_with_depth(
   }
 #else
   int stack_start = nlocalsplus;
-  for (int i = 0; i < depth; i++) {
+  for (const auto i : c10::irange(depth)) {
     PyObject* obj = iframe->localsplus[stack_start + i];
     if (obj == nullptr) {
       result.append(get_null_stack_value());
@@ -175,33 +207,6 @@ py::list _get_frame_value_stack_with_depth(
     }
   }
 #endif
-
-#else
-  // Python 3.10 and earlier - use f_valuestack
-  PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
-  if (frame->f_valuestack == nullptr) {
-    return result;
-  }
-
-  PyCodeObject* code = frame->f_code;
-  if (code == nullptr) {
-    return result;
-  }
-
-  int stacksize = code->co_stacksize;
-  if (depth > stacksize) {
-    depth = stacksize;
-  }
-
-  for (int i = 0; i < depth; i++) {
-    PyObject* obj = frame->f_valuestack[i];
-    if (obj == nullptr) {
-      result.append(get_null_stack_value());
-    } else {
-      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
-    }
-  }
-#endif // IS_PYTHON_3_11_PLUS
 
   return result;
 }
@@ -258,20 +263,15 @@ static py::object dynamo_call_callback(
     py::handle callback,
     THP_EVAL_API_FRAME_OBJECT* _frame,
     FrameLocalsMapping* locals,
-    CacheEntry* cache_entry,
+    py::handle cache_entry,
     FrameState* frame_state) {
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
   TORCH_CHECK(
       frame, "Dynamo failed to initialize CPython interpreter frame wrapper");
   frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
 
-  py::object cache_entry_obj = py::none();
-  if (cache_entry) {
-    cache_entry_obj = py::cast(cache_entry, py::return_value_policy::reference);
-  }
-
   py::object result = callback(
-      py::handle((PyObject*)frame), cache_entry_obj, py::handle(frame_state));
+      py::handle((PyObject*)frame), cache_entry, py::handle(frame_state));
   Py_DECREF(frame);
   return result;
 }
@@ -337,6 +337,41 @@ struct CRecursionLimitRAII {
 
 #endif
 
+// Looks the frame up in its code object's cache.  Out of line so that the
+// snapshot, and the references it holds, are gone before the frame runs.
+// Returns whether the region or the default bucket had any entries.
+//
+// If an entry is invalidated mid-lookup, the snapshot may hold its last
+// references, so its cleanup runs after the hit's guards pass and can change
+// state they checked.  As with any GC between guards and dispatch, that is not
+// guarded against.
+static C10_NOINLINE bool lookup_cache(
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    int64_t isolate_recompiles_id,
+    PyObject* backend,
+    std::unique_ptr<FrameLocalsMapping>& locals,
+    CacheLookupResult* cache_hit) {
+  PyCodeObject* code = F_CODE(frame);
+  bool is_skip_guard_eval_unsafe = get_skip_guard_eval_unsafe();
+  CacheSnapshot snapshot = snapshot_cache(
+      code, isolate_recompiles_id, backend, is_skip_guard_eval_unsafe);
+  if (!try_lookup_without_guard_eval(
+          code, snapshot, backend, is_skip_guard_eval_unsafe, cache_hit)) {
+    locals = std::make_unique<FrameLocalsMapping>(frame);
+    _PytorchRecordFunctionState* rf =
+        _pytorch_record_function_enter(cache_lookup_profiler_str);
+    lookup(
+        code,
+        snapshot,
+        locals.get(),
+        backend,
+        is_skip_guard_eval_unsafe,
+        cache_hit);
+    _pytorch_record_function_exit(rf);
+  }
+  return snapshot.has_relevant_entries;
+}
+
 // frame and callback are borrowed references.
 // Returns new reference.
 PyObject* dynamo__custom_eval_frame(
@@ -344,22 +379,12 @@ PyObject* dynamo__custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback_py) {
-#if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
       "begin %s %s %i %i",
       get_frame_name(frame),
       PyUnicode_AsUTF8(F_CODE(frame)->co_filename),
       F_CODE(frame)->co_firstlineno,
       _PyInterpreterFrame_LASTI(frame));
-#else
-  DEBUG_TRACE(
-      "begin %s %s %i %i %i",
-      get_frame_name(frame),
-      PyUnicode_AsUTF8(F_CODE(frame)->co_filename),
-      frame->f_lineno,
-      frame->f_lasti,
-      frame->f_iblock);
-#endif
 
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==
@@ -403,8 +428,10 @@ PyObject* dynamo__custom_eval_frame(
 
   // callback to run on recursively invoked frames
   py::handle recursive_callback = callback; // borrowed
-  PyCodeObject* cached_code = nullptr; // borrowed
-  const char* trace_annotation = "";
+  PyCodeObject* cached_code = nullptr; // borrowed from cache_hit
+  // Owns the code eval_custom runs and its annotation, since a concurrent
+  // torch._dynamo.reset() can free the cache entry they came from.
+  CacheLookupResult cache_hit;
   PyObject* eval_result = nullptr; // strong reference
 
   // exit functions
@@ -429,15 +456,15 @@ PyObject* dynamo__custom_eval_frame(
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
-    if (fullgraph_compiled_frame_count >= 0) {
-      fullgraph_compiled_frame_count++;
+    if (get_fullgraph_compiled_frame_count() >= 0) {
+      bump_fullgraph_compiled_frame_count();
       // Under fullgraph, disable or error Dynamo for sub-frames of compiled
       // code. If fullgraph_error_on_nested_compile is set, wrap the callback
       // with get_fail_callback so compilation attempts error. Otherwise, set
       // callback to None to skip sub-frames entirely.
       if (!recursive_callback.is_none() &&
           !recursive_callback.is(py::bool_(false))) {
-        if (fullgraph_error_on_nested_compile) {
+        if (get_fullgraph_error_on_nested_compile()) {
           if (!convert_frame_get_fail_callback) {
             convert_frame_get_fail_callback =
                 py::module_::import("torch._dynamo.convert_frame")
@@ -473,7 +500,11 @@ PyObject* dynamo__custom_eval_frame(
       debugger_cb(py::handle((PyObject*)cached_code));
     }
     eval_result = dynamo_eval_custom_code(
-        tstate, frame, cached_code, trace_annotation, throw_flag);
+        tstate,
+        frame,
+        cached_code,
+        cache_hit.trace_annotation.c_str(),
+        throw_flag);
     if (!callback.is(recursive_callback)) {
       eval_frame_callback_set(callback.ptr());
     }
@@ -491,27 +522,25 @@ PyObject* dynamo__custom_eval_frame(
   }
 #endif
 
-  ExtraState* extra = get_extra_state(F_CODE(frame));
-
-  if (callback.is(py::bool_(false)) && extra == nullptr) {
+  PyCodeObject* code = F_CODE(frame);
+  // Resolve strategy per isolate_recompiles scope. For non-isolated
+  // frames (id < 0) this returns extra->strategy; for isolated regions
+  // it returns the region's own strategy with global SKIP applied
+  // (deliberate "do not trace" marks must apply across regions), but
+  // does not inherit RUN_ONLY (recompile-limit hits are per-region).
+  int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
+  FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  // In run-only mode a code object without a cache is never compiled, so do
+  // not create one for it.
+  if (!get_frame_exec_strategy(
+          code,
+          isolate_recompiles_id,
+          /*create=*/!callback.is(py::bool_(false)),
+          &strategy)) {
     DEBUG_TRACE("skip (run only with empty cache) %s", get_frame_name(frame));
     eval_default();
     return eval_result;
   }
-
-  // create cache
-  if (extra == nullptr) {
-    extra = init_and_set_extra_state(F_CODE(frame));
-  }
-
-  // Resolve strategy per isolate_recompiles scope. For non-isolated
-  // frames (id < 0) this returns extra->strategy; for isolated regions
-  // it returns the region's own strategy if set, otherwise inherits
-  // global SKIP (deliberate "do not trace" marks must apply across
-  // regions) but not RUN_ONLY (recompile-limit hits are per-region).
-  int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
-  FrameExecStrategy strategy =
-      extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
 
   recursive_callback =
       _callback_from_action(recursive_callback, strategy.recursive_action);
@@ -532,28 +561,9 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  PyObject* maybe_cached_code = nullptr;
   std::unique_ptr<FrameLocalsMapping> locals;
-  if (!try_lookup_without_guard_eval(
-          extra,
-          backend,
-          isolate_recompiles_id,
-          &maybe_cached_code,
-          &trace_annotation,
-          is_skip_guard_eval_unsafe)) {
-    locals = std::make_unique<FrameLocalsMapping>(frame);
-    _PytorchRecordFunctionState* rf =
-        _pytorch_record_function_enter(cache_lookup_profiler_str);
-    lookup(
-        extra,
-        locals.get(),
-        backend,
-        isolate_recompiles_id,
-        &maybe_cached_code,
-        &trace_annotation,
-        is_skip_guard_eval_unsafe);
-    _pytorch_record_function_exit(rf);
-  }
+  bool has_relevant_entries =
+      lookup_cache(frame, isolate_recompiles_id, backend, locals, &cache_hit);
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
@@ -563,7 +573,7 @@ PyObject* dynamo__custom_eval_frame(
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
 
-  if (maybe_cached_code == nullptr) {
+  if (!cache_hit.code) {
     // guard eval failed, keep propagating
     fail();
     return eval_result;
@@ -573,20 +583,17 @@ PyObject* dynamo__custom_eval_frame(
   // for the current region (or the default region); this reduces
   // overtriggering and we don't need to do guard collectives the very first
   // time we've seen a frame in this region.
-  bool has_relevant_entries =
-      extra->cache_entry_map.count(isolate_recompiles_id) > 0 ||
-      extra->cache_entry_map.count(-1) > 0;
   if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
-    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
+    py::object res = guard_complete_hook_handle(!cache_hit.code.is_none());
     if (!py::cast<bool>(res)) {
-      maybe_cached_code = Py_None; // NB: non-owning
+      cache_hit.code = py::none();
     }
   }
 
-  if (!Py_IsNone(maybe_cached_code)) {
-    cached_code = (PyCodeObject*)maybe_cached_code;
+  if (!cache_hit.code.is_none()) {
+    cached_code = (PyCodeObject*)cache_hit.code.ptr();
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     eval_custom();
@@ -595,7 +602,7 @@ PyObject* dynamo__custom_eval_frame(
 
   // cache miss
   DEBUG_TRACE("cache miss %s", get_frame_name(frame));
-  if (is_skip_guard_eval_unsafe) {
+  if (get_skip_guard_eval_unsafe()) {
     PyErr_SetString(
         PyExc_RuntimeError,
         "Recompilation triggered with skip_guard_eval_unsafe stance. "
@@ -614,8 +621,6 @@ PyObject* dynamo__custom_eval_frame(
   if (locals == nullptr) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
-  CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
-  FrameState* frame_state = extract_frame_state(extra);
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
@@ -629,8 +634,15 @@ PyObject* dynamo__custom_eval_frame(
       return eval_result;
     }
     PreserveGlobalState preserve_global_state;
+    // Scoped to the callback, so its copy of the entry is not held while the
+    // frame runs.
+    CompileInputs inputs = get_compile_inputs(code, isolate_recompiles_id);
     callback_result = dynamo_call_callback(
-        callback, frame, locals.get(), cache_entry, frame_state);
+        callback,
+        frame,
+        locals.get(),
+        inputs.cache_entry,
+        inputs.frame_state.ptr());
     new_strategy =
         callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
     apply_to_code = callback_result.attr("apply_to_code").cast<bool>();
@@ -664,27 +676,21 @@ PyObject* dynamo__custom_eval_frame(
       DEBUG_TRACE(
           "create recursive action: %d\n", new_strategy.recursive_action);
     }
-    extra_state_set_region_exec_strategy(
-        extra, isolate_recompiles_id, new_strategy);
   }
 
-  if (!Py_IsNone(guarded_code)) {
+  // The callback ran arbitrary Python, which may have reset this code object's
+  // cache; the strategy and the new entry go on whatever state it has now.
+  cache_hit = record_compile_result(
+      code,
+      isolate_recompiles_id,
+      apply_to_code,
+      new_strategy,
+      guarded_code,
+      backend);
+  if (!cache_hit.code.is_none()) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
-
-    // NB: We could use extract_cache_entry to get the cache_entry, but
-    // extract_cache_entry returns a borrowed reference. Modifying a borrowed
-    // reference seems wrong. Therefore, we directly access the
-    // extra->cache_entry. extra won't be NULL here.
-    CacheEntry* new_cache_entry =
-        create_cache_entry(extra, guarded_code, backend);
-
-    // Update the existing cache_entry on the extra object. This extra object
-    // is sitting on the extra scratch space, we are just changing the
-    // cache_entry ptr. As a result, extra now becomes the owner of CacheEntry
-    // object. This will be cleaned up when set_extra_state is called.
     // Re-enable custom behavior
-    cached_code = CacheEntry_get_code(new_cache_entry),
-    trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
+    cached_code = (PyCodeObject*)cache_hit.code.ptr();
     eval_custom();
   } else {
     eval_default();
@@ -692,7 +698,7 @@ PyObject* dynamo__custom_eval_frame(
   return eval_result;
 }
 
-PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
+PyObject* dynamo_set_code_exec_strategy(PyObject* /*dummy*/, PyObject* args) {
   PyObject* code_obj = nullptr;
   PyObject* strategy_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &code_obj, &strategy_obj)) {
@@ -703,26 +709,14 @@ PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
     return nullptr;
   }
 
-  PyCodeObject* code = (PyCodeObject*)code_obj;
-  ExtraState* extra = get_extra_state(code);
-  if (extra == nullptr) {
-    extra = init_and_set_extra_state(code);
-  }
-
   FrameExecStrategy strategy =
       py::handle(strategy_obj).cast<FrameExecStrategy>();
 
-  extra_state_set_exec_strategy(extra, strategy);
+  set_code_exec_strategy((PyCodeObject*)code_obj, strategy);
   Py_RETURN_NONE;
 }
 
 void dynamo_skip_code_recursive(PyCodeObject* code) {
-  ExtraState* extra = get_extra_state(code);
-  if (extra == nullptr) {
-    extra = init_and_set_extra_state(code);
-  }
-
-  FrameExecStrategy strategy =
-      FrameExecStrategy{FrameAction::SKIP, FrameAction::SKIP};
-  extra_state_set_exec_strategy(extra, strategy);
+  set_code_exec_strategy(
+      code, FrameExecStrategy{FrameAction::SKIP, FrameAction::SKIP});
 }

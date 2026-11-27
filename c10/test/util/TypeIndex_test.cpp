@@ -2,12 +2,39 @@
 #include <c10/util/TypeIndex.h>
 #include <gtest/gtest.h>
 
+#include <string_view>
+#include <type_traits>
+
 using c10::util::get_fully_qualified_type_name;
 using c10::util::get_type_index;
 using std::string_view;
 
 // NOLINTBEGIN(modernize-unary-static-assert)
 namespace {
+
+static_assert(std::is_same_v<
+              decltype(get_fully_qualified_type_name<int>()),
+              std::string_view>);
+static_assert(get_fully_qualified_type_name<int>() == "int");
+static_assert(get_fully_qualified_type_name<double>() == "double");
+
+TEST(TypeIndex, PrimitiveNames) {
+  EXPECT_EQ(get_fully_qualified_type_name<int>(), "int");
+  EXPECT_EQ(get_fully_qualified_type_name<double>(), "double");
+}
+
+#if !defined(_MSC_VER)
+template <char C>
+struct CharTag {};
+
+static_assert(
+    get_fully_qualified_type_name<CharTag<';'>>().ends_with("CharTag<';'>"));
+
+TEST(TypeIndex, SemicolonTemplateArgument) {
+  EXPECT_TRUE(
+      get_fully_qualified_type_name<CharTag<';'>>().ends_with("CharTag<';'>"));
+}
+#endif
 
 static_assert(get_type_index<int>() == get_type_index<int>(), "");
 static_assert(get_type_index<float>() == get_type_index<float>(), "");

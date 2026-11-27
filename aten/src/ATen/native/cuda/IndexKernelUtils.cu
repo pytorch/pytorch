@@ -15,15 +15,17 @@
 namespace at::native {
 template <int Alignment, typename index_t>
 __global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride, bool allow_neg_indices) {
-    int64_t ind = idx[blockIdx.x];
-    if (allow_neg_indices) {
-        ind = (ind < 0) ? ind + ind_dim_size : ind;
-    }
-    CUDA_KERNEL_ASSERT_VERBOSE(ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds", "Expected 0 <= index < ind_dim_size(%ld), but got index = %ld", ind_dim_size, ind);
-    // off is guaranteed to be within int32 limits
-    for (int32_t off = (blockDim.x * blockIdx.y + threadIdx.x) * Alignment; off < slice_size; off += blockDim.x * gridDim.y * Alignment) {
-      auto vec = at::native::memory::ld_vec<Alignment>(inp + ind * inp_stride + off);
-      at::native::memory::st_vec<Alignment>(out + blockIdx.x * (int32_t)out_stride + off, vec);  // out offset is guaranteed to be within int32 limits
+    for (auto entry = blockIdx.x * blockDim.y + threadIdx.y; entry < static_cast<unsigned int>(num_ind); entry += gridDim.x * blockDim.y) {
+      int64_t ind = idx[entry];
+      if (allow_neg_indices) {
+          ind = (ind < 0) ? ind + ind_dim_size : ind;
+      }
+      CUDA_KERNEL_ASSERT_VERBOSE(ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds", "Expected 0 <= index < ind_dim_size(%ld), but got index = %ld", ind_dim_size, ind);
+      // Keep the final byte-offset increment unsigned, as in vectorized scatter.
+      for (uint32_t off = (blockDim.x * blockIdx.y + threadIdx.x) * Alignment; off < slice_size; off += blockDim.x * gridDim.y * Alignment) {
+        auto vec = at::native::memory::ld_vec<Alignment>(inp + ind * inp_stride + off);
+        at::native::memory::st_vec<Alignment>(out + entry * (int32_t)out_stride + off, vec);  // out offset is guaranteed to be within int32 limits
+      }
     }
 }
 
@@ -34,13 +36,29 @@ void vectorized_gather_kernel_launch(char * out, char * inp, index_t * idx, int 
                                      int64_t slice_size_in_bytes, int64_t ind_dim_size, int64_t inp_stride_bytes, int64_t out_stride_bytes, bool allow_neg_indices){
 
   constexpr int64_t max_num_threads=256;
-  auto num_threads = at::round_up(
-      at::ceil_div(slice_size_in_bytes, Alignment),
-      static_cast<int64_t>(at::cuda::warp_size()));
-  uint32_t grid_y = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+  // Packing wider rows regressed Hopper; leave them one row per block.
+  constexpr int64_t max_packed_num_threads=32;
+  constexpr int64_t max_block_waves=32;
+  auto num_vectors = at::ceil_div(slice_size_in_bytes, Alignment);
+  const bool is_packed = num_vectors <= max_packed_num_threads;
+  // x copies vectors within a row; y packs rows without rounding each to a warp.
+  auto num_threads = is_packed ? num_vectors : std::min(max_num_threads, at::round_up(num_vectors, static_cast<int64_t>(at::cuda::warp_size())));
+  auto entries_per_block = is_packed ? max_num_threads / num_vectors : 1;
+  const auto* properties = at::cuda::getCurrentDeviceProperties();
+  // A partially filled warp still consumes all of its thread slots.
+  const auto warp_threads_per_block = at::round_up(num_threads * entries_per_block, static_cast<int64_t>(at::cuda::warp_size()));
+  const int64_t resident_blocks = properties->multiProcessorCount * (properties->maxThreadsPerMultiProcessor / warp_threads_per_block);
+  // Cap rows to 32 thread-limited waves; scattered reads need more concurrency
+  // than ScatterCopyOp's random writes.
+  const int64_t max_blocks = resident_blocks * max_block_waves;
+  const auto row_blocks = at::ceil_div(static_cast<int64_t>(num_ind), entries_per_block);
+  const auto grid_x = std::min(row_blocks, max_blocks);
+  uint32_t grid_y = properties->maxGridSize[1];
   grid_y = std::min(static_cast<uint32_t>(at::ceil_div(slice_size_in_bytes, max_num_threads * Alignment)), grid_y);
-  dim3 grid = {static_cast<uint32_t>(num_ind), grid_y, 1};
-  auto block = std::min(max_num_threads, num_threads);
+  // Budget the full grid; few very wide rows still need column parallelism.
+  grid_y = std::min(static_cast<int64_t>(grid_y), max_blocks / grid_x);
+  dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
+  dim3 block = {static_cast<uint32_t>(num_threads), static_cast<uint32_t>(entries_per_block), 1};
   vectorized_gather_kernel<Alignment, index_t><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(out, inp, idx, num_ind, slice_size_in_bytes,
   ind_dim_size, inp_stride_bytes, out_stride_bytes, allow_neg_indices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -218,6 +236,17 @@ struct ScatterAddOp {
   }
 };
 
+struct ScatterCopyOp {
+  static constexpr int threads_per_entry = 32;
+  static constexpr int entries_per_block = 8;
+
+  template <int Alignment, typename scalar_t>
+  __device__ __forceinline__ static void apply(
+      scalar_t* dst, const at::native::memory::Vec<Alignment>& vec) {
+    at::native::memory::st_vec<Alignment>(reinterpret_cast<char*>(dst), vec);
+  }
+};
+
 template <typename reduce_op, int Alignment, typename scalar_t, typename index_t>
 __global__ void vectorized_scatter_kernel(
     scalar_t* __restrict__ self_data,
@@ -231,30 +260,34 @@ __global__ void vectorized_scatter_kernel(
     int threads_per_entry,
     int entries_per_block) {
 
+  if constexpr (std::is_same_v<reduce_op, ScatterCopyOp>) {
+    threads_per_entry = ScatterCopyOp::threads_per_entry;
+    entries_per_block = ScatterCopyOp::entries_per_block;
+  }
   int entry_in_block = threadIdx.x / threads_per_entry;
   int lane = threadIdx.x - entry_in_block * threads_per_entry;
-  int entry_id = blockIdx.x * entries_per_block + entry_in_block;
+  for (int entry_id = blockIdx.x * entries_per_block + entry_in_block;
+       entry_id < num_ind;
+       entry_id += gridDim.x * entries_per_block) {
+    int64_t ind = idx[entry_id];
+    CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "vectorized scatter kernel index out of bounds",
+        "Expected 0 <= index < self_dim_size(%ld), but got index = %ld", self_dim_size, ind);
 
-  if (entry_id >= num_ind) return;
+    scalar_t* dst_slice = reinterpret_cast<scalar_t*>(
+        reinterpret_cast<char*>(self_data) + ind * self_stride_bytes);
 
-  int64_t ind = idx[entry_id];
-  CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "vectorized scatter kernel index out of bounds",
-      "Expected 0 <= index < self_dim_size(%ld), but got index = %ld", self_dim_size, ind);
+    for (uint32_t off = (blockIdx.y * threads_per_entry + lane) * Alignment;
+         off < slice_size_bytes;
+         off += gridDim.y * threads_per_entry * Alignment) {
+      auto vec = at::native::memory::ld_vec<Alignment>(
+          reinterpret_cast<const char*>(src_data) + entry_id * static_cast<int32_t>(src_stride_bytes) + off);
 
-  scalar_t* dst_slice = reinterpret_cast<scalar_t*>(
-      reinterpret_cast<char*>(self_data) + ind * self_stride_bytes);
+      scalar_t* dst = reinterpret_cast<scalar_t*>(
+          reinterpret_cast<char*>(dst_slice) + off);
 
-  for (int32_t off = (blockIdx.y * threads_per_entry + lane) * Alignment;
-       off < slice_size_bytes;
-       off += gridDim.y * threads_per_entry * Alignment) {
-
-    auto vec = at::native::memory::ld_vec<Alignment>(
-        reinterpret_cast<const char*>(src_data) + entry_id * static_cast<int32_t>(src_stride_bytes) + off);
-
-    scalar_t* dst = reinterpret_cast<scalar_t*>(
-        reinterpret_cast<char*>(dst_slice) + off);
-
-    reduce_op::template apply<Alignment>(dst, vec);
+      reduce_op::template apply<Alignment>(dst, vec);
+    }
+    if constexpr (!std::is_same_v<reduce_op, ScatterCopyOp>) return;
   }
 }
 
@@ -270,12 +303,23 @@ void vectorized_scatter_kernel_launch(
       at::round_up(num_vectors, static_cast<int64_t>(at::cuda::warp_size())),
       max_num_threads);
   int64_t entries_per_block = max_num_threads / threads_per_entry;
+  if constexpr (std::is_same_v<atomic_op, ScatterCopyOp>) {
+    threads_per_entry = ScatterCopyOp::threads_per_entry;
+    entries_per_block = ScatterCopyOp::entries_per_block;
+  }
   int64_t block_size = entries_per_block * threads_per_entry;
   int64_t grid_x = at::ceil_div(static_cast<int64_t>(num_ind), entries_per_block);
   uint32_t grid_y = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   grid_y = std::min(
       static_cast<uint32_t>(at::ceil_div(num_vectors, threads_per_entry)),
       grid_y);
+  if constexpr (std::is_same_v<atomic_op, ScatterCopyOp>) {
+    const int64_t max_blocks =
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount * 8;
+    grid_x = std::min(grid_x, max_blocks);
+    // Split wide slices when there are too few rows to fill the grid.
+    grid_y = std::min(static_cast<int64_t>(grid_y), max_blocks / grid_x);
+  }
 
   dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
   vectorized_scatter_kernel<atomic_op, Alignment, scalar_t, index_t>
@@ -293,6 +337,7 @@ template void vectorized_scatter_kernel_launch<op, 16, scalar_t, int32_t>( \
     scalar_t*, const scalar_t*, int32_t*, int, int64_t, int64_t, int64_t, int64_t);
 
 #define INSTANTIATE_SCATTER_ADD(scalar_t) INSTANTIATE_SCATTER_OP(ScatterAddOp, scalar_t)
+INSTANTIATE_SCATTER_OP(ScatterCopyOp, char)
 #if !defined(USE_ROCM)
 #define INSTANTIATE_SCATTER_MINMAX(scalar_t) \
   INSTANTIATE_SCATTER_OP(ScatterMinOp, scalar_t) \

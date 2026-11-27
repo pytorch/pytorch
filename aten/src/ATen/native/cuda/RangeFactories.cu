@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -44,7 +45,11 @@ C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
-    index_t idx = block_work_size * blockIdx.x + num_threads() * i + threadIdx.x;
+    // Widen before multiplying: block_work_size * blockIdx.x is otherwise
+    // computed in 32-bit unsigned arithmetic and wraps for N >= 2**32,
+    // leaving the tail of the output unwritten.
+    index_t idx = static_cast<index_t>(block_work_size) * blockIdx.x +
+        num_threads() * i + threadIdx.x;
     if (idx < N) {
       data[idx] = f(idx);
     }
@@ -141,9 +146,13 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
     });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, r.scalar_type(), "linspace_cuda", [&]() {
+      // Rounding the step to half or bfloat16 before multiplying it by the index
+      // compounds that rounding across the range, so accumulate in the opmath
+      // type. Matches the CPU and MPS kernels.
+      using step_t = at::opmath_type<scalar_t>;
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      step_t step = (static_cast<step_t>(scalar_end) - static_cast<step_t>(scalar_start)) / static_cast<step_t>(steps - 1);
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
@@ -195,10 +204,12 @@ Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
     });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, r.scalar_type(), "logspace_cuda", [&]() {
-      scalar_t scalar_base = static_cast<scalar_t>(base);
+      // See linspace_cuda_out: keep the step, and hence the pow, in the opmath type
+      using step_t = at::opmath_type<scalar_t>;
+      step_t scalar_base = static_cast<step_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      step_t step = (static_cast<step_t>(scalar_end) - static_cast<step_t>(scalar_start)) / static_cast<step_t>(steps - 1);
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, scalar_base, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
@@ -249,7 +260,7 @@ Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& ste
 }
 
 Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
@@ -268,12 +279,20 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     }
     bool is_contiguous = result.is_contiguous();
     Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
-
-    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
-        accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
-        accscalar_t val = xstart + inc;
-        return static_cast<scalar_t>(val);
-    });
+    if(isComplexType(result.scalar_type())) {
+      if(size <= 1) {
+        r.fill_(start);
+      } else {
+        Scalar endc = start.to<c10::complex<double>>() + step.to<c10::complex<double>>() * static_cast<double>(size - 1);
+        linspace_cuda_out(start, endc, size, r);
+      }
+    } else {
+      gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
+          accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
+          accscalar_t val = xstart + inc;
+          return static_cast<scalar_t>(val);
+      });
+    }
 
     if(!is_contiguous) {
       result.copy_(r);

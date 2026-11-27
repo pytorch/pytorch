@@ -9,6 +9,7 @@ import sys
 import tempfile
 import textwrap
 import traceback
+import types
 import unittest
 import warnings
 from concurrent.futures import Future
@@ -18,9 +19,11 @@ import torch
 from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.compile_worker.subproc_pool import SubprocException
+from torch._inductor.runtime.hints import HeuristicType
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
+    lookup_autotune_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
@@ -372,6 +375,33 @@ def test_flydsl_loader_main(value, stream):
 
     @requires_gpu()
     @requires_triton()
+    @parametrize("method", ("subprocess", "fork"))
+    def test_pool_compile_on_one_rank_without_triton_cache_dir(self, method):
+        # compile_on_one_rank kernels carry no device index, and a worker forked after
+        # CUDA initialization cannot look up the current device to pick a cache dir.
+        def fn(x, y):
+            return x + y
+
+        x = torch.rand(10, device=GPU_TYPE)
+        y = torch.rand(10, device=GPU_TYPE)
+
+        with (
+            config.patch(worker_start_method=method, compile_threads=2),
+            torch.compiler.config.patch(compile_on_one_rank=True),
+            patch.dict(os.environ),
+        ):
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            shutdown_compile_workers()
+            try:
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+                self.assertFalse(AsyncCompile.should_use_thread_workers())
+                self.assertEqual(torch.compile(fn)(x, y), fn(x, y))
+            finally:
+                shutdown_compile_workers()
+
+    @requires_gpu()
+    @requires_triton()
     def test_bad_kernel(self):
         shutdown_compile_workers()
 
@@ -509,6 +539,80 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         self.assertEqual(args[1].num_warps, autotune_config.num_warps)
         self.assertEqual(args[1].num_stages, autotune_config.num_stages)
 
+    @parametrize(
+        "scheduled_rsplit,cached_rsplit,xblock,num_stages,extra_meta,accepted",
+        (
+            (18, 18, 2, 1, {}, True),
+            (18, 32, 2, 1, {}, False),
+            (18, 18, 4, 1, {}, False),
+            (18, 18, 3, 1, {}, False),
+            (64, 64, 32, 1, {}, False),
+            (18, 18, 2, None, {}, False),
+            (18, 18, 2, 4, {}, False),
+            (18, 18, 2, 2, {"mix_order_reduction_allow_multi_stages": False}, False),
+            (18, 18, 2, 2, {"uses_device_tma": True}, False),
+            (18, 18, 2, 1, {"tma_min_block_sizes": {"XBLOCK": 4}}, False),
+        ),
+    )
+    @requires_triton()
+    def test_mix_order_autotune_lookup_table(
+        self,
+        scheduled_rsplit,
+        cached_rsplit,
+        xblock,
+        num_stages,
+        extra_meta,
+        accepted,
+    ):
+        size_hints = {"x": 4096, "r0_": 768}
+        fn = types.SimpleNamespace(src="def triton_fused_mix_order(): pass")
+        fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
+        cached_config = {
+            "XBLOCK": xblock,
+            "RSPLIT_SIZE": cached_rsplit,
+            "num_warps": 4,
+            "num_stages": 1,
+        }
+        if num_stages is not None:
+            cached_config["NUM_STAGES"] = num_stages
+        inductor_meta = {"RSPLIT_SIZE": scheduled_rsplit, **extra_meta}
+
+        with config.patch(autotune_lookup_table={fn_hash: cached_config}):
+            result = lookup_autotune_config(
+                size_hints, fn, inductor_meta, HeuristicType.PERSISTENT_REDUCTION
+            )
+
+        if accepted:
+            self.assertIsNotNone(result)
+            self.assertEqual(
+                result.kwargs,
+                {"XBLOCK": 2, "RSPLIT_SIZE": 18, "NUM_STAGES": 1},
+            )
+        else:
+            self.assertIsNone(result)
+
+    def test_fixed_config_skips_autotune_lookup_table(self):
+        size_hints = None
+        fn = types.SimpleNamespace(src="def triton_fused_mix_order(): pass")
+        fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
+        cached_config = {
+            "XBLOCK": 2,
+            "RSPLIT_SIZE": 18,
+            "NUM_STAGES": 1,
+            "num_warps": 4,
+            "num_stages": 1,
+        }
+
+        with config.patch(autotune_lookup_table={fn_hash: cached_config}):
+            result = lookup_autotune_config(
+                size_hints,
+                fn,
+                {"RSPLIT_SIZE": 18},
+                HeuristicType.FIXED,
+            )
+
+        self.assertIsNone(result)
+
     def test_wait_futures_timeout(self):
         """A compile future that doesn't finish within
         compile_worker_wait_timeout causes _wait_futures to raise
@@ -536,6 +640,25 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         finally:
             release.set()
             pool.shutdown(wait=True)
+
+    def test_triton_worker_receives_static_launch_config(self):
+        from torch._inductor.async_compile import CompiledTritonKernels
+
+        pool = Mock()
+        source = "# test_triton_worker_receives_static_launch_config\n"
+        with (
+            config.patch(static_launch_user_defined_triton_kernels=True),
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "get_worker_pool", return_value=pool),
+            patch.object(AsyncCompile, "should_use_thread_workers", return_value=False),
+            patch("torch._inductor.async_compile._set_triton_libdevice_path"),
+        ):
+            try:
+                AsyncCompile().triton("kernel", source)
+            finally:
+                CompiledTritonKernels.remove_future(source)
+        extra_config = pool.submit.call_args.args[3]
+        self.assertIs(extra_config["static_launch_user_defined_triton_kernels"], True)
 
 
 @skipIfNoCuteDSL

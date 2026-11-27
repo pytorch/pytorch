@@ -109,6 +109,13 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("has_hint")().is(py::handle(Py_True));
   }
 
+  std::optional<int64_t> guarding_hint() override {
+    py::gil_scoped_acquire acquire;
+    const auto r = getPyObj().attr("hint");
+    return r.is_none() ? std::nullopt
+                       : std::optional<int64_t>(r.cast<int64_t>());
+  }
+
   int64_t guard_int(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_int")(file, line).cast<int64_t>();
@@ -127,11 +134,6 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   bool expect_true(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("expect_true")(file, line).cast<bool>();
-  }
-
-  bool guard_size_oblivious(const char* file, int64_t line) override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("guard_size_oblivious")(file, line).cast<bool>();
   }
 
   bool guard_or_false(const char* file, int64_t line) override {

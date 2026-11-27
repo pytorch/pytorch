@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_types.py b/test/cpython/v3_13/test_types.py
-index d5c613b75ec74a60e624830734814ce2e4bc2f4b..d2d79db58ae35e5c8fb5c52457ef877310fadcc7 100644
+index d5c613b75ec74a60e624830734814ce2e4bc2f4b..550263780c26b1e8ef164264b9a5a59304f84660 100644
 --- a/test/cpython/v3_13/test_types.py
 +++ b/test/cpython/v3_13/test_types.py
 @@ -1,3 +1,27 @@
@@ -56,7 +56,15 @@ index d5c613b75ec74a60e624830734814ce2e4bc2f4b..d2d79db58ae35e5c8fb5c52457ef8773
  
      def test_or_types_operator(self):
          self.assertEqual(int | str, typing.Union[int, str])
-@@ -1102,7 +1125,7 @@ class UnionTests(unittest.TestCase):
+@@ -1085,6 +1108,7 @@ class UnionTests(unittest.TestCase):
+             str | _SpecialForm()
+ 
+     @cpython_only
++    @unittest.skipUnless(hasattr(sys, 'gettotalrefcount'), 'Cannot get total reference count.')
+     def test_or_type_operator_reference_cycle(self):
+         if not hasattr(sys, 'gettotalrefcount'):
+             self.skipTest('Cannot get total reference count.')
+@@ -1102,7 +1126,7 @@ class UnionTests(unittest.TestCase):
                               msg='Check for union reference leak.')
  
  
@@ -65,7 +73,7 @@ index d5c613b75ec74a60e624830734814ce2e4bc2f4b..d2d79db58ae35e5c8fb5c52457ef8773
      mappingproxy = types.MappingProxyType
  
      def test_constructor(self):
-@@ -1317,7 +1340,7 @@ class MappingProxyTests(unittest.TestCase):
+@@ -1317,7 +1341,7 @@ class MappingProxyTests(unittest.TestCase):
          self.assertEqual(hash(view), hash(mapping))
  
  
@@ -74,7 +82,7 @@ index d5c613b75ec74a60e624830734814ce2e4bc2f4b..d2d79db58ae35e5c8fb5c52457ef8773
  
      class Meta(type):
          def __init__(cls, name, bases, ns, **kw):
-@@ -1807,7 +1830,7 @@ class ClassCreationTests(unittest.TestCase):
+@@ -1807,7 +1831,7 @@ class ClassCreationTests(unittest.TestCase):
          self.assertEqual(type(typ.__bases__), TupleSubclass)
  
  
@@ -83,7 +91,7 @@ index d5c613b75ec74a60e624830734814ce2e4bc2f4b..d2d79db58ae35e5c8fb5c52457ef8773
  
      def test_constructor(self):
          def check(ns, expected):
-@@ -2054,7 +2077,7 @@ class SimpleNamespaceTests(unittest.TestCase):
+@@ -2054,7 +2078,7 @@ class SimpleNamespaceTests(unittest.TestCase):
              types.SimpleNamespace() >= FakeSimpleNamespace()
  
  
@@ -92,7 +100,7 @@ index d5c613b75ec74a60e624830734814ce2e4bc2f4b..d2d79db58ae35e5c8fb5c52457ef8773
      def test_wrong_args(self):
          samples = [None, 1, object()]
          for sample in samples:
-@@ -2367,7 +2390,7 @@ class CoroutineTests(unittest.TestCase):
+@@ -2367,7 +2391,7 @@ class CoroutineTests(unittest.TestCase):
              'close', 'throw'}))
  
  
@@ -101,7 +109,7 @@ index d5c613b75ec74a60e624830734814ce2e4bc2f4b..d2d79db58ae35e5c8fb5c52457ef8773
      def test_function_type_defaults(self):
          def ex(a, /, b, *, c):
              return a + b + c
-@@ -2400,7 +2423,7 @@ class FunctionTests(unittest.TestCase):
+@@ -2400,7 +2424,7 @@ class FunctionTests(unittest.TestCase):
              )
  
  
@@ -110,7 +118,7 @@ index d5c613b75ec74a60e624830734814ce2e4bc2f4b..d2d79db58ae35e5c8fb5c52457ef8773
  
      @classmethod
      def setUpClass(cls):
-@@ -2410,6 +2433,7 @@ class SubinterpreterTests(unittest.TestCase):
+@@ -2410,6 +2434,7 @@ class SubinterpreterTests(unittest.TestCase):
          except ModuleNotFoundError:
              raise unittest.SkipTest('subinterpreters required')
          import test.support.interpreters.channels
@@ -118,7 +126,7 @@ index d5c613b75ec74a60e624830734814ce2e4bc2f4b..d2d79db58ae35e5c8fb5c52457ef8773
  
      @cpython_only
      @no_rerun('channels (and queues) might have a refleak; see gh-122199')
-@@ -2446,4 +2470,4 @@ class SubinterpreterTests(unittest.TestCase):
+@@ -2446,4 +2471,4 @@ class SubinterpreterTests(unittest.TestCase):
  
  
  if __name__ == '__main__':

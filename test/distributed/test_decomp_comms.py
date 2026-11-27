@@ -9,7 +9,6 @@ into:
 """
 
 import operator
-import unittest
 
 import torch
 import torch.distributed as dist
@@ -18,9 +17,7 @@ from torch._inductor.fx_passes.decomp_comms import decomp_gram_matrix_all_gather
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
-from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 aten = torch.ops.aten
@@ -31,9 +28,9 @@ def _count_ops(graph: fx.Graph, target) -> int:  # type: ignore[type-arg]
     return sum(1 for n in graph.nodes if n.op == "call_function" and n.target is target)
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
-@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestDecompGramMatrixAllGather(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -41,7 +38,7 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
 
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
+        cls.device = "meta"
 
     @classmethod
     def tearDownClass(cls):

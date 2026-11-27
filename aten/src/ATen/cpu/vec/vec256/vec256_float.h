@@ -159,6 +159,10 @@ class Vectorized<float> {
     }
     return loadu(tmp);
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<float> or_nan_if(const Vectorized<float>& mask) const {
+    return _mm256_or_ps(values, mask);
+  }
   Vectorized<float> abs() const {
     auto mask = _mm256_set1_ps(-0.f);
     return _mm256_andnot_ps(mask, values);
@@ -171,8 +175,7 @@ class Vectorized<float> {
     const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm256_set1_ps(c10::pi<float>);
 
-    const auto neg_mask = _mm256_cmp_ps(values, zero_vec, _CMP_LT_OQ);
-    auto angle = _mm256_blendv_ps(zero_vec, pi, neg_mask);
+    auto angle = _mm256_blendv_ps(zero_vec, pi, values);
     angle = _mm256_blendv_ps(angle, nan_vec, nan_mask);
     return angle;
   }
@@ -185,6 +188,16 @@ class Vectorized<float> {
   Vectorized<float> conj() const {
     return *this;
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> acos() const;
+  Vectorized<float> acosh() const;
+  Vectorized<float> asin() const;
+  Vectorized<float> asinh() const;
+  Vectorized<float> atan() const;
+  Vectorized<float> atanh() const;
+  Vectorized<float> atan2(const Vectorized<float>& b) const;
+  Vectorized<float> copysign(const Vectorized<float>& sign) const;
+#else
   Vectorized<float> acos() const {
     return Vectorized<float>(Sleef_acosf8_u10(values));
   }
@@ -212,6 +225,10 @@ class Vectorized<float> {
   Vectorized<float> copysign(const Vectorized<float>& sign) const {
     return Vectorized<float>(Sleef_copysignf8(values, sign));
   }
+#endif
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> erf() const;
+#else
   Vectorized<float> erf() const {
     // constants
     const auto neg_zero_vec = _mm256_set1_ps(-0.f);
@@ -244,6 +261,14 @@ class Vectorized<float> {
     auto tmp7 = _mm256_fmadd_ps(tmp6, r, one_vec);
     return _mm256_xor_ps(sign_mask, tmp7);
   }
+#endif
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> erfc() const;
+  Vectorized<float> erfinv() const;
+  Vectorized<float> exp() const;
+  Vectorized<float> exp2() const;
+  Vectorized<float> expm1() const;
+#else
   Vectorized<float> erfc() const {
     return Vectorized<float>(Sleef_erfcf8_u15(values));
   }
@@ -259,6 +284,7 @@ class Vectorized<float> {
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f8_u10(values));
   }
+#endif
   Vectorized<float> fexp_u20() const {
     const __m256 vec_c0 = _mm256_set1_ps(0.00010703434948458272f);
     const __m256 vec_c1 = _mm256_set1_ps(0.30354260500649682f);
@@ -317,7 +343,7 @@ class Vectorized<float> {
   }
 
   Vectorized<float> exp_u20() const {
-    // A faster version of exp with ULP=20
+    // A faster version of exp, within 2 ULP
     const __m256 vec_factorial_1 =
         _mm256_set1_ps(0.999999701f); // 1/factorial(1)
     const __m256 vec_factorial_2 =
@@ -332,12 +358,13 @@ class Vectorized<float> {
         _mm256_castsi256_ps(_mm256_set1_epi32(0x3fb8aa3b)); // log2(e)
     const __m256 vec_half = _mm256_set1_ps(0.5f);
     const __m256 vec_one = _mm256_set1_ps(1.f);
-    const __m256 vec_zero = _mm256_set1_ps(0.f);
-    const __m256 vec_two = _mm256_set1_ps(2.f);
-    const __m256 vec_ln2f =
+    // Cody-Waite split of ln(2).
+    const __m256 vec_ln2f_hi =
         _mm256_castsi256_ps(_mm256_set1_epi32(0x3f317218)); // ln(2)
-    const __m256 vec_ln_flt_min =
-        _mm256_castsi256_ps(_mm256_set1_epi32(0xc2aeac50));
+    const __m256 vec_ln2f_lo =
+        _mm256_set1_ps(-0x1.05c61p-29f); // ln(2) - ln2f_hi
+    // exp(x) rounds to zero below this.
+    const __m256 vec_exp_min = _mm256_set1_ps(-104.f);
     const __m256 vec_ln_flt_max =
         _mm256_castsi256_ps(_mm256_set1_epi32(0x42b17218));
     const __m256i vec_127 = _mm256_set1_epi32(0x0000007f);
@@ -347,17 +374,20 @@ class Vectorized<float> {
     // = exp(n * ln(2) + r) // divide x by ln(2) and get quot and rem
     // = 2^n * exp(r) // simplify the exp(n*ln(2)) expression
 
-    auto less_ln_flt_min_mask =
-        _mm256_cmp_ps(values, vec_ln_flt_min, 1 /*_CMP_LT_OS*/);
-    auto vec_src = _mm256_min_ps(values, vec_ln_flt_max);
-    vec_src = _mm256_max_ps(vec_src, vec_ln_flt_min);
+    // Below vec_exp_min exp rounds to 0. Those lanes, -inf included, are
+    // computed from 0 and zeroed at the end, which avoids slow subnormal
+    // arithmetic. NaN compares false and propagates.
+    const auto zero_mask = _mm256_cmp_ps(values, vec_exp_min, _CMP_LT_OQ);
+    auto vec_src =
+        _mm256_andnot_ps(zero_mask, _mm256_min_ps(vec_ln_flt_max, values));
 
     // fx = floorf(x * log2ef + 0.5)
     auto vec_fx = _mm256_fmadd_ps(vec_src, vec_exp_log2ef, vec_half);
     vec_fx = _mm256_floor_ps(vec_fx);
 
     // x = x - fx * ln2
-    auto vec_exp_poly = _mm256_fnmadd_ps(vec_fx, vec_ln2f, vec_src);
+    auto vec_exp_poly = _mm256_fnmadd_ps(vec_fx, vec_ln2f_hi, vec_src);
+    vec_exp_poly = _mm256_fnmadd_ps(vec_fx, vec_ln2f_lo, vec_exp_poly);
 
     // compute polynomial
     auto vec_res =
@@ -367,20 +397,36 @@ class Vectorized<float> {
     vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_1);
     vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_one);
 
-    // compute 2^(n-1)
-    auto vec_exp_number = _mm256_sub_ps(vec_fx, vec_one);
-    auto vec_exp_number_i = _mm256_cvtps_epi32(vec_exp_number);
-    auto vec_two_pow_n_i = _mm256_add_epi32(vec_exp_number_i, vec_127);
-    vec_two_pow_n_i = _mm256_slli_epi32(vec_two_pow_n_i, n_mantissa_bits);
-    auto vec_two_pow_n = _mm256_castsi256_ps(vec_two_pow_n_i);
-    vec_two_pow_n =
-        _mm256_blendv_ps(vec_two_pow_n, vec_zero, less_ln_flt_min_mask);
-
-    // y = y * 2^n
-    vec_res = _mm256_mul_ps(vec_res, vec_two_pow_n);
-    vec_res = _mm256_mul_ps(vec_res, vec_two);
-    return vec_res;
+    // y = y * 2^n: add n to the exponent bits. For n outside [-125, 127]
+    // (subnormal results, or 2^128), scale by two normal factors instead so
+    // the result rounds once and does not overflow.
+    auto vec_n = _mm256_cvtps_epi32(vec_fx);
+    auto vec_scaled = _mm256_castsi256_ps(_mm256_add_epi32(
+        _mm256_castps_si256(vec_res),
+        _mm256_slli_epi32(vec_n, n_mantissa_bits)));
+    const auto rare = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
+        _mm256_add_epi32(vec_n, _mm256_set1_epi32(INT32_MIN + 125)),
+        _mm256_set1_epi32(INT32_MIN + 252)));
+    if (_mm256_movemask_ps(rare)) {
+      auto vec_n1 = _mm256_srai_epi32(vec_n, 1);
+      auto vec_n2 = _mm256_sub_epi32(vec_n, vec_n1);
+      auto vec_two_pow_n1 = _mm256_castsi256_ps(_mm256_slli_epi32(
+          _mm256_add_epi32(vec_n1, vec_127), n_mantissa_bits));
+      auto vec_two_pow_n2 = _mm256_castsi256_ps(_mm256_slli_epi32(
+          _mm256_add_epi32(vec_n2, vec_127), n_mantissa_bits));
+      auto vec_two_factor =
+          _mm256_mul_ps(_mm256_mul_ps(vec_res, vec_two_pow_n1), vec_two_pow_n2);
+      vec_scaled = _mm256_blendv_ps(vec_scaled, vec_two_factor, rare);
+    }
+    return _mm256_andnot_ps(zero_mask, vec_scaled);
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> fmod(const Vectorized<float>& q) const;
+  Vectorized<float> log() const;
+  Vectorized<float> log2() const;
+  Vectorized<float> log10() const;
+  Vectorized<float> log1p() const;
+#else
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     return Vectorized<float>(Sleef_fmodf8(values, q));
   }
@@ -396,7 +442,22 @@ class Vectorized<float> {
   Vectorized<float> log1p() const {
     return Vectorized<float>(Sleef_log1pf8_u10(values));
   }
+#endif
   Vectorized<float> frac() const;
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> sin() const;
+  Vectorized<float> sinh() const;
+  Vectorized<float> cos() const;
+  Vectorized<float> cosh() const;
+  Vectorized<float> ceil() const;
+  Vectorized<float> floor() const;
+  Vectorized<float> hypot(const Vectorized<float>& b) const;
+  Vectorized<float> i0() const;
+  Vectorized<float> i0e() const;
+  Vectorized<float> digamma() const;
+  Vectorized<float> igamma(const Vectorized<float>& x) const;
+  Vectorized<float> igammac(const Vectorized<float>& x) const;
+#else
   Vectorized<float> sin() const {
     return Vectorized<float>(Sleef_sinf8_u35(values));
   }
@@ -450,9 +511,16 @@ class Vectorized<float> {
     }
     return loadu(tmp);
   }
+#endif
   Vectorized<float> neg() const {
     return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> nextafter(const Vectorized<float>& b) const;
+  Vectorized<float> round() const;
+  Vectorized<float> tan() const;
+  Vectorized<float> tanh() const;
+#else
   Vectorized<float> nextafter(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_nextafterf8(values, b));
   }
@@ -466,12 +534,17 @@ class Vectorized<float> {
   Vectorized<float> tanh() const {
     return Vectorized<float>(Sleef_tanhf8_u10(values));
   }
+#endif
   Vectorized<float> trunc() const {
     return _mm256_round_ps(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> lgamma() const;
+#else
   Vectorized<float> lgamma() const {
     return Vectorized<float>(Sleef_lgammaf8_u10(values));
   }
+#endif
   Vectorized<float> sqrt() const {
     return _mm256_sqrt_ps(values);
   }
@@ -481,9 +554,13 @@ class Vectorized<float> {
   Vectorized<float> rsqrt() const {
     return _mm256_div_ps(_mm256_set1_ps(1), _mm256_sqrt_ps(values));
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> pow(const Vectorized<float>& b) const;
+#else
   Vectorized<float> pow(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_powf8_u10(values, b));
   }
+#endif
   float reduce_add() const {
     auto v = values;
     // 128-bit shuffle
@@ -497,6 +574,10 @@ class Vectorized<float> {
     v = _mm256_add_ps(v, v1);
     return _mm256_cvtss_f32(v);
   }
+  // Propagates NaN, matching maximum() and torch.max. MAXPS returns its second
+  // operand when either input is NaN, so the ladder below does not merely drop
+  // a NaN, it displaces whatever the NaN was compared against -- a real maximum
+  // can fall out of the reduction. Test the inputs rather than the result.
   float reduce_max() const {
     auto v = values;
     // 128-bit shuffle
@@ -508,7 +589,10 @@ class Vectorized<float> {
     // 32-bit shuffle
     v1 = _mm256_shuffle_ps(v, v, 0xB1);
     v = _mm256_max_ps(v, v1);
-    return _mm256_cvtss_f32(v);
+    const float m = _mm256_cvtss_f32(v);
+    return _mm256_movemask_ps(_mm256_cmp_ps(values, values, _CMP_UNORD_Q))
+        ? std::numeric_limits<float>::quiet_NaN()
+        : m;
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN

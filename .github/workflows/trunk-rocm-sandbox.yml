@@ -50,6 +50,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-noble-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
+      rocm-arch-list: gfx950
       # The amd-sandbox experiment routes the mi350 test shards onto the
       # amd-sandbox- prefixed runner scale sets via the dedicated
       # amd-sandbox-label-type output (empty when the experiment is disabled, in
@@ -75,7 +76,7 @@ jobs:
 
   linux-noble-rocm-py3_11-test:
     name: linux-noble-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs:
       - linux-noble-rocm-py3_11-build
       - target-determination
@@ -83,12 +84,4 @@ jobs:
       build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
-      # The default config picks these up by discovery; the inductor config in
-      # this same job already runs them. Only affects default (see EXCLUDE_CLAUSE
-      # in .ci/pytorch/test.sh).
-      tests-to-exclude: >-
-        inductor/test_torchinductor
-        inductor/test_torchinductor_opinfo
-        inductor/test_aot_inductor
-        inductor/test_cpu_select_algorithm
     secrets: inherit

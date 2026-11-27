@@ -82,7 +82,6 @@ REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.item.default", aten_item, {
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.narrow.default", aten_narrow, {
   const auto& self = KernelInput(0).toTensor();
-  const auto dim = KernelInput(1).toInt();
   int64_t start = 0;
   if (KernelInput(2).isScalar()) {
     start = KernelInput(2).toInt();
@@ -92,6 +91,7 @@ REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.narrow.default", aten_narrow, {
   }
   const auto length = KernelInput(3).toInt();
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  const auto dim = at::maybe_wrap_dim(KernelInput(1).toInt(), self.dim());
   auto cur_size = self.sizes()[dim];
   if (start != cur_size && start < 0) {
     start = at::maybe_wrap_dim(start, cur_size);

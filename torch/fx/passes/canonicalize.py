@@ -94,19 +94,24 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
             return False
-        # triton_kernel_wrapper_mutation mutates tensors via kwargs but
-        # is not detected by is_impure() or trailing-underscore checks.
-        if name == "triton_kernel_wrapper_mutation":
+        # User-kernel mutation HOPs (triton_kernel_wrapper_mutation, ...) mutate
+        # tensors via kwargs but are not detected by is_impure() or
+        # trailing-underscore checks.
+        from torch._higher_order_ops.user_kernel_hop import is_user_kernel_mutation_hop
+
+        if is_user_kernel_mutation_hop(node.target):
             return False
         # Non-OpOverload targets with no FX Node arguments are likely
-        # state-changing (e.g., _vmap_increment_nesting,
-        # _set_fwd_grad_enabled). This is intentionally conservative:
-        # pure constant-producing ops would also be treated as barriers,
-        # but those are rare in Dynamo output graphs (constants are
+        # state-changing (e.g., _set_fwd_grad_enabled). This is intentionally
+        # conservative: pure constant-producing ops would also be treated as
+        # barriers, but those are rare in Dynamo output graphs (constants are
         # typically lifted as placeholders or get_attr nodes).
         if not node.all_input_nodes:
             return False
-        # functorch batch dim ops modify the vmap interpreter stack.
+        # The functorch batch dim ops modify the vmap interpreter stack.
+        # is_impure() covers their wrappers in torch._functorch.predispatch;
+        # this name check also covers the C bindings with the same names,
+        # such as torch._add_batch_dim.
         if name in ("_add_batch_dim", "_remove_batch_dim"):
             return False
         # HigherOrderOperators are proper operators whose impurity is_impure()

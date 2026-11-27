@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/core/TensorAccessor.h>
 #include <torch/headeronly/cuda/Atomic.h>
 #include <torch/headeronly/cuda/KernelUtils.h>
 
@@ -18,6 +19,44 @@ namespace at::native {
 
 using torch::headeronly::fastAtomicAdd;
 using torch::headeronly::fastSpecializedAtomicAdd;
+
+// Scatter into a packed accessor without naming a bound.
+//
+// fastAtomicAdd needs to know how far it may look for a pairing partner -- see
+// Note [Passing pointer and offset to fastAtomicAdd] in GridSampler.cu. A
+// caller holding a raw pointer supplies that by hand, and too large a value
+// lets the pairing write past the allocation. An accessor already carries what
+// it would be derived from:
+//
+//   memory_span = 1 + sum over d of (size[d] - 1) * stride[d]
+//
+// the distance to the last addressable element rather than the element count,
+// which is what at::native::storage_size_for computes on the host. The two
+// differ for a strided view, whose gaps are legal pairing partners: inside the
+// region, though belonging to whatever the view was taken from, and only ever
+// receiving -0.0, which leaves their values unchanged.
+template <
+    typename scalar_t,
+    size_t N,
+    template <typename U> class PtrTraits,
+    typename index_t,
+    typename... Idx>
+__device__ __forceinline__ void fastAtomicAdd(
+    at::GenericPackedTensorAccessor<scalar_t, N, PtrTraits, index_t> accessor,
+    scalar_t value,
+    Idx... indices) {
+  static_assert(
+      sizeof...(Idx) == N, "fastAtomicAdd needs one index per dimension");
+  const index_t index[N] = {static_cast<index_t>(indices)...};
+  index_t offset = 0;
+  index_t memory_span = 1;
+#pragma unroll
+  for (size_t d = 0; d < N; ++d) {
+    offset += index[d] * accessor.stride(d);
+    memory_span += (accessor.size(d) - 1) * accessor.stride(d);
+  }
+  fastAtomicAdd(accessor.data(), offset, memory_span, value, true);
+}
 
 __device__ __forceinline__ size_t
 idx(const size_t nc,
@@ -42,6 +81,10 @@ __device__ __forceinline__ index_t idx_cl(
 }
 
 #ifdef USE_ROCM
+// LLVM 18+. __MEMORY_SCOPE_DEVICE is the agent scope.
+#define TORCH_HIP_RELAXED_AGENT_STORE(ptr, val) \
+  __scoped_atomic_store_n((ptr), (val), __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)
+
 // This function implements a committed store.
 // Upon returning, the store is committed to global memory.
 // This is useful in avoiding the need for fences.
@@ -62,32 +105,20 @@ __device__ inline void cmtdStore(void* address, T value) {
   } _pnr = {.v = value};
   if constexpr (num_long_per_val * sizeof(long) == sizeof(value))
     for (int i = 0; i < num_long_per_val; i++)
-      __hip_atomic_store(
-          reinterpret_cast<long*>(address) + i,
-          _pnr.l[i],
-          __ATOMIC_RELAXED,
-          __HIP_MEMORY_SCOPE_AGENT);
+      TORCH_HIP_RELAXED_AGENT_STORE(
+          reinterpret_cast<long*>(address) + i, _pnr.l[i]);
   else if constexpr (num_int_per_val * sizeof(int) == sizeof(value))
     for (int i = 0; i < num_int_per_val; i++)
-      __hip_atomic_store(
-          reinterpret_cast<int*>(address) + i,
-          _pnr.i[i],
-          __ATOMIC_RELAXED,
-          __HIP_MEMORY_SCOPE_AGENT);
+      TORCH_HIP_RELAXED_AGENT_STORE(
+          reinterpret_cast<int*>(address) + i, _pnr.i[i]);
   else if constexpr (num_short_per_val * sizeof(short) == sizeof(value))
     for (int i = 0; i < num_short_per_val; i++)
-      __hip_atomic_store(
-          reinterpret_cast<short*>(address) + i,
-          _pnr.s[i],
-          __ATOMIC_RELAXED,
-          __HIP_MEMORY_SCOPE_AGENT);
+      TORCH_HIP_RELAXED_AGENT_STORE(
+          reinterpret_cast<short*>(address) + i, _pnr.s[i]);
   else if constexpr (num_char_per_val * sizeof(char) == sizeof(value))
     for (int i = 0; i < num_char_per_val; i++)
-      __hip_atomic_store(
-          reinterpret_cast<char*>(address) + i,
-          _pnr.c[i],
-          __ATOMIC_RELAXED,
-          __HIP_MEMORY_SCOPE_AGENT);
+      TORCH_HIP_RELAXED_AGENT_STORE(
+          reinterpret_cast<char*>(address) + i, _pnr.c[i]);
   if constexpr (wait_for_commit) {
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if defined(__GFX12__)
@@ -101,6 +132,7 @@ __device__ inline void cmtdStore(void* address, T value) {
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
   }
 }
+#undef TORCH_HIP_RELAXED_AGENT_STORE
 
 // This function implements warp-level opportunistic fastatomics
 // To reduce contention on an atomicAdd, this replaces per-thread atomicAdd with

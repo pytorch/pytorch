@@ -276,6 +276,12 @@ def register_custom_class(
     torch._C._register_opaque_type(name)
 
 
+def unregister_custom_class(cls: Any) -> None:
+    type_info = _OPAQUE_TYPES.pop(cls)
+    _OPAQUE_TYPES_BY_NAME.pop(type_info.class_name, None)
+    torch._C._unregister_opaque_type(type_info.class_name)
+
+
 def register_opaque_type(
     cls: Any,
     *,
@@ -478,3 +484,15 @@ def get_member_type(cls: Any, member_name: str) -> MemberType | None:
     if info is None:
         return None
     return info.members.get(member_name)
+
+
+class OpaqueStr(str, CustomClassBase):
+    """
+    A str boxed as a symbolic opaque object, so torch.compile can pass a string
+    into a graph as a runtime input instead of specializing on its value.
+    """
+
+    __slots__ = ()
+
+
+register_custom_class(OpaqueStr, typ="symbolic")

@@ -39,20 +39,20 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: linux-jammy-py3.11-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
+          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
         ]}
       build-additional-packages: "vision audio torchao"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: cpu
     secrets: inherit
@@ -68,7 +68,7 @@ jobs:
       docker-image: ${{ needs.nightly-inductor-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.nightly-inductor-benchmarks-build.outputs.test-matrix }}
       timeout-minutes: 720
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: cpu
     secrets: inherit

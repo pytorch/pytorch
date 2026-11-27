@@ -55,17 +55,19 @@ template <typename P, typename T>
 class ListIterator {
   static_assert(std::is_same_v<std::remove_const_t<P>, IntrusiveListHook>);
   static_assert(std::is_base_of_v<IntrusiveListHook, T>);
-  P* ptr_;
+  P* ptr_ = nullptr;
 
   friend class IntrusiveList<T>;
 
  public:
+  using iterator_concept = std::bidirectional_iterator_tag;
   using iterator_category = std::bidirectional_iterator_tag;
   using value_type = std::conditional_t<std::is_const_v<P>, const T, T>;
   using difference_type = std::ptrdiff_t;
   using pointer = value_type*;
   using reference = value_type&;
 
+  ListIterator() = default;
   explicit ListIterator(P* ptr) : ptr_(ptr) {}
   ~ListIterator() = default;
 
@@ -107,10 +109,22 @@ class ListIterator {
     return *this;
   }
 
+  ListIterator operator++(int) {
+    auto old = *this;
+    ++*this;
+    return old;
+  }
+
   ListIterator& operator--() {
     TORCH_CHECK(ptr_);
     ptr_ = ptr_->prev_;
     return *this;
+  }
+
+  ListIterator operator--(int) {
+    auto old = *this;
+    --*this;
+    return old;
   }
 
   [[nodiscard]] auto* operator->() const {

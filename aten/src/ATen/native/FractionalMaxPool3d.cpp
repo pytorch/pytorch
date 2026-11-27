@@ -133,13 +133,13 @@ void fractional_max_pool3d_out_single_batch_frame(
       scalar_t* outputForPlane = output + plane * outputT * outputH * outputW;
       int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
 
-      for (int64_t t = 0; t < outputT; ++t) {
+      for (const auto t : c10::irange(outputT)) {
         int64_t inputTStart = sequenceT[t];
 
-        for (int64_t h = 0; h < outputH; ++h) {
+        for (const auto h : c10::irange(outputH)) {
           int64_t inputHStart = sequenceH[h];
 
-          for (int64_t w = 0; w < outputW; ++w) {
+          for (const auto w : c10::irange(outputW)) {
             int64_t inputWStart = sequenceW[w];
 
             int64_t t2 = inputTStart, h2 = inputHStart, w2 = inputWStart;
@@ -246,8 +246,8 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
     [&] {
       fractional_max_pool3d_out_frame<scalar_t>(
         input.const_data_ptr<scalar_t>(),
-        output.data_ptr<scalar_t>(),
-        indices.data_ptr<int64_t>(),
+        output.mutable_data_ptr<scalar_t>(),
+        indices.mutable_data_ptr<int64_t>(),
         randomSamples.const_data_ptr<scalar_t>(),
         numBatch, numPlanes,
         inputT, inputH, inputW,
@@ -276,9 +276,9 @@ void fractional_max_pool3d_backward_out_single_batch_frame(
                   plane * outputT * outputH * outputW;
       const int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
 
-      for (int64_t t = 0; t < outputT; ++t) {
-        for (int64_t h = 0; h < outputH; ++h) {
-          for (int64_t w = 0; w < outputW; ++w) {
+      for (const auto t : c10::irange(outputT)) {
+        for (const auto h : c10::irange(outputH)) {
+          for (const auto w : c10::irange(outputW)) {
             int64_t outputIndex = t * outputH * outputW + h * outputW + w;
             int64_t index = indicesForPlane[outputIndex];
             AT_ASSERT(index >= 0 && index < inputT * inputH * inputW);
@@ -379,7 +379,7 @@ void fractional_max_pool3d_backward_out_cpu_template(
     "fractional_max_pool3d_backward_out_frame",
     [&]{
       fractional_max_pool3d_backward_out_frame<scalar_t>(
-        gradInput.data_ptr<scalar_t>(),
+        gradInput.mutable_data_ptr<scalar_t>(),
         gradOutput.const_data_ptr<scalar_t>(),
         indices.const_data_ptr<int64_t>(),
         numBatch, numPlanes,

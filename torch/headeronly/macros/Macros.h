@@ -421,6 +421,61 @@ static inline int C10_WARP_SIZE_INTERNAL() {
 #define __func__ __FUNCTION__
 #endif
 
+// The HIDDEN_NAMESPACE_BEGIN and HIDDEN_NAMESPACE_END below
+// are needed for maintaining robustness in our header APIs in
+// torch/headeronly and torch/csrc/stable under the namespaces
+// torch::headeronly and torch::stable respectively. We enforce
+// hidden visibility for these APIs because we want to enable
+// loading custom extensions compiled against different libtorch
+// versions where these APIs may have changed.
+
+// Helper macros to handle 1-3 hidden namespace levels when not windows
+#define _HIDDEN_NS_GET_MACRO(_1, _2, _3, NAME, ...) NAME
+#define _HIDDEN_NS_1(n1) namespace n1 __attribute__((visibility("hidden"))) {
+#define _HIDDEN_NS_2(n1, n2) \
+  namespace n1 {             \
+  namespace n2 __attribute__((visibility("hidden"))) {
+#define _HIDDEN_NS_3(n1, n2, n3) \
+  namespace n1::n2 {             \
+  namespace n3 __attribute__((visibility("hidden"))) {
+
+// Helper macros to close namespaces when not windows
+#define _HIDDEN_NS_END_1(n1) }
+#define _HIDDEN_NS_END_N(n1, ...) \
+  }                               \
+  }
+
+// Helper macros to join strs with :: (for win, where symbols are hidden by
+// default)
+#define _EXPAND(...) __VA_ARGS__
+#define _JOIN_GET_MACRO(_1, _2, _3, NAME, ...) NAME
+#define _JOIN_NS1(a) a
+#define _JOIN_NS2(a, b) a::b
+#define _JOIN_NS3(a, b, c) a::b::c
+
+#if !defined(HIDDEN_NAMESPACE_BEGIN)
+#if defined(__GNUG__) && !defined(_WIN32)
+#define HIDDEN_NAMESPACE_BEGIN(...) \
+  _HIDDEN_NS_GET_MACRO(             \
+      __VA_ARGS__, _HIDDEN_NS_3, _HIDDEN_NS_2, _HIDDEN_NS_1)(__VA_ARGS__)
+#else
+#define HIDDEN_NAMESPACE_BEGIN(...)  \
+  namespace _EXPAND(_JOIN_GET_MACRO( \
+      __VA_ARGS__, _JOIN_NS3, _JOIN_NS2, _JOIN_NS1)(__VA_ARGS__)) {
+#endif
+#endif
+
+#if !defined(HIDDEN_NAMESPACE_END)
+#if defined(__GNUG__) && !defined(_WIN32)
+#define HIDDEN_NAMESPACE_END(...)                                         \
+  _HIDDEN_NS_GET_MACRO(                                                   \
+      __VA_ARGS__, _HIDDEN_NS_END_N, _HIDDEN_NS_END_N, _HIDDEN_NS_END_1)( \
+      __VA_ARGS__)
+#else
+#define HIDDEN_NAMESPACE_END(...) }
+#endif
+#endif
+
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
@@ -556,7 +611,7 @@ __host__ __device__
   }
 #else
 #if defined(USE_ROCM) && defined(__HIP_DEVICE_COMPILE__)
-namespace torch::headeronly::detail {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly, detail)
 // Compile-time string fragment for CUDA_KERNEL_ASSERT message pieces.
 template <unsigned N>
 struct RoCmAssertLit {
@@ -616,7 +671,7 @@ rocm_assert_one_shot(const char (&msg)[N], unsigned length) {
   __ockl_fprintf_append_string_n(d, msg, length, 1);
   __builtin_trap();
 }
-} // namespace torch::headeronly::detail
+HIDDEN_NAMESPACE_END(torch, headeronly, detail)
 
 #define ROCM_ASSERT_LIT(s) ::torch::headeronly::detail::RoCmAssertLit(s)
 
@@ -770,61 +825,6 @@ rocm_assert_one_shot(const char (&msg)[N], unsigned length) {
 #define C10_RETURN_MOVE_IF_OLD_COMPILER 1
 #else
 #define C10_RETURN_MOVE_IF_OLD_COMPILER 0
-#endif
-
-// The HIDDEN_NAMESPACE_BEGIN and HIDDEN_NAMESPACE_END below
-// are needed for maintaining robustness in our header APIs in
-// torch/headeronly and torch/csrc/stable under the namespaces
-// torch::headeronly and torch::stable respectively. We enforce
-// hidden visibility for these APIs because we want to enable
-// loading custom extensions compiled against different libtorch
-// versions where these APIs may have changed.
-
-// Helper macros to handle 1-3 hidden namespace levels when not windows
-#define _HIDDEN_NS_GET_MACRO(_1, _2, _3, NAME, ...) NAME
-#define _HIDDEN_NS_1(n1) namespace n1 __attribute__((visibility("hidden"))) {
-#define _HIDDEN_NS_2(n1, n2) \
-  namespace n1 {             \
-  namespace n2 __attribute__((visibility("hidden"))) {
-#define _HIDDEN_NS_3(n1, n2, n3) \
-  namespace n1::n2 {             \
-  namespace n3 __attribute__((visibility("hidden"))) {
-
-// Helper macros to close namespaces when not windows
-#define _HIDDEN_NS_END_1(n1) }
-#define _HIDDEN_NS_END_N(n1, ...) \
-  }                               \
-  }
-
-// Helper macros to join strs with :: (for win, where symbols are hidden by
-// default)
-#define _EXPAND(...) __VA_ARGS__
-#define _JOIN_GET_MACRO(_1, _2, _3, NAME, ...) NAME
-#define _JOIN_NS1(a) a
-#define _JOIN_NS2(a, b) a::b
-#define _JOIN_NS3(a, b, c) a::b::c
-
-#if !defined(HIDDEN_NAMESPACE_BEGIN)
-#if defined(__GNUG__) && !defined(_WIN32)
-#define HIDDEN_NAMESPACE_BEGIN(...) \
-  _HIDDEN_NS_GET_MACRO(             \
-      __VA_ARGS__, _HIDDEN_NS_3, _HIDDEN_NS_2, _HIDDEN_NS_1)(__VA_ARGS__)
-#else
-#define HIDDEN_NAMESPACE_BEGIN(...)  \
-  namespace _EXPAND(_JOIN_GET_MACRO( \
-      __VA_ARGS__, _JOIN_NS3, _JOIN_NS2, _JOIN_NS1)(__VA_ARGS__)) {
-#endif
-#endif
-
-#if !defined(HIDDEN_NAMESPACE_END)
-#if defined(__GNUG__) && !defined(_WIN32)
-#define HIDDEN_NAMESPACE_END(...)                                         \
-  _HIDDEN_NS_GET_MACRO(                                                   \
-      __VA_ARGS__, _HIDDEN_NS_END_N, _HIDDEN_NS_END_N, _HIDDEN_NS_END_1)( \
-      __VA_ARGS__)
-#else
-#define HIDDEN_NAMESPACE_END(...) }
-#endif
 #endif
 
 #endif // C10_MACROS_MACROS_H_

@@ -20,7 +20,7 @@ if not torch.backends.mps.is_available():
         print("MPS not available because the current PyTorch install was not "
               "built with MPS enabled.")
     else:
-        print("MPS not available because the current macOS version is not 14.0+ "
+        print("MPS not available because the current macOS version is not 15.0+ "
               "and/or you do not have an MPS-enabled device on this machine.")
 
 else:

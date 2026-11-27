@@ -37,7 +37,7 @@ class WrapperModule(torch.nn.Module):
 
 class AOTIRunnerUtil:
     @staticmethod
-    def _run_abicompat_package(package_path, list_example_inputs, rng_state=None):
+    def _load_abicompat_package(package_path, *args, **kwargs):
         with PT2ArchiveReader(package_path) as reader:
             names = reader.get_file_names()
             abicompat_names = [name for name in names if name.endswith("_abicompat.so")]
@@ -59,10 +59,29 @@ class AOTIRunnerUtil:
                         output_name = legacy_name if name == abicompat_name else name
                         writer.write_bytes(output_name, reader.read_bytes(name))
 
-                optimized = torch._inductor.aoti_load_package(abicompat_package_path)
-                if rng_state is not None:
-                    torch.set_rng_state(rng_state)
-                return [optimized(*inputs) for inputs in list_example_inputs]
+                return torch._inductor.aoti_load_package(
+                    abicompat_package_path, *args, **kwargs
+                )
+
+    @staticmethod
+    def load_package(package_path, *args, **kwargs):
+        """Load an AOTI package, honoring AOTI_TEST_USE_ABICOMPAT_DSO.
+
+        Tests that load packages directly instead of via run/run_multiple must
+        use this so the local-build target exercises the ABI-compatible DSO
+        rather than the legacy libstdc++ DSO, which cannot dlopen on hosts
+        with an older platform libstdc++.
+        """
+        if os.environ.get("AOTI_TEST_USE_ABICOMPAT_DSO") == "1":
+            return AOTIRunnerUtil._load_abicompat_package(package_path, *args, **kwargs)
+        return torch._inductor.aoti_load_package(package_path, *args, **kwargs)
+
+    @staticmethod
+    def _run_abicompat_package(package_path, list_example_inputs, rng_state=None):
+        optimized = AOTIRunnerUtil._load_abicompat_package(package_path)
+        if rng_state is not None:
+            torch.set_rng_state(rng_state)
+        return [optimized(*inputs) for inputs in list_example_inputs]
 
     @staticmethod
     def legacy_compile(
@@ -128,14 +147,16 @@ class AOTIRunnerUtil:
                     temp_so_path, device == "cpu"
                 )
         else:
-            if device == "cpu":
-                return torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
-            elif device == "xpu":
-                return torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
-            elif device == "mps":
-                return torch._C._aoti.AOTIModelContainerRunnerMps(so_path, 1)
-            else:
-                return torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
+            runner_cls_name = f"AOTIModelContainerRunner{device.capitalize()}"
+            runner_cls = getattr(torch._C._aoti, runner_cls_name, None)
+            if runner_cls is None:
+                raise RuntimeError(
+                    f"Unsupported device '{device}': expected {runner_cls_name} "
+                    f"in torch._C._aoti"
+                )
+            if device in ("cpu", "mps"):
+                return runner_cls(so_path, 1)
+            return runner_cls(so_path, 1, device)
 
     @staticmethod
     def legacy_load(device, so_path):

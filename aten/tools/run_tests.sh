@@ -35,6 +35,7 @@ run_if_exists() {
 }
 
 run_if_exists tensor_interop_test
+run_if_exists ivalue_test
 run_if_exists cudnn_test
 run_if_exists cuda_generator_test
 run_if_exists apply_test
@@ -50,6 +51,7 @@ run_if_exists cuda_cub_test
 run_if_exists cuda_atomic_ops_test
 run_if_exists cuda_allocator_test
 run_if_exists cuda_event_test
+run_if_exists cuda_cublas_handle_pool_test
 
 if [ "$VALGRIND" == "ON" ]; then
   # NB: As these tests are invoked by valgrind, let's leave them for now as it's

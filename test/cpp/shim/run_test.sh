@@ -10,5 +10,6 @@ if [ "$VALGRIND" == "ON" ]; then
     SUPPRESSION_FILE="${SCRIPT_DIR}/../../../aten/tools/valgrind.sup"
 
     # --leak-check=full is necessary to return 1 in case of definite and possible leaks.
-    valgrind --suppressions="${SUPPRESSION_FILE}" --error-exitcode=1  --leak-check=full ${CPP_TESTS_DIR}/test_shim
+    # Check the CUDA tests with compute-sanitizer instead.
+    valgrind --suppressions="${SUPPRESSION_FILE}" --error-exitcode=1  --leak-check=full ${CPP_TESTS_DIR}/test_shim --gtest_filter='-*Cuda*'
 fi

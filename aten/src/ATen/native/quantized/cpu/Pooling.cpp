@@ -60,8 +60,8 @@ void spatial_dilated_max_pooling(
   at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
     for (const auto p : c10::irange(start, end)) {
       const T* i_p = iData + p * iW * iH;
-      for (int64_t row = 0; row < oH; ++row) {
-        for (int64_t col = 0; col < oW; ++col) {
+      for (const auto row : c10::irange(oH)) {
+        for (const auto col : c10::irange(oW)) {
           int64_t h_start = row * sH - pH;
           int64_t w_start = col * sW - pW;
           int64_t h_end = std::min(h_start + (kH - 1) * dH + 1, iH);
@@ -278,8 +278,8 @@ Tensor q_maxpool_2d(
               qx.q_scale(),
               qx.q_zero_point());
       auto qx_contig = qx.contiguous();
-      auto qxd = qx_contig.data_ptr<Q>();
-      auto qyd = qy.data_ptr<Q>();
+      auto qxd = qx_contig.const_data_ptr<Q>();
+      auto qyd = qy.mutable_data_ptr<Q>();
       if (ndim == 3 || nbatch == 1) {
         auto* iData = qxd;
         auto* oData = qyd;
@@ -425,8 +425,8 @@ Tensor q_maxpool_3d(
       qx.q_scale(),
       qx.q_zero_point());
     auto qx_contig = qx.contiguous();
-    auto qxd = qx_contig.data_ptr<Q>();
-    auto qyd = qy.data_ptr<Q>();
+    auto qxd = qx_contig.const_data_ptr<Q>();
+    auto qyd = qy.mutable_data_ptr<Q>();
 
     spatial_dilated_max_pooling3d<Q>(
         qxd,
@@ -595,7 +595,7 @@ void check_maxpool3d_params(
            inW /* input width */,
            reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input */,
            inC /* input_pixel_stride */,
-           (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
+           reinterpret_cast<uint8_t*>(qy.mutable_data_ptr<c10::quint8>()) /* output data */,
            outC /* output_pixel_stride */,
            nullptr /* thread pool */);
    TORCH_INTERNAL_ASSERT(

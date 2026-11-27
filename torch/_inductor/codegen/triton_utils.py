@@ -58,15 +58,19 @@ def use_block_ptr_enabled() -> bool:
     return False
 
 
-def should_unwrap_unspec_arg(name: str):
-    if V.graph.is_unspec_arg(name):
-        # Unwrap on all devices except CPU
-        if V.graph.get_current_device_or_throw().type != "cpu":
-            return True
-        # Only unwrap on CPU if the input is not used as an output
-        if name not in V.graph.mutated_buffers:
-            return True
-    return False
+def should_unwrap_unspec_arg(name: str) -> bool:
+    if not V.graph.is_unspec_arg(name):
+        return False
+
+    wrapper_code = getattr(V.graph, "wrapper_code", None)
+    if getattr(wrapper_code, "preserve_zero_dim_tensor_args", False):
+        return False
+
+    # Unwrap on all devices except CPU
+    if V.graph.get_current_device_or_throw().type != "cpu":
+        return True
+    # Only unwrap on CPU if the input is not used as an output.
+    return name not in V.graph.mutated_buffers
 
 
 def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
@@ -355,23 +359,27 @@ def equal_1_arg_indices(
 def _is_tensor_within_2gb(arg: TensorArg) -> bool:
     """Check if a tensor argument's storage is provably within 2GB.
 
-    Mirrors HIPBackend.is_within_2gb() but uses compile-time symbolic analysis
-    instead of runtime tensor inspection. This enables canonicalize_pointers to
+    Mirrors HIPBackend.is_within_2gb() using constant storage sizes or
+    compile-time symbolic layouts. This enables canonicalize_pointers to
     decompose pointer arithmetic into (splat(base), offset) form for buffer ops.
     """
     MAX_BYTES = 2**31 - 1
     try:
-        # Graph inputs aren't tracked by the scheduler; get their layout
-        # from the graph_inputs dict to avoid KeyError in get_buffer_layout.
-        if arg.buffer in V.graph.graph_inputs:
-            inp = V.graph.graph_inputs[arg.buffer]
-            if hasattr(inp, "get_layout"):
-                layout = inp.get_layout()
-            else:
-                return False
+        if arg.buffer in V.graph.constants:
+            # A small view can share a backing allocation larger than 2GB.
+            storage_bytes = V.graph.constants[arg.buffer].untyped_storage().nbytes()
         else:
-            layout = _get_buffer_layout(arg.buffer)
-        storage_bytes = layout.storage_size() * arg.dtype.itemsize
+            # Graph inputs aren't tracked by the scheduler; get their layout
+            # from the graph_inputs dict to avoid KeyError in get_buffer_layout.
+            if arg.buffer in V.graph.graph_inputs:
+                inp = V.graph.graph_inputs[arg.buffer]
+                if hasattr(inp, "get_layout"):
+                    layout = inp.get_layout()
+                else:
+                    return False
+            else:
+                layout = _get_buffer_layout(arg.buffer)
+            storage_bytes = layout.storage_size() * arg.dtype.itemsize
         return V.graph.sizevars.statically_known_true(storage_bytes <= MAX_BYTES)
     except Exception:
         return False

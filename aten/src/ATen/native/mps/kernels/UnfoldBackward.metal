@@ -21,7 +21,7 @@ using namespace c10::metal;
 // Accumulation step is skipped if in_last_idx is outside of [0, size] range
 template <typename T>
 kernel void unfold_backward(
-    constant T* grad_in,
+    device const T* grad_in,
     device T* grad_out,
     constant long* input_strides,
     constant long* output_sizes,
@@ -60,7 +60,7 @@ kernel void unfold_backward(
 #define INSTANTIATE_UNFOLD_BACKWARD(DTYPE)                      \
   template [[host_name("unfold_backward_" #DTYPE)]] kernel void \
   unfold_backward<DTYPE>(                                       \
-      constant DTYPE*,                                          \
+      device const DTYPE*,                                      \
       device DTYPE*,                                            \
       constant long*,                                           \
       constant long*,                                           \

@@ -1,13 +1,26 @@
 import functools
 import inspect
 import os
+from collections import OrderedDict
 from functools import cached_property
 from typing import Any
-from typing_extensions import Unpack
+
+from torch.utils._triton import get_triton_version
 
 from ..utils import is_rocm
-from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
+from .triton_compat import (
+    ASTSource,
+    CompiledKernel,
+    knobs as triton_knobs,
+    OutOfResources,
+)
 from .triton_helpers import get_constexprs
+
+
+def _max_tmem_columns(arch: int | str | None) -> int:
+    # Mirrors CompiledKernel._init_handles; Triton 3.8 added sm_107's 576 columns:
+    # https://github.com/triton-lang/triton/commit/ab592f012f37f2c2ffc9ceda6c5b49b3c37c9036
+    return 576 if arch == 107 and get_triton_version() >= (3, 8) else 512
 
 
 @functools.lru_cache(None)
@@ -40,6 +53,11 @@ def _triton_allocator_var():
     return _allocator
 
 
+# Encoded descriptors kept per descriptor position, so a dynamic size that
+# alternates between a few values does not re-encode on every launch.
+_HOST_TMA_CACHE_ENTRIES = 4
+
+
 def make_host_tma_expander():
     """Bind the TMA arg helpers once, so the launcher does not resolve them per call.
 
@@ -47,10 +65,13 @@ def make_host_tma_expander():
     ([CUtensorMap, *shape, *strides]) for one descriptor and caches them per
     descriptor position.
 
-    On a cache hit (same base address) it returns the previously-encoded
-    CUtensorMap, skipping both the TensorDescriptor construction/validation and
-    cuTensorMapEncodeTiled. The descriptor only encodes addressing (not buffer
-    contents), so reuse is safe whenever the address/shape/strides match.
+    On a cache hit (same base address, shape and strides, among the last
+    _HOST_TMA_CACHE_ENTRIES seen at that position) it returns the
+    previously-encoded CUtensorMap, skipping both the TensorDescriptor
+    construction/validation and cuTensorMapEncodeTiled. The descriptor only
+    encodes addressing (not buffer contents), so reuse is safe whenever the
+    address/shape/strides match; shape and strides can change between launches
+    when they are dynamic sizes read at launch.
 
     `tensor` must already be TMA-aligned; the launcher calls _host_tma_aligned
     and keeps the (possibly cloned) result alive across the launch, since the
@@ -62,15 +83,17 @@ def make_host_tma_expander():
     def expand_host_tma_descriptor(
         cache, pos, tensor, cacheable, shape, strides, block, meta
     ):
-        data_ptr = tensor.data_ptr()
-        if cacheable:
-            cached = cache.get(pos)
-            if cached is not None and cached[0] == data_ptr:
-                return cached[1]
+        key = (tensor.data_ptr(), tuple(shape), tuple(strides))
+        entries = cache.setdefault(pos, OrderedDict()) if cacheable else None
+        if entries is not None and key in entries:
+            entries.move_to_end(key)
+            return entries[key]
         desc = TensorDescriptor(tensor, shape, strides, block)
         expanded = tuple(make_tensordesc_arg(desc, meta))
-        if cacheable:
-            cache[pos] = (data_ptr, expanded)
+        if entries is not None:
+            entries[key] = expanded
+            if len(entries) > _HOST_TMA_CACHE_ENTRIES:
+                entries.popitem(last=False)
         return expanded
 
     return expand_host_tma_descriptor
@@ -109,11 +132,16 @@ class StaticallyLaunchedTritonKernel:
 
     supports_global_scratch = False
 
+    @staticmethod
+    def supports_launch_pdl(target: Any) -> bool:
+        return False
+
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
         # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
+        self.cubin_filename = os.path.basename(self.cubin_path)
 
         # Used by torch.compile to filter constants in older triton versions
         # pyrefly: ignore [missing-attribute]
@@ -177,6 +205,10 @@ class StaticallyLaunchedTritonKernel:
             raise NotImplementedError("Profile scratch not yet supported")
         self.has_profile_scratch = self.profile_scratch_size is not None
 
+        self.launch_pdl = getattr(metadata, "launch_pdl", False)
+        if self.launch_pdl and not self.supports_launch_pdl(metadata.target):
+            raise NotImplementedError("PDL launch not supported")
+
         self.tensordesc_meta = getattr(metadata, "tensordesc_meta", None)
         self._has_tensordesc = False
         # tensordesc<> arg names in signature order; filled by arg_ty_from_signature
@@ -213,14 +245,16 @@ class StaticallyLaunchedTritonKernel:
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
         """
-        if self.cubin_path is None:
+        if not os.path.exists(filepath):
             if self.cubin_raw is None:
-                raise AssertionError("cubin_raw must be set when cubin_path is None")
+                raise AssertionError(
+                    "cubin_raw must be set to restore a missing binary"
+                )
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
-                self.cubin_path = filepath  # pyre-ignore
-        return self.cubin_path
+        self.cubin_path = filepath  # pyre-ignore
+        return filepath
 
     def _agnostic_cubin_path(self) -> str:
         # The cubin bytes are device-agnostic, so the same file loads onto any device.
@@ -439,7 +473,7 @@ class StaticallyLaunchedTritonKernel:
         grid_y: int,
         grid_z: int,
         stream: int,
-        *args: Unpack[tuple[object, ...]],
+        *args: *tuple[object, ...],
     ) -> None:
         """Actually run the kernel at runtime. This function is the hot codepath."""
 
@@ -495,6 +529,8 @@ class StaticallyLaunchedTritonKernel:
         if len(args) != len(arg_tys):
             raise AssertionError(f"Expected {len(arg_tys)} args, got {len(args)}")
 
+        # Only launchers with supports_launch_pdl take the trailing launch_pdl flag.
+        launch_pdl = (True,) if self.launch_pdl else ()
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
         self.C_impl._launch_kernel(
@@ -507,11 +543,16 @@ class StaticallyLaunchedTritonKernel:
             arg_tys,
             args,
             stream,
+            *launch_pdl,
         )
 
 
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
     supports_global_scratch = not is_rocm()
+
+    @staticmethod
+    def supports_launch_pdl(target: Any) -> bool:
+        return not is_rocm() and target.arch >= 90
 
     @cached_property
     def C_impl(self):
@@ -520,6 +561,8 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
         return _StaticCudaLauncher
 
     def __init__(self, kernel: CompiledKernel) -> None:
+        self.tmem_size: int | None = None
+        self.max_tmem_size = 0
         # pyrefly: ignore [missing-attribute]
         if "hsaco" in kernel.asm:
             # pyrefly: ignore [missing-attribute]
@@ -529,11 +572,22 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
         elif "cubin" in kernel.asm:
             # pyrefly: ignore [missing-attribute]
             self.cubin_raw = kernel.asm["cubin"]
+            # pyrefly: ignore [missing-attribute]
+            metadata = kernel.metadata
+            self.tmem_size = getattr(metadata, "tmem_size", None)
+            arch = getattr(getattr(metadata, "target", None), "arch", None)
+            self.max_tmem_size = _max_tmem_columns(arch)
         else:
             raise RuntimeError(
                 "Expected either 'hsaco' (ROCm) or 'cubin' (CUDA) in kernel.asm"
             )
         super().__init__(kernel)
+
+    def load_kernel(self, device: int) -> None:
+        # Match Triton's load-time check so _make_launchers can retry num_stages=1.
+        if self.tmem_size is not None and self.tmem_size > self.max_tmem_size:
+            raise OutOfResources(self.tmem_size, self.max_tmem_size, "tensor memory")
+        super().load_kernel(device)
 
     def _current_device(self) -> int:
         import torch
@@ -593,14 +647,68 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.modules = {}
 
 
+_STATIC_LAUNCHER_REGISTRY: dict[str, type[StaticallyLaunchedTritonKernel]] = {}
+
+
+def register_statically_launched_kernel(
+    device_type: str,
+    kernel_cls: type[StaticallyLaunchedTritonKernel],
+    *,
+    override: bool = False,
+) -> None:
+    """Register a device-type specific static Triton kernel launcher.
+
+    Backends (e.g. privateuse1 devices such as NPU) that implement a
+    StaticallyLaunchedTritonKernel subclass can register it here instead of
+    patching this dispatch.
+
+    Args:
+        device_type: torch.device.type string (e.g. "cuda", "hip", "xpu").
+        kernel_cls: a StaticallyLaunchedTritonKernel subclass that can launch
+            kernels compiled for device_type.
+        override: allow overriding an existing registration.
+    """
+    if not isinstance(device_type, str) or not device_type:
+        raise ValueError(
+            "device_type must be a non-empty string matching torch.device.type"
+        )
+    # Guard against non-class inputs before issubclass (its native TypeError
+    # message "must be a class" doesn't say whether the value is a valid class).
+    if not isinstance(kernel_cls, type) or not issubclass(
+        kernel_cls, StaticallyLaunchedTritonKernel
+    ):
+        raise TypeError(
+            "kernel_cls must be a StaticallyLaunchedTritonKernel subclass, "
+            "got " + str(kernel_cls)
+        )
+    if not override and device_type in _STATIC_LAUNCHER_REGISTRY:
+        raise ValueError(
+            "Static launcher for device_type '" + device_type + "' already registered"
+        )
+    _STATIC_LAUNCHER_REGISTRY[device_type] = kernel_cls
+
+
+# Register the built-in static launchers explicitly, mirroring the
+# register_benchmarker pattern in benchmarking.py.
+register_statically_launched_kernel("cuda", StaticallyLaunchedCudaKernel)
+register_statically_launched_kernel("hip", StaticallyLaunchedCudaKernel)
+register_statically_launched_kernel("xpu", StaticallyLaunchedXpuKernel)
+
+
 def statically_launched_kernel_by_device(
     kernel: CompiledKernel, device_type: str = "cuda"
 ) -> StaticallyLaunchedTritonKernel:
-    if device_type in ("cuda", "hip"):
-        return StaticallyLaunchedCudaKernel(kernel)
-    elif device_type == "xpu":
-        return StaticallyLaunchedXpuKernel(kernel)
-    else:
+    kernel_cls = _STATIC_LAUNCHER_REGISTRY.get(device_type)
+    if kernel_cls is None:
+        supported = ", ".join(sorted(_STATIC_LAUNCHER_REGISTRY))
         raise NotImplementedError(
-            f"Device type {device_type} is not supported for static launcher"
+            "Device type " + device_type + " is not registered for static launcher. "
+            "Registered device types: " + supported + ". Backends can register one via "
+            "register_statically_launched_kernel()."
         )
+    return kernel_cls(kernel)
+
+
+def is_registered_static_launch_device(device_type: str) -> bool:
+    """Return whether a static Triton kernel launcher is registered for device_type."""
+    return device_type in _STATIC_LAUNCHER_REGISTRY

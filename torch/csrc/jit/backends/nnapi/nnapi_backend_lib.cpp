@@ -14,8 +14,7 @@ namespace torch::jit {
 // Android devices. The API is available on all Android devices running
 // Android 8.1 (API level 27) or higher.
 
-// Implementation is reflective of caffe2/torch/backends/_nnapi/prepare.py
-// NnapiModule.forward()
+// Input/output layouts follow the serialized NNAPI model format.
 class NnapiBackend : public PyTorchBackendInterface {
  public:
   // Constructor.

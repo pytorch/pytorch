@@ -688,7 +688,7 @@ def determine_qparams(
                 zero_point = zero_point.new_full(zero_point.size(), 128)
     elif qscheme == torch.per_channel_affine_float_qparams:
         scale = (max_val - min_val) / float(quant_max - quant_min)
-        scale = torch.where(scale > eps, scale, torch.ones_like(scale))
+        scale = torch.where(scale > eps, scale, 1)
         # We use the quantize function
         # xq = Round(Xf * inv_scale + zero_point),
         # setting zero_point to (-1 * min *inv_scale) we get

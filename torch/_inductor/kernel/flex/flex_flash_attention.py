@@ -80,9 +80,7 @@ def get_flex_flash_fwd_configs(
     aux_scalar_symbols: Sequence[sympy.Symbol] = (),
 ) -> list[FlexFlashConfig]:
     cuda_major = None
-    if torch.cuda.is_available() and (
-        has_mask_mod or (has_score_mod and has_aux_tensors)
-    ):
+    if torch.cuda.is_available() and (has_mask_mod or has_score_mod):
         device_index = None if device is None else device.index
         cuda_major = torch.cuda.get_device_capability(device_index)[0]
     mask_mod_vec_size = select_mask_mod_vec_size(
@@ -95,7 +93,7 @@ def get_flex_flash_fwd_configs(
     score_mod_vec_size = select_score_mod_vec_size(
         has_score_mod=has_score_mod,
         has_aux_tensors=has_aux_tensors,
-        is_sm100_or_later=cuda_major is not None and cuda_major >= 10,
+        supports_score_mod_vec=cuda_major in (10, 11),
         graph_module=score_mod_graph_module,
         other_buffers=score_mod_other_buffers,
     )
@@ -115,9 +113,11 @@ def get_flex_flash_fwd_configs(
         and torch._inductor.config.max_autotune
     ):
         # None means no captured tensor load constrained the score_mod vector width.
-        # Scalar captures are lane-uniform aux_scalars, so any kernel-supported
-        # power-of-two vector width is legal.
-        score_mod_vec_sizes = (1, 2, 4, 8, 16, 32, 64, 128)
+        # Scalar captures impose no load constraint, but accumulator ownership
+        # limits widths to 1 or 2 outside the SM100/110 kernel path.
+        score_mod_vec_sizes = (
+            (1, 2, 4, 8, 16, 32, 64, 128) if cuda_major in (10, 11) else (1, 2)
+        )
     else:
         score_mod_vec_sizes = (score_mod_vec_size,)
     configs = [
@@ -368,7 +368,7 @@ def _use_flex_flash_attention(
     mask_graph: Subgraph,
     kernel_options: dict[str, Any],
     num_score_mod_placeholders: int,
-    backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
+    backend: Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"],
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs.
 
@@ -626,7 +626,7 @@ def _can_use_flex_flash_attention_backward(
 def _use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
-    backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
+    backend: Literal["AUTO", "TRITON", "FLASH", "FLYDSL", "TRITON_DECODE"],
     joint_outputs: Any | None = None,
     score_mod_other_buffers: Sequence[TensorBox] | None = None,
 ) -> bool:

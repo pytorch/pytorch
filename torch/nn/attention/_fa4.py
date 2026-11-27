@@ -7,7 +7,7 @@ import importlib
 from dataclasses import dataclass
 from functools import cache
 from typing import Any, TYPE_CHECKING
-from typing_extensions import TypeVarTuple, Unpack
+from typing_extensions import TypeVarTuple
 
 from . import _registry
 from ._utils import _empty_with_matching_layout
@@ -165,14 +165,19 @@ def _fa4_backward_support_error(
     logsumexp: torch.Tensor,
     dropout_p: float,
     cum_seq_q: torch.Tensor | None,
+    grad_logsumexp: torch.Tensor | None = None,
 ) -> str | None:
     if dropout_p != 0.0:
         return "dropout_p must be 0"
+    tensors = (grad_out, query, key, value, out, logsumexp)
+    require_fp32 = (("logsumexp", logsumexp),)
+    if grad_logsumexp is not None:
+        if grad_logsumexp.shape != logsumexp.shape:
+            return "grad_logsumexp must have the shape of logsumexp"
+        tensors += (grad_logsumexp,)
+        require_fp32 += (("grad_logsumexp", grad_logsumexp),)
     error = _fa4_common_support_error(
-        query,
-        (grad_out, query, key, value, out, logsumexp),
-        cum_seq_q,
-        require_fp32=(("logsumexp", logsumexp),),
+        query, tensors, cum_seq_q, require_fp32=require_fp32
     )
     if error is not None:
         return error
@@ -187,7 +192,7 @@ def _aten_to_fa4_window_size(val: int | None) -> int | None:
 Ts = TypeVarTuple("Ts")
 
 
-def _transpose_dense(*tensors: Unpack[Ts]) -> tuple[Unpack[Ts]]:
+def _transpose_dense(*tensors: *Ts) -> tuple[*Ts]:
     return tuple(t.transpose(1, 2) for t in tensors)  # type: ignore[attr-defined]
 
 
@@ -211,6 +216,12 @@ def _fa4_run_forward(
     if _FA4_MODULE_PATH is None:
         raise RuntimeError("FA4 not registered")
     module = _fa4_import_module(_FA4_MODULE_PATH)
+    if _get_device_major(query.device) != 10:
+        # SplitKV is SM100-only; the support check already rejects num_splits > 1
+        num_splits = 1
+    elif num_splits is None:
+        # FA4 runs its SplitKV heuristic when num_splits < 1
+        num_splits = 1 if torch.are_deterministic_algorithms_enabled() else 0
 
     kwargs: dict[str, Any] = {
         "softmax_scale": scale,
@@ -224,7 +235,7 @@ def _fa4_run_forward(
         "max_seqlen_k": max_k,
         "seqused_k": seqused_k.contiguous() if seqused_k is not None else None,
         "page_table": block_table,
-        "num_splits": num_splits or 1,
+        "num_splits": num_splits,
         "out": out,
     }
     out, lse, *_ = module._flash_attn_fwd(query, key, value, **kwargs)
@@ -245,6 +256,7 @@ def _fa4_run_backward(
     window_size_left: int | None,
     window_size_right: int | None,
     deterministic: bool = False,
+    grad_logsumexp: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if _FA4_MODULE_PATH is None:
         raise RuntimeError("FA4 not registered")
@@ -263,6 +275,8 @@ def _fa4_run_backward(
         cu_seqlens_q=cu_seq_q,
         cu_seqlens_k=cu_seq_k,
         deterministic=deterministic,
+        # Older FA4 releases have no dlse argument.
+        **({"dlse": grad_logsumexp} if grad_logsumexp is not None else {}),
     )
     return dq, dk, dv
 
@@ -395,6 +409,7 @@ def _fa4_flash_attention_backward_impl(
     scale: float | None = None,
     window_size_left: int | None = None,
     window_size_right: int | None = None,
+    grad_logsumexp: torch.Tensor | None = None,
 ):
     error = _fa4_backward_support_error(
         grad_out,
@@ -405,9 +420,19 @@ def _fa4_flash_attention_backward_impl(
         logsumexp,
         dropout_p,
         cum_seq_q,
+        grad_logsumexp,
     )
     if error is not None:
         raise RuntimeError(f"FA4 flash_attention backward unsupported: {error}")
+    if (
+        grad_logsumexp is not None
+        and query.size(-1) == value.size(-1) == 256
+        and _get_device_major(query.device) == 10
+    ):
+        raise NotImplementedError(
+            "FA4 flash_attention backward does not support grad_logsumexp with head "
+            "dim 256 on SM100"
+        )
     deterministic = torch.are_deterministic_algorithms_enabled()
     dq, dk, dv = _fa4_run_backward(
         grad_out,
@@ -423,6 +448,7 @@ def _fa4_flash_attention_backward_impl(
         window_size_left,
         window_size_right,
         deterministic,
+        grad_logsumexp,
     )
     return dq, dk, dv
 

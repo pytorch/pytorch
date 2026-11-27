@@ -367,6 +367,82 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "select_cat_aten_pass": {},
+        },
+    )
+    def test_select_cat_post_grad_not_merged(self):
+        def mixed_inputs(x, y):
+            return torch.cat([x.select(1, 0), x.select(1, 1) * 2.0], dim=1)
+
+        def other_input(x, y):
+            cat = torch.cat([x.select(1, 0), y.select(1, 1)], dim=1)
+            return cat, x.select(1, 1)
+
+        def negative_index(x, y):
+            return torch.cat([x.select(1, -1), x.select(1, 0)], dim=1)
+
+        def non_contiguous(x, y):
+            x = x.transpose(0, 2)
+            return torch.cat([x.select(1, 0), x.select(1, 1)], dim=1)
+
+        inputs = [torch.randn(4, 2, 4), torch.randn(4, 2, 4)]
+        for fn in (mixed_inputs, other_input, negative_index, non_contiguous):
+            with self.subTest(fn=fn.__name__):
+                counters.clear()
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn)(*inputs), fn(*inputs))
+                self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 0)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "select_cat_aten_pass": {},
+        },
+    )
+    def test_select_cat_post_grad_merged_negative_dim_and_index(self):
+        def fn(x):
+            return torch.cat([x.select(-2, i) for i in range(-4, 0)], dim=-1)
+
+        counters.clear()
+        x = torch.randn(3, 4, 5)
+        self.assertEqual(torch.compile(fn)(x), fn(x))
+        self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 1)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "select_cat_aten_pass": {},
+        },
+    )
+    def test_select_cat_post_grad_does_not_alias(self):
+        # the merged cat is a new tensor, not a view of its input
+        def input_mutated(x):
+            cat = torch.cat([x.select(1, i) for i in range(4)], dim=1)
+            x.add_(100)
+            return cat
+
+        def output_returned(x):
+            return torch.cat([x.select(1, i) for i in range(4)], dim=1)
+
+        for fn in (input_mutated, output_returned):
+            with self.subTest(fn=fn.__name__):
+                counters.clear()
+                torch._dynamo.reset()
+                x = torch.randn(3, 4, 5)
+                x_ref, x_res = x.clone(), x.clone()
+                ref, res = fn(x_ref), torch.compile(fn)(x_res)
+                self.assertEqual(res, ref)
+                self.assertEqual(x_res, x_ref)
+                self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 1)
+                res.add_(1)
+                self.assertEqual(x_res, x_ref)
+
 
 class TestSplitCatAtenNormalizationPasses(TestCase):
     @torch._inductor.config.patch(

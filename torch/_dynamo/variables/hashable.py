@@ -9,6 +9,7 @@ during symbolic execution. Used by both ConstDictVariable and SetVariable.
 from typing import TYPE_CHECKING
 
 import torch
+from torch._subclasses.fake_tensor import maybe_get_fake_constant
 
 from .. import variables
 from ..exc import raise_observed_exception
@@ -119,7 +120,7 @@ class HashableTracker:
             return
 
         # Compute hash via the tp_hash slot (generic_hash_impl).
-        # For unhashable types, hash_impl raises ObservedTypeError.
+        # For unhashable types, tp_hash_impl raises ObservedTypeError.
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
         from .object_protocol import generic_hash_impl
@@ -158,7 +159,7 @@ class HashableTracker:
                 example_value = (
                     meta.get("example_value") if isinstance(meta, dict) else None
                 )
-                constant = getattr(example_value, "constant", None)
+                constant = maybe_get_fake_constant(example_value)
 
                 if isinstance(constant, torch.Tensor) and constant.numel() == 1:
                     items.append(constant.item())

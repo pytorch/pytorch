@@ -56,6 +56,28 @@
 
 ```
 
+## MPS Stream
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: autosummary/classnoinheritance.rst
+
+    Stream
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    stream
+    current_stream
+    default_stream
+    set_stream
+```
+
 % This module needs to be documented. Adding here in the meantime
 
 % for tracking purposes
@@ -66,4 +88,8 @@
 
 ```{eval-rst}
 .. py:module:: torch.mps.profiler
+```
+
+```{eval-rst}
+.. py:module:: torch.mps.streams
 ```
