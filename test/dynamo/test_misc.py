@@ -5521,9 +5521,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(compiled(x, original), fn(x, original))
         original.clear()
         original.update([(equal_key, None), ("b", value)])
-        result = compiled(x, original)
-        self.assertEqual(result, fn(x, original))
-        self.assertIs(result[1], equal_key)
+        self.assertEqual(compiled(x, original), fn(x, original))
+        self.assertIs(compiled(x, original)[1], equal_key)
         self.assertEqual(counter.frame_count, 1)
         reversed_input = collections.OrderedDict(reversed(list(original.items())))
         self.assertEqual(compiled(x, reversed_input), fn(x, reversed_input))
@@ -5577,7 +5576,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(copied.tag is od.tag, copier is copy.copy)
         self.assertIs(od.tag, value)
         self.assertEqual(od is inp, not local)
-        compiled(x, collections.OrderedDict(a=1))
+        with torch.compiler.set_stance("fail_on_recompile"):
+            compiled(x, collections.OrderedDict(a=1))
         self.assertEqual(counter.frame_count, 1)
 
     def test_return_ordered_dict_with_instance_state(self):
@@ -5587,7 +5587,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return value, value.tag
 
         x = torch.ones(1)
-        with self.assertRaisesRegex(Unsupported, "returning a local OrderedDict"):
+        with self.assertRaisesRegex(Unsupported, "OrderedDict reconstruction"):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         value, tag = torch.compile(fn, backend="eager")(x)
         self.assertIs(value["a"], x)
