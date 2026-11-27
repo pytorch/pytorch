@@ -1,23 +1,64 @@
 # Owner(s): ["module: inductor"]
 import os
 import unittest
+from unittest.mock import Mock, patch
 
 import torch
+from torch._dynamo.source import ConstantSource
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
+from torch._inductor.fx_passes import b2b_gemm
+from torch._inductor.ir import FixedLayout, InputBuffer, TensorBox
 from torch._inductor.runtime.benchmarking import benchmarker
+from torch._inductor.select_algorithm import TritonTemplateCaller
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
-from torch.testing._internal.common_utils import recover_orig_fp32_precision, skipIfXpu
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    parametrize,
+    recover_orig_fp32_precision,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
-@skipIfXpu(msg="Segmentation fault on CI machine")
+# Pin the good-shape autotune to a single B2B candidate: select_algorithm
+# skips benchmarking when a single choice remains, so only the first shape
+# per associativity pays for autotuning. The regex is unanchored because the
+# choice description is built from the kernel kwargs and may gain a prefix
+# on other GPUs.
+_B2B_GOOD_SHAPE_PIN = {
+    "test_configs.autotune_choice_desc_regex": (
+        r"BLOCK_SIZE_M=128, BLOCK_SIZE_N=16, "
+        r"BLOCK_SIZE_O=16, BLOCK_SIZE_P=16"
+    )
+}
+
+
 class B2BGEMMTest(TestCase):
     device = GPU_TYPE
 
-    @torch._dynamo.config.patch(recompile_limit=32)
-    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    def _b2b_good_shape_case(self, f, f_32, M, N, O, P, entrance, extra=None):
+        """Compile f on (M, N, O, P) and assert the b2b choice is selected."""
+        torch._dynamo.reset()
+        counters.clear()
+        with torch._inductor.config.patch(**(extra or {})):
+            f_opt = torch.compile(f)
+            A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+            B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+            C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+            res, codes = run_and_get_code(f_opt, A, B, C)
+        self.assertEqual(f_32(A, B, C), res, atol=0.1, rtol=0.01)
+        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+        self.assertIn(entrance, "\n".join(codes))
+
+    @torch._inductor.config.patch(
+        b2b_gemm_pass=True,
+        **{"test_configs.autotune_choice_name_regex": r"^triton_b2b_gemm_left_"},
+    )
     def test_b2b_gemm_left_assoc_good_shape(self):
         """
         left_assoc means the pattern is (subgraph(A @ B) @ C)
@@ -42,13 +83,31 @@ class B2BGEMMTest(TestCase):
             m3 = m3.to(torch.float32)
             return f(m1, m2, m3).to(torch.float16)
 
-        f_opt = torch.compile(f)
-        A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        res = f_opt(A, B, C)
-        self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
-        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+        # The first shape autotunes the full set of B2B Triton candidates
+        # (the decorator's name regex drops the unoptimized fallback); the
+        # remaining shapes use _B2B_GOOD_SHAPE_PIN to keep the compile
+        # matrix cheap.
+        pin = _B2B_GOOD_SHAPE_PIN
+        for idx, (M, N, O, P) in enumerate(
+            (
+                (256, 32, 256, 32),
+                (128, 16, 128, 16),
+                (128, 16, 256, 16),
+                (128, 32, 128, 16),
+                (128, 16, 128, 32),
+            )
+        ):
+            with self.subTest(shape=(M, N, O, P)):
+                self._b2b_good_shape_case(
+                    f,
+                    f_32,
+                    M,
+                    N,
+                    O,
+                    P,
+                    "B2B_GEMM_LEFT_TRITON_ENTRANCE",
+                    extra=None if idx == 0 else pin,
+                )
 
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
@@ -74,8 +133,10 @@ class B2BGEMMTest(TestCase):
                     self.assertEqual(actual, fn(a, b, c))
                     self.assertEqual(counters["inductor"]["b2b_gemm"], 0)
 
-    @torch._dynamo.config.patch(recompile_limit=32)
-    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    @torch._inductor.config.patch(
+        b2b_gemm_pass=True,
+        **{"test_configs.autotune_choice_name_regex": r"^triton_b2b_gemm_right_"},
+    )
     def test_b2b_gemm_right_assoc_good_shape(self):
         """
         right_assoc means the pattern is (A @ subgraph(B @ C))
@@ -92,13 +153,28 @@ class B2BGEMMTest(TestCase):
             m3 = m3.to(torch.float32)
             return f(m1, m2, m3).to(torch.float16)
 
-        f_opt = torch.compile(f)
-        A = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        res = f_opt(A, B, C)
-        self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
-        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+        # Same pinning rationale as the left-assoc test above.
+        pin = _B2B_GOOD_SHAPE_PIN
+        for idx, (M, N, O, P) in enumerate(
+            (
+                (32, 256, 32, 256),
+                (16, 128, 16, 128),
+                (16, 256, 16, 128),
+                (16, 128, 32, 128),
+                (32, 128, 16, 128),
+            )
+        ):
+            with self.subTest(shape=(M, N, O, P)):
+                self._b2b_good_shape_case(
+                    f,
+                    f_32,
+                    M,
+                    N,
+                    O,
+                    P,
+                    "B2B_GEMM_RIGHT_TRITON_ENTRANCE",
+                    extra=None if idx == 0 else pin,
+                )
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
@@ -172,7 +248,6 @@ class B2BGEMMTest(TestCase):
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 
-    @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_good_pattern_bad_shape(self):
         """
@@ -182,15 +257,99 @@ class B2BGEMMTest(TestCase):
         def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
             return torch.mm(torch.mm(m1, m2), m3)
 
-        f_opt = torch.compile(f)
-        A = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
-        res, codes = run_and_get_code(f_opt, A, B, C)
-        code = "\n".join(codes)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
-        self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
-        self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
+        for M, N, O, P in (
+            (100, 100, 100, 100),
+            (64, 64, 64, 64),
+            # The load-ratio gate rejects (64, 16, 32, 64), so autotune never
+            # runs and the b2b_gemm counter must stay at zero.
+            (64, 16, 32, 64),
+        ):
+            with self.subTest(shape=(M, N, O, P)):
+                torch._dynamo.reset()
+                counters.clear()
+                f_opt = torch.compile(f)
+                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+                res, codes = run_and_get_code(f_opt, A, B, C)
+                code = "\n".join(codes)
+                self.assertEqual(f(A, B, C), res, atol=0.1, rtol=0.01)
+                self.assertNotIn("B2B_GEMM_LEFT_TRITON_ENTRANCE", code)
+                self.assertNotIn("B2B_GEMM_RIGHT_TRITON_ENTRANCE", code)
+                self.assertEqual(counters["inductor"]["b2b_gemm"], 0)
+
+    @torch._inductor.config.patch(
+        b2b_gemm_pass=True,
+        **{
+            "test_configs.autotune_choice_name_regex": r"^triton_b2b_gemm_(left|right)_",
+            # The assertions only need the template entrance and a single
+            # frame; the pin keeps each associativity from benchmarking the
+            # full B2B candidate set.
+            **_B2B_GOOD_SHAPE_PIN,
+        },
+    )
+    def test_b2b_gemm_good_shape_dynamic_shapes(self):
+        """Backed SymInts must not crash or specialize the compiled graph."""
+
+        for is_left_assoc in (True, False):
+            with self.subTest(associativity="left" if is_left_assoc else "right"):
+                counters.clear()
+
+                def f(
+                    m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor
+                ) -> torch.Tensor:
+                    if is_left_assoc:
+                        return torch.mm(torch.mm(m1, m2), m3)
+                    return torch.mm(m1, torch.mm(m2, m3))
+
+                def f_32(
+                    m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor
+                ) -> torch.Tensor:
+                    return f(m1.float(), m2.float(), m3.float()).half()
+
+                backend = CompileCounterWithBackend("inductor")
+                f_opt = torch.compile(f, backend=backend, dynamic=True)
+                shapes = (
+                    ((256, 32, 256, 32), (128, 16, 128, 16), (256, 16, 256, 16))
+                    if is_left_assoc
+                    else (
+                        (32, 256, 32, 256),
+                        (16, 128, 16, 128),
+                        (16, 256, 16, 256),
+                    )
+                )
+                for i, (M, N, O, P) in enumerate(shapes):
+                    A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+                    B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+                    C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+                    if i == 0:
+                        actual, codes = run_and_get_code(f_opt, A, B, C)
+                        entrance = "LEFT" if is_left_assoc else "RIGHT"
+                        self.assertIn(
+                            f"B2B_GEMM_{entrance}_TRITON_ENTRANCE", "\n".join(codes)
+                        )
+                    else:
+                        actual = f_opt(A, B, C)
+                    self.assertEqual(f_32(A, B, C), actual, atol=0.1, rtol=0.01)
+
+                self.assertEqual(backend.frame_count, 1)
+                self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    def test_b2b_gemm_unbacked_symbol_skips(self):
+        def f(a, b, c, mask):
+            selected = a[mask.nonzero().squeeze(1)]
+            return torch.mm(torch.mm(selected, b), c)
+
+        A = torch.randn((128, 32), device=GPU_TYPE)
+        B = torch.randn((32, 128), device=GPU_TYPE)
+        C = torch.randn((128, 16), device=GPU_TYPE)
+        mask = torch.arange(128, device=GPU_TYPE) % 2 == 0
+
+        actual = torch.compile(f, dynamic=True, fullgraph=True)(A, B, C, mask)
+        self.assertEqual(actual, f(A, B, C, mask))
+        self.assertEqual(counters["inductor"]["b2b_gemm"], 0)
 
     @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
     @torch._dynamo.config.patch(recompile_limit=32)
@@ -354,6 +513,190 @@ class B2BGEMMTest(TestCase):
 
         # flaky test assertion: disabled
         # self.assertTrue(average_speedup > 1)
+
+    def select_fused(self, name, choices, *args, **kwargs):
+        self.assertEqual(name, "b2b_gemm")
+        choice = next(c for c in choices if isinstance(c, TritonTemplateCaller))
+        return choice.output_node(), None
+
+    def check_tf32_policy(self, left_assoc, device_type, shape, sizevars, expected):
+        m, n, o, p = shape
+        tensors = [
+            TensorBox.create(
+                InputBuffer(
+                    name=name,
+                    layout=FixedLayout(torch.device(device_type), torch.float32, dims),
+                )
+            )
+            for name, dims in (("a", [m, n]), ("b", [n, o]), ("c", [o, p]))
+        ]
+        template = (
+            b2b_gemm.b2b_gemm_left_template
+            if left_assoc
+            else b2b_gemm.b2b_gemm_right_template
+        )
+        with (
+            V.set_graph_handler(Mock(sizevars=sizevars)),
+            patch.object(b2b_gemm, "build_subgraph_buffer", return_value=None),
+            patch.object(b2b_gemm, "_make_unoptimized_b2b_gemm_choice"),
+            patch.object(
+                b2b_gemm, "autotune_select_algorithm", return_value=(None, None)
+            ),
+            patch.object(template, "maybe_append_choice") as append,
+        ):
+            b2b_gemm.tuned_b2b_gemm(left_assoc, None, *tensors)
+        self.assertEqual(append.call_count, len(b2b_gemm.b2b_gemm_configs))
+        for call in append.call_args_list:
+            flags = call.kwargs
+            self.assertEqual(
+                (flags["ALLOW_TF32_INNER"], flags["ALLOW_TF32_OUTER"]), expected
+            )
+
+    @parametrize("left_assoc", (False, True))
+    @parametrize(
+        "device_type,cuda_tf32,xpu_tf32,shape,expected_left,expected_right",
+        (
+            ("xpu", False, True, (256, 32, 256, 32), (True, True), (True, True)),
+            ("xpu", True, False, (256, 32, 256, 32), (False, False), (False, False)),
+            ("cuda", False, True, (16, 512, 512, 512), (False, False), (False, False)),
+            ("cuda", True, False, (16, 512, 512, 32), (True, False), (False, False)),
+            ("cuda", True, False, (16, 32, 512, 512), (False, True), (True, False)),
+            ("cuda", True, False, (16, 512, 32, 512), (False, False), (False, True)),
+            ("cuda", True, False, (16, 512, 512, 512), (True, True), (True, True)),
+            ("cuda", True, False, (15, 512, 512, 512), (False, False), (True, False)),
+        ),
+    )
+    @recover_orig_fp32_precision
+    def test_b2b_gemm_tf32_policy(
+        self,
+        left_assoc,
+        device_type,
+        cuda_tf32,
+        xpu_tf32,
+        shape,
+        expected_left,
+        expected_right,
+    ):
+        torch.backends.cuda.matmul.fp32_precision = "tf32" if cuda_tf32 else "ieee"
+        expected = expected_left if left_assoc else expected_right
+        with patch(
+            "torch._dynamo.device_interface.XpuInterface.allow_tf32",
+            return_value=xpu_tf32,
+        ) as xpu_flag:
+            self.check_tf32_policy(
+                left_assoc, device_type, shape, SizeVarAllocator(), expected
+            )
+        if device_type == "xpu":
+            self.assertTrue(xpu_flag.called)
+        else:
+            xpu_flag.assert_not_called()
+
+    @parametrize("left_assoc", (False, True))
+    @recover_orig_fp32_precision
+    def test_b2b_gemm_tf32_policy_symbolic(self, left_assoc):
+        shape_env = ShapeEnv()
+        m = shape_env.create_symbol(
+            16, source=ConstantSource("dimension"), dynamic_dim=DimDynamic.DYNAMIC
+        )
+        sizevars = SizeVarAllocator(shape_env)
+        self.assertEqual(sizevars.optimization_hint(m), 16)
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        expected = (False, False) if left_assoc else (True, False)
+        self.check_tf32_policy(
+            left_assoc, "cuda", (m, 512, 512, 512), sizevars, expected
+        )
+        self.assertEqual(shape_env.guards, [])
+
+    @parametrize("left_assoc", (False, True))
+    @parametrize(
+        "inner_dtype,outer_dtype,allow_tf32",
+        (
+            (torch.float32, torch.float32, False),
+            (torch.float32, torch.float32, True),
+            (torch.float16, torch.float16, False),
+            (torch.bfloat16, torch.bfloat16, False),
+            (torch.float16, torch.float32, False),
+            (torch.float32, torch.float16, False),
+            (torch.bfloat16, torch.float32, False),
+            (torch.float32, torch.bfloat16, False),
+        ),
+    )
+    @recover_orig_fp32_precision
+    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    def test_b2b_gemm_precision(
+        self, device, left_assoc, inner_dtype, outer_dtype, allow_tf32
+    ):
+        if allow_tf32 and not torch.cuda.is_tf32_supported():
+            self.skipTest("TF32 is not supported")
+
+        def fn(a, b, c):
+            if left_assoc:
+                return (a @ b).to(c.dtype) @ c
+            return a @ (b @ c).to(a.dtype)
+
+        torch.manual_seed(314159)
+        torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+        torch.set_float32_matmul_precision("high" if allow_tf32 else "highest")
+        m, n, o, p = (256, 32, 256, 32) if left_assoc else (32, 256, 32, 256)
+        a_dtype, c_dtype = (
+            (inner_dtype, outer_dtype) if left_assoc else (outer_dtype, inner_dtype)
+        )
+        a = torch.randn(m, n, device=device, dtype=a_dtype)
+        b = torch.randn(n, o, device=device, dtype=inner_dtype)
+        c = torch.randn(o, p, device=device, dtype=c_dtype)
+        if allow_tf32:
+            a.fill_(2)
+            b.fill_(2)
+            c.fill_(2)
+        expected = fn(a.double(), b.double(), c.double()).to(outer_dtype)
+
+        with patch(
+            "torch._inductor.fx_passes.b2b_gemm.autotune_select_algorithm",
+            self.select_fused,
+        ):
+            actual, codes = run_and_get_code(torch.compile(fn, fullgraph=True), a, b, c)
+        assoc = "left" if left_assoc else "right"
+        code = "\n".join(codes)
+        self.assertIn(f"B2B_GEMM_{assoc.upper()}_TRITON_ENTRANCE", code)
+        for role, dtype in (("INNER", inner_dtype), ("OUTER", outer_dtype)):
+            tf32 = dtype != torch.float32
+            self.assertIn(f"ALLOW_TF32_{role} : tl.constexpr = {tf32}", code)
+        precise = outer_dtype == torch.float32
+        atol, rtol = (1e-3, 1e-5) if precise else (0.2, 0.01)
+        self.assertEqual(actual, expected, atol=atol, rtol=rtol, exact_dtype=True)
+
+    @parametrize("left_assoc", (False, True))
+    @parametrize("shape", ((32, 32), (64, 64), (128, 128), (256, 32)))
+    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    def test_b2b_gemm_dynamic_rows(self, device, left_assoc, shape):
+        def fn(a, b, c):
+            return (a @ b) @ c if left_assoc else a @ (b @ c)
+
+        torch.manual_seed(0)
+        m, n = shape
+        m, n, o, p = (m, n, m, n) if left_assoc else (n, m, n, m)
+        a = torch.randn(m, n, device=device, dtype=torch.float16)
+        b = torch.randn(n, o, device=device, dtype=torch.float16)
+        c = torch.randn(o, p, device=device, dtype=torch.float16)
+        torch._dynamo.mark_dynamic(a, 0, min=2, max=512)
+        compiled = torch.compile(fn, fullgraph=True)
+        with patch(
+            "torch._inductor.fx_passes.b2b_gemm.autotune_select_algorithm",
+            self.select_fused,
+        ):
+            actual, codes = run_and_get_code(compiled, a, b, c)
+        if m != n:
+            assoc = "LEFT" if left_assoc else "RIGHT"
+            self.assertIn(f"B2B_GEMM_{assoc}_TRITON_ENTRANCE", "\n".join(codes))
+        expected = fn(a.float(), b.float(), c.float()).half()
+        self.assertEqual(actual, expected, atol=0.1, rtol=0.01)
+        a = torch.randn(17, n, device=device, dtype=torch.float16)
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            expected = fn(a.float(), b.float(), c.float()).half()
+            self.assertEqual(compiled(a, b, c), expected, atol=0.1, rtol=0.01)
+
+
+instantiate_device_type_tests(B2BGEMMTest, globals(), only_for=GPU_TYPE, allow_xpu=True)
 
 
 if __name__ == "__main__":
