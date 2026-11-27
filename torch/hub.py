@@ -338,8 +338,9 @@ def _cache_lock_timeout(stacklevel):
     """Return how long to wait for another process's download, in seconds.
 
     The environment variable ``TORCH_HUB_LOCK_TIMEOUT`` overrides the default of
-    ``_CACHE_LOCK_TIMEOUT_S``: 0 doesn't wait, and a negative value waits until
-    the lock is released. A value that isn't a number is ignored with a warning.
+    ``_CACHE_LOCK_TIMEOUT_S``: 0 doesn't wait (or warn), and a negative value
+    waits until the lock is released. A value that isn't a number is ignored
+    with a warning.
     """
     value = os.getenv(ENV_TORCH_HUB_LOCK_TIMEOUT)
     if value is None:
@@ -409,9 +410,14 @@ def _cache_lock(path, stacklevel, verbose):
             if error is not None:
                 raise error from None
             timeout = _cache_lock_timeout(stacklevel)
-            if verbose:
-                sys.stderr.write(f"Waiting for another process to download {path}\n")
-            stack.enter_context(new_lock(timeout=timeout))
+            # With a timeout of 0 the user chose not to wait, so the entry is
+            # populated without the lock and without a warning.
+            if timeout != 0:
+                if verbose:
+                    sys.stderr.write(
+                        f"Waiting for another process to download {path}\n"
+                    )
+                stack.enter_context(new_lock(timeout=timeout))
     except filelock.Timeout:
         message = (
             f"Another process has held {lock_path} for more than "
@@ -1063,11 +1069,12 @@ def load_state_dict_from_url(
 
     With filelock 3.20.1 or later, processes that share ``model_dir`` (for
     example DDP ranks) don't download the same file at the same time: one of
-    them downloads it while the others wait, for up to an hour, and then load
-    the cached copy. The lock for a downloaded file ``<name>`` is a
+    them downloads it while the others wait, for up to an hour by default (the
+    ``TORCH_HUB_LOCK_TIMEOUT`` environment variable sets this time in seconds),
+    and then load the cached copy. The lock for a downloaded file ``<name>`` is a
     ``.<name>.lock`` file next to it in ``model_dir``, which stays there on
     Linux and macOS. If it can't be taken, the file is downloaded without it
-    and a warning is raised. If it is held for more than an hour, a warning is
+    and a warning is raised. If it is held for longer than that, a warning is
     raised and the file is downloaded without it, unless it has been cached by
     then. With an older filelock, every process downloads the file.
     Checkpoints in the legacy zip format are still extracted on every load,

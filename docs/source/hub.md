@@ -155,7 +155,8 @@ as in earlier releases, and a `UserWarning` is raised. If another process holds 
 an hour, a `UserWarning` is raised and the entry is downloaded without the lock, unless that
 process has cached it by then. The environment variable `TORCH_HUB_LOCK_TIMEOUT` sets this wait
 in seconds: for example `TORCH_HUB_LOCK_TIMEOUT=7200` for downloads that take longer than an
-hour, `0` to not wait, or `-1` to wait until the lock is released. Repos are downloaded and extracted in a temporary work directory in
+hour, `0` to not wait (the entry is then downloaded without the lock and without a warning), or
+`-1` to wait until the lock is released. Repos are downloaded and extracted in a temporary work directory in
 the hub directory, whose name starts with `.<owner_repo_ref>~`.
 
 ### Known limitations:

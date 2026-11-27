@@ -469,6 +469,9 @@ class TestHubCache(TestCase):
 
     def setUp(self):
         super().setUp()
+        # TORCH_HUB_LOCK_TIMEOUT would override the lock timeouts these tests set.
+        self.enterContext(patch.dict(os.environ))
+        os.environ.pop(hub.ENV_TORCH_HUB_LOCK_TIMEOUT, None)
         self.previous_hub_dir = hub.get_dir()
         self.tmpdir = tempfile.TemporaryDirectory("hub_dir")
         hub.set_dir(self.tmpdir.name)
@@ -953,8 +956,10 @@ class TestHubCache(TestCase):
         url, model_dir = self._save_weights()
         os.makedirs(model_dir)
         lock = FileLock(os.path.join(model_dir, ".weights.pt.lock"))
+        # A short default, so that only a wait without a limit is still pending.
         with (
             ThreadPoolExecutor(1) as pool,
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 0.2),
             patch.dict(os.environ, {hub.ENV_TORCH_HUB_LOCK_TIMEOUT: "-1"}),
             warnings.catch_warnings(),
         ):
@@ -968,6 +973,26 @@ class TestHubCache(TestCase):
                 self.assertFalse(load.done())
             state_dict = load.result(timeout=60)
         self.assertEqual(state_dict["w"], torch.arange(10))
+
+    @skipIfOldFilelock
+    def test_load_state_dict_from_url_zero_timeout_does_not_wait(self):
+        url, model_dir = self._save_weights()
+        os.makedirs(model_dir)
+        stderr = io.StringIO()
+        with (
+            ThreadPoolExecutor(1) as pool,
+            FileLock(os.path.join(model_dir, ".weights.pt.lock")),
+            patch.dict(os.environ, {hub.ENV_TORCH_HUB_LOCK_TIMEOUT: "0"}),
+            patch("sys.stderr", new=stderr),
+            warnings.catch_warnings(),
+        ):
+            # The user chose not to wait, so the load neither waits nor warns.
+            warnings.simplefilter("error")
+            state_dict = pool.submit(
+                hub.load_state_dict_from_url, url, model_dir=model_dir, progress=True
+            ).result(timeout=60)
+        self.assertEqual(state_dict["w"], torch.arange(10))
+        self.assertNotIn("Waiting for another process", stderr.getvalue())
 
     def test_get_cache_or_reload_failed_publish_raises(self):
         url = self._make_hub_archive("repo")
