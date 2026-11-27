@@ -5504,6 +5504,7 @@ class TestSDPAAccelerator(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
+    @skipIfXpu(msg="2^32-element attention exceeds XPU memory, see intel/torch-xpu-ops#6327")
     def test_mem_eff_attention_dropout_rng_offset_no_wraparound(self, device):
         # num_queries * num_keys == 2^32, which wraps a 32-bit offset so that head 1
         # replays head 0's mask. Inputs are identical per head, so a shared mask shows
