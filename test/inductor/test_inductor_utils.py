@@ -2,7 +2,6 @@
 
 import functools
 import logging
-import unittest
 from types import SimpleNamespace
 from unittest import mock
 
@@ -26,7 +25,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.testing._internal.inductor_utils import requires_triton
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -34,6 +33,8 @@ log = logging.getLogger(__name__)
 
 
 class TestFallbackByDefault(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_sym_size_uses_inductor_lowering_in_lite_mode(self):
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
@@ -213,7 +214,7 @@ class TestBenchCuda(TestCase):
             functools.partial(torch.nn.functional.linear, x, w)
         )
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @requires_triton()
     def test_benchmarker(self):
         res = benchmarker.benchmark_gpu(self._bench_fn)
         log.warning("do_bench result: %s", res)

@@ -1,13 +1,11 @@
 # Owner(s): ["module: inductor"]
-import unittest
-
 import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.testing._internal.inductor_utils import requires_triton
 
 
 class InductorAnnotationTestCase(TestCase):
@@ -24,7 +22,7 @@ class InductorAnnotationTestCase(TestCase):
         _, code = run_and_get_code(f_comp, a, b)
         return code[0]
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @requires_triton()
     def test_no_annotations(self, device):
         code = self.get_code(device)
 
@@ -32,7 +30,7 @@ class InductorAnnotationTestCase(TestCase):
         self.assertTrue("training_annotation" not in code)
 
     @inductor_config.patch(annotate_training=True)
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @requires_triton()
     def test_training_annotation(self, device):
         code = self.get_code(device)
 
