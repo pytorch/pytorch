@@ -2059,7 +2059,9 @@ class GraphModuleSerializer(metaclass=Final):
                         name = self._output_node_name_at_index(user_node, i)
                     args.append(self.serialize_tensor_output(name, m))
                 output_arguments.append(Argument.create(as_tensors=args))
-            elif isinstance(meta, (int, SymInt, float, SymFloat)):
+            elif isinstance(
+                meta, (int, float, torch.SymInt, torch.SymFloat, torch.SymBool)
+            ):
                 user_node_name = self._output_node_name_at_index(node, idx)
                 output_arguments.append(self.serialize_output(user_node_name, meta))
             else:
@@ -3290,7 +3292,6 @@ class GraphModuleDeserializer(metaclass=Final):
                 )
                 if arg is None:
                     raise AssertionError("arg should not be None")
-                # pyrefly: ignore [bad-argument-type]
                 self.generate_getitem(meta_val, fx_node, arg, 0, deserialized_metadata)
                 fx_node.meta["val"] = tuple(meta_val)
                 self.serialized_name_to_node[fx_node.name] = fx_node
@@ -3325,15 +3326,13 @@ class GraphModuleDeserializer(metaclass=Final):
         self,
         meta_val,
         fx_node: torch.fx.Node,
-        arg: TensorArgument | SymIntArgument | SymFloatArgument,
+        arg: TensorArgument | SymIntArgument | SymFloatArgument | SymBoolArgument,
         idx: int,
         deserialized_metadata: dict[str, Any],
     ):
         if isinstance(arg, TensorArgument):
             name = arg.name
-        elif isinstance(arg, SymIntArgument):
-            name = arg.as_name
-        elif isinstance(arg, SymFloatArgument):
+        elif isinstance(arg, (SymIntArgument, SymBoolArgument, SymFloatArgument)):
             name = arg.as_name
         else:
             raise AssertionError(
@@ -3359,7 +3358,9 @@ class GraphModuleDeserializer(metaclass=Final):
         deserialized_metadata: dict[str, Any],
     ):
         for idx, arg in enumerate(args):
-            if isinstance(arg, (TensorArgument, SymIntArgument, SymFloatArgument)):
+            if isinstance(
+                arg, (TensorArgument, SymIntArgument, SymBoolArgument, SymFloatArgument)
+            ):
                 self.generate_getitem(
                     meta_val, fx_node, arg, idx, deserialized_metadata
                 )
@@ -3367,7 +3368,7 @@ class GraphModuleDeserializer(metaclass=Final):
 
             if not isinstance(arg, Argument):
                 raise AssertionError(f"expected Argument, got {type(arg).__name__}")
-            if arg.type in ("as_tensor", "as_sym_int", "as_sym_float"):
+            if arg.type in ("as_tensor", "as_sym_int", "as_sym_float", "as_sym_bool"):
                 self.generate_getitem(
                     meta_val, fx_node, arg.value, idx, deserialized_metadata
                 )

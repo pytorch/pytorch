@@ -190,7 +190,7 @@ class SuperVariable(VariableTracker):
             # objvar itself is a type (e.g. `super(Base, cls)` or
             # `super(Base, list)`); as_python_constant() works uniformly here
             # since objvar must be a type-representing VariableTracker
-            # (UserDefinedClassVariable, BaseBuiltinVariable, ...), unlike
+            # (UserDefinedClassVariable, TypeVariable, ...), unlike
             # `.value` which only some of those define.
             type_to_use = self.objvar.as_python_constant()
             type_to_use_source = self.objvar.source
@@ -411,8 +411,10 @@ class SuperVariable(VariableTracker):
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
-            # type: ignore[arg-type]
-            return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+            from .object_protocol import object_generic_setattr
+
+            no_keywords(tx, "wrapper __setattr__", kwargs)
+            return object_generic_setattr(tx, self.objvar, *args)
         elif inner_fn is object.__delattr__:
             attr = args[0]
             try:

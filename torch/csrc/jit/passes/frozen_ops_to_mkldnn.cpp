@@ -39,6 +39,7 @@
 #include <dnnl_types.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/detail/Eltwise.h>
 #include <ideep.hpp>
 #endif
 
@@ -259,7 +260,7 @@ Operation createUnaryOp(
     if (!inplace) {
       // `a_it.get_desc()` will allocate a tensor
       // of the right physical size.
-      auto it_empty = ideep::tensor(a_it.get_desc());
+      auto it_empty = at::native::mkldnn::MkldnnMemory(a_it.get_desc());
       TORCH_INTERNAL_ASSERT(it_empty.get_desc() == a_it.get_desc());
       out = at::native::new_with_itensor_mkldnn(
           std::move(it_empty),
@@ -496,13 +497,13 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
 }
 
 Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
-  ideep::tensor& x = at::native::itensor_from_mkldnn(tensor);
-  ideep::tensor& z = at::native::itensor_from_mkldnn(out);
-  ideep::eltwise_forward::compute(
+  at::native::mkldnn::MkldnnMemory& x = at::native::itensor_from_mkldnn(tensor);
+  at::native::mkldnn::MkldnnMemory& z = at::native::itensor_from_mkldnn(out);
+  at::native::mkldnn::eltwise_forward(
       x,
       z,
-      ideep::algorithm::eltwise_linear,
-      ideep::prop_kind::forward_inference,
+      dnnl::algorithm::eltwise_linear,
+      dnnl::prop_kind::forward_inference,
       /*alpha*/ scalar);
   return out;
 }

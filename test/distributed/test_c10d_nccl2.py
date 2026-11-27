@@ -412,11 +412,11 @@ def _wait_done(fut: torch.futures.Future, timeout: float = 60.0):
 
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -770,6 +770,7 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             self.assertTrue(work.is_completed())
 
 
+@instantiate_parametrized_tests
 class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
@@ -808,6 +809,104 @@ class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
         dist.destroy_process_group()
         del work
         gc.collect()
+
+    def _reconfigure_options(
+        self, store: dist.Store, uuid: int, timeout: timedelta
+    ) -> ReconfigureOptions:
+        key = f"nccl2_reconfigure/{uuid}"
+        store.set(f"{key}/{self.rank}", dist.group.WORLD.get_reconfigure_handle())
+        opts = ReconfigureOptions()
+        opts.uuid = uuid
+        opts.handles = [
+            store.get(f"{key}/{rank}").decode() for rank in range(self.world_size)
+        ]
+        opts.timeout = timeout
+        return opts
+
+    @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("blocking_wait", [False, True])
+    def test_reconfigure_old_work(self, blocking_wait: bool) -> None:
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        timeout = timedelta(seconds=30)
+        store = dist.FileStore(self.file_name, self.world_size)
+        store.set_timeout(timeout)
+        env = {"TORCH_NCCL_BLOCKING_WAIT": str(int(blocking_wait))}
+        with mock.patch.dict(os.environ, env):
+            dist.init_process_group(
+                "nccl2",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=store,
+                timeout=timeout,
+                enable_reconfigure=True,
+                device_id=device,
+            )
+        try:
+            group = dist.group.WORLD
+            group.reconfigure(self._reconfigure_options(store, 1, timeout)).wait()
+            next_options = self._reconfigure_options(store, 2, timeout)
+
+            # Finished before reconfigure(), so it still succeeds. Async ops run on
+            # an internal stream, so sync the device.
+            completed = torch.tensor([self.rank + 1], device=device)
+            completed_work = dist.all_reduce(completed, async_op=True)
+            torch.cuda.synchronize(device)
+
+            # No other rank issues this collective, so it cannot complete.
+            waited: list[RuntimeError] = []
+            aborted: list[int] = []
+            if self.rank == 0:
+                group.register_abort_hook(0, lambda: aborted.append(1))
+                old_work = dist.all_reduce(torch.ones(4, device=device), async_op=True)
+
+                def on_cancel(_: torch.futures.Future) -> None:
+                    try:
+                        old_work.wait()
+                    except RuntimeError as e:
+                        waited.append(e)
+
+                # Runs inside reconfigure(), once old_work is cancelled.
+                old_work.get_future_result().then(on_cancel)
+            store.set(f"reconfigure_ready/{self.rank}", "1")
+            for rank in range(self.world_size):
+                store.get(f"reconfigure_ready/{rank}")
+
+            group.reconfigure(next_options).wait()
+            # Before rank 0's assertions, so a failure cannot hang the peer.
+            health = torch.tensor([self.rank + 1], device=device)
+            dist.all_reduce(health)
+            self.assertEqual(int(health.item()), sum(range(1, self.world_size + 1)))
+            if self.rank == 0:
+                # on_cancel ran inside reconfigure(), not in the wait() below.
+                self.assertEqual(len(waited), 1)
+                self.assertIsInstance(waited[0], dist.DistBackendError)
+                self.assertIn("cancelled by reconfigure", str(waited[0]))
+                with self.assertRaisesRegex(
+                    dist.DistBackendError, "cancelled by reconfigure"
+                ):
+                    old_work.wait()
+                # A cancelled work is not a failure of the new communicator.
+                self.assertEqual(aborted, [])
+                old_result = old_work.get_future_result()
+                self.assertTrue(old_result.done())
+                self.assertEqual(WorkResult(old_result.wait()), WorkResult.COMM_ERROR)
+            completed_result = completed_work.get_future_result()
+            self.assertTrue(completed_result.done())
+            self.assertEqual(WorkResult(completed_result.wait()), WorkResult.SUCCESS)
+            completed_work.wait()
+            expected = sum(range(1, self.world_size + 1))
+            self.assertEqual(completed, torch.full_like(completed, expected))
+        finally:
+            dist.destroy_process_group()
 
 
 _TEST_PSK = "0123456789abcdef0123456789abcdef"
@@ -870,13 +969,6 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
         self._new_pg(None)
         with self.assertRaisesRegex(RuntimeError, "differs"):
             self._new_pg(_TEST_PSK[::-1])
-        with self.assertRaisesRegex(RuntimeError, "use the nccl2 backend"):
-            dist.ProcessGroupNCCL(
-                dist.FileStore(self.file_name, self.world_size),
-                self.rank,
-                self.world_size,
-                _psk_options(_TEST_PSK),
-            )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -940,24 +1032,6 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_encryption_psk_legacy_shrink(self) -> None:
-        device = torch.device("cuda", self.rank)
-        dist.init_process_group(
-            "nccl-legacy",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=dist.FileStore(self.file_name, self.world_size),
-            device_id=device,
-        )
-        dist.barrier()
-        if self.rank == 0:
-            with self.assertRaisesRegex(RuntimeError, "use the nccl2 backend"):
-                dist.shrink_group([1], pg_options=_psk_options(_TEST_PSK))
-        dist.barrier()
-        dist.destroy_process_group()
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
     def test_encrypted_allreduce(self) -> None:
         device = torch.device("cuda", self.rank)
         torch.cuda.set_device(device)
@@ -987,11 +1061,11 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -1024,14 +1098,8 @@ class ProcessGroupNCCL2CommPtrTest(_ProcessGroupNCCL2OptionsTest):
 
 class ProcessGroupNCCLLazyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
-
-
-class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
-    @classmethod
-    def backend_str(cls) -> str:
-        return "nccl-legacy"
 
 
 class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
@@ -1083,7 +1151,7 @@ class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
 
 class ProcessGroupNCCLLazyLazyInitTest(ProcessGroupNCCL2LazyInitTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
 
@@ -1493,8 +1561,11 @@ class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
             raise AssertionError("Expected rdvz_file to not be None")
         os.environ["LOCAL_RANK"] = str(rank)
         store = dist.FileStore(rdvz_file, world_size)
+        device = cls.device_type
+        if isinstance(device, property):
+            device = device.fget(cls)
         dist.init_process_group(
-            backend=cls.backend_str(),
+            backend=cls.backend_str(device),
             world_size=world_size,
             rank=rank,
             store=store,
@@ -1885,7 +1956,7 @@ class ProcessGroupNCCL2TimingTest(_ProcessGroupNCCL2OptionsTest):
 
 class ProcessGroupNCCLLazyTimingTest(ProcessGroupNCCL2TimingTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
 
@@ -1907,12 +1978,6 @@ class ProcessGroupNCCL2NonblockingOptionPrecedenceTest(_ProcessGroupNCCL2Options
         backend = dist.get_backend_impl(device=self.device)
         self.assertEqual(backend.options.config.blocking, 1)
         self._check_all_reduce()
-
-
-class ProcessGroupNCCLLegacyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
-    @classmethod
-    def backend_str(cls) -> str:
-        return "nccl-legacy"
 
 
 class ProcessGroupNCCL2ScalableInitTest(_ProcessGroupNCCL2OptionsTest):
@@ -1949,11 +2014,11 @@ class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
     """
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2312,11 +2377,11 @@ class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
 
 class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2356,11 +2421,11 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
     Megatron's nccl_allocator drives (megatron/core/nccl_allocator.py)."""
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2482,7 +2547,7 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
 
 class ProcessGroupNCCLLazyMemPoolTest(ProcessGroupNCCL2MemPoolTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
     @requires_nccl()
@@ -2528,11 +2593,11 @@ class ProcessGroupNCCL2MemPoolNoWindowTest(MultiProcContinuousTest):
     every NCCL_WIN_COLL_SYMMETRIC registration fails."""
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2571,7 +2636,7 @@ class ProcessGroupNCCL2MemPoolNoWindowTest(MultiProcContinuousTest):
 
 class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
     @requires_nccl()
@@ -2624,7 +2689,7 @@ class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
 
 class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
     @unittest.skip("nccl-lazy does not support communicator shrink")
@@ -2657,11 +2722,11 @@ class _DeterministicNVLSTest(MultiProcContinuousTest):
     preset_nccl_algo: str | None = None
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2724,11 +2789,11 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
     """What nccl2 reports about a collective to profilers and flight recorders."""
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2749,7 +2814,7 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         # (process group, sequence number).
         groups = [
             dist.new_group(
-                backend=self.backend_str(),
+                backend=self.backend_str(self.device_type),
                 use_local_synchronization=True,
                 timeout=timedelta(seconds=60),
             )
