@@ -130,6 +130,39 @@ class MultiKernelTest(TestCase):
         self.assertNotIn("run", vars(split))
         self.assertEqual(events, ["run_1", "run_0"])
 
+    @parametrize("baseline_us,picked", [(15, 0), (30, 1)])
+    def test_tma_pick_needs_a_20us_baseline(self, baseline_us, picked):
+        call = self._benchmark_lock_call([])
+        call.multi_kernel_name = "multi_kernel_test"
+        call.picked_kernel, call.disable_cache, call._recorded = None, True, True
+        for kernel, meta in zip(call._kernels, ({}, {"tma_variant": True})):
+            kernel.inductor_meta, kernel.size_hints = meta, {"x": 1}
+        timings = [baseline_us / 1000, baseline_us / 1500]
+        with unittest.mock.patch.object(
+            call, "benchmark_sub_kernels", return_value=timings
+        ):
+            call.run("arg")
+        self.assertEqual(call.picked_kernel, picked)
+
+    def test_cache_file_path_separates_coordinate_descent(self):
+        def call_with_cd(cd):
+            call = self._benchmark_lock_call([])
+            for i, kernel in enumerate(call._kernels):
+                kernel.fn = SimpleNamespace(cache_key=f"k{i}")
+                kernel.size_hints = {"x": 1}
+                kernel.triton_meta = {"signature": {}}
+                kernel.inductor_meta = {"coordinate_descent_tuning": cd and i == 0}
+            return call
+
+        self.assertNotEqual(
+            call_with_cd(False).cache_file_path(),
+            call_with_cd(True).cache_file_path(),
+        )
+        self.assertEqual(
+            call_with_cd(False).cache_file_path(),
+            call_with_cd(False).cache_file_path(),
+        )
+
     def test_failed_subkernels_remap_args_and_skip_single_survivor_benchmark(self):
         # A failed optional sub-kernel comes back as its exception, as one missing under no_compilation() does.
         counters.clear()

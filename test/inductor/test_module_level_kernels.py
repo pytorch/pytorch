@@ -269,7 +269,7 @@ class TestModuleLevelKernels(TestCase):
         "requires NVIDIA sm90+ with Triton tensor descriptors",
     )
     def test_optional_kernel_stays_async(self):
-        x = torch.randn(1024, 1024, device="cuda", dtype=torch.bfloat16)
+        x = torch.randn(4096, 4096, device="cuda", dtype=torch.bfloat16)
         result, code = _code_for(
             torch.nn.functional.silu,
             x,

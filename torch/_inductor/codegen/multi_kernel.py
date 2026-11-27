@@ -362,7 +362,9 @@ class MultiKernelCall:
         key = code_hash(
             ",".join(
                 [
+                    # Coordinate descent changes the tuned sub-kernel without changing its Triton source.
                     f"{k.fn.cache_key}{k.size_hints!r}{k.triton_meta!r}"
+                    f"{bool(k.inductor_meta.get('coordinate_descent_tuning'))}"
                     for k in self.kernels
                 ]
             )
@@ -522,6 +524,11 @@ class MultiKernelCall:
         if self.picked_kernel is None:
             timings = self.benchmark_sub_kernels(*args, **kwargs)
             self.picked_kernel = timings.index(min(timings))
+            # better-benchmark on GB200 found TMA picks gained nothing where the baseline runs under 20 us, and lost on some.
+            if timings[0] < 0.02 and self.kernels[self.picked_kernel].inductor_meta.get(
+                "tma_variant"
+            ):
+                self.picked_kernel = 0
             k0 = self.kernels[0]
             log.debug(
                 "pick %dth sub-kernel in %s. Size hints %s. Reduction hint %s. Timings %s",

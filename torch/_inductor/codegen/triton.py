@@ -9501,6 +9501,10 @@ class TritonScheduling(SIMDScheduling):
                 or is_scan
                 or kernel_features.numel.free_symbols
                 or kernel_features.reduction_numel.free_symbols
+                # better-benchmark on H100 and GB200 measured no TMA win at 2**23 elements or fewer, where picks follow timing noise.
+                or V.graph.sizevars.statically_known_leq(
+                    kernel_features.numel * kernel_features.reduction_numel, 2**23
+                )
                 or (
                     previous_nodes is not None
                     and NVUniversalGemmScheduling.is_pdl_enabled_template(

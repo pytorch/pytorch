@@ -2758,7 +2758,7 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
         def fn(x):
             return torch.nn.functional.silu(x)
 
-        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(4096, 4096, dtype=torch.bfloat16, device=GPU_TYPE)
 
         def check_pool(pool, num_kernels, num_tma):
             with config.patch({"triton.autotune_tensor_descriptor": pool}):
@@ -2776,6 +2776,12 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
 
         check_pool("auto", 2, 1)
         check_pool("all", 3, 2)
+        # 2**23 elements is the largest kernel that gets no pool.
+        small = x[:2048]
+        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=False), small)
+        self.assertEqual(result, fn(small), exact_device=True)
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
+        FileCheck().check_not("async_compile.multi_kernel").run(code)
 
     @config.patch({"nvgemm_pdl": "auto", "triton.enable_pdl": False})
     def test_dynamic_shapes_and_pdl_consumers_skip_the_pool(self):
@@ -2788,7 +2794,7 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
             scale = torch.rsqrt(x_float.pow(2).mean(-1, keepdim=True) + 1e-6)
             return (x_float * scale).to(x.dtype) * weight
 
-        x = torch.randn(1024, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        x = torch.randn(4096, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
         weight = torch.randn(4096, device=GPU_TYPE, dtype=torch.bfloat16)
         result, (code,) = run_and_get_code(
             torch.compile(rmsnorm, dynamic=True), x, weight
@@ -2802,7 +2808,7 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
         def scale_rows(x, y):
             return y * x.amax(-1)
 
-        y = torch.randn(512, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn(4096, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
         # A PDL-enabled NVGEMM needs NVFP4 on datacenter Blackwell, so the amax kernel stands in for one.
         with mock.patch.object(
             NVUniversalGemmScheduling, "is_pdl_enabled_template", return_value=True
@@ -2866,7 +2872,7 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
         def fn(x):
             return torch.softmax(x, dim=-1)
 
-        x = torch.randn(256, 4096, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(4096, 4096, dtype=torch.bfloat16, device=GPU_TYPE)
         # The second compile loads the graph from the FX graph cache, with the dropped variants bundled.
         with mock.patch.object(CachingAutotuner, "_make_launchers", fail_tma_launchers):
             for cache_hits in range(2):
@@ -2890,7 +2896,7 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
             return choices
 
         # Bool has no tensor-map dtype, so the TMA choice repeats the baseline.
-        flags = torch.randint(0, 2, (1024, 1024), dtype=torch.bool, device=GPU_TYPE)
+        flags = torch.randint(0, 2, (4096, 4096), dtype=torch.bool, device=GPU_TYPE)
         metrics.reset()
         with mock.patch.object(
             TritonScheduling, "create_kernel_choices", count_choices
