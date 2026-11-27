@@ -41,6 +41,8 @@ class BadCmp:
 
 
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -58,6 +60,8 @@ class _BaseSetTests(torch._dynamo.test_case.TestCase):
 
 
 class CustomSetTests(_BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     class CustomSet(set):
         def add(self, item):
             return super().add(item + 1)
@@ -80,6 +84,8 @@ class CustomSetTests(_BaseSetTests):
 
 
 class CustomNewSetTests(_BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     # No class between the leaf and set/frozenset overrides __new__ at all
     # -- tp_new must resolve the owner by walking the MRO, not by checking
     # self.value.__new__ identity for a fixed list of known base types.
@@ -138,6 +144,8 @@ class CustomNewSetTests(_BaseSetTests):
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_isdisjoint_with_generator(self):
         n = 0
 
@@ -377,6 +385,8 @@ class DictSetOperandTests(torch._dynamo.test_case.TestCase):
 
 
 class TestSetGuards(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_set_with_function(self):
         s = {
             torch._C._set_grad_enabled,
@@ -618,6 +628,8 @@ from user code:
 
 
 class _FrozensetBase:
+    hw_classification = HardwareClassification.GENERIC
+
     # Frozenset methods
     # + copy
     # + difference
@@ -870,6 +882,8 @@ class _FrozensetBase:
 
 
 class _SetBase(_FrozensetBase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Set Methods
     # + add
     # + clear
@@ -997,6 +1011,8 @@ class _SetBase(_FrozensetBase):
 
 
 class FrozensetTests(_FrozensetBase, _BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = frozenset
 
     @make_dynamo_test
@@ -1007,6 +1023,8 @@ class FrozensetTests(_FrozensetBase, _BaseSetTests):
 
 
 class _SetKeyCoercionMixin:
+    hw_classification = HardwareClassification.GENERIC
+
     # set/frozenset allow an (unhashable) set key for remove/discard by
     # coercing it to a frozenset for the lookup, mirroring the set-key
     # fallback in CPython set_remove_impl / set_discard_impl.
@@ -1028,6 +1046,8 @@ class _SetKeyCoercionMixin:
 
 
 class SetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = set
 
     def test_in_frozenset(self):
@@ -1035,6 +1055,8 @@ class SetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
 
 
 class UserDefinedSetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     class CustomSet(set):
         pass
 
@@ -1048,6 +1070,8 @@ class UserDefinedSetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
 
 
 class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     class CustomFrozenset(frozenset):
         pass
 
@@ -1069,6 +1093,8 @@ class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
 
 
 class OrderedSetTests(_SetBase, _BaseSetTests):
+    hw_classification = HardwareClassification.GENERIC
+
     from torch.utils._ordered_set import OrderedSet
 
     thetype = OrderedSet
@@ -1172,6 +1198,8 @@ class OrderedSetTests(_SetBase, _BaseSetTests):
 
 class FrozensetHierarchyTests(_BaseSetTests):
     """frozenset must not be a subclass of set (CPython parity). Part of #192874."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_frozenset_not_a_set_variable(self):
         from torch._dynamo.variables.sets import (
@@ -1290,6 +1318,8 @@ class OrderedSetHierarchyTests(torch._dynamo.test_case.TestCase):
     here. What differs is that insertion order is observable and that the
     in-place operators are ``collections.abc.MutableSet``'s.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     # Deliberately not in hash order. A result that comes back as [1, 2, 3]
     # was rebuilt from a set, not from the OrderedSet's own order.
@@ -1898,6 +1928,8 @@ class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
     `set`'s named methods.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     # dir(set) - dir(dict.keys()), i.e. everything a dict_keys must not have.
     SET_ONLY_METHODS = (
         "union",
@@ -2084,6 +2116,8 @@ class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
 
 
 class SetSubclassSideEffectTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_set_subclass_input_mutation(self):
         def fn(s, x):
             s.add(9)
