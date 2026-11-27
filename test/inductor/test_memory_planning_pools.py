@@ -27,7 +27,7 @@ class MemoryPlanningPoolsTest(TestCase):
             return torch.device("cpu")
 
         def get_layout(self):
-            return SimpleNamespace(size=())
+            return SimpleNamespace(size=(), stride=())
 
         def get_name(self):
             return self._name
@@ -83,12 +83,12 @@ class MemoryPlanningPoolsTest(TestCase):
 
 class PoolAlignmentTest(TestCase):
     @staticmethod
-    def make_allocation(name, nbytes, live_range):
+    def make_allocation(name, nbytes, live_range, size_hint=64):
         node = ir.Buffer(
             name=name,
             layout=ir.FixedLayout(torch.device("cpu"), torch.uint8, [nbytes], [1]),
         )
-        return Allocation(node, live_range, size_hint=64, symbolic_size=nbytes)
+        return Allocation(node, live_range, size_hint=size_hint, symbolic_size=nbytes)
 
     def test_symbolic_pool_alignment(self):
         a, b, c, d = sympy.symbols("a b c d", integer=True)
@@ -113,6 +113,53 @@ class PoolAlignmentTest(TestCase):
             [block.offset for block in (first, second, tail, anchor, replacement)],
             [0, 0, prefix, prefix + align(c), 0],
         )
+
+
+class UnbackedPoolTest(TestCase):
+    @staticmethod
+    def plan(*blocks):
+        planner = MemoryPlanner(wrapper=None)
+        planner.buffer_groups = [
+            MemoryPlanningPoolsTest.FakeBufferGroup(block, is_output=False)
+            for block in blocks
+        ]
+        with config.patch(memory_pool="intermediates"):
+            planner.allocate_groups()
+
+    def test_unbacked_symbol_available_from_first_use(self):
+        make = PoolAlignmentTest.make_allocation
+        u0, u1 = sympy.symbols("u0 u1", integer=True, positive=True)
+        static = make("static", sympy.Integer(64), LiveRange(1, 2))
+        first = make("first", u0, LiveRange(2, 3))
+        second = make("second", u0, LiveRange(4, 5))
+        late = make("late", u1, LiveRange(6, 7))
+        self.plan(static, first, second, late)
+
+        self.assertEqual(
+            [block.earliest_available for block in (static, first, second, late)],
+            [None, 2, 2, 6],
+        )
+        self.assertIs(first.pool, second.pool)
+        self.assertEqual(len({id(block.pool) for block in (static, first, late)}), 3)
+
+    def test_pool_begins_after_symbols_of_every_member(self):
+        make = PoolAlignmentTest.make_allocation
+        u0, u1 = sympy.symbols("u0 u1", integer=True, positive=True)
+        # u0 is first used at timestep 5 and u1 at 7, so once a and b share a pool,
+        # c must not move the start of that pool before 7.
+        a = make("a", u0, LiveRange(9, 10), size_hint=256)
+        b = make("b", u1, LiveRange(12, 13), size_hint=256)
+        c = make("c", sympy.Integer(128), LiveRange(6, 7), size_hint=128)
+        d = make("d", u0, LiveRange(5, 6))
+        e = make("e", u1, LiveRange(7, 8))
+        self.plan(a, b, c, d, e)
+
+        self.assertIs(a.pool, b.pool)
+        self.assertIsNot(c.pool, a.pool)
+        for block in (a, b, c, d, e):
+            pool_begin = block.pool.root.get_live_ranges().begin
+            if block.earliest_available is not None:
+                self.assertLessEqual(block.earliest_available, pool_begin)
 
 
 if __name__ == "__main__":

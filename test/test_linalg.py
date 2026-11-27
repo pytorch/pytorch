@@ -6775,7 +6775,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                 self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
         # NOTE: We're just exercising terrible failures here.
-        version = _get_torch_cuda_version()
         SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
         SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
         SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
@@ -6784,8 +6783,8 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             _test(17, k, n, use_transpose_a, use_transpose_b, True)
         else:
             if not use_transpose_a and use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
-                    _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
+                if SM80OrLater or SM70 or SM75:
+                    _test(17, k, n, use_transpose_a, use_transpose_b, True)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
                                                 "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
@@ -6802,7 +6801,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
+                if SM80OrLater or SM70 or SM75:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
@@ -12933,6 +12932,8 @@ class TestGroupedMM(TestCase):
     @parametrize("b_row_major", [False, True])
     @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES)
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    # same as test_grouped_gemm_rocm_backend: ck_tile, on by default on ROCm, sums K in one fp32 accumulator
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)} if TEST_WITH_ROCM else {})
     @decorateIf(
         unittest.skip('Unaligned cases require the CUDA float32 fallback'),
         lambda p: torch.device(p["device"]).type == "cuda" and not torch.version.hip and p["dtype"] != torch.float32 and any(size % (16 // p["dtype"].itemsize) for size in p["a_shape"][-2:] + p["b_shape"][-2:] + tuple(p["offsets"] or ())),
@@ -12950,7 +12951,7 @@ class TestGroupedMM(TestCase):
         offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=backward)
 
-    # The ROCm grouped gemm backends are opt-in via env var, which CI never sets.
+    # ROCM_ALLOW_GROUP_GEMM_CK_TILE=1 forces ck_tile; unset, a heuristic picks ck_tile or hipBLASLt per call.
     @onlyCUDA
     @skipCUDAIfNotRocm
     @parametrize("backend", ["ck_tile"])

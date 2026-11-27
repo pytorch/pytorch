@@ -341,6 +341,7 @@ class InductorMeta(typing.TypedDict, total=False):
     force_disable_caches: bool
     dynamic_scale_rblock: bool
     incremental_autotune: bool
+    incremental_autotune_reduction: bool
     incremental_autotune_max_dispatches: int
     max_autotune: bool
     max_autotune_pointwise: bool
@@ -392,6 +393,8 @@ class InductorMeta(typing.TypedDict, total=False):
 
     # Kernel identity / launch (codegen_kernel literal)
     grid_type: str
+    # Number of pointwise axes, excluding reductions, used by GridND.
+    rank: int
     kernel_name: str
     mutated_arg_names: typing.Any
     optimize_mem: bool

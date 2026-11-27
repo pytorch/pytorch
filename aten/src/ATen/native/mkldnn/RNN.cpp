@@ -79,11 +79,12 @@ REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub)
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Lstm.h>
 
 namespace at::native {
 
 struct RNNParams {
-  ideep::rnn_kind mode;
+  mkldnn::rnn_kind mode;
   int64_t seq_length;
   int64_t mini_batch;
   int64_t input_size;
@@ -105,7 +106,7 @@ struct RNNParams {
       bool bidirectional,
       bool batch_first_,
       bool train_) {
-    mode = static_cast<ideep::rnn_kind>(mode_);
+    mode = static_cast<mkldnn::rnn_kind>(mode_);
     batch_first = batch_first_;
     seq_length = input.size(0);
     mini_batch = input.size(1);
@@ -115,10 +116,10 @@ struct RNNParams {
     num_layers = num_layers_;
     train = train_;
     batch_sizes = batch_sizes_;
-    if (mode == ideep::rnn_kind::LSTM) {
+    if (mode == mkldnn::rnn_kind::LSTM) {
       num_gates = 4;
       num_bias_gates = 4;
-    } else if (mode == ideep::rnn_kind::GRU) {
+    } else if (mode == mkldnn::rnn_kind::GRU) {
       num_gates = 3;
       num_bias_gates = 4;
     } else {
@@ -130,7 +131,7 @@ struct RNNParams {
 
   // mkldnn memory descriptors
   using format = dnnl::memory::format_tag;
-  using desc = ideep::tensor::desc;
+  using desc = mkldnn::MkldnnMemory::desc;
   using dtype = dnnl::memory::data_type;
   desc src_layer_desc(int64_t _input_size, dtype dtype) const {
     return {{seq_length, mini_batch, _input_size}, dtype, format::tnc};
@@ -194,7 +195,7 @@ static std::vector<int64_t> _output_size(const RNNParams& rnn) {
 //
 static Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
   auto weight_t = weight.contiguous();
-  if (static_cast<ideep::rnn_kind>(fn_mode) == ideep::rnn_kind::GRU) {
+  if (static_cast<mkldnn::rnn_kind>(fn_mode) == mkldnn::rnn_kind::GRU) {
     std::vector<Tensor> gates = weight_t.chunk(3, /*gates*/0);
     return at::cat({gates[1], gates[0], gates[2]}, /*gates*/0);
   }
@@ -202,7 +203,7 @@ static Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
 }
 
 static Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_t fn_mode) {
-  if (static_cast<ideep::rnn_kind>(fn_mode) == ideep::rnn_kind::GRU) {
+  if (static_cast<mkldnn::rnn_kind>(fn_mode) == mkldnn::rnn_kind::GRU) {
     std::vector<Tensor> b1 = bias_ih.chunk(3, /*output_channels*/0);
     std::vector<Tensor> b2 = bias_hh.chunk(3, /*output_channels*/0);
     return at::cat({b1[1] + b2[1], b1[0] + b2[0], b1[2], b2[2]}, /*output_channels*/0);
@@ -252,38 +253,38 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
 
   // per layer input size
   int64_t input_size = input.size(2);
-  ideep::tensor w1_, w2_;
-  auto x = itensor_view_from_const_dense(
+  mkldnn::MkldnnMemory w1_, w2_;
+  auto x = memory_view_from_const_dense(
       input,
       rnn.src_layer_desc(input_size, get_mkldnn_dtype(input)));
-  auto hx = itensor_view_from_const_dense(
+  auto hx = memory_view_from_const_dense(
       hx_, rnn.src_iter_desc(get_mkldnn_dtype(hx_)));
-  auto cx = itensor_view_from_const_dense(
+  auto cx = memory_view_from_const_dense(
       cx_, rnn.src_iter_c_desc(get_mkldnn_dtype(cx_)));
-  auto b = itensor_view_from_const_dense(
+  auto b = memory_view_from_const_dense(
       bias, rnn.bias_desc(get_mkldnn_dtype(bias)));
-  auto y = itensor_view_from_dense(
+  auto y = memory_view_from_dense(
       output, rnn.dst_layer_desc(get_mkldnn_dtype(output)));
-  auto hy = itensor_view_from_dense(
+  auto hy = memory_view_from_dense(
       hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_)));
-  auto cy = itensor_view_from_dense(
+  auto cy = memory_view_from_dense(
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_)));
-  w1_ = weight_ih.is_mkldnn() ? itensor_from_const_tensor(weight_ih) : itensor_view_from_const_dense(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
-  w2_ = weight_hh.is_mkldnn() ? itensor_from_const_tensor(weight_hh) : itensor_view_from_const_dense(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
+  w1_ = weight_ih.is_mkldnn() ? memory_from_const_tensor(weight_ih) : memory_view_from_const_dense(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
+  w2_ = weight_hh.is_mkldnn() ? memory_from_const_tensor(weight_hh) : memory_view_from_const_dense(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
   if (at::GradMode::is_enabled()) {
     Tensor workspace = Tensor();
-    auto pd = ideep::lstm_forward_training::prepare(
+    auto pd = mkldnn::lstm_forward_training_prepare(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
     workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
-    ideep::tensor mkldnn_workspace;
+    mkldnn::MkldnnMemory mkldnn_workspace;
     mkldnn_workspace.init(
       pd.workspace_desc(), workspace.template mutable_data_ptr<uint8_t>());
-    ideep::lstm_forward_training::compute(
-        pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, dnnl::prop_kind::forward_training);
+    mkldnn::lstm_forward_training(
+        pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy);
     return std::make_tuple(
         std::move(output), std::move(hy_), std::move(cy_), std::move(workspace));
   } else {
-    ideep::lstm_forward_inference::compute(
+    mkldnn::lstm_forward_inference(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, dnnl::prop_kind::forward_inference);
     return std::make_tuple(std::move(output), std::move(hy_), std::move(cy_), Tensor());
   }
@@ -343,29 +344,29 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 
   // per layer input size
   int64_t input_size = input.size(2);
-    auto x = itensor_view_from_const_dense(
+    auto x = memory_view_from_const_dense(
       input,
       rnn.src_layer_desc(input_size, get_mkldnn_dtype(input.scalar_type())));
-    auto hx = itensor_view_from_const_dense(
+    auto hx = memory_view_from_const_dense(
       hx_, rnn.src_iter_desc(get_mkldnn_dtype(hx_.scalar_type())));
-    auto cx = itensor_view_from_const_dense(
+    auto cx = memory_view_from_const_dense(
       cx_, rnn.src_iter_c_desc(get_mkldnn_dtype(cx_.scalar_type())));
-    auto w1 = itensor_view_from_const_dense(
+    auto w1 = memory_view_from_const_dense(
       weight_ih,
       rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih.scalar_type())));
-    auto w2 = itensor_view_from_const_dense(
+    auto w2 = memory_view_from_const_dense(
       weight_hh,
       rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh.scalar_type())));
-    auto b = itensor_view_from_const_dense(
+    auto b = memory_view_from_const_dense(
       bias, rnn.bias_desc(get_mkldnn_dtype(bias.scalar_type())));
-    auto y = itensor_view_from_const_dense(
+    auto y = memory_view_from_const_dense(
       output, rnn.dst_layer_desc(get_mkldnn_dtype(output.scalar_type())));
-    auto hy = itensor_view_from_const_dense(
+    auto hy = memory_view_from_const_dense(
       hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_.scalar_type())));
-    auto cy = itensor_view_from_const_dense(
+    auto cy = memory_view_from_const_dense(
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_.scalar_type())));
 
-  // Create diff_* ATen tensor and corresponding ideep tensor as fp32
+  // Create diff_* ATen tensor and corresponding MkldnnMemory as fp32
   auto diff_x_ =
       at::empty(input.sizes(), input.options().dtype(at::ScalarType::Float));
   auto diff_hx_ =
@@ -379,22 +380,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   auto diff_b_ =
       at::empty(bias.sizes(), bias.options().dtype(at::ScalarType::Float));
 
-  auto diff_x = itensor_view_from_dense(
+  auto diff_x = memory_view_from_dense(
       diff_x_, rnn.src_layer_desc(input_size, dnnl::memory::data_type::f32));
-  auto diff_hx = itensor_view_from_dense(
+  auto diff_hx = memory_view_from_dense(
       diff_hx_, rnn.src_iter_desc(dnnl::memory::data_type::f32));
-  auto diff_cx = itensor_view_from_dense(
+  auto diff_cx = memory_view_from_dense(
       diff_cx_, rnn.src_iter_c_desc(dnnl::memory::data_type::f32));
-  auto diff_w1 = itensor_view_from_dense(
+  auto diff_w1 = memory_view_from_dense(
       diff_w1_,
       rnn.weights_layer_desc(input_size, dnnl::memory::data_type::f32));
-  auto diff_w2 = itensor_view_from_dense(
+  auto diff_w2 = memory_view_from_dense(
       diff_w2_, rnn.weights_iter_desc(dnnl::memory::data_type::f32));
-  auto diff_b = itensor_view_from_dense(
+  auto diff_b = memory_view_from_dense(
       diff_b_, rnn.bias_desc(dnnl::memory::data_type::f32));
 
   // Convert grad_y, grad_hy, grad_cy to fp32 in non-fp32 backward
-  ideep::tensor diff_y, diff_hy, diff_cy;
+  mkldnn::MkldnnMemory diff_y, diff_hy, diff_cy;
   at::Tensor grad_y_, grad_hy_, grad_cy_;
   if (input.scalar_type() != at::ScalarType::Float) {
     grad_y_ = at::empty(
@@ -408,27 +409,27 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
         grad_cy.sizes(), grad_cy.options().dtype(at::ScalarType::Float));
     grad_cy_.copy_(grad_cy);
 
-    diff_y = itensor_view_from_const_dense(
+    diff_y = memory_view_from_const_dense(
         grad_y_, rnn.dst_layer_desc(get_mkldnn_dtype(grad_y_.scalar_type())));
-    diff_hy = itensor_view_from_const_dense(
+    diff_hy = memory_view_from_const_dense(
         grad_hy_, rnn.dst_iter_desc(get_mkldnn_dtype(grad_hy_.scalar_type())));
-    diff_cy = itensor_view_from_const_dense(
+    diff_cy = memory_view_from_const_dense(
         grad_cy_, rnn.dst_iter_desc(get_mkldnn_dtype(grad_cy_.scalar_type())));
   } else {
-    diff_y = itensor_view_from_const_dense(
+    diff_y = memory_view_from_const_dense(
         grad_output, rnn.dst_layer_desc(dnnl::memory::data_type::f32));
-    diff_hy = itensor_view_from_const_dense(
+    diff_hy = memory_view_from_const_dense(
         grad_hy, rnn.dst_iter_desc(dnnl::memory::data_type::f32));
-    diff_cy = itensor_view_from_const_dense(
+    diff_cy = memory_view_from_const_dense(
         grad_cy, rnn.dst_iter_desc(dnnl::memory::data_type::f32));
   }
 
-  auto forward_hint = ideep::lstm_forward_training::prepare(x, hx, cx, w1, w2, b, y, hy, cy, reverse);
-  ideep::tensor mkldnn_workspace;
+  auto forward_hint = mkldnn::lstm_forward_training_prepare(x, hx, cx, w1, w2, b, y, hy, cy, reverse);
+  mkldnn::MkldnnMemory mkldnn_workspace;
   mkldnn_workspace.init(
       forward_hint.workspace_desc(),
       const_cast<uint8_t*>(workspace.const_data_ptr<uint8_t>()));
-  ideep::lstm_backward::compute(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, mkldnn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
+  mkldnn::lstm_backward(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, mkldnn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
   auto diff_b2_ = at::clone(diff_b_);
   return std::make_tuple(std::move(diff_x_), std::move(diff_w1_), std::move(diff_w2_), std::move(diff_b_), std::move(diff_b2_), std::move(diff_hx_), std::move(diff_cx_));
 }
@@ -438,7 +439,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 //   a. mkldnn will use plain formats for input, hx/cx, output, hy/cy
 //      and possibly use blocked formats for weights depending shape info.
 //   b. All mkldnn memories are created (in plain format) as views on ATen tensor,
-//      the weight reorder(if any) is handed automatically inside ideep (mkldnn bridge)
+//      the weight reorder(if any) is handed automatically inside the oneDNN wrappers (mkldnn bridge)
 //
 // II. MKLDNN Primitive Mapping
 //   a. mkldnn rnn primitive doesn't support training with dropout or padded input sequence.
@@ -456,7 +457,7 @@ static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
     int64_t num_layers, bool has_biases, bool batch_first, double dropout_p,
     bool train, bool bidirectional, IntArrayRef batch_sizes) {
   TORCH_CHECK(batch_sizes.empty(), "mkldnn_rnn doesn't support packed input");
-  if (static_cast<ideep::rnn_kind>(mode) != ideep::rnn_kind::LSTM) {
+  if (static_cast<mkldnn::rnn_kind>(mode) != mkldnn::rnn_kind::LSTM) {
     TORCH_CHECK(!cx_.defined(), "mkldnn_rnn: illegal defined cx for non-LSTM RNN");
   }
 
@@ -555,7 +556,7 @@ std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor&
 template<typename hidden_type>
 std::pair<Tensor, hidden_type> mkldnn_impl(
     const Tensor& input, const hidden_type& hidden,
-    TensorList params, bool has_biases, ideep::rnn_kind mode,
+    TensorList params, bool has_biases, mkldnn::rnn_kind mode,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   auto [hx, cx] = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
@@ -573,7 +574,7 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
     const Tensor& input, TensorList hx, TensorList params, bool has_biases,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   auto result = mkldnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
-      ideep::rnn_kind::LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
+      mkldnn::rnn_kind::LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
   output = std::move(result.first);
   std::tie(hy, cy) = std::move(result.second);
 }

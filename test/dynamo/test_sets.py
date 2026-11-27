@@ -266,6 +266,33 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             # Every key hashed exactly once (during the initial fromkeys).
             self.assertEqual(ref[0], [n] * 5)
 
+    def test_unbound_contains(self):
+        # set/frozenset.__contains__ are METH_COEXIST methods, not slot wrappers.
+        def fn():
+            return (
+                set.__contains__({1, 2}, 1),
+                set.__contains__(SetSubclass({1}), 2),
+                frozenset.__contains__(frozenset({1}), 1),
+                frozenset.__contains__(FrozenstSubclass({1}), 2),
+                # An unhashable set key is retried as a frozenset.
+                frozenset.__contains__(frozenset({frozenset({1})}), {1}),
+            )
+
+        self.assertEqual(fn(), torch.compile(fn, backend="eager", fullgraph=True)())
+
+    def test_ordered_set_contains_unhashable_set_raises(self):
+        # Only set/frozenset retry an unhashable set key as a frozenset.
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn():
+            try:
+                OrderedSet([frozenset({1})]).__contains__({1})
+                return "no error"
+            except TypeError:
+                return "TypeError"
+
+        self.assertEqual(fn(), torch.compile(fn, backend="eager", fullgraph=True)())
+
 
 @instantiate_parametrized_tests
 class DictSetOperandTests(torch._dynamo.test_case.TestCase):
