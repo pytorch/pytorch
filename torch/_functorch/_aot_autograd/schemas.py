@@ -145,6 +145,7 @@ class InputAliasInfo:
     mutation_is_shallow_copy_data: bool
     requires_grad: bool
     keep_input_mutations: bool
+    mutations_under_inference_mode: bool = False
 
     def __post_init__(self) -> None:
         if self.mutates_storage_metadata:

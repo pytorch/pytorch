@@ -249,9 +249,16 @@ void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regen
   // we won't call replace_() on the other alias until the alias is later used, which
   if (!from_lazy_regenerate) {
     mark_mutation();
-    if (!at::GradMode::is_enabled() || InferenceMode::is_enabled()) {
+    // See Note [Suppressing c10::InferenceMode during functionalization]
+    const bool in_inference_mode = InferenceMode::is_enabled() ||
+        (!at::GradMode::is_enabled() &&
+         functionalization::impl::getFunctionalizationInInferenceModeTLS());
+    if (!at::GradMode::is_enabled() || in_inference_mode) {
       // This mutation happened under no_grad or inference_mode
       mark_mutation_during_no_grad_or_inference_mode();
+    }
+    if (in_inference_mode) {
+      mark_mutation_during_inference_mode();
     }
   }
 }
@@ -710,6 +717,11 @@ bool are_all_mutations_under_no_grad_or_inference_mode(const Tensor& functional_
   return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_under_no_grad_or_inference_mode();
 }
 
+bool are_all_mutations_under_inference_mode(const Tensor& functional_tensor) {
+  TORCH_CHECK(isFunctionalTensor(functional_tensor));
+  return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_under_inference_mode();
+}
+
 bool isFunctionalTensor(const at::Tensor& tensor) {
    return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
 }
@@ -849,6 +861,15 @@ bool getFunctionalizationReapplyViewsTLS() {
 }
 void setFunctionalizationReapplyViewsTLS(bool reapply_views) {
   _functionalizationReapplyViews = reapply_views;
+}
+
+thread_local static bool _functionalizationInInferenceMode;
+
+bool getFunctionalizationInInferenceModeTLS() {
+  return _functionalizationInInferenceMode;
+}
+void setFunctionalizationInInferenceModeTLS(bool in_inference_mode) {
+  _functionalizationInInferenceMode = in_inference_mode;
 }
 
 } // namespace impl

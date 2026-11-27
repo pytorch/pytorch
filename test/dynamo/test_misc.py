@@ -10152,6 +10152,136 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_inference_mode_views(self, backend):
+        # Views taken under an in-graph inference_mode used to fail at compile
+        # time with "Cannot set version_counter for inference tensor".
+        m = torch.nn.Linear(4, 4)
+
+        @torch.inference_mode()
+        def fn(x):
+            return m(x.view(-1, 4)).view(-1) + m.weight.t().reshape(-1)
+
+        x = torch.randn(2, 2, 4)
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @parametrize("mutations_in_graph", [True, False])
+    def test_inference_mode_kv_cache_update(self, mutations_in_graph):
+        # A cache allocated under inference_mode is an inference tensor, which
+        # can only be mutated under inference_mode. That includes the copy_
+        # that AOTAutograd's runtime epilogue applies after the graph runs.
+        from functorch.compile import nop
+        from torch._dynamo.backends.common import aot_autograd
+
+        backend = (
+            "inductor"
+            if mutations_in_graph
+            else aot_autograd(fw_compiler=nop, keep_inference_input_mutations=False)
+        )
+
+        def make_cache():
+            with torch.inference_mode():
+                return torch.zeros(4, 8), torch.zeros(4, 8)
+
+        def fn(xk, cache_k, cache_v):
+            with torch.inference_mode():
+                cache_k[1:3] = xk
+                cache_v.copy_(cache_k * 2)
+                return cache_k.view(-1) + 1
+
+        xk = torch.randn(2, 8)
+        ref_k, ref_v = make_cache()
+        ref = fn(xk, ref_k, ref_v)
+        cache_k, cache_v = make_cache()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(opt_fn(xk, cache_k, cache_v), ref)
+        self.assertEqual(cache_k, ref_k)
+        self.assertEqual(cache_v, ref_v)
+
+    @parametrize("mutation", ["under_no_grad", "under_inference_mode_false", "mixed"])
+    def test_inference_mode_kv_cache_update_outside_inference_mode(self, mutation):
+        from functorch.compile import nop
+        from torch._dynamo.backends.common import aot_autograd
+
+        def under_no_grad(x, cache):
+            with torch.no_grad():
+                cache.add_(x)
+            return x + 1
+
+        def under_inference_mode_false(x, cache):
+            with torch.inference_mode():
+                y = x.view(-1) * 2
+                with torch.inference_mode(False):
+                    cache.add_(x)
+            return y
+
+        def mixed(x, cache):
+            with torch.inference_mode():
+                cache.add_(x)
+            cache.add_(x)
+            return x + 1
+
+        fn = {
+            "under_no_grad": under_no_grad,
+            "under_inference_mode_false": under_inference_mode_false,
+            "mixed": mixed,
+        }[mutation]
+        backend = aot_autograd(fw_compiler=nop, keep_inference_input_mutations=False)
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with torch.inference_mode():
+            cache = torch.zeros(4)
+        for f in (fn, opt_fn):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Inplace update to inference tensor outside InferenceMode is not allowed",
+            ):
+                f(torch.ones(4), cache)
+
+    def test_inference_mode_cond_kv_cache_update(self):
+        from functorch.compile import nop
+        from torch._dynamo.backends.common import aot_autograd
+
+        def true_fn(x, cache):
+            cache.add_(x)
+            return x + 1
+
+        def false_fn(x, cache):
+            return x - 1
+
+        def fn(x, cache):
+            with torch.inference_mode():
+                return torch.cond(x.sum() > 0, true_fn, false_fn, (x, cache))
+
+        backend = aot_autograd(fw_compiler=nop, keep_inference_input_mutations=False)
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with torch.inference_mode():
+            cache = torch.zeros(4)
+        x = torch.ones(4)
+        self.assertEqual(opt_fn(x, cache), x + 1)
+        self.assertEqual(cache, x)
+
+    def test_inference_mode_custom_op_mutating_view(self):
+        # auto_functionalized_v2 needs the base of the mutated view.
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("add_one_(Tensor(a!) x) -> ()")
+
+            def add_one_(x):
+                x.add_(1)
+
+            lib.impl("add_one_", add_one_, "CompositeExplicitAutograd")
+
+            @torch.inference_mode()
+            def fn(x):
+                torch.ops.mylib.add_one_(x.view(-1)[1:3])
+                return x + 1
+
+            x_ref, x = torch.zeros(2, 3), torch.zeros(2, 3)
+            ref = fn(x_ref)
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            self.assertEqual(opt_fn(x), ref)
+            self.assertEqual(x, x_ref)
+
     def test_if_cond_nn_mod1(self):
         class MockModule(torch.nn.Module):
             def __init__(self, output_relu=True):

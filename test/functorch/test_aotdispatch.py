@@ -4230,6 +4230,67 @@ def forward(self, tangents_1):
             out_test = aot_mod(inp)
         self.assertEqual(out_ref, out_test)
 
+    def test_inference_mode_input_mutation_with_synthetic_base(self):
+        # a and b overlap, so they are replaced by a synthetic base, and the
+        # metadata of every input is rebuilt. cache must keep its
+        # mutations_under_inference_mode so that its copy_ runs under
+        # inference_mode.
+        def f(a, b, cache, x):
+            a.mul_(2)
+            with torch.inference_mode():
+                cache.copy_(x)
+            return b + 1
+
+        def make_inputs():
+            with torch.inference_mode():
+                cache = torch.zeros(3)
+            return torch.ones(4), cache
+
+        x = torch.randn(3)
+        buf_ref, cache_ref = make_inputs()
+        ref = f(buf_ref[0:3], buf_ref[1:4], cache_ref, x)
+        buf, cache = make_inputs()
+        compiled_f = aot_function(f, nop, keep_inference_input_mutations=False)
+        self.assertEqual(compiled_f(buf[0:3], buf[1:4], cache, x), ref)
+        self.assertEqual(buf, buf_ref)
+        self.assertEqual(cache, cache_ref)
+
+    def test_inference_mode_input_mutation_in_training_graph(self):
+        def f(x, w, cache):
+            y = (x * w).sin()
+            with torch.inference_mode():
+                cache.copy_(y.detach())
+            return y.sum()
+
+        with torch.inference_mode():
+            cache = torch.zeros(4)
+        x = torch.randn(4)
+        w = torch.randn(4, requires_grad=True)
+        compiled_f = aot_function(f, nop, keep_inference_input_mutations=False)
+        compiled_f(x, w, cache).backward()
+        self.assertEqual(cache, (x * w).sin().detach())
+        self.assertEqual(w.grad, (x * (x * w).cos()).detach())
+
+    def test_inference_mode_ambient_input_mutation(self):
+        # A mutation made under the caller's inference_mode is applied in the
+        # mode the compiled function is called in: it succeeds under
+        # inference_mode and raises outside of it, like eager.
+        def f(x, cache):
+            cache.copy_(x)
+            return x + 1
+
+        compiled_f = aot_function(f, nop, keep_inference_input_mutations=False)
+        with torch.inference_mode():
+            cache = torch.zeros(4)
+            compiled_f(torch.ones(4), cache)
+        self.assertEqual(cache, torch.ones(4))
+        for fn in (f, compiled_f):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Inplace update to inference tensor outside InferenceMode is not allowed",
+            ):
+                fn(torch.ones(4), cache)
+
     def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
         """
         In this test, the important thing is that primals_1 is **only** needed in the backward
@@ -5524,6 +5585,26 @@ class TestAOTExport(AOTTestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
+
+    def test_inference_mode_export_run_decompositions(self):
+        # Parameters of a module built under inference_mode are inference
+        # tensors that require grad. torch.cond's functionalization rule
+        # re-wraps them with c10::InferenceMode suppressed.
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                y = self.lin(x)
+                return torch.cond(
+                    y.sum() > 0, lambda y: self.lin(y), lambda y: y - 1, (y,)
+                )
+
+        with torch.inference_mode():
+            m, x = M(), torch.randn(2, 3)
+            ep = torch.export.export(m, (x,)).run_decompositions()
+            self.assertEqual(ep.module()(x), m(x))
 
     def test_aot_export_module_graph_module_serialization(self):
         class M(torch.nn.Module):

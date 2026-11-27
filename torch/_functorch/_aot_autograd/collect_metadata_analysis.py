@@ -41,6 +41,7 @@ from .descriptors import (
 )
 from .functional_utils import (
     are_all_mutations_hidden_from_autograd,
+    are_all_mutations_under_inference_mode,
     are_all_mutations_under_no_grad_or_inference_mode,
     from_fun,
     has_data_mutation,
@@ -201,6 +202,7 @@ def run_functionalized_fw_and_collect_metadata(
         output_info: list[OutputAliasInfo] = []
 
         prior_grad_enabled = torch.is_grad_enabled()
+        prior_inference_mode = torch.is_inference_mode_enabled()
         prior_autocast_states = _get_autocast_states()
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
@@ -274,6 +276,13 @@ def run_functionalized_fw_and_collect_metadata(
 
             if mutates_storage_metadata:
                 mutates_data = False
+            # Only mark mutations under an in-graph inference_mode, not the
+            # caller's mode (those replay in whatever mode the caller uses).
+            mutations_under_inference_mode = (
+                mutates_data
+                and not prior_inference_mode
+                and are_all_mutations_under_inference_mode(f_arg)
+            )
 
             requires_grad = isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
 
@@ -289,6 +298,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
                     keep_input_mutations=keep_input_mutations,
+                    mutations_under_inference_mode=mutations_under_inference_mode,
                 )
             )
 

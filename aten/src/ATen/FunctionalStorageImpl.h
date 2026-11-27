@@ -214,6 +214,9 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   void mark_mutation_during_no_grad_or_inference_mode() {
     mutation_counter_during_no_grad_or_inference_mode_++;
   }
+  void mark_mutation_during_inference_mode() {
+    mutation_counter_during_inference_mode_++;
+  }
   void mark_mutation_hidden_from_autograd() {
     mutation_counter_hidden_from_autograd_++;
   }
@@ -225,6 +228,10 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     // The <= is because both counters will technically be incremented, if we
     // perform e.g. a triton kernel mutation under no_grad
     return mutation_counter_ <= non_autograd_mutations;
+  }
+
+  bool are_all_mutations_under_inference_mode() const {
+    return mutation_counter_ == mutation_counter_during_inference_mode_;
   }
 
   bool are_all_mutations_hidden_from_autograd() const {
@@ -284,7 +291,11 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // When we detect that an input was mutated, we need to be able to tell if:
   // (1) all of the mutations were from triton kernels
   // (2) all of the mutations were under no_grad
+  // (3) all of the mutations were under inference_mode, in which case the
+  //     mutation must also be replayed under inference_mode, since inference
+  //     tensors can only be mutated there.
   uint64_t mutation_counter_during_no_grad_or_inference_mode_ = 0;
+  uint64_t mutation_counter_during_inference_mode_ = 0;
   uint64_t mutation_counter_ = 0;
   uint64_t mutation_counter_hidden_from_autograd_ = 0;
 

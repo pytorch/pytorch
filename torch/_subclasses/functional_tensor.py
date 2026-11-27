@@ -34,6 +34,8 @@ from torch.utils._python_dispatch import (
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
+_NULL_CONTEXT = contextlib.nullcontext()
+
 
 def _has_unrecognized_tensor_types(types: Sequence[type]) -> bool:
     unrecognized_types = [
@@ -93,6 +95,33 @@ def _assert_functionalize_not_active(msg: str) -> None:
     )
     if not is_excluded and is_included:
         raise AssertionError(msg)
+
+
+# Note [Suppressing c10::InferenceMode during functionalization]
+# FunctionalTensor/FakeTensor wrappers created during tracing must not be born
+# as inference tensors (no version counter), or as_view() fails when viewing a
+# normal base. While inference_mode is active, we temporarily disable
+# c10::InferenceMode in __torch_dispatch__, HOP py_functionalize_impl, and
+# FunctionalTensor.__new__, while keeping grad/forward-grad off (under
+# DisableTorchFunction so pre-dispatch tracing skips them) and preserving the
+# TLS dispatch key set. FunctionalizationInInferenceModeTLS stays True so
+# FunctionalTensorWrapper::replace_ still attributes mutations to inference_mode.
+@contextlib.contextmanager
+def _suppress_inference_mode_for_functionalization() -> Generator[None, None, None]:
+    include = torch._C._dispatch_tls_local_include_set()
+    exclude = torch._C._dispatch_tls_local_exclude_set()
+    prev_in_inference_mode = torch._functionalize_set_in_inference_mode(True)
+    try:
+        with (
+            torch.inference_mode(False),
+            torch._C._ForceDispatchKeyGuard(include, exclude),
+        ):
+            with torch._C.DisableTorchFunction():
+                torch._C._set_grad_enabled(False)
+                torch._C._set_fwd_grad_enabled(False)
+            yield
+    finally:
+        torch._functionalize_set_in_inference_mode(prev_in_inference_mode)
 
 
 # NOTE Some special handling for tensor conversion during export is needed.
@@ -202,29 +231,32 @@ class FunctionalTensor(torch.Tensor):
         # symbolic tensor this takes the call from 144us to 21us.
         storage_size = None if is_sparse_any(elem) else elem.untyped_storage().size()
 
-        out = torch.Tensor._make_wrapper_subclass(
-            # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
-            # Calling the overload that has kwargs causes us to go down the first overload path,
-            # which will **always** specialize sizes.
-            # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
-            cls,
-            elem.shape,  # sizes
-            elem.stride() if not is_sparse_any(elem) else None,  # strides
-            (
-                elem.storage_offset() if not is_sparse_any(elem) else None
-            ),  # storage_offset
-            None,  # memory_format
-            elem.dtype,  # dtype
-            elem.layout,  # layout
-            elem.device,  # device
-            False,  # pin_memory
-            elem.requires_grad,  # requires_grad
-            None,  # dispatch_sizes_strides_policy
-            False,  # dispatch_device
-            is_sparse_compressed(elem),  # dispatch_layout
-            extra_dispatch_keys,  # _extra_dispatch_keys
-            storage_size,  # storage_size
-        )
+        # See Note [Suppressing c10::InferenceMode during functionalization]
+        in_inf = torch.is_inference_mode_enabled()
+        with torch.inference_mode(False) if in_inf else _NULL_CONTEXT:
+            out = torch.Tensor._make_wrapper_subclass(
+                # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
+                # Calling the overload that has kwargs causes us to go down the first overload path,
+                # which will **always** specialize sizes.
+                # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
+                cls,
+                elem.shape,  # sizes
+                elem.stride() if not is_sparse_any(elem) else None,  # strides
+                (
+                    elem.storage_offset() if not is_sparse_any(elem) else None
+                ),  # storage_offset
+                None,  # memory_format
+                elem.dtype,  # dtype
+                elem.layout,  # layout
+                elem.device,  # device
+                False,  # pin_memory
+                elem.requires_grad,  # requires_grad
+                None,  # dispatch_sizes_strides_policy
+                False,  # dispatch_device
+                is_sparse_compressed(elem),  # dispatch_layout
+                extra_dispatch_keys,  # _extra_dispatch_keys
+                storage_size,  # storage_size
+            )
         torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem
 
@@ -320,7 +352,12 @@ class FunctionalTensor(torch.Tensor):
             raise AssertionError("functional_mode must not be None")
 
         with functional_mode:
-            torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
+            # Setting requires_grad=True on an inference tensor (e.g. a module
+            # parameter built under inference_mode) requires inference_mode.
+            inf_grad = x.is_inference() and x.requires_grad
+            need_inf = inf_grad and not torch.is_inference_mode_enabled()
+            with torch.inference_mode() if need_inf else _NULL_CONTEXT:
+                torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
             out = FunctionalTensor(x_functional, functional_mode)
             torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
         return out
@@ -518,6 +555,18 @@ class FunctionalTensorMode(TorchDispatchMode):
                 if r is not NotImplemented:
                     return r
 
+        if torch.is_inference_mode_enabled():
+            # See Note [Suppressing c10::InferenceMode during functionalization]
+            with _suppress_inference_mode_for_functionalization():
+                return self._dispatch_functionalized(func, args, kwargs)
+        return self._dispatch_functionalized(func, args, kwargs)
+
+    def _dispatch_functionalized(
+        self,
+        func: OpOverload,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> Any:
         def wrap(x: object) -> object:
             # Only wrap our outputs in subclasses if the inner functionalization call
             # also wrapped outputs into FunctionalTensorWrappers.

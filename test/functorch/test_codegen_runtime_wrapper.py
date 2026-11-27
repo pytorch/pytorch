@@ -535,6 +535,39 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIn(".requires_grad", source)
         self.assertIn(".copy_(", source)
 
+    @skipIfTorchDynamo("dynamo handles mutations in-graph")
+    def test_non_leaf_inference_mode_mutation_uses_inference_mode(self):
+        """
+        Non-leaf input mutated under inference_mode. The codegen should emit
+        its plain copy_() inside torch.inference_mode(), like the mutation.
+        """
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        with capture_codegen_source("mutation_epilogue") as captured:
+
+            def f(x, y):
+                with torch.inference_mode():
+                    x.mul_(2)
+                return y + 1
+
+            x = torch.randn(4, requires_grad=True).clone()
+            y = torch.randn(4)
+            x_ref = x.detach().clone()
+            compiled_f = aot_function(f, nop, keep_inference_input_mutations=False)
+            out = compiled_f(x, y)
+
+        self.assertEqual(x, x_ref * 2)
+        self.assertEqual(out, y + 1)
+        self.assertEqual(len(captured), 1)
+        self.assertExpectedInline(
+            captured[0],
+            """\
+def _apply_mutations(orig_inputs, updated_inputs):
+    with torch.inference_mode():
+        orig_inputs[0].copy_(updated_inputs[0])""",
+        )
+
 
 if __name__ == "__main__":
     run_tests()

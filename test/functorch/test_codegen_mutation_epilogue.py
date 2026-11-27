@@ -180,6 +180,93 @@ class TestCodegenMutationEpilogue(TestCase):
         self.assertIn("as_strided_", captured[0])
         self.assertIn("copy_", captured[0])
 
+    @skipIfTorchDynamo(
+        "aot_function uses FX tracing which conflicts with dynamo wrapping"
+    )
+    def test_data_mutation_under_inference_mode(self):
+        """
+        Inference tensor input mutated under inference_mode. Inference
+        tensors can only be mutated under inference_mode, so codegen should
+        emit its copy_() inside torch.inference_mode().
+        """
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+
+            def f(x, cache):
+                with torch.inference_mode():
+                    cache.add_(x)
+                return x + 1
+
+            with torch.inference_mode():
+                cache = torch.zeros(4)
+            x = torch.randn(4)
+            compiled_f = aot_function(f, nop, keep_inference_input_mutations=False)
+            out = compiled_f(x, cache)
+
+        self.assertEqual(cache, x)
+        self.assertEqual(out, x + 1)
+
+        self.assertEqual(len(captured), 1)
+        self.assertExpectedInline(
+            captured[0],
+            """\
+def _apply_mutations(orig_inputs, updated_inputs):
+    with torch.inference_mode():
+        if orig_inputs[1].requires_grad: orig_inputs[1].detach().copy_(updated_inputs[0])
+        else: orig_inputs[1].copy_(updated_inputs[0])""",
+        )
+
+    @skipIfTorchDynamo(
+        "aot_function uses FX tracing which conflicts with dynamo wrapping"
+    )
+    def test_coalesced_data_mutations_under_inference_mode(self):
+        """
+        Adjacent inference-mode data mutations share a single
+        torch.inference_mode() block, which closes before a non-inference-mode
+        mutation and re-opens for subsequent inference-mode mutations.
+        """
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+
+            def f(x, cache_k, cache_v, buf, cache_o):
+                with torch.inference_mode():
+                    cache_k.add_(x)
+                    cache_v.add_(x * 2)
+                buf.add_(x)
+                with torch.inference_mode():
+                    cache_o.add_(x * 3)
+                return x + 1
+
+            with torch.inference_mode():
+                cache_k = torch.zeros(4)
+                cache_v = torch.zeros(4)
+                cache_o = torch.zeros(4)
+            buf = torch.zeros(4)
+            x = torch.randn(4)
+            compiled_f = aot_function(f, nop, keep_inference_input_mutations=False)
+            out = compiled_f(x, cache_k, cache_v, buf, cache_o)
+
+        self.assertEqual(cache_k, x)
+        self.assertEqual(cache_v, x * 2)
+        self.assertEqual(buf, x)
+        self.assertEqual(cache_o, x * 3)
+        self.assertEqual(out, x + 1)
+
+        self.assertEqual(len(captured), 1)
+        self.assertExpectedInline(
+            captured[0],
+            """\
+def _apply_mutations(orig_inputs, updated_inputs):
+    with torch.inference_mode():
+        if orig_inputs[1].requires_grad: orig_inputs[1].detach().copy_(updated_inputs[0])
+        else: orig_inputs[1].copy_(updated_inputs[0])
+        if orig_inputs[2].requires_grad: orig_inputs[2].detach().copy_(updated_inputs[1])
+        else: orig_inputs[2].copy_(updated_inputs[1])
+    if orig_inputs[3].requires_grad: orig_inputs[3].detach().copy_(updated_inputs[2])
+    else: orig_inputs[3].copy_(updated_inputs[2])
+    with torch.inference_mode():
+        if orig_inputs[4].requires_grad: orig_inputs[4].detach().copy_(updated_inputs[3])
+        else: orig_inputs[4].copy_(updated_inputs[3])""",
+        )
+
     def test_no_mutation_no_epilogue(self):
         """
         No mutations at all. No mutation_epilogue artifact should be

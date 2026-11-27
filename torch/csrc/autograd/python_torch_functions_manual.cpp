@@ -653,6 +653,14 @@ void initTorchFunctions(PyObject* module) {
             are_all_mutations_under_no_grad_or_inference_mode(t);
       });
   py_module.def(
+      "_functionalize_are_all_mutations_under_inference_mode",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        return at::functionalization::impl::
+            are_all_mutations_under_inference_mode(t);
+      });
+  py_module.def(
       "_functionalize_was_inductor_storage_resized", [](const at::Tensor& t) {
         TORCH_INTERNAL_ASSERT(
             at::functionalization::impl::isFunctionalTensor(t));
@@ -729,6 +737,16 @@ void initTorchFunctions(PyObject* module) {
         return old;
       },
       py::arg("reapply_views") = false);
+  py_module.def(
+      "_functionalize_set_in_inference_mode",
+      [](bool enabled) {
+        auto old = at::functionalization::impl::
+            getFunctionalizationInInferenceModeTLS();
+        at::functionalization::impl::setFunctionalizationInInferenceModeTLS(
+            enabled);
+        return old;
+      },
+      py::arg("enabled"));
   py_module.def(
       "_functionalize_has_metadata_mutation", [](const at::Tensor& t) {
         TORCH_INTERNAL_ASSERT(
