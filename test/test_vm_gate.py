@@ -5229,6 +5229,21 @@ def waits():
     if '_initializing' in vars(Spec):
         del Spec._initializing"""
 )
+# Classes a module can be given (`m.__class__ = Sub`), whose own code then
+# answers for the module's attributes: RAN has what that code was asked for.
+IMPORTS_CLASS = """
+RAN = []
+class WithProperty(types.ModuleType):
+    @property
+    def K(self):
+        RAN.append('K')
+        return 5.0
+class WithGetattribute(types.ModuleType):
+    def __getattribute__(self, name):
+        RAN.append(name)
+        return 7.0 if name == 'K' else super().__getattribute__(name)
+def become(m, cls, second):
+    m.__class__ = cls if second else types.ModuleType"""
 IMPORTS_ONE = "import vm_imp_m\nk = vm_imp_m.K"
 IMPORTS_SUB = "import vm_imp_p.sub\nk = vm_imp_p.sub.K"
 IMPORTS_FROM = "from vm_imp_m import K\nk = K"
@@ -5336,6 +5351,69 @@ IMPORTS_PROGRAMS = {
         "sys.modules['vm_imp_p'] = P\n"
         "sys.modules['vm_imp_p.sub'] = P2.sub if second else S",
         "None",
+        True,
+    ),
+    "module_gets_a_class_with_a_property": (
+        ("IMPORT_NAME", "IMPORT_FROM"),
+        IMPORTS_MODULE + IMPORTS_CLASS,
+        IMPORTS_FROM,
+        "sys.modules['vm_imp_m'] = A\nbecome(A, WithProperty, second)",
+        "RAN[:]",
+        True,
+    ),
+    "module_gets_a_class_with_getattribute": (
+        ("IMPORT_NAME", "IMPORT_FROM"),
+        IMPORTS_MODULE + IMPORTS_CLASS,
+        IMPORTS_FROM,
+        "sys.modules['vm_imp_m'] = A\nbecome(A, WithGetattribute, second)",
+        "RAN[:]",
+        True,
+    ),
+    "module_only_imported_gets_a_class": (
+        ("IMPORT_NAME",),
+        IMPORTS_MODULE + IMPORTS_CLASS,
+        "import vm_imp_m\nk = 3.0",
+        "sys.modules['vm_imp_m'] = A\nbecome(A, WithGetattribute, second)",
+        "RAN[:]",
+        True,
+    ),
+    "package_gets_a_class": (
+        ("IMPORT_NAME",),
+        IMPORTS_PACKAGE + IMPORTS_CLASS,
+        "import vm_imp_p.sub\nk = 3.0",
+        "put(P)\nbecome(P, WithGetattribute, second)",
+        "RAN[:]",
+        True,
+    ),
+    "submodule_gets_a_class": (
+        ("IMPORT_NAME",),
+        IMPORTS_PACKAGE + IMPORTS_CLASS + "\nS = P.sub",
+        "import vm_imp_p.sub\nk = 3.0",
+        "put(P)\nbecome(S, WithGetattribute, second)",
+        "RAN[:]",
+        True,
+    ),
+    "module_with_a_submodule_in_sys_modules_gets_a_class": (
+        ("IMPORT_NAME", "IMPORT_FROM"),
+        IMPORTS_PACKAGE
+        + IMPORTS_CLASS
+        + "\ndel P.sub\nS = sys.modules['vm_imp_p.sub']",
+        "from vm_imp_p import sub\nk = sub.K",
+        "sys.modules['vm_imp_p'] = P\nsys.modules['vm_imp_p.sub'] = S\n"
+        "become(P, WithGetattribute, second)",
+        "RAN[:]",
+        True,
+    ),
+    # The names of a package are taken by importlib's code, under no trace:
+    # the module is then an input of the region that holds IMPORT_FROM.
+    "package_a_name_is_taken_from_gets_a_class": (
+        ("IMPORT_FROM", "IMPORT_NAME"),
+        IMPORTS_SETUP
+        + "G = module('vm_imp_g', K=2.0, __path__=[])\nsys.modules['vm_imp_g'] = G"
+        + IMPORTS_CLASS,
+        "from vm_imp_g import K\nk = K",
+        "sys.modules['vm_imp_g'] = G\nbecome(G, WithProperty, second)",
+        "RAN[:]",
         True,
     ),
     "reloaded": (
@@ -5463,6 +5541,8 @@ class TestVmRulesImports(TestCase):
         for row in rows:
             # They read more than their operands, enter nothing, write nothing.
             self.assertIn("Modules", row[4].split(","))
+            # A module's attribute is its dict's item for one class only.
+            self.assertIn("Class", row[4].split(","))
             self.assertEqual(row[5:8], ["None", "Pinned", "Never"])
 
         class Lazy(types.ModuleType):

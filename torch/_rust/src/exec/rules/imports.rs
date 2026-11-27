@@ -29,7 +29,9 @@
 //     builtins dict, the items of sys.modules, `__spec__` of each module
 //     found and `_initializing` of that spec (False in the spec's own dict,
 //     or in no place the lookup has: see loaded()), the items of the module's
-//     dict the import asks for, each present with its value or absent;
+//     dict the import asks for, each present with its value or absent; and
+//     with every item read of a module's dict, that the module is of exactly
+//     the class of modules (see module_item);
 //   - it runs no code of the program: classes are compared by address, dicts
 //     with str keys are read in C, a new str is made for a dotted name.
 // What it may not assume
@@ -53,11 +55,11 @@ pub const FAMILY: Family = Family { name: "imports", rule, table };
 const WHY_NAME: &str = "With level 0 and no names, or names of a module that is no package, the interpreter's own __import__ returns the module it finds loaded in sys.modules: it runs no code and writes nothing, and the items it read are what a region is checked on.";
 const WHY_FROM: &str = "The name is the item of the exact module's dict, or with no such item and no __getattr__ there the loaded submodule of that name in sys.modules: the items read are what a region is checked on.";
 
-const NAME_READS: &[Read] = &[Read::Global, Read::Modules, Read::Attribute];
+const NAME_READS: &[Read] = &[Read::Global, Read::Modules, Read::Class, Read::Attribute];
 // (level, names): an int and None, or an int and a tuple.
 const NAME_ROW: Row = Row { operands: &[(0, Class::Group(Group::Immutable)), (1, Class::Group(Group::Immutable))], reads: NAME_READS, writes: Write::None, result: Res::Pinned, enters: Enters::Never, scalars: Scalars::None, why: WHY_NAME, before: Some(import_name) };
 const NAMES_ROW: Row = Row { operands: &[(0, Class::Group(Group::Immutable)), (1, Class::Group(Group::ExactTuple))], reads: NAME_READS, writes: Write::None, result: Res::Pinned, enters: Enters::Never, scalars: Scalars::None, why: WHY_NAME, before: Some(import_name) };
-const FROM_ROW: Row = Row { operands: &[(0, Class::Group(Group::ExactModule))], reads: &[Read::Attribute, Read::Modules], writes: Write::None, result: Res::Pinned, enters: Enters::Never, scalars: Scalars::None, why: WHY_FROM, before: Some(import_from) };
+const FROM_ROW: Row = Row { operands: &[(0, Class::Group(Group::ExactModule))], reads: &[Read::Class, Read::Attribute, Read::Modules], writes: Write::None, result: Res::Pinned, enters: Enters::Never, scalars: Scalars::None, why: WHY_FROM, before: Some(import_from) };
 
 fn rule(what: &What) -> Taken {
     match *what {
@@ -175,17 +177,33 @@ unsafe fn loaded(modules: *mut PyObject, key: *mut PyObject) -> Result<Loaded, S
     Ok(Loaded { module, dict, spec, initializing })
 }
 
+// module.name was read as the item of the module's dict (`value`; NULL: no
+// such item). That is what the interpreter reads only of a module of exactly
+// the class of modules, and a module can be given another class at any time
+// (`m.__class__ = Sub`), whose property or __getattribute__ then answers
+// instead: the item is an entry of the trace together with the module's
+// class. Err for a module of another class.
+unsafe fn module_item(module: *mut PyObject, name: *mut PyObject, value: *mut PyObject) -> Result<(), String> {
+    if !exact(module, &raw mut ffi::PyModule_Type) {
+        return Err(format!("it reads {} of a module of the class {}, whose attributes are code of that class", reads::text(name), reads::type_name(module)));
+    }
+    reads::class_is(module);
+    reads::attr(module, name, value, false);
+    Ok(())
+}
+
 // The reads of loaded(), as entries of the trace.
-unsafe fn found(modules: *mut PyObject, key: *mut PyObject, at: &Loaded) {
+unsafe fn found(modules: *mut PyObject, key: *mut PyObject, at: &Loaded) -> Result<(), String> {
     let n = names();
     reads::subscript(modules, key, false);
-    reads::attr(at.module, n.spec as *mut PyObject, at.spec, false);
+    module_item(at.module, n.spec as *mut PyObject, at.spec)?;
     if at.spec != ffi::Py_None() {
         // In the spec's dict; or absent there, with the spec's class and
         // what that class has for the name, for __getattribute__ and for
         // __getattr__.
         reads::attr(at.spec, n.initializing as *mut PyObject, at.initializing, false);
     }
+    Ok(())
 }
 
 unsafe fn name_of(what: &What, site: &Site) -> Result<*mut PyObject, String> {
@@ -237,14 +255,14 @@ unsafe fn import_name(what: &What, site: &Site) -> Result<(), String> {
         Ok(_) if !plain => Err(format!("it takes names from {}, a package or a module with a __getattr__: importlib's Python code, or that function, runs", reads::text(name))),
         Ok(package) => {
             reads::subscript(builtins, n.import as *mut PyObject, false);
-            found(modules, name, &module);
+            let mut recorded = found(modules, name, &module);
             if let Some(package) = package {
-                found(modules, top, &package);
+                recorded = recorded.and(found(modules, top, &package));
             }
             if named {
-                asked.iter().for_each(|k| reads::attr(module.module, *k, std::ptr::null_mut(), false));
+                recorded = recorded.and(asked.iter().try_for_each(|k| module_item(module.module, *k, std::ptr::null_mut())));
             }
-            Ok(())
+            recorded
         }
     };
     ffi::Py_XDECREF(top);
@@ -256,6 +274,9 @@ unsafe fn import_from(what: &What, site: &Site) -> Result<(), String> {
     let n = names();
     let name = name_of(what, site)?;
     let &[module] = site.operands else { return Err("it has other operands than a module".into()) };
+    if !exact(module, &raw mut ffi::PyModule_Type) {
+        return Err(format!("it takes a name from an object of the class {}, whose attributes are code of that class", reads::type_name(module)));
+    }
     let dict = ffi::PyModule_GetDict(module);
     // What the class of modules has under the name comes before the dict
     // (`__dict__`, `__class__`) or after it (`__repr__`): neither is a row.
@@ -265,8 +286,7 @@ unsafe fn import_from(what: &What, site: &Site) -> Result<(), String> {
     }
     let value = reads::dict_get(dict, name);
     if !value.is_null() {
-        reads::attr(module, name, value, false);
-        return Ok(());
+        return module_item(module, name, value);
     }
     if !reads::dict_get(dict, n.getattr as *mut PyObject).is_null() {
         return Err(format!("the module has no {} and a __getattr__, which is asked for it", reads::text(name)));
@@ -281,11 +301,10 @@ unsafe fn import_from(what: &What, site: &Site) -> Result<(), String> {
     let ok = modules().and_then(|modules| {
         let submodule = loaded(modules, full)?;
         for k in [name, n.getattr as *mut PyObject] {
-            reads::attr(module, k, std::ptr::null_mut(), false);
+            module_item(module, k, std::ptr::null_mut())?;
         }
-        reads::attr(module, n.name as *mut PyObject, package, false);
-        found(modules, full, &submodule);
-        Ok(())
+        module_item(module, n.name as *mut PyObject, package)?;
+        found(modules, full, &submodule)
     });
     ffi::Py_DECREF(full);
     ok

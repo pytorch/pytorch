@@ -1371,6 +1371,18 @@ pub unsafe fn class_of(obj: *mut PyObject, name: *mut PyObject) {
     with(|t| t.typed(obj, name));
 }
 
+// obj is of the class it has now, by identity, whatever that class is. For
+// an object that can be given another class although the class itself cannot
+// change, where typed() records nothing: a module (`m.__class__ = Sub`).
+pub unsafe fn class_is(obj: *mut PyObject) {
+    with(|t| {
+        if t.seen.insert((obj as usize, 0)) {
+            t.count += 1;
+            t.entries.typed.push(Typed { obj: counted(obj), class: counted(ffi::Py_TYPE(obj) as *mut PyObject) });
+        }
+    });
+}
+
 // super().name was loaded in a method of class `cls` on `obj`: what the
 // class after `cls` in the order obj's class resolves methods in has.
 pub unsafe fn super_attr(cls: *mut PyObject, obj: *mut PyObject, name: *mut PyObject) {
