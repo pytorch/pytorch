@@ -1,6 +1,7 @@
 #include <c10/core/AllocatorConfig.h>
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/IPCTypes.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
 namespace torch::accelerator {
@@ -177,6 +178,12 @@ void initModule(PyObject* module) {
     torch::utils::maybe_initialize_device(device_type);
     py::gil_scoped_release no_gil;
     return at::accelerator::getMemoryInfo(device_index);
+  });
+
+  m.def("_accelerator_ipcCollect", []() {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    torch::utils::maybe_initialize_device(device_type);
+    torch::IPCCollect();
   });
 
   m.def("_accelerator_getAllocatorSettings", []() {
