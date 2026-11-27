@@ -41,6 +41,7 @@ L1:
   - NVIDIA-dev/pytorch-oot-internal
   - RBLN-SW/torch-rbln
   - ROCm/pytorch-windows-ci
+  - Cambricon/torch_mlu_ci
   - versi379/pytorch-tccl-ci:
       events:
         - nightly
