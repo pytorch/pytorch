@@ -77,6 +77,10 @@ class _RecordingInterface(DeviceInterface):
 
     entered: list[torch.device] = []
 
+    @classmethod
+    def exposes_device_guard(cls) -> bool:
+        return True
+
     @staticmethod
     def is_available() -> bool:
         return True
@@ -130,8 +134,21 @@ class TestGetDeviceContext(TestCase):
     def test_no_single_guardable_device_returns_nullcontext(
         self, device_types: list[str]
     ) -> None:
-        gm = _make_graph(*device_types)
-        ctx = get_device_context(gm)
+        # Patch every relevant availability probe to True and register a
+        # declaring interface on xpu: on a CPU-only host the null context
+        # would otherwise come from the availability gate alone, so the
+        # single-type/single-index rules themselves would never be exercised.
+        # With those gates open, every shape below must still reach
+        # nullcontext via the rules: no device, cpu/meta only, multiple
+        # indices of one type, or multiple device types.
+        self._register("xpu", _RecordingInterface)
+        with (
+            patch.object(torch.cuda, "is_available", return_value=True),
+            patch.object(torch.xpu, "is_available", return_value=True),
+            patch.object(torch.mtia, "is_available", return_value=True),
+        ):
+            gm = _make_graph(*device_types)
+            ctx = get_device_context(gm)
         self.assertIs(type(ctx), type(contextlib.nullcontext()))
 
     def test_unregistered_device_type_is_skipped(self) -> None:
@@ -156,7 +173,8 @@ class TestGetDeviceContext(TestCase):
     def test_torch_device_interface_returns_nullcontext(self) -> None:
         # Out-of-tree backends may register interfaces whose device attr is
         # torch.device. Its context-manager protocol is a default-device mode,
-        # not a device guard, so exposes_device_guard must reject it.
+        # not a device guard, and the backend never declares one, so the
+        # default False keeps compile_fx on the null context.
 
         class TorchDeviceInterface(DeviceInterface):
             device = torch.device
@@ -231,6 +249,10 @@ class TestGetDeviceContext(TestCase):
         # context (mocked device tags, AOT cross-compile flows).
 
         class UnavailableInterface(DeviceInterface):
+            @classmethod
+            def exposes_device_guard(cls) -> bool:
+                return True
+
             @staticmethod
             def is_available() -> bool:
                 return False
@@ -256,6 +278,10 @@ class TestGetDeviceContext(TestCase):
         # propagating out of the compile path.
 
         class PartialInterface(DeviceInterface):
+            @classmethod
+            def exposes_device_guard(cls) -> bool:
+                return True
+
             class device:
                 def __init__(self, dev: torch.device) -> None:
                     raise AssertionError("guard must not be constructed")
@@ -271,11 +297,12 @@ class TestGetDeviceContext(TestCase):
         ctx = get_device_context(gm)
         self.assertIs(type(ctx), type(contextlib.nullcontext()))
 
-    def test_non_context_manager_device_returns_nullcontext(self) -> None:
-        # A device override without the context-manager protocol is not
-        # enterable, so it must not be reported as a guard.  This is the shape
-        # of the in-tree triton extension test backend (its plain device class
-        # is registered for privateuseone and compiles through compile_fx).
+    def test_undeclared_device_override_returns_nullcontext(self) -> None:
+        # A device override that never opts in stays on the base default,
+        # whatever its shape: this is the case of the in-tree triton
+        # extension test backend (plain device class registered for
+        # privateuseone), which under the declared contract is rejected
+        # without the framework having to inspect the class at all.
 
         class NonGuardInterface(DeviceInterface):
             class device:

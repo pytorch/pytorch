@@ -252,26 +252,20 @@ class DeviceInterface:
     @classmethod
     def exposes_device_guard(cls) -> bool:
         """
-        True when a subclass provides a real device guard in ``device``: a
-        context manager that switches the current device on entry, like
-        ``torch.cuda.device``. Consumers (e.g. the compile-time device context
-        in Inductor's compile_fx) consult this hook instead of inspecting the
-        attribute directly.
+        True only when the backend explicitly declares it: ``device`` is a
+        real current-device guard - a context manager switching the current
+        device on entry and restoring on exit, like ``torch.cuda.device``.
 
-        Overriding the device slot is the contract for guard support, the way
-        overriding Stream is the contract for stream support. Three shapes are
-        rejected: the base ``device`` is a raising sentinel, so compare against
-        it rather than None; ``torch.device`` is also rejected, as its
-        context-manager protocol enters a default-device TorchFunctionMode
-        rather than switching the current device; and an override lacking the
-        ``__enter__``/``__exit__`` protocol is not enterable, so advertising it
-        as a guard would turn a no-op into an error at compile time.
+        The declaration is the contract; the framework never infers it from
+        the shape of the slot. Backends must opt in by overriding this to
+        return True alongside a working guard class. Note ``torch.device``
+        is not a device guard: its context-manager protocol enters a
+        default-device TorchFunctionMode, so backends using it as the slot
+        must stay on the default False. Consumers such as the compile-time
+        device context in Inductor's compile_fx enter ``device`` only for
+        declaring backends.
         """
-        if cls.device in (DeviceInterface.device, torch.device):
-            return False
-        enter = getattr(cls.device, "__enter__", None)
-        exit_ = getattr(cls.device, "__exit__", None)
-        return callable(enter) and callable(exit_)
+        return False
 
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
@@ -397,6 +391,10 @@ class DeviceGuard:
 
 
 class CudaInterface(DeviceInterface):
+    @classmethod
+    def exposes_device_guard(cls) -> bool:
+        return True  # ``device`` is a real current-device guard
+
     device = torch.cuda.device  # type: ignore[assignment]
 
     # register Event and Stream class into the backend interface
@@ -556,6 +554,10 @@ else:
 
 
 class MtiaInterface(DeviceInterface):
+    @classmethod
+    def exposes_device_guard(cls) -> bool:
+        return True  # ``device`` is a real current-device guard
+
     device = torch.mtia.device  # type: ignore[assignment]
     Event = torch.mtia.Event  # type: ignore[assignment]
     Stream = torch.mtia.Stream  # type: ignore[assignment]
@@ -667,6 +669,10 @@ else:
 
 
 class XpuInterface(DeviceInterface):
+    @classmethod
+    def exposes_device_guard(cls) -> bool:
+        return True  # ``device`` is a real current-device guard
+
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
