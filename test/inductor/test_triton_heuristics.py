@@ -1020,6 +1020,7 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(configs[0].kwargs, expected_kwargs)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @requires_triton()
 class TestTritonHeuristicsRuntime(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1165,6 +1166,7 @@ class TestTritonHeuristicsRuntime(TestCase):
             self.assertEqual(len(benchmark_calls), 1)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @requires_triton()
 class TestTritonHeuristicsBackendConfig(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1203,6 +1205,7 @@ class TestTritonHeuristicsBackendConfig(TestCase):
             self.assertEqual(len(configs), expected_count)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @requires_triton()
 @instantiate_parametrized_tests
 @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
@@ -1371,6 +1374,7 @@ class TestTritonHeuristicsROCm(TestCase):
             self.assertEqual([c.kwargs["kpack"] for c in configs], [int8_kpack] * 2)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
 class TestROCmExhaustiveConfigs(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -1402,6 +1406,7 @@ _PLUGIN_FACTORY_PATH = (
 )
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @requires_triton()
 class TestCachingAutotunerPrecompileDriverSetup(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1432,6 +1437,7 @@ class TestCachingAutotunerPrecompileDriverSetup(TestCase):
         self.assertEqual(len(autotuner.compile_results), num_configs)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @requires_triton()
 class TestCachingAutotunerPlugin(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1618,6 +1624,7 @@ class TestCachingAutotunerPlugin(TestCase):
         self.assertEqual(revived._plugins, [])
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @requires_triton()
 class TestArgumentCloneAndRestore(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1706,6 +1713,7 @@ class TestArgumentCloneAndRestore(TestCase):
         self._do_test(device, arg)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @requires_triton()
 class TestDumpLaunchTensors(TestCase):
     """Test the _dump_launch_tensors functionality"""
@@ -1823,10 +1831,8 @@ class TestDumpLaunchTensors(TestCase):
 
 @requires_triton()
 @instantiate_parametrized_tests
-class TestRecheckAutotuneCache(TestCase):
-    """Tests for CachingAutotuner.recheck_autotune_cache"""
-
-    hw_classification = HardwareClassification.ACCELERATOR
+class TestStaticRecheckAutotuneCache(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize("tuned_options", [False, True])
     def test_static_restore_selects_extra_options_winner(self, tuned_options):
@@ -1913,6 +1919,19 @@ class TestRecheckAutotuneCache(TestCase):
         result = MagicMock(spec=StaticTritonCompileResult)
         result.config = cfg
         return result
+
+
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
+@requires_triton()
+@instantiate_parametrized_tests
+class TestRecheckAutotuneCache(TestCase):
+    """Tests for CachingAutotuner.recheck_autotune_cache"""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    _make_compile_result = staticmethod(
+        TestStaticRecheckAutotuneCache._make_compile_result
+    )
 
     def _make_autotuner_with_results(self, configs, compile_results, device):
         """
@@ -2061,6 +2080,7 @@ def get_hip_autotune_kernel_with_invalid_config():
     )(hip_autotune_kernel)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @requires_triton()
 @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
 class TestHIPInvalidConfigHandling(TestCase):
@@ -2121,6 +2141,8 @@ class TestGridExprMaximum(TestCase):
 
 @instantiate_parametrized_tests
 class TestPrecomputedGridConfigMatching(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # The default candidates differ only in BLOCK, and each grid string is
     # its BLOCK value, so a grid assertion records which one was selected.
     _GRID_BY_BLOCK = {64: "64", 128: "128"}
@@ -2311,66 +2333,6 @@ class TestPrecomputedGridConfigMatching(TestCase):
         self.assertEqual(autotuner.launchers, [("128", "1", "1")])
         retried = autotuner._precompile_config.call_args.args[0]
         self.assertEqual(retried.num_stages, 1)
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_pipelining_disabled_retry_runs_autotuned_kernel(self):
-        self._run_autotuned_kernel_with_pipelining_retry()
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    @config.patch({"cpp_wrapper": True, "triton.autotune_at_compile_time": False})
-    def test_pipelining_disabled_retry_runs_autotuned_kernel_cpp_wrapper(self):
-        # Compiling the generated C++ also compiles the lazy-grid
-        # switch, including its `default: throw` case.
-        self._run_autotuned_kernel_with_pipelining_retry()
-
-    def _run_autotuned_kernel_with_pipelining_retry(self):
-        # A user @triton.autotune kernel whose grid reads BLOCK_SIZE,
-        # run through torch.compile with every pipelined config made to
-        # fail launcher creation, so the real _make_launchers retry
-        # (compile_by_disabling_pipelining -> launcher codegen) runs.
-        from torch._inductor.runtime.triton_compat import OutOfResources
-        from torch._inductor.runtime.triton_heuristics import (
-            StaticTritonCompileResult,
-            TritonCompileResult,
-        )
-        from torch.testing._internal.triton_utils import add_kernel_autotuned
-
-        def add(x, y):
-            output = torch.empty_like(x)
-            n_elements = output.numel()
-
-            def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            add_kernel_autotuned[grid](x, y, output, n_elements)
-            return output
-
-        def does_not_fit(cls, error):
-            orig = cls.make_launcher
-
-            def make_launcher(self):
-                if self.config.num_stages > 1:
-                    raise error
-                return orig(self)
-
-            return patch.object(cls, "make_launcher", make_launcher)
-
-        x = torch.randn(4096, device=GPU_TYPE)
-        y = torch.randn(4096, device=GPU_TYPE)
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(
-                does_not_fit(
-                    TritonCompileResult, OutOfResources(1 << 20, 1 << 16, "shared")
-                )
-            )
-            stack.enter_context(
-                does_not_fit(
-                    StaticTritonCompileResult,
-                    torch.cuda.OutOfMemoryError("out of shared memory"),
-                )
-            )
-            actual = torch.compile(add)(x, y)
-        self.assertEqual(actual, x + y)
 
     def test_generate_keeps_declared_num_stages_in_match_key(self):
         # generate passes its inductor_meta to find_candidate_index, which
@@ -2625,6 +2587,7 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertGreaterEqual(y * z, 131070)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 class TestDynamicScaleRblockCacheInteraction(TestCase):
     """Tests for _dynamic_scale_rblock + autotune cache interaction.
 
@@ -2856,6 +2819,7 @@ class TestDynamicScaleRblockCacheLoading(TestCase):
         self.assertIsNone(result)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @requires_triton()
 class TestCheckLauncherCallArgs(TestCase):
     """Unit tests for CachingAutotuner._check_launcher_call_args.
@@ -2984,6 +2948,7 @@ class TestWarpSizeUnification(TestCase):
         self.assertEqual(cfg64.kwargs["XBLOCK"], 2 * cfg32.kwargs["XBLOCK"])
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 class TestBackendGridLimits(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -3083,14 +3048,84 @@ class TestMakeLaunchersMemory(TestCase):
 
 
 # Collection initializes device bases, but must not enter Dynamo class fixtures.
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
+@requires_triton()
+class TestPrecomputedGridAutotunedKernel(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_pipelining_disabled_retry_runs_autotuned_kernel(self, device):
+        self._run_autotuned_kernel_with_pipelining_retry(device)
+
+    @config.patch({"cpp_wrapper": True, "triton.autotune_at_compile_time": False})
+    def test_pipelining_disabled_retry_runs_autotuned_kernel_cpp_wrapper(self, device):
+        # Compiling the generated C++ also compiles the lazy-grid
+        # switch, including its `default: throw` case.
+        self._run_autotuned_kernel_with_pipelining_retry(device)
+
+    def _run_autotuned_kernel_with_pipelining_retry(self, device):
+        # A user @triton.autotune kernel whose grid reads BLOCK_SIZE,
+        # run through torch.compile with every pipelined config made to
+        # fail launcher creation, so the real _make_launchers retry
+        # (compile_by_disabling_pipelining -> launcher codegen) runs.
+        from torch._inductor.runtime.triton_compat import OutOfResources
+        from torch._inductor.runtime.triton_heuristics import (
+            StaticTritonCompileResult,
+            TritonCompileResult,
+        )
+        from torch.testing._internal.triton_utils import add_kernel_autotuned
+
+        def add(x, y):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            return output
+
+        def does_not_fit(cls, error):
+            orig = cls.make_launcher
+
+            def make_launcher(self, device):
+                if self.config.num_stages > 1:
+                    raise error
+                return orig(self)
+
+            return patch.object(cls, "make_launcher", make_launcher)
+
+        x = torch.randn(4096, device=device)
+        y = torch.randn(4096, device=device)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                does_not_fit(
+                    TritonCompileResult, OutOfResources(1 << 20, 1 << 16, "shared")
+                )
+            )
+            stack.enter_context(
+                does_not_fit(
+                    StaticTritonCompileResult,
+                    torch.OutOfMemoryError("out of shared memory"),
+                )
+            )
+            actual = torch.compile(add)(x, y)
+        self.assertEqual(actual, x + y)
+
+
 with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
+    instantiate_device_type_tests(
+        TestPrecomputedGridAutotunedKernel,
+        globals(),
+        except_for=("cpu",),
+        allow_xpu=True,
+    )
     instantiate_device_type_tests(
         TestTritonHeuristicsRuntime, globals(), allow_xpu=True
     )
     instantiate_device_type_tests(
         TestTritonHeuristicsBackendConfig,
         globals(),
-        only_for=("cuda", "xpu"),
+        except_for=("cpu",),
         allow_xpu=True,
     )
     instantiate_device_type_tests(
@@ -3113,5 +3148,4 @@ with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
 
 
 if __name__ == "__main__":
-    if IS_LINUX:
-        run_tests()
+    run_tests()
