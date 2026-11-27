@@ -9,8 +9,8 @@ from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
-from torch._dynamo.device_interface import CudaInterface
 from torch._inductor.exc import InductorError
+from torch._inductor.kernel.flex import flex_decoding
 from torch._inductor.kernel.flex.flex_decoding import get_split_k
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -1825,11 +1825,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out_mixed.backward()
 
     @requires_capabilities(Capability.attention.flex_attention)
-    @skipCUDAIf(True, "Not supported on CUDA")
-    @skipXPUIf(True, "Not supported on XPU")
     @parametrize_device_dtype("dtypes")
     @common_utils.parametrize("partition_size", [64, 128, 256, 1024])
     def test_flash_decoding_partition_size(self, device, dtype, partition_size):
+        # PARTITION_SIZE is implemented on the CPU path only; keep the test in the
+        # accelerator class but skip it on every non-CPU device.
+        if self.device_type != "cpu":
+            self.skipTest("flash decoding partition size is a CPU-only path")
+
         def score_mod(score, b, h, m, n):
             return score * 2
 
@@ -2507,21 +2510,25 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
 
 class TestGetSplitKDeviceRouting(common_utils.TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     # Regression guard: get_split_k must query the SM count from the kernel's
     # own device via DeviceInterface, not from ambient backend state.
     def test_split_k_queries_kernel_device(self):
         calls = []
 
-        def fake_mp_count(device=None):
-            calls.append(device)
-            return 80
+        class FakeInterface:
+            def get_multi_processor_count(self, device=None):
+                calls.append(device)
+                return 80
 
-        with patch.object(CudaInterface, "get_multi_processor_count", fake_mp_count):
-            split_k = get_split_k(2, 4, 128, torch.device("cuda", 1))
+        device = torch.device("cpu")
+        with patch.object(
+            flex_decoding, "get_interface_for_device", lambda _: FakeInterface()
+        ):
+            split_k = get_split_k(2, 4, 128, device)
 
-        self.assertEqual(calls, [torch.device("cuda", 1)])
+        self.assertEqual(calls, [device])
         self.assertEqual(split_k, 80 // (2 * 4) * 2)
 
 
@@ -2567,15 +2574,9 @@ class TestFlexDecodingLargeKV(InductorTestCase):
         torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
 
-instantiate_device_type_tests(
-    TestFlexDecoding, globals(), except_for=("privateuse1", "hpu"), allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestFlexDecodingLargeKV,
-    globals(),
-    except_for=("privateuse1", "hpu"),
-    allow_xpu=True,
-)
+# Every device type is collected; @requires_capabilities decides per backend.
+instantiate_device_type_tests(TestFlexDecoding, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFlexDecodingLargeKV, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
