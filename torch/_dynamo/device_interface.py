@@ -199,22 +199,26 @@ class DeviceInterface:
 
     @staticmethod
     def get_mempool_type() -> type:
+        """Return the MemPool class this device manages (e.g. ``torch.cuda.MemPool``)."""
         raise NotImplementedError
 
     @staticmethod
     def begin_allocate_current_thread_to_pool(
         device_index: int, mempool_id: tuple[int, int]
     ) -> None:
+        """Route the current thread's allocations into pool ``mempool_id`` (a ``MemPool.id`` tuple)."""
         raise NotImplementedError
 
     @staticmethod
     def end_allocate_current_thread_to_pool(
         device_index: int, mempool_id: tuple[int, int]
     ) -> None:
+        """Stop routing the current thread's allocations; must pair with ``release_pool``."""
         raise NotImplementedError
 
     @staticmethod
     def release_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+        """Release the pool reference taken by ``begin_allocate_current_thread_to_pool``."""
         raise NotImplementedError
 
     @staticmethod

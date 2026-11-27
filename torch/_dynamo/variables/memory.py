@@ -37,24 +37,34 @@ def _get_device_index_for(device_type: str, device: Any) -> int:
     raise RuntimeError(f"mempool ops do not support device type {device_type}")
 
 
+_MEMPOOL_IFACE_CACHE: dict[type, type["DeviceInterface"]] = {}
+
+
 def _get_mempool_and_iface(
     mempool_index: int,
 ) -> tuple[type["DeviceInterface"], Any]:
-    """Fetch the mempool object at ``mempool_index`` and the device interface
-    that manages it, raising if the object is not a valid mempool or if no
-    accelerator is available."""
+    """Fetch the mempool at ``mempool_index`` and its device interface (cached per pool type)."""
     mempool = get_external_object_by_index(mempool_index)
-    acc = torch.accelerator.current_accelerator()
-    if acc is None:
-        raise RuntimeError("No accelerator available for mempool operations")
-    from torch._dynamo.device_interface import get_interface_for_device
-
-    iface = get_interface_for_device(acc.type)
-    if not isinstance(mempool, iface.get_mempool_type()):
-        raise RuntimeError(
-            f"use_mem_pool expected a {iface.get_mempool_type().__qualname__} "
-            f"object at index {mempool_index}"
+    iface = _MEMPOOL_IFACE_CACHE.get(type(mempool))
+    if iface is None:
+        from torch._dynamo.device_interface import (
+            DeviceInterface,
+            get_registered_device_interfaces,
         )
+
+        for _, candidate in get_registered_device_interfaces():
+            # Skip interfaces without the mempool contract.
+            if candidate.get_mempool_type is DeviceInterface.get_mempool_type:
+                continue
+            if isinstance(mempool, candidate.get_mempool_type()):
+                iface = candidate
+                _MEMPOOL_IFACE_CACHE[type(mempool)] = candidate
+                break
+        if iface is None:
+            raise RuntimeError(
+                f"use_mem_pool expected a MemPool object at index {mempool_index}, "
+                f"got {type(mempool).__qualname__}"
+            )
     return iface, mempool
 
 
