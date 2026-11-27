@@ -209,6 +209,51 @@ class TestCase(PytorchTestCase):
 
             self.assertSameResult(expected, actual, **kwargs)
 
+    def check_consistency_compiled(self, device: str, dtype: torch.dtype, op: OpInfo, variant: Variant):
+        if variant != Variant.Op:
+            raise AssertionError(
+                f"`check_consistency` called with the wrong `variant`: {variant}"
+            )
+        desc = Descriptor(
+            op=get_overload_packet_from_name(op.aten_name),
+            device_type=torch.device(device).type,
+            dtype=dtype,
+            variant=variant,
+        )
+        self.conditional_skip(desc)
+        kwargs = self.get_extra_kwargs(desc)
+
+        sample_inputs = op.sample_inputs(device, dtype)
+
+        for sample_input in sample_inputs:
+
+            def expected(sample_input=sample_input):
+                return op(
+                    sample_input.input,
+                    *sample_input.args,
+                    **sample_input.kwargs,
+                )
+
+            def actual(sample_input=sample_input):
+                return torch.compile(op)(
+                    sample_input.input,
+                    *sample_input.args,
+                    **sample_input.kwargs,
+                )
+
+            self.assertSameResult(expected, actual, **kwargs)
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._old_enable_complex_wrapper = torch._functorch.config.enable_complex_wrapper
+        torch._functorch.config.enable_complex_wrapper = True
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        torch._functorch.config.enable_complex_wrapper = cls._old_enable_complex_wrapper
+
     def check_grad(
         self, device: str, dtype: torch.dtype, op: OpInfo, variant: Variant
     ) -> None:
