@@ -17655,6 +17655,21 @@ class TestNNCPU(NNTestCase):
             outf.sum().backward()
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
 
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
+    @unittest.skipIf(not IS_ARM64, "dense oneDNN softmax is enabled on AArch64 only")
+    def test_dense_softmax_mkldnn_cpu(self):
+        for fn in (F.softmax, F.log_softmax):
+            for shape in ((1, 8192), (2, 8193), (2, 4, 8192)):
+                x = torch.randn(shape, dtype=torch.float)
+
+                with torch.backends.mkldnn.flags(enabled=False):
+                    expected = fn(x, dim=-1)
+
+                with torch.backends.mkldnn.flags(enabled=True):
+                    actual = fn(x, dim=-1)
+
+                self.assertEqual(actual, expected, atol=1e-6, rtol=1e-5)
+
     def test_LSTM_differentiable_backward_using_oneDNN(self, device):
         batch = 10
         seq_len = 12
