@@ -198,5 +198,6 @@ jobs:
         run: |
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
           call pytorch/.ci/pytorch/windows/arm64/bootstrap_tests.bat
+          if errorlevel 1 exit /b 1
           set GIT_BASH=C:\Program Files\Git\usr\bin\bash.exe
           "%GIT_BASH%" -c "bash --noprofile --norc .ci/pytorch/win-arm64-test.sh"
