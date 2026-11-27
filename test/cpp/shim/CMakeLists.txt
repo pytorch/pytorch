@@ -9,6 +9,7 @@ set(TORCH_SHIM_TEST_ROOT ${TORCH_ROOT}/test/cpp/shim)
 set(TORCH_SHIM_TEST_SRCS
   ${TORCH_SHIM_TEST_ROOT}/main.cpp
   ${TORCH_SHIM_TEST_ROOT}/test_stable_ivalue.cpp
+  ${TORCH_SHIM_TEST_ROOT}/test_schema_adaptation.cpp
   ${TORCH_SHIM_TEST_ROOT}/test_pyobject_conversion.cpp
   ${TORCH_SHIM_TEST_ROOT}/test_foreach_copy.cpp
 )

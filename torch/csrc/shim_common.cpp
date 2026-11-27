@@ -473,10 +473,9 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_impl_v2(
 // torch_call_dispatcher.
 
 // Currently this only adapts the argument stack.
-// C++ default argument resolution will happen at compile time in the
-// torch/csrc/stable/ops.h header, so extensions always pass complete argument
-// lists for the version they build against's schema. As such, this is only
-// needed if a new argument is added to the schema
+// Historical wrappers pass complete build-schema argument lists. Future
+// target-gated wrappers can opt in to selecting their adapter by known target.
+// C++ default argument resolution still happens in the wrapper at compile time.
 //
 // This is not declared in the stable shim.h,
 // so we **do not make any guarantees that the signature of this will not
@@ -493,10 +492,12 @@ using SchemaAdapterFn = std::function<torch::jit::Stack(
 // Global registry for schema adapters
 class SchemaAdapterRegistry {
  private:
-  std::unordered_map<
-      std::string,
-      std::vector<std::pair<uint64_t, SchemaAdapterFn>>>
-      adapters_;
+  struct Adapter {
+    uint64_t applies_to_versions_below;
+    SchemaAdapterFn fn;
+    bool target_gated;
+  };
+  std::unordered_map<std::string, std::vector<Adapter>> adapters_;
 
  public:
   static SchemaAdapterRegistry& instance() {
@@ -508,27 +509,38 @@ class SchemaAdapterRegistry {
       const std::string& op_name,
       uint64_t
           applies_to_versions_below, // versions below this need the adapter
-      SchemaAdapterFn adapter) {
-    adapters_[op_name].emplace_back(applies_to_versions_below, adapter);
+      SchemaAdapterFn adapter,
+      bool target_gated = false) {
+    adapters_[op_name].push_back(
+        {applies_to_versions_below, std::move(adapter), target_gated});
     // Sort by version ascending - this allows us to find the first (most
     // specific) match
     std::sort(
         adapters_[op_name].begin(),
         adapters_[op_name].end(),
-        [](const auto& a, const auto& b) { return a.first < b.first; });
+        [](const auto& a, const auto& b) {
+          return a.applies_to_versions_below < b.applies_to_versions_below;
+        });
   }
 
   std::optional<SchemaAdapterFn> get_adapter(
       const std::string& op_name,
-      uint64_t extension_version) {
+      uint64_t extension_build_version,
+      uint64_t extension_target_version) {
     auto it = adapters_.find(op_name);
     if (it == adapters_.end())
       return std::nullopt;
 
     // Find the first adapter that applies (most specific due to ascending sort)
-    for (const auto& [applies_to_versions_below, adapter] : it->second) {
-      if (extension_version < applies_to_versions_below) {
-        return adapter;
+    for (const auto& adapter : it->second) {
+      // Target zero means unknown, not an old target: legacy callers still
+      // supply their complete build-schema stack.
+      const auto schema_version =
+          adapter.target_gated && extension_target_version != 0
+          ? extension_target_version
+          : extension_build_version;
+      if (schema_version < adapter.applies_to_versions_below) {
+        return adapter.fn;
       }
     }
     return std::nullopt;
@@ -550,20 +562,60 @@ class SchemaAdapterRegistry {
   });
 }
 
+AOTITorchError register_targeted_schema_adapter(
+    const char* op_name,
+    uint64_t applies_to_versions_below,
+    SchemaAdapterFn adapter_fn) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    SchemaAdapterRegistry::instance().register_adapter(
+        op_name, applies_to_versions_below, std::move(adapter_fn), true);
+  });
+}
+
+// Simulated schema metadata, not a claim about actual PyTorch 2.17 headers.
+constexpr uint64_t kSchemaPocV17 = 0x0211000000000000ULL;
+
+torch::jit::Stack adapt_schema_poc_to_v17(
+    const c10::FunctionSchema& current_schema,
+    const StableIValue* extension_stack,
+    uint64_t extension_build_version,
+    uint64_t extension_target_version) {
+  const auto& args = current_schema.arguments();
+  const auto& returns = current_schema.returns();
+  TORCH_CHECK(
+      args.size() == 3 &&
+          args[0].real_type()->kind() == c10::TypeKind::TensorType &&
+          args[1].real_type()->kind() == c10::TypeKind::IntType &&
+          args[2].real_type()->kind() == c10::TypeKind::BoolType &&
+          returns.size() == 1 &&
+          returns[0].real_type()->kind() == c10::TypeKind::TensorType,
+      "schema PoC adapter expects (Tensor, int, bool) -> Tensor");
+  torch::jit::Stack result;
+  result.reserve(3);
+  for (const auto i : c10::irange(2)) {
+    result.push_back(to_ivalue(
+        args[i].real_type(),
+        extension_stack[i],
+        extension_build_version,
+        extension_target_version));
+  }
+  result.emplace_back(false);
+  return result;
+}
+
 } // namespace
 
-// Function to register test schema adapters for _test_schema_upgrader
+// Function to register test schema adapters for _test_schema_poc_v17
 // This demonstrates the adapter registration pattern (internal use only)
 static AOTITorchError _register_adapters() {
   // ** Schema adapters should be registered here**
   // Refer to https://github.com/pytorch/pytorch/pull/165284/ for an example.
-  //
-  // if (auto err = register_schema_adapter(
-  //         "aten::your_op",
-  //         VERSION_FOO, // applies to versions < VERSION_FOO
-  //         adapt_v1_to_vfoo)) {
-  //   return err;
-  // }
+  if (auto err = register_targeted_schema_adapter(
+          "_test_schema_poc_v17::example",
+          kSchemaPocV17,
+          adapt_schema_poc_to_v17)) {
+    return err;
+  }
   return AOTI_TORCH_SUCCESS;
 }
 
@@ -571,7 +623,7 @@ static AOTITorchError _register_adapters() {
 static struct AdapterInitializer {
   AdapterInitializer() {
     // Register the test adapters when the library loads
-    _register_adapters();
+    STABLE_TORCH_ERROR_CODE_CHECK(_register_adapters());
   }
 } adapter_initializer;
 
@@ -594,7 +646,7 @@ static void call_dispatcher(
   // Check if we need an adapter for this operation
   auto adapter = use_schema_adapters
       ? SchemaAdapterRegistry::instance().get_adapter(
-            opName, extension_build_version)
+            opName, extension_build_version, extension_target_version)
       : std::nullopt;
   if (adapter) {
     // Use adapter to create IValue stack
