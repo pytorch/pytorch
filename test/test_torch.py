@@ -224,7 +224,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(base, torch.ones(4, device=device))
 
     @onlyNativeDeviceTypes
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5378
     @dtypes(torch.bits1x8, torch.bits2x4, torch.bits4x2, torch.bits8,
             torch.bits16, torch.float4_e2m1fn_x2)
     def test_zero_dtypes_without_fill_kernel(self, device, dtype):
@@ -355,7 +354,8 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(raises_on_data_ptr(s2))
 
     @onlyNativeDeviceTypes
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5377
+    # storage_type() returns None on XPU: TypedStorage is a deprecated API, no plan to fix.
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/2508
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
     def test_tensor_storage_type(self, device, dtype):

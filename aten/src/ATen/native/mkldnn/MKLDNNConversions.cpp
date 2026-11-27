@@ -39,7 +39,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
               mkldnn_tensor.scalar_type() == ScalarType::Char ||
               mkldnn_tensor.scalar_type() == ScalarType::Float8_e4m3fn,
               "mkldnn_to_dense expects float, bfloat16, half, uint8, int8, float8_e4m3fn tensor input");
-  mkldnn::MkldnnMemory& stensor = memory_from_mkldnn(mkldnn_tensor);
+  mkldnn::MkldnnMemory& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
   auto data_type = dtype.has_value() ? dtype.value() : mkldnn_tensor.scalar_type();
   if (mkldnn_tensor.scalar_type() == ScalarType::Byte ||
@@ -49,7 +49,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
     TORCH_CHECK(mkldnn_tensor.scalar_type() == data_type,
             "For uint8, int8, float8 mkldnn_tensor input, we should not change the data type.");
   }
-  // NOTE: int32_t dims from MkldnnMemory but sizes needs int64_t
+  // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   Tensor cpu_tensor = at::empty(
     std::vector<int64_t>(dims.begin(), dims.end()),
     mkldnn_tensor.options().layout(c10::kStrided).dtype(data_type));
@@ -81,7 +81,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
           cpu_tensor.template mutable_data_ptr<Float8_e4m3fn>(),
           dnnl::memory::data_type::f8_e4m3);
       break;
-    default: TORCH_INTERNAL_ASSERT(false, "Unsupported dtype for oneDNN public tensor: ", data_type);
+    default: TORCH_INTERNAL_ASSERT(false, "Unsupported dtype for ideep public tensor: ", data_type);
   }
   cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
   // Make sure that NC11 strides follow formula of contiguous tensor.
@@ -101,7 +101,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
              "dense_to_mkldnn expects float, bfloat16, half, uint8, int8 tensor input");
   TORCH_CHECK(cpu_tensor.dim() <= 5,
              "Can't convert cpu tensor with the number of dimensions > 5");
-  // NOTE: forbid direct convert from non-contiguous (or channels last) to `MkldnnMemory`.
+  // NOTE: forbid direct convert from non-contiguous (or channels last) to `ideep::tensor`.
   auto cpu_tensor_cont = cpu_tensor.contiguous();
   auto data_type = dtype.has_value() ? dtype.value() : cpu_tensor.scalar_type();
   if (cpu_tensor.scalar_type() == ScalarType::Byte || cpu_tensor.scalar_type() == ScalarType::Char) {
@@ -118,7 +118,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
   Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), data_type,
                                       cpu_tensor_cont.options().layout_opt(), cpu_tensor_cont.options().device_opt(),
                                       cpu_tensor_cont.options().pinned_memory_opt());
-  mkldnn::MkldnnMemory& dtensor = memory_from_mkldnn(mkldnn_tensor);
+  mkldnn::MkldnnMemory& dtensor = itensor_from_mkldnn(mkldnn_tensor);
   if (cpu_tensor.scalar_type() == ScalarType::Float) {
     dtensor.feed_from(dtensor.get_dims(),
                       dnnl::memory::data_type::f32,
@@ -147,7 +147,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
 
 // Mkldnn tensor has special non-public format for conv2d weights
 // (dense_to_mkldnn only converts dense tensor to mkldnn tensor with
-// public format). The oneDNN conv kernel will do implicit reorder if the
+// public format). Ideep conv kernel will do implicit reorder if the
 // weight is not already in this optimized format. By the time I'm
 // writing this note, we are seeing ~20% perf cost of doing the
 // on-the-fly reorder.
@@ -174,7 +174,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   }
 
   auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
-  auto w = memory_from_const_tensor(self_);
+  auto w = itensor_from_const_tensor(self_);
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
   // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
@@ -204,7 +204,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   result.init(desc);
   result.feed_from(w);
 
-  return new_with_mkldnn_memory(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()),
+  return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
 
@@ -231,7 +231,7 @@ Tensor mkldnn_reorder_conv3d_weight(
   }
 
   auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
-  auto w = memory_from_const_tensor(self_);
+  auto w = itensor_from_const_tensor(self_);
 
   auto desc = mkldnn::convolution_forward_expected_weights_desc(
       w.get_dims(),
@@ -251,7 +251,7 @@ Tensor mkldnn_reorder_conv3d_weight(
   result.init(desc);
   result.feed_from(w);
 
-  return new_with_mkldnn_memory(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
+  return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
 static Tensor mkldnn_reorder_conv_weight(
@@ -276,7 +276,7 @@ static Tensor mkldnn_reorder_linear_weight(
   auto out_features = self.size(0);
   auto in_features = self.size(1);
   auto self_ = self.contiguous();
-  auto w = memory_from_const_tensor(self_);
+  auto w = itensor_from_const_tensor(self_);
   dnnl::memory::dims input_size;
   auto dtype = w.get_data_type();
   if (batch_size_opt.has_value()) {
@@ -291,7 +291,7 @@ static Tensor mkldnn_reorder_linear_weight(
   mkldnn::MkldnnMemory result;
   result.init(packed_desc);
   result.feed_from(w);
-  return new_with_mkldnn_memory(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
+  return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
 static mkldnn::MkldnnMemory::desc get_conv_transpose_expected_weights_desc(
@@ -368,7 +368,7 @@ static Tensor mkldnn_reorder_conv_transpose_weight(
   }
 
   auto self_ = self.contiguous(memory_format);
-  mkldnn::MkldnnMemory w = memory_from_const_tensor(self_);
+  mkldnn::MkldnnMemory w = itensor_from_const_tensor(self_);
 
   auto expected_desc = get_conv_transpose_expected_weights_desc(
       w.get_dims(),
@@ -394,7 +394,7 @@ static Tensor mkldnn_reorder_conv_transpose_weight(
   w.transpose_(0, 1);
   result.feed_from(w, /*is_deconv_weights*/true);
 
-  return new_with_mkldnn_memory(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()),
+  return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
 
@@ -433,13 +433,13 @@ static std::tuple<mkldnn::MkldnnMemory, mkldnn::MkldnnMemory> get_lstm_packed_we
   mkldnn::MkldnnMemory src_iter_c(src_iter_c_desc);
   mkldnn::MkldnnMemory bias(bias_desc);
 
-  auto w1 = memory_view_from_const_dense(
+  auto w1 = itensor_view_from_const_dense(
       weight_ih,
       {{1, 1, layer_feature_size, num_gates, hidden_size},
         get_mkldnn_dtype(weight_ih.scalar_type()),
         dnnl::memory::format_tag::ldgoi});
 
-  auto w2 = memory_view_from_const_dense(
+  auto w2 = itensor_view_from_const_dense(
       weight_hh,
       {{1, 1, hidden_size, num_gates, hidden_size},
         get_mkldnn_dtype(weight_hh.scalar_type()),
@@ -466,7 +466,7 @@ static std::tuple<mkldnn::MkldnnMemory, mkldnn::MkldnnMemory> get_lstm_packed_we
 }
 
 static bool should_use_plain_format(mkldnn::MkldnnMemory w) {
-#if defined(DNNL_VERSION_MAJOR) && DNNL_VERSION_MAJOR>=3
+#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3
   return w.get_desc().is_opaque() || w.get_desc().is_plain();
 # else
   return w.get_desc().is_rnn_packed() || w.get_desc().is_plain();
@@ -522,19 +522,19 @@ static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
   if (should_use_plain_format(w1_)) {
     packed_w1 = std::move(weight0);
   } else {
-    packed_w1 = new_with_mkldnn_memory(std::move(w1_), optTypeMetaToScalarType(weight0.options().dtype_opt()), weight0.options().device_opt());
+    packed_w1 = new_with_itensor_mkldnn(std::move(w1_), optTypeMetaToScalarType(weight0.options().dtype_opt()), weight0.options().device_opt());
   }
 
   if (should_use_plain_format(w2_)) {
     packed_w2 = std::move(weight1);
   } else {
-    packed_w2 = new_with_mkldnn_memory(std::move(w2_), optTypeMetaToScalarType(weight1.options().dtype_opt()), weight1.options().device_opt());
+    packed_w2 = new_with_itensor_mkldnn(std::move(w2_), optTypeMetaToScalarType(weight1.options().dtype_opt()), weight1.options().device_opt());
   }
   return {packed_w1, packed_w2};
 }
 
 static Tensor get_mkldnn_serialized_md(const Tensor& self) {
-  const mkldnn::MkldnnMemory packed_w = memory_from_const_tensor(self);
+  const mkldnn::MkldnnMemory packed_w = itensor_from_const_tensor(self);
   auto packed_w_desc = packed_w.get_desc();
   std::vector<uint8_t> serialized_wei_desc;
 
@@ -626,9 +626,9 @@ static Tensor mkl_reorder_linear_weight(
       weight.options().layout_opt(),
       weight.options().device_opt(),
       weight.options().pinned_memory_opt());
-  mkldnn::MkldnnMemory& mkl_weight = memory_from_mkldnn(packed_weight);
+  mkldnn::MkldnnMemory& mkl_weight = itensor_from_mkldnn(packed_weight);
   auto weight_ = weight.contiguous();
-  const mkldnn::MkldnnMemory orig_w = memory_view_from_const_dense(weight_);
+  const mkldnn::MkldnnMemory orig_w = itensor_view_from_const_dense(weight_);
   cblas_sgemm_pack(
       CblasRowMajor,
       CblasBMatrix,
