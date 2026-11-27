@@ -44,6 +44,7 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/detail/DirectCopy.h>
 
 namespace at::native {
 
@@ -57,10 +58,10 @@ Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
   if (self.sizes() == inferred_size) {
     return self;
   }
-  const ideep::tensor& x = itensor_from_mkldnn(self);
-  ideep::tensor y{x};
+  const mkldnn::MkldnnMemory& x = memory_from_mkldnn(self);
+  mkldnn::MkldnnMemory y{x};
   y.reshape(inferred_size);
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+  return new_with_mkldnn_memory(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
 
@@ -69,10 +70,10 @@ Tensor mkldnn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optiona
       !optional_memory_format.has_value(),
       "unsupported memory format option ",
       optional_memory_format.value());
-  ideep::tensor& src = itensor_from_mkldnn(self);
-  ideep::tensor dst;
-  ideep::direct_copy::compute(src, dst);
-  return new_with_itensor_mkldnn(std::move(dst), optTypeMetaToScalarType(self.options().dtype_opt()),
+  mkldnn::MkldnnMemory& src = memory_from_mkldnn(self);
+  mkldnn::MkldnnMemory dst;
+  mkldnn::direct_copy(src, dst);
+  return new_with_mkldnn_memory(std::move(dst), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
 
@@ -80,13 +81,13 @@ Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
   auto ndims = self.dim();
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
-  const ideep::tensor& x = itensor_from_mkldnn(self);
-  ideep::tensor y;
+  const mkldnn::MkldnnMemory& x = memory_from_mkldnn(self);
+  mkldnn::MkldnnMemory y;
   std::vector<int> axes(x.ndims());
   std::iota(axes.begin(), axes.end(), 0);
   std::swap(axes[dim0], axes[dim1]);
   y.transpose_from(x, axes);
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+  return new_with_mkldnn_memory(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
 

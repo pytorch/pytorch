@@ -7,6 +7,7 @@ from torch._inductor.runtime.tiling import (
     get_max_block_prefix,
     get_pointwise_prefixes,
     get_reduction_prefixes,
+    get_yz_grid_extents,
     get_z_prefixes,
     is_reduction_prefix,
     is_z_prefix,
@@ -178,6 +179,30 @@ class TestTiling(TestCase):
     def test_invalid_block_limit(self):
         with self.assertRaisesRegex(KeyError, "INVALID"):
             get_max_block("invalid", {})
+
+    @parametrize(
+        "size_hints,blocks,expected",
+        [
+            ({"x": 8, "y": 65536}, {"x": 1, "y": 1}, {}),
+            (
+                {"x": 8, "y": 7, "z0_": 9, "z1_": 5},
+                {"x": 1, "y": 2, "z0_": 4, "z1_": 2},
+                {("y",): 4, ("z0_", "z1_"): 9},
+            ),
+            (
+                {"x": 8, "y": 7, "z0_": 9, "z1_": 5},
+                {"x": 1, "y": 2, "z0_": 4},
+                {("y",): 4},
+            ),
+            (
+                {"x": 8, "z0_": 9},
+                {"x": 1, "z0_": 4},
+                {("z0_",): 3},
+            ),
+        ],
+    )
+    def test_yz_grid_extents(self, size_hints, blocks, expected):
+        self.assertEqual(get_yz_grid_extents(size_hints, blocks), expected)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ TORCH_META_FUNC(_upsample_lanczos2d_aa) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
+  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(native::upsample::output_memory_format(input)));
 }
 
 TORCH_META_FUNC(_upsample_lanczos2d_aa_backward) (

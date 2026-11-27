@@ -1,3 +1,7 @@
+// Round float to bf16 to nearest even, like hipBLASLt. CK-tile defaults to truncation where it has no native conversion
+// (gfx942); must precede every ck_tile include.
+#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_STANDARD
+
 #include <ATen/native/hip/ck_tile_group_gemm.h>
 #include <ATen/native/hip/ck_tile_group_gemm/four_wave_tail_comp_v3.h>
 #include <ATen/native/hip/ck_tile_group_gemm/no_split_k_epilogue.h>

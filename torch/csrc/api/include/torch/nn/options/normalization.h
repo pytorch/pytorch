@@ -128,6 +128,7 @@ struct TORCH_API NormalizeFuncOptions {
   TORCH_ARG(double, p) = 2.0;
   /// The dimension to reduce. Default: 1
   TORCH_ARG(int64_t, dim) = 1;
+  // TODO: match F.normalize's default, torch.finfo(norm.dtype).eps.
   /// Small value to avoid division by zero. Default: 1e-12
   TORCH_ARG(double, eps) = 1e-12;
   /// the output tensor. If `out` is used, this
