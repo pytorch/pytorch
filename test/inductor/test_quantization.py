@@ -284,6 +284,73 @@ class TestQuantization(TestCase):
         counters.clear()
 
 
+class TestWeightInt8PackMM(TestCase):
+    """Regression tests for gh-204778.
+
+    The CUDA kernel for _weight_int8pack_mm indexes x as x[b*K + k] with
+    no stride parameter, so a non-contiguous activation produces incorrect
+    results.  The fix enforces a contiguous layout on the activation at
+    both the Inductor lowering layer (require_contiguous) and the ATen
+    CUDA entry point (x_f32.contiguous()).
+    """
+
+    @requires_gpu
+    def test_non_contiguous_bf16_3d_via_compile(self):
+        """Original reproducer from gh-204778: 3-D input transposed to make
+        last-dimension stride == 8 instead of 1."""
+        weight = torch.eye(64, 128, device=GPU_TYPE, dtype=torch.int8)
+        # shape (17, 8, 128), strides (1024, 1, 8) — contracting dim stride != 1
+        x = (
+            torch.arange(17 * 128 * 8, device=GPU_TYPE)
+            .reshape(17, 128, 8)
+            .remainder(17)
+            .to(torch.bfloat16)
+            .transpose(1, 2)
+        )
+        scale = torch.ones(64, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def fn(x, w, s):
+            return torch.ops.aten._weight_int8pack_mm(
+                x.reshape(-1, 128), w, s
+            )
+
+        eager_out = fn(x, weight, scale)
+        compiled_out = torch.compile(fn, fullgraph=True)(x, weight, scale)
+        self.assertEqual(eager_out, compiled_out)
+
+    @requires_gpu
+    def test_non_contiguous_bf16_2d_direct(self):
+        """Direct 2-D non-contiguous activation: slice every other column so
+        stride(-1) == 2 instead of 1."""
+        K, N = 64, 32
+        weight = torch.eye(N, K, device=GPU_TYPE, dtype=torch.int8)
+        scale = torch.ones(N, device=GPU_TYPE, dtype=torch.bfloat16)
+        # shape (8, 64), strides (128, 2) — stride(-1) != 1
+        x_full = torch.arange(8 * 128, device=GPU_TYPE).to(torch.bfloat16).reshape(8, 128)
+        x = x_full[:, ::2]
+        self.assertFalse(x.is_contiguous())
+
+        eager_out = torch.ops.aten._weight_int8pack_mm(x, weight, scale)
+        compiled_out = torch.compile(
+            torch.ops.aten._weight_int8pack_mm, fullgraph=True
+        )(x, weight, scale)
+        self.assertEqual(eager_out, compiled_out)
+
+    @requires_gpu
+    def test_contiguous_input_unaffected(self):
+        """Contiguous activations must still produce correct results."""
+        weight = torch.eye(64, 128, device=GPU_TYPE, dtype=torch.int8)
+        x = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.bfloat16)
+        scale = torch.ones(64, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.assertTrue(x.is_contiguous())
+
+        eager_out = torch.ops.aten._weight_int8pack_mm(x, weight, scale)
+        compiled_out = torch.compile(
+            torch.ops.aten._weight_int8pack_mm, fullgraph=True
+        )(x, weight, scale)
+        self.assertEqual(eager_out, compiled_out)
+
+
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
         run_tests()

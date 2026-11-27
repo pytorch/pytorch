@@ -63,6 +63,8 @@ def register_woq_mm_ops() -> None:
         *,
         layout: Any = None,
     ) -> Any:
+        from .ir import ExternKernel
+
         _, _, _, layout, mat1, mat2 = mm_args(
             input, weight, layout=layout, mat2_transposed=True
         )
@@ -74,6 +76,11 @@ def register_woq_mm_ops() -> None:
                 f"expected mat1 dtype in [bfloat16, float16, float] and mat2 dtype "
                 f"int8, got {mat1.get_dtype()} and {mat2.get_dtype()}"
             )
+        # The CUDA kernel indexes x as x[b*K + k] with no stride parameter.
+        # Enforce a contiguous layout on mat1 so that the extern call receives
+        # a tensor whose last-dimension stride is 1, regardless of the original
+        # activation layout (e.g. after transpose or slice).
+        mat1 = ExternKernel.require_contiguous(mat1)
         aten_layout = layout
 
         # options to tune from
