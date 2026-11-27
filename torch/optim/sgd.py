@@ -47,6 +47,8 @@ class SGD(Optimizer):
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= momentum:
             raise ValueError(f"Invalid momentum value: {momentum}")
+        if not 0.0 <= dampening <= 1.0:
+            raise ValueError(f"Invalid dampening value: {dampening}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
