@@ -52,6 +52,7 @@ from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.functions import FloorDiv, Identity
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from torch.utils._sympy.value_ranges import bound_sympy
 from torch.utils._triton import has_triton
 
 from . import comms, config, config_comms, dependencies, ir, metrics
@@ -6293,6 +6294,9 @@ class Scheduler:
             ]
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        # During codegen, the nodes on the current stream whose kernels may
+        # still be running under PDL, maintained in _codegen; None means they
+        # are unknown, so the next kernel waits before its first access.
         self.previous_nodes: list[BaseSchedulerNode] | None = None
         self.current_node: BaseSchedulerNode | None = None
         self.update_zero_dim_cpu_tensor()
@@ -13206,6 +13210,45 @@ class Scheduler:
         previous_nodes_by_stream: dict[
             tuple[torch.device | None, int], list[BaseSchedulerNode]
         ] = {}
+        # Launchers skip a kernel whose grid is empty at runtime, so a node
+        # whose size may be zero, like one that emits no launch, cannot clear
+        # the kernels that may still run.
+        sizevars = V.graph.sizevars
+        var_to_range = sizevars.shape_env.var_to_range
+
+        @functools.cache
+        def is_known_nonzero(size: sympy.Expr) -> bool:
+            symbols = free_symbols(size)
+            if not symbols:
+                return sizevars.statically_known_gt(size, 0)
+            if not all(s in var_to_range for s in symbols):
+                return False
+            # Backed size symbols are sympy-positive even when their range
+            # includes 0 (backed_size_oblivious), so guard-based reasoning is
+            # trusted only when every sympy-positive symbol is at least 1.
+            # Unbacked symbols assume no positivity, so their checks hold as is.
+            return bound_sympy(size, var_to_range).lower >= 1 or (
+                all(var_to_range[s].lower >= 1 for s in symbols if s.is_positive)
+                and (
+                    sizevars.statically_known_gt(size, 0)
+                    or sizevars.statically_known_true(sympy.Ne(size, 0))
+                    # a derived size often carries only a guard that it is >= 2
+                    or sizevars.statically_known_geq(size, 2)
+                )
+            )
+
+        def is_known_nonempty(node: BaseSchedulerNode) -> bool:
+            for n in node.get_nodes():
+                if not isinstance(n, SchedulerNode):
+                    return False
+                # A zero reduction size empties neither the grid nor the waits,
+                # which are hoisted out of the reduction loop. A split scan
+                # takes its grid from the scan length, but its workspace drops
+                # the list below anyway.
+                sizes, _ = n.get_ranges()
+                if not all(map(is_known_nonzero, sizes)):
+                    return False
+            return True
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -13330,6 +13373,7 @@ class Scheduler:
             self.buffer_names_to_free.update(node.last_usage)
 
             kernel = None
+            launched = True
             if node.is_template():
                 prologue, template_node, epilogue = node.get_prologue_template_epilogue(
                     list(node.get_nodes())
@@ -13365,6 +13409,10 @@ class Scheduler:
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 # pyrefly: ignore [unbound-name]
                 kernel = self.get_backend(device).codegen_node(node)
+                # SIMD backends return None only when every op was folded into
+                # another kernel (CppScheduling always does, but PDL is
+                # CUDA-only)
+                launched = kernel is not None
             else:
                 if not isinstance(node, NopKernelSchedulerNode):
                     raise AssertionError("expected node to be a NopKernelSchedulerNode")
@@ -13400,9 +13448,19 @@ class Scheduler:
                 from .codegen.triton import TritonKernel
 
                 waited = isinstance(kernel, TritonKernel) and kernel._pdl_has_wait
-                if self.previous_nodes is None or waited:
+                # A node starts a new list only if it launches a non-empty grid
+                # and has waited for the kernels that may still run (or none
+                # are recorded). Otherwise it joins the current list or, when
+                # there is none, is left out, so the next kernel still sees
+                # None and waits before its first access.
+                if (
+                    launched
+                    and (self.previous_nodes is None or waited)
+                    and is_known_nonempty(node)
+                ):
                     previous_nodes_by_stream[stream_key] = []
-                previous_nodes_by_stream[stream_key].append(node)
+                if stream_key in previous_nodes_by_stream:
+                    previous_nodes_by_stream[stream_key].append(node)
                 if isinstance(kernel, MultiKernel):
                     kernel = kernel.kernels[0]
                 if isinstance(kernel, TritonKernel) and kernel.args.workspace_args:
@@ -13769,6 +13827,10 @@ class BaseScheduling:  # noqa: docstring_linter
     ) -> Kernel[Any] | MultiKernelBase | None:
         """
         Generate a kernel given a list of pre-fused nodes.
+
+        Backends that can use PDL (the SIMD ones) return the kernel they
+        launched, or a MultiKernel, and None only when they launch nothing:
+        the PDL running list in _codegen treats None as no launch.
         """
         raise NotImplementedError
 

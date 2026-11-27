@@ -4158,7 +4158,7 @@ class SIMDScheduling(BaseScheduling):
         combined_schedule,
         nodes_to_mark,
         config_patch_schedule=None,
-    ) -> None:
+    ) -> SIMDKernel | MultiKernel:
         MultiKernel.merge_workspaces_inplace(kernels)
         config_patches = self._collect_config_patches(
             config_patch_schedule or combined_schedule
@@ -4184,6 +4184,7 @@ class SIMDScheduling(BaseScheduling):
             node for node in combined_schedule if isinstance(node, BaseSchedulerNode)
         ]
         self._launch_kernel_and_cleanup(final_kernel, base_scheduler_nodes)
+        return final_kernel
 
     def _codegen_nested_grouped_schedule(
         self,
@@ -4639,7 +4640,9 @@ class SIMDScheduling(BaseScheduling):
         )
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(combined_schedule, kernel)
-        self._finalize_nested_reduction_kernels(kernels, combined_schedule, nodes)
+        return self._finalize_nested_reduction_kernels(
+            kernels, combined_schedule, nodes
+        )
 
     def _codegen_native_matmul_row_epilogue_with_kernel(
         self, nodes, kernel, m, n, first_row_node
