@@ -59,6 +59,25 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_var_mean_empty_reduction(self, device):
+        # The mean of zero elements is nan, whichever Welford codegen path runs.
+        def fn(mask, y):
+            x = torch.nonzero(mask).float().flatten() * y[:, None]
+            return (
+                *torch.var_mean(x, 1),
+                *torch.std_mean(x, 1, correction=0, keepdim=True),
+                *torch.var_mean(x),
+            )
+
+        y = torch.randn(4, device=device)
+        compiled = torch.compile(fn, fullgraph=True)
+        for numel in (0, 3):
+            mask = torch.zeros(16, device=device, dtype=torch.bool)
+            mask[:numel] = True
+            torch.testing.assert_close(compiled(mask, y), fn(mask, y), equal_nan=True)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
         def fn(x):
             nz = x.nonzero()
