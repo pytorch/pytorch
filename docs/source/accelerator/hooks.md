@@ -35,6 +35,7 @@ The tables below list the hooks accelerator vendors should implement when integr
 | `getCurrentDevice()`               | Returns the currently active device index                                    | Query which accelerator device is active in the current thread       |
 | `exchangeDevice(DeviceIndex)`      | Atomically exchanges the current device and returns the previous one         | Temporarily switch devices and restore the previous device afterward |
 | `maybeExchangeDevice(DeviceIndex)` | Conditionally exchanges device only if the index is valid                    | Safely attempt device switching with validation                      |
+| `getDLDeviceType()`                | Overrides the PrivateUse1 DLPack device type (defaults to `kDLExtDev`)       | DLPack import/export with unchanged device indices                   |
 
 ## Implementation
 
@@ -164,4 +165,4 @@ This function maintains a static vector of generators (one per device), initiali
 
 [random.py]: https://github.com/pytorch/pytorch/tree/main/test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/openreg/random.py#L48-L53 "random.py"
 [Context.h]: https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/Context.h#L61-L102 "Context.h"
-[PrivateUse1HooksInterface.h]: https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/detail/PrivateUse1HooksInterface.h#L15-L72 "PrivateUse1HooksInterface.h"
+[PrivateUse1HooksInterface.h]: https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/detail/PrivateUse1HooksInterface.h "PrivateUse1HooksInterface.h"
