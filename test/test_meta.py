@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
     xfailIfTorchDynamo,
-    skipIfXpu,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -914,6 +913,21 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
 }
 
+meta_dispatch_device_expected_failures['xpu'] = {
+    # The log_sigmoid_forward decomposition picks the buffer shape from
+    # self.is_cuda or self.is_xpu, which are both False for a meta tensor, so the
+    # meta buffer keeps the input shape while the real XPU kernel returns shape (0,),
+    # exactly as on CUDA above. Affects
+    #   test_dispatch_meta_outplace_nn_functional_logsigmoid
+    #   test_dispatch_symbolic_meta_outplace_nn_functional_logsigmoid
+    #   test_dispatch_meta_outplace_nn_functional_multilabel_soft_margin_loss
+    #   test_dispatch_symbolic_meta_outplace_nn_functional_multilabel_soft_margin_loss
+    # (multilabel_soft_margin_loss calls log_sigmoid).
+    # https://github.com/intel/torch-xpu-ops/issues/5020
+    aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},  # https://github.com/intel/torch-xpu-ops/issues/5020
+    aten.log_sigmoid_forward.output: {bf16, f16, f64, f32},  # https://github.com/intel/torch-xpu-ops/issues/5020
+}
+
 meta_dispatch_device_skips['cpu'] = {
     aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
 
@@ -1598,10 +1612,10 @@ class TestMeta(_TestMetaBase):
 
 
 @unMarkDynamoStrictTest
-class TestMetaCudaRef(_TestMetaBase):
+class TestMetaDeviceType(_TestMetaBase):
     # Tests whose reference stride/output comes from the CUDA kernel, so the
     # whole class is restricted to CUDA via only_for='cuda'.
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfCrossRef
     @suppress_warnings
@@ -2699,7 +2713,6 @@ class TestMetaKernelRegistrations(TestCase):
             )
             self.assertEqual(result, expected)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181490")
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -3043,7 +3056,7 @@ class TestMetaKernelRegistrations(TestCase):
 
 
 instantiate_device_type_tests(TestMeta, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestMetaDeviceType, globals(), except_for=("cpu",), allow_xpu=True)
 
 
 def print_op_str_if_not_supported(op_str):
