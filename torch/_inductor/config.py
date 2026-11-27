@@ -1200,6 +1200,12 @@ benchmark_epilogue_fusion: bool = Config(
 # Maximum number of top template choices to benchmark with fusion.
 max_template_fusion_benchmarked_choices: int = 1
 
+# On XPU with 16-bit inputs the fused B2B GEMM kernel beats the two-kernel
+# unoptimized choice end-to-end only while the serial N*O reduction is at most
+# this size. Larger values fuse larger reductions too; a negative value disables
+# the policy and autotunes both choices.
+xpu_b2b_gemm_fused_max_n_o: int = 8192
+
 # Deprecated compatibility alias for max_template_fusion_benchmarked_choices.
 max_epilogue_benchmarked_choices: int = Config(
     alias="torch._inductor.config.max_template_fusion_benchmarked_choices",

@@ -619,6 +619,7 @@ class B2BGEMMTest(TestCase):
             ("cuda", torch.float16, torch.float16, (128, 16, 128, 16), "both"),
         ),
     )
+    @torch._inductor.config.patch(xpu_b2b_gemm_fused_max_n_o=8192)
     def test_b2b_gemm_xpu_selection(
         self, left_assoc, device_type, inner_dtype, outer_dtype, shape, expected
     ):
@@ -632,8 +633,8 @@ class B2BGEMMTest(TestCase):
         )
         choices = calls[0]
         if expected == "fused":
-            self.assertEqual(len(choices), len(b2b_gemm.b2b_gemm_configs))
-            self.assertTrue(all(c == "triton" for c in choices))
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(choices, ["triton"] * len(b2b_gemm.b2b_gemm_configs))
         elif expected == "unoptimized":
             self.assertEqual(choices, ["unoptimized"])
         else:
@@ -643,6 +644,7 @@ class B2BGEMMTest(TestCase):
             )
 
     @parametrize("left_assoc", (False, True))
+    @torch._inductor.config.patch(xpu_b2b_gemm_fused_max_n_o=8192)
     def test_b2b_gemm_xpu_selection_symbolic(self, left_assoc):
         shape_env = ShapeEnv()
         n = shape_env.create_symbol(
@@ -659,6 +661,7 @@ class B2BGEMMTest(TestCase):
         self.assertEqual(calls[0], ["unoptimized"])
         self.assertEqual(shape_env.guards, [])
 
+    @torch._inductor.config.patch(xpu_b2b_gemm_fused_max_n_o=8192)
     def test_b2b_gemm_xpu_fused_safety_net(self):
         calls = []
 
@@ -678,7 +681,7 @@ class B2BGEMMTest(TestCase):
             autotune=failing_then_fallback,
         )
         self.assertEqual(len(calls), 2)
-        self.assertTrue(all(c == "triton" for c in calls[0]))
+        self.assertEqual(calls[0], ["triton"] * len(b2b_gemm.b2b_gemm_configs))
         self.assertEqual(calls[1], ["unoptimized"])
 
     @parametrize("left_assoc", (False, True))
