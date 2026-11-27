@@ -10,9 +10,8 @@
 #include <requantization/runtime-assembly.h>
 
 #ifndef __APPLE__
-#define NDEF_APPLE_SYMBOLS .arch armv7-a; .fpu neon
-#else
-#define NDEF_APPLE_SYMBOLS
+.arch armv7-a;
+.fpu neon
 #endif
 
 # r0 mr
@@ -81,7 +80,6 @@
 #define MAKE_PYTORCH_Q8GEMM_DQ_SPARSE_1X4_UKERNEL_4X8_PACKEDA__AARCH32_NEON(W_INDEX_DTYPE_NUM_BITS, W_INDEX_DTYPE_NUM_BYTES_ARG, W_INDEX_DTYPE_LOG_NUM_BYTES_ARG, LOAD_INDEX_INSTRUCTION) ;\
     BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w##W_INDEX_DTYPE_NUM_BITS##__aarch32_neon ;\
         .arm                                                                  ;\
-        NDEF_APPLE_SYMBOLS                                                    ;\
                                                                               ;\
         PUSH {r4, r5, r6, r7, r8, r9, r10, r11, lr}                           ;\
         VPUSH {d8-d15}                                                        ;\
@@ -502,5 +500,4 @@ MAKE_PYTORCH_Q8GEMM_DQ_SPARSE_1X4_UKERNEL_4X8_PACKEDA__AARCH32_NEON(8, #1, #0, L
 .section ".note.GNU-stack","",%progbits
 #endif
 
-#undef NDEF_APPLE_SYMBOLS
 #undef MAKE_PYTORCH_Q8GEMM_DQ_SPARSE_1X4_UKERNEL_4X8_PACKEDA__AARCH32_NEON
