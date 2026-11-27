@@ -81,7 +81,6 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    TEST_CUDA,
     xfailIfDistributedNotSupported,
 )
 from torch.testing._internal.common_device_type import (
@@ -100,16 +99,14 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
-    TEST_XPU,
     TestCase as TorchTestCase,
 )
 from torch.testing._internal.custom_tensor import (
     ConstantExtraMetadataTensor,
     CustomTensorPlainOut,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
-from torch.testing._internal.triton_utils import requires_gpu, requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     register_constant,
@@ -605,6 +602,8 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
         exported_program = export(f, args, kwargs)
@@ -2517,25 +2516,6 @@ graph():
         y = torch.tensor([5, 10])
         self.assertTrue(torch.allclose(ep.module()(y), m(y)))
 
-    @requires_gpu_and_triton
-    def test_export_raw_triton_kernel_non_strict_error(self):
-        from torch.testing._internal.triton_utils import add_kernel
-
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                out = torch.empty_like(x)
-                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
-                return out
-
-        args = (
-            torch.randn(3, device=GPU_TYPE),
-            torch.randn(3, device=GPU_TYPE),
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Raw Triton kernel calls are not supported by non-strict torch.export",
-        ):
-            export(M(), args, strict=False)
 
     def test_boolean_mask_setitem_unbacked(self):
         class M(torch.nn.Module):
@@ -10838,98 +10818,8 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
 
-    @requires_gpu_and_triton
-    @testing.expectedFailureCppRuntime
-    def test_export_associative_scan_symbol_dim(self):
-        device = torch.device(GPU_TYPE)
-        combine_mode = "pointwise"
 
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=device)
 
-        class Foo(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def combine_fn(self, x, y):
-                return x + y
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 2, combine_mode=combine_mode
-                )
-
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        module_out = Foo()(xs)
-        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
-
-    @requires_gpu_and_triton
-    @testing.expectedFailureCppRuntime
-    def test_export_associative_scan_symbol_scandim(self):
-        device = torch.device(GPU_TYPE)
-        combine_mode = "pointwise"
-
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=device)
-
-        class Foo(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def combine_fn(self, x, y):
-                return x + y
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 1, combine_mode=combine_mode
-                )
-
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        module_out = Foo()(xs)
-        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
-
-    @requires_gpu_and_triton
-    def test_export_associative_scan_lifted_buffers(self):
-        if "cpp_runtime_nonstrict" in self.id():
-            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
-
-        device = torch.device(GPU_TYPE)
-        combine_mode = "pointwise"
-
-        class A(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
-
-            def forward(self):
-                return self.buffer.cos()
-
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.a = A()
-
-            def combine_fn(self, x, y):
-                return (x + y) * self.a()
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 1, combine_mode=combine_mode
-                )
-
-        inp = torch.ones(3, 10, 2, device=device)
-        ep = export(M(), (inp,))
-        epm = ep.module()
-
-        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
-
-        for gm in epm.named_modules():
-            if not isinstance(gm, torch.fx.GraphModule):
-                continue
-            self.assertEqual(
-                len([node for node in gm.graph.nodes if node.op == "placeholder"]),
-                1,
-            )
 
     # associative_scan is not supported by the cpp (NativeRT) runtime yet
     @testing.expectedFailureCppRuntime
@@ -17832,78 +17722,6 @@ class GraphModule(torch.nn.Module):
             ignore_empty_lines=True,
         )
 
-    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "Test requires CUDA or XPU.")
-    def test_module_to_with_shared_weights(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
-
-            def forward(self, x):
-                token_ids = torch.ones((4,), device=x.device, dtype=torch.int64)
-                embedded = self.embedding(token_ids).sum()
-                return x.sum() + embedded.sum()
-
-        class Container(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = Model()
-
-            def forward(self, x):
-                if GPU_TYPE in str(x.device):
-                    mod = self.mod.to(x.device)
-                    return mod(x)
-                else:
-                    return x.sum()
-
-        with (
-            torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False),
-            torch._export.config.patch(use_legacy_dynamo_graph_capture=False),
-        ):
-            torch.manual_seed(0)
-            container = Container()
-            container_eager = copy.deepcopy(container)
-            gm = torch.export.export(
-                container,
-                (torch.randn(4, 4, 4, device=GPU_TYPE),),
-                strict=True,
-            ).module()
-
-            self.assertExpectedInline(
-                str(gm.code).strip(),
-                f"""\
-def forward(self, x):
-    args_0, = fx_pytree.tree_flatten_spec(([x], {{}}), self._in_spec)
-    mod_embedding_weight = self.mod.embedding.weight
-    _guards_fn = self._guards_fn(args_0);  _guards_fn = None
-    empty_memory_format = torch.ops.aten.empty.memory_format([10, 8], dtype = torch.float32, device = device(type='{GPU_TYPE}', index=0), pin_memory = False)
-    detach_default = torch.ops.aten.detach.default(empty_memory_format);  empty_memory_format = None
-    submod_1 = self.submod_1
-    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_1, mod_embedding_weight);  submod_1 = mod_embedding_weight = None
-    getitem = wrap_with_set_grad_enabled[0];  wrap_with_set_grad_enabled = None
-    set__source_tensor = torch.ops.aten.set_.source_Tensor(detach_default, getitem);  detach_default = getitem = None
-    view_as_default = torch.ops.aten.view_as.default(set__source_tensor, set__source_tensor);  set__source_tensor = None
-    ones_default = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='{GPU_TYPE}', index=0), pin_memory = False)
-    embedding_default = torch.ops.aten.embedding.default(view_as_default, ones_default);  view_as_default = ones_default = None
-    sum_default = torch.ops.aten.sum.default(embedding_default);  embedding_default = None
-    sum_default_1 = torch.ops.aten.sum.default(args_0);  args_0 = None
-    sum_default_2 = torch.ops.aten.sum.default(sum_default);  sum_default = None
-    add_tensor = torch.ops.aten.add.Tensor(sum_default_1, sum_default_2);  sum_default_1 = sum_default_2 = None
-    return pytree.tree_unflatten((add_tensor,), self._out_spec)""",  # noqa: B950
-            )
-
-            inp = torch.randn(4, 4, 4, device=GPU_TYPE)
-
-            # Call container first to move shared weights to the accelerator
-            export_out = gm(inp)
-            eager_out = container_eager(inp)
-            self.assertEqual(export_out, eager_out)
-
-            # This should not fail even though the weights have already moved
-            # and .to() returns the same parameter with requires_grad=True
-            export_out_v2 = gm(inp)
-            eager_out_v2 = container_eager(inp)
-            self.assertEqual(export_out_v2, eager_out_v2)
 
     @testing.expectedFailureStrict  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureStrictV2  # test_hop doesn't have a dynamo implementation
@@ -19736,6 +19554,29 @@ class TestExportTriton(TestCase):
         exp_out = m(*args)
         self.assertEqual(exp_out, ep.module()(*args))
 
+    def test_export_raw_triton_kernel_non_strict_error(self, device):
+        if triton is None:
+            self.skipTest("triton is not installed")
+
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
+                return out
+
+        args = (
+            torch.randn(3, device=device),
+            torch.randn(3, device=device),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Raw Triton kernel calls are not supported by non-strict torch.export",
+        ):
+            export(M(), args, strict=False)
+
+
     def test_export_custom_triton_kernel_mutable(self, device):
         if triton is None or capture_triton is None:
             self.skipTest("triton is not installed")
@@ -20035,6 +19876,173 @@ class TestExportAutocastException(TestCase):
                     strict=False,
                 ).module()
 
+class TestExportAssociativeScan(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_symbol_dim(self, device):
+        combine_mode = "pointwise"
+
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=device)
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 2, combine_mode=combine_mode
+                )
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        module_out = Foo()(xs)
+        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
+
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_symbol_scandim(self, device):
+        combine_mode = "pointwise"
+
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=device)
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 1, combine_mode=combine_mode
+                )
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        module_out = Foo()(xs)
+        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
+
+    def test_export_associative_scan_lifted_buffers(self, device):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
+        combine_mode = "pointwise"
+
+        class A(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
+
+            def forward(self):
+                return self.buffer.cos()
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = A()
+
+            def combine_fn(self, x, y):
+                return (x + y) * self.a()
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 1, combine_mode=combine_mode
+                )
+
+        inp = torch.ones(3, 10, 2, device=device)
+        ep = export(M(), (inp,))
+        epm = ep.module()
+
+        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
+
+        for gm in epm.named_modules():
+            if not isinstance(gm, torch.fx.GraphModule):
+                continue
+            self.assertEqual(
+                len([node for node in gm.graph.nodes if node.op == "placeholder"]),
+                1,
+            )
+
+class TestExportModuleToDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_module_to_with_shared_weights(self, device):
+
+        device_type = torch.device(device).type
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+
+            def forward(self, x):
+                token_ids = torch.ones((4,), device=x.device, dtype=torch.int64)
+                embedded = self.embedding(token_ids).sum()
+                return x.sum() + embedded.sum()
+
+        class Container(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if device_type in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        with (
+            torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False),
+            torch._export.config.patch(use_legacy_dynamo_graph_capture=False),
+        ):
+            torch.manual_seed(0)
+            container = Container()
+            container_eager = copy.deepcopy(container)
+            gm = torch.export.export(
+                container,
+                (torch.randn(4, 4, 4, device=device),),
+                strict=True,
+            ).module()
+
+            self.assertExpectedInline(
+                str(gm.code).strip(),
+                f"""\
+def forward(self, x):
+    args_0, = fx_pytree.tree_flatten_spec(([x], {{}}), self._in_spec)
+    mod_embedding_weight = self.mod.embedding.weight
+    _guards_fn = self._guards_fn(args_0);  _guards_fn = None
+    empty_memory_format = torch.ops.aten.empty.memory_format([10, 8], dtype = torch.float32, device = device(type='{device_type}', index=0), pin_memory = False)
+    detach_default = torch.ops.aten.detach.default(empty_memory_format);  empty_memory_format = None
+    submod_1 = self.submod_1
+    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_1, mod_embedding_weight);  submod_1 = mod_embedding_weight = None
+    getitem = wrap_with_set_grad_enabled[0];  wrap_with_set_grad_enabled = None
+    set__source_tensor = torch.ops.aten.set_.source_Tensor(detach_default, getitem);  detach_default = getitem = None
+    view_as_default = torch.ops.aten.view_as.default(set__source_tensor, set__source_tensor);  set__source_tensor = None
+    ones_default = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='{device_type}', index=0), pin_memory = False)
+    embedding_default = torch.ops.aten.embedding.default(view_as_default, ones_default);  view_as_default = ones_default = None
+    sum_default = torch.ops.aten.sum.default(embedding_default);  embedding_default = None
+    sum_default_1 = torch.ops.aten.sum.default(args_0);  args_0 = None
+    sum_default_2 = torch.ops.aten.sum.default(sum_default);  sum_default = None
+    add_tensor = torch.ops.aten.add.Tensor(sum_default_1, sum_default_2);  sum_default_1 = sum_default_2 = None
+    return pytree.tree_unflatten((add_tensor,), self._out_spec)""",  # noqa: B950
+            )
+
+            inp = torch.randn(4, 4, 4, device=device)
+
+            # Call container first to move shared weights to the accelerator
+            export_out = gm(inp)
+            eager_out = container_eager(inp)
+            self.assertEqual(export_out, eager_out)
+
+            # This should not fail even though the weights have already moved
+            # and .to() returns the same parameter with requires_grad=True
+            export_out_v2 = gm(inp)
+            eager_out_v2 = container_eager(inp)
+            self.assertEqual(export_out_v2, eager_out_v2)
+
 # Split out of TestExport for device-agnostic coverage. Wrapper suites
 # (strict/serdes/retrace/...) only clone TestExport; they must also mock +
 # instantiate these via this list, or those cases silently drop.
@@ -20053,6 +20061,8 @@ _DEVICE_EXPORT_TEST_SPECS = (
     (TestExportRNN, {"except_for": "cpu", "allow_xpu": True}),
     (TestExportAutocastException, {"except_for": "cpu", "allow_xpu": True}),
     (TestExportTriton, {"except_for": "cpu", "allow_xpu": True}),
+    (TestExportAssociativeScan, {"except_for": "cpu", "allow_xpu": True}),
+    (TestExportModuleToDevice, {"except_for": "cpu", "allow_xpu": True}),
     (TestExportFlexAttention, {"allow_xpu": True}),
 )
 
@@ -20072,6 +20082,12 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestExportTriton, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestExportAssociativeScan, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestExportModuleToDevice, globals(), except_for="cpu", allow_xpu=True
 )
 instantiate_device_type_tests(TestExportFlexAttention, globals(), allow_xpu=True)
 del _DEVICE_EXPORT_TEST_SPECS
