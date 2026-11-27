@@ -25,13 +25,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import IS_BIG_GPU
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import IS_BIG_GPU, requires_triton
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-
-requires_triton = skipIf(not has_triton(), "requires triton")
 
 
 class DeterministicTestGeneric(TestCase):
@@ -92,21 +89,35 @@ class DeterministicTestGeneric(TestCase):
         self.assertFalse(inductor_config.deterministic)
 
 
+@requires_triton()
 class DeterministicTestRun2Run(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180681")
     @skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
     @parametrize("training_or_inference", ["training", "inference"])
     @parametrize("precision", ["float32", "bfloat16", "float16", "amp"])
-    def test_run2run_determinism(self, model_name, training_or_inference, precision):
+    def test_run2run_determinism(
+        self, device, model_name, training_or_inference, precision
+    ):
         """
         Test run2run determinism for a few huggingface models.
 
         The test assumes benchmarks/dynamo/huggingface.py can be found from
         the current working directory.
         """
+        # Pass --device explicitly: without it the benchmark subprocess falls
+        # back to torch.accelerator.current_accelerator(), which only accepts
+        # cuda/privateuse1 and otherwise silently runs on cpu.
+        device_type = torch.device(device).type
+        if device_type not in ("cuda", "xpu"):
+            # The benchmark runs in a subprocess that never imports third-party
+            # accelerator backends, so the injected backend name cannot be parsed
+            # by torch.device there (benchmarks/dynamo/common.py only consults
+            # torch._C._get_privateuse1_backend_name()). Skip instead of failing
+            # until the benchmark imports the active backend itself.
+            self.skipTest(f"benchmark subprocess cannot run on {device_type}")
 
         def _setup_env(env):
             env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"  # disable autotune cache
@@ -123,7 +134,8 @@ class DeterministicTestRun2Run(TestCase):
             cmd = (
                 f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
-                + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
+                + f" --device {device_type} --disable-cudagraphs"
+                + f" --save-model-outputs-to={saved_pkl}"
             )
             print("Command", cmd)
             env = os.environ.copy()
@@ -139,7 +151,8 @@ class DeterministicTestRun2Run(TestCase):
             cmd = (
                 f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
-                + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
+                + f" --device {device_type} --disable-cudagraphs"
+                + f" --compare-model-outputs-with={saved_pkl}"
             )
             print("Command", cmd)
 
@@ -155,6 +168,7 @@ class DeterministicTestRun2Run(TestCase):
             )
 
 
+@requires_triton()
 class DeterministicTestAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -169,7 +183,6 @@ class DeterministicTestAccelerator(TestCase):
         self._exit_stack.close()
         super().tearDown()
 
-    @requires_triton
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, device, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -187,7 +200,6 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["pad_mm_bench"] > 0)
 
-    @requires_triton
     @parametrize("deterministic", [False, True])
     @inductor_config.patch(max_autotune=True)
     @skipIf(not IS_BIG_GPU, "templates require big gpu")
@@ -207,7 +219,6 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["select_algorithm_autotune"] > 0)
 
-    @requires_triton
     def test_pointwise_coordesc_tuning(self, device):
         @torch.compile(mode="max-autotune")
         def f(x):
@@ -218,7 +229,6 @@ class DeterministicTestAccelerator(TestCase):
 
         self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
-    @requires_triton
     @parametrize("deterministic", [False, True])
     def test_reduction_coordesc_tuning(self, device, deterministic):
         with inductor_config.patch(
@@ -239,7 +249,6 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
-    @requires_triton
     @parametrize("fp_fusion", [True, False])
     @parametrize("deterministic", [False, True])
     def test_fp_fusion(self, device, deterministic, fp_fusion):
@@ -254,7 +263,6 @@ class DeterministicTestAccelerator(TestCase):
         triton_fusion = fp_fusion and not deterministic
         self.assertIn(f"'enable_fp_fusion': {triton_fusion}", code)
 
-    @requires_triton
     @parametrize(
         "deterministic,fp_fusion",
         [(True, True), (False, False)],
@@ -294,7 +302,6 @@ class DeterministicTestAccelerator(TestCase):
         self.assertNotEqual(xblocks[0], xblocks[1])
         self.assertEqual(outs[0].view(torch.int32), outs[1].view(torch.int32))
 
-    @requires_triton
     @inductor_config.patch(batch_invariant=True)
     def test_persistent_reduction_batch_invariance(self, device):
         H = 768
@@ -327,7 +334,6 @@ class DeterministicTestAccelerator(TestCase):
             )
             size //= 2
 
-    @requires_triton
     def test_cumsum_deterministic(self, device):
         from torch._inductor.utils import run_and_get_code
 
@@ -341,7 +347,6 @@ class DeterministicTestAccelerator(TestCase):
             self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
         self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
 
-    @requires_triton
     @inductor_config.patch(deterministic=True)
     def test_deterministic_flag_survives_compile(self, device):
         # Dynamo restores the deterministic-algorithms state after each frame;
@@ -366,7 +371,8 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     DeterministicTestRun2Run,
     globals(),
-    only_for="cuda",
+    except_for="cpu",
+    allow_xpu=True,
 )
 
 
