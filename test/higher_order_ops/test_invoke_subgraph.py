@@ -25,8 +25,9 @@ import torch._inductor
 import torch._inductor.decomposition
 import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
-from torch._dynamo import source
+from torch._dynamo import mark_dynamic, maybe_mark_dynamic, source
 from torch._dynamo.backends.common import aot_autograd
+from torch._dynamo.exc import UncapturedHigherOrderOpError
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.guards import GuardBuilder
 from torch._dynamo.precompile_package import precompile_capture
@@ -3763,7 +3764,6 @@ class TestInvokeSubgraphReuse(TestCase):
                 self.assertEqual(count(), traces)
             if frames is not None:
                 self.assertEqual(len(backend.graphs), frames)
-            return count(), len(backend.graphs)
 
         return check
 
@@ -3828,9 +3828,7 @@ class TestInvokeSubgraphReuse(TestCase):
 
     @torch._dynamo.config.patch(force_parameter_static_shapes=False)
     @parametrize("wrap", [torch.as_tensor, torch.nn.Parameter])
-    @parametrize(
-        "mark", [None, torch._dynamo.mark_dynamic, torch._dynamo.maybe_mark_dynamic]
-    )
+    @parametrize("mark", [None, mark_dynamic, maybe_mark_dynamic])
     def test_reused_region_static_to_dynamic_capture(self, wrap, mark):
         fixed = Holder(tensor=wrap(torch.ones(2)))
         torch._dynamo.mark_static(fixed.tensor, 0)
@@ -3889,10 +3887,9 @@ class TestInvokeSubgraphReuse(TestCase):
         holders = [Holder(layout=layout()) for _ in range(2)]
         holders[0].tensor = _dynamic_capture(5) if kind == "prebuilt" else torch.ones(5)
         run = self._reuse_runner(fn, torch.ones(1), dynamic=True)
-        for size in (5, 7, 9):
+        for size, traces, frames in ((5, 2, 1), (7, 4, 2), (9, 4, 2)):
             holders[1].tensor = _dynamic_capture(size)
-            stats = run(holders, fixed)
-        self.assertEqual(stats, (4, 2))
+            run(holders, fixed, traces=traces, frames=frames)
 
     @parametrize("case", ["same", "different", "collision"])
     def test_reused_region_overlapping_operands(self, case):
@@ -3916,17 +3913,16 @@ class TestInvokeSubgraphReuse(TestCase):
             "range": lambda x, h: x + 100 if h.tensor.shape[0] >= 4 else x - 100,
         }
         region = _map_nested_region(bodies[binding])
-
         preload = binding == "unrelated"
         fn = lambda x, hs: region(hs[0].tensor.clone() if preload else x, hs)
         holders = [Holder(tensor=torch.ones(5), scale=n) for n in (5, 3)]
         if binding == "range":
-            torch._dynamo.mark_dynamic(holders[0].tensor, 0, min=4)
-            torch._dynamo.mark_dynamic(holders[1].tensor, 0)
+            mark_dynamic(holders[0].tensor, 0, min=4)
+            mark_dynamic(holders[1].tensor, 0)
         elif preload:
             holders[0].scale = holders[1].scale = 2
             del holders[1].tensor
-            torch._dynamo.mark_dynamic(holders[0].tensor, 0)
+            mark_dynamic(holders[0].tensor, 0)
         run = self._reuse_runner(fn, torch.ones(1))
         run(holders, traces=2 if binding == "integer" else 1)
         if binding == "range":
@@ -3988,8 +3984,7 @@ class TestInvokeSubgraphReuse(TestCase):
                 holder.tensor = _dynamic_capture(n)
             if second_capture == "shared":
                 holders[1].tensor = holders[0].tensor
-            stats = run(holders)
-        self.assertEqual(stats, (2 if second_capture == "static" else 1, 1))
+            run(holders, traces=2 if second_capture == "static" else 1, frames=1)
 
     @parametrize("op", ["scalar", "offset", "static_offset", "data"])
     def test_reused_region_captured_symbol_source(self, op):
@@ -4023,6 +4018,12 @@ class TestInvokeSubgraphReuse(TestCase):
         else:
             layers[-1].weight = torch.nn.Parameter(torch.ones(4, 5)[:, 0])
             run(layers, traces=3, frames=2)
+
+    def test_reused_region_sourceless_storage_offset(self):
+        region = nested_compile_region(lambda x: x + x.storage_offset())
+        run = self._reuse_runner(lambda x, w: (region(x), region(w[1:])))
+        with self.assertRaisesRegex(UncapturedHigherOrderOpError, "storage_offset"):
+            run(torch.ones(4), torch.arange(5.0))
 
     def test_reused_region_explicit_spec_parameter_captures(self):
         fn = _map_nested_region(lambda x, layer: x @ layer.weight)
@@ -4124,18 +4125,18 @@ class TestInvokeSubgraphReuse(TestCase):
         + [OrderedDict, defaultdict, deque, frozenset, torch.Size, FunctionType],
         name_fn=lambda make: make.__name__,
     )
-    @parametrize("preload", [False, True])
-    def test_reused_region_preloaded_python_identity(self, make, preload):
+    @parametrize("outer_read", [False, True])
+    def test_reused_region_python_identity(self, make, outer_read):
         body = lambda x, a, b: x + (a is b) + (b is a)
         if make is IdentityItem:
             body = lambda x, a, b: x + a.value + b.value + (a is b) + (a == b)
 
-        if explicit := preload and make is not IdentityItem:
+        if explicit := outer_read and make is not IdentityItem:
             region = nested_compile_region(body)
             fn = lambda x, hs: tuple(region(x, h.a, h.b) for h in hs)
         else:
             region = _map_nested_region(lambda x, h: body(x, h.a, h.b))
-            fn = lambda x, hs: (preload and _lexical.tensor.a.value, region(x, hs))
+            fn = lambda x, hs: (outer_read and _lexical.tensor.a.value, region(x, hs))
 
         args = {tuple: ([1],), torch.Size: ([1],), range: (2,), slice: (2,)}
         args[FunctionType] = ((lambda: None).__code__, globals())
@@ -5505,7 +5506,8 @@ class GraphModule(torch.nn.Module):
             return gn(x, 1) + gn(x, 2) + gn(x, 3)
 
         x = torch.randn(4)
-        error = r"reuse entries .*test_invoke_subgraph\.py.*, line \d+"
+        suffix = r".*\(hash-key path\)" if key else ""
+        error = rf"reuse entries .*test_invoke_subgraph\.py.*, line \d+{suffix}"
         with self.assertRaisesRegex(RuntimeError, error):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
