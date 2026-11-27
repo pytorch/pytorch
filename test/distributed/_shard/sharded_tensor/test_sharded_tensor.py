@@ -3515,7 +3515,7 @@ class TestShardedTensorSubGroupInit(TestCase):
 
         for r in sub_pg_ranks:
             _parse_and_validate_remote_device(
-                sub_pg, _remote_device(f"rank:{r}/meta:{r % sub_group_sz}")
+                sub_pg, _remote_device(f"rank:{r}/cuda:{r % sub_group_sz}")
             )
 
 
