@@ -1399,19 +1399,11 @@ sym_sqrt = globals()["_sym_sqrt"]
 __all__.append("sym_sqrt")
 
 
+_SYM_TO_PY = {SymInt: builtins.int, SymFloat: builtins.float, SymBool: builtins.bool}
+
+
 def _sym_ite_types_compatible(t: object, f: object) -> builtins.bool:
-    # Same Python type, or SymX paired with the matching literal scalar.
-    # Use `type(...) is` for the literal side so bool is not treated as int.
-    if type(t) is type(f):
-        return True
-    return (
-        (isinstance(t, SymInt) and type(f) is builtins.int)
-        or (isinstance(f, SymInt) and type(t) is builtins.int)
-        or (isinstance(t, SymFloat) and type(f) is builtins.float)
-        or (isinstance(f, SymFloat) and type(t) is builtins.float)
-        or (isinstance(t, SymBool) and type(f) is builtins.bool)
-        or (isinstance(f, SymBool) and type(t) is builtins.bool)
-    )
+    return _SYM_TO_PY.get(type(t), type(t)) is _SYM_TO_PY.get(type(f), type(f))
 
 
 def sym_ite(b: "BoolLikeType", t: _SymIteT, f: _SymIteT) -> _SymIteT:
