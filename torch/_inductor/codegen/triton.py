@@ -1442,6 +1442,13 @@ class TritonOverrides(OpOverrides):
             out_dtype = triton_store_type(dtype)
 
         if (
+            src_dtype == torch.float64
+            and dtype in TRITON_FLOAT8_DTYPES
+            and utils.is_strict_cuda_triton()
+        ):
+            return f"triton_helpers.round_to_odd_float32({x}).to({out_dtype})"
+
+        if (
             dtype == torch.bfloat16
             and src_dtype is not None
             and src_dtype in (torch.int32, torch.int64, torch.uint32, torch.uint64)
@@ -1495,8 +1502,7 @@ class TritonOverrides(OpOverrides):
                     torch.float16,
                     torch.bfloat16,
                 ):
-                    # c10's low-precision constructors convert double through float.
-                    finite = f"{x}.to(tl.float32).to({out_dtype})"
+                    finite = f"triton_helpers.round_to_odd_float32({x}).to({out_dtype})"
                 return f"tl.where({x} != {x}, {nan}, {finite})"
 
         return f"{x}.to({out_dtype})"
@@ -1552,6 +1558,16 @@ class TritonOverrides(OpOverrides):
         return cls._shaped_constant(value, dtype, shape=[])
 
     @staticmethod
+    def add(x, y):
+        if (
+            utils.is_strict_cuda_triton()
+            and cast(Any, get_dtype_handler()).add(x, y) == torch.float64
+        ):
+            x = TritonOverrides._cast_libdevice_arg(x, torch.float64)
+            y = TritonOverrides._cast_libdevice_arg(y, torch.float64)
+        return f"{x} + {y}"
+
+    @staticmethod
     def sub(x, y):
         if (
             isinstance(x, CSEVariable)
@@ -1570,29 +1586,75 @@ class TritonOverrides(OpOverrides):
         ):
             x = TritonOverrides._cast_libdevice_arg(x, torch.float64)
             y = TritonOverrides._cast_libdevice_arg(y, torch.float64)
-            # Fusing producers can reorder subtraction's NaN operand priority.
-            result = f"triton_helpers.eager_unary_nan({y}, {x} - {y})"
-            return f"triton_helpers.eager_unary_nan({x}, {result})"
         return f"{x} - {y}"
 
     @staticmethod
-    def mul(x, y, *, native_cuda_execution=None):
+    def _cuda_pointwise_vectorized(
+        index, numel, alignments, contiguous, *, itemsize=8, vectorized_tail=False
+    ):
+        if itemsize not in (4, 8):
+            return "tl.full([], False, tl.int1)"
+        vectorized = f"({contiguous})"
+        if not vectorized_tail:
+            vectorized += f" & triton_helpers.cuda_mul_full_block({index}, {numel})"
+        for name, offset in alignments:
+            ptr = f"{V.kernel.args.input(name)}.to(tl.int64)" if name else "0"
+            vectorized += (
+                f" & ((({ptr}) + ({offset}) * {itemsize}) % {2 * itemsize} == 0)"
+            )
+        return vectorized
+
+    @staticmethod
+    def cuda_pointwise_unrolled(
+        index,
+        numel,
+        contiguous,
+        *,
+        alignments,
+        itemsize=8,
+        vectorized_tail=False,
+        unroll_prefix=0,
+    ):
+        vectorized = TritonOverrides._cuda_pointwise_vectorized(
+            index,
+            numel,
+            alignments,
+            contiguous,
+            itemsize=itemsize,
+            vectorized_tail=vectorized_tail,
+        )
+        if unroll_prefix:
+            return f"({index} % 1024 < {unroll_prefix}) & ~({vectorized})"
+        return f"({contiguous}) & ~({vectorized})"
+
+    @staticmethod
+    def cuda_pointwise_vectorized(
+        index,
+        numel,
+        contiguous,
+        *,
+        alignments,
+        itemsize=8,
+        vectorized_tail=False,
+        unroll_prefix=0,
+    ):
+        vectorized = TritonOverrides._cuda_pointwise_vectorized(
+            index,
+            numel,
+            alignments,
+            contiguous,
+            itemsize=itemsize,
+            vectorized_tail=vectorized_tail,
+        )
+        return f"({contiguous}) & ({vectorized})"
+
+    @staticmethod
+    def mul(x, y):
         if utils.is_strict_cuda_triton() and (
             dtype := get_dtype_handler().mul(x, y)
         ) in (torch.float32, torch.float64):
             x = TritonOverrides._cast_libdevice_arg(x, dtype)
             y = TritonOverrides._cast_libdevice_arg(y, dtype)
-            result = f"triton_helpers.eager_unary_nan({y}, {x} * {y})"
-            first = f"triton_helpers.eager_unary_nan({x}, {result})"
-            if dtype == torch.float64 and native_cuda_execution is not None:
-                index, numel, alignments, contiguous = native_cuda_execution
-                vectorized = f"({contiguous}) & triton_helpers.cuda_mul_full_block({index}, {numel})"
-                for name, offset in alignments:
-                    ptr = f"{V.kernel.args.input(name)}.to(tl.int64)" if name else "0"
-                    vectorized += f" & ((({ptr}) + ({offset}) * 8) % 16 == 0)"
-                second = f"triton_helpers.eager_unary_nan({y}, triton_helpers.eager_unary_nan({x}, {x} * {y}))"
-                return f"tl.where({vectorized}, {second}, {first})"
-            return first
         return f"{x} * {y}"
 
     @classmethod
@@ -1607,8 +1669,6 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def abs(x):
-        if utils.is_strict_cuda_triton():
-            return f"triton_helpers.eager_unary_nan({x}, tl_math.abs({x}))"
         return f"tl_math.abs({x})"
 
     @staticmethod
@@ -1755,12 +1815,6 @@ class TritonOverrides(OpOverrides):
     def _fminmax(a, b, name):
         result = f"tl.{name}({a}, {b})"
         both_nan = f"tl.{name}({a}, {b}, tl.PropagateNan.ALL)"
-        if a.dtype == torch.float64:
-            # Eager quiets the first NaN when both FP64 operands are NaNs.
-            both_nan = (
-                f"({a}.to(tl.int64, bitcast=True) | 0x0008000000000000)"
-                ".to(tl.float64, bitcast=True)"
-            )
         return f"tl.where(({a} != {a}) & ({b} != {b}), {both_nan}, {result})"
 
     @staticmethod
@@ -2644,22 +2698,6 @@ class TritonKernelOverrides(TritonOverrides):
     variables which are assumed to already be defined in the current scope.
     """
 
-    @staticmethod
-    def copysign(x, y):
-        if (
-            utils.is_strict_cuda_triton()
-            and cast(Any, get_dtype_handler()).copysign(x, y) == torch.float64
-        ):
-            x = TritonOverrides._cast_libdevice_arg(x, torch.float64)
-            y = TritonOverrides._cast_libdevice_arg(y, torch.float64)
-            # Copy the sign without quieting or changing NaN payload bits.
-            return (
-                f"((({x}).to(tl.uint64, bitcast=True) & 0x7FFFFFFFFFFFFFFF) | "
-                f"(({y}).to(tl.uint64, bitcast=True) & 0x8000000000000000))"
-                ".to(tl.float64, bitcast=True)"
-            )
-        return TritonOverrides.copysign(x, y)
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -2929,6 +2967,9 @@ class TritonKernelOverrides(TritonOverrides):
                     # so the masked-load `other` would be silently dropped;
                     # fall back to an explicit tl.where.
                     or arg.args[1] in V.kernel.cse.store_cache
+                    # Negative inputs transform the load, so apply the logical
+                    # fill value after that transformation.
+                    or V.graph.is_negative_buffer(arg.args[1])
                 ):
                     need_where = True
                     break
@@ -2976,13 +3017,6 @@ class TritonKernelOverrides(TritonOverrides):
         V.kernel.compute.writeline(
             f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
         )
-        if utils.is_strict_cuda_triton():
-            mantissa = V.kernel.cse.generate(
-                V.kernel.compute,
-                f"triton_helpers.eager_unary_nan({x}, {mantissa})",
-                dtype=x.dtype,
-                shape=x.shape,
-            )
         V.kernel.cse.put(cache_key, (mantissa, exponent))
         return (mantissa, exponent)
 
@@ -4965,6 +4999,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             else:
                 mask_vars = OrderedSet()
+            if override_mask:
+                mask_vars = OrderedSet([override_mask])
             if self._load_mask:
                 mask_vars.add(self._load_mask)
             return IndexingOptions(
@@ -5352,6 +5388,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _mask_shape(self, mask: str | TritonCSEVariable) -> BlockShapeType:
         if isinstance(mask, TritonCSEVariable):
             return mask.shape
+        if mask in ("True", "False"):
+            return ()
         return self._range_tree_mask_shape(mask)
 
     def _broadcast_shape_with_masks(
@@ -5971,6 +6009,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._handle_pdl_after_load(load_buffer, result_var)
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
+        if V.graph.is_negative_buffer(name):
+            result_var = self.cse.generate(
+                load_buffer, TritonOverrides.neg(result_var), dtype=dtype, shape=shape
+            )
         if not isinstance(result_var, TritonCSEVariable):
             raise AssertionError(f"expected TritonCSEVariable, got {type(result_var)}")
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
@@ -6040,6 +6082,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         store the 'value' to the memory location 'name', offset by some indexing expression 'index'.
         """
 
+        if V.graph.is_negative_buffer(name):
+            if mode not in (None, "atomic_add"):
+                raise NotImplementedError("negative tensor input atomic store")
+            value = self.cse.generate(
+                self.compute,
+                TritonOverrides.neg(value),
+                dtype=value.dtype,
+                shape=value.shape,
+            )
         var = self.args.output(name)
         original_index = index
         dtype = V.graph.get_dtype(name)
@@ -8398,6 +8449,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "enable_fp_fusion": triton_fp_fusion_enabled(),
             "launch_pdl": cls._enable_pdl_codegen(),
             "disable_ftz": config.eager_numerics.disable_ftz,
+            "strict_pointwise": config.strict_pointwise,
         }
 
     @classmethod
