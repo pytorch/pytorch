@@ -42,6 +42,15 @@
 // A variant keeps no object of the program alive that it is found or checked
 // by (see pin.rs): one whose object died can never run again, and the place
 // drops it when it is next entered (see Table::reap).
+//
+// A place belongs to a code object, and a code object can be the code of
+// several functions (types.FunctionType(f.__code__, other_globals), a
+// function made again from a code object that was kept), each with globals
+// and builtins of its own. What a trace read of the frame's two namespaces is
+// checked in the dicts of the frame it ran in (see reads.rs), so a variant is
+// for the frames that have those two dicts and for no other (Variant::home):
+// a frame with other namespaces is passed over by every variant traced
+// elsewhere and gets its own trace.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -54,7 +63,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
 
 use crate::cfg::ir::{Check, RegionOut, RegionSpec};
-use crate::exec::ffi::GilCell;
+use crate::exec::ffi::{Frame, GilCell, tr_frame_builtins, tr_frame_globals};
 use crate::exec::pin::Pin;
 use crate::exec::types::Slot;
 
@@ -342,6 +351,9 @@ pub struct Variant {
     // The objects of the facts, each for as long as the program keeps it:
     // an atom that is an address is compared only while they all live.
     pins: Vec<Pin>,
+    // The globals and the builtins of the frame it was traced in (see
+    // namespace): the dicts its reads of globals are checked in.
+    home: [Pin; 2],
     // Whether it ever ran.
     ran: AtomicBool,
     // The call of the program it was traced in.
@@ -349,19 +361,56 @@ pub struct Variant {
 }
 
 impl Variant {
-    // Whether a call with these args has the variant's facts: asked before
-    // anything else of it, so that a variant for another object or value is
-    // passed over whichever of its checks the fact comes from (func's, for a
-    // str or a bound method).
-    pub unsafe fn facts_hold(&self, args: &[*mut PyObject]) -> bool {
-        !self.pins.iter().any(Pin::dead) && self.facts.iter().all(|(p, a)| atom_at(args, *p) == *a)
+    // Whether a call with these args, in a frame with the namespaces `home`
+    // (see namespaces), has the variant's facts: asked before anything else
+    // of it, so that a variant for another object or value is passed over
+    // whichever of its checks the fact comes from (func's, for a str or a
+    // bound method), and one traced in a frame with other globals or
+    // builtins whatever its checks say of the dicts it was traced in.
+    pub unsafe fn facts_hold(&self, args: &[*mut PyObject], home: &[*mut PyObject; 2]) -> bool {
+        self.home.iter().zip(home).all(|(mine, now)| mine.is(*now)) && !self.pins.iter().any(Pin::dead) && self.facts.iter().all(|(p, a)| atom_at(args, *p) == *a)
     }
 
-    // Whether it can never run again: an object it is found by died, or one
-    // its reads expect to find (see reads.rs).
+    // Whether it can never run again: an object it is found by died (a
+    // module whose dict was a namespace of its frame too), or one its reads
+    // expect to find (see reads.rs).
     fn dead(&self) -> bool {
-        self.pins.iter().any(Pin::dead) || self.spec.reads.as_ref().is_some_and(|r| r.get().dead())
+        self.pins.iter().chain(&self.home).any(Pin::dead) || self.spec.reads.as_ref().is_some_and(|r| r.get().dead())
     }
+}
+
+// The globals and the builtins of frame `f` (borrowed).
+pub unsafe fn namespaces(f: *mut Frame) -> [*mut PyObject; 2] {
+    [tr_frame_globals(f), tr_frame_builtins(f)]
+}
+
+// How a variant holds a namespace (the globals, the builtins) of the frame
+// it was traced in. A dict takes no weak reference. One that is the dict of
+// the module loaded under the name the dict gives itself
+// (`sys.modules[d["__name__"]].__dict__ is d`: the globals of a function of
+// a module, the builtins) is found through that module, held weakly (a
+// module's dict is the same one for as long as the module lives), and the
+// variant dies with the module. Any other (the globals of exec, of
+// types.FunctionType, of a module that is no longer loaded) is counted for
+// as long as the variant lives, with what it holds.
+unsafe fn namespace(dict: *mut PyObject) -> Pin {
+    let mut pin = Pin::counted(dict);
+    let modules = ffi::PyImport_GetModuleDict();
+    if ffi::PyDict_CheckExact(dict) != 0 && ffi::PyDict_CheckExact(modules) != 0 {
+        let key = ffi::PyUnicode_InternFromString(c"__name__".as_ptr());
+        if key.is_null() {
+            ffi::PyErr_Clear();
+            return pin;
+        }
+        let name = super::reads::dict_get(dict, key);
+        ffi::Py_DECREF(key);
+        let module = if !name.is_null() && ffi::PyUnicode_CheckExact(name) != 0 { super::reads::dict_get(modules, name) } else { std::ptr::null_mut() };
+        if !module.is_null() && ffi::PyModule_Check(module) != 0 {
+            // (Stays counted unless the module has this dict.)
+            pin.through(&Pin::weak(module));
+        }
+    }
+    pin
 }
 
 #[inline]
@@ -683,11 +732,12 @@ unsafe fn parse_facts(keys: &[Bound<'_, PyTuple>]) -> PyResult<(Vec<(Pos, u64)>,
 // Traces a run of a block's version. `args`: its params then inputs
 // (borrowed, NULL allowed), of which those at `unread` aren't read by the
 // version's instrs (NULL if not used at all), and `types` their types over
-// the runs observed (see observing); `body` runs it. Ok(None): not worth a
-// region. With `span` (a span's run, which no guard checks first), the region
-// makes all its checks itself; with `asked` (a span a cfg pass asked for) it
-// is a region however few ops it runs.
-pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: &[u32], span: bool, asked: bool, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
+// the runs observed (see observing); `body` runs it in frame `f`. Ok(None):
+// not worth a region. With `span` (a span's run, which no guard checks
+// first), the region makes all its checks itself; with `asked` (a span a cfg
+// pass asked for) it is a region however few ops it runs.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: &[u32], span: bool, asked: bool, f: *mut Frame, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
     let py = Python::assume_attached();
     let null = null_sentinel(py)?;
     let items: Vec<Bound<'_, PyAny>> =
@@ -756,6 +806,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
             },
             facts,
             pins: held,
+            home: namespaces(f).map(|dict| namespace(dict)),
             ran: AtomicBool::new(false),
             born: CALL.load(Ordering::Relaxed),
         },

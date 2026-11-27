@@ -1283,15 +1283,16 @@ impl Act<'_> {
     }
 
     // Runs the variant of a place that is for a call with these args (the
-    // place's args, borrowed): the first of those to ask (see
+    // place's args, borrowed) in this frame: the first of those to ask (see
     // region::Variants) whose own checks hold and whose region takes the
     // call. As region::call: None if there is none.
     unsafe fn place_call(&self, variants: &super::region::Variants, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
         let mut key = None;
         let mut i = 0;
+        let home = super::region::namespaces(self.f);
         while let Some(v) = variants.candidate(args, &mut key, i) {
             i += 1;
-            let own = v.facts_hold(args)
+            let own = v.facts_hold(args, &home)
                 && v.checks.iter().all(|c| match c {
                     super::region::Own::Is(k, o) => o.is(args[*k as usize]),
                     super::region::Own::Check(k, c) => self.check(c, k.map_or(std::ptr::null_mut(), |k| args[k as usize])),
@@ -1549,7 +1550,7 @@ impl Act<'_> {
         super::covered::place(sp.state.gave_up.load(std::sync::atomic::Ordering::Relaxed));
         let (traced_code, traced_by) = self.c.map_or((0, 0), |c| (c.code, c as *const super::Compiled as usize));
         super::value_reads::begin(traced_code, traced_by);
-        let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, sp.asked, &mut body));
+        let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, sp.asked, self.f, &mut body));
         for (cell, old) in cells {
             PyCell_Set(cell, old);
             ffi::Py_XDECREF(old);
@@ -1766,7 +1767,7 @@ impl Act<'_> {
         let later = &self.p.region_later[b.idx()];
         super::covered::place(later.load(std::sync::atomic::Ordering::Relaxed));
         super::value_reads::begin(c.code, c as *const super::Compiled as usize);
-        let traced = super::outside_executor(|| super::region::trace(&name, &args, &types, &unread, false, false, &mut body));
+        let traced = super::outside_executor(|| super::region::trace(&name, &args, &types, &unread, false, false, self.f, &mut body));
         // Refused for code no call ran before: the block runs it now, as
         // written, and is traced again (see covered.rs).
         let again = super::covered::later();

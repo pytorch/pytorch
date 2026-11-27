@@ -4543,6 +4543,33 @@ def back():
     {back}
 """
 
+
+def pin_frame_body(x):
+    return ((x.sin() * 2.0).cos() + 1).tanh().exp()
+
+
+def pin_frame_of_a_module():
+    module = sys.modules["vm_pin_frame"] = types.ModuleType("vm_pin_frame")
+    module.__builtins__ = builtins
+    module.content = PinCfg()
+    fn = types.FunctionType(pin_frame_body.__code__, vars(module))
+    return fn, {"object": module, "content": module.content}
+
+
+def pin_frame_of_no_module():
+    names = {"__name__": "vm_pin_frame_of_none", "__builtins__": builtins}
+    names["content"] = PinCfg()
+    fn = types.FunctionType(pin_frame_body.__code__, names)
+    return fn, {"content": names["content"]}
+
+
+# A function of one code object whose frames have globals of their own, by
+# what those globals are: what makes a fresh function, and the objects to
+# watch. Its code loads no global, so that no read holds the namespace.
+PIN_FRAMES = {
+    "frame_of_a_loaded_module": pin_frame_of_a_module,
+    "frame_of_no_module": pin_frame_of_no_module,
+}
 PIN_FROM_A_CELL = pin_cell()
 PIN_WAYS = {
     "argument": (pin_argument, pin_as_argument(PinCfg)),
@@ -4651,6 +4678,12 @@ PIN_KEPT = {
     ),
     ("global_module", "weight"): PIN_CONSTANT,
     ("module_argument", "weight"): PIN_CONSTANT,
+    ("frame_of_no_module", "content"): (
+        "a region is for the frames that have the globals of the frame it was "
+        "traced in: a dict takes no weak reference, and one that is the dict "
+        "of no loaded module has no owner to find it through: counted, with "
+        "what it holds"
+    ),
 }
 
 
@@ -4693,7 +4726,33 @@ class TestVmPins(TestCase):
         self.assertGreater(pin_runs(compiled), 0, msg=f"none on the second: {states}")
 
     def test_what_is_kept_names_a_way(self, device):
-        self.assertLessEqual({way for way, _ in PIN_KEPT}, set(PIN_WAYS))
+        ways = set(PIN_WAYS) | set(PIN_FRAMES)
+        self.assertLessEqual({way for way, _ in PIN_KEPT}, ways)
+
+    @parametrize("way", list(PIN_FRAMES))
+    @checks_isolated
+    def test_the_namespace_of_a_function_the_program_drops(self, device, way):
+        """A region is entered only by a frame with the globals and the
+        builtins of the frame it was traced in. It finds the dict of a
+        loaded module through the module, which it holds weakly: the
+        namespace dies with the program's last function of it."""
+        PIN_DEVICE[0] = device
+        fn, watched = PIN_FRAMES[way]()
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        watched = {name: weakref.ref(o) for name, o in watched.items()}
+        self.calls(compiled, fn, (), 0, 6)
+        ran = pin_runs(compiled)
+        self.assertGreater(ran, 0, msg="no region ran in the function's frame")
+        # The program's last references to the first function go here.
+        fn, _ = PIN_FRAMES[way]()
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        gc.collect()
+        kept = {name for name, ref in watched.items() if ref() is not None}
+        listed = {name for name in watched if (way, name) in PIN_KEPT}
+        self.assertEqual(kept, listed, msg=f"{way}: kept alive {sorted(kept)}")
+        self.calls(compiled, fn, (), 6, 8)
+        states = [r["state"] for r in vm.regions(compiled)]
+        self.assertGreater(pin_runs(compiled), ran, msg=f"none on the second: {states}")
 
     @checks_isolated
     def test_a_new_object_on_every_call_is_not_traced_for_ever(self, device):
@@ -6816,6 +6875,161 @@ class TestVmLowerScalars(TestCase):
 
 
 instantiate_device_type_tests(TestVmLowerScalars, globals())
+
+
+NAMESPACES_SETUP = """import builtins, functools, sys, types
+import torch
+def names(**items):
+    return {'__builtins__': vars(builtins), '__name__': 'vm_ns', 'torch': torch, **items}
+def of(function, **items):
+    return types.FunctionType(function.__code__, names(**items))
+def before():
+    pass
+def state():
+    return None
+"""
+NAMESPACES_TEMPLATE = """
+def template(x):
+    y = torch.sin(x) * 2.0 + torch.cos(x)
+    return (y * {} + torch.tanh(y)).sum(-1)
+"""
+# Two functions, `A` and `B`, whose frames run the same source in namespaces
+# that are not the same: (what makes them; which of them get a region; whether
+# a region traced for one is to run for the other).
+NAMESPACES_WAYS = {
+    "global_read": (
+        NAMESPACES_TEMPLATE.format("K")
+        + "A = of(template, K=2.0)\nB = of(template, K=5.0)",
+        "AB",
+        False,
+    ),
+    "global_call": (
+        NAMESPACES_TEMPLATE.format("scale()")
+        + "A = of(template, scale=lambda: 2.0)\nB = of(template, scale=lambda: 5.0)",
+        "AB",
+        False,
+    ),
+    "builtin_shadowed": (
+        NAMESPACES_TEMPLATE.format("abs(-2.0)")
+        + "A = of(template)\nB = of(template, abs=lambda value: 5.0)",
+        "AB",
+        False,
+    ),
+    # The interpreter's own `__import__` finds M1; the other one is Python
+    # code, which runs under no region, and returns M2.
+    "import_with_another_import_function": (
+        """
+M1 = types.ModuleType('vm_ns_m')
+M1.K = 2.0
+M2 = types.ModuleType('vm_ns_m')
+M2.K = 5.0
+OWN = builtins.__import__
+SEEN = []
+def other(name, *args, **kwargs):
+    if name != 'vm_ns_m':
+        return OWN(name, *args, **kwargs)
+    SEEN.append(name)
+    return M2
+def before():
+    sys.modules['vm_ns_m'] = M1
+def state():
+    return len(SEEN)
+def template(x):
+    y = torch.sin(x) * 2.0 + torch.cos(x)
+    import vm_ns_m
+    return (y * vm_ns_m.K + torch.tanh(y)).sum(-1)
+A = of(template)
+B = of(template, __builtins__={**vars(builtins), '__import__': other})""",
+        "A",
+        False,
+    ),
+    "copied_with_update_wrapper": (
+        NAMESPACES_TEMPLATE.format("K")
+        + "A = of(template, K=2.0)\n"
+        + "B = functools.update_wrapper(of(template, K=5.0), A)",
+        "AB",
+        False,
+    ),
+    # Two code objects: each function has places of its own.
+    "exec_twins": (
+        f"TWIN = {NAMESPACES_TEMPLATE.format('K')!r}"
+        + """
+def twin(k):
+    space = names(K=k)
+    exec(TWIN, space)
+    return space['template']
+A = twin(2.0)
+B = twin(5.0)""",
+        "AB",
+        False,
+    ),
+    # One namespace, other cells: what a cell holds is an input of the region.
+    "closures_of_one_factory": (
+        """
+def factory(t):
+    def inner(x):
+        y = torch.sin(x) * 2.0 + torch.cos(x)
+        return (y * t + torch.tanh(y)).sum(-1)
+    return inner
+A = factory(torch.full((8,), 2.0))
+B = factory(torch.full((8,), 5.0))""",
+        "AB",
+        True,
+    ),
+}
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmFrameNamespaces(TestCase):
+    """A region is entered only by a frame that has the globals and the
+    builtins of the frame it was traced in. A code object can be the code of
+    several functions, each with namespaces of its own, and what a trace read
+    of the frame's namespaces is checked in the dicts it was read from: a
+    function with other namespaces gets its own trace, and computes what
+    eager computes. Functions of one code object in one namespace (the
+    closures a factory returns) go on sharing their regions."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def runs(self, compiled):
+        return sum(r.get("runs") or 0 for r in vm.regions(compiled))
+
+    @parametrize("way", list(NAMESPACES_WAYS))
+    @checks_isolated
+    def test_two_functions_called_in_turn(self, way):
+        import torch._rust_inductor as tracer
+
+        source, with_regions, shared = NAMESPACES_WAYS[way]
+        eager, traced = {}, {}
+        exec(compile(NAMESPACES_SETUP + source, "<namespaces eager>", "exec"), eager)
+        exec(compile(NAMESPACES_SETUP + source, "<namespaces vm>", "exec"), traced)
+        compiled = {name: vm(traced[name], passes=CHECKS_EARLY) for name in "AB"}
+        ran = {"A": 0, "B": 0}
+        # Which function the program calls: A, then B, then A again.
+        schedule = "A" * 7 + "B" * 7 + "A" * 5
+        for call, name in enumerate(schedule):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8)
+            eager["before"]()
+            want = eager[name](x)
+            traced["before"]()
+            runs, traces = self.runs(compiled["A"]), tracer.stats["traced"]
+            got = compiled[name](x)
+            msg = f"call {call}, of {name}"
+            self.assertEqual(got, want, atol=0, rtol=0, msg=msg)
+            self.assertEqual(traced["state"](), eager["state"](), msg=msg)
+            ran_now = self.runs(compiled["A"]) - runs
+            ran[name] += ran_now
+            if shared and call in (7, 14):
+                # The first call of the other function runs the regions
+                # that were traced for the one before it.
+                self.assertGreater(ran_now, 0, msg=msg)
+                self.assertEqual(tracer.stats["traced"], traces, msg=msg)
+        places = vm.regions(compiled["A"])
+        self.assertEqual(
+            {name for name in ran if ran[name]}, set(with_regions), msg=str(places)
+        )
 
 
 if __name__ == "__main__":
