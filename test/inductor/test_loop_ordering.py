@@ -38,6 +38,7 @@ from torch.testing._internal.common_device_type import (
     requires_capabilities,
     skipIf,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -130,7 +131,7 @@ class ImplDetailTest(MockSchedulerTest):
             ir.Buffer(
                 name="a",
                 layout=ir.FixedLayout(
-                    torch.device("cuda"),
+                    torch.device(GPU_TYPE),
                     dtype=torch.float32,
                     size=sizes,
                     stride=strides,
@@ -292,7 +293,7 @@ class ImplDetailTest(MockSchedulerTest):
 
     def test_template_producer_loop_state_rollback(self):
         layout = ir.FixedLayout(
-            torch.device("cuda"), torch.float32, [sympy.Integer(8)], [1]
+            torch.device(GPU_TYPE), torch.float32, [sympy.Integer(8)], [1]
         )
         template = ir.TemplateBuffer(layout, [], None)
         template_node = SchedulerNode(V.graph.scheduler, template)
@@ -419,7 +420,7 @@ class ImplDetailTest(MockSchedulerTest):
                 )
 
             buf = ir.Pointwise.create(
-                device=torch.device("cuda"),
+                device=torch.device(GPU_TYPE),
                 dtype=torch.float32,
                 inner_fn=inner_fn,
                 ranges=[128, 4, 49, 49],
