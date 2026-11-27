@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
-from torch.testing._internal.common_cuda import TEST_CUDNN
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_CUDNN
 
 
 # Make the helper files in test/ importable
@@ -340,18 +340,25 @@ class BinaryFoldingTemplate(TestCase):
         class Model(nn.Module):
             def __init__(self, dtype):
                 super().__init__()
-                self.weight = nn.Parameter(torch.ones(2, 2, dtype=dtype))
-                self.scale = nn.Parameter(torch.full((2,), 3.0, dtype=dtype))
+                self.weight = nn.Parameter(torch.randn(2, 2, dtype=dtype))
+                self.scale = nn.Parameter(torch.rand(2, dtype=dtype) + 1.0)
 
             def forward(self, x):
                 y = torch.nn.functional.linear(x, self.weight)
                 return y * self.scale.reciprocal()
 
         for dtype in (torch.bfloat16, torch.float32):
+            if (
+                self.device == GPU_TYPE
+                and dtype == torch.bfloat16
+                and not PLATFORM_SUPPORTS_BF16
+            ):
+                continue
             torch._dynamo.reset()
             counters.clear()
+            torch.manual_seed(0)
             model = Model(dtype).to(self.device).eval()
-            x = torch.ones(2, 2, 2, dtype=dtype, device=self.device)
+            x = torch.randn(2, 2, 2, dtype=dtype, device=self.device)
             with torch.no_grad():
                 expected = model(x)
                 actual = torch.compile(model, fullgraph=True)(x)
