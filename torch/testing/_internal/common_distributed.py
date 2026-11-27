@@ -1734,16 +1734,27 @@ class SaveForwardInputsModel(nn.Module):
 
 @contextmanager
 def _dynamo_dist_per_rank_init(
-    rank, world_size, backend=None, init_pg=True, fake_pg=False, *, rdvz_file=None
+    rank,
+    world_size,
+    backend=None,
+    init_pg=True,
+    fake_pg=False,
+    *,
+    rdvz_file=None,
+    device=None,
 ):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
-    if not fake_pg:
-        torch.accelerator.set_device_index(rank)
-
-    device_type = (
-        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-    )
+    if device is None:
+        if not fake_pg:
+            torch.accelerator.set_device_index(rank)
+        device_type = (
+            acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+        )
+    else:
+        device_type = torch.device(device).type
+        if not fake_pg and device_type != "cpu":
+            torch.get_device_module(device).set_device(device)
     if backend is None:
         backend = c10d.get_default_backend_for_device(device_type)
 
@@ -1799,8 +1810,17 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
         with tempfile.NamedTemporaryFile(delete=False) as f:
             cls.rdvz_file = f.name
         cls.rank = 0
-        device = torch.accelerator.current_accelerator().type
-        cls.device = f"{device}:{cls.rank}"
+        device = (
+            getattr(cls, "device_type", None)
+            or torch.accelerator.current_accelerator().type
+        )
+        cls.device = (
+            cls.get_primary_device()
+            if getattr(cls, "device_type", None) is not None
+            else f"{device}:{cls.rank}"
+        )
+        if getattr(cls, "device_type", None) is not None and device != "cpu":
+            torch.get_device_module(device).set_device(cls.device)
         cls.device_ids = None if device in cls.device else [cls.rank]
         c10d.init_process_group(
             c10d.get_default_backend_for_device(device),
