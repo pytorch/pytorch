@@ -2481,6 +2481,781 @@ class StrictNumericsCompileTest(TestCase):
         )
         self.assertIn("torch.ops.aten.where.self", "\n".join(code))
 
+    @dtypes(torch.float32)
+    @parametrize(
+        "case",
+        (
+            "masked_fill",
+            "value_only",
+            "where",
+            "func_grad",
+            "cudagraph",
+            "detached",
+            "subclass_input",
+            "subclass_mask",
+            "custom_autograd",
+            "subclass_extracted_mask",
+        ),
+    )
+    def test_masked_fill_backward_provenance(self, device, dtype, case):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        torch.manual_seed(1024)
+        mask = torch.arange(528, device=device) % 3 == 0
+        wrapped_mask = TwoTensor(mask, mask.clone())
+        grad = torch.randn(528, dtype=dtype, device=device)
+        x = torch.zeros_like(grad, requires_grad=case != "value_only")
+        value = torch.ones((), dtype=dtype, device=device, requires_grad=True)
+        subclass = case in ("subclass_input", "subclass_mask")
+        if subclass:
+            if case == "subclass_input":
+                x = TwoTensor(x.detach(), x.detach().clone()).requires_grad_()
+            else:
+                mask = wrapped_mask
+            grad = TwoTensor(grad, grad.clone())
+
+        class CustomMaskedFill(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp, fill):
+                ctx.save_for_backward(mask)
+                return inp.masked_fill(mask, fill)
+
+            @staticmethod
+            def backward(ctx, upstream):
+                (saved_mask,) = ctx.saved_tensors
+                zero = torch.full((), 0.0, device=device, dtype=dtype)
+                return (
+                    torch.where(saved_mask, zero, upstream),
+                    torch.where(saved_mask, upstream, zero).sum(),
+                )
+
+        def fn(inp, fill):
+            if case == "subclass_extracted_mask":
+                return inp.masked_fill(wrapped_mask.clone().a, fill)
+            if case == "custom_autograd":
+                return CustomMaskedFill.apply(inp, fill)
+            if case == "detached":
+                return (
+                    torch.where(mask, fill, inp),
+                    inp.detach().masked_fill(mask, fill.detach()),
+                )
+            if case == "where":
+                return torch.where(mask, fill, inp)
+            return inp.masked_fill(mask, fill)
+
+        if case == "func_grad":
+            call = torch.func.grad(
+                lambda inp, fill: (fn(inp, fill) * grad).sum(), argnums=(0, 1)
+            )
+            expected = call(x, value)
+        else:
+            call = fn
+            inputs = (value,) if case == "value_only" else (x, value)
+            eager = fn(x, value)
+            expected = torch.autograd.grad(
+                eager[0] if case == "detached" else eager, inputs, grad
+            )
+        options = {"numerics": "strict"}
+        if case == "cudagraph":
+            options["triton.cudagraphs"] = True
+        compiled = torch.compile(call, fullgraph=True, options=options)
+        result = compiled(x, value)
+        actual = (
+            result
+            if case == "func_grad"
+            else torch.autograd.grad(
+                result[0] if case == "detached" else result, inputs, grad
+            )
+        )
+        if subclass:
+            from torch.utils._pytree import tree_map_only
+
+            actual, expected = tree_map_only(
+                TwoTensor, lambda t: (t.a, t.b), (actual, expected)
+            )
+        self._assert_bitwise_equal(actual, expected)
+
+    @dtypes(
+        torch.bfloat16,
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.complex64,
+        torch.complex128,
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_mm_single_term_edges(self, device, dtype, numerics):
+        smallest = torch.finfo(dtype).tiny * torch.finfo(dtype).eps
+        left = torch.tensor(
+            [-0.0, 0.0, -smallest, smallest, -1.0, 1.0],
+            device=device,
+            dtype=dtype,
+        ).reshape(-1, 1)
+        right = torch.tensor(
+            [0.0, -0.0, 0.125, -0.125, 1.0, -1.0], device=device, dtype=dtype
+        ).reshape(1, -1)
+        if dtype.is_complex:
+            components = torch.tensor(
+                [
+                    [0.0, 0.0],
+                    [-0.0, 0.0],
+                    [0.0, -0.0],
+                    [-0.0, -0.0],
+                    [1.0, -1.0],
+                    [float("inf"), 0.0],
+                    [0.0, float("inf")],
+                    [float("nan"), 1.0],
+                    [1.0, float("nan")],
+                ],
+                device=device,
+                dtype=left.real.dtype,
+            )
+            values = torch.view_as_complex(components)
+            left, right = values.reshape(-1, 1), values.reshape(1, -1)
+        actual = torch.compile(
+            torch.mm, fullgraph=True, options={"numerics": numerics}
+        )(left, right)
+        self._assert_bitwise_equal(actual, torch.mm(left, right))
+
+    @dtypes(torch.complex64, torch.complex128)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("op", ("sinc", "silu"))
+    def test_complex_transcendental_edges(self, device, dtype, numerics, op):
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        values = _min_max_specials(real_dtype, device)
+        x = torch.complex(
+            values[:, None].expand(-1, values.numel()),
+            values[None, :].expand(values.numel(), -1),
+        )
+        if op == "silu":
+            # Neighbors of Thrust's two exponential scaling boundaries, with
+            # zero, finite, and nonfinite imaginary parts through the same graph.
+            bounds = (
+                (0x42B17218, 0x43400074)
+                if real_dtype == torch.float32
+                else (0x40862E4200000000, 0x4096B8E4FFFFFFFF)
+            )
+            real = torch.tensor(
+                [v + step for v in bounds for step in (-1, 0, 1)],
+                dtype=_BIT_VIEW[real_dtype],
+                device=device,
+            ).view(real_dtype)
+            edges = torch.complex(
+                -real[:, None].expand(-1, values.numel()),
+                values[None, :].expand(real.numel(), -1),
+            )
+            x = torch.cat((x, edges))
+        storage = torch.empty(
+            (x.shape[0], 2 * x.shape[1] + 1), dtype=dtype, device=device
+        )
+        strided = storage[:, 1::2]
+        strided.copy_(x)
+        inputs = (x, x.t(), strided, strided.t(), strided.conj(), strided._neg_view())
+
+        call = torch.sinc if op == "sinc" else torch.nn.functional.silu
+
+        def panels(*tensors):
+            return tuple(call(t) for t in tensors)
+
+        actual, code = run_and_get_code(
+            torch.compile(panels, fullgraph=True, options={"numerics": numerics}),
+            *inputs,
+        )
+        self._assert_bitwise_equal(
+            tuple(torch.view_as_real(t) for t in actual),
+            tuple(torch.view_as_real(t) for t in panels(*inputs)),
+        )
+        self.assertIn("@triton.jit", "\n".join(code))
+
+    @ops(
+        [op for op in op_db if op.name in ("sigmoid", "tanh")],
+        allowed_dtypes=(torch.complex64, torch.complex128),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_complex_activation_backward(self, device, dtype, op, numerics):
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        int_dtype = _BIT_VIEW[real_dtype]
+        width = real_dtype.itemsize * 8
+        infinity = 0x7F800000 if width == 32 else 0x7FF0000000000000
+        quiet = infinity | (0x00400000 if width == 32 else 0x0008000000000000)
+        raw = (
+            quiet | 0x17,
+            quiet | 0x23,
+            infinity | 0x17,
+            quiet | (1 << (width - 1)) | 0x23,
+        )
+        raw = [v if v < 1 << (width - 1) else v - (1 << width) for v in raw]
+        values = torch.cat(
+            (
+                _min_max_specials(real_dtype, device),
+                torch.tensor(raw, dtype=int_dtype, device=device).view(real_dtype),
+            )
+        )
+        count = 17 * 61
+        g = torch.complex(values, values.roll(1))
+        y = torch.complex(values.roll(2), values.roll(3))
+        g, y = (t.repeat((count + t.numel() - 1) // t.numel())[:count] for t in (g, y))
+
+        def storage(t, step):
+            result = torch.empty(step * count + 1, dtype=dtype, device=device)[1::step]
+            result.copy_(t)
+            return result
+
+        offset_g, offset_y = storage(g, 1), storage(y, 1)
+        transposed_g, transposed_y = (
+            t.reshape(17, 61).t() for t in (offset_g, offset_y)
+        )
+        backward = getattr(torch.ops.aten, f"{op.name}_backward").default
+        # Prefixes, full blocks, scalar tails, native output ordering, and fresh
+        # storage after MathBits resolution all use the same small edge panel.
+        pairs = (
+            (g, y),
+            (offset_g, offset_y),
+            (transposed_g, transposed_y),
+            (storage(g, 2).reshape(17, 61).t(), storage(y, 2).reshape(17, 61).t()),
+            (transposed_g, y.reshape(61, 17)),
+            (transposed_g[:, :1], transposed_y),
+            (transposed_g.conj(), transposed_y._neg_view()),
+            (offset_g.clone(), offset_y),
+        )
+
+        def backward_panels(*tensors):
+            return tuple(
+                backward(grad, output)
+                for grad, output in zip(tensors[::2], tensors[1::2])
+            )
+
+        args = tuple(tensor for pair in pairs for tensor in pair)
+        actual, code = run_and_get_code(
+            torch.compile(
+                backward_panels, fullgraph=True, options={"numerics": numerics}
+            ),
+            *args,
+        )
+        expected = backward_panels(*args)
+        self._assert_bitwise_equal(
+            tuple(torch.view_as_real(t.resolve_conj().resolve_neg()) for t in actual),
+            tuple(torch.view_as_real(t.resolve_conj().resolve_neg()) for t in expected),
+        )
+        self.assertIn("@triton.jit", "\n".join(code))
+
+        def selected_backward(grad, output, selector):
+            indices = selector.nonzero().flatten()
+            return backward(grad[indices], output[indices])
+
+        selector = torch.tensor(
+            [True, False, True, True, False, False, True, False], device=device
+        )
+        grad = torch.ones(8, dtype=dtype, device=device)
+        output = torch.full_like(grad, 0.25 + 0.5j)
+        with torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True):
+            compiled = torch.compile(
+                selected_backward, fullgraph=True, options={"numerics": numerics}
+            )
+            for mask in (selector, ~selector, torch.zeros_like(selector)):
+                self._assert_bitwise_equal(
+                    torch.view_as_real(compiled(grad, output, mask)),
+                    torch.view_as_real(selected_backward(grad, output, mask)),
+                )
+
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_complex_scalar_and_storage_views(self, device, dtype, numerics):
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        components = torch.tensor(
+            [[0.0, 0.0], [-0.0, 0.0], [0.0, -0.0], [-0.0, -0.0], [1.0, -1.0]],
+            dtype=real_dtype,
+            device=device,
+        )
+        upstream = torch.view_as_complex(components)
+
+        def fn(grad):
+            return grad * complex(0.0, 0.4).conjugate()
+
+        actual, _ = run_and_get_code(
+            torch.compile(fn, fullgraph=True, options={"numerics": numerics}), upstream
+        )
+        self._assert_bitwise_equal(
+            torch.view_as_real(actual), torch.view_as_real(fn(upstream))
+        )
+
+        def storage_views(x):
+            components = torch.view_as_real(x)
+            return (
+                x,
+                components,
+                components + 1,
+                x.real + 1,
+                x.imag + 1,
+                torch.view_as_real(torch.view_as_complex(components)) + 2,
+            )
+
+        values = torch.cat(
+            (
+                _pointwise_subnormals(real_dtype).to(device),
+                _min_max_specials(real_dtype, device),
+            )
+        )
+        x = torch.view_as_complex(torch.stack((values, values.roll(1)), dim=-1))
+        compiled = torch.compile(
+            storage_views, fullgraph=True, options={"numerics": numerics}
+        )
+        for view in (x, x._neg_view(), x[::2]._neg_view()):
+            expected = storage_views(view)
+            actual = compiled(view)
+            self._assert_bitwise_equal(actual, expected)
+            self.assertEqual(
+                [t.is_neg() for t in actual], [t.is_neg() for t in expected]
+            )
+            self.assertTrue(torch._C._is_alias_of(actual[0], view))
+            self.assertTrue(torch._C._is_alias_of(actual[1], view))
+
+        def cloned_outputs(a):
+            return a.clone(), a.clone()
+
+        from torch._inductor.utils import fresh_cache
+
+        with (
+            fresh_cache(),
+            config.patch(fx_graph_cache=True, force_disable_caches=False),
+            torch._functorch.config.patch(
+                enable_autograd_cache=True, enable_remote_autograd_cache=False
+            ),
+        ):
+            compiled = torch.compile(
+                cloned_outputs, fullgraph=True, options={"numerics": numerics}
+            )
+            backward_compiler = torch.compile(backend="eager", fullgraph=True)
+            for cache_hit in (False, True):
+                torch._dynamo.reset()
+                hits = counters["aot_autograd"]["autograd_cache_hit"]
+                base = x.clone().requires_grad_()
+                expected_base = base.detach().clone().requires_grad_()
+                actual = compiled(base)
+                expected = cloned_outputs(expected_base)
+                if cache_hit:
+                    self.assertGreater(
+                        counters["aot_autograd"]["autograd_cache_hit"], hits
+                    )
+                # Prime the cached backward with tensor gradients before testing None.
+                zeros = tuple(torch.zeros_like(output) for output in actual)
+                self._assert_bitwise_equal(
+                    torch.autograd.grad(actual, base, zeros, retain_graph=True),
+                    torch.autograd.grad(
+                        expected, expected_base, zeros, retain_graph=True
+                    ),
+                )
+                self._assert_optional_output_gradients(
+                    actual,
+                    expected,
+                    base,
+                    expected_base,
+                    x,
+                    backward_compiler=backward_compiler,
+                )
+
+        def mutate_components(x, operation, view):
+            components = torch.view_as_real(x)
+            original = components.clone()
+            if view == "full":
+                destination = components
+            elif view == "real":
+                destination = components[:, 0]
+            elif view == "nested":
+                destination = components[::2, 0]
+            else:
+                destination = components.diagonal()
+            if operation == "add":
+                destination.add_(1)
+            elif operation == "mul":
+                destination.mul_(2)
+                destination.mul_(0.5)
+            else:
+                destination.copy_(destination + 1)
+            return original, components, x, components + 2
+
+        compiled_mutation = torch.compile(
+            mutate_components, fullgraph=True, options={"numerics": numerics}
+        )
+        for operation, view, strided in itertools.product(
+            ("add", "mul", "copy"),
+            ("full", "real", "nested", "diagonal"),
+            (False, True),
+        ):
+            torch._dynamo.reset()
+            if strided:
+                base = torch.empty(2 * x.numel() + 1, dtype=dtype, device=device)
+                base.fill_(7 + 8j)
+                base[1::2].copy_(x)
+            else:
+                base = x.clone()
+            expected_base = base.clone()
+            actual_view = (base[1::2] if strided else base)._neg_view()
+            expected_view = (
+                expected_base[1::2] if strided else expected_base
+            )._neg_view()
+            expected = mutate_components(expected_view, operation, view)
+            actual = compiled_mutation(actual_view, operation, view)
+            self._assert_bitwise_equal(actual, expected)
+            self._assert_bitwise_equal(
+                torch.view_as_real(base), torch.view_as_real(expected_base)
+            )
+            self.assertEqual(
+                [t.is_neg() for t in actual], [t.is_neg() for t in expected]
+            )
+            self.assertEqual(
+                [torch._C._is_alias_of(t, actual_view) for t in actual],
+                [torch._C._is_alias_of(t, expected_view) for t in expected],
+            )
+
+        input_components = torch.tensor(
+            [
+                [1.0, 2.0],
+                [-2.0, 1.0],
+                [-0.0, -0.0],
+                [0.0, 0.0],
+                [float("nan"), 1.0],
+                [1.0, float("nan")],
+                [-0.0, 0.0],
+                [0.0, -0.0],
+            ],
+            dtype=real_dtype,
+            device=device,
+        )
+        upstream = torch.tensor(
+            [
+                [0.0, 0.25],
+                [0.5, 0.75],
+                [1.0, 1.25],
+                [1.0, 1.25],
+                [0.5, 0.75],
+                [0.5, 0.75],
+                [-0.0, 1.0],
+                [-0.0, 1.0],
+            ],
+            dtype=real_dtype,
+            device=device,
+        )
+
+        def local_mutation(a, tracked, view):
+            allocation = a.clone()
+            x = allocation._neg_view()
+            components = torch.view_as_real(x)
+            old = components.clone()
+            destination = (
+                components
+                if view == "full"
+                else components[:, 0]
+                if view == "real"
+                else components.diagonal()
+            )
+            if tracked:
+                destination.add_(1)
+            else:
+                with torch.no_grad():
+                    destination.mul_(2)
+            middle = components.clone()
+            if tracked:
+                destination.add_(2)
+            else:
+                with torch.no_grad():
+                    destination.mul_(3)
+            return (
+                old * old + middle * middle + components * components,
+                components,
+                x,
+                allocation,
+            )
+
+        compiled_local = torch.compile(
+            local_mutation, fullgraph=True, options={"numerics": numerics}
+        )
+        for tracked in (False, True):
+            for view in ("full", "real", "diagonal"):
+                torch._dynamo.reset()
+                base = torch.view_as_complex(input_components).clone().requires_grad_()
+                expected_base = base.detach().clone().requires_grad_()
+                expected = local_mutation(expected_base, tracked, view)
+                actual = compiled_local(base, tracked, view)
+                self._assert_bitwise_equal(actual, expected)
+                self._assert_bitwise_equal(base, expected_base)
+                self.assertEqual(
+                    [torch._C._is_alias_of(t, base) for t in actual],
+                    [torch._C._is_alias_of(t, expected_base) for t in expected],
+                )
+                self.assertEqual(
+                    [t.is_neg() for t in actual], [t.is_neg() for t in expected]
+                )
+                for tensor in actual[1:]:
+                    self.assertTrue(torch._C._is_alias_of(tensor, actual[3]))
+                self._assert_bitwise_equal(
+                    torch.autograd.grad(actual[0], base, upstream)[0],
+                    torch.autograd.grad(expected[0], expected_base, upstream)[0],
+                )
+                self._assert_bitwise_equal(base, expected_base)
+
+        def mutated_input(a, linear):
+            components = torch.view_as_real(a)
+            old = components.clone()
+            with torch.no_grad():
+                components.mul_(2)
+            result = (
+                old + components * 3 if linear else old * old + components * components
+            )
+            return result, components, a
+
+        compiled_input = torch.compile(
+            mutated_input, fullgraph=True, options={"numerics": numerics}
+        )
+        compile_backward = torch.compile(backend="eager", fullgraph=True)
+
+        def input_view(kind):
+            values = torch.view_as_complex(input_components)
+            if kind == "offset":
+                base = torch.full(
+                    (values.numel() + 2,), 7 + 8j, dtype=dtype, device=device
+                )
+                base[1:-1].copy_(values)
+                base.requires_grad_()
+                return base, base[1:-1]._neg_view()
+            base = values.clone().requires_grad_()
+            view = base._neg_view()
+            if kind == "nonview":
+                view = view.detach().requires_grad_()
+                return view, view
+            return base, view
+
+        for linear in (False, True):
+            torch._dynamo.reset()
+            for kind in ("nonview", "view", "offset", "cached"):
+                if kind == "cached":
+                    torch._dynamo.reset()
+                base, view = input_view(kind)
+                expected_base, expected_view = input_view(kind)
+                hits = counters["aot_autograd"]["autograd_cache_hit"]
+                expected = mutated_input(expected_view, linear)
+                actual = compiled_input(view, linear)
+                self._assert_bitwise_equal(actual, expected)
+                self.assertEqual(
+                    [t.is_neg() for t in actual], [t.is_neg() for t in expected]
+                )
+                self.assertTrue(torch._C._is_alias_of(actual[1], actual[2]))
+                self.assertTrue(torch._C._is_alias_of(actual[2], base))
+                backward_context = (
+                    compiled_autograd._enable(compile_backward)
+                    if kind == "cached"
+                    else nullcontext()
+                )
+                with backward_context:
+                    grad = torch.autograd.grad(actual[0], base, upstream)[0]
+                self._assert_bitwise_equal(
+                    grad, torch.autograd.grad(expected[0], expected_base, upstream)[0]
+                )
+                if kind == "cached":
+                    self.assertEqual(
+                        counters["aot_autograd"]["autograd_cache_hit"], hits + 1
+                    )
+                # A saved alias must not be donated to backward and overwrite input storage.
+                self._assert_bitwise_equal(base, expected_base)
+
+        def symbolic_alias(a, sizes, negate_before_slice):
+            with torch.no_grad():
+                a.add_(1)
+            view = a._neg_view() if negate_before_slice else a
+            length = sizes.shape[0]
+            if negate_before_slice:
+                length = int(length * 0.5)
+            view = view.reshape(-1)[:length]
+            if not negate_before_slice:
+                view = view._neg_view()
+            return a * 2, view
+
+        grad_values = torch.view_as_complex(upstream)
+        grad_storage = torch.stack((grad_values, grad_values), dim=-1)
+        for negate_before_slice in (False, True):
+            scale = 2 if negate_before_slice else 1
+            torch._dynamo.reset()
+            compiled = torch.compile(
+                symbolic_alias,
+                fullgraph=True,
+                dynamic=True,
+                options={"numerics": numerics},
+            )
+            base, view = input_view("view")
+            warm = compiled(
+                view, torch.empty(3 * scale, device=device), negate_before_slice
+            )
+            torch.autograd.grad(warm, base, tuple(torch.ones_like(t) for t in warm))
+            torch._dynamo.reset()
+            hits = counters["aot_autograd"]["autograd_cache_hit"]
+            for size in (3, 5):
+                base, view = input_view("view")
+                ref_base, ref_view = input_view("view")
+                sizes = torch.empty(size * scale, device=device)
+                expected = symbolic_alias(ref_view, sizes, negate_before_slice)
+                actual = compiled(view, sizes, negate_before_slice)
+                self._assert_bitwise_equal(actual, expected)
+                self.assertTrue(torch._C._is_alias_of(actual[1], view))
+                self.assertEqual(
+                    (
+                        actual[1].stride(),
+                        actual[1].storage_offset(),
+                        actual[1].is_neg(),
+                    ),
+                    (
+                        expected[1].stride(),
+                        expected[1].storage_offset(),
+                        expected[1].is_neg(),
+                    ),
+                )
+                grad = grad_storage[:size, 0]
+                saved_grad = grad.clone()
+                self._assert_bitwise_equal(
+                    torch.autograd.grad(actual[1], base, grad)[0],
+                    torch.autograd.grad(expected[1], ref_base, grad)[0],
+                )
+                self._assert_bitwise_equal(base, ref_base)
+                self._assert_bitwise_equal(grad, saved_grad)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits + 1)
+
+        def real_mutation(a, local):
+            allocation = a.clone() if local else a
+            view = allocation._neg_view() if local else a
+            old = view.clone()
+            view.add_(1)
+            return old, view, allocation
+
+        compiled_real = torch.compile(
+            real_mutation, fullgraph=True, options={"numerics": numerics}
+        )
+        for local, empty in itertools.product((False, True), (False, True)):
+            base = values.clone()
+            expected_base = base.clone()
+            a = base[:0] if empty else base[1::2]
+            expected_a = expected_base[:0] if empty else expected_base[1::2]
+            if not local:
+                a, expected_a = a._neg_view(), expected_a._neg_view()
+            actual = compiled_real(a, local)
+            expected = real_mutation(expected_a, local)
+            self._assert_bitwise_equal(actual, expected)
+            self._assert_bitwise_equal(base, expected_base)
+            self.assertEqual(
+                [t.is_neg() for t in actual], [t.is_neg() for t in expected]
+            )
+            self.assertTrue(torch._C._is_alias_of(actual[1], actual[2]))
+            self.assertEqual(torch._C._is_alias_of(actual[1], a), not local)
+
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "weight",
+        (
+            -0.5 - 2**-10,
+            -0.5,
+            -0.5 + 2**-10,
+            0.5 - 2**-10,
+            0.5,
+            0.5 + 2**-10,
+            0.4j,
+            1 + 2j,
+        ),
+    )
+    def test_complex_lerp_scalar(self, device, dtype, numerics, weight):
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        values = _min_max_specials(real_dtype, device)
+        components = torch.stack((values, values.flip(0)), dim=-1)
+        values = torch.view_as_complex(components)
+        start, end = values[:, None], values[None, :]
+
+        def fn(start, end):
+            return torch.lerp(start, end, weight)
+
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, options={"numerics": numerics}),
+            start,
+            end,
+        )
+        self._assert_bitwise_equal(
+            torch.view_as_real(actual), torch.view_as_real(fn(start, end))
+        )
+        self.assertIn("@triton.jit", "\n".join(code))
+        self.assertNotIn("= torch.ops.aten.lerp.Scalar(", "\n".join(code))
+
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_complex_lerp_tensor_broadcast(self, device, dtype, numerics):
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        values = _min_max_specials(real_dtype, device)
+        components = torch.stack((values, values.flip(0)), dim=-1)
+        values = torch.view_as_complex(components)
+        start, end = values[:, None], values[None, :]
+        weights = torch.tensor(
+            [
+                -0.5 - 2**-10,
+                -0.5,
+                -0.5 + 2**-10,
+                0.5 - 2**-10,
+                0.5,
+                0.5 + 2**-10,
+                0.4j,
+                1 + 2j,
+                complex(-0.0, 0.0),
+                0.5j,
+            ],
+            dtype=dtype,
+            device=device,
+        )[None, :]
+
+        def fn(start, end, weights):
+            return torch.lerp(start, end, weights)
+
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, options={"numerics": numerics}),
+            start,
+            end,
+            weights,
+        )
+        self._assert_bitwise_equal(
+            torch.view_as_real(actual), torch.view_as_real(fn(start, end, weights))
+        )
+        self.assertIn("@triton.jit", "\n".join(code))
+        self.assertNotIn("= torch.ops.aten.lerp.Tensor(", "\n".join(code))
+
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    @parametrize("weight_kind", ("tensor", "small", "large"))
+    @parametrize(
+        "layout", ("contiguous", "broadcast", "transposed", "offset1", "offset2")
+    )
+    def test_generated_complex_lerp_rounding(self, device, dtype, weight_kind, layout):
+        torch.manual_seed(371)
+        start = torch.randn(129, 127, device=device, dtype=dtype)
+        end = torch.randn(
+            129, 1 if layout == "broadcast" else 127, device=device, dtype=dtype
+        )
+        weight = torch.randn(
+            1 if layout == "broadcast" else 129, 127, device=device, dtype=dtype
+        )
+        if layout == "transposed":
+            start, end, weight = start.t(), end.t(), weight.t()
+        elif layout.startswith("offset"):
+            offset = int(layout[-1])
+            start = torch.cat((start.new_zeros(offset), start.flatten()))[
+                offset:
+            ].view_as(start)
+        if weight_kind != "tensor":
+            weight = 0.1 + 0.2j if weight_kind == "small" else 1.1 + 2.2j
+        fn = torch.lerp
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, options={"numerics": "strict"}),
+            start,
+            end,
+            weight,
+        )
+        self._assert_bitwise_equal(actual, fn(start, end, weight))
+        self.assertIn("@triton.jit", "\n".join(code))
+        self.assertNotIn("= torch.ops.aten.lerp.", "\n".join(code))
+
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("conjugated", (False, True))
     @parametrize("alpha", (None, 3.14))
@@ -2493,6 +3268,14 @@ class StrictNumericsCompileTest(TestCase):
             device=device,
         )
         components = torch.cat((torch.stack((values, values.flip(0)), dim=-1), zeros))
+        if dtype == torch.complex32:
+            # Scaling followed by cancellation exposes premature half rounding.
+            finite = torch.tensor(
+                [[-1.869140625, 0.1026611328125], [0.6533203125, -0.51953125]],
+                dtype=real_dtype,
+                device=device,
+            )
+            components = torch.cat((components, finite))
         values = torch.view_as_complex(components)
         x = values.repeat_interleave(values.numel())
         y = values.repeat(values.numel())
@@ -2511,6 +3294,19 @@ class StrictNumericsCompileTest(TestCase):
         )
         self.assertIn("@triton.jit", code)
         self.assertNotIn("= torch.ops.aten.add.", code)
+
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_complex_unary_nan_payload(self, device, dtype, numerics, upcast):
+        real_dtype = torch.empty((), dtype=dtype).real.dtype
+        values = _min_max_specials(real_dtype, device)
+        x = torch.view_as_complex(torch.cartesian_prod(values, values))
+
+        def fn(x):
+            return torch.angle(x), torch.view_as_real(torch.sgn(x))
+
+        self._check_bitwise(fn, x, numerics=numerics, upcast=upcast)
 
     @dtypes(torch.complex64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -2615,6 +3411,59 @@ class StrictNumericsCompileTest(TestCase):
             options["triton.codegen_upcast_to_fp32"] = upcast
         actual = torch.compile(fn, fullgraph=True, options=options)(*args)
         self._assert_bitwise_equal(actual, fn(*args))
+
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("source", ("power", "product", "floor", "difference"))
+    def test_whole_input_stride_power(self, device, dtype, numerics, source):
+        import operator
+
+        from torch._inductor.fx_passes.pre_grad import _preserve_symbolic_strides
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+        env = ShapeEnv()
+        u, v, k = [env.create_unbacked_symint() for _ in range(3)]
+        torch._check(u >= 3)
+        torch._check(v >= 3)
+        torch._check(u > v)
+        torch._check(k >= 0)
+        stride = {
+            "power": u**2,
+            "product": u * v,
+            "floor": u // 2,
+            "difference": u - v,
+        }[source]
+        mode = FakeTensorMode(shape_env=env)
+        with mode:
+            fake = torch.empty(
+                (2 * (stride**2 + k**2) + 3,), device=device, dtype=dtype
+            ).as_strided((3, 3), (stride, 1))
+        env.pending_fresh_unbacked_symbols.clear()
+        graph = torch.fx.Graph()
+        tensor = graph.placeholder("x")
+        scalar = graph.placeholder("k")
+        query = graph.call_method("stride", (tensor, 0))
+        square = graph.call_function(operator.mul, (query, query))
+        offset = graph.call_function(operator.mul, (scalar, scalar))
+        summed = graph.call_function(operator.add, (square, offset))
+        view = graph.call_function(
+            torch.ops.aten.as_strided.default, (tensor, (3, 3), (summed, 1))
+        )
+        query = graph.call_method("stride", (view, 0))
+        graph.output(query)
+        gm = torch.fx.GraphModule({}, graph)
+        FakeTensorProp(gm, mode=mode).propagate(fake, k)
+        with config.patch(numerics=numerics):
+            _preserve_symbolic_strides(gm)
+        graph.lint()
+        gm.recompile()
+        for stride, known in ((9, 0), (10, 3)):
+            tensor = torch.empty(
+                2 * (stride**2 + known**2) + 3, device=device, dtype=dtype
+            ).as_strided((3, 3), (stride, 1))
+            self.assertEqual(gm(tensor, known), stride**2 + known**2)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @parametrize("numerics", ("strict_pointwise", "strict"))
