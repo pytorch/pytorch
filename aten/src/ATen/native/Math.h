@@ -2383,6 +2383,30 @@ inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
     return (T(0.5) * (b - p) / std::sqrt(x));
 } // T scaled_modified_bessel_k1_forward(T x)
 
+// Note [Shifted Chebyshev recurrence overflow]
+// Outside [-1, 1], change alternating signs so p >= 1 and q >= p.
+// Let delta = 2 * (abs(z) - 1) and u be unit roundoff. Separate rounding
+// and FMA both give d_next >= (1 - u) * d + (delta / 8) * q, where d = q - p.
+// The resulting positive comparison recurrence grows by at least
+// 1 + sqrt(delta) / 4 per step, with leading coefficient at least 1/2.
+// If e = ilogb(abs(z) - 1) and s = ceil(-e / 2), then after
+// S = 8 * (max_exponent + 2) * 2**s updates this lower bound exceeds
+// max_finite. The next two updates yield Inf - Inf = NaN. The extra four
+// degrees cover the initial conditions and update indexing. This requires
+// FP32/FP64 round-to-nearest and 1 < abs(z) <= 2; it does not cap the degree.
+template<typename T>
+inline C10_HOST_DEVICE bool shifted_chebyshev_recurrence_overflows(T z, int64_t n) {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) {
+        z = std::abs(z);
+        if (z > T(1.0) && z <= T(2.0)) {
+            const int shift = (1 - std::ilogb(z - T(1.0))) / 2;
+            const int64_t bound = (int64_t(8) * (std::numeric_limits<T>::max_exponent + 2)) << shift;
+            return n > bound + 4;
+        }
+    }
+    return false;
+}
+
 template<typename T>
 inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
     if (n < 0) {
@@ -2393,7 +2417,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) 
         return T(1.0);
     }
 
-    if (x == T(0.0)) {
+    if (x + x - T(1.0) == T(-1.0)) {
         if (n % 2 == 0) {
             return T(1.0);
         }
@@ -2411,6 +2435,10 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) 
 
     if (n == 1) {
         return x + x - T(1.0);
+    }
+
+    if (shifted_chebyshev_recurrence_overflows(x + x - T(1.0), n)) {
+        return std::numeric_limits<T>::quiet_NaN();
     }
 
     T p = T(1.0);
@@ -2437,16 +2465,18 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) 
         return T(0.0);
     }
 
+    const uint64_t degree = static_cast<uint64_t>(n);
+
     if (x == T(1.0)) {
-        return n + 1;
+        return T(degree + 1);
     }
 
-    if (x == T(0.0)) {
+    if (x + x - T(1.0) == T(-1.0)) {
         if (n % 2 == 0) {
-            return n + 1;
+            return T(degree + 1);
         }
 
-        return -(n + 1);
+        return -T(degree + 1);
     }
 
     if ((n > 6) && (std::abs(x + x - T(1.0)) < T(1.0))) {
@@ -2463,6 +2493,10 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) 
 
     if (n == 1) {
         return x + x - T(1.0) + (x + x - T(1.0));
+    }
+
+    if (shifted_chebyshev_recurrence_overflows(x + x - T(1.0), n)) {
+        return std::numeric_limits<T>::quiet_NaN();
     }
 
     T p = T(1.0);
@@ -2489,16 +2523,18 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) 
         return T(0.0);
     }
 
+    const uint64_t degree = static_cast<uint64_t>(n);
+
     if (x == T(1.0)) {
         return T(1.0);
     }
 
-    if (x == T(0.0)) {
+    if (x + x - T(1.0) == T(-1.0)) {
         if (n % 2 == 0) {
-            return (n + n + 1);
+            return T(degree + degree + 1);
         }
 
-        return -(n + n + 1);
+        return -T(degree + degree + 1);
     }
 
     if ((n > 6) && (std::abs(x + x - T(1.0)) < T(1.0))) {
@@ -2507,10 +2543,10 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) 
         }
 
         if (n % 2 == 0) {
-            return n + n + 1;
+            return T(degree + degree + 1);
         }
 
-        return -(n + n + 1);
+        return -T(degree + degree + 1);
     }
 
     if (n == 0) {
@@ -2519,6 +2555,10 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) 
 
     if (n == 1) {
         return x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
+    }
+
+    if (shifted_chebyshev_recurrence_overflows(x + x - T(1.0), n)) {
+        return std::numeric_limits<T>::quiet_NaN();
     }
 
     T p = T(1.0);
@@ -2545,11 +2585,13 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) 
         return T(0.0);
     }
 
+    const uint64_t degree = static_cast<uint64_t>(n);
+
     if (x == T(1.0)) {
-        return n + n + 1;
+        return T(degree + degree + 1);
     }
 
-    if (x == T(0.0)) {
+    if (x + x - T(1.0) == T(-1.0)) {
         if (n % 2 == 0) {
             return T(1.0);
         }
@@ -2575,6 +2617,10 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) 
 
     if (n == 1) {
         return x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
+    }
+
+    if (shifted_chebyshev_recurrence_overflows(x + x - T(1.0), n)) {
+        return std::numeric_limits<T>::quiet_NaN();
     }
 
     T p = T(1.0);
