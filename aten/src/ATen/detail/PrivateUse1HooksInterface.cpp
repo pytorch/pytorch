@@ -1,6 +1,11 @@
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <ATen/dlpack.h>
 
 namespace at {
+
+int32_t PrivateUse1HooksInterface::getDLDeviceType() const {
+  return kDLExtDev;
+}
 
 static PrivateUse1HooksInterface* privateuse1_hooks = nullptr;
 static std::mutex _hooks_mutex_lock;

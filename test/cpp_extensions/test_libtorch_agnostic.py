@@ -169,6 +169,10 @@ class TestLibtorchAgnostic(TestCase):
         else:
             print(f"Skipping 2.16 extension (running on PyTorch {torch.__version__})")
 
+    def assertStableError(self, error_type, *, regex_before, regex_after):
+        regex = regex_before if _torchVersionLessThan(2, 13) else regex_after
+        return self.assertRaisesRegex(error_type, regex)
+
     @onlyCPU
     def test_slow_sgd(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
@@ -471,7 +475,11 @@ class TestLibtorchAgnostic(TestCase):
         result = libtorch_agnostic.ops.my_masked_select(t, broadcast_mask)
         self.assertEqual(result, torch.masked_select(t, broadcast_mask))
 
-        with self.assertRaisesRegex(RuntimeError, "expected BoolTensor for mask"):
+        with self.assertStableError(
+            RuntimeError,
+            regex_before="API call failed",
+            regex_after="expected BoolTensor for mask",
+        ):
             libtorch_agnostic.ops.my_masked_select(t, mask.to(torch.int64))
 
     @skipIfTorchVersionLessThan(2, 10)
@@ -930,8 +938,19 @@ class TestLibtorchAgnostic(TestCase):
         out = libtorch_agnostic.ops.my_transpose(t, 0, 1)
         self.assertEqual(out, torch.transpose(t, 0, 1))
 
-        with self.assertRaisesRegex(RuntimeError, "API call failed"):
-            libtorch_agnostic.ops.my_transpose(t, 1, 2)
+        if TEST_WITH_TORCHDYNAMO:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"(?s)RuntimeError when making fake tensor call.*API call failed",
+            ):
+                libtorch_agnostic.ops.my_transpose(t, 1, 2)
+        else:
+            with self.assertStableError(
+                RuntimeError,
+                regex_before="API call failed",
+                regex_after=r"Dimension out of range \(expected to be in range of \[-2, 1\], but got 2\)",
+            ):
+                libtorch_agnostic.ops.my_transpose(t, 1, 2)
 
     def test_my_empty_like(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
@@ -1461,6 +1480,38 @@ for warning in w:
 
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
+    def test_stable_cpu_capabilities(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        getters = {
+            int: libtorch_agnostic.ops.my_cpu_capability_int,
+            bool: libtorch_agnostic.ops.my_cpu_capability_bool,
+            str: libtorch_agnostic.ops.my_cpu_capability_string,
+        }
+        capabilities = torch.cpu.get_capabilities()
+        for key, value in capabilities.items():
+            with self.subTest(key=key):
+                op = getters[type(value)]
+                self.assertEqual(op(key), value)
+
+        missing_key = "nonexistent_test_cpu_capability"
+        self.assertNotIn(missing_key, capabilities)
+        for kind, op in getters.items():
+            with self.subTest(kind=kind):
+                self.assertIsNone(op(missing_key))
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_stable_cpu_capabilities_wrong_type(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with self.assertRaisesRegex(
+            RuntimeError, "CPU capability 'architecture' has type String, expected Int"
+        ):
+            libtorch_agnostic.ops.my_cpu_capability_int("architecture")
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
     @parametrize("flag", ["conj", "neg", "inference"])
     def test_is_conj_is_neg_is_inference(self, device, flag):
         import libtorch_agn_2_16 as libtorch_agnostic
@@ -1664,6 +1715,214 @@ for warning in w:
         expected = x.clone()
         expected[:, 1:5:2] = -1
         view.fill_(-1)
+        self.assertEqual(x, expected)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("outer_enabled", [False, True])
+    @parametrize("inner_enabled", [None, False, True])
+    def test_inference_mode_guard(self, device, outer_enabled, inner_enabled):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with torch.inference_mode(outer_enabled):
+            if inner_enabled is None:
+                actual = libtorch_agnostic.ops.my_default_inference_mode_guard()
+            else:
+                actual = libtorch_agnostic.ops.my_inference_mode_guard(inner_enabled)
+            self.assertEqual(actual, True if inner_enabled is None else inner_enabled)
+            # The stable guard must restore the outer thread-local state.
+            self.assertEqual(torch.is_inference_mode_enabled(), outer_enabled)
+            self.assertEqual(torch.is_grad_enabled(), not outer_enabled)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("inference_enabled", [False, True])
+    def test_is_inference_mode_enabled(self, device, inference_enabled):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        # Grad mode is disabled in both cases; only inference mode differs.
+        with torch.inference_mode(inference_enabled), torch.no_grad():
+            self.assertEqual(
+                libtorch_agnostic.ops.my_is_inference_mode_enabled(),
+                inference_enabled,
+            )
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_roll(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        actual = libtorch_agnostic.ops.my_roll(x, [-1], [1])
+        self.assertEqual(actual, x.roll(-1, 1))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_repeat_interleave(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, output_size=6)
+        self.assertEqual(actual, x.repeat_interleave(2, dim=1, output_size=6))
+        actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2)
+        self.assertEqual(actual, x.repeat_interleave(2))
+        with self.assertStableError(
+            RuntimeError,
+            regex_before="API call failed",
+            regex_after="repeat_interleave: Invalid output_size, expected 6 but got 5",
+        ):
+            libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, output_size=5)
+        ops = libtorch_agnostic.ops
+        repeats = torch.tensor([1, 3, 0], device=device)
+        self.assertEqual(
+            ops.my_repeat_interleave_tensor(repeats, output_size=4),
+            torch.repeat_interleave(repeats, output_size=4),
+        )
+        self.assertEqual(
+            ops.my_repeat_interleave_self_tensor(x, repeats, -1, output_size=4),
+            x.repeat_interleave(repeats, dim=-1, output_size=4),
+        )
+
+    @skipIfTorchDynamo("equal returns a data-dependent bool")
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_equal(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([0, 3, 1], device=device)
+        equal = libtorch_agnostic.ops.my_equal
+        self.assertTrue(equal(x, x.clone()))
+        self.assertFalse(equal(x, x + 1))
+
+    @skipIfTorchDynamo("nonzero has a data-dependent output shape")
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_nonzero(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        self.assertEqual(libtorch_agnostic.ops.my_nonzero(x), x.nonzero())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_expand(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1]], device=device)
+        actual = libtorch_agnostic.ops.my_expand(x, [2, 3])
+        expected = x.expand(2, 3)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_all(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([True, False], device=device)
+        self.assertEqual(libtorch_agnostic.ops.my_all(x), x.all())
+        ops = libtorch_agnostic.ops
+        x = torch.tensor([[True, False], [True, True]], device=device)
+        self.assertEqual(ops.my_all_dim(x, 0, True), x.all(0, keepdim=True))
+        self.assertEqual(ops.my_all_dims(x, [1], True), x.all((1,), keepdim=True))
+        self.assertEqual(ops.my_all_dims(x, None), x.all())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_median(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        actual = libtorch_agnostic.ops.my_median(x, 1, True)
+        self.assertEqual(actual, x.median(1, keepdim=True))
+        self.assertEqual(libtorch_agnostic.ops.my_median_default(x), x.median())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_index_fill_(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        index = torch.tensor([1], device=device)
+        value = torch.tensor(7, device=device)
+        expected = x.clone().index_fill_(1, index, value)
+        actual = libtorch_agnostic.ops.my_index_fill_(x, 1, index, value)
+        self.assertEqual(actual, expected)
+        self.assertEqual(x, expected)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_my_index_fill_scalar_(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        x = torch.tensor([[0.0, 3.0, 1.0], [2.0, 5.0, 0.0]], device=device)
+        index = torch.tensor([1], device=device)
+        expected = x.clone().index_fill_(1, index, -1.5)
+        actual = libtorch_agnostic.ops.my_index_fill_scalar_(x, 1, index, -1.5)
+        self.assertEqual(actual, expected)
         self.assertEqual(x, expected)
 
     @skipIfTorchVersionLessThan(2, 10)
@@ -2069,6 +2328,32 @@ for warning in w:
         res = libtorch_agnostic.ops.my_get_curr_cuda_blas_handle()
         expected = torch.cuda.current_blas_handle()
         self.assertEqual(res, expected)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCUDA
+    def test_my_get_curr_cuda_blas_handle_v2(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        get_handle_stream = libtorch_agnostic.ops.my_get_curr_cuda_blas_handle_stream
+        original_stream = torch.cuda.current_stream(device)
+        other_stream = torch.cuda.Stream(device=device)
+        with torch.cuda.device(device):
+            try:
+                _, handle_stream = get_handle_stream(True)
+                self.assertEqual(handle_stream, original_stream.cuda_stream)
+                with torch.cuda.stream(other_stream):
+                    handle_without_setup, handle_stream = get_handle_stream(False)
+                    # ROCm can select a separate BLAS handle for each stream.
+                    if torch.version.hip is None:
+                        self.assertEqual(handle_stream, original_stream.cuda_stream)
+                    handle_with_setup, handle_stream = get_handle_stream(True)
+                    self.assertEqual(handle_stream, other_stream.cuda_stream)
+
+                    expected_handle = torch.cuda.current_blas_handle()
+                    self.assertEqual(handle_without_setup, expected_handle)
+                    self.assertEqual(handle_with_setup, expected_handle)
+            finally:
+                get_handle_stream(True)
 
     @skipIfWindows(msg="ValueError: vector too long")
     @skipIfTorchVersionLessThan(2, 10)
@@ -3086,30 +3371,22 @@ except RuntimeError as e:
             lambda: libtorch_agnostic.ops.our_subtract_torch_error_check(a, b),
         )
 
-        def make_exception_stable():
-            libtorch_agnostic.ops.our_subtract_stable_error_check(a, b)
-
-        if _torchVersionLessThan(2, 13):
+        with self.assertStableError(
+            RuntimeError,
             # Runtime predates the shim: dlsym returns null, so we fall back to
             # the same simple call-site message as the non-stable check.
-            self.assertRaisesRegex(RuntimeError, simple_re, make_exception_stable)
-        else:
+            regex_before=simple_re,
             # Runtime has the shim: the dynamic lookup succeeds and we get the
             # detailed error retrieved across the C ABI boundary, wrapped with the
             # "(originally from ...)" annotation naming the failing shim call.
-            detailed_re = (
-                "^The size of tensor a \\(\\d\\) must match the size of "
-                "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
-            )
-            with self.assertRaises(RuntimeError) as cm:
-                make_exception_stable()
-            stable_msg = str(cm.exception)
-            self.assertRegex(stable_msg, detailed_re)
-            self.assertRegex(
-                stable_msg,
-                r" \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
-                r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
-            )
+            regex_after=(
+                r"^The size of tensor a \(\d\) must match the size of "
+                r"tensor b \(\d\) at non-singleton dimension \d"
+                r"(?s:.*) \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
+                r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$"
+            ),
+        ):
+            libtorch_agnostic.ops.our_subtract_stable_error_check(a, b)
 
 
 @unittest.skipIf(
