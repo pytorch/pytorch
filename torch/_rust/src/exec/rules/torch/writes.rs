@@ -6,12 +6,12 @@
 use super::*;
 
 // The tensors a call with the row `row` writes: for each operand the row
-// names (Write::Operands), the operand, or the tensors an exact list or
+// names (Write::Operands, Write::Draws), the operand, or the tensors an exact list or
 // tuple operand holds; and whether a schema declares every one of those
 // writes. None: the row writes no operand. Err: an operand the row names is
 // not among the call's.
 pub(super) unsafe fn writes_of(row: &Row, what: &What, site: &Site) -> Result<Option<(Vec<*mut PyObject>, bool)>, String> {
-    let (What::Callee(f), Write::Operands(written)) = (*what, row.writes) else { return Ok(None) };
+    let (What::Callee(f), Write::Operands(written) | Write::Draws(written)) = (*what, row.writes) else { return Ok(None) };
     let placed = placed(&operands(f, site)?, site.kwnames)?;
     let mut tensors = vec![];
     for w in written {
@@ -38,7 +38,8 @@ pub(super) unsafe fn writing_call(row: &Row, what: &What, site: &Site) -> Result
     writes_of(row, what, site).map(|_| ())
 }
 
-// Hands the tensors that a call with the row `row` writes to the trace that
+// Hands the tensors that a call with the row `row` writes, and whether it
+// draws from the default generators, to the trace that
 // is running, before the call runs (covered::step, for the trace of today's
 // engine; not a part of the license: the recorder asks the same rows). The
 // trace's record of its writes is told of each (torch._rust_inductor
@@ -50,15 +51,16 @@ pub unsafe fn hand_over(row: &Row, what: &What, site: &Site) -> Result<(), Strin
     let Some((tensors, declared)) = writes_of(row, what, site)? else { return Ok(()) };
     let py = Python::assume_attached();
     let handed = pyo3::types::PyList::new(py, tensors.into_iter().map(|t| Bound::from_borrowed_ptr(py, t))).map_err(|_| "the tensors it writes could not be listed".to_string())?;
-    match scalars::tell(py, "_row_writes", vec![handed.into_any(), pyo3::types::PyBool::new(py, declared).to_owned().into_any()]) {
+    let flag = |b: bool| pyo3::types::PyBool::new(py, b).to_owned().into_any();
+    match scalars::tell(py, "_row_writes", vec![handed.into_any(), flag(declared), flag(matches!(row.writes, Write::Draws(_)))]) {
         Some(_) => Ok(()),
-        None => Err("the trace did not take the tensors it writes".into()),
+        None => Err("the trace did not take the tensors it writes, or the generators it draws from".into()),
     }
 }
 
 // Whether every row of the member `f` calls says that the call only
-// computes: it writes no operand in any form of it that has a row. False
-// for a callee that is no member with a row.
+// computes: it writes no operand and draws nothing in any form of it that
+// has a row. False for a callee that is no member with a row.
 pub unsafe fn only_computes(f: *mut PyObject) -> bool {
     matches!(member(f).map(|m| m.taken), Some(Taken::Rows(rows)) if rows.iter().all(|r| matches!(r.writes, Write::None)))
 }

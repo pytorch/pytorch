@@ -164,47 +164,71 @@ pub(super) unsafe fn holds_tensor(o: *mut PyObject, depth: u8) -> Option<bool> {
 
 // What a form of the table tells of a call's operands (the column `form`):
 // per place, `T` for a tensor, `[T]` for an exact list or tuple with a tensor
-// in it, `True` / `False` for a bool. None: a dict among the operands (its
+// in it, `True` / `False` for a bool, and `K` for a keyword that holds no
+// tensor (a bool by keyword is both). None: a dict among the operands (its
 // items are no places), or a container nested deeper than a form tells.
 pub(super) unsafe fn call_form(operands: &[*mut PyObject], kwnames: *mut PyObject) -> Option<Vec<(String, &'static str)>> {
+    let placed = placed(operands, kwnames).ok()?;
+    let positional = placed.len() - if kwnames.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(kwnames) as usize };
     let mut found = vec![];
-    for (place, o) in placed(operands, kwnames).ok()? {
+    for (i, (place, o)) in placed.into_iter().enumerate() {
         let tp = ffi::Py_TYPE(o);
         if tp == &raw mut ffi::PyDict_Type {
             return None;
         }
         if Group::PlainTensor.holds(tp) {
             found.push((place, "T"));
-        } else if tp == &raw mut ffi::PyBool_Type {
-            found.push((place, if o == ffi::Py_True() { "True" } else { "False" }));
+            continue;
+        }
+        if tp == &raw mut ffi::PyBool_Type {
+            found.push((place.clone(), if o == ffi::Py_True() { "True" } else { "False" }));
         } else if holds_tensor(o, 0)? {
             found.push((place, "[T]"));
+            continue;
+        }
+        if i >= positional {
+            found.push((place, "K"));
         }
     }
     Some(found)
 }
 
+// The word of a form's line for the calls that pass no keyword but those
+// that hold a tensor, among the lines of a form that tell keywords (no
+// keyword has this name).
+const NO_KEYWORD: &str = "-:K";
+
 // Whether a call (call_form) is of the form `named` of the table: the same
 // places hold a tensor, or a container with one, and each bool the form
 // names has that value in the call. A bool of the call that the form does
-// not name is of either value.
+// not name is of either value. A form that tells keywords (`alpha:K`, or
+// NO_KEYWORD) is of the calls that pass exactly those keywords: a call
+// that passes another set of them was not measured, and fits no such line.
+// A form that tells none is of the calls with any.
 pub(super) fn fits(named: &str, call: &[(String, &'static str)]) -> bool {
-    let told: Vec<(&str, &str)> = named.split(' ').filter_map(|one| one.split_once(':')).collect();
-    if named != "plain" && told.len() != named.split(' ').count() {
+    let words: Vec<&str> = if named == "plain" { vec![] } else { named.split(' ').collect() };
+    let none = words.contains(&NO_KEYWORD);
+    let told: Vec<(&str, &str)> = words.iter().filter(|one| **one != NO_KEYWORD).filter_map(|one| one.split_once(':')).collect();
+    // (A word that tells no place: the line of no form, `?`.)
+    if told.len() + usize::from(none) != words.len() {
         return false;
     }
-    let tensor = |one: &str| one == "T" || one == "[T]";
-    told.iter().all(|(place, one)| call.iter().any(|(at, had)| at == place && had == one)) && call.iter().filter(|(_, had)| tensor(had)).all(|(at, had)| told.iter().any(|(place, one)| place == at && one == had))
+    let keyed = none || told.iter().any(|(_, one)| *one == "K");
+    let exact = |one: &str| one == "T" || one == "[T]" || (keyed && one == "K");
+    told.iter().all(|(place, one)| call.iter().any(|(at, had)| at == place && had == one)) && call.iter().filter(|(_, had)| exact(had)).all(|(at, had)| told.iter().any(|(place, one)| place == at && one == had))
 }
 
+// (A bool by keyword is shown once, by its value.)
 pub(super) fn shown(call: &[(String, &'static str)]) -> String {
-    call.iter().map(|(place, one)| format!("{place}:{one}")).collect::<Vec<_>>().join(" ")
+    let again = |i: usize| i > 0 && call[i].1 == "K" && call[i - 1].0 == call[i].0;
+    call.iter().enumerate().filter(|(i, _)| !again(*i)).map(|(_, (place, one))| format!("{place}:{one}")).collect::<Vec<_>>().join(" ")
 }
 
 // The values a row of a member with forms is for: a plain call (plain_call)
 // whose form has a line that is a row, and that is `row`'s form if `row` is
 // for one. Of the lines that fit a call, the one that names most is the
-// call's. Records nothing, as plain_call; it is asked wherever the call
+// call's (of the lines of one form that tell keywords at most one fits).
+// Records nothing, as plain_call; it is asked wherever the call
 // runs under a trace (the row reads classes), so a form that stops does so
 // under a call taken at another's word too.
 pub(super) unsafe fn formed_call(row: &Row, what: &What, site: &Site) -> Result<(), String> {

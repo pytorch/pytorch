@@ -115,10 +115,12 @@ pub(super) fn of_the_write(k: &str, written: &[Written]) -> bool {
     })
 }
 
-// What the line of a member that writes or re-keys an operand means, the
-// member's own (`form` "") or one form's: a row that names the operands
-// written, or a stop. The result is an operand where every call measured
-// returned that operand itself (A).
+// What the line of a member that writes or re-keys an operand, or draws,
+// means, the member's own (`form` "") or one form's: a row that names the
+// operands written and says whether the calls drew (D: from the default
+// generators; no form is of a call that hands a generator over), or a stop.
+// The result is an operand where every call measured returned that operand
+// itself (A).
 pub(super) fn writer(line: &[&str], form: &'static str) -> Taken {
     let &[_, _, _, cpu, cuda, scpu, scuda, _, p, w, k, d, s, r, a, _, o, x, _] = line else { return Taken::Stop("its line of the table of torch's members has other columns than the rules read") };
     let is = |verdict: &str, word: &str| verdict.split('@').next() == Some(word);
@@ -132,8 +134,8 @@ pub(super) fn writer(line: &[&str], form: &'static str) -> Taken {
     if !is(k, "no") && !written.is_some_and(|written| of_the_write(k, written)) {
         return stop(format!("it changes the key of an operand in place (measured: {k}), and what a region finds or checks by that operand's key would no longer hold"));
     }
-    if !is(d, "no") || !(is(p, "no") || warns) || !s.starts_with("key") || !r.starts_with("yes") || !o.starts_with("nested=key") {
-        return stop(format!("its measured line is none the rules know for a member that writes (P {p}, D {d}, S {s}, R {r}, O {o})"));
+    if !(is(p, "no") || warns) || !s.starts_with("key") || !r.starts_with("yes") || !o.starts_with("nested=key") {
+        return stop(format!("its measured line is none the rules know for a member that writes or draws (P {p}, S {s}, R {r}, O {o})"));
     }
     if !enough(cpu) || !enough(cuda) {
         return stop(format!("it has under 5 returning samples on a device (cpu {cpu}, cuda {cuda})"));
@@ -146,6 +148,11 @@ pub(super) fn writer(line: &[&str], form: &'static str) -> Taken {
     }
     let Some(written) = written else { return stop(format!("its measured line names what it writes in a way the rules do not read ({w})")) };
     let result = a.rsplit_once('@').and_then(|(a, _)| a.strip_prefix("r=is(")).filter(|a| !a.contains([';', '|', '/'])).and_then(|a| a.split_once(')')).and_then(|(k, _)| k.parse().ok()).map_or(Res::Entry, Res::Operand);
-    let row = Row { writes: if written.is_empty() { Write::None } else { Write::Operands(written) }, result, enters: if warns { Enters::Foreign } else { Enters::Never }, form, ..ROW_WRITES };
-    Taken::Rows(Box::leak(Box::new([if form.is_empty() { row } else { Row { reads: &[Read::Class], why: WHY_WRITES_FORM, ..row } }])))
+    let (writes, why) = if !is(d, "no") {
+        (Write::Draws(written), WHY_DRAWS_FORM)
+    } else {
+        (if written.is_empty() { Write::None } else { Write::Operands(written) }, WHY_WRITES_FORM)
+    };
+    let row = Row { writes, result, enters: if warns { Enters::Foreign } else { Enters::Never }, form, ..ROW_WRITES };
+    Taken::Rows(Box::leak(Box::new([if form.is_empty() { row } else { Row { reads: &[Read::Class], why, ..row } }])))
 }

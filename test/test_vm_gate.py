@@ -4686,7 +4686,7 @@ RULES_COLUMNS = {
         "Modules",
         "Attribute",
     ),
-    "writes": r"None|Slot|Handled|Fills\(\d+\)|Operands\(\w+!?(,\w+!?)*\)",
+    "writes": r"None|Slot|Handled|Fills\(\d+\)|Operands\(\w+!?(,\w+!?)*\)|Draws\((-|\w+!?(,\w+!?)*)\)",
     "result": r"None|Lit|Entry|Slot|Part|Made|Pinned|Return|Operand\(\d+\)",
     "enters": r"Never|Named|Foreign",
     "scalars": r"None|Operand|Parts|Specialize",
@@ -8841,7 +8841,7 @@ TORCH_READ_FORMS = {
     ),
     "foreach_add_": (
         "torch._foreach_add_",
-        ("0:[T] 1:T", "torch._foreach_add_([y], x[0, 0])\nr = y * 1.0"),
+        ("0:[T] 1:T -:K", "torch._foreach_add_([y], x[0, 0])\nr = y * 1.0"),
         ("0:[T]", "torch._foreach_add_([y], 2.0)\nr = y * 1.0"),
     ),
     "foreach_maximum_": (
@@ -8871,6 +8871,36 @@ TORCH_READ_FORMS = {
 # Those of them whose row no region runs over: the result is a quantized
 # tensor, which the tracer of a region does not hold (the trace is given up).
 TORCH_READ_FORMS_UNTRACED = {"quantize_per_tensor"}
+# A program per set of KEYWORDS of a form of a C callee of torch that has a
+# line per set (the calls with one set read a value out of a tensor, those
+# with another do not: the parser takes another overload): the member, the
+# form without its keywords, the keywords the call passes, what the rules
+# say of the line of exactly those, and the construct; (None, None): a call
+# whose keywords come in a dict, which no line tells. The member's call is
+# on line 10.
+TORCH_KEYWORD_FORMS = {
+    "foreach_add_no_keyword": (
+        "torch._foreach_add_",
+        "0:[T] 1:T",
+        (),
+        "stop",
+        "torch._foreach_add_([y], x[0, 0])\nr = y * 1.0",
+    ),
+    "foreach_add_alpha": (
+        "torch._foreach_add_",
+        "0:[T] 1:T",
+        ("alpha",),
+        "row",
+        "torch._foreach_add_([y], x[0, 0], alpha=0.5)\nr = y * 1.0",
+    ),
+    "foreach_add_star": (
+        "torch._foreach_add_",
+        "0:[T] 1:T",
+        None,
+        None,
+        "torch._foreach_add_([y], x[0, 0], **{'alpha': 0.5})\nr = y * 1.0",
+    ),
+}
 TORCH_NO_ROW = {
     "out": ("torch.add", "r = torch.zeros_like(y)\ntorch.add(y, 1.0, out=r)"),
     "partial": ("torch.add", "r = functools.partial(torch.add, y)(1.0)"),
@@ -9094,6 +9124,16 @@ class TestVmRulesTorch(TestCase):
                     self.assertTrue(quiet)
                 if writer:
                     self.assertIn(status, ("row", "stop"))
+                # It draws from a random generator and nothing else stands
+                # against it: by its forms (in which form it draws), with
+                # lines of forms; left as it was with none.
+                drawer = said(line, "D") != "no" and not sized and not python
+                drawer = drawer and (said(line, "S"), said(line, "R")) == ("key", "yes")
+                drawer = drawer and "nested=data" not in line["O"]
+                if drawer:
+                    self.assertIn(
+                        status, ("row", "stop") if formed else ("later:ambient",)
+                    )
                 if status == "row" and not formed:
                     self.assertIn(said(line, "P").partition("(")[0], ("no", "warn"))
                     self.assertEqual((said(line, "S"), said(line, "R")), ("key", "yes"))
@@ -9121,7 +9161,7 @@ class TestVmRulesTorch(TestCase):
                 # following data, and draws, stand against, or one that only
                 # a value read under some calls stands against.)
                 still = all(said(line, c) == "no" for c in "WK")
-                by_forms = writer or (sized and still and not python)
+                by_forms = writer or drawer or (sized and still and not python)
                 self.assertLessEqual(formed, by_forms or self.only_reads(line))
                 self.assertLessEqual(self.only_reads(line), formed)
                 # Python under the call: neither a row nor yet a stop.
@@ -9150,6 +9190,15 @@ class TestVmRulesTorch(TestCase):
         # The members that only a value read under some calls stands against.
         readers = {x["member"] for x in self.lines() if self.only_reads(x)}
         self.assertEqual(readers & writers, set())
+        # The members that draw from a random generator and go by forms.
+        drawers = {
+            x["member"]
+            for x in self.lines()
+            if x["D"].rpartition("@")[0] != "no"
+            and x["S"].rpartition("@")[0] == "key"
+            and x["member"] in by_form
+        }
+        self.assertEqual(readers & drawers, set())
         lines = [x for x in self.lines(forms=True) if x["member"] in by_form]
         self.assertEqual(sorted(forms), sorted((x["member"], x["form"]) for x in lines))
         rows, later = collections.Counter(), {}
@@ -9162,9 +9211,12 @@ class TestVmRulesTorch(TestCase):
                 ) and line["O"].startswith("nested=key")
                 # No call of this form that was witnessed read a value.
                 unread = line["X"].rpartition("@")[0] == "no"
-                if line["member"] in writers:
-                    # The form of a writer: what it writes is the row's.
+                if line["member"] in writers | drawers:
+                    # The form of a writer, or of a member that draws: what
+                    # it writes, and whether it draws, is the row's.
                     del clean[1]
+                    if line["member"] in drawers:
+                        clean[2] = "no"
                     is_row = clean == ["no"] * 3 + ["key", "yes"] and enough
                     is_row = is_row and unread
                     self.assertEqual(status, "row" if is_row else "stop")
@@ -9189,7 +9241,7 @@ class TestVmRulesTorch(TestCase):
                 self.assertNotIn("?", line["form"] if is_row else "")
                 self.assertRegex(
                     line["form"],
-                    r"^(\?|plain|\w+:(T|\[T\]|True|False)( \w+:(T|\[T\]|True|False))*)$",
+                    r"^(\?|plain|-:K|\w+:(T|\[T\]|True|False|K)( \w+:(T|\[T\]|True|False|K))*( -:K)?)$",
                 )
                 rows[line["member"]] += is_row
         # A member is a row exactly if a form of it is; with no such form it
@@ -9199,7 +9251,7 @@ class TestVmRulesTorch(TestCase):
             self.assertEqual(members[member], want, msg=member)
         self.assertEqual(
             {m for m, _ in TORCH_FORM_ROWS.values()},
-            {m for m in rows if rows[m] and m not in writers | readers},
+            {m for m in rows if rows[m] and m not in writers | readers | drawers},
         )
         # A member under whose calls a value is read in some form, and that
         # has a row for another: a program for the form that reads and one
@@ -9379,6 +9431,128 @@ class TestVmRulesTorch(TestCase):
             and r["lines"][0] < 10 < r["lines"][1]
         )
         self.assertGreater(runs, 0, msg=str(vm.regions(compiled)))
+
+    def keyword_lines(self):
+        """The lines of the forms that tell the keywords a call passes, by
+        (member, the form without its keywords): the set of keywords and
+        the line, each."""
+        found = collections.defaultdict(list)
+        for line in self.lines(forms=True):
+            words = line["form"].split()
+            names = tuple(w[:-2] for w in words if w.endswith(":K") and w != "-:K")
+            if names or "-:K" in words:
+                base = " ".join(w for w in words if not w.endswith(":K")) or "plain"
+                # (The word for no keyword stands alone.)
+                self.assertFalse(names and "-:K" in words, msg=line["form"])
+                found[line["member"], base].append((names, line))
+        return found
+
+    def test_a_form_tells_keywords_only_where_they_tell_the_calls_that_read(self):
+        # The lines of one form that tell keywords: one per set of keywords,
+        # no line of that form for the calls with any, a value was read
+        # under every call witnessed of a line or under none, and under
+        # those of some line and not of another. Every such form has its
+        # programs.
+        found = self.keyword_lines()
+        forms = {(x["member"], x["form"]) for x in self.lines(forms=True)}
+        for (member, base), lines in found.items():
+            with self.subTest(member=member, form=base):
+                self.assertNotIn((member, base), forms)
+                sets = [names for names, _ in lines]
+                self.assertEqual(len(set(sets)), len(sets))
+                said = set()
+                for _, line in lines:
+                    read, _, count = line["X"].rpartition("@")
+                    self.assertIn(read, ("no", f"yes({count})"), msg=line["form"])
+                    said.add(read == "no")
+                self.assertEqual(said, {True, False})
+        programs = collections.defaultdict(dict)
+        for member, base, names, status, _ in TORCH_KEYWORD_FORMS.values():
+            programs[member, base][names] = status
+        statuses = {
+            (m, form): status for m, form, status in torch._rust._rules_torch_forms()
+        }
+        measured = {
+            key: {names: statuses[key[0], line["form"]] for names, line in lines}
+            for key, lines in found.items()
+        }
+        for sets in programs.values():
+            # (And a program for a call that has none of the lines.)
+            self.assertIn(None, sets)
+        self.assertEqual(
+            {k: {n: s for n, s in v.items() if s} for k, v in programs.items()},
+            measured,
+        )
+
+    def test_a_call_fits_a_form_that_tells_keywords_only_with_exactly_those(self):
+        # Asked of the table directly: a call of the form whose lines tell
+        # keywords has the line of exactly the keywords it passes, whatever
+        # they hold but a tensor, and no line with any other set; a form
+        # whose lines tell none takes a call with any.
+        hear = torch._rust._rules_hear
+        add_ = torch._foreach_add_
+        ts, t0 = [torch.ones(2)], torch.tensor(1.0)
+
+        def ask(*operands, kwnames=()):
+            return hear(callee=add_, operands=[add_, *operands], kwnames=kwnames)
+
+        row = "row\ttorch\ttorch._foreach_add_ (0:[T] 1:T alpha:K)\t"
+        for alpha in (1.0, 2, True, None):
+            kind, line = ask(ts, t0, alpha, kwnames=("alpha",))
+            self.assertEqual((kind, line[: len(row)]), ("row", row), msg=repr(alpha))
+        self.assertEqual(ask(ts, t0)[0], "stop")
+        self.assertIn("called on (0:[T] 1:T)", ask(ts, t0)[1])
+        unmeasured = "no call of it with tensors in these places ({}) was measured"
+        for kwnames, form in (
+            (("alpha", "beta"), "0:[T] 1:T alpha:K beta:K"),
+            (("beta",), "0:[T] 1:T beta:K"),
+            (("beta", "alpha"), "0:[T] 1:T beta:K alpha:K"),
+        ):
+            kind, why = ask(ts, t0, *[1.0] * len(kwnames), kwnames=kwnames)
+            self.assertEqual(kind, "stop", msg=str(kwnames))
+            self.assertIn(unmeasured.format(form), why)
+        # A tensor by keyword is a place of the form, as before.
+        kind, why = ask(ts, t0, t0, kwnames=("alpha",))
+        self.assertEqual(kind, "stop")
+        self.assertIn(unmeasured.format("0:[T] 1:T alpha:T"), why)
+        # The forms of the member whose lines tell no keyword.
+        for operands, kwnames, form in (
+            ((ts, ts), (), "0:[T] 1:[T]"),
+            ((ts, ts, 0.5), ("alpha",), "0:[T] 1:[T]"),
+            ((ts, 2.0), (), "0:[T]"),
+            ((ts, 2.0, 0.5), ("alpha",), "0:[T]"),
+        ):
+            kind, line = ask(*operands, kwnames=kwnames)
+            self.assertEqual(kind, "row", msg=form)
+            self.assertIn(f"\ttorch._foreach_add_ ({form})\t", line)
+
+    @parametrize("name", list(TORCH_KEYWORD_FORMS))
+    @checks_isolated
+    def test_a_region_runs_over_a_call_only_with_keywords_measured_to_read_nothing(
+        self, name
+    ):
+        member, _, _, status, construct = TORCH_KEYWORD_FORMS[name]
+        compiled = self.calls(construct)
+        met, refused = self.met_and_refused(compiled, member)
+        # As for a row: the call is on line 10.
+        runs = sum(
+            r["runs"]
+            for r in vm.regions(compiled)
+            if r["function"] == "f"
+            and r["state"] == "region"
+            and r["lines"][0] < 10 < r["lines"][1]
+        )
+        if status == "row":
+            self.assertGreater(met, 0)
+            self.assertEqual(refused, 0, msg=str(vm.regions(compiled)))
+            self.assertGreater(runs, 0, msg=str(vm.regions(compiled)))
+            return
+        # (A call that reads a value may be a place of its own, which no
+        # trace comes to.)
+        if status is None:
+            self.assertGreater(refused, 0, msg=str(vm.regions(compiled)))
+        self.assertEqual(met, refused, msg=str(vm.regions(compiled)))
+        self.assertEqual(runs, 0, msg=str(vm.regions(compiled)))
 
     @parametrize("name", list(TORCH_NO_ROW))
     @checks_isolated
@@ -17978,6 +18152,14 @@ UNDO_PAD = "def f(x):\n    y = torch.sin(x) * 2.0 + torch.cos(x)\n"
 UNDO_NORM = "F.batch_norm(x, {}, None, None, True, 0.5, 1e-5)\n"
 UNDO_UNIQUE = "    u = torch.unique((y * 2).round())\n"
 UNDO_GIVEN_UP = UNDO_UNIQUE + "    return (BUF * 3 + 1).cos() * u.sum()\n"
+# A generator of the program's, with its state in what read() gives.
+UNDO_GENERATOR = (
+    UNDO_BUF.replace(
+        "return (BUF.clone(),)", "return BUF.clone(), G.get_state()"
+    ).replace("V = BUF", "G = torch.Generator().manual_seed(5)\nV = BUF")
+    + UNDO_X68
+    + UNDO_PAD
+)
 UNDO_PROGRAMS = {
     "write_then_norm_of_views": UNDO_BIG
     + UNDO_X48
@@ -18033,12 +18215,23 @@ UNDO_PROGRAMS = {
     + UNDO_PAD
     + "    BUF.add_(y)\n    V.mul_(0.5)\n"
     + UNDO_GIVEN_UP,
-    "generator": UNDO_BUF.replace(
-        "return (BUF.clone(),)", "return BUF.clone(), G.get_state()"
-    ).replace("V = BUF", "G = torch.Generator().manual_seed(5)\nV = BUF")
-    + UNDO_X68
-    + UNDO_PAD
+    "generator": UNDO_GENERATOR
     + "    BUF.add_(torch.rand(6, 8, generator=G).to(DEVICE))\n    V.mul_(0.5)\n"
+    + UNDO_GIVEN_UP,
+    # (An operator is handed this generator by position, however the
+    # program passes it.)
+    "generator_by_position": UNDO_GENERATOR
+    + "    BUF.add_(torch.poisson(y.abs().cpu(), G).to(DEVICE))\n"
+    + UNDO_GIVEN_UP,
+    "generator_by_keyword": UNDO_GENERATOR
+    + "    BUF.add_(torch.poisson(y.abs().cpu(), generator=G).to(DEVICE))\n"
+    + UNDO_GIVEN_UP,
+    "generator_behind_two_tensors": UNDO_GENERATOR
+    + "    n = torch.binomial(torch.full((6, 8), 5.0), y.sigmoid().cpu(), generator=G)\n"
+    + "    BUF.add_(n.to(DEVICE))\n"
+    + UNDO_GIVEN_UP,
+    "generator_of_an_in_place_draw": UNDO_GENERATOR
+    + "    BUF.add_(torch.empty(6, 8).normal_(0.0, 1.0, generator=G).to(DEVICE))\n"
     + UNDO_GIVEN_UP,
     "column_row_column": UNDO_BUF
     + UNDO_X68
@@ -18257,6 +18450,56 @@ class TestVmRulesTorchUndo(TestCase):
                 names = [a.name for a in schema.arguments]
                 with self.subTest(operator=schema.name, overload=overload):
                     self.assertLessEqual(set(stays.STATISTICS), set(names))
+
+    def test_an_operator_tells_which_generators_it_may_draw_from(self, device):
+        from torch._rust_inductor import _generators
+
+        x, given = torch.ones(3), torch.Generator().manual_seed(1234567)
+
+        def seeds(found):
+            # (A mode is handed another object for the program's generator.)
+            return [g.initial_seed() for g in found]
+
+        # Handed by position, by keyword, and not at all.
+        self.assertEqual(seeds(_generators((x, given), {})), [1234567])
+        self.assertEqual(seeds(_generators((x, x, given), {})), [1234567])
+        self.assertEqual(seeds(_generators((x,), {"generator": given})), [1234567])
+        self.assertIs(_generators((x,), {})[0], torch.default_generator)
+        self.assertIs(
+            _generators((x, None), {"generator": None})[0], torch.default_generator
+        )
+        # What a mode is handed: the generator of poisson and of binomial
+        # among the positional arguments, however the program passed it.
+        seen = []
+
+        class Mode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                seen.append((func, _generators(args, kwargs or {})))
+                return func(*args, **(kwargs or {}))
+
+        with Mode():
+            torch.poisson(x, given)
+            torch.poisson(x, generator=given)
+            torch.binomial(x, x * 0.5, generator=given)
+            torch.rand(3, generator=given)
+            torch.poisson(x)
+        drew = [found for func, found in seen if "mul" not in str(func)]
+        self.assertEqual([seeds(found) for found in drew[:4]], [[1234567]] * 4)
+        self.assertIs(drew[4][0], torch.default_generator)
+        # Every operator that can be handed a generator is handed it as an
+        # argument of its own (never in a list), and is one whose draws the
+        # record is told of.
+        aten, handed = torch.ops.aten, 0
+        for name in dir(aten):
+            packet = getattr(aten, name)
+            for overload in getattr(packet, "overloads", list)():
+                op = getattr(packet, overload)
+                for argument in op._schema.arguments:
+                    if "Generator" in str(argument.type):
+                        handed += 1
+                        self.assertEqual(str(argument.type), "Optional[Generator]")
+                        self.assertIn(torch.Tag.nondeterministic_seeded, op.tags)
+        self.assertGreater(handed, 50)
 
     def beside_eager(self, source, calls=12):
         """Runs the program as written and under vm, each in a module of
@@ -18477,7 +18720,7 @@ def rules_callables():
         ("a C function of torch with a row", torch.sin, torch_c, "row"),
         ("a C method of tensors with a row, bound", torch.ones(2).cos, torch_c, "row"),
         ("a C function of torch that stops", torch.nonzero, torch_c, "stop"),
-        ("a C function of torch left to a family", torch.dropout, torch_c, "ambient"),
+        ("a C function of torch left to a family", torch.randperm, torch_c, "ambient"),
         ("a C function of torch with no line", unswept, torch_c, "callees: torch, unswept"),
         ("a C method of tensors with no line", unswept_method, torch_c, "callees: torch, unswept"),
         ("a C function of torch's own module", torch._C._is_tracing, torch_c, "callees: torch, unswept"),
@@ -18638,7 +18881,7 @@ class TestVmRulesTrusted(TestCase):
         # not written, and a callee with no line.
         self.assertEqual(members["torch.nonzero"], "stop")
         self.assertEqual(members["torch.sin"], "row")
-        self.assertEqual(members["torch.dropout"], "later:ambient")
+        self.assertEqual(members["torch.randperm"], "later:ambient")
 
         def heard(callee, *operands, word=False):
             return hear(callee=callee, operands=[callee, *operands], at_a_word=word)
@@ -18650,8 +18893,8 @@ class TestVmRulesTrusted(TestCase):
             answer = heard(torch.sin, x.as_subclass(Tensor), word=word)
             self.assertEqual(answer[0], "stop")
             self.assertIn("no row for these operands", answer[1])
-        self.assertEqual(heard(torch.dropout, x), ("older", "ambient"))
-        self.assertEqual(heard(torch.dropout, x, word=True), ("unheard", "ambient"))
+        self.assertEqual(heard(torch.randperm, 4), ("older", "ambient"))
+        self.assertEqual(heard(torch.randperm, 4, word=True), ("unheard", "ambient"))
         self.assertEqual(heard(len, [1]), ("older", "callees: builtins"))
         self.assertEqual(heard(len, [1], word=True), ("unheard", "callees: builtins"))
 
@@ -18927,6 +19170,17 @@ class TestVmRulesDump(TestCase):
         for item in form.split(" ") if form not in ("", "plain") else ():
             place, _, held = item.partition(":")
             made = {"T": x, "[T]": [x], "True": True, "False": False}
+            if item == "-:K":
+                # (The form of the calls that pass no such keyword.)
+                continue
+            if held == "K":
+                # A keyword that holds no tensor, of a class measured there.
+                plain = [
+                    c for c in places.get(place, ()) if c in values and "T" not in c
+                ]
+                if not plain:
+                    return None
+                made["K"] = values[plain[0]]
             if held not in made:
                 return None
             (positional if place.isdigit() else keywords)[place] = made[held]
@@ -19034,6 +19288,12 @@ class TestVmRulesDump(TestCase):
                         self.assertIn(
                             "has no row for operands of the classes", refused[1]
                         )
+                elif how == "form" and parts[3] == "?":
+                    # The samples whose operands the measurement does not
+                    # name (a generator among them): no call is of this
+                    # form, and it is no row.
+                    self.assertNotEqual(parts[4], "row")
+                    continue
                 elif how == "form":
                     ask = self.torch_ask(what, parts[3], domain, x)
                     if ask is None:
@@ -19366,6 +19626,324 @@ class TestVmScalarIdentity(TestCase):
         self.assertEqual([state for state, _ in found["regions"]], ["region"])
         self.assertEqual(found["runs"][:4], [0] * 4)
         self.assertGreaterEqual(sum(found["runs"]), 3)
+
+
+# A program per C callee of torch whose row says that the call draws from a
+# default random generator: the member, the form of the row, the construct.
+# The member's call is on line 10.
+TORCH_DRAWS = {
+    "dropout": ("torch.dropout", "0:T 2:True", "r = F.dropout(y, 0.5, True)"),
+    "bernoulli": ("torch.bernoulli", "0:T", "r = torch.bernoulli(y.sigmoid())"),
+    "rand_like": ("torch.rand_like", "0:T", "r = torch.rand_like(y)"),
+    "randn_like": ("torch.randn_like", "0:T", "r = torch.randn_like(y)"),
+    "normal_": ("torch.Tensor.normal_", "0:T", "r = (y * 1.0).normal_()"),
+    "uniform_": ("torch.Tensor.uniform_", "0:T", "r = (y * 1.0).uniform_()"),
+    "bernoulli_": ("torch.Tensor.bernoulli_", "0:T", "r = (y * 1.0).bernoulli_(0.5)"),
+    "exponential_": (
+        "torch.Tensor.exponential_",
+        "0:T",
+        "r = (y * 1.0).exponential_()",
+    ),
+}
+# A program per call of such a callee that has no row, or a row that draws
+# nothing: the member, what the rules say of the call (None: no line of a
+# form is the call's), and the construct. `G`: a generator of the program's.
+TORCH_DRAWS_NOT = {
+    "dropout_eval": ("torch.dropout", "row", "r = F.dropout(y, 0.5, False)"),
+    "generator": (
+        "torch.bernoulli",
+        None,
+        "r = torch.bernoulli(y.sigmoid(), generator=G)",
+    ),
+    "generator_normal_": (
+        "torch.Tensor.normal_",
+        None,
+        "r = (y * 1.0).normal_(0.0, 1.0, generator=G)",
+    ),
+    "generator_uniform_": (
+        "torch.Tensor.uniform_",
+        None,
+        "r = (y * 1.0).uniform_(0.0, 1.0, generator=G)",
+    ),
+    "generator_bernoulli_": (
+        "torch.Tensor.bernoulli_",
+        None,
+        "r = (y * 1.0).bernoulli_(0.5, generator=G)",
+    ),
+    "generator_exponential_": (
+        "torch.Tensor.exponential_",
+        None,
+        "r = (y * 1.0).exponential_(1.0, generator=G)",
+    ),
+    "rrelu": ("torch.rrelu", "stop", "r = F.rrelu(y, training=True)"),
+    "multinomial": (
+        "torch.multinomial",
+        "stop",
+        "r = torch.multinomial(y.abs() + 0.1, 2).float()",
+    ),
+}
+# What a run of the recorder of call lists beside today's engine leaves
+# (sys.argv[1]: the body): every result and the default generator's state
+# behind every call, and the recordings.
+TORCH_DRAWS_SHADOW = """
+import json, sys, torch, torch.nn.functional as F
+from torch import vm
+
+def dropout(x):
+    y = F.dropout(x * 1.5, 0.5, True)
+    return (y * 3 + 1).cos().tanh()
+
+def normal(x):
+    y = (x * 1.5).normal_()
+    return (y * 3 + 1).cos().tanh()
+
+f = {"dropout": dropout, "normal": normal}[sys.argv[1]]
+compiled = vm(f, passes=vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1))
+calls = []
+for call in range(10):
+    x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call))
+    torch.manual_seed(100 + call)
+    out = compiled(x)
+    calls.append([out.tolist(), torch.get_rng_state().tolist()])
+shadow = [{k: r[k] for k in ("status", "validated", "text", "reasons", "stop")} for r in torch._rust._calls_shadow()]
+print(json.dumps({"calls": calls, "shadow": shadow}))
+"""
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRulesTorchDraws(TestCase):
+    """A C callee of torch under whose calls a random generator's state
+    changed, and that nothing else was measured against, has a row per form
+    of its operands: the row of a form whose calls drew says that the call
+    draws from the default generators, and what it writes besides; a form
+    whose calls drew nothing is a row that says nothing of them. A call that
+    hands a generator over has no row. Under a trace the generators' states
+    are recorded before the call runs: given up, the trace puts them back.
+    A list of calls with one that draws is not run a second time."""
+
+    hw_classification = HardwareClassification.GENERIC
+    COLUMNS = TestVmRulesTorch.COLUMNS
+
+    def beside_eager(self, construct):
+        """13 calls of the program beside eager, the default generator
+        seeded alike in front of both, the data other on every second call:
+        the results and where the generator is left are eager's. Returns
+        the compiled function."""
+        os.environ["TORCH_RUST_GATE_HIST"] = "1"
+        space = {"G": torch.Generator()}
+        exec(compile(torch_source(construct), "<torch member>", "exec"), space)
+        compiled = vm(space["f"], passes=CHECKS_EARLY)
+        for call in range(13):
+            x = torch.randn(6, 8, generator=torch.Generator().manual_seed(call // 2))
+            torch.manual_seed(100 + call)
+            space["G"].manual_seed(200 + call)
+            want = space["f"](x)
+            left = torch.get_rng_state(), space["G"].get_state()
+            torch.manual_seed(100 + call)
+            space["G"].manual_seed(200 + call)
+            got = compiled(x)
+            self.assertEqual(torch.get_rng_state(), left[0], msg=f"call {call}")
+            self.assertEqual(space["G"].get_state(), left[1], msg=f"call {call}")
+            for a, b in zip(got, want, strict=True):
+                self.assertEqual(a, b, atol=0, rtol=0, msg=f"call {call}")
+        return compiled
+
+    def over_line_10(self, compiled):
+        return sum(
+            r["runs"]
+            for r in vm.regions(compiled)
+            if r["function"] == "f"
+            and r["state"] == "region"
+            and r["lines"][0] < 10 < r["lines"][1]
+        )
+
+    def test_a_row_draws_where_the_calls_of_its_form_drew(self):
+        # Of the table: every form of a member that goes by its forms
+        # because it draws; the dump's row of a form says `Draws` exactly
+        # if a generator moved under a call of the form, with the operands
+        # the calls wrote; and every such row has a program.
+        lines = TestVmRulesTorch.lines(self, forms=True)
+        members = {x["member"]: x for x in TestVmRulesTorch.lines(self)}
+        statuses = {
+            (m, form): status for m, form, status in torch._rust._rules_torch_forms()
+        }
+        dumped = {}
+        for line in torch._rust._rules_dump().splitlines():
+            how, family, what, *rest = line.split("\t")
+            if (how, family) == ("row", "torch") and " (" in what:
+                member, _, form = what.partition(" (")
+                dumped[member, form.removesuffix(")")] = rest[2]
+        drew = set()
+        for line in lines:
+            key = line["member"], line["form"]
+            of = members[line["member"]]
+            draws = of["D"].rpartition("@")[0] != "no"
+            if not draws or of["S"].rpartition("@")[0] != "key":
+                self.assertNotIn("Draws", dumped.get(key, ""), msg=str(key))
+                continue
+            with self.subTest(member=key[0], form=key[1]):
+                if statuses[key] != "row":
+                    continue
+                wrote = [
+                    w.partition("(")[0] for w in line["W"].rpartition("@")[0].split(",")
+                ]
+                wrote = "-" if wrote == ["no"] else ",".join(wrote)
+                if line["D"].rpartition("@")[0] == "no":
+                    self.assertEqual(
+                        dumped[key], "None" if wrote == "-" else f"Operands({wrote})"
+                    )
+                else:
+                    self.assertEqual(dumped[key], f"Draws({wrote})")
+                    drew.add(key)
+        self.assertEqual({(m, form) for m, form, _ in TORCH_DRAWS.values()}, drew)
+        # A member that draws, whose results are not sized by data, and
+        # that has lines of forms is a row or a stop.
+        table = {name: status for name, _, status in torch._rust._rules_torch()}
+        formed = {m for m, _ in statuses}
+        for name, line in members.items():
+            draws = line["D"].rpartition("@")[0] != "no"
+            if draws and line["S"].rpartition("@")[0] == "key" and name in formed:
+                self.assertIn(table[name], ("row", "stop"), msg=name)
+        for member, status, _ in TORCH_DRAWS_NOT.values():
+            self.assertEqual(table[member], "stop" if status == "stop" else "row")
+
+    def test_a_call_that_hands_a_generator_over_has_no_row(self):
+        hear = torch._rust._rules_hear
+        x, given = torch.ones(2, 3), torch.Generator()
+        for callee, operands, kwnames, form in (
+            (torch.dropout, (x, 0.5, True), (), "0:T 2:True"),
+            (torch.dropout, (x, 0.5, False), (), "0:T 2:False"),
+            (torch.bernoulli, (x,), (), "0:T"),
+            (torch.Tensor.normal_, (x,), (), "0:T"),
+            (torch.Tensor.normal_, (x, 0.0, 2.0), (), "0:T"),
+        ):
+            kind, line = hear(
+                callee=callee, operands=[callee, *operands], kwnames=kwnames
+            )
+            self.assertEqual(kind, "row", msg=line)
+            self.assertIn(f" ({form})\t", line)
+        for callee, operands, kwnames in (
+            (torch.bernoulli, (x, given), ("generator",)),
+            (torch.Tensor.normal_, (x, 0.0, 1.0, given), ("generator",)),
+            (torch.rand_like, (x, given), ("generator",)),
+        ):
+            kind, why = hear(
+                callee=callee, operands=[callee, *operands], kwnames=kwnames
+            )
+            self.assertEqual(kind, "stop")
+            self.assertIn("it is handed a torch._C.Generator", why)
+        # The flag of dropout is in the form by its value: a call whose flag
+        # is no bool is of no form measured.
+        kind, why = hear(callee=torch.dropout, operands=[torch.dropout, x, 0.5, 1])
+        self.assertEqual(kind, "stop")
+        self.assertIn("no call of it with tensors in these places (0:T)", why)
+
+    def test_the_record_of_a_trace_is_told_of_the_default_generators(self):
+        import torch._rust_inductor as tracer
+        from torch._rust_inductor import undo
+
+        self.assertIsNone(tracer._trace_undo)
+        with self.assertRaisesRegex(AssertionError, "no trace is running"):
+            tracer._row_writes([], True, True)
+        record = undo.Undo()
+        tracer._trace_undo = record
+        try:
+            torch.manual_seed(5)
+            before = torch.get_rng_state()
+            tracer._row_writes([], True, False)
+            self.assertTrue(record.empty())
+            tracer._row_writes([], True, True)
+            self.assertFalse(record.empty())
+            torch.rand(3)
+            self.assertNotEqual(torch.get_rng_state(), before)
+            record.back()
+            self.assertEqual(torch.get_rng_state(), before)
+        finally:
+            tracer._trace_undo = None
+
+    @parametrize("name", list(TORCH_DRAWS))
+    @checks_isolated
+    def test_a_region_runs_over_a_call_that_draws(self, name):
+        import torch._rust_inductor as tracer
+
+        member, form, construct = TORCH_DRAWS[name]
+        self.assertIn((member, form, "row"), torch._rust._rules_torch_forms())
+        told, real = [], tracer._row_writes
+
+        def spy(tensors, declared, draws):
+            told.append((len(tensors), declared, draws))
+            return real(tensors, declared, draws)
+
+        tracer._row_writes = spy
+        try:
+            compiled = self.beside_eager(construct)
+        finally:
+            tracer._row_writes = real
+        # Before the call ran under a trace, its row told the trace that it
+        # draws, and of the operand an in-place member writes.
+        self.assertIn((int(member.startswith("torch.Tensor.")), True, True), told)
+        met, refused = TestVmRulesTorch.met_and_refused(self, compiled, member)
+        self.assertGreater(met, 0)
+        self.assertEqual(refused, 0, msg=str(vm.regions(compiled)))
+        self.assertGreater(
+            self.over_line_10(compiled), 0, msg=str(vm.regions(compiled))
+        )
+
+    @parametrize("name", [*TORCH_DRAWS, *TORCH_DRAWS_NOT])
+    @checks_isolated
+    def test_a_trace_given_up_behind_a_draw_puts_the_generator_back(self, name):
+        # A result sized by data behind the draw: every trace is given up,
+        # and the block runs again from where the generators were, the
+        # default one and the program's own.
+        given_up = "\nu = torch.unique((y * 2).round())\nr = r * u.sum()"
+        construct = (TORCH_DRAWS.get(name) or TORCH_DRAWS_NOT[name])[2]
+        compiled = self.beside_eager(construct + given_up)
+        self.assertEqual(self.over_line_10(compiled), 0, msg=str(vm.regions(compiled)))
+
+    @parametrize("name", list(TORCH_DRAWS_NOT))
+    @checks_isolated
+    def test_a_call_with_no_row_that_draws_is_in_no_region(self, name):
+        member, status, construct = TORCH_DRAWS_NOT[name]
+        compiled = self.beside_eager(construct)
+        met, refused = TestVmRulesTorch.met_and_refused(self, compiled, member)
+        if status == "row":
+            # (Dropout that is off draws nothing and returns its operand.)
+            self.assertGreater(met, 0)
+            self.assertEqual(refused, 0, msg=str(vm.regions(compiled)))
+            self.assertGreater(self.over_line_10(compiled), 0)
+            return
+        self.assertEqual(met, refused, msg=str(vm.regions(compiled)))
+        self.assertEqual(self.over_line_10(compiled), 0, msg=str(vm.regions(compiled)))
+
+    @parametrize("name", ["dropout", "normal"])
+    def test_the_recorder_of_call_lists_never_runs_a_draw_again(self, name):
+        # Beside today's engine the recorder may run a list again to compare
+        # it; one with a call that draws would draw twice.
+        def run(mode):
+            env = {k: v for k, v in os.environ.items() if k != "TORCH_RUST_CALLS"}
+            command = [sys.executable, "-c", TORCH_DRAWS_SHADOW, name]
+            ran = subprocess.run(
+                command, env=env | mode, capture_output=True, text=True, timeout=600
+            )
+            self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+            return json.loads(ran.stdout.splitlines()[-1])
+
+        plain, shadow = run({}), run({"TORCH_RUST_CALLS": "shadow"})
+        self.assertEqual(plain["shadow"], [])
+        # Every result and the generator's state behind every call.
+        self.assertEqual(shadow["calls"], plain["calls"])
+        member = {"dropout": "dropout", "normal": "normal_"}[name]
+        met = [
+            r
+            for r in shadow["shadow"]
+            if member in r["text"] or member in json.dumps([r["reasons"], r["stop"]])
+        ]
+        self.assertTrue(met, msg=str(shadow["shadow"]))
+        for recording in met:
+            self.assertNotEqual(
+                recording["status"], "replayable", msg=json.dumps(recording)
+            )
 
 
 if __name__ == "__main__":

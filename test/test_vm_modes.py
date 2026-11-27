@@ -535,16 +535,6 @@ class TestVmTracedTensors(TestCase):
         rows = [r for r in vm.regions(compiled) if "_multi_tensor_adam" in r["where"]]
         rows = [r for r in rows if r["state"] != "not movable"]
         steps = [r for r in rows if r["state"] == "region" and r["runs"]]
-        if torch.device(device).type == "cpu":
-            # On the CPU the step counts with a 0-dim tensor in the place of
-            # a number (_foreach_add_(steps, torch.tensor(1.0), alpha=1.0)):
-            # among the calls of that form that were measured, one read the
-            # tensor's value, so the form has no row and no region holds it.
-            whys = [str(why) for r in rows for _, why in r["traces"]]
-            form = "torch._foreach_add_ has no row for these operands: called on (0:[T] 1:T)"
-            self.assertTrue(any(form in why for why in whys), msg=str(whys))
-            self.assertEqual(steps, [], msg=str(rows))
-            return
         self.assertTrue(steps, msg=str(rows))
         # A float is checked by value only where the code branches on it (the
         # weight decay): another learning rate is no miss.

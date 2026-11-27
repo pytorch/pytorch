@@ -37,7 +37,8 @@
 //   - A ROW THAT WRITES OPERANDS (Write::Operands) says which tensors a call
 //     writes by what calls of the callee were measured to write, declared by
 //     a schema or not. Saying is all the row does: who runs the call acts on
-//     it (see torch.rs);
+//     it (see torch.rs). A ROW THAT DRAWS (Write::Draws) says the same of
+//     the default random generators: the call moves their state;
 //   - UNDER A CALL TAKEN AT ANOTHER'S WORD (covered.rs's Trusted: a callable
 //     the pass list declares pure, a call a cfg pass made movable, a
 //     function of torch that another tracer keeps whole) the table is asked
@@ -116,9 +117,11 @@ impl What {
 pub enum Read { Slot, Constant, Global, Cell, Closure, Identity, Class, Text, Handled, Pending, Modules, Attribute }
 // What is written: a slot of the frame, the container at an operand (one
 // the frame is building), the exception the thread handles, the memory of
-// tensors among the operands of a call.
+// tensors among the operands of a call, the state of the default random
+// generators (of the CPU and of the CUDA devices in use) and the memory of
+// the operands named besides.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Write { None, Slot, Fills(u8), Handled, Operands(&'static [Written]) }
+pub enum Write { None, Slot, Fills(u8), Handled, Operands(&'static [Written]), Draws(&'static [Written]) }
 // An operand of a call whose memory the callee was measured to write: where
 // it is among the operands (its position, the receiver of a method first, or
 // the name of its keyword), and whether the schema of the operator the call

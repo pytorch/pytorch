@@ -7,7 +7,11 @@
 #         exact Tensor or Parameter, `PLACE:[T]` for one that holds an exact list or tuple with a tensor in it,
 #         and `PLACE:True` / `PLACE:False` for a bool of that value where the calls measured do not do the same
 #         under both values, or only one was measured; `plain`: none of those; `?`: operands the record of the
-#         sample does not tell. What else a call hands over (numbers, None, containers of numbers) is in no form
+#         sample does not tell. What else a call hands over (numbers, None, containers of numbers) is in no form,
+#         but for the KEYWORDS it is handed by, where they tell the calls that read a value (X) from those that do
+#         not and nothing else was measured against the form: `NAME:K` for each keyword that holds no tensor
+#         and no container with one, `-:K` for a call with no such keyword. A line that names keywords so is of
+#         the calls that pass exactly those
 # kind    builtin | method_descriptor | wrapper_descriptor | classmethod_descriptor | slot
 # cpu, cuda  samples whose call returned, per device; `-`: not measured there
 # scpu, scuda  of those, the samples whose results were compared on other data (what S rests on), per device
@@ -52,6 +56,9 @@ torch.Tensor.any	-	method_descriptor	32	32	32	32	-	no@64	no@64	no@64	no@64	key@6
 torch.Tensor.argmax	-	method_descriptor	16	16	16	16	-	no@32	no@32	no@32	no@32	key@32	yes@32	r=fresh:32@32	T@32	nested=key@32	no@32	0=T dim=int keepdim=bool
 torch.Tensor.argwhere	-	method_descriptor	24	-	20	0	-	no@24	no@24	no@24	no@24	data(18)@20	yes@24	r=fresh:24@24	T@24	nested=key@24	no@24	0=T
 torch.Tensor.bernoulli_	-	method_descriptor	13	13	12	12	-	no@26	0(decl;ver):24@26	no@26	cpu:11,cuda:11,generator:generator:2@26	key@24	yes@26	r=is(0):26@26	T@26	nested=key@28	no@26	0=T 1=T|float generator=?
+torch.Tensor.bernoulli_	0:T	method_descriptor	10	10	9	9	-	no@20	0(decl;ver):18@20	no@20	yes:18@20	key@18	yes@20	r=is(0):20@20	-	nested=key@18	no@20	-
+torch.Tensor.bernoulli_	0:T 1:T	method_descriptor	2	2	2	2	-	no@4	0(decl;ver):4@4	no@4	yes:4@4	key@4	yes@4	r=is(0):4@4	-	nested=key@2	no@4	-
+torch.Tensor.bernoulli_	?	method_descriptor	1	1	1	1	-	no@2	0(decl;ver):2@2	no@2	yes:2@2	key@2	yes@2	r=is(0):2@2	-	nested=key@2	no@2	-
 torch.Tensor.bincount	-	method_descriptor	8	-	8	0	-	no@8	no@8	no@8	no@8	data(6;by 0)@8	yes@8	r=fresh:8@8	T@8	nested=key@8	no@8	0=T minlength=int weights=None|T
 torch.Tensor.chunk	-	method_descriptor	27	27	27	27	-	no@54	no@54	no@54	no@54	data(4;by 1)@54	yes@54	r[0]=view(0):54;r[1]=view(0):54;r[2]=view(0):44;r[3]=view(0):22;r[4]=view(0):22;r[5]=view(0):2@54	(T,T,T) (T,T,T,T,T) (T,T) (T,T,T,T,T,T)@54	nested=key@54	yes(4)@54	0=T 1=T|int 2=int
 torch.Tensor.chunk	0:T	method_descriptor	25	25	25	25	-	no@50	no@50	no@50	no@50	key@50	yes@50	r[0]=view(0):50;r[1]=view(0):50;r[2]=view(0):40;r[3]=view(0):20;r[4]=view(0):20@50	-	nested=key@50	no@50	-
@@ -86,6 +93,8 @@ torch.Tensor.expand	0:T 1:T	method_descriptor	1	1	1	1	-	no@2	no@2	no@2	no@2	data
 torch.Tensor.expand	0:T 1:T 2:T	method_descriptor	1	1	1	1	-	no@2	no@2	no@2	no@2	data(2)@2	yes@2	r=view(0):2@2	-	nested=key@2	yes(2)@2	-
 torch.Tensor.expand_as	-	method_descriptor	33	33	33	33	-	no@66	no@66	no@66	no@66	key@66	yes@66	r=view(0):66@66	T@66	nested=key@66	no@66	0=T 1=T
 torch.Tensor.exponential_	-	method_descriptor	14	14	13	13	-	no@28	0(decl;ver):26@28	no@28	cpu:12,cuda:12,generator:generator:2@28	key@26	yes@28	r=is(0):28@28	T@28	nested=key@32	no@28	0=T 1=float|int generator=? lambd=float
+torch.Tensor.exponential_	0:T	method_descriptor	13	13	12	12	-	no@26	0(decl;ver):24@26	no@26	yes:24@26	key@24	yes@26	r=is(0):26@26	-	nested=key@24	no@26	-
+torch.Tensor.exponential_	?	method_descriptor	1	1	1	1	-	no@2	0(decl;ver):2@2	no@2	yes:2@2	key@2	yes@2	r=is(0):2@2	-	nested=key@2	no@2	-
 torch.Tensor.fill_	-	method_descriptor	15	15	10	10	-	no@30	0(decl;ver):20@30	no@30	no@30	key@20	yes@30	r=is(0):30@30	T@30	nested=key@30	no@30	0=T value=bool
 torch.Tensor.fill_	0:T value:True	method_descriptor	15	15	10	10	-	no@30	0(decl;ver):20@30	no@30	no@30	key@20	yes@30	r=is(0):30@30	-	nested=key@20	no@30	-
 torch.Tensor.flatten	-	method_descriptor	30	30	30	30	-	no@60	no@60	no@60	no@60	key@60	yes@60	r=is(0):20|view(0):40@60	T@60	nested=key@60	no@60	0=T end_dim=int start_dim=int
@@ -134,6 +143,8 @@ torch.Tensor.new_zeros	-	method_descriptor	63	63	59	59	-	no@126	no@126	no@126	no
 torch.Tensor.nonzero	-	method_descriptor	32	32	28	28	-	no@64	no@64	no@64	no@64	data(44)@56	yes@64	r=fresh:40;r[0]=fresh:24;r[1]=fresh:14;r[2]=fresh:14@64	T (T,T,T) (T)@64	nested=key@64	no@64	0=T as_tuple=bool
 torch.Tensor.nonzero	0:T	method_descriptor	32	32	28	28	-	no@64	no@64	no@64	no@64	data(44)@56	yes@64	r=fresh:40;r[0]=fresh:24;r[1]=fresh:14;r[2]=fresh:14@64	-	nested=key@56	no@64	-
 torch.Tensor.normal_	-	method_descriptor	16	16	15	15	-	no@32	0(decl;ver):30@32	no@32	cpu:14,cuda:14,generator:generator:2@32	key@30	yes@32	r=is(0):32@32	T@32	nested=key@38	no@32	0=T 1=float|int 2=float|int generator=? mean=float std=float
+torch.Tensor.normal_	0:T	method_descriptor	15	15	14	14	-	no@30	0(decl;ver):28@30	no@30	yes:28@30	key@28	yes@30	r=is(0):30@30	-	nested=key@28	no@30	-
+torch.Tensor.normal_	?	method_descriptor	1	1	1	1	-	no@2	0(decl;ver):2@2	no@2	yes:2@2	key@2	yes@2	r=is(0):2@2	-	nested=key@2	no@2	-
 torch.Tensor.numel	-	method_descriptor	17	17	14	14	-	no@34	no@34	no@34	no@34	key@28	yes@34	no-tensor-result@34	int@34;pyval=key@28	nested=key@34	no@34	0=T
 torch.Tensor.permute	-	method_descriptor	20	20	20	20	-	no@40	no@40	no@40	no@40	key@40	yes@40	r=view(0):40@40	T@40	nested=key@40	no@40	0=T 1=tuple[]|tuple[int]
 torch.Tensor.pow	-	method_descriptor	80	80	76	76	-	no@160	no@160	no@160	no@160	key@152	yes@160	r=fresh:160@160	T@160	nested=key@160	no@160	0=T 1=T|float|int
@@ -213,6 +224,7 @@ torch.Tensor.transpose	-	method_descriptor	61	61	61	61	-	no@122	no@122	no@122	no
 torch.Tensor.unbind	-	method_descriptor	38	38	33	33	-	no@76	no@76	no@76	no@76	key@66	yes@76	r[0]=view(0):76;r[1]=view(0):76;r[2]=view(0):64;r[3]=view(0):62;r[4]=view(0):60@76	(T,T,T,T,T) (T,T) (T,T,T) (T,T,T,T)@76	nested=key@76	no@76	0=T 1=int
 torch.Tensor.unflatten	-	method_descriptor	7	7	7	7	-	no@14	no@14	no@14	no@14	key@14	yes@14	r=view(0):14@14	T@14	nested=key@16	no@14	0=T 1=int 2=Size|list[int]|tuple[int]
 torch.Tensor.uniform_	-	method_descriptor	6	6	6	6	-	no@12	0(decl;ver):12@12	no@12	cpu:6,cuda:6@12	key@12	yes@12	r=is(0):12@12	T@12	nested=key@14	no@12	0=T 1=int 2=int
+torch.Tensor.uniform_	0:T	method_descriptor	6	6	6	6	-	no@12	0(decl;ver):12@12	no@12	yes:12@12	key@12	yes@12	r=is(0):12@12	-	nested=key@12	no@12	-
 torch.Tensor.unsqueeze	-	method_descriptor	82	82	82	82	-	no@164	no@164	no@164	no@164	data(4;by 1)@164	yes@164	r=view(0):164@164	T@164	nested=key@164	yes(4)@164	0=T 1=T|int
 torch.Tensor.unsqueeze	0:T	method_descriptor	80	80	80	80	-	no@160	no@160	no@160	no@160	key@160	yes@160	r=view(0):160@160	-	nested=key@160	no@160	-
 torch.Tensor.unsqueeze	0:T 1:T	method_descriptor	2	2	2	2	-	no@4	no@4	no@4	no@4	data(4)@4	yes@4	r=view(0):4@4	-	nested=key@4	yes(4)@4	-
@@ -280,9 +292,10 @@ torch._foreach_add	-	builtin	13	13	13	13	-	no@26	no@26	no@26	no@26	key@26	yes@26
 torch._foreach_add	0:[T]	builtin	3	3	3	3	-	no@6	no@6	no@6	no@6	key@6	yes@6	r[0]=fresh:6;r[1]=fresh:6;r[2]=fresh:6@6	-	nested=key@6	no@6	-
 torch._foreach_add	0:[T] 1:T	builtin	1	1	1	1	-	no@2	no@2	no@2	no@2	key@2	yes@2	r[0]=fresh:2;r[1]=fresh:2;r[2]=fresh:2@2	-	nested=key@2	yes(2)@2	-
 torch._foreach_add	0:[T] 1:[T]	builtin	9	9	9	9	-	no@18	no@18	no@18	no@18	key@18	yes@18	r[0]=fresh:18;r[1]=fresh:18;r[2]=fresh:18;r[3]=fresh:8@18	-	nested=key@18	no@18	-
-torch._foreach_add_	-	builtin	23	23	23	23	-	no@46	0(decl;ver):46@46	no@46	no@46	key@46	yes@46	r[0]=is(0):46;r[1]=is(0):46;r[2]=is(0):46;r[3]=is(0):28@46	[T,T,T] [T,T,T,T] (T,T,T,T)@46	nested=key@46	yes(2)@46	0=list[T]|tuple[T] 1=T|float|int|list[T]|list[float]|tuple[T] alpha=float|int
+torch._foreach_add_	-	builtin	30	30	30	30	-	no@60	0(decl;ver):60@60	no@60	no@60	key@60	yes@60	r[0]=is(0):60;r[1]=is(0):60;r[2]=is(0):60;r[3]=is(0):28@60	[T,T,T] [T,T,T,T] (T,T,T,T)@60	nested=key@60	yes(2)@60	0=list[T]|tuple[T] 1=T|float|int|list[T]|list[float]|tuple[T] alpha=float|int
 torch._foreach_add_	0:[T]	builtin	7	7	7	7	-	no@14	0(decl;ver):14@14	no@14	no@14	key@14	yes@14	r[0]=is(0):14;r[1]=is(0):14;r[2]=is(0):14;r[3]=is(0):8@14	-	nested=key@14	no@14	-
-torch._foreach_add_	0:[T] 1:T	builtin	3	3	3	3	-	no@6	0(decl;ver):6@6	no@6	no@6	key@6	yes@6	r[0]=is(0):6;r[1]=is(0):6;r[2]=is(0):6;r[3]=is(0):4@6	-	nested=key@6	yes(2)@6	-
+torch._foreach_add_	0:[T] 1:T -:K	builtin	1	1	1	1	-	no@2	0(decl;ver):2@2	no@2	no@2	key@2	yes@2	r[0]=is(0):2;r[1]=is(0):2;r[2]=is(0):2@2	-	nested=key@2	yes(2)@2	-
+torch._foreach_add_	0:[T] 1:T alpha:K	builtin	9	9	9	9	-	no@18	0(decl;ver):18@18	no@18	no@18	key@18	yes@18	r[0]=is(0):18;r[1]=is(0):18;r[2]=is(0):18;r[3]=is(0):4@18	-	nested=key@18	no@18	-
 torch._foreach_add_	0:[T] 1:[T]	builtin	13	13	13	13	-	no@26	0(decl;ver):26@26	no@26	no@26	key@26	yes@26	r[0]=is(0):26;r[1]=is(0):26;r[2]=is(0):26;r[3]=is(0):16@26	-	nested=key@26	no@26	-
 torch._foreach_addcdiv_	-	builtin	11	10	11	10	-	no@21	0(decl;ver):21@21	no@21	no@21	key@21	yes@21	r[0]=is(0):21;r[1]=is(0):21;r[2]=is(0):21;r[3]=is(0):8@21	[T,T,T] [T,T,T,T]@21	nested=key@22	no@21	0=list[T] 1=list[T] 2=list[T]|tuple[T] 3=T|float|list[float] value=float
 torch._foreach_addcdiv_	0:[T] 1:[T] 2:[T]	builtin	10	10	10	10	-	no@20	0(decl;ver):20@20	no@20	no@20	key@20	yes@20	r[0]=is(0):20;r[1]=is(0):20;r[2]=is(0):20;r[3]=is(0):8@20	-	nested=key@20	no@20	-
@@ -340,6 +353,7 @@ torch.batch_norm	0:T 3:T 4:T 5:False 8:True	builtin	7	7	5	5	-	no@14	no@14	no@14	
 torch.batch_norm	0:T 3:T 4:T 5:True 8:True	builtin	7	7	5	5	-	no@14	3(UNDECL;nover):10,4(UNDECL;nover):10@14	no@14	no@14	key@10	yes@14	r=fresh:14@14	-	nested=key@10	no@14	-
 torch.batch_norm	0:T 5:True 8:True	builtin	5	5	5	5	-	no@10	no@10	no@10	no@10	key@10	yes@10	r=fresh:10@10	-	nested=key@10	no@10	-
 torch.bernoulli	-	builtin	8	8	6	6	yes	no@16	no@16	no@16	cpu:6,cuda:6@16	key@12	yes@16	r=fresh:16@16	T@16	nested=key@10	no@16	0=T
+torch.bernoulli	0:T	builtin	8	8	6	6	-	no@16	no@16	no@16	yes:12@16	key@12	yes@16	r=fresh:16@16	-	nested=key@6	no@16	-
 torch.bincount	-	builtin	8	8	8	8	-	no@16	no@16	no@16	no@16	data(12;by 0)@16	yes@16	r=fresh:16@16	T@16	nested=key@16	yes(8)@16	0=T minlength=int weights=None|T
 torch.bincount	0:T	builtin	5	5	5	5	-	no@10	no@10	no@10	no@10	data(8)@10	yes@10	r=fresh:10@10	-	nested=key@10	yes(5)@10	-
 torch.bincount	0:T weights:T	builtin	3	3	3	3	-	no@6	no@6	no@6	no@6	data(4)@6	yes@6	r=fresh:6@6	-	nested=key@6	yes(3)@6	-
@@ -350,6 +364,8 @@ torch.conv1d	-	builtin	32	24	32	24	-	no@56	no@56	no@56	no@56	key@56	yes@56	r=fre
 torch.conv2d	-	builtin	40	32	40	32	-	warn(2)@72	no@72	no@72	no@72	key@72	yes@72	r=fresh:72@72	T@72	nested=key@96	no@72	0=T 1=T 2=None|T 3=tuple[int] 4=tuple[int] 5=tuple[int] 6=int dilation=int|tuple[int] groups=int padding=int|str stride=int|tuple[int]
 torch.cos	-	builtin	47	47	42	42	-	no@94	no@94	no@94	no@94	key@84	yes@94	r=fresh:94@94	T@94	nested=key@94	no@94	0=T
 torch.dropout	-	builtin	45	45	45	45	-	no@90	no@90	no@90	cpu:22,cuda:22@90	key@90	yes@90	r=fresh:44|is(0):46@90	T@90	nested=key@90	no@90	0=T 1=float 2=bool
+torch.dropout	0:T 2:False	builtin	16	16	16	16	-	no@32	no@32	no@32	no@32	key@32	yes@32	r=is(0):32@32	-	nested=key@32	no@32	-
+torch.dropout	0:T 2:True	builtin	29	29	29	29	-	no@58	no@58	no@58	yes:44@58	key@58	yes@58	r=fresh:44|is(0):14@58	-	nested=key@58	no@58	-
 torch.embedding	-	builtin	11	11	11	11	-	no@22	no@22	no@22	no@22	key@22	yes@22	r=fresh:22@22	T@22	nested=key@26	no@22	0=T 1=T 2=int 3=bool 4=bool
 torch.empty	-	builtin	38	38	6	6	-	no@76	no@76	no@76	no@76	data(12;by 0)@12	NO(44)@76	r=fresh:76@76	T@76	nested=key@76	yes(12)@76	0=T|tuple[T]|tuple[]|tuple[int] 1=T|int 2=T device=str dtype=dtype layout=layout requires_grad=bool size=tuple[T,int]
 torch.empty_like	-	builtin	28	28	24	24	-	no@56	no@56	no@56	no@56	key@48	NO(48)@56	r=fresh:56@56	T@56	nested=key@56	no@56	0=T device=str dtype=dtype
@@ -410,6 +426,9 @@ torch.min	-	builtin	56	56	52	52	yes	no@112	no@112	no@112	no@112	key@104	yes@112	
 torch.mm	-	builtin	13	12	9	8	-	no@25	no@25	no@25	no@25	key@17	yes@25	r=fresh:25@25	T@25	nested=key@26	no@25	0=T 1=T
 torch.mul	-	builtin	40	40	35	35	-	no@80	no@80	no@80	no@80	key@70	yes@80	r=fresh:80@80	T@80	nested=key@80	no@80	0=T 1=T
 torch.multinomial	-	builtin	7	9	7	7	yes	no@14	no@14	no@14	cpu:7,cuda:7@14	key@14	yes@14	r=fresh:14@14	T@14	nested=key@19	yes(5)@13	0=T 1=int replacement=bool
+torch.multinomial	0:T	builtin	3	3	3	3	-	no@6	no@6	no@6	yes:6@6	key@6	yes@6	r=fresh:6@6	-	nested=key@3	yes(3)@5	-
+torch.multinomial	0:T replacement:False	builtin	2	2	2	2	-	no@4	no@4	no@4	yes:4@4	key@4	yes@4	r=fresh:4@4	-	nested=key@2	yes(2)@4	-
+torch.multinomial	0:T replacement:True	builtin	2	2	2	2	-	no@4	no@4	no@4	yes:4@4	key@4	yes@4	r=fresh:4@4	-	nested=key@2	no@4	-
 torch.nonzero	-	builtin	32	32	28	28	yes	no@64	no@64	no@64	no@64	data(44)@56	yes@64	r=fresh:40;r[0]=fresh:24;r[1]=fresh:14;r[2]=fresh:14@64	T (T,T,T) (T)@64	nested=key@64	no@64	0=T as_tuple=bool
 torch.nonzero	0:T	builtin	32	32	28	28	-	no@64	no@64	no@64	no@64	data(44)@56	yes@64	r=fresh:40;r[0]=fresh:24;r[1]=fresh:14;r[2]=fresh:14@64	-	nested=key@56	no@64	-
 torch.ones	-	builtin	28	28	6	6	-	no@56	no@56	no@56	no@56	data(12;by 0)@12	yes@56	r=fresh:56@56	T@56	nested=key@56	yes(12)@56	0=Size|T|tuple[T]|tuple[int] 1=T|int 2=T device=device|str dtype=dtype layout=layout requires_grad=bool size=tuple[T,int]
@@ -431,6 +450,7 @@ torch.rand	0:[T]	builtin	1	1	1	1	-	no@2	no@2	no@2	yes:2@2	data(2)@2	yes@2	r=fres
 torch.rand	plain	builtin	8	8	0	0	-	no@16	no@16	no@16	yes:14@16	no-sample	yes@16	r=fresh:16@16	-	no-sample	no@16	-
 torch.rand	size:[T]	builtin	1	1	1	1	-	no@2	no@2	no@2	yes:2@2	data(2)@2	yes@2	r=fresh:2@2	-	nested=key@2	yes(2)@2	-
 torch.rand_like	-	builtin	14	14	12	12	-	no@28	no@28	no@28	cpu:12,cuda:12@28	key@24	yes@28	r=fresh:28@28	T@28	nested=key@28	no@28	0=T device=str dtype=dtype
+torch.rand_like	0:T	builtin	14	14	12	12	-	no@28	no@28	no@28	yes:24@28	key@24	yes@28	r=fresh:28@28	-	nested=key@24	no@28	-
 torch.randint	-	builtin	21	21	0	0	-	no@42	no@42	no@42	cpu:18,cuda:18@42	no-sample	yes@42	r=fresh:42@42	T@42	aten::randint x42@42	no@42	0=int 1=Size|int 2=Size device=str dtype=dtype
 torch.randn	-	builtin	18	18	6	6	-	no@36	no@36	no@36	cpu:18,cuda:18@36	data(12;by 0)@12	yes@36	r=fresh:36@36	T@36	nested=key@36	yes(12)@36	0=T|int|tuple[T]|tuple[int] 1=T|int 2=T device=device|str dtype=dtype requires_grad=bool size=tuple[T,int]
 torch.randn	0:T	builtin	3	3	3	3	-	no@6	no@6	no@6	yes:6@6	data(6)@6	yes@6	r=fresh:6@6	-	nested=key@6	yes(6)@6	-
@@ -439,6 +459,7 @@ torch.randn	0:[T]	builtin	1	1	1	1	-	no@2	no@2	no@2	yes:2@2	data(2)@2	yes@2	r=fre
 torch.randn	plain	builtin	12	12	0	0	-	no@24	no@24	no@24	yes:24@24	no-sample	yes@24	r=fresh:24@24	-	no-sample	no@24	-
 torch.randn	size:[T]	builtin	1	1	1	1	-	no@2	no@2	no@2	yes:2@2	data(2)@2	yes@2	r=fresh:2@2	-	nested=key@2	yes(2)@2	-
 torch.randn_like	-	builtin	14	14	12	12	-	no@28	no@28	no@28	cpu:12,cuda:12@28	key@24	yes@28	r=fresh:28@28	T@28	nested=key@28	no@28	0=T device=str dtype=dtype
+torch.randn_like	0:T	builtin	14	14	12	12	-	no@28	no@28	no@28	yes:24@28	key@24	yes@28	r=fresh:28@28	-	nested=key@24	no@28	-
 torch.randperm	-	builtin	8	8	0	0	-	no@16	no@16	no@16	cpu:4,cuda:5,generator:generator:4@16	no-sample	yes@16	r=fresh:16@16	T@16;follows=inference_mode:16@16	aten::randperm x18@18	no@16	0=int device=str dtype=dtype generator=? n=int
 torch.relu	-	builtin	12	12	12	12	-	no@24	no@24	no@24	no@24	key@24	yes@24	r=fresh:24@24	T@24	nested=key@24	no@24	0=T
 torch.relu_	-	builtin	8	8	8	8	-	no@16	0(decl;ver):16@16	no@16	no@16	key@16	yes@16	r=is(0):16@16	T@16	nested=key@16	no@16	0=T
@@ -455,6 +476,8 @@ torch.rnn_tanh	0:T 1:T 2:T 3:[T]	builtin	6	6	6	6	-	yes(6)@12	no@12	no@12	yes:2@1
 torch.rnn_tanh	0:T 1:T 2:[T]	builtin	12	12	12	12	-	yes(10)@24	no@24	no@24	yes:2@24	key@24	yes@24	r[0]=fresh:24;r[1]=fresh:24@24	-	nested=key@24	yes(1)@24	-
 torch.rnn_tanh_cell	-	builtin	7	7	7	7	-	no@14	no@14	no@14	no@14	key@14	yes@14	r=fresh:14@14	T@14	nested=key@16	no@14	0=T 1=T 2=T 3=T 4=None|T 5=None|T
 torch.rrelu	-	builtin	8	8	6	6	-	no@16	no@16	no@16	cpu:4,cuda:4@16	key@12	yes@16	r=fresh:16@16	T@16	nested=key@18	yes(2)@16	0=T 1=float 2=float 3=bool
+torch.rrelu	0:T 3:False	builtin	2	2	2	2	-	no@4	no@4	no@4	no@4	key@4	yes@4	r=fresh:4@4	-	nested=key@4	yes(2)@4	-
+torch.rrelu	0:T 3:True	builtin	6	6	4	4	-	no@12	no@12	no@12	yes:8@12	key@8	yes@12	r=fresh:12@12	-	nested=key@8	no@12	-
 torch.rsqrt	-	builtin	15	15	10	10	-	no@30	no@30	no@30	no@30	key@20	yes@30	r=fresh:30@30	T@30	nested=key@30	no@30	0=T
 torch.rsub	-	builtin	78	78	70	70	-	no@156	no@156	no@156	no@156	key@140	yes@156	r=fresh:156@156	T@156	nested=key@156	no@156	0=T 1=T|int alpha=float|int
 torch.scalar_tensor	-	builtin	12	12	0	0	-	no@24	no@24	no@24	no@24	no-sample	yes@24	r=fresh:24@24	T@24	aten::scalar_tensor x24@24	no@24	0=int device=str dtype=dtype requires_grad=bool

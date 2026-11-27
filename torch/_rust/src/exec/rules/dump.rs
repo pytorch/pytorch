@@ -49,6 +49,7 @@ fn row_line(family: &str, what: &str, r: &Row) -> String {
     let what = if r.form.is_empty() { what.to_string() } else { format!("{what} ({})", r.form) };
     let writes = match r.writes {
         Write::Operands(written) => format!("Operands({})", join(written.iter().map(|w| format!("{}{}", w.at, if w.declared { "" } else { "!" })).collect())),
+        Write::Draws(written) => format!("Draws({})", join(written.iter().map(|w| format!("{}{}", w.at, if w.declared { "" } else { "!" })).collect())),
         other => format!("{other:?}"),
     };
     let operands = join(r.operands.iter().map(|(at, c)| format!("{at}:{}", unsafe { c.name() })).collect());

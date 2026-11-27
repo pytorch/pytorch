@@ -1277,7 +1277,7 @@ def _opaque_call(fn, *args, **kwargs):
 _trace_undo: _undo.Undo | None = None
 
 
-def _row_writes(tensors: list[torch.Tensor], declared: bool) -> None:
+def _row_writes(tensors: list[torch.Tensor], declared: bool, draws: bool) -> None:
     """Told by the executor (exec/covered.rs), before a call of the traced
     body runs whose row of the rule table (exec/rules/torch.rs) says that
     the callee writes the memory of ``tensors``: what calls of that callee
@@ -1290,19 +1290,28 @@ def _row_writes(tensors: list[torch.Tensor], declared: bool) -> None:
     ``declared``: a schema declares every one of these writes; if not, the
     order of reads and writes that the graph's schemas tell is not the
     program's, and the trace's graph gets no host prologue (_compile).
+    ``draws``: the row says that the call moves the state of a default
+    random generator; the record is told of each of them first.
     Raises, and the trace is then refused, where no trace keeps a record."""
     undo = _trace_undo
     if undo is None:
         raise AssertionError("a row writes tensors and no trace is running")
+    if draws:
+        for g in _generators((), {}):
+            undo.draw(g)
     for t in tensors:
         undo.write(t, declared)
 
 
-def _generators(given) -> list[torch.Generator]:
-    """The generators a random operator may draw from: the one it is handed,
-    else the default one of the CPU and of every CUDA device in use."""
-    if given is not None:
-        return [given]
+def _generators(args, kwargs) -> list[torch.Generator]:
+    """The generators a random operator may draw from: those it is handed,
+    wherever among its arguments (most schemas have ``generator`` behind the
+    star and a dispatch mode finds it among the keywords; ``poisson`` and
+    ``binomial`` are handed theirs by position, however the program passed
+    it), else the default one of the CPU and of every CUDA device in use."""
+    given = [a for a in (*args, *kwargs.values()) if isinstance(a, torch.Generator)]
+    if given:
+        return given
     if not torch.cuda.is_initialized():
         return [torch.default_generator]
     return [torch.default_generator, *torch.cuda.default_generators]
@@ -1414,7 +1423,7 @@ class _RefuseImpure(TorchDispatchMode):
         if self.refuse and (why := _data_sized(func, args, kwargs)) is not None:
             raise _refuse(f"it runs {func}, which {why}")
         if torch.Tag.nondeterministic_seeded in func.tags:
-            for g in _generators(kwargs.get("generator")):
+            for g in _generators(args, kwargs):
                 self.undo.draw(g)
         for t, declared, out in _stays.written(func, args, kwargs):
             self.undo.write(t, declared, grows=out)

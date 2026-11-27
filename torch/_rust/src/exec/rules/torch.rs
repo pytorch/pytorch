@@ -62,6 +62,18 @@
 //     writes is told of each tensor, torch/_rust_inductor/undo.py; given
 //     up, the trace undoes its writes, the last first, and it no longer
 //     takes the call for one that leaves nothing behind);
+//   - for a member that DRAWS from a random generator and that nothing
+//     else stands against (D; S key, R yes: two calls from the same
+//     generator state give the same bits): a row per form, as for a writer
+//     with forms, each on its form's own samples. The row of a form whose
+//     calls drew says so (Write::Draws, with the operands it writes
+//     besides: normal_ writes its receiver); a form whose calls drew
+//     nothing is a row like any other (dropout with train=False returns its
+//     operand). The generators are the default ones: a call that hands a
+//     generator over has no row (plain_call: a generator is no plain
+//     operand; and no form is of such a call). Whoever runs the call asks
+//     (hand_over: today's trace records the generators' states and puts
+//     them back if it is given up; only_computes is false for the member);
 //   - NO ROW for a line under whose calls a VALUE was read out of a tensor
 //     (X: what the engine's witness of the dispatcher saw under one call per
 //     sample; anything but `no` is no row, so also a line no call of which
@@ -74,8 +86,18 @@
 //     of a form says whether calls of that form read (form_that_reads). A
 //     form in which they do, or with too few samples, or with no line,
 //     stops the trace; a member that reads in every form stops whole;
-//   - LATER, with the family that will take it, for a member that draws,
-//     makes a tensor of no tensor or
+//   - A LINE PER SET OF KEYWORDS for a form that only such a read stands
+//     against, where the keywords a call passes tell the calls that read
+//     from those that do not (the parser takes another overload of the
+//     operator: _foreach_add_(list, t) reads the 0-dim tensor's value as a
+//     number, _foreach_add_(list, t, alpha=1.0) hands the tensor on). The
+//     lines then name the keywords that hold no tensor (`0:[T] 1:T
+//     alpha:K`; `-:K`: none), each is on the samples of its set alone, and
+//     a call fits one only if it passes exactly those keywords (fits): a
+//     call with a set of keywords that was not measured apart stops the
+//     trace. A form whose lines tell no keyword is of the calls with any;
+//   - LATER, with the family that will take it, for a member that draws
+//     and has no line of a form, makes a tensor of no tensor or
 //     follows ambient state (ambient), returns a fact or a value of a tensor
 //     (facts), or enters Python code under the call (native: on CUDA seven
 //     members go through the Python router of torch._native, whose frames
@@ -144,6 +166,7 @@ const WHY_READS_FORM: &str = "As a member that only computes, for the forms of o
 const ROW_WARN: Row = Row { operands: &[], reads: &[], writes: Write::None, result: Res::Entry, enters: Enters::Foreign, scalars: Scalars::Operand, why: WHY_WARN, before: Some(plain_call), form: "" };
 const WHY_WRITES: &str = "Measured on the CPU and on CUDA: the call writes the memory of the operands named and no other, changes no operand's key, moves no generator and gives the same bits twice; every write measured is one the schema of its operator declares, on the same operands in every form of the call that was measured.";
 const WHY_WRITES_FORM: &str = "As a member that writes operands, for one form of the call's operands (a bool among them by its value) on that form's own samples: which operands the call writes, declared by a schema or not, is what was measured in this form. A call of a form with no row stops the trace.";
+const WHY_DRAWS_FORM: &str = "As a member that writes operands, for one form of the call's operands (a bool among them by its value) on that form's own samples: the calls of this form move the state of a default random generator (of the CPU, or of a CUDA device), and write the operands named. No call of the form hands a generator over. Run again, the call draws again: a list with it is not run a second time on one arrival, and a trace that is given up puts the generators back.";
 const ROW_WRITES: Row = Row { operands: &[], reads: &[], writes: Write::None, result: Res::Entry, enters: Enters::Never, scalars: Scalars::Operand, why: WHY_WRITES, before: Some(writing_call), form: "" };
 
 // The `before` functions of this family's rows, each by the function it
@@ -151,8 +174,8 @@ const ROW_WRITES: Row = Row { operands: &[], reads: &[], writes: Write::None, re
 // `before` by this list, and a `before` that is not on it has no name.
 pub const BEFORES: &[(Before, &str, &str)] = &[
     (plain_call, "plain_call", "refuses: a callee that is no member of the table; a call through a functools.partial or through a slot bound to its receiver; a builtin bound to a class or module that is not exactly a type or a module; `out=`; an operand that is not plain (an exact Tensor or Parameter, an immutable of the closed list, a constant of torch, the engine's stand-in for a number, an exact tuple, list or dict with str keys of those, 8 deep at most); with the domain switch on, an operand of a class no sample of the member had in its place. records: nothing (the operands are what the call is run again on)"),
-    (formed_call, "formed_call", "refuses: what plain_call refuses; a dict among the operands, or containers nested deeper than a form tells; a call whose form (the places that hold a tensor or an exact list or tuple with one, and each bool the form names by its value) has no line that is a row, or has a row of its own that is not this one. records: nothing"),
-    (writing_call, "writing_call", "refuses: what plain_call refuses, or formed_call if the row is for one form; a call that does not hand over, in its place, an operand the row says is written. records: nothing, and tells nobody: the tensors the call writes go to the trace's record of writes through hand_over, which the executor calls behind the license"),
+    (formed_call, "formed_call", "refuses: what plain_call refuses; a dict among the operands, or containers nested deeper than a form tells; a call whose form (the places that hold a tensor or an exact list or tuple with one, each bool the form names by its value, and, where the lines of the form tell keywords, exactly the keywords it passes) has no line that is a row, or has a row of its own that is not this one. records: nothing"),
+    (writing_call, "writing_call", "refuses: what plain_call refuses, or formed_call if the row is for one form; a call that does not hand over, in its place, an operand the row says is written. records: nothing, and tells nobody: the tensors the call writes, and that it draws from the default generators, go to the trace's record of writes and draws through hand_over, which the executor calls behind the license"),
 ];
 
 // Resolves `names` as attributes from a loaded module on: `found[i]` is the
@@ -237,6 +260,11 @@ fn members() -> &'static Members {
                         let declared = matches!(whole, Taken::Rows(rows) if matches!(rows[0].writes, Write::Operands(written) if written.iter().all(|w| w.declared)));
                         Member { name: line[0], taken: whole, object: 0, forms: vec![], by_form: !declared, writer: true, but_reads: None, domain: domain(line) }
                     }
+                    // A member that draws, and nothing else stands against
+                    // it: by the lines of its forms, read as a writer's (in
+                    // which form it draws, and what it writes besides). With
+                    // no line of a form it is left as it was.
+                    Taken::Later("ambient") if line.get(11).is_some_and(|d| d.split('@').next() != Some("no")) => Member { name: line[0], taken: Taken::Later("ambient"), object: 0, forms: vec![], by_form: true, writer: true, but_reads: None, domain: domain(line) },
                     taken => {
                         let but_reads = match (taken, but_reads(line)) {
                             (Taken::Stop(_), Taken::Rows(rows)) => rows.first(),
