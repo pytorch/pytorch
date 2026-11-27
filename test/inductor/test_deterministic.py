@@ -91,23 +91,20 @@ class DeterministicTestGeneric(TestCase):
 
 @requires_triton()
 class DeterministicTestRun2Run(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180681")
     @skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
     @parametrize("training_or_inference", ["training", "inference"])
     @parametrize("precision", ["float32", "bfloat16", "float16", "amp"])
-    def test_run2run_determinism(
-        self, device, model_name, training_or_inference, precision
-    ):
+    def test_run2run_determinism(self, model_name, training_or_inference, precision):
         """
         Test run2run determinism for a few huggingface models.
 
         The test assumes benchmarks/dynamo/huggingface.py can be found from
         the current working directory.
         """
-        device_type = torch.device(device).type
 
         def _setup_env(env):
             env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"  # disable autotune cache
@@ -124,8 +121,7 @@ class DeterministicTestRun2Run(TestCase):
             cmd = (
                 f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
-                + f" --devices {device_type} --disable-cudagraphs"
-                + f" --save-model-outputs-to={saved_pkl}"
+                + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
             )
             print("Command", cmd)
             env = os.environ.copy()
@@ -141,8 +137,7 @@ class DeterministicTestRun2Run(TestCase):
             cmd = (
                 f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
-                + f" --devices {device_type} --disable-cudagraphs"
-                + f" --compare-model-outputs-with={saved_pkl}"
+                + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
             )
             print("Command", cmd)
 
@@ -361,8 +356,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     DeterministicTestRun2Run,
     globals(),
-    except_for="cpu",
-    allow_xpu=True,
+    only_for="cuda",
 )
 
 
