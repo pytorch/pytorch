@@ -698,9 +698,9 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
-    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/106557")
-    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
-    @unittest.skipIf(
+    @skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/106557")
+    @skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @skipIf(
         TEST_WITH_SLOW_GRADCHECK,
         "Failing in slow gradcheck on cuda12.8, see https://github.com/pytorch/pytorch/pull/156731 for example",
     )
