@@ -429,8 +429,9 @@ class FxirTestCase(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
         Test that we allocate on a device type instead of a specific index.
         """
         # Pass in a tensor on an indexed device.
-        device_runtime = getattr(torch, device)
-        indexed_device = torch.device(device, device_runtime.current_device())
+        device_type = torch.device(device).type
+        device_runtime = getattr(torch, device_type)
+        indexed_device = torch.device(device_type, device_runtime.current_device())
         args = [torch.randn(8, device=indexed_device) for _ in range(2)]
         (gm,) = self._compile_and_check(torch.add, args)
         (empty_strided,) = gm.graph.find_nodes(
@@ -749,7 +750,10 @@ class FxirTestCase(_FxirTestConfigMixin, _FxirTestMixin, InductorTestCase):
         custom_backend = common.DeviceCodegen(
             TritonScheduling, CustomWrapperCodegen, None
         )
-        with unittest.mock.patch.dict(common.device_codegens, {device: custom_backend}):
+        device_type = torch.device(device).type
+        with unittest.mock.patch.dict(
+            common.device_codegens, {device_type: custom_backend}
+        ):
             func = torch.add
             opt = torch.compile(func)
             result = opt(*args)
@@ -1584,7 +1588,10 @@ class AOTFxirTestCase(_FxirTestMixin, InductorTestCase):
             PythonWrapperCodegen,
             fx_wrapper_codegen=CustomWrapperCodegen,
         )
-        with unittest.mock.patch.dict(common.device_codegens, {device: custom_backend}):
+        device_type = torch.device(device).type
+        with unittest.mock.patch.dict(
+            common.device_codegens, {device_type: custom_backend}
+        ):
             # The backend should not have been called yet.
             self.assertFalse(called)
 
