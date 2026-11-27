@@ -62,6 +62,7 @@ class TestPointwiseCoverage(TestCase):
         (
             "matched",
             "matched_without_kernel",
+            "unverified",
             "known_mismatch",
             "skipped",
             "failed",
@@ -88,7 +89,9 @@ class TestPointwiseCoverage(TestCase):
                 if outcome in ("failed", "expected_failure"):
                     self.fail("numerical mismatch")
                 record.compared = 1
-                record.generated_kernels = int(outcome != "matched_without_kernel")
+                record.generated_kernels = int(
+                    outcome not in ("matched_without_kernel", "unverified")
+                )
                 if outcome == "known_mismatch":
                     record.mismatches["nan-payload"] += 1
                 else:
@@ -113,15 +116,6 @@ class TestPointwiseCoverage(TestCase):
             len(result.failures) + len(result.errors), int(expected == "failed")
         )
         self.assertEqual(len(result.skipped), int(expected == "skipped"))
-
-    def test_unverified_success(self):
-        record = CoverageRecord({"test": "example"}, compared=1, matched=1)
-        test = unittest.FunctionTestCase(lambda: None)
-        result = unittest.TestResult()
-        with record_result(record, result, test):
-            test.run(result)
-        self.assertTrue(result.wasSuccessful())
-        self.assertEqual(record.status, "unverified")
 
     def test_failed_subtest(self):
         record = CoverageRecord({"test": "example"})
@@ -283,13 +277,30 @@ class TestPointwiseCoverage(TestCase):
             with self.assertRaisesRegex(ValueError, "manifest"):
                 summarize(directory)
 
-    def test_case_identity(self):
+    @parametrize(
+        "method,family",
+        (
+            ("test_pointwise_edges_backward", "test_pointwise_edges_backward"),
+            ("test_pointwise_bitwise", "test_pointwise_bitwise"),
+            ("test_pointwise_backward", "test_pointwise_backward"),
+            ("test_pointwise_bitwise", "test_pointwise_edges"),
+            ("test_pointwise_backward", "test_pointwise_edges_backward"),
+        ),
+        name_fn=lambda method, family: f"{method}_{family}",
+    )
+    def test_case_identity(self, method, family):
+        sample_kind = "edges" if "edges" in family else "opinfo"
+        suffix = (
+            ""
+            if method == "test_pointwise_edges_backward"
+            else f"_sample_kind_{sample_kind}"
+        )
         case = coverage_case(
-            "test_pointwise_edges_backward_nn_functional_silu_complex_cuda_complex128"
+            f"{method}_nn_functional_silu_complex{suffix}_cuda_complex128"
         )
         self.assertEqual(case["op"], "nn_functional_silu_complex")
         self.assertEqual(case["dtype"], "complex128")
-        self.assertEqual(case["family"], "test_pointwise_edges_backward")
+        self.assertEqual(case["family"], family)
         self.assertIsNone(coverage_case("test_keyword_input_grads_cuda_float16"))
 
 

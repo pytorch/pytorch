@@ -40,6 +40,15 @@ def coverage_case(method):
         if method.startswith(family + "_"):
             op, separator, dtype = method[len(family) + 1 :].rpartition("_cuda_")
             if separator:
+                if family in ("test_pointwise_bitwise", "test_pointwise_backward"):
+                    name, sample_separator, sample_kind = op.rpartition("_sample_kind_")
+                    if sample_separator and sample_kind in ("opinfo", "edges"):
+                        op = name
+                        if sample_kind == "edges":
+                            family = {
+                                "test_pointwise_bitwise": "test_pointwise_edges",
+                                "test_pointwise_backward": "test_pointwise_edges_backward",
+                            }[family]
                 return {"test": method, "family": family, "op": op, "dtype": dtype}
     return None
 
