@@ -54,6 +54,7 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
+    expectedFailureCUDA,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
@@ -4131,12 +4132,20 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
 
         self.assertEqual(actual, expected)
 
+    # CUDA memory efficient attention rejects the mask after the batch rule folds a vmap
+    # dim into a broadcast one, as the copy that makes leaves its unaligned stride (S = 6)
+    _xfail_unaligned_mask = (
+        [expectedFailureCUDA]
+        if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION and not TEST_WITH_ROCM
+        else []
+    )
+
     @parametrize("unbatched_kv", [False, True])
     @parametrize(
         "case",
         [
-            "mask_1LS",
-            "mask_LS",
+            subtest("mask_1LS", decorators=_xfail_unaligned_mask),
+            subtest("mask_LS", decorators=_xfail_unaligned_mask),
             "mask_B1LS",
             "3d_query",
             "broadcast_batch",
