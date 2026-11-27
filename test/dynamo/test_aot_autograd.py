@@ -13,6 +13,7 @@ import torch._inductor.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._C._dynamo.guards import compute_overlapping_tensors
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource
 from torch._dynamo.testing import (
     CompileCounter,
@@ -1756,53 +1757,51 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             torch._foreach_add_(inputs, 1)
             return inputs[0]
 
-        base = torch.zeros(401, 4)
-        inputs = list(base.unbind())
-        counter = CompileCounterWithBackend("aot_eager")
-        compiled = torch.compile(f, backend=counter, dynamic=True)
+        inputs = list(torch.zeros(401, 4).unbind())
+        compiled = torch.compile(f, backend="aot_eager", dynamic=True, fullgraph=True)
+        knob = "pytorch/compiler:aliased_inputs_with_mutation_and_dyn_shapes_killswitch"
         with (
-            patch("torch._utils_internal.justknobs_check", return_value=True),
+            patch(
+                "torch._utils_internal.justknobs_check",
+                side_effect=lambda name, default=True: name == knob or default,
+            ),
             patch(
                 "torch._functorch._aot_autograd.input_output_analysis._storage_overlap_partition",
                 side_effect=AssertionError("partition scan ran before alias fallback"),
             ) as partition_scan,
+            self.assertRaisesRegex(Unsupported, "401 dynamic, aliased/mutated inputs"),
         ):
-            result = compiled(inputs)
+            compiled(inputs)
 
         partition_scan.assert_not_called()
-        self.assertEqual(result, torch.ones(4))
-        self.assertEqual(base, torch.ones_like(base))
-        self.assertGreater(counter.frame_count, 0)
 
-    def test_input_mutation_storage_overlap_recompiles(self):
+    @parametrize("dynamic", [False, True])
+    @parametrize("first_call", ["different_storage", "same_storage_no_overlap"])
+    def test_input_mutation_storage_overlap_recompiles(self, dynamic, first_call):
         def f(x, y):
             x.mul_(2)
             return x + y
 
-        for dynamic in (False, True):
-            for first_call in ("different_storage", "same_storage_no_overlap"):
-                with self.subTest(dynamic=dynamic, first_call=first_call):
-                    torch._dynamo.reset()
-                    compiler = CompileCounterWithBackend("aot_eager")
-                    opt_f = torch.compile(f, backend=compiler, dynamic=dynamic)
+        compiler = CompileCounterWithBackend("aot_eager")
+        opt_f = torch.compile(f, backend=compiler, dynamic=dynamic)
 
-                    # First call compiles under the assumption that the
-                    # mutated input does not overlap any other input.
-                    if first_call == "different_storage":
-                        opt_f(torch.ones(4), torch.ones(4))
-                    else:
-                        base = torch.ones(8)
-                        opt_f(base[:4], base[4:8])
+        # First call compiles under the assumption that the mutated input does
+        # not overlap any other input.
+        if first_call == "different_storage":
+            opt_f(torch.ones(4), torch.ones(4))
+        else:
+            base = torch.ones(8)
+            opt_f(base[:4], base[4:8])
 
-                    base = torch.ones(8)
-                    opt_out = opt_f(base[:4], base[2:6])
+        base = torch.ones(8)
+        opt_out = opt_f(base[:4], base[2:6])
 
-                    base_ref = torch.ones(8)
-                    ref_out = f(base_ref[:4], base_ref[2:6])
+        base_ref = torch.ones(8)
+        ref_out = f(base_ref[:4], base_ref[2:6])
 
-                    self.assertEqual(opt_out, ref_out)
-                    self.assertEqual(base, base_ref)
-                    self.assertEqual(compiler.frame_count, 2)
+        self.assertEqual(opt_out, ref_out)
+        self.assertEqual(base, base_ref)
+        self.assertEqual(compiler.frame_count, 2)
 
     @parametrize("tiled", [False, True])
     @torch.no_grad()
@@ -1917,6 +1916,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(partition_guards[0].overlapping_indices, ())
         self.assertEqual(len(partition_guards[0].input_sources), len(args))
 
+    # Under dynamic shapes, every new lr recompiles, with or without the
+    # partition guard.
     @expectedFailureDynamic
     @torch._dynamo.config.patch(
         recompile_limit=2,
@@ -1924,8 +1925,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         specialize_float=False,
     )
     def test_input_mutation_storage_overlap_allows_runtime_scalar_inputs(self):
-        counter = CompileCounterWithBackend("aot_eager")
-
+        # With specialize_float=False, the second compile makes lr a graph input
+        # with a source, and the partition guard must accept the float that L['lr']
+        # holds at runtime rather than recompile on every call.
         def scaling_step(update, dummy_tensor, lr):
             dummy_tensor.mul_(0.5 * lr)
 
@@ -1935,7 +1937,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
             return update
 
-        compiled = torch.compile(scaling_step, backend=counter, fullgraph=True)
+        compiler = _AOTGuardCapture()
+        compiled = torch.compile(scaling_step, backend=compiler, fullgraph=True)
         base_update = torch.randn(128, 128)
         base_dummy = torch.randn(324, 64)
 
@@ -1946,7 +1949,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 scaling_step(base_update.clone(), base_dummy.clone(), lr),
             )
 
-        self.assertLessEqual(counter.frame_count, 2)
+        self.assertEqual(compiler.counter.frame_count, 2)
+        (partition_guard,) = compiler.partition_guards()
+        self.assertIn("L['lr']", {s.name for s in partition_guard.input_sources})
 
     def test_input_mutation_storage_overlap_with_module_buffer_recompiles(self):
         class Module(torch.nn.Module):
@@ -1999,6 +2004,23 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(
             names - const_names, {"L['x']", "L['y']", "L['index']", "L['src']"}
         )
+
+    def test_input_mutation_storage_overlap_skips_synthetic_local_inputs(self):
+        # nn.Parameter(x) becomes a graph input with a SyntheticLocalSource,
+        # which guards can't read.
+        def f(x, y):
+            p = torch.nn.Parameter(x)
+            y.add_(1)
+            return p * y + x
+
+        compiler = _AOTGuardCapture()
+        x, y, y_ref = torch.randn(4), torch.zeros(4), torch.zeros(4)
+        self.assertEqual(torch.compile(f, backend=compiler)(x, y), f(x, y_ref))
+        self.assertEqual(y, y_ref)
+
+        (partition_guard,) = compiler.partition_guards()
+        names = {source.name for source in partition_guard.input_sources}
+        self.assertEqual(names, {"L['x']", "L['y']"})
 
     def test_input_mutation_storage_overlap_guards_assume_constant_result_alias(self):
         const = torch.zeros(4)
@@ -2317,6 +2339,7 @@ class StorageOverlapAnalysisTests(torch._inductor.test_case.TestCase):
             patch.object(input_output_analysis, "_hinted_views", hinted_views),
         ):
             torch.compile(f, backend="aot_eager", dynamic=True, fullgraph=True)(inputs)
+        self.assertEqual(inputs, [torch.ones(4)] * 10)
         self.assertTrue(hinted)
         self.assertTrue(all(h is not None for h in hinted))
         self.assertEqual(calls_in_analysis, 0)

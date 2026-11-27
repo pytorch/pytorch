@@ -23,7 +23,7 @@ from torch._C._dynamo.guards import (
 from torch._dynamo.source import ConstantSource, GlobalSource
 from torch._environment import is_fbcode
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
-from torch._guards import Source, StorageOverlap, StorageOverlapPartition
+from torch._guards import ChainedSource, Source, StorageOverlap, StorageOverlapPartition
 from torch._prims_common import compute_required_storage_length
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -61,8 +61,9 @@ INPUT_ALIAS_TYPES = (OutputType.alias_of_input, OutputType.is_input)
 
 def _use_storage_overlap_partition_guard() -> bool:
     """
-    Killswitch for the StorageOverlapPartition guard. When off, inputs are
-    guarded with the older StorageOverlap guard, under dynamic shapes only.
+    Killswitch for the StorageOverlapPartition guard. When off, only aliased
+    mutated inputs under dynamic shapes are guarded, with the older
+    StorageOverlap guard, and static-shape graphs get no overlap guard.
     """
     from torch._utils_internal import justknobs_check
 
@@ -89,10 +90,12 @@ def _prepare_overlap_analysis(
     replaced by their hinted layouts where possible (see _hinted_views).
     """
     tracing_context = torch._guards.TracingContext.try_get()
-    if tracing_context is None or not aot_config.aot_autograd_arg_pos_to_source:
+    if tracing_context is None:
         return tensors, symbolic, contextlib.nullcontext()
     if tracing_context.fake_mode is None:
         raise AssertionError("tracing_context.fake_mode must not be None")
+    if not aot_config.aot_autograd_arg_pos_to_source:
+        return tensors, symbolic, contextlib.nullcontext()
     shape_env = tracing_context.fake_mode.shape_env
     if shape_env is None:
         return tensors, symbolic, contextlib.nullcontext()
@@ -437,7 +440,10 @@ def _hinted_views(tensors: list[Tensor]) -> list[Tensor] | None:
 
 
 def compute_overlapping_inputs(
-    aot_config: AOTConfig, fwd_inputs: list[Any], aliased_input_indices: list[int]
+    aot_config: AOTConfig,
+    fwd_inputs: list[Any],
+    aliased_input_indices: list[int],
+    use_partition_guard: bool,
 ) -> set[int]:
     num_aliases = len(aliased_input_indices)
     aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]
@@ -446,8 +452,7 @@ def compute_overlapping_inputs(
     # This killswitch guards against the cost of symbolic pair checks, which
     # the hint path below removes for backed symbols with Dynamo sources. It
     # still keys on the original inputs, so those compiles keep falling back as
-    # before: this is deliberate, to keep behavior unchanged. Consider firing it
-    # only when the hint path isn't taken.
+    # before: this is deliberate, to keep behavior unchanged.
     if is_fbcode():
         if symbolic and num_aliases > 400:
             from torch._subclasses.fake_tensor import (
@@ -476,7 +481,7 @@ def compute_overlapping_inputs(
     # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
     # dynamo sources inside AOTAutograd.
     if (
-        not _use_storage_overlap_partition_guard()
+        not use_partition_guard
         and tracing_context is not None
         # Make sure dynamic shapes is currently being used. This is whether the
         # original inputs are symbolic, not analysis_symbolic.
@@ -519,15 +524,21 @@ def _constant_to_global(s: Source) -> Source:
     return GlobalSource(s.source_name) if isinstance(s, ConstantSource) else s
 
 
+def _guardable_source(s: Source) -> Source:
+    # Dynamo installs assume_constant_result values as frame globals under their
+    # ConstantSource name, so guard on them through G. Clone only those sources:
+    # cloning rebuilds every link of the chain.
+    base = s.get_base() if isinstance(s, ChainedSource) else s
+    return s.clone(_constant_to_global) if isinstance(base, ConstantSource) else s
+
+
 def add_input_mutation_storage_overlap_partition_guard(
     aot_config: AOTConfig,
     fwd_inputs: list[Any],
     input_info: list[InputAliasInfo],
+    use_partition_guard: bool,
 ) -> None:
-    if not any(info.mutates_data for info in input_info):
-        return
-
-    if not _use_storage_overlap_partition_guard():
+    if not use_partition_guard:
         return
 
     tracing_context = torch._guards.TracingContext.try_get()
@@ -536,35 +547,38 @@ def add_input_mutation_storage_overlap_partition_guard(
 
     if not aot_config.aot_autograd_arg_pos_to_source:
         return
+    if len(aot_config.aot_autograd_arg_pos_to_source) != len(fwd_inputs):
+        raise AssertionError(
+            f"expected a source slot per input, got {len(aot_config.aot_autograd_arg_pos_to_source)} != {len(fwd_inputs)}"
+        )
 
-    # Dynamo installs assume_constant_result values as frame globals under their
-    # ConstantSource name, so guard on them through G.
     sources = [
-        None if s is None else s.clone(_constant_to_global)
+        None if s is None else _guardable_source(s)
         for s in aot_config.aot_autograd_arg_pos_to_source
     ]
     tensor_indices: list[int] = []
-    seen_sources: set[Any] = set()
+    selected_sources: list[Source] = []
+    seen_sources: set[Source] = set()
     for i, inpt in enumerate(fwd_inputs):
         source = sources[i]
-        if not isinstance(inpt, Tensor) or source is None or source in seen_sources:
+        if (
+            not isinstance(inpt, Tensor)
+            or source is None
+            or source in seen_sources
+            # Guards can't read a SyntheticLocalSource (e.g. nn.Parameter(x)
+            # built in the frame), which doesn't exist until after they run.
+            or not source.subguards_allowed()
+        ):
             continue
         tensor_indices.append(i)
+        selected_sources.append(source)
         seen_sources.add(source)
     if len(tensor_indices) <= 1:
         return
-
-    mutated_tensor_indices = [i for i in tensor_indices if input_info[i].mutates_data]
-    if not mutated_tensor_indices:
+    if not any(input_info[i].mutates_data for i in tensor_indices):
         return
 
     selected_inputs = [fwd_inputs[i] for i in tensor_indices]
-    selected_sources = []
-    for i in tensor_indices:
-        source = sources[i]
-        if source is None:
-            raise AssertionError("expected source for tensor index")
-        selected_sources.append(source)
     by_storage: dict[StorageWeakRef, list[int]] = {}
     for i, t in enumerate(selected_inputs):
         by_storage.setdefault(StorageWeakRef(t.untyped_storage()), []).append(i)

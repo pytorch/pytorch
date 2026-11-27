@@ -3478,7 +3478,14 @@ class StorageOverlapPartitionChecker {
       std::vector<std::vector<int64_t>> expected_storage_groups)
       : _expected_partition(std::move(expected_partition)),
         _expected_storage_groups(std::move(expected_storage_groups)),
-        _inputs(expected_inputs, nullptr) {}
+        _inputs(expected_inputs, nullptr),
+        _track_storages(
+            _expected_partition.empty() &&
+            expected_inputs >= kMinStorageRangeSortSize) {
+    if (_track_storages) {
+      _storages.resize(expected_inputs);
+    }
+  }
 
   void add(PyObject* obj, size_t input_index) {
     TORCH_CHECK(input_index < _inputs.size());
@@ -3486,6 +3493,9 @@ class StorageOverlapPartitionChecker {
     Py_INCREF(obj);
     _inputs[input_index] = obj;
     _seen++;
+    if (_track_storages) {
+      track_storage(obj, input_index);
+    }
   }
 
   void reset(size_t input_index) {
@@ -3506,8 +3516,22 @@ class StorageOverlapPartitionChecker {
       return false;
     }
 
-    if (_expected_partition.empty() &&
-        _inputs.size() >= kMinStorageRangeSortSize) {
+    if (_track_storages) {
+      // Inputs on distinct storages can't overlap. Distinctness depends only
+      // on the pointers, so skip the sort when they match the last distinct
+      // set, as they do when the same tensors are passed every call.
+      if (_storages == _distinct_storages) {
+        return true;
+      }
+      if (std::find(_storages.begin(), _storages.end(), nullptr) ==
+          _storages.end()) {
+        auto sorted = _storages;
+        std::sort(sorted.begin(), sorted.end(), std::less<>{});
+        if (std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end()) {
+          _distinct_storages = _storages;
+          return true;
+        }
+      }
       if (auto disjoint = try_check_disjoint()) {
         return *disjoint;
       }
@@ -3536,6 +3560,22 @@ class StorageOverlapPartitionChecker {
   }
 
  private:
+  // Runs while the input is still in cache from its other guards, so the
+  // common case, all inputs on distinct storages, needs no pass over the
+  // inputs at the end. Inputs the fast path can't handle record nullptr.
+  void track_storage(PyObject* obj, size_t input_index) {
+    const c10::StorageImpl* storage = nullptr;
+    if (THPVariable_CheckExact(obj)) {
+      const auto& tensor = THPVariable_Unpack(obj);
+      if (has_plain_static_metadata(tensor)) {
+        storage = tensor.unsafeGetTensorImpl()
+                      ->unsafe_storage()
+                      .unsafeGetStorageImpl();
+      }
+    }
+    _storages[input_index] = storage;
+  }
+
   std::optional<bool> try_check_disjoint() const {
     // Check all inputs before allocating scratch space. The generic type
     // check can invoke __class__, so leave it to the fallback.
@@ -3654,6 +3694,10 @@ class StorageOverlapPartitionChecker {
   std::vector<std::vector<int64_t>> _expected_storage_groups;
   std::vector<PyObject*> _inputs;
   size_t _seen{0};
+
+  const bool _track_storages;
+  std::vector<const c10::StorageImpl*> _storages;
+  std::vector<const c10::StorageImpl*> _distinct_storages;
 };
 
 class STORAGE_OVERLAP_PARTITION : public RelationalGuard {

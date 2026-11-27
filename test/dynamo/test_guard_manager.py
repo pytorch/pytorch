@@ -1305,6 +1305,27 @@ user_stack=None)
         self.assertTrue(root.check({"x": values[:-1] + (value,)}))
         self.assertEqual(class_checks, 1)
 
+    def test_disjoint_storage_partition_distinct_storages(self):
+        # The guard skips the overlap check when the inputs' storages are the
+        # same distinct set as on an earlier call, so it must still see an
+        # input's storage changing in place.
+        base = torch.randn(8)
+        values = (base[:4],) + tuple(torch.randn(4) for _ in range(9))
+        root = self._make_disjoint_storage_partition_guard(values)
+        scope = {"x": values}
+        self.assertTrue(root.check(scope))
+        self.assertTrue(root.check(scope))
+
+        last, storage = values[-1], values[-1].untyped_storage()
+        last.set_(base.untyped_storage(), 2, (4,), (1,))
+        self.assertFalse(root.check(scope))
+        last.set_(base.untyped_storage(), 4, (4,), (1,))
+        self.assertTrue(root.check(scope))
+        last.set_(storage, 0, (4,), (1,))
+        self.assertTrue(root.check(scope))
+        self.assertFalse(root.check({"x": values[:-1] + (values[0],)}))
+        self.assertTrue(root.check(scope))
+
     def test_disjoint_storage_partition_tiled_views(self):
         backing = torch.empty(16, 16)
         tiles = tuple(

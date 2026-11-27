@@ -1464,7 +1464,8 @@ def _is_noop_guard_type(guard_type: str) -> bool:
 # any type added to GuardBuilder after this list -- is KEPT unconditionally
 # until someone classifies it, so a new value-pinning guard can never become
 # silently droppable. Guards installed outside GuardBuilder (the root manager's
-# DuplicateInputs and StorageOverlap exprs, the dimension-marking lambda) never
+# AOTAutograd DuplicateInputs/StorageOverlap/StorageOverlapPartition exprs, the
+# dimension-marking lambda) never
 # reach the guard filter and are outside the policy as well.
 _INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset({"BUILTIN_MATCH"})
 

@@ -815,6 +815,27 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertEqual(compiled(x), x)
         self.assertEqual(counter.frame_count, 2)
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_caching_precompile_keeps_aotautograd_guard_roots(self):
+        # The guard filter drops every Dynamo guard on y, but AOTAutograd's
+        # StorageOverlapPartition guard still reads it, so y must stay in the
+        # saved scope.
+        def fn(x, y):
+            y.add_(1)
+            return x + y
+
+        opts = {"guard_filter_fn": torch.compiler.skip_all_guards_unsafe}
+        torch.compile(fn, backend="inductor", options=opts)(
+            torch.randn(4), torch.randn(4)
+        )
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        x, y = torch.randn(4), torch.zeros(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            out = torch.compile(fn, backend="inductor", options=opts)(x, y)
+        self.assertEqual(out, x + 1)
+        self.assertEqual(y, torch.ones(4))
+
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
         # stand-in for a dynamic-shape cuda capture, whose first meta value is a

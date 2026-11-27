@@ -6698,6 +6698,24 @@ class CheckFunctionManager:
             self.output_graph.aotautograd_guards if self.output_graph else []
         )
 
+        # serialize_guards keeps only the scope roots of the filtered guards,
+        # which doesn't include these, so save the roots they read as well.
+        if builder.save_guards:
+            for guard in aotautograd_guards:
+                if isinstance(guard, DuplicateInputs):
+                    sources = [guard.input_source_a, guard.input_source_b]
+                elif isinstance(guard, StorageOverlap):
+                    sources = guard.overlapping_sources + guard.non_overlapping_sources
+                elif isinstance(guard, StorageOverlapPartition):
+                    sources = guard.input_sources
+                else:
+                    continue
+                for source in sources:
+                    if name := get_local_source_name(source):
+                        self.additional_used_local_vars.add(name)
+                    if name := get_global_source_name(source):
+                        self.additional_used_global_vars.add(name)
+
         # TODO(anijain2305) - There is a duplicate logic in Dynamo to find
         # aliased input tensors. So most probably we don't need this here.
         # Revisit.
