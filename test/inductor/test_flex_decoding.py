@@ -1828,8 +1828,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @parametrize_device_dtype("dtypes")
     @common_utils.parametrize("partition_size", [64, 128, 256, 1024])
     def test_flash_decoding_partition_size(self, device, dtype, partition_size):
-        # PARTITION_SIZE is implemented on the CPU path only; keep the test in the
-        # accelerator class but skip it on every non-CPU device.
         if self.device_type != "cpu":
             self.skipTest("flash decoding partition size is a CPU-only path")
 
@@ -2574,7 +2572,6 @@ class TestFlexDecodingLargeKV(InductorTestCase):
         torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
 
-# Every device type is collected; @requires_capabilities decides per backend.
 instantiate_device_type_tests(TestFlexDecoding, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFlexDecodingLargeKV, globals(), allow_xpu=True)
 
