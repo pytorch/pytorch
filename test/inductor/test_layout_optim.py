@@ -45,10 +45,6 @@ class TestLayoutOptim(TestCase):
 
         import torch.distributed as dist
 
-        # Each instantiated device class runs its own setUpClass in the same
-        # process, so tear down a process group left by a previous device class
-        # first: a second init_process_group raises ValueError, not RuntimeError,
-        # so the retry loop below would not catch it.
         if dist.is_initialized():
             dist.destroy_process_group()
 
@@ -378,8 +374,6 @@ class TestLayoutOptim(TestCase):
         self.assertTrue(torch.allclose(ref, loss))
 
 
-# XPU is not instantiated (no allow_xpu=True): ccl doesn't currently work on the
-# XPU stack.
 instantiate_device_type_tests(TestLayoutOptim, globals(), except_for="cpu")
 
 
