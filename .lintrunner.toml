@@ -282,6 +282,8 @@ exclude_patterns = [
     'torch/headeronly/util/irange.h',
     'torch/headeronly/util/MathConstants.h',
     'torch/headeronly/util/overflows.h',
+    'torch/headeronly/native/cpu/zmath.h',
+    'torch/headeronly/native/Math.h',
 ]
 init_command = [
     'python3',
@@ -1086,6 +1088,8 @@ code = 'CODEOWNERS_GENERATED'
 include_patterns = [
     'CODEOWNERS',
     'OWNERSHIP.yaml',
+    '.github/label_to_label.yml',
+    'tools/linter/adapters/pytorch_labels.json',
     'scripts/codeowners/generate_codeowners.py',
 ]
 command = [

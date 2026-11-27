@@ -1601,23 +1601,24 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 class DistBucketizeTest(LocalDTensorTestBase):
     @with_comms
     def test_bucketize_partial_input(self):
-        # Bucketize is non-linear, so Partial("sum")/Partial("avg") inputs
-        # must be converted to Replicate. But bucketize is monotone, so
-        # Partial("max") and Partial("min") can propagate directly.
+        # Partial inputs are reduced before bucketize. Partial("sum")/("avg")
+        # because bucketize is non-linear, Partial("max")/("min") because it maps
+        # NaN to the last bucket, so applying it first turns a NaN held by one
+        # rank into a number that can lose the reduction (or win it on NCCL,
+        # whose all_reduce MAX/MIN ignores NaN).
         with LocalTensorMode(ranks=self.world_size):
             mesh = self.build_device_mesh()
             boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+            dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
             input_tensor = torch.tensor(
                 [[2.0, 4.0, 6.0, 8.0], [0.0, 1.0, 5.0, 9.0]],
                 device=self.device_type,
             )
 
-            # Non-linear reductions: must redistribute to Replicate
-            for reduce_op in ("sum", "avg"):
+            for reduce_op in ("sum", "avg", "max", "min"):
                 partial_input = DTensor.from_local(
                     input_tensor, mesh, [Partial(reduce_op)]
                 )
-                dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
                 result = torch.bucketize(partial_input, dist_boundaries)
 
                 self.assertTrue(
@@ -1629,25 +1630,15 @@ class DistBucketizeTest(LocalDTensorTestBase):
                 expected = torch.bucketize(global_input, boundaries)
                 self.assertEqual(result.to_local(), expected)
 
-            # Monotone reductions: output inherits the same partial type
-            for reduce_op in ("max", "min"):
-                partial_input = DTensor.from_local(
-                    input_tensor, mesh, [Partial(reduce_op)]
-                )
-                dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
+            rows = torch.tensor([[2.0, 4.0]], device=self.device_type).repeat(
+                self.world_size, 1
+            )
+            rows[0] = float("nan")
+            sharded = distribute_tensor(rows, mesh, [Shard(0)])
+            # Pending Partial("max"/"min") whose local value on rank r is rows[r]
+            for partial_input in (sharded.amax(0), sharded.amin(0)):
                 result = torch.bucketize(partial_input, dist_boundaries)
-
-                self.assertTrue(
-                    result.placements[0].is_partial(),
-                    lambda msg: f"{msg}\nExpected Partial output but got {result.placements[0]} "
-                    f"for Partial({reduce_op}) input",
-                )
-                self.assertEqual(
-                    result.placements[0].reduce_op,
-                    reduce_op,
-                    lambda msg: f"{msg}\nExpected Partial({reduce_op}) output but got {result.placements[0]}",
-                )
-                expected = torch.bucketize(input_tensor, boundaries)
+                expected = torch.bucketize(partial_input.full_tensor(), boundaries)
                 self.assertEqual(result.full_tensor(), expected)
 
     @with_comms

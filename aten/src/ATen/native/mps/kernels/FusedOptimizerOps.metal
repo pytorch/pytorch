@@ -112,8 +112,10 @@ inline void adam_math_amsgrad(
   grad = grad_;
 }
 
+// Without always_inline this gets outlined (a call per element), which makes
+// the half and bfloat Adam kernels 1.5x slower
 template <typename T, typename state_steps_t, ADAM_MODE adam_mode>
-inline void adam_math(
+inline __attribute__((always_inline)) void adam_math(
     device T& param,
     device T& grad,
     device T& exp_avg,

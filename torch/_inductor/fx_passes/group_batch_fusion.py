@@ -8,11 +8,13 @@ from typing import Any
 
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
+from torch._higher_order_ops.user_kernel_hop import is_user_kernel_functional_hop
 from torch._logging import trace_structured, warning_once
 from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.reinplace import _get_view_type, _is_view_op, _ViewType
+from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
@@ -572,6 +574,78 @@ class BatchLinearLHSFusion(BatchFusion):
                         pending.append(user)
         return False
 
+    @staticmethod
+    def _reaches_raw_storage_op(node: torch.fx.Node) -> bool:
+        raw_storage_ops = (
+            aten.as_strided.default,
+            aten.as_strided_.default,
+            aten.as_strided_copy.default,
+            aten.as_strided_scatter.default,
+            aten.resize.default,
+            aten.resize_as.default,
+        )
+        pending = [node]
+        seen = OrderedSet([node])
+        while pending:
+            cur = pending.pop()
+            multi_output_view = _get_view_type(cur.target) is _ViewType.MultiOutputView
+            for user in cur.users:
+                if user.target in raw_storage_ops:
+                    return True
+                if _is_view_op(user.target) or (
+                    multi_output_view and user.target is operator.getitem
+                ):
+                    if user not in seen:
+                        seen.add(user)
+                        pending.append(user)
+        return False
+
+    @staticmethod
+    def _consumes_multiple_aliases(node: torch.fx.Node) -> bool:
+        # Opaque consumers can observe that two inputs are aliases of the same
+        # projection, and auto_functionalized rebuilds a mutated view from the
+        # base with eager strides. Value-only aten ops and the graph output
+        # cannot observe aliasing, so keep fusing across those.
+        closure = OrderedSet([node])
+        pending = [node]
+        while pending:
+            cur = pending.pop()
+            multi_output_view = _get_view_type(cur.target) is _ViewType.MultiOutputView
+            for user in cur.users:
+                if _is_view_op(user.target) or (
+                    multi_output_view and user.target is operator.getitem
+                ):
+                    if user not in closure:
+                        closure.add(user)
+                        pending.append(user)
+        for cur in closure:
+            for user in cur.users:
+                if user in closure or user.op == "output":
+                    continue
+                target = user.target
+                writes_through_base = (
+                    is_user_kernel_functional_hop(target)
+                    or target is torch.ops.higher_order.auto_functionalized
+                    or target is torch.ops.higher_order.auto_functionalized_v2
+                )
+                if isinstance(target, torch._ops.OpOverload):
+                    if target.namespace == "aten":
+                        continue
+                elif isinstance(target, torch._ops.OpOverloadPacket):
+                    default = getattr(target, "default", None)
+                    if default is not None and default.namespace == "aten":
+                        continue
+                count = 0
+                for arg in pytree.arg_tree_leaves(*user.args, **user.kwargs):
+                    if isinstance(arg, torch.fx.Node) and arg in closure:
+                        count += 1
+                # These HOPs rebuild a mutated view from its base, so even one
+                # aliased input is unsafe. Read-only HOPs such as
+                # flex_attention read the slice with its real strides.
+                if count > 1 or (writes_through_base and count > 0):
+                    return True
+        return False
+
     def match(self, node: torch.fx.Node):
         devices = self.graph_search_options.get("devices")
         if devices is not None:
@@ -592,9 +666,15 @@ class BatchLinearLHSFusion(BatchFusion):
         # Replacing a mutated mm output with a split view can break autograd.
         if any(_is_mutable_node(user.target) for user in node.users):
             return None
-        # as_strided reinterprets the raw storage and would observe the wide
-        # GEMM row stride instead of the eager slice, so do not fuse across it.
-        if any(user.target is aten.as_strided.default for user in node.users):
+        # Raw-storage consumers reinterpret physical storage and would observe
+        # the wide GEMM row stride instead of the eager slice. Follow views so
+        # an aliased consumer such as t().as_strided() also blocks the fusion.
+        if self._reaches_raw_storage_op(node):
+            return None
+        # Aliases copied separately during lowering, or a mutated view rebuilt
+        # by auto_functionalized, would observe changed storage. Do not fuse
+        # across such consumers.
+        if self._consumes_multiple_aliases(node):
             return None
         weight_val = weight_m.meta["val"]  # type: ignore[union-attr]
         if not statically_known_true(weight_val.shape[1] > 0):
