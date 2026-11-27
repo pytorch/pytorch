@@ -38,9 +38,9 @@ from torch._inductor.codegen.common import (
 from torch._inductor.codegen.cpp_utils import device_to_aten
 from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
-    instantiate_parametrized_tests,
     parametrize,
     xfailIfS390X,
 )

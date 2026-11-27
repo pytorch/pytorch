@@ -42,9 +42,9 @@ from torch._dynamo import device_interface
 from torch._inductor import codegen, ir, metrics
 from torch._inductor.codegen import common
 from torch._inductor.codegen.common import (
-    IndentedBuffer,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
+    IndentedBuffer,
     register_backend_for_device,
     register_device_op_overrides,
 )
@@ -56,15 +56,11 @@ from torch.testing._internal.common_device_type import (
     skipIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
-    HardwareClassification,
 )
-from torch.testing._internal.inductor_utils import (
-    HAS_CPU,
-    HAS_TRITON,
-    TRITON_HAS_CPU,
-)
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON, TRITON_HAS_CPU
 from torch.utils._triton import has_triton_package
 
 
