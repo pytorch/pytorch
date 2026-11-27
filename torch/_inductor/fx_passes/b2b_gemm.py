@@ -13,6 +13,7 @@ from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
 from .. import config as inductor_config
+from ..autotune_process import use_pipelined_autotuning
 from ..codegen.common import BackendFeature, has_backend_feature
 from ..heuristics.template.triton import mm_allow_tf32
 from ..ir import (
@@ -40,7 +41,6 @@ from ..select_algorithm import (
     TritonTemplateCaller,
 )
 from ..utils import ceildiv, is_bf16x9_matmul, is_gpu
-from ..virtualized import V
 
 
 log = logging.getLogger(__name__)
@@ -118,7 +118,6 @@ b2b_gemm_left_template = TritonTemplate(
             b = tl.load(b_ptrs, mask=b_mask, other=0.0)  # BLOCK_SIZE_N * BLOCK_SIZE_O
             if not XPU_NATIVE_DOT:
                 a = a.to(tl.float32)
-            if not XPU_NATIVE_DOT:
                 b = b.to(tl.float32)
             acc_ab += tl.dot(a, b, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_INNER)
             offs_n += BLOCK_SIZE_N
@@ -128,9 +127,9 @@ b2b_gemm_left_template = TritonTemplate(
             output_name="post_subgraph_acc_ab",
             inner_mm="acc_ab"
         ) | indent_except_first(2) }}
-        # fp16 keeps native operands so tl.dot can use the matrix units; bf16
-        # and fp32 keep fp32 because casting the intermediate to bf16 loses too
-        # much precision.
+        # Only XPU (XPU_NATIVE_DOT) keeps fp16 native operands so tl.dot can use
+        # the matrix units; bf16 and other devices use fp32 because casting the
+        # intermediate to bf16 loses too much precision.
         if c.dtype == tl.float16:
             acc += tl.dot(post_subgraph_acc_ab.to(tl.float16), c, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
         else:
@@ -209,7 +208,6 @@ b2b_gemm_right_template = TritonTemplate(
             c = tl.load(c_ptrs, mask=c_mask, other=0.0)  # BLOCK_SIZE_O * BLOCK_SIZE_P
             if not XPU_NATIVE_DOT:
                 b = b.to(tl.float32)
-            if not XPU_NATIVE_DOT:
                 c = c.to(tl.float32)
             acc_bc += tl.dot(b, c, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_INNER)
             offs_o += BLOCK_SIZE_O
@@ -219,7 +217,7 @@ b2b_gemm_right_template = TritonTemplate(
             output_name="post_subgraph_acc_bc",
             inner_mm="acc_bc"
         ) | indent_except_first(2) }}
-        # Same fp16 native-operand choice as the left-associative template.
+        # Same XPU fp16 native-operand choice as the left-associative template.
         if a.dtype == tl.float16:
             acc += tl.dot(a, post_subgraph_acc_bc.to(tl.float16), out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
         else:
@@ -610,9 +608,9 @@ def tuned_b2b_gemm(
 ) -> torch._inductor.ir.TensorBox:
     """Choose B2B GEMM candidates and autotune the fused template.
 
-    On XPU with 16-bit inputs the fused template and the unoptimized two-kernel
-    choice are not ranked correctly by the autotuner's kernel timing, so only the
-    kind that wins for this serial N*O reduction is built.
+    XPU 16-bit inputs load native operands. When the fused-selection policy is
+    enabled (threshold >= 0), only fused candidates are built, with the
+    unoptimized choice as a fallback; otherwise both choices are autotuned.
     """
     # call .realize() to get rid of Pointwise
     A.realize()
@@ -643,56 +641,39 @@ def tuned_b2b_gemm(
     )
     # Only XPU uses native 16-bit operands; other devices keep the fp32 upcast.
     native_dot = device_type == "xpu" and is_16bit
-    # On XPU the fused template (one kernel) and the unoptimized choice (two
-    # kernels) rank differently end-to-end than the autotuner's kernel timing
-    # suggests: the fused kernel wins while the serial N*O reduction is small and
-    # loses once it is large because that reduction runs inside a single program.
-    # Build only the winning kind on XPU; a negative threshold disables this.
-    force_fused = force_unoptimized = False
-    max_n_o = inductor_config.xpu_b2b_gemm_fused_max_n_o
-    if native_dot and max_n_o >= 0:
-        n_o_hint = V.graph.sizevars.optimization_hint(N * O)
-        if n_o_hint <= max_n_o:
-            force_fused = True
-        else:
-            force_unoptimized = True
-        log.debug(
-            "b2b_gemm: XPU N*O hint=%s %s fused threshold=%s; fused=%s unoptimized=%s",
-            n_o_hint,
-            "<=" if force_fused else ">",
-            max_n_o,
-            force_fused,
-            force_unoptimized,
-        )
+    # is_b2b_gemm_good_on keeps XPU 16-bit shapes below the N*O threshold, where
+    # the fused kernel wins end-to-end, so build only fused candidates and skip
+    # the autotune mis-ranking. A negative threshold disables the policy.
+    fused_only = native_dot and inductor_config.xpu_b2b_gemm_fused_max_n_o >= 0
 
-    if not force_unoptimized:
-        for config in b2b_gemm_configs:
-            if is_left_assoc:
-                b2b_gemm_left_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(A, B, C),
-                    layout=layout,
-                    subgraphs=[subgraph_buffer],
-                    ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
-                    ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
-                    XPU_NATIVE_DOT=native_dot,
-                    **config,
-                )
-            else:
-                b2b_gemm_right_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(A, B, C),
-                    layout=layout,
-                    subgraphs=[subgraph_buffer],
-                    ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
-                    ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
-                    XPU_NATIVE_DOT=native_dot,
-                    **config,
-                )
-    if force_fused:
-        # Fall back to the two-kernel choice if every fused candidate fails.
-        # Force eager selection so the failure surfaces here rather than in a
-        # deferred MultiTemplateBuffer under max-autotune/benchmark fusion.
+    for config in b2b_gemm_configs:
+        if is_left_assoc:
+            b2b_gemm_left_template.maybe_append_choice(
+                choices,
+                input_nodes=(A, B, C),
+                layout=layout,
+                subgraphs=[subgraph_buffer],
+                ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
+                ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
+                XPU_NATIVE_DOT=native_dot,
+                **config,
+            )
+        else:
+            b2b_gemm_right_template.maybe_append_choice(
+                choices,
+                input_nodes=(A, B, C),
+                layout=layout,
+                subgraphs=[subgraph_buffer],
+                ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
+                ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
+                XPU_NATIVE_DOT=native_dot,
+                **config,
+            )
+    # Fall back to the two-kernel choice if every fused candidate fails. Force
+    # eager selection so the failure surfaces here rather than in a deferred
+    # MultiTemplateBuffer. Pipelined autotuning cannot select eagerly, so there
+    # keep the unoptimized choice in the candidate set instead.
+    if fused_only and not use_pipelined_autotuning():
         try:
             node, _ = autotune_select_algorithm(
                 "b2b_gemm",
