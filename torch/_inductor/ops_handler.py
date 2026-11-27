@@ -368,6 +368,12 @@ class OpsHandler(Generic[T]):
     def maximum(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 
+    def fmin(self, x0: T, x1: T) -> T:
+        raise NotImplementedError
+
+    def fmax(self, x0: T, x1: T) -> T:
+        raise NotImplementedError
+
     def fmaximum(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 
