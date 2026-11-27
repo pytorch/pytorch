@@ -1163,27 +1163,30 @@ def _maybe_record_pointwise_barrier(
     if not isinstance(func, torch._ops.OpOverload):
         return
 
-    if node is None:
-        node = next(iter(reversed(proxy_mode.tracer.graph.nodes)))
+    producer: fx.Node = (
+        node
+        if node is not None
+        else next(iter(reversed(proxy_mode.tracer.graph.nodes)))
+    )
     low_pr_fp = (torch.bfloat16, torch.float16)
 
     while (
-        node.op == "call_function"
-        and node.target is operator.getitem
-        and isinstance(node.args[0], fx.Node)
-        and isinstance(node.args[0].meta.get("val"), (list, tuple))
+        producer.op == "call_function"
+        and producer.target is operator.getitem
+        and isinstance(producer.args[0], fx.Node)
+        and isinstance(producer.args[0].meta.get("val"), (list, tuple))
     ):
-        node = node.args[0]
+        producer = producer.args[0]
 
     if pytree.tree_any_only(
-        Tensor, lambda t: t.dtype in low_pr_fp, node.meta.get("val")
+        Tensor, lambda t: t.dtype in low_pr_fp, producer.meta.get("val")
     ) or any(
         pytree.tree_any_only(
             Tensor, lambda t: t.dtype in low_pr_fp, input_node.meta.get("val")
         )
-        for input_node in node.all_input_nodes
+        for input_node in producer.all_input_nodes
     ):
-        node.meta["low_precision_pointwise_barrier"] = True
+        producer.meta["low_precision_pointwise_barrier"] = True
 
 
 def _fetch_proxies_and_all_constant_flag(
