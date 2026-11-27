@@ -340,6 +340,13 @@ const auto zeta_string = jiterator_stringify(
       if (x != floor(x)) {
         return NAN;
       }
+      const T even_threshold = sizeof(T) == sizeof(float)
+          ? T{16777216.0}
+          : T{9007199254740992.0};
+      // Even exponents give positive terms, and a near-zero term overflows.
+      if (isfinite(x) && x >= even_threshold) {
+        return POS_INFINITY;
+      }
     }
 
     s = pow(q, -x);

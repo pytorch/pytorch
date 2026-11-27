@@ -287,6 +287,16 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) {
     if (x != std::floor(x)) {
       return std::numeric_limits<scalar_t>::quiet_NaN();
     }
+    if constexpr (
+        std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>) {
+      constexpr scalar_t even_threshold = std::is_same_v<scalar_t, float>
+          ? scalar_t{16777216.0}
+          : scalar_t{9007199254740992.0};
+      // Even exponents give positive terms, and a near-zero term overflows.
+      if (std::isfinite(x) && x >= even_threshold) {
+        return std::numeric_limits<scalar_t>::infinity();
+      }
+    }
   }
 
   s = std::pow(q, -x);
