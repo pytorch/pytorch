@@ -778,6 +778,26 @@ class XpuInterface(DeviceInterface):
         if "intel" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'intel' backend")
 
+    @staticmethod
+    def get_mempool_type() -> type:
+        return torch.xpu.MemPool
+
+    @staticmethod
+    def begin_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        torch._C._xpu_beginAllocateCurrentThreadToPool(device_index, mempool_id)
+
+    @staticmethod
+    def end_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        torch._C._xpu_endAllocateToPool(device_index, mempool_id)
+
+    @staticmethod
+    def release_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+        torch._C._xpu_releasePool(device_index, mempool_id)
+
 
 @dataclass
 class CpuDeviceProperties:
