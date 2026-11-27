@@ -1,0 +1,28 @@
+{% if FINAL %}
+{{def_kernel("X", "P", "RM", "RV")}}
+{% else %}
+{{def_kernel("X")}}
+{% endif %}
+    count = tl.full((), {{size("X", 0, runtime=True)}}, tl.int32)
+    {% for dimension in range(2, RANK) %}
+    count = count * {{size("X", dimension, runtime=True)}}
+    {% endfor %}
+    lane = tl.arange(0, 512 * VEC)
+    channel_tile = tl.program_id(0) if FINAL else tl.program_id(1)
+    channel = (channel_tile * TILE + lane % TILE).to(INDEX_DTYPE)
+    channel_index = channel[None, :]
+    row = tl.arange(0, 4).to(INDEX_DTYPE)[:, None]
+{% if FINAL %}
+    mean, invstd, new_mean, new_var = triton_helpers.cuda_cudnn_bn_nhwc_finish(
+        P, RM, RV, channel_tile, count, C, TILE, VEC, PARTS, EPS, MOMENTUM, INDEX_DTYPE,
+    )
+    value = tl.where(row == 0, mean[None, :], tl.where(row == 1, invstd[None, :], tl.where(row == 2, new_mean[None, :], new_var[None, :])))
+    {{store_output(("row", "channel_index"), "value", "(lane[None, :] // TILE == 0) & (channel_index < C)", val_shape=("4", "512 * VEC"))}}
+{% else %}
+    part = tl.program_id(0).to(INDEX_DTYPE)
+    total, variance, num = triton_helpers.cuda_cudnn_bn_nhwc_partial(
+        X, part, channel_tile, count, C, TILE, VEC, SAMPLES, PARTS,
+    )
+    value = tl.where(row == 0, total[None, :], tl.where(row == 1, variance[None, :], num))
+    {{store_output(("row", "part", "channel_index"), "value", "(row < 3) & (lane[None, :] // TILE == 0) & (channel_index < C)", val_shape=("4", "512 * VEC"))}}
+{% endif %}
