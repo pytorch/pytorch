@@ -190,9 +190,6 @@ class ConvMultiFunctionalBN(torch.nn.Module):
 
 class OptimizeForInferenceTemplate(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
-    # instantiate_device_type_tests ports class attributes onto the generated
-    # subclasses; without these, CUDATestBase turns on the non-default-stream
-    # and memory-leak wrappers, which these tests did not use before.
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
 
