@@ -198,6 +198,26 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
+    def get_mempool_type() -> type:
+        raise NotImplementedError
+
+    @staticmethod
+    def begin_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        raise NotImplementedError
+
+    @staticmethod
+    def end_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        raise NotImplementedError
+
+    @staticmethod
+    def release_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+        raise NotImplementedError
+
+    @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         """
         Returns True if the device has Triton support, False otherwise, even if
@@ -516,6 +536,26 @@ class CudaInterface(DeviceInterface):
         # Keep Bert-style patterns on their original math path; generic SDPA can
         # pick fused backends whose scaling/dropout numerics fail tight checks.
         return torch.version.hip is None
+
+    @staticmethod
+    def get_mempool_type() -> type:
+        return torch.cuda.MemPool
+
+    @staticmethod
+    def begin_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        torch.cuda.memory._cuda_beginAllocateCurrentThreadToPool(device_index, mempool_id)
+
+    @staticmethod
+    def end_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        torch.cuda.memory._cuda_endAllocateToPool(device_index, mempool_id)
+
+    @staticmethod
+    def release_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+        torch.cuda.memory._cuda_releasePool(device_index, mempool_id)
 
 
 get_mtia_stream: Callable[[int], int] | None
