@@ -80,18 +80,16 @@ def _multi_tensor_zeropower_via_newtonschulz(
     """
     Multi-tensor version of :func:`_single_tensor_zeropower_via_newtonschulz`.
 
-    The cast and normalization are fused across tensors, but the Newton-Schulz
-    iterations still run in a for loop: they are built on matmuls (``mm`` /
-    ``addmm``), which have no ``_foreach_*`` counterpart.
+    Some operations (e.g. the norm computation) are fused across tensors, but the
+    Newton-Schulz iterations run in a for loop: they are built on matmuls
+    (``mm`` / ``addmm``), which have no ``_foreach_*`` counterpart.
 
     To keep the peak memory low, ``updates`` is emptied once it has been cast, and
     each intermediate is released as soon as it is consumed.
     """
-    ortho_updates = [torch.empty_like(u, dtype=torch.bfloat16) for u in updates]
-    torch._foreach_copy_(ortho_updates, updates)
+    ortho_updates = [u.to(torch.bfloat16, copy=True) for u in updates]
     updates.clear()
-    norms = torch._foreach_norm(ortho_updates)
-    torch._foreach_clamp_min_(norms, eps)
+    norms = torch._foreach_clamp_min(torch._foreach_norm(ortho_updates), eps)
     torch._foreach_div_(ortho_updates, norms)
     del norms
     for i, u in enumerate(ortho_updates):
@@ -432,9 +430,8 @@ def _multi_tensor_muon(
         if u.ndim != 2:
             raise ValueError("Muon update must be a 2D matrix")
 
-    # Phase 2: Newton-Schulz. The cast and normalization are fused across
-    # tensors; the iterations themselves run per tensor since standard NS has
-    # no natural batching.
+    # Phase 2: Newton-Schulz. Some operations are fused across tensors; the
+    # iterations run per tensor since standard NS has no natural batching.
     updates = _multi_tensor_zeropower_via_newtonschulz(
         updates, ns_coefficients, ns_steps, eps
     )
