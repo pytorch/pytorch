@@ -221,12 +221,11 @@ def pow_integer(base, exponent):
 
 
 @triton.jit
-def _aten_bessel_poly(t, coefficients: tl.constexpr):
-    # Cephes seeds each Horner chain with 0 and folds coefficients[0] in with an
-    # extra fma; that first step is exact for the finite t of the branch it belongs
-    # to, so start from the constant instead.
-    result = tl.full(t.shape, coefficients[0], t.dtype)
-    for i in tl.static_range(1, len(coefficients)):
+def _aten_bessel_poly(t, coefficients: tl.constexpr, monic: tl.constexpr = False):
+    # Native numerators start at zero; monic denominators start at one.
+    # Fold the first numerator coefficient into the initial value.
+    result = tl.full(t.shape, 1.0 if monic else coefficients[0], t.dtype)
+    for i in tl.static_range(0 if monic else 1, len(coefficients)):
         result = tl.fma(result, t, tl.full(t.shape, coefficients[i], t.dtype))
     return result
 
@@ -298,7 +297,7 @@ def aten_bessel_j0(x):
         (xx - tl.full(x.shape, 5.78318596294678452118, x.dtype))
         * (xx - tl.full(x.shape, 3.04712623436620863991e01, x.dtype))
         * _aten_bessel_poly(xx, rp),
-        _aten_bessel_poly(xx, rq),
+        _aten_bessel_poly(xx, rq, True),
     )
     small = tl.where(
         ax < tl.full(x.shape, 0.00001, x.dtype), tl.fma(xx, -0.25, 1.0), small
@@ -310,7 +309,7 @@ def aten_bessel_j0(x):
         _aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)
     ) * libdevice.cos(w)
     b = libdevice.div_rn(tl.full(x.shape, 5.0, x.dtype), ax) * libdevice.div_rn(
-        _aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq)
+        _aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq, True)
     )
     # ptxas contracts eager's `a - b * sin(w)` into a single FFMA; strict numerics
     # compiles Triton with enable_fp_fusion=False, so spell the fma out.
@@ -386,7 +385,7 @@ def aten_bessel_j1(x):
     xx = ax * ax
 
     small = (
-        libdevice.div_rn(_aten_bessel_poly(xx, rp), _aten_bessel_poly(xx, rq))
+        libdevice.div_rn(_aten_bessel_poly(xx, rp), _aten_bessel_poly(xx, rq, True))
         * ax
         * (xx - tl.full(x.shape, 1.46819706421238932572e01, x.dtype))
         * (xx - tl.full(x.shape, 4.92184563216946036703e01, x.dtype))
@@ -399,7 +398,7 @@ def aten_bessel_j1(x):
     a = libdevice.div_rn(
         _aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)
     ) * libdevice.cos(w)
-    b = u * libdevice.div_rn(_aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq))
+    b = u * libdevice.div_rn(_aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq, True))
     large = libdevice.div_rn(
         tl.fma(-b, libdevice.sin(w), a)
         * tl.full(x.shape, 0.797884560802865355879892119868763737, x.dtype),
@@ -495,7 +494,7 @@ def aten_bessel_y0(x):
         libdevice.log(x)
         * tl.full(x.shape, 0.636619772367581343075535053490057448, x.dtype),
         aten_bessel_j0(x),
-        libdevice.div_rn(_aten_bessel_poly(xx, yp), _aten_bessel_poly(xx, yq)),
+        libdevice.div_rn(_aten_bessel_poly(xx, yp), _aten_bessel_poly(xx, yq, True)),
     )
     small = tl.where(x == 0.0, float("-inf"), small)
 
@@ -505,7 +504,7 @@ def aten_bessel_y0(x):
         _aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)
     ) * libdevice.sin(w)
     b = libdevice.div_rn(tl.full(x.shape, 5.0, x.dtype), x) * libdevice.div_rn(
-        _aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq)
+        _aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq, True)
     )
     large = libdevice.div_rn(
         tl.fma(b, libdevice.cos(w), a)
@@ -583,7 +582,7 @@ def aten_bessel_y1(x):
     # encoding; FP64 needs the explicit conversion of the float NAN macro.
     small = tl.fma(
         x,
-        libdevice.div_rn(_aten_bessel_poly(xx, yp), _aten_bessel_poly(xx, yq)),
+        libdevice.div_rn(_aten_bessel_poly(xx, yp), _aten_bessel_poly(xx, yq, True)),
         tl.fma(
             libdevice.log(x),
             aten_bessel_j1(x),
@@ -602,7 +601,7 @@ def aten_bessel_y1(x):
     a = libdevice.div_rn(
         _aten_bessel_poly(t, pp), _aten_bessel_poly(t, pq)
     ) * libdevice.sin(w)
-    b = u * libdevice.div_rn(_aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq))
+    b = u * libdevice.div_rn(_aten_bessel_poly(t, qp), _aten_bessel_poly(t, qq, True))
     large = libdevice.div_rn(
         tl.fma(b, libdevice.cos(w), a)
         * tl.full(x.shape, 0.797884560802865355879892119868763737, x.dtype),
@@ -2315,6 +2314,7 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 @triton.jit
 def cuda_mul_full_block(index, numel):
     # TensorIterator recursively halves iterations whose byte offsets exceed int32.
+    index = index.to(tl.int64)
     start = index * 0
     size = start + numel
     while tl.max(tl.reshape(size, (size.numel,))) > 268435456:
@@ -2323,32 +2323,9 @@ def cuda_mul_full_block(index, numel):
         right = active & (index - start >= half)
         start = tl.where(right, start + half, start)
         size = tl.where(active, tl.where(right, size - half, half), size)
-    # CUDA's vectorized FP64 MulFunctor uses 128 threads and 8 elements per thread.
+    # CUDA's vectorized FP64 pointwise loop uses 128 threads and 8 elements per thread.
     # An odd chunk start also misaligns the fresh native output pointer.
     return (index - start < size // 1024 * 1024) & (start % 2 == 0)
-
-
-@triton.jit
-def eager_unary_nan(x, result):
-    # CUDA abs, neg and frexp canonicalize NaNs except float64, which only quiets them.
-    if result.dtype == tl.float64:
-        bits = x.to(tl.int64, bitcast=True)
-        is_nan = (bits & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000
-        result = tl.where(
-            is_nan, bits | 0x0008000000000000, result.to(tl.int64, bitcast=True)
-        ).to(tl.float64, bitcast=True)
-    elif (
-        result.dtype == tl.float32
-        or result.dtype == tl.float16
-        or result.dtype == tl.bfloat16
-    ):
-        width: tl.constexpr = result.dtype.primitive_bitwidth
-        idtype = tl.core.get_int_dtype(bitwidth=width, signed=True)
-        nan_bits = tl.full((), (1 << (width - 1)) - 1, idtype)
-        result = tl.where(x != x, nan_bits, result.to(idtype, bitcast=True)).to(
-            result.dtype, bitcast=True
-        )
-    return result
 
 
 @triton.jit
@@ -2357,7 +2334,7 @@ def eager_neg(x):
     idtype = tl.core.get_int_dtype(bitwidth=width, signed=True)
     sign = tl.full((), -1 << (width - 1), idtype)
     result = (x.to(idtype, bitcast=True) ^ sign).to(x.dtype, bitcast=True)
-    return eager_unary_nan(x, result)
+    return result
 
 
 @triton.jit
@@ -2381,7 +2358,7 @@ def eager_fmod(a, b):
         # Binary32 fmod results are exactly representable in binary64. Avoid
         # libdevice's float32 implementation, which flushes subnormals.
         result = libdevice.fmod(a.to(tl.float64), b.to(tl.float64)).to(tl.float32)
-        return eager_unary_nan(result, result)
+        return result
 
 
 @triton.jit
@@ -2690,3 +2667,1233 @@ def inline_asm_unpack(x, orig, pack: tl.constexpr):
     for _ in tl.static_range(n_pad):
         result, _ = tl.split(tl.reshape(result, (result.shape[0] // 2, 2)))
     return tl.reshape(result, orig.shape)
+
+
+@triton.jit
+def cuda_masked_sum_combine(a, b):
+    return a + b
+
+
+@triton.jit
+def cuda_native_sum_runtime_metadata(
+    SHAPE, STRIDES, ORDER: tl.constexpr, RDIMS: tl.constexpr
+):
+    r"""Sort reduction dimensions and select CUDA vectorization from runtime metadata."""
+    RANK: tl.constexpr = len(SHAPE)
+    WIDTH: tl.constexpr = triton.next_power_of_2(RANK)
+    lane = tl.arange(0, WIDTH)
+    shape = tl.full((WIDTH,), 1, tl.int64)
+    stride = tl.full((WIDTH,), 0, tl.int64)
+    permutation = tl.full((WIDTH,), 0, tl.int32)
+    for d in tl.static_range(RANK):
+        shape = tl.where(lane == d, SHAPE[d], shape)
+        stride = tl.where(lane == d, STRIDES[d], stride)
+        permutation = tl.where(lane == d, ORDER[d], permutation)
+    for i in tl.static_range(1, RDIMS):
+        right_position = tl.full((), i, tl.int32)
+        active = tl.full((), True, tl.int1)
+        for j in tl.static_range(i - 1, -1, -1):
+            left = tl.gather(permutation, tl.full((1,), j, tl.int32), 0).reshape(())
+            right = tl.gather(permutation, right_position[None], 0).reshape(())
+            a = tl.gather(stride, left[None], 0).reshape(())
+            b = tl.gather(stride, right[None], 0).reshape(())
+            sa = tl.gather(shape, left[None], 0).reshape(())
+            sb = tl.gather(shape, right[None], 0).reshape(())
+            comparable = (a != 0) & (b != 0)
+            swap = active & comparable & ((a > b) | ((a == b) & (sa > sb)))
+            permutation = tl.where(
+                swap & (lane == j),
+                right,
+                tl.where(swap & (lane == right_position), left, permutation),
+            )
+            right_position = tl.where(swap, j, right_position)
+            active = active & ~(comparable & (a < b))
+    first_red_stride = tl.full((), 0, tl.int64)
+    expected = tl.full((), 0, tl.int64)
+    started = tl.full((), False, tl.int1)
+    dense = tl.full((), True, tl.int1)
+    aligned2 = tl.full((), True, tl.int1)
+    aligned4 = tl.full((), True, tl.int1)
+    for d in tl.static_range(RDIMS):
+        dim = tl.gather(permutation, tl.full((1,), d, tl.int32), 0).reshape(())
+        size = tl.gather(shape, dim[None], 0).reshape(())
+        step = tl.gather(stride, dim[None], 0).reshape(())
+        significant = size > 1
+        dense = dense & (~significant | ~started | (step == expected))
+        first_red_stride = tl.where(significant & ~started, step, first_red_stride)
+        expected = tl.where(
+            significant, tl.where(started, expected, step) * size, expected
+        )
+        started = started | significant
+        aligned2 = aligned2 & (~significant | (step % 2 == 0))
+        aligned4 = aligned4 & (~significant | (step % 4 == 0))
+    first_out_stride = tl.full((), 0, tl.int64)
+    group_size = tl.full((), 1, tl.int64)
+    expected = tl.full((), 0, tl.int64)
+    started = tl.full((), False, tl.int1)
+    group_open = tl.full((), True, tl.int1)
+    for d in tl.static_range(RDIMS, RANK):
+        dim = tl.gather(permutation, tl.full((1,), d, tl.int32), 0).reshape(())
+        size = tl.gather(shape, dim[None], 0).reshape(())
+        step = tl.gather(stride, dim[None], 0).reshape(())
+        significant = size > 1
+        first = significant & ~started
+        member = first | (significant & started & group_open & (step == expected))
+        first_out_stride = tl.where(first, step, first_out_stride)
+        group_size = tl.where(member, group_size * size, group_size)
+        expected = tl.where(member, step * size, expected)
+        group_open = group_open & (~significant | member)
+        started = started | significant
+        aligned2 = aligned2 & (~significant | member | (step % 2 == 0))
+        aligned4 = aligned4 & (~significant | member | (step % 4 == 0))
+    fast = ~started | (first_red_stride < first_out_stride)
+    vi = fast & dense & (first_red_stride == 1)
+    ov2 = (first_out_stride == 1) & aligned2 & (group_size % 2 == 0)
+    ov4 = (first_out_stride == 1) & aligned4 & (group_size % 4 == 0)
+    return permutation, fast, vi, ov2, ov4
+
+
+@triton.jit
+def cuda_native_sum_runtime_offset(
+    index, SHAPE, STRIDES, PERMUTATION, BEGIN: tl.constexpr, END: tl.constexpr
+):
+    RANK: tl.constexpr = len(SHAPE)
+    WIDTH: tl.constexpr = triton.next_power_of_2(RANK)
+    lane = tl.arange(0, WIDTH)
+    shape = tl.full((WIDTH,), 1, tl.int64)
+    stride = tl.full((WIDTH,), 0, tl.int64)
+    for d in tl.static_range(RANK):
+        shape = tl.where(lane == d, SHAPE[d], shape)
+        stride = tl.where(lane == d, STRIDES[d], stride)
+    result = index.to(tl.int64) * 0
+    remainder = index.to(tl.int64)
+    for d in tl.static_range(BEGIN, END):
+        dim = tl.gather(PERMUTATION, tl.full((1,), d, tl.int32), 0).reshape(())
+        size = tl.gather(shape, dim[None], 0).reshape(())
+        step = tl.gather(stride, dim[None], 0).reshape(())
+        result += remainder % size * step
+        remainder //= size
+    return result
+
+
+@triton.jit
+def cuda_native_sum_vector_get(values, index):
+    slots = tl.arange(0, values.shape[0])
+    return tl.sum(tl.where(slots == index, values, 0), 0)
+
+
+@triton.jit
+def cuda_native_sum_coalesced_metadata(
+    SHAPE, ISTRIDES, ORDER: tl.constexpr, RDIMS: tl.constexpr
+):
+    permutation, _, _, _, _ = cuda_native_sum_runtime_metadata(
+        SHAPE, ISTRIDES, ORDER, RDIMS
+    )
+    slots = tl.arange(0, permutation.shape[0])
+    source_shape = tl.full((permutation.shape[0],), 1, tl.int64)
+    source_input = tl.full((permutation.shape[0],), 0, tl.int64)
+    source_output = tl.full((permutation.shape[0],), 0, tl.int64)
+    output_stride = tl.full((), 1, tl.int64)
+    for d in tl.static_range(len(SHAPE) - 1, -1, -1):
+        source_shape = tl.where(slots == d, SHAPE[d], source_shape)
+        source_input = tl.where(slots == d, ISTRIDES[d], source_input)
+        is_reduced = False
+        for r in tl.static_range(RDIMS):
+            is_reduced = is_reduced or d == ORDER[r]
+        if not is_reduced:
+            source_output = tl.where(slots == d, output_stride, source_output)
+            output_stride *= SHAPE[d]
+    shape = tl.full((permutation.shape[0],), 1, tl.int64)
+    inputs = tl.full((permutation.shape[0],), 0, tl.int64)
+    outputs = tl.full((permutation.shape[0],), 0, tl.int64)
+    ndim = tl.full((), 0, tl.int32)
+    for d in tl.static_range(len(SHAPE)):
+        original = cuda_native_sum_vector_get(permutation, d)
+        size = cuda_native_sum_vector_get(source_shape, original)
+        istride = cuda_native_sum_vector_get(source_input, original)
+        ostride = cuda_native_sum_vector_get(source_output, original)
+        previous = tl.maximum(ndim - 1, 0)
+        last_size = cuda_native_sum_vector_get(shape, previous)
+        last_input = cuda_native_sum_vector_get(inputs, previous)
+        last_output = cuda_native_sum_vector_get(outputs, previous)
+        combine = ndim > 0 and (
+            last_size == 1
+            or size == 1
+            or (
+                last_size * last_input == istride and last_size * last_output == ostride
+            )
+        )
+        slot = tl.where(combine, ndim - 1, ndim)
+        shape = tl.where(
+            slots == slot, tl.where(combine, last_size * size, size), shape
+        )
+        inputs = tl.where(
+            slots == slot,
+            tl.where(combine and last_size != 1, last_input, istride),
+            inputs,
+        )
+        outputs = tl.where(
+            slots == slot,
+            tl.where(combine and last_size != 1, last_output, ostride),
+            outputs,
+        )
+        ndim += tl.where(combine, 0, 1)
+    reduced = tl.sum(((slots < ndim) & (outputs == 0)).to(tl.int32), 0)
+    return shape, inputs, outputs, ndim, reduced
+
+
+@triton.jit
+def cuda_native_sum_split_leaf(
+    SHAPE,
+    ISTRIDES,
+    OSTRIDES,
+    NDIM,
+    INPUT_BYTES: tl.constexpr,
+    OUTPUT_BYTES: tl.constexpr,
+    target,
+):
+    slots = tl.arange(0, SHAPE.shape[0])
+    # A signed 64-bit element count needs at most 126 nested odd-sized halvings.
+    rows = tl.arange(0, 128)
+    stack_shape = tl.full((128, SHAPE.shape[0]), 1, tl.int64)
+    stack_start = tl.full((128, SHAPE.shape[0]), 0, tl.int64)
+    stack_accumulate = tl.full((128,), False, tl.int1)
+    size = SHAPE
+    starts = tl.full((SHAPE.shape[0],), 0, tl.int64)
+    accumulate = False
+    depth = tl.full((), 0, tl.int32)
+    leaf = tl.full((), 0, tl.int64)
+    found = False
+    available = True
+    while available and not found:
+        fits = (
+            prod(size, 0) <= 2147483647
+            and 1 + tl.sum((size - 1) * ISTRIDES * INPUT_BYTES, 0) <= 2147483647
+            and 1 + tl.sum((size - 1) * OSTRIDES * OUTPUT_BYTES, 0) <= 2147483647
+        )
+        if fits:
+            found = leaf == target
+            if not found:
+                leaf += 1
+                if depth > 0:
+                    depth -= 1
+                    size = tl.sum(tl.where(rows[:, None] == depth, stack_shape, 0), 0)
+                    starts = tl.sum(tl.where(rows[:, None] == depth, stack_start, 0), 0)
+                    accumulate = (
+                        tl.sum(
+                            tl.where(rows == depth, stack_accumulate.to(tl.int32), 0), 0
+                        )
+                        != 0
+                    )
+                else:
+                    available = False
+        else:
+            extents = (size - 1) * tl.maximum(
+                tl.abs(ISTRIDES) * INPUT_BYTES, tl.abs(OSTRIDES) * OUTPUT_BYTES
+            )
+            maximum = tl.max(tl.where(slots < NDIM, extents, -1), 0)
+            dim = tl.max(tl.where((slots < NDIM) & (extents == maximum), slots, -1), 0)
+            count = cuda_native_sum_vector_get(size, dim)
+            first = count // 2
+            right_size = tl.where(slots == dim, count - first, size)
+            right_start = starts + tl.where(slots == dim, first, 0)
+            reduced = cuda_native_sum_vector_get(OSTRIDES, dim) == 0
+            stack_shape = tl.where(
+                rows[:, None] == depth, right_size[None, :], stack_shape
+            )
+            stack_start = tl.where(
+                rows[:, None] == depth, right_start[None, :], stack_start
+            )
+            stack_accumulate = tl.where(
+                rows == depth, accumulate or reduced, stack_accumulate
+            )
+            depth += 1
+            size = tl.where(slots == dim, first, size)
+    return size, starts, accumulate, found
+
+
+@triton.jit
+def cuda_native_sum_offset(
+    index,
+    SHAPE,
+    STRIDES,
+    BEGIN,
+    END,
+    PERMUTATION=None,
+    PACKED: tl.constexpr = False,
+):
+    if PACKED:
+        result = index.to(tl.int64) * 0
+        remainder = index.to(tl.int64)
+        for d in tl.static_range(SHAPE.shape[0]):
+            if d >= BEGIN and d < END:
+                size = cuda_native_sum_vector_get(SHAPE, d)
+                stride = cuda_native_sum_vector_get(STRIDES, d)
+                result += remainder % size * stride
+                remainder //= size
+        return result
+    else:
+        if PERMUTATION is not None:
+            return cuda_native_sum_runtime_offset(
+                index, SHAPE, STRIDES, PERMUTATION, BEGIN, END
+            )
+        if END - BEGIN == 1:
+            return index.to(tl.int64) * STRIDES[BEGIN]
+        result = index.to(tl.int64) * 0
+        remainder = index.to(tl.int64)
+        for d in tl.static_range(BEGIN, END):
+            result += remainder % SHAPE[d] * STRIDES[d]
+            remainder //= SHAPE[d]
+        return result
+
+
+@triton.jit
+def cuda_native_sum_x_reduce(
+    value, lane, BW: tl.constexpr, LANES: tl.constexpr, DESCENDING: tl.constexpr
+):
+    for power in tl.static_range(0, 9):
+        shift = BW >> (power + 1)
+        if shift > 0 and (DESCENDING or shift >= 32):
+            partner = tl.gather(value, (lane + shift) % LANES, 0)
+            value = tl.where(lane % BW < shift, value + partner, value)
+    if not DESCENDING:
+        for power in tl.static_range(0, 5):
+            shift = 1 << power
+            if shift < BW:
+                partner = tl.gather(value, (lane + shift) % LANES, 0)
+                value = tl.where(
+                    lane % 32 + shift < tl.minimum(BW, 32), value + partner, value
+                )
+    return value
+
+
+@triton.jit
+def cuda_native_sum_y_reduce(
+    value,
+    lane,
+    BW: tl.constexpr,
+    BH: tl.constexpr,
+    FAST: tl.constexpr,
+    LANES: tl.constexpr,
+):
+    for power in tl.static_range(0, 9):
+        shift = BH >> (power + 1)
+        if shift > 0:
+            stride = BW if FAST else 1
+            partner = tl.gather(value, (lane + shift * stride) % LANES, 0)
+            value = tl.where(lane // stride < shift, value + partner, value)
+    return value
+
+
+@triton.jit
+def cuda_native_sum(
+    X,
+    PARTIAL,
+    output,
+    cta,
+    SHAPE,
+    ISTRIDES,
+    OSTRIDES: tl.constexpr,
+    RDIMS,
+    N,
+    M: tl.constexpr,
+    BW: tl.constexpr,
+    BH: tl.constexpr,
+    VI: tl.constexpr,
+    IV: tl.constexpr,
+    FAST: tl.constexpr,
+    SY: tl.constexpr,
+    CTAS,
+    PARTIAL_STRIDE,
+    FINAL: tl.constexpr,
+    DESCENDING: tl.constexpr,
+    LANES: tl.constexpr,
+    ALIGNMENT: tl.constexpr = -1,
+    PERMUTATION=None,
+    PACKED: tl.constexpr = False,
+):
+    r"""Reduce a CUDA TensorIterator tile in native accumulation order."""
+    lane = tl.arange(0, LANES)
+    BASE_STEP: tl.constexpr = BW * (BH if SY else 1) if FAST else (BH if SY else 1)
+    STEP = BASE_STEP * CTAS
+    DTYPE: tl.constexpr = tl.float64 if X.dtype.element_ty == tl.float64 else tl.float32
+    if PACKED:
+        RANK: tl.constexpr = SHAPE.shape[0]
+    else:
+        RANK: tl.constexpr = len(SHAPE)
+    row = cuda_native_sum_offset(
+        output, SHAPE, ISTRIDES, RDIMS, RANK, PERMUTATION, PACKED
+    )
+    if FINAL:
+        # CUDA's final pass accumulates one partial per thread per iteration.
+        value = tl.full((LANES,), 0, DTYPE)
+        for k in range(tl.cdiv(CTAS, BASE_STEP)):
+            idx = lane + k * BASE_STEP
+            valid = idx < CTAS
+            incoming = tl.load(PARTIAL + output * PARTIAL_STRIDE + idx, valid, 0)
+            value = tl.where(valid, value + incoming, value)
+        if SY:
+            value = cuda_native_sum_y_reduce(value, lane, BW, BH, FAST, LANES)
+        if FAST:
+            value = cuda_native_sum_x_reduce(value, lane, BW, LANES, DESCENDING)
+    else:
+        VT: tl.constexpr = IV if VI else 4
+        slot = tl.arange(0, VT)[:, None]
+        index = lane[None, :] + cta * BASE_STEP
+        value_list = tl.full((VT, LANES), 0, DTYPE)
+        if VI:
+            if ALIGNMENT >= 0:
+                alignment = ALIGNMENT
+            else:
+                alignment = (
+                    (X + row).to(tl.uint64)
+                    // (X.dtype.element_ty.primitive_bitwidth // 8)
+                    % IV
+                )
+            prefix = tl.where(alignment > 0, IV - alignment, 0)
+            tx = lane % BW if FAST else lane * 0
+            ty = lane // BW if FAST else lane
+            tail_owner = (ty == 0) & (cta == 0) if SY else cta == 0
+            head = (alignment > 0) & (tx >= alignment) & (tx < IV) & tail_owner
+            head_index = tx - alignment
+            head_value = tl.load(
+                X
+                + row
+                + cuda_native_sum_offset(
+                    head_index, SHAPE, ISTRIDES, 0, RDIMS, PERMUTATION, PACKED
+                ),
+                head,
+                0,
+            ).to(DTYPE)
+            value_list = tl.where(slot == 0, head_value[None, :], value_list)
+            for k in range(tl.cdiv(N, STEP * IV)):
+                vector_index = index + k * STEP
+                ridx = prefix + vector_index * IV + slot
+                valid = prefix + vector_index * IV + IV <= N
+                incoming = tl.load(
+                    X
+                    + row
+                    + cuda_native_sum_offset(
+                        ridx, SHAPE, ISTRIDES, 0, RDIMS, PERMUTATION, PACKED
+                    ),
+                    valid,
+                    0,
+                ).to(DTYPE)
+                value_list = tl.where(valid, value_list + incoming, value_list)
+            tail_start = N - (N - prefix) % IV
+            tail_index = tail_start + tx
+            tail = (tail_index < N) & tail_owner
+            tail_value = tl.load(
+                X
+                + row
+                + cuda_native_sum_offset(
+                    tail_index, SHAPE, ISTRIDES, 0, RDIMS, PERMUTATION, PACKED
+                ),
+                tail,
+                0,
+            ).to(DTYPE)
+            value_list = tl.where(
+                (slot == 0) & tail[None, :],
+                value_list + tail_value[None, :],
+                value_list,
+            )
+        else:
+            for k in range(tl.cdiv(N, STEP * 4)):
+                ridx = index + k * STEP * 4 + slot * STEP
+                valid = ridx < N
+                incoming = tl.load(
+                    X
+                    + row
+                    + cuda_native_sum_offset(
+                        ridx, SHAPE, ISTRIDES, 0, RDIMS, PERMUTATION, PACKED
+                    ),
+                    valid,
+                    0,
+                ).to(DTYPE)
+                value_list = tl.where(valid, value_list + incoming, value_list)
+        value = tl.gather(value_list, tl.full((1, LANES), 0, tl.int32), 0).reshape(
+            (LANES,)
+        )
+        for s in tl.static_range(1, VT):
+            other = tl.gather(value_list, tl.full((1, LANES), s, tl.int32), 0).reshape(
+                (LANES,)
+            )
+            value = value + other
+        if FAST:
+            value = cuda_native_sum_x_reduce(value, lane, BW, LANES, DESCENDING)
+        if SY:
+            value = cuda_native_sum_y_reduce(value, lane, BW, BH, FAST, LANES)
+    value = tl.gather(value, tl.full((1,), 0, tl.int32), 0).reshape(())
+    return value
+
+
+@triton.jit
+def cuda_bn_divide(a, b):
+    if a.dtype == tl.float64:
+        return a / b
+    else:
+        return tl.div_rn(a, b)
+
+
+@triton.jit
+def cuda_bn_merge(avg, var, n, lane, LANES: tl.constexpr):
+    for power in tl.static_range(0, 5):
+        other = lane ^ (1 << power)
+        oa = tl.gather(avg, other, 0)
+        ov = tl.gather(var, other, 0)
+        on = tl.gather(n, other, 0)
+        factor = cuda_bn_divide(
+            tl.full((LANES,), 1, tl.float64), tl.maximum(1, n + on).to(tl.float64)
+        ).to(avg.dtype)
+        delta = avg - oa
+        product = delta * delta * n.to(avg.dtype) * on.to(avg.dtype)
+        var = var + tl.fma(product, factor, ov)
+        avg = tl.fma(n.to(avg.dtype), avg, on.to(avg.dtype) * oa) * factor
+        n = n + on
+    return avg, var, n
+
+
+@triton.jit
+def cuda_bn_statistics(
+    X,
+    channel,
+    N: tl.constexpr,
+    C: tl.constexpr,
+    S: tl.constexpr,
+    BW: tl.constexpr,
+    BH: tl.constexpr,
+):
+    lane = tl.arange(0, 512)
+    tx, ty = lane % BW, lane // BW
+    DTYPE: tl.constexpr = tl.float64 if X.dtype.element_ty == tl.float64 else tl.float32
+    avg = tl.full((512,), 0, DTYPE)
+    var = tl.full((512,), 0, DTYPE)
+    count = tl.full((512,), 0, tl.int32)
+    for bi in range(triton.cdiv(N, BH)):
+        batch = ty + bi * BH
+        for si in range(triton.cdiv(S, BW)):
+            sample = tx + si * BW
+            valid = (batch < N) & (sample < S)
+            value = tl.load(X + (batch * C + channel) * S + sample, valid, 0).to(DTYPE)
+            delta = value - avg
+            next_count = count + 1
+            next_avg = avg + cuda_bn_divide(delta, next_count.to(DTYPE))
+            next_var = tl.fma(delta, value - next_avg, var)
+            avg = tl.where(valid, next_avg, avg)
+            var = tl.where(valid, next_var, var)
+            count = tl.where(valid, next_count, count)
+    avg, var, count = cuda_bn_merge(avg, var, count, lane, 512)
+    leaders = tl.arange(0, 32)
+    avg = tl.gather(avg, (leaders * 32) % 512, 0)
+    var = tl.gather(var, (leaders * 32) % 512, 0)
+    count = tl.gather(count, (leaders * 32) % 512, 0)
+    valid = leaders < 16
+    avg = tl.where(valid, avg, 0)
+    var = tl.where(valid, var, 0)
+    count = tl.where(valid, count, 0)
+    avg, var, count = cuda_bn_merge(avg, var, count, leaders, 32)
+    avg = tl.gather(avg, tl.full((1,), 0, tl.int32), 0).reshape(())
+    var = tl.gather(var, tl.full((1,), 0, tl.int32), 0).reshape(())
+    variance = cuda_bn_divide(var, tl.full((), N * S, DTYPE))
+    return avg, variance
+
+
+@triton.jit
+def cuda_welford_update(mean, m2, count, value, valid):
+    next_count = count + 1
+    delta = value - mean
+    next_mean = mean + cuda_bn_divide(delta, next_count.to(mean.dtype))
+    next_m2 = tl.fma(delta, value - next_mean, m2)
+    return (
+        tl.where(valid, next_mean, mean),
+        tl.where(valid, next_m2, m2),
+        tl.where(valid, next_count, count),
+    )
+
+
+@triton.jit
+def cuda_welford_combine(am, av, ac, bm, bv, bc):
+    delta = bm - am
+    count = ac + bc
+    ratio = cuda_bn_divide(bc, count)
+    mean = tl.fma(delta, ratio, am)
+    m2 = tl.fma(delta * delta * ac, ratio, av + bv)
+    mean = tl.where(ac == 0, bm, tl.where(bc == 0, am, mean))
+    m2 = tl.where(ac == 0, bv, tl.where(bc == 0, av, m2))
+    return mean, m2, count
+
+
+@triton.jit
+def cuda_welford_tree(
+    mean,
+    m2,
+    count,
+    lane,
+    BW: tl.constexpr,
+    BH: tl.constexpr,
+    FAST: tl.constexpr,
+    LANES: tl.constexpr,
+    Y: tl.constexpr,
+):
+    WIDTH: tl.constexpr = BH if Y else BW
+    STRIDE: tl.constexpr = (BW if FAST else 1) if Y else 1
+    for power in tl.static_range(0, 9):
+        shift = WIDTH >> (power + 1)
+        if shift > 0:
+            other = (lane + shift * STRIDE) % LANES
+            bm = tl.gather(mean, other, 0)
+            bv = tl.gather(m2, other, 0)
+            bc = tl.gather(count, other, 0)
+            nm, nv, nc = cuda_welford_combine(mean, m2, count, bm, bv, bc)
+            active = lane // STRIDE < shift if Y else lane % BW < shift
+            mean = tl.where(active, nm, mean)
+            m2 = tl.where(active, nv, m2)
+            count = tl.where(active, nc, count)
+    return mean, m2, count
+
+
+@triton.jit
+def cuda_native_welford(
+    X,
+    P,
+    row,
+    cta,
+    SHAPE: tl.constexpr,
+    INS: tl.constexpr,
+    OUTS: tl.constexpr,
+    RDIMS: tl.constexpr,
+    N: tl.constexpr,
+    M: tl.constexpr,
+    BW: tl.constexpr,
+    BH: tl.constexpr,
+    FAST: tl.constexpr,
+    SY: tl.constexpr,
+    CTAS: tl.constexpr,
+    LANES: tl.constexpr,
+    FINAL: tl.constexpr,
+    VI: tl.constexpr,
+    PARTIAL_STRIDE,
+):
+    r"""Combine CUDA variance and mean accumulators in native Welford order."""
+    lane = tl.arange(0, LANES)
+    BASE: tl.constexpr = BW * (BH if SY else 1) if FAST else (BH if SY else 1)
+    STEP: tl.constexpr = BASE * CTAS
+    DTYPE: tl.constexpr = tl.float64 if X.dtype.element_ty == tl.float64 else tl.float32
+    if FINAL:
+        mean = tl.full((LANES,), 0, DTYPE)
+        m2 = tl.full((LANES,), 0, DTYPE)
+        count = tl.full((LANES,), 0, DTYPE)
+        for k in range(triton.cdiv(CTAS, BASE)):
+            idx = lane + k * BASE
+            valid = idx < CTAS
+            bm = tl.load(P + row * PARTIAL_STRIDE + idx, valid, 0)
+            bv = tl.load(P + (M + row) * PARTIAL_STRIDE + idx, valid, 0)
+            bc = tl.load(P + (2 * M + row) * PARTIAL_STRIDE + idx, valid, 0)
+            mean, m2, count = cuda_welford_combine(mean, m2, count, bm, bv, bc)
+        if SY:
+            mean, m2, count = cuda_welford_tree(
+                mean, m2, count, lane, BW, BH, FAST, LANES, True
+            )
+        if FAST:
+            mean, m2, count = cuda_welford_tree(
+                mean, m2, count, lane, BW, BH, FAST, LANES, False
+            )
+    else:
+        slots = tl.arange(0, 2)[:, None]
+        mean_list = tl.full((2, LANES), 0, DTYPE)
+        m2_list = tl.full((2, LANES), 0, DTYPE)
+        count_list = tl.full((2, LANES), 0, tl.int32)
+        base = cuda_native_sum_offset(row, SHAPE, INS, RDIMS, len(SHAPE))
+        if VI:
+            alignment = (
+                (X + base).to(tl.uint64)
+                // (X.dtype.element_ty.primitive_bitwidth // 8)
+                % 2
+            )
+            prefix = tl.where(alignment > 0, 2 - alignment, 0)
+            tx = lane % BW
+            ty = lane // BW
+            owner = ((ty == 0) & (cta == 0)) if SY else cta == 0
+            head = (alignment > 0) & (tx >= alignment) & (tx < 2) & owner
+            head_idx = tx - alignment
+            head_value = tl.load(
+                X + base + cuda_native_sum_offset(head_idx, SHAPE, INS, 0, RDIMS),
+                head,
+                0,
+            ).to(DTYPE)
+            mean_list, m2_list, count_list = cuda_welford_update(
+                mean_list,
+                m2_list,
+                count_list,
+                head_value[None, :],
+                (slots == 0) & head[None, :],
+            )
+            for k in range(triton.cdiv(N, STEP * 2)):
+                vector = lane[None, :] + cta * BASE + k * STEP
+                idx = prefix + vector * 2 + slots
+                valid = prefix + vector * 2 + 2 <= N
+                value = tl.load(
+                    X + base + cuda_native_sum_offset(idx, SHAPE, INS, 0, RDIMS),
+                    valid,
+                    0,
+                ).to(DTYPE)
+                mean_list, m2_list, count_list = cuda_welford_update(
+                    mean_list, m2_list, count_list, value, valid
+                )
+            tail_idx = N - (N - prefix) % 2 + tx
+            tail = (tail_idx < N) & owner
+            tail_value = tl.load(
+                X + base + cuda_native_sum_offset(tail_idx, SHAPE, INS, 0, RDIMS),
+                tail,
+                0,
+            ).to(DTYPE)
+            mean_list, m2_list, count_list = cuda_welford_update(
+                mean_list,
+                m2_list,
+                count_list,
+                tail_value[None, :],
+                (slots == 0) & tail[None, :],
+            )
+        else:
+            for k in range(triton.cdiv(N, STEP * 2)):
+                idx = lane[None, :] + cta * BASE + k * STEP * 2 + slots * STEP
+                valid = idx < N
+                value = tl.load(
+                    X + base + cuda_native_sum_offset(idx, SHAPE, INS, 0, RDIMS),
+                    valid,
+                    0,
+                ).to(DTYPE)
+                mean_list, m2_list, count_list = cuda_welford_update(
+                    mean_list, m2_list, count_list, value, valid
+                )
+        zero = tl.full((1, LANES), 0, tl.int32)
+        one = tl.full((1, LANES), 1, tl.int32)
+        mean = tl.gather(mean_list, zero, 0).reshape((LANES,))
+        m2 = tl.gather(m2_list, zero, 0).reshape((LANES,))
+        count = tl.gather(count_list, zero, 0).reshape((LANES,)).to(DTYPE)
+        bm = tl.gather(mean_list, one, 0).reshape((LANES,))
+        bv = tl.gather(m2_list, one, 0).reshape((LANES,))
+        bc = tl.gather(count_list, one, 0).reshape((LANES,)).to(DTYPE)
+        mean, m2, count = cuda_welford_combine(mean, m2, count, bm, bv, bc)
+        if FAST:
+            mean, m2, count = cuda_welford_tree(
+                mean, m2, count, lane, BW, BH, FAST, LANES, False
+            )
+        if SY:
+            mean, m2, count = cuda_welford_tree(
+                mean, m2, count, lane, BW, BH, FAST, LANES, True
+            )
+    zero = tl.full((1,), 0, tl.int32)
+    mean = tl.gather(mean, zero, 0).reshape(())
+    m2 = tl.gather(m2, zero, 0).reshape(())
+    count = tl.gather(count, zero, 0).reshape(())
+    return mean, m2, count
+
+
+@triton.jit
+def cuda_bn_channels_last_merge(am, av, ac, bm, bv, bc, LINEAR: tl.constexpr):
+    dtype: tl.constexpr = am.dtype
+    factor = cuda_bn_divide(tl.full((), 1, dtype), tl.maximum(1, ac + bc).to(dtype))
+    delta = am - bm
+    if LINEAR:
+        mean = tl.fma(bm, bc.to(dtype), am * ac.to(dtype)) * factor
+    else:
+        mean = tl.fma(am, ac.to(dtype), bm * bc.to(dtype)) * factor
+    m2 = av + tl.fma(delta * delta * bc.to(dtype) * ac.to(dtype), factor, bv)
+    return mean, m2, ac + bc
+
+
+@triton.jit
+def cuda_bn_channels_last_vertical(mean, m2, count, lane, BH: tl.constexpr):
+    for power in tl.static_range(0, 9):
+        shift = BH >> (power + 1)
+        if shift > 0:
+            other = (lane + shift) % BH
+            bm = tl.gather(mean, other, 0)
+            bv = tl.gather(m2, other, 0)
+            bc = tl.gather(count, other, 0)
+            nm, nv, nc = cuda_bn_channels_last_merge(mean, m2, count, bm, bv, bc, False)
+            mean = tl.where(lane < shift, nm, mean)
+            m2 = tl.where(lane < shift, nv, m2)
+            count = tl.where(lane < shift, nc, count)
+    return mean, m2, count
+
+
+@triton.jit
+def cuda_bn_channels_last_statistics(
+    X,
+    P,
+    row,
+    cta,
+    N: tl.constexpr,
+    C: tl.constexpr,
+    BH: tl.constexpr,
+    CTAS: tl.constexpr,
+    FINAL: tl.constexpr,
+):
+    lane = tl.arange(0, BH)
+    dtype: tl.constexpr = tl.float64 if X.dtype.element_ty == tl.float64 else tl.float32
+    if FINAL:
+        mean = tl.full((BH,), 0, dtype)
+        m2 = tl.full((BH,), 0, dtype)
+        count = tl.full((BH,), 0, tl.int32)
+        for k in range(triton.cdiv(CTAS, BH)):
+            idx = lane + k * BH
+            valid = idx < CTAS
+            bm = tl.load(P + row * CTAS + idx, valid, 0)
+            bv = tl.load(P + (C + row) * CTAS + idx, valid, 0)
+            bc = tl.load(P + (2 * C + row) * CTAS + idx, valid, 0).to(tl.int32)
+            nm, nv, nc = cuda_bn_channels_last_merge(mean, m2, count, bm, bv, bc, False)
+            mean = tl.where(valid, nm, mean)
+            m2 = tl.where(valid, nv, m2)
+            count = tl.where(valid, nc, count)
+    else:
+        slots = tl.arange(0, 4)[:, None]
+        mean_list = tl.full((4, BH), 0, dtype)
+        m2_list = tl.full((4, BH), 0, dtype)
+        count_list = tl.full((4, BH), 0, tl.int32)
+        for k in range(triton.cdiv(N, BH * CTAS * 4)):
+            idx = cta * BH + lane[None, :] + (k * 4 + slots) * BH * CTAS
+            valid = idx < N
+            value = tl.load(X + idx * C + row, valid, 0).to(dtype)
+            count_list += valid.to(tl.int32)
+            inv = tl.where(
+                valid, cuda_bn_divide(tl.full((), 1, dtype), count_list.to(dtype)), 0
+            )
+            delta = value - mean_list
+            mean_list = tl.fma(delta, inv, mean_list)
+            m2_list = tl.fma(delta * (value - mean_list), valid.to(dtype), m2_list)
+        zero = tl.full((1, BH), 0, tl.int32)
+        mean = tl.gather(mean_list, zero, 0).reshape((BH,))
+        m2 = tl.gather(m2_list, zero, 0).reshape((BH,))
+        count = tl.gather(count_list, zero, 0).reshape((BH,))
+        for slot in tl.static_range(1, 4):
+            index = tl.full((1, BH), slot, tl.int32)
+            bm = tl.gather(mean_list, index, 0).reshape((BH,))
+            bv = tl.gather(m2_list, index, 0).reshape((BH,))
+            bc = tl.gather(count_list, index, 0).reshape((BH,))
+            mean, m2, count = cuda_bn_channels_last_merge(
+                mean, m2, count, bm, bv, bc, True
+            )
+    mean, m2, count = cuda_bn_channels_last_vertical(mean, m2, count, lane, BH)
+    zero = tl.full((1,), 0, tl.int32)
+    mean = tl.gather(mean, zero, 0).reshape(())
+    m2 = tl.gather(m2, zero, 0).reshape(())
+    count = tl.gather(count, zero, 0).reshape(())
+    return mean, m2, count
+
+
+@triton.jit
+def cuda_bn_backward_warp(value, lane, LANES: tl.constexpr, INPUT: tl.constexpr):
+    for power in tl.static_range(0, 5):
+        shift = 16 >> power
+        other = (lane + shift) % LANES
+        partner = tl.gather(value, other, 0)
+        value = tl.where(lane % 32 + shift < 32, value + partner, value)
+    return value
+
+
+@triton.jit
+def cuda_bn_backward_fused_statistics(
+    X,
+    G,
+    MEAN,
+    channel,
+    N: tl.constexpr,
+    C: tl.constexpr,
+    S: tl.constexpr,
+    BW: tl.constexpr,
+    BH: tl.constexpr,
+    FUSED: tl.constexpr,
+):
+    THREADS: tl.constexpr = BW * BH
+    lane = tl.arange(0, THREADS)
+    tx = lane % BW
+    ty = lane // BW
+    dtype: tl.constexpr = tl.float64 if X.dtype.element_ty == tl.float64 else tl.float32
+    input: tl.constexpr = X.dtype.element_ty
+    mean = tl.load(MEAN + channel)
+    dy = tl.full((THREADS,), 0, dtype)
+    dot = tl.full((THREADS,), 0, dtype)
+    for bi in range(triton.cdiv(N, BH)):
+        batch = (ty + bi * BH).to(tl.int64)
+        for si in range(triton.cdiv(S, BW)):
+            sample = tx + si * BW
+            valid = (batch < N) & (sample < S)
+            index = (batch * C + channel) * S + sample
+            x = tl.load(X + index, valid, 0).to(dtype)
+            g = tl.load(G + index, valid, 0).to(dtype)
+            dy = tl.where(valid, dy + g, dy)
+            delta = x - mean
+            if FUSED:
+                dot = tl.where(valid, tl.fma(g, delta, dot), dot)
+            else:
+                product = g * delta
+                dot = tl.where(valid, dot + product, dot)
+    dy = cuda_bn_backward_warp(dy, lane, THREADS, input)
+    dot = cuda_bn_backward_warp(dot, lane, THREADS, input)
+    leaders = tl.arange(0, 32)
+    dy = tl.gather(dy, (leaders * 32) % THREADS, 0)
+    dot = tl.gather(dot, (leaders * 32) % THREADS, 0)
+    dy = tl.where(leaders < THREADS // 32, dy, 0)
+    dot = tl.where(leaders < THREADS // 32, dot, 0)
+    dy = cuda_bn_backward_warp(dy, leaders, 32, input)
+    dot = cuda_bn_backward_warp(dot, leaders, 32, input)
+    zero = tl.full((1,), 0, tl.int32)
+    dy = tl.gather(dy, zero, 0).reshape(())
+    dot = tl.gather(dot, zero, 0).reshape(())
+    return dy, dot
+
+
+@triton.jit
+def cuda_bn_backward_channels_last_vertical(dy, dot, lane, BH: tl.constexpr):
+    for power in tl.static_range(0, 9):
+        shift = BH >> (power + 1)
+        if shift > 0:
+            other = (lane + shift) % BH
+            bd = tl.gather(dy, other, 0)
+            bp = tl.gather(dot, other, 0)
+            dy = tl.where(lane < shift, dy + bd, dy)
+            dot = tl.where(lane < shift, dot + bp, dot)
+    return dy, dot
+
+
+@triton.jit
+def cuda_bn_backward_channels_last_statistics(
+    X,
+    G,
+    MEAN,
+    P,
+    row,
+    cta,
+    N: tl.constexpr,
+    C: tl.constexpr,
+    BH: tl.constexpr,
+    CTAS: tl.constexpr,
+    FINAL: tl.constexpr,
+):
+    lane = tl.arange(0, BH)
+    dtype: tl.constexpr = tl.float64 if X.dtype.element_ty == tl.float64 else tl.float32
+    if FINAL:
+        dy = tl.full((BH,), 0, dtype)
+        dot = tl.full((BH,), 0, dtype)
+        for k in range(triton.cdiv(CTAS, BH)):
+            idx = lane + k * BH
+            valid = idx < CTAS
+            bd = tl.load(P + row * CTAS + idx, valid, 0)
+            bp = tl.load(P + (C + row) * CTAS + idx, valid, 0)
+            dy += bd
+            dot += bp
+    else:
+        mean = tl.load(MEAN + row)
+        slots = tl.arange(0, 4)[:, None]
+        dy_list = tl.full((4, BH), 0, dtype)
+        dot_list = tl.full((4, BH), 0, dtype)
+        for k in range(triton.cdiv(N, BH * CTAS * 4)):
+            idx = cta * BH + lane[None, :] + (k * 4 + slots) * BH * CTAS
+            valid = idx < N
+            value = tl.load(X + idx * C + row, valid, 0).to(dtype)
+            grad = tl.load(G + idx * C + row, valid, 0).to(dtype)
+            dy_list += grad
+            dot_list = tl.fma(grad, value - mean, dot_list)
+        zero = tl.full((1, BH), 0, tl.int32)
+        dy = tl.gather(dy_list, zero, 0).reshape((BH,))
+        dot = tl.gather(dot_list, zero, 0).reshape((BH,))
+        for slot in tl.static_range(1, 4):
+            index = tl.full((1, BH), slot, tl.int32)
+            dy += tl.gather(dy_list, index, 0).reshape((BH,))
+            dot += tl.gather(dot_list, index, 0).reshape((BH,))
+    dy, dot = cuda_bn_backward_channels_last_vertical(dy, dot, lane, BH)
+    zero = tl.full((1,), 0, tl.int32)
+    dy = tl.gather(dy, zero, 0).reshape(())
+    dot = tl.gather(dot, zero, 0).reshape(())
+    return dy, dot
+
+
+@triton.jit
+def cuda_native_mv_value(
+    X,
+    VECTOR,
+    PARTIAL,
+    row,
+    cta,
+    K,
+    S0,
+    S1,
+    VS,
+    CTAS,
+    THREADS: tl.constexpr,
+    ACTIVE_THREADS,
+    INNER_CHUNK,
+    INNER_STRIDE,
+    KIND: tl.constexpr,
+    ACC_TYPE: tl.constexpr,
+    FINAL: tl.constexpr,
+    PARTIAL_CTAS,
+):
+    r"""Compute a real GEMV partial or final value in native reduction order."""
+    if FINAL and KIND != 2 and KIND != 3:
+        value = tl.load(PARTIAL + row * PARTIAL_CTAS)
+    else:
+        if FINAL and KIND == 3:
+            value = tl.full((1,), 0, ACC_TYPE)
+            for index in range(CTAS):
+                value += tl.load(PARTIAL + row * PARTIAL_CTAS + index)
+        elif FINAL and KIND == 2:
+            lane = tl.arange(0, THREADS)
+            total = tl.full((THREADS,), 0, ACC_TYPE)
+            for chunk in range(tl.cdiv(CTAS, THREADS)):
+                index = lane + chunk * THREADS
+                total += tl.load(PARTIAL + row * PARTIAL_CTAS + index, index < CTAS, 0)
+            for shift in tl.static_range(THREADS // 2, 16, -32):
+                partner = tl.gather(total, (lane + shift) % THREADS, 0)
+                total = tl.where(lane < shift, total + partner, total)
+            group = tl.arange(0, 4)
+            sums = tl.full((4,), 0, ACC_TYPE)
+            for index in tl.static_range(8):
+                sums += tl.gather(total, group + index * 4, 0)
+            value = tl.full((1,), 0, ACC_TYPE)
+            for index in tl.static_range(4):
+                value += tl.gather(sums, tl.full((1,), index, tl.int32), 0)
+        else:
+            lane = tl.arange(0, THREADS)
+            total = tl.full((THREADS,), 0, ACC_TYPE)
+            if KIND == 2:
+                pair = S1 == 1 and VS == 1 and ACC_TYPE != tl.float64
+                second = tl.full((THREADS,), 0, ACC_TYPE)
+                for chunk in range(tl.cdiv(K, THREADS * CTAS * (tl.where(pair, 2, 1)))):
+                    index = (lane + THREADS * (cta + CTAS * chunk)) * (
+                        tl.where(pair, 2, 1)
+                    )
+                    valid = index < K
+                    x = tl.load(X + row * S0 + index * S1, valid, 0).to(ACC_TYPE)
+                    vector = tl.load(VECTOR + index * VS, valid, 0).to(ACC_TYPE)
+                    total = tl.where(valid, tl.fma(x, vector, total), total)
+                    if pair:
+                        valid = index + 1 < K
+                        x = tl.load(X + row * S0 + (index + 1) * S1, valid, 0).to(
+                            ACC_TYPE
+                        )
+                        vector = tl.load(VECTOR + (index + 1) * VS, valid, 0).to(
+                            ACC_TYPE
+                        )
+                        second = tl.where(valid, tl.fma(x, vector, second), second)
+                if pair:
+                    total = (tl.full((THREADS,), 0, ACC_TYPE) + total) + second
+            elif KIND == 3:
+                CHUNK = tl.cdiv(K, CTAS)
+                for step in range(tl.cdiv(CHUNK, THREADS)):
+                    index = cta * CHUNK + lane + step * THREADS
+                    valid = (index < K) & (lane + step * THREADS < CHUNK)
+                    x = tl.load(X + row * S0 + index * S1, valid, 0).to(ACC_TYPE)
+                    vector = tl.load(VECTOR + index * VS, valid, 0).to(ACC_TYPE)
+                    total = tl.where(valid, tl.fma(x, vector, total), total)
+            else:
+                STEP = INNER_CHUNK * (
+                    tl.where(INNER_STRIDE == 1, ACTIVE_THREADS, INNER_STRIDE)
+                )
+                for chunk in range(tl.cdiv(K, STEP)):
+                    for step in range(INNER_CHUNK):
+                        index = (
+                            lane * (tl.where(INNER_STRIDE == 1, INNER_CHUNK, 1))
+                            + chunk * STEP
+                            + step * INNER_STRIDE
+                        )
+                        valid = (index < K) & (lane < ACTIVE_THREADS)
+                        x = tl.load(X + row * S0 + index * S1, valid, 0).to(ACC_TYPE)
+                        vector = tl.load(VECTOR + index * VS, valid, 0).to(ACC_TYPE)
+                        total = tl.where(valid, tl.fma(x, vector, total), total)
+            total = cuda_native_sum_x_reduce(total, lane, THREADS, THREADS, True)
+            value = tl.gather(total, tl.full((1,), 0, tl.int32), 0)
+    if FINAL:
+        value = tl.fma(value, 1.0, 0.0)
+    return value
+
+
+@triton.jit
+def round_to_odd_float32(x):
+    truncated = libdevice.double2float_rz(x)
+    inexact = (truncated.to(tl.float64) != x) & (x == x)
+    bits = truncated.to(tl.uint32, bitcast=True) | inexact.to(tl.uint32)
+    return bits.to(tl.float32, bitcast=True)
+
+
+@triton.jit
+def cuda_native_complex_mv_value(
+    X,
+    VECTOR,
+    PARTIAL,
+    row,
+    cta,
+    K,
+    S0,
+    S1,
+    VS,
+    CTAS,
+    THREADS: tl.constexpr,
+    ACTIVE_THREADS,
+    INNER_CHUNK,
+    INNER_STRIDE,
+    KIND: tl.constexpr,
+    ACC_TYPE: tl.constexpr,
+    FINAL: tl.constexpr,
+    PARTIAL_CTAS,
+    SWAP,
+    PRODUCT,
+    PRE_SCALE,
+):
+    r"""Compute a complex GEMV partial or final value in native reduction order."""
+    if FINAL and KIND != 2 and KIND != 3:
+        real = tl.load(PARTIAL + 2 * row * PARTIAL_CTAS)
+        imag = tl.load(PARTIAL + 2 * row * PARTIAL_CTAS + 1)
+    else:
+        if FINAL and KIND == 3:
+            real = tl.full((1,), 0, ACC_TYPE)
+            imag = tl.full((1,), 0, ACC_TYPE)
+            for index in range(CTAS):
+                real += tl.load(PARTIAL + 2 * (row * PARTIAL_CTAS + index))
+                imag += tl.load(PARTIAL + 2 * (row * PARTIAL_CTAS + index) + 1)
+        elif FINAL and KIND == 2:
+            lane = tl.arange(0, THREADS)
+            total_real = tl.full((THREADS,), 0, ACC_TYPE)
+            for chunk_real in range(tl.cdiv(CTAS, THREADS)):
+                index_real = lane + chunk_real * THREADS
+                total_real += tl.load(
+                    PARTIAL + 2 * (row * PARTIAL_CTAS + index_real) + 0,
+                    index_real < CTAS,
+                    0,
+                )
+            for shift_real in tl.static_range(THREADS // 2, 16, -32):
+                partner_real = tl.gather(total_real, (lane + shift_real) % THREADS, 0)
+                total_real = tl.where(
+                    lane < shift_real, total_real + partner_real, total_real
+                )
+            group = tl.arange(0, 4)
+            sums_real = tl.full((4,), 0, ACC_TYPE)
+            for index_real in tl.static_range(8):
+                sums_real += tl.gather(total_real, group + index_real * 4, 0)
+            real = tl.full((1,), 0, ACC_TYPE)
+            for index_real in tl.static_range(4):
+                real += tl.gather(sums_real, tl.full((1,), index_real, tl.int32), 0)
+            total_imag = tl.full((THREADS,), 0, ACC_TYPE)
+            for chunk_imag in range(tl.cdiv(CTAS, THREADS)):
+                index_imag = lane + chunk_imag * THREADS
+                total_imag += tl.load(
+                    PARTIAL + 2 * (row * PARTIAL_CTAS + index_imag) + 1,
+                    index_imag < CTAS,
+                    0,
+                )
+            for shift_imag in tl.static_range(THREADS // 2, 16, -32):
+                partner_imag = tl.gather(total_imag, (lane + shift_imag) % THREADS, 0)
+                total_imag = tl.where(
+                    lane < shift_imag, total_imag + partner_imag, total_imag
+                )
+            group = tl.arange(0, 4)
+            sums_imag = tl.full((4,), 0, ACC_TYPE)
+            for index_imag in tl.static_range(8):
+                sums_imag += tl.gather(total_imag, group + index_imag * 4, 0)
+            imag = tl.full((1,), 0, ACC_TYPE)
+            for index_imag in tl.static_range(4):
+                imag += tl.gather(sums_imag, tl.full((1,), index_imag, tl.int32), 0)
+        else:
+            lane = tl.arange(0, THREADS)
+            total_real = tl.full((THREADS,), 0, ACC_TYPE)
+            total_imag = tl.full((THREADS,), 0, ACC_TYPE)
+            if KIND == 2:
+                CHUNK = K
+                STEP = THREADS * CTAS
+                INNER = 1
+            elif KIND == 3:
+                CHUNK = tl.cdiv(K, CTAS)
+                STEP = INNER_CHUNK * (
+                    tl.where(INNER_STRIDE == 1, ACTIVE_THREADS, INNER_STRIDE)
+                )
+                INNER = INNER_CHUNK
+            else:
+                CHUNK = K
+                STEP = INNER_CHUNK * (
+                    tl.where(INNER_STRIDE == 1, THREADS, INNER_STRIDE)
+                )
+                INNER = INNER_CHUNK
+            for chunk in range(tl.cdiv(CHUNK, STEP)):
+                for step in range(INNER):
+                    if KIND == 2:
+                        index = lane + THREADS * cta + chunk * STEP
+                    elif KIND == 3:
+                        index = (
+                            cta * CHUNK
+                            + lane * (tl.where(INNER_STRIDE == 1, INNER_CHUNK, 1))
+                            + chunk * STEP
+                            + step * INNER_STRIDE
+                        )
+                    else:
+                        index = (
+                            lane * (tl.where(INNER_STRIDE == 1, INNER_CHUNK, 1))
+                            + chunk * STEP
+                            + step * INNER_STRIDE
+                        )
+                    valid = index < K
+                    if KIND == 3:
+                        valid = valid & (index - cta * CHUNK < CHUNK)
+                    xr = tl.load(X + 2 * (row * S0 + index * S1), valid, 0)
+                    xi = tl.load(X + 2 * (row * S0 + index * S1) + 1, valid, 0)
+                    vr = tl.load(VECTOR + 2 * index * VS, valid, 0)
+                    vi = tl.load(VECTOR + 2 * index * VS + 1, valid, 0)
+                    if PRE_SCALE:
+                        vr, vi = tl.fma(vr, 1.0, -vi * 0.0), tl.fma(vi, 1.0, vr * 0.0)
+                    if PRODUCT:
+                        next_real = total_real + tl.fma(xr, vr, -xi * vi)
+                        next_imag = total_imag + tl.fma(xr, vi, xi * vr)
+                    else:
+                        next_real = tl.fma(-xi, vi, tl.fma(xr, vr, total_real))
+                        if SWAP:
+                            next_imag = tl.fma(xr, vi, tl.fma(xi, vr, total_imag))
+                        else:
+                            next_imag = tl.fma(xi, vr, tl.fma(xr, vi, total_imag))
+                    total_real = tl.where(valid, next_real, total_real)
+                    total_imag = tl.where(valid, next_imag, total_imag)
+            total_real = cuda_native_sum_x_reduce(
+                total_real, lane, THREADS, THREADS, True
+            )
+            total_imag = cuda_native_sum_x_reduce(
+                total_imag, lane, THREADS, THREADS, True
+            )
+            real = tl.gather(total_real, tl.full((1,), 0, tl.int32), 0)
+            imag = tl.gather(total_imag, tl.full((1,), 0, tl.int32), 0)
+    if FINAL and PRE_SCALE == 0:
+        real, imag = tl.fma(real, 1.0, -imag * 0.0), tl.fma(imag, 1.0, real * 0.0)
+    return real, imag
+
+
+@triton.jit
+def cuda_native_mv_mma_value(
+    X,
+    VECTOR,
+    cta,
+    M,
+    K,
+    S0,
+    S1,
+    VS,
+    K_SLICE,
+):
+    row = tl.program_id(0) * 16 + tl.arange(0, 16)
+    column = tl.arange(0, 16)
+    inner = tl.arange(0, 64)
+    total = tl.full((16, 16), 0, tl.float32)
+    for chunk in range(tl.cdiv(K_SLICE, 64)):
+        index = cta * K_SLICE + chunk * 64 + inner
+        valid = (index < K) & (chunk * 64 + inner < K_SLICE)
+        matrix = tl.load(
+            X + row[:, None].to(tl.int64) * S0 + index[None, :].to(tl.int64) * S1,
+            (row[:, None] < M) & valid[None, :],
+            0,
+        )
+        vector = tl.load(
+            VECTOR + index[:, None].to(tl.int64) * VS + tl.zeros((1, 16), tl.int64),
+            valid[:, None],
+            0,
+        )
+        total = tl.dot(matrix, vector, total)
+    value = tl.sum(tl.where(column[None, :] == 0, total, 0), 1)
+    return value
