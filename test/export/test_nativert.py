@@ -219,6 +219,7 @@ def make_dynamic_cls(cls, strict=False):
     # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
     globals()[test_class.__name__] = test_class
     test_class.__module__ = __name__
+    return test_class
 
 
 def _single_output_model(device):
@@ -413,6 +414,15 @@ if is_fbcode():
         make_dynamic_cls(test, strict=True)
         make_dynamic_cls(test, strict=False)
     del test
+
+    for cls, instantiate_kwargs in test_export.DEVICE_EXPORT_TEST_CLASSES:
+        instantiate_device_type_tests(
+            make_dynamic_cls(cls, strict=True), globals(), **instantiate_kwargs
+        )
+        instantiate_device_type_tests(
+            make_dynamic_cls(cls, strict=False), globals(), **instantiate_kwargs
+        )
+    del cls, instantiate_kwargs
 
 
 instantiate_device_type_tests(TestNativeRTDevice, globals(), allow_xpu=True)
