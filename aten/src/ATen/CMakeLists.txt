@@ -342,6 +342,12 @@ if(USE_FLASH_ATTENTION)
       HIP_ARCHITECTURES "${AT_ROCM_CK_SDPA_ARCHS}")
     target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
     target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
+    set(ck_sdpa_bwd_sources ${ck_sdpa_sources_hip})
+    list(FILTER ck_sdpa_bwd_sources INCLUDE REGEX "/fmha_bwd_[^/]*\\.hip$")
+    set(ck_sdpa_fwd_sources ${ck_sdpa_sources_hip})
+    list(FILTER ck_sdpa_fwd_sources EXCLUDE REGEX "/fmha_bwd_[^/]*\\.hip$")
+    set_property(SOURCE ${ck_sdpa_fwd_sources} APPEND PROPERTY COMPILE_DEFINITIONS CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=5)
+    set_property(SOURCE ${ck_sdpa_bwd_sources} APPEND PROPERTY COMPILE_DEFINITIONS CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=4)
     target_include_directories(ck_sdpa PUBLIC
                                ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include
                                ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include
