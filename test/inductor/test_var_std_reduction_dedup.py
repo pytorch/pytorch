@@ -6,11 +6,13 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import device_supports_fp64
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize
-from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_CPU, RUN_GPU
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
+from torch.testing._internal.inductor_utils import RUN_CPU, RUN_GPU
 
 
 class TestVarStdReductionDedup(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @config.patch(var_std_reduction_dedup=True)
     @parametrize("correction", [0, 1])
     @parametrize("strided", [False, True])
@@ -38,16 +40,15 @@ class TestVarStdReductionDedup(TestCase):
         self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 0)
 
 
-if RUN_CPU or RUN_GPU:
-    variance_test_devices = (["cpu"] if RUN_CPU else []) + (
-        [GPU_TYPE] if RUN_GPU else []
-    )
-    instantiate_device_type_tests(
-        TestVarStdReductionDedup,
-        globals(),
-        only_for=variance_test_devices,
-        allow_xpu=True,
-    )
+excluded_devices = ["hpu", "mps", "privateuse1"]
+if not RUN_CPU:
+    excluded_devices.append("cpu")
+if not RUN_GPU:
+    excluded_devices.extend(("cuda", "xpu"))
+
+instantiate_device_type_tests(
+    TestVarStdReductionDedup, globals(), except_for=excluded_devices, allow_xpu=True
+)
 
 
 if __name__ == "__main__":
