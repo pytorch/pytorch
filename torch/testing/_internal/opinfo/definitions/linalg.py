@@ -1658,13 +1658,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.bfloat16, torch.float16),
             ),
-            # regression in ROCm 6.4; f32, f64 re-enabled to validate fix
-            DecorateInfo(
-                unittest.skip("Skipped on ROCm (regression in ROCm 6.4)"),
-                device_type="cuda",
-                dtypes=(torch.complex64, torch.complex128),
-                active_if=TEST_WITH_ROCM,
-            ),
             # ROCm: second-order autograd through vmap (vmap(vjp(vjp(...)))) on
             # linalg.householder_product accumulates an f32 precision difference
             # that exceeds the default tolerance. Other functorch transforms for
