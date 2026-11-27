@@ -21,6 +21,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_grouped_mm_native.h>
 #include <ATen/ops/_scaled_grouped_mm_v2_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #endif
@@ -182,26 +183,6 @@ void _check_scales_blocked(
   }
 }
 
-void check_scale(
-    const Tensor& mat,
-    const Tensor& scale,
-    const int dim,
-    const int arg_idx,
-    const int scale_multiplier = 1) {
-  bool using_fp8_rowwise = scale.scalar_type() == kFloat;
-  bool using_mx = scale.scalar_type() == at::kFloat8_e8m0fnu;
-  if (using_fp8_rowwise) {
-    _check_scales_fp8_rowwise(mat, scale, dim, arg_idx, scale_multiplier);
-  } else if (using_mx) {
-    _check_scales_blocked(mat, scale, dim, arg_idx);
-  } else {
-    TORCH_CHECK(
-        false,
-        "scale must be float32 or float8_e8m0fnu, but got ",
-        scale.dtype());
-  }
-}
-
 template <class ArrayType>
 void check_swizzle(ArrayType& swizzle_enums) {
   for (auto swizzle_enum : swizzle_enums) {
@@ -216,28 +197,21 @@ void check_swizzle(ArrayType& swizzle_enums) {
 
 namespace {
 
-using acceptance_fn = std::function<bool(
-    c10::ScalarType,
-    std::vector<ScalingType>&,
-    ArrayRef<Tensor>&,
-    c10::ScalarType,
-    std::vector<ScalingType>&,
-    ArrayRef<Tensor>&)>;
+using scaled_blas::ScaleKernelDispatchEntry;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 4>
-    scale_grouped_kernel_dispatch = {
-        {{"rowwise_rowwise",
-          scaled_blas::check_rowwise_recipe,
-          ScaledGemmImplementation::ROWWISE_ROWWISE},
-         {"mxfp8_mxfp8",
-          scaled_blas::check_mxfp8_recipe,
-          ScaledGemmImplementation::MXFP8_MXFP8},
-         {"mxfp4_mxfp4",
-          scaled_blas::check_mxfp4_recipe,
-          ScaledGemmImplementation::MXFP4_MXFP4},
-         {"nvfp4_nvfp4",
-          scaled_blas::check_nvfp4_recipe,
-          ScaledGemmImplementation::NVFP4_NVFP4}}};
+std::array<ScaleKernelDispatchEntry, 4> scale_grouped_kernel_dispatch = {{
+    {"rowwise_rowwise",
+     scaled_blas::check_rowwise_recipe,
+     ScaledGemmImplementation::ROWWISE_ROWWISE},
+    {"mxfp8_mxfp8",
+     scaled_blas::check_mxfp8_recipe,
+     ScaledGemmImplementation::MXFP8_MXFP8},
+    {"mxfp4_mxfp4",
+     scaled_blas::check_mxfp4_recipe,
+     ScaledGemmImplementation::MXFP4_MXFP4},
+    {"nvfp4_nvfp4",
+     scaled_blas::check_nvfp4_recipe,
+     ScaledGemmImplementation::NVFP4_NVFP4}}};
 
 } // anonymous namespace
 
@@ -301,9 +275,11 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_xpu_v2_out)
       mat_a.scalar_type(),
       scale_recipe_a_enum,
       scale_a_ref,
+      swizzle_a_enum,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b_ref);
+      scale_b_ref,
+      swizzle_b_enum);
   TORCH_CHECK_VALUE(
       gemm_impl != ScaledGemmImplementation::NONE,
       "No gemm implementation was found");
@@ -359,8 +335,9 @@ Tensor _grouped_mm_xpu(
       (!out_dtype.has_value() || mat_a.dtype() == *out_dtype);
 
   const bool a_is_2d = mat_a.dim() == 2;
-  const bool b_is_2d = mat_b.dim() == 2;
-  const bool supported_cases = (a_is_2d && !b_is_2d) && !bias.has_value();
+
+  // OneDNN only supports 2dx3d and 2dx2d for grouped matmul.
+  const bool supported_cases = a_is_2d && !bias.has_value();
 
   bool use_fast_path = a_b_and_out_are_same_type && supported_cases;
   const auto out_dtype_ =

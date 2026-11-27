@@ -64,7 +64,6 @@ class C10_API SymBool {
   // bool, so it's not so common to have to call this
   bool guard_bool(const char* file, int64_t line) const;
   bool expect_true(const char* file, int64_t line) const;
-  bool guard_size_oblivious(const char* file, int64_t line) const;
   bool statically_known_true(const char* file, int64_t line) const;
   bool guard_or_false(const char* file, int64_t line) const;
   bool guard_or_true(const char* file, int64_t line) const;
@@ -109,20 +108,6 @@ C10_API std::ostream& operator<<(std::ostream& os, const SymBool& s);
     TORCH_CHECK((cond), __VA_ARGS__)                                     \
   }
 
-inline bool guard_size_oblivious(
-    bool b,
-    const char* file [[maybe_unused]],
-    int64_t line [[maybe_unused]]) {
-  return b;
-}
-
-inline bool guard_size_oblivious(
-    const c10::SymBool& b,
-    const char* file,
-    int64_t line) {
-  return b.guard_size_oblivious(file, line);
-}
-
 inline bool guard_or_false(
     bool b,
     const char* file [[maybe_unused]],
@@ -164,9 +149,6 @@ inline bool guard_or_true(
     int64_t line) {
   return b.guard_or_true(file, line);
 }
-
-#define TORCH_GUARD_SIZE_OBLIVIOUS(cond) \
-  c10::guard_size_oblivious((cond), __FILE__, __LINE__)
 
 #define TORCH_STATICALLY_KNOWN_TRUE(cond) \
   c10::statically_known_true((cond), __FILE__, __LINE__)

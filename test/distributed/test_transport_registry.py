@@ -62,11 +62,27 @@ class _TestTransport(Transport):
     def register_memory(self, tensor):
         return tensor
 
-    def write(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+    def write(
+        self,
+        local_buffer,
+        remote_buffer,
+        *,
+        async_op=False,
+        timeout=None,
+        notification=None,
+    ):
         self.operation(local_buffer, remote_buffer)
         return _completed_work() if async_op else 0
 
-    def read(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+    def read(
+        self,
+        local_buffer,
+        remote_buffer,
+        *,
+        async_op=False,
+        timeout=None,
+        notification=None,
+    ):
         return self.write(
             local_buffer, remote_buffer, async_op=async_op, timeout=timeout
         )
@@ -286,7 +302,7 @@ class TestTransportWork(TestCase):
                         None, None, timeout=0.5
                     )
                     submit.assert_called_once_with(
-                        None, None, async_op=True, timeout=0.5
+                        None, None, async_op=True, timeout=0.5, notification=None
                     )
 
         asyncio.run(run())
