@@ -84,17 +84,17 @@ def _multi_tensor_zeropower_via_newtonschulz(
     Newton-Schulz iterations run in a for loop: they are built on matmuls
     (``mm`` / ``addmm``), which have no ``_foreach_*`` counterpart.
 
-    To keep the peak memory low, ``updates`` is emptied once it has been cast, and
-    each intermediate is released as soon as it is consumed.
+    To keep the peak memory low, each entry of ``updates`` is replaced in place as
+    soon as its successor is computed, so that it can be freed.
     """
-    ortho_updates = [u.to(torch.bfloat16, copy=True) for u in updates]
-    updates.clear()
-    norms = torch._foreach_clamp_min(torch._foreach_norm(ortho_updates), eps)
-    torch._foreach_div_(ortho_updates, norms)
+    for i, u in enumerate(updates):
+        updates[i] = u.to(torch.bfloat16, copy=True)
+    norms = torch._foreach_clamp_min(torch._foreach_norm(updates), eps)
+    torch._foreach_div_(updates, norms)
     del norms
-    for i, u in enumerate(ortho_updates):
-        ortho_updates[i] = _newtonschulz_iterations(u, ns_coefficients, ns_steps)
-    return ortho_updates
+    for i, u in enumerate(updates):
+        updates[i] = _newtonschulz_iterations(u, ns_coefficients, ns_steps)
+    return updates
 
 
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
