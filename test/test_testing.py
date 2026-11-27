@@ -4665,6 +4665,30 @@ class TestOpInfos(TestCase):
 # Tests that validate the various sample generating functions on each OpInfo.
 class TestOpInfoSampleFunctions(TestCase):
 
+    @parametrize("op_name", ["add", "remainder"])
+    @parametrize("requires_grad", [False, True])
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_binary_scalar_reference_gradients(self, device, dtype, op_name, requires_grad):
+        from torch.testing._internal.opinfo.core import generate_elementwise_binary_with_scalar_samples
+
+        op = next(op for op in op_db if op.name == op_name and not op.variant_test_name)
+        samples = list(generate_elementwise_binary_with_scalar_samples(
+            op, device=device, dtype=dtype, requires_grad=requires_grad))
+        scalar_samples = [sample for sample in samples if not isinstance(sample.input, torch.Tensor)]
+        self.assertTrue(scalar_samples)
+        for sample in samples:
+            scalar_left = not isinstance(sample.input, torch.Tensor)
+            tensors = [value for value in (sample.input, *sample.args) if isinstance(value, torch.Tensor)]
+            expected_grad = requires_grad and bool(tensors) and not (op_name == "remainder" and scalar_left)
+            for value in tensors:
+                self.assertEqual(value.requires_grad, expected_grad)
+            with torch.enable_grad():
+                output = op.op(sample.input, *sample.args, **sample.kwargs)
+                self.assertEqual(output.requires_grad, expected_grad)
+                if expected_grad:
+                    grads = torch.autograd.grad(output.sum(), tensors)
+                    self.assertEqual(len(grads), len(tensors))
+
     @parametrize("requires_grad", [False, True])
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_binary_reference_input_gradients(self, device, dtype, requires_grad):
