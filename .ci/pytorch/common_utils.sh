@@ -377,7 +377,7 @@ function install_cutlass_dsl() {
   # Pin to a version accepted by torch._native's cutedsl version gate
   # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.12
+  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.12 'cuda-bindings>=13.2,<14'
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 

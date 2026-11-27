@@ -130,6 +130,23 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
   return status;
 }
 
+void WorkNCCLQueue::cancelPending() {
+  std::lock_guard<std::mutex> lock(work_queues_mutex_);
+  for (const auto& [_, queued_works] : stream_work_queues_) {
+    // A copy: std::queue cannot be iterated.
+    for (auto work_queue = queued_works; !work_queue.empty();
+         work_queue.pop()) {
+      const auto& state = work_queue.front().state;
+      state->cancelledByReconfigure = true;
+      // Work whose kernel has already finished still completes successfully.
+      state->checkStatus();
+      state->setTerminalStatus(
+          WorkNCCL::WorkStatus::ERROR,
+          "NCCL operation was cancelled by reconfigure()");
+    }
+  }
+}
+
 void WorkNCCLQueue::enqueueWork(
     const c10::intrusive_ptr<WorkNCCL>& work,
     cudaStream_t stream) {

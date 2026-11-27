@@ -435,7 +435,11 @@ DEFINE_DISPATCH(ldexp_stub);
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
 ) {
-  add_stub(device_type(), *this, -alpha);
+  // Negate in the arithmetic type, preserving -0 and avoiding integer overflow.
+  const auto neg_alpha = common_dtype() == kFloat && alpha.isIntegral(false)
+      ? Scalar(-alpha.to<float>())
+      : -alpha;
+  add_stub(device_type(), *this, neg_alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
 

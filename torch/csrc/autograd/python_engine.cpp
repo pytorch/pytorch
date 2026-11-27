@@ -123,7 +123,8 @@ variable_list PythonEngine::execute(
     bool keep_graph,
     bool create_graph,
     bool accumulate_grad,
-    const edge_list& outputs) {
+    const edge_list& outputs,
+    bool disallow_implicit_grad_accumulation) {
   TORCH_CHECK(
       !PyGILState_Check(),
       "The autograd engine was called while holding the GIL. If you are using the C++ "
@@ -132,7 +133,13 @@ variable_list PythonEngine::execute(
       ". If you are not using the C++ API, please report a bug to the pytorch team.")
   try {
     return Engine::execute(
-        roots, inputs, keep_graph, create_graph, accumulate_grad, outputs);
+        roots,
+        inputs,
+        keep_graph,
+        create_graph,
+        accumulate_grad,
+        outputs,
+        disallow_implicit_grad_accumulation);
   } catch (python_error& e) {
     e.restore();
     throw;
@@ -189,6 +196,7 @@ static PyObject* THPEngine_run_backward(
   unsigned char allow_unreachable = 0;
   unsigned char accumulate_grad =
       0; // Indicate whether to accumulate grad into leaf Tensors or capture
+  unsigned char disallow_implicit_grad_accumulation = 0;
   constexpr const char* accepted_kwargs[] = {
       "tensors",
       "grad_tensors",
@@ -197,11 +205,12 @@ static PyObject* THPEngine_run_backward(
       "inputs",
       "allow_unreachable",
       "accumulate_grad",
+      "disallow_implicit_grad_accumulation",
       nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "OObb|Obb",
+          "OObb|Obbb",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast,-warnings-as-errors)
           const_cast<char**>(accepted_kwargs),
           &tensors,
@@ -210,7 +219,8 @@ static PyObject* THPEngine_run_backward(
           &create_graph,
           &inputs,
           &allow_unreachable,
-          &accumulate_grad))
+          &accumulate_grad,
+          &disallow_implicit_grad_accumulation))
     return nullptr;
   TORCH_CHECK(
       PyTuple_Check(tensors),
@@ -359,7 +369,13 @@ static PyObject* THPEngine_run_backward(
     pybind11::gil_scoped_release no_gil;
     auto& engine = python::PythonEngine::get_python_engine();
     outputs = engine.execute(
-        roots, grads, keep_graph, create_graph, accumulate_grad, output_edges);
+        roots,
+        grads,
+        keep_graph,
+        create_graph,
+        accumulate_grad,
+        output_edges,
+        disallow_implicit_grad_accumulation);
   }
 
   if (!backward_api_called && inputs != nullptr) {

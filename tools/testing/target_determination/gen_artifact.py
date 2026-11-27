@@ -9,7 +9,12 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def gen_ci_artifact(included: list[Any], excluded: list[Any]) -> None:
+def gen_ci_artifact(
+    included: list[Any], excluded: list[Any], scorer: dict[str, Any] | None = None
+) -> None:
     file_name = f"td_exclusions-{os.urandom(10).hex()}.json"
+    artifact: dict[str, Any] = {"included": included, "excluded": excluded}
+    if scorer is not None:
+        artifact["scorer"] = scorer
     with open(REPO_ROOT / "test" / "test-reports" / file_name, "w") as f:
-        json.dump({"included": included, "excluded": excluded}, f)
+        json.dump(artifact, f)

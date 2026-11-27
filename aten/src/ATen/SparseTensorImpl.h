@@ -326,7 +326,11 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
       interpreter = *c10::impl::getGlobalPyInterpreter();
     } else {
       // otherwise just copy the SparseTensorImpl and not the PyObject.
-      auto impl = c10::make_intrusive<SparseTensorImpl>(key_set(), dtype());
+      // A fake's backend keys name its logical device, but its components
+      // (including the constructor's placeholders) must stay on Meta.
+      auto impl = c10::make_intrusive<SparseTensorImpl>(
+          is_fake() ? DispatchKeySet(DispatchKey::SparseMeta) : key_set(),
+          dtype());
       copy_tensor_metadata(
           /*src_sparse_impl=*/this,
           /*dest_sparse_impl=*/impl.get(),

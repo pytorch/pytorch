@@ -41,10 +41,26 @@ class _Transport(Transport):
     def register_memory(self, tensor, *, timeout=None):
         raise NotImplementedError
 
-    def write(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+    def write(
+        self,
+        local_buffer,
+        remote_buffer,
+        *,
+        async_op=False,
+        timeout=None,
+        notification=None,
+    ):
         raise NotImplementedError
 
-    def read(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+    def read(
+        self,
+        local_buffer,
+        remote_buffer,
+        *,
+        async_op=False,
+        timeout=None,
+        notification=None,
+    ):
         raise NotImplementedError
 
     def close(self, *, timeout=None):
