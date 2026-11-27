@@ -5578,6 +5578,12 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     if isinstance(node, (ir.Switch, ir.WhileLoop)):
         return True
 
+    if isinstance(node, ir.MultiOutput):
+        return any(
+            isinstance(parent, ir.Operation) and is_cudagraph_unsafe_op(parent)
+            for parent in node.inputs
+        )
+
     if not isinstance(node, (ir.FallbackKernel, ir.ExternKernel)):
         return False
 

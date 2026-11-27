@@ -739,13 +739,6 @@ def _clamp_default(
     return x
 
 
-def _cuda_tensor_iterator_cast(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    # TensorIterator narrows CUDA doubles through float32.
-    if x.dtype == torch.float64 and dtype in (torch.float16, torch.bfloat16):
-        x = x.float()
-    return x.to(dtype)
-
-
 def _strict_clamp(
     x: torch.Tensor,
     min: torch.types.Number | torch.Tensor | None = None,
@@ -764,17 +757,9 @@ def _strict_clamp(
     nan_bounds = None
     if tensor_bounds:
         # TensorIterator converts all operands to their joint result dtype.
-        x = _cuda_tensor_iterator_cast(x, dtype)
-        lo = (
-            _cuda_tensor_iterator_cast(min, dtype)
-            if isinstance(min, torch.Tensor)
-            else None
-        )
-        hi = (
-            _cuda_tensor_iterator_cast(max, dtype)
-            if isinstance(max, torch.Tensor)
-            else None
-        )
+        x = x.to(dtype)
+        lo = min.to(dtype) if isinstance(min, torch.Tensor) else None
+        hi = max.to(dtype) if isinstance(max, torch.Tensor) else None
     else:
         # Eager checks NaN bounds before converting either to opmath precision.
         if (isinstance(min, (int, float)) and math.isnan(min)) or (
@@ -951,8 +936,8 @@ def _strict_pointwise_inputs(
     compute_dtype = utils.get_computation_dtype(dtype)
     # CUDA loads operands in the kernel dtype before converting to opmath.
     return (
-        _cuda_tensor_iterator_cast(grad_output, dtype).to(compute_dtype),
-        _cuda_tensor_iterator_cast(self, dtype).to(compute_dtype),
+        grad_output.to(dtype).to(compute_dtype),
+        self.to(dtype).to(compute_dtype),
         dtype,
     )
 
