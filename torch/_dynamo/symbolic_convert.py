@@ -4471,7 +4471,9 @@ class InstructionTranslatorBase(
         ):
             slots = ("__str__", "__repr__") if flag == 1 else ("__repr__",)
             if slot := BuiltinVariable.pending_format_slot(self, value, slots):
-                BuiltinVariable.unsupported_format(value, slot)
+                BuiltinVariable.unsupported_format(
+                    value, f"pending class mutation: {slot}"
+                )
         if flag == 1:
             return VariableTracker.build(self, str).call_function(self, [value], {})  # type: ignore[arg-type]
         elif flag == 2:

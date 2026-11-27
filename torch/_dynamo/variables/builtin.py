@@ -24,6 +24,8 @@ import abc
 import ast
 import builtins
 import contextlib
+import datetime
+import enum
 import functools
 import gc
 import inspect
@@ -55,7 +57,7 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import _method_identity_guards_filtered, GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     GetItemSource,
@@ -75,6 +77,7 @@ from ..utils import (
     check_unspec_python_args,
     dict_methods,
     extract_fake_example_value,
+    get_type_mro_no_user_code,
     has_torch_function,
     is_safe_constant,
     is_torch_class,
@@ -109,6 +112,7 @@ from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleV
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
     _is_skipped_constant_property,
+    _mro_entry_source,
     _NO_DEFAULT,
     _resolve_descriptor_get,
     binary_iop,
@@ -835,6 +839,7 @@ def _uses_custom_classinfo_check(
 
 
 _STR_SLOTS = ("__str__", "__repr__")
+_FORMAT_BASES = (int, float, str, object, datetime.date)
 _FORMAT_SLOTS = ("__format__", *_STR_SLOTS)
 
 
@@ -2159,6 +2164,17 @@ class BuiltinVariable(TypeVariable):
             const_args, const_kwargs = self.unwrap_unspec_args_kwargs(
                 list(args[1:]), kwargs
             )
+            if tx.output.side_effects.store_attr_mutations and any(
+                type(b) is enum.EnumMeta for b in const_args[1:]
+            ):
+                # EnumMeta may copy these slots before pending writes reach the base.
+                for base in args[2:]:
+                    if isinstance(base, UserDefinedClassVariable):
+                        for name in (*_FORMAT_SLOTS, "__float__"):
+                            if base.pending_setattr_owner(tx, name):
+                                self.unsupported_format(
+                                    base, f"pending class mutation: {name}"
+                                )
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
@@ -2171,6 +2187,8 @@ class BuiltinVariable(TypeVariable):
                 # exception so a surrounding except can catch it, instead of
                 # escaping the compiled region.
                 raise_observed_exception(type(exc), tx, args=list(exc.args))
+            if type(r) is enum.EnumMeta:
+                tx.output.created_enum_classes[id(r)] = r
             return VariableTracker.build(tx, r)
         else:
             fail(args, kwargs)
@@ -3021,21 +3039,33 @@ class BuiltinVariable(TypeVariable):
         field: VariableTracker | None = None,
         names: tuple[str, ...] = _FORMAT_SLOTS,
     ) -> str | None:
+        created = tx.output.created_enum_classes
+        if created and field is not None and id(cls := field.python_type()) in created:
+            if _method_identity_guards_filtered(tx):
+                BuiltinVariable.unsupported_format(
+                    field, "missing class source for __format__"
+                )
+            global_name = tx.output.install_global_by_id("__compiled_enum", cls)
+            cls_source = GlobalSource(global_name)
+            # EnumMeta copies slots onto new classes. Its bases can change before the next call.
+            for index, owner in enumerate(get_type_mro_no_user_code(cls)):
+                parent = _mro_entry_source(cls, cls_source, index)
+                for name in names:
+                    if source := mro_attr_source(tx, owner, parent, name):
+                        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         for owner, attrs in tx.output.side_effects.store_attr_mutations.items():
             if not isinstance(owner, UserDefinedClassVariable):
                 continue
             for name in names:
                 if name not in attrs:
                     continue
-                if field is not None and not type.__subclasscheck__(
-                    owner.value, field.python_type()
-                ):
+                if field is None:
+                    return name
+                if not type.__subclasscheck__(owner.value, field.python_type()):
                     break
-                cls = (
-                    field._class_vt(tx)
-                    if isinstance(field, UserDefinedObjectVariable)
-                    else None
-                )
+                if not isinstance(field, UserDefinedObjectVariable):
+                    return name
+                cls = field._class_vt(tx)
                 if not isinstance(
                     cls, UserDefinedClassVariable
                 ) or cls.pending_setattr_owner(tx, name):
@@ -3043,10 +3073,7 @@ class BuiltinVariable(TypeVariable):
         return None
 
     @staticmethod
-    def unsupported_format(
-        value: VariableTracker, slot: str = "", *, reason: str = ""
-    ) -> NoReturn:
-        detail = reason or f"pending class mutation: {slot or 'none'}"
+    def unsupported_format(value: VariableTracker, detail: str) -> NoReturn:
         unimplemented(
             gb_type="Unsupported user-defined formatting",
             context=f"{value.python_type_name()}, {detail}",
@@ -3070,23 +3097,22 @@ class BuiltinVariable(TypeVariable):
                 isinstance(v, UserDefinedObjectVariable) and v.is_python_constant()
                 for v in itertools.chain(args[1:], kwargs.values())
             ) or self.pending_format_slot(tx, names=(*_FORMAT_SLOTS, "__float__")):
-                return self._expand_format(
-                    tx, value.guard_as_python_constant(), args[1:], kwargs
-                )
+                template = value.guard_as_python_constant()
+                return self._expand_format(tx, template, args[1:], kwargs)
             return None
         if kwargs or len(args) > 2:
             return None
         spec = args[1] if len(args) == 2 else ConstantVariable.create("")
-        return self._format_field(tx, value, spec, expanding=False)
+        return self._format_field(tx, value, spec)
 
-    def _format_field(self, tx, value, spec, *, expanding):
+    def _format_field(self, tx, value, spec, *, trace_str=True):
         value = value.realize()
         if isinstance(value, FakeIdVariable):
             value.guard_as_python_constant()
         if not isinstance(value, UserDefinedObjectVariable):
             return None
         if slot := self.pending_format_slot(tx, value):
-            self.unsupported_format(value, slot)
+            self.unsupported_format(value, f"pending class mutation: {slot}")
         if spec.python_type() is not str:
             return None
         lookup = value.lookup_class_mro_attr
@@ -3095,38 +3121,40 @@ class BuiltinVariable(TypeVariable):
             return value.SLOT1(tx, "__format__", spec)
         text = spec.guard_as_python_constant() if spec.is_python_constant() else None
         constant = value.is_python_constant()
-        if text == "" and formatter is object.__format__:
-            if not (constant or expanding):
-                return generic_str(tx, value)
+        if text == "" and formatter is object.__format__ and trace_str and not constant:
+            return generic_str(tx, value)
         floating = formatter is int.__format__ and (
             text is None or text.endswith(tuple("eEfFgG%"))
         )
         if floating and self.pending_format_slot(tx, value, ("__float__",)):
-            self.unsupported_format(value, "__float__")
+            self.unsupported_format(value, "pending class mutation: __float__")
         if not constant or text is None:
             return None
-        bases = (int, float, str, object)
-        base = next((b for b in bases if b.__format__ is formatter), None)
-        if base is None or value.cls_source is None:
-            self.unsupported_format(value)
+        base = next((b for b in _FORMAT_BASES if b.__format__ is formatter), None)
+        if base is None or (base is datetime.date and text):
+            self.unsupported_format(value, "unsupported __format__ slot")
+
+        cls, cls_source = value.python_type(), value.cls_source
+        if cls_source is None and id(cls) not in tx.output.created_enum_classes:
+            self.unsupported_format(value, "missing class source for __format__")
 
         def guarded_slot(name):
-            source = mro_attr_source(tx, value.python_type(), value.cls_source, name)
-            if source is None:
-                self.unsupported_format(value)
-            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            if cls_source is not None:
+                source = mro_attr_source(tx, cls, cls_source, name)
+                if source is None:
+                    self.unsupported_format(value, f"missing MRO source for {name}")
+                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return lookup(name)
 
         guarded_slot("__format__")
         if not text:
             impl = guarded_slot("__str__")
+            if base is object and torch._C._dynamo.utils.is_instancemethod(impl):
+                return None
             if impl is not base.__repr__ and impl is not str.__str__:
-                if base is not object or not torch._C._dynamo.utils.is_instancemethod(
-                    impl
-                ):
-                    return generic_str(tx, value)
+                return generic_str(tx, value)
         elif floating and guarded_slot("__float__") is not int.__float__:
-            self.unsupported_format(value)
+            self.unsupported_format(value, "custom __float__ in integer format")
         return None  # Use the ordinary constant-fold handler.
 
     def _expand_format(self, tx, template, args, kwargs):
@@ -3134,20 +3162,22 @@ class BuiltinVariable(TypeVariable):
         position = 0
         auto, manual = "automatic field numbering", "manual field specification"
         render = StringFormatVariable.create
-        literal_value = ConstantVariable.create
+        const = ConstantVariable.create
         opaque = False
         reason = "a deferred formatting callback precedes a user-defined operation"
 
-        def trace_hook(field, slot):
+        def trace_hook(field, slot, empty=False):
             nonlocal opaque
             if not isinstance(field, UserDefinedObjectVariable):
                 return False
             if slot != "__format__":
                 slots = _STR_SLOTS if slot == "__str__" else (slot,)
                 if pending := self.pending_format_slot(tx, field, slots):
-                    self.unsupported_format(field, pending)
+                    self.unsupported_format(field, f"pending class mutation: {pending}")
             impl = field.lookup_class_mro_attr(slot)
-            if impl is object.__format__:
+            if impl is object.__format__ or (
+                empty and any(impl is b.__format__ for b in _FORMAT_BASES)
+            ):
                 impl = field.lookup_class_mro_attr("__str__")
             if impl is object.__str__:
                 impl = field.lookup_class_mro_attr("__repr__")
@@ -3155,7 +3185,7 @@ class BuiltinVariable(TypeVariable):
                 if getattr(impl, "_torchdynamo_disable", False):
                     opaque = True
                 elif opaque:
-                    self.unsupported_format(field, reason=reason)
+                    self.unsupported_format(field, reason)
                 else:
                     return True
             return field.is_python_constant()
@@ -3166,7 +3196,7 @@ class BuiltinVariable(TypeVariable):
                 raise ValueError("Max string recursion exceeded")
             parts: list[VariableTracker] = []
             for literal, name, spec, conv in _string.formatter_parser(template):
-                parts.append(literal_value(literal))
+                parts.append(const(literal))
                 if name is None:
                     continue
                 key, path = _string.formatter_field_name_split(name)
@@ -3185,11 +3215,11 @@ class BuiltinVariable(TypeVariable):
                 field = args[key] if isinstance(key, int) else kwargs[key]
                 for is_attr, index in path:
                     if opaque and isinstance(field, UserDefinedObjectVariable):
-                        self.unsupported_format(field, reason=reason)
+                        self.unsupported_format(field, reason)
                     if is_attr:
                         field = generic_getattr(tx, field, index)
                     else:
-                        field = generic_getitem(tx, field, literal_value(index))
+                        field = generic_getitem(tx, field, const(index))
                 if conv in ("s", "r", "a"):
                     field = field.realize()
                     if isinstance(field, FakeIdVariable):
@@ -3197,18 +3227,16 @@ class BuiltinVariable(TypeVariable):
                     if trace_hook(field, "__str__" if conv == "s" else "__repr__"):
                         field = tx._convert_value(field, 1 if conv == "s" else 2)
                         if conv == "a":
-                            codec = [
-                                literal_value(s) for s in ("ascii", "backslashreplace")
-                            ]
+                            codec = [const("ascii"), const("backslashreplace")]
                             encoded = field.call_method(tx, "encode", codec, {})
                             field = encoded.call_method(tx, "decode", [], {})
                     else:
                         field = render(tx, "{!" + conv + "}", [field], {})
                 elif conv and conv != "\0":
                     ("{!" + conv + "}").format(None)
-                fmt = expand(spec, depth - 1) if "{" in spec else literal_value(spec)
-                trace_hook(field, "__format__")
-                formatted = self._format_field(tx, field, fmt, expanding=True)
+                fmt = expand(spec, depth - 1) if "{" in spec else const(spec)
+                trace_str = trace_hook(field, "__format__", fmt.is_constant_match(""))
+                formatted = self._format_field(tx, field, fmt, trace_str=trace_str)
                 parts.append(formatted or render(tx, "{0:{1}}", [field, fmt], {}))
             return render(tx, "{}" * len(parts), parts, {})
 
