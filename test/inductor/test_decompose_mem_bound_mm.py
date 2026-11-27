@@ -58,19 +58,6 @@ class MyModule3(torch.nn.Module):
         return output
 
 
-def _pass_rewrites(device: str, *, include_cpu: bool = False) -> bool:
-    """Whether decompose_mm_pass rewrites matmuls on this device type.
-
-    Mirrors the device gate in torch/_inductor/fx_passes/decompose_mem_bound_mm.py
-    (its check_device calls) so expectations stay backend-independent and every
-    device variant runs instead of being skipped.
-    """
-    device_type = torch.device(device).type
-    if include_cpu:
-        return device_type in ("cpu", "cuda", "xpu")
-    return device_type in ("cuda", "xpu")
-
-
 class _TestDecomposeAddMM(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -231,7 +218,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and _pass_rewrites(device) else 0
+        expected_val = 1 if should_decompose and has_triton() else 0
         self.assertEqual(
             counters["inductor"]["decompose_bmm"],
             expected_val,
@@ -242,7 +229,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = 3 if should_decompose and _pass_rewrites(device) else 0
+        expected_val = 3 if should_decompose and has_triton() else 0
         self.assertEqual(
             counters["inductor"]["decompose_bmm"],
             expected_val,
@@ -269,7 +256,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and _pass_rewrites(device) else 0
+        expected_val = 1 if should_decompose and has_triton() else 0
         if has_bias:
             self.assertEqual(
                 counters["inductor"]["decompose_addmm"],
@@ -327,7 +314,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = 1 if should_decompose and _pass_rewrites(device) else 0
+            expected_val = 1 if should_decompose and has_triton() else 0
             if has_bias:
                 self.assertEqual(
                     counters["inductor"]["decompose_addmm"],
@@ -373,7 +360,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and _pass_rewrites(device) else 0
+        expected_val = 1 if should_decompose and has_triton() else 0
         self.assertEqual(
             counters["inductor"]["decompose_mm"],
             expected_val,
@@ -385,7 +372,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = 1 if should_decompose and _pass_rewrites(device) else 0
+        expected_val = 1 if should_decompose and has_triton() else 0
         self.assertEqual(
             counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
             expected_val,
@@ -426,7 +413,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = 1 if should_decompose and _pass_rewrites(device) else 0
+            expected_val = 1 if should_decompose and has_triton() else 0
             self.assertEqual(
                 counters["inductor"]["decompose_mm"],
                 expected_val,
@@ -438,7 +425,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
             self.compare_parameters(module, traced)
             self.compare_gradients(module, traced)
 
-            expected_val = 1 if should_decompose and _pass_rewrites(device) else 0
+            expected_val = 1 if should_decompose and has_triton() else 0
             self.assertEqual(
                 counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
                 expected_val,
@@ -462,7 +449,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and _pass_rewrites(device) else 0
+        expected_val = 1 if should_decompose and has_triton() else 0
         if has_bias:
             self.assertEqual(
                 counters["inductor"]["decompose_addmm"],
@@ -475,7 +462,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = (1 if has_bias else 2) if _pass_rewrites(device) else 0
+        expected_val = (1 if has_bias else 2) if has_triton() else 0
 
         self.assertEqual(
             counters["inductor"]["decompose_mm"],
@@ -485,10 +472,6 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
     @skipIf(not has_triton(), "requires triton")
     def test_realize_input(self, device):
-        if not _pass_rewrites(device):
-            self.skipTest(
-                f"kernel-count assertion covers decompose_mm_pass codegen only: {device}"
-            )
         m = 20480
         k = 5
         n = 2
@@ -550,7 +533,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 
         self.assertEqual(
             counters["inductor"]["decompose_addmm"],
-            1 if _pass_rewrites(device) else 0,
+            1,
         )
         counters.clear()
 
@@ -689,7 +672,7 @@ class TestDecomposeAddmmScalars(TestCase):
         self.assertEqual(torch.compile(fn)(*args), fn(*args), rtol=1e-3, atol=1e-3)
         self.assertEqual(
             counters["inductor"]["decompose_addmm"],
-            int(should_decompose and _pass_rewrites(device, include_cpu=True)),
+            int(should_decompose),
         )
 
 
