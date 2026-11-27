@@ -210,6 +210,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
         torch.cuda.use_mem_pool,
+        torch.xpu.use_mem_pool,
         torch.fx.traceback.annotate,
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback._dynamo_region_activation_memory_budget,
@@ -739,7 +740,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
-            CUDAMemPoolContextVariable,
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
             FSDPParamGroupUseTrainingStateVariable,
@@ -749,6 +749,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             GradModeVariable,
             InferenceModeVariable,
             JvpIncrementNestingCtxManagerVariable,
+            MemPoolContextVariable,
             SDPAKernelVariable,
             SetFwdGradEnabledContextManager,
             StreamVariable,
@@ -763,7 +764,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False)
-        elif self.value is torch.cuda.use_mem_pool:
+        elif self.value in (torch.cuda.use_mem_pool, torch.xpu.use_mem_pool):
+            device_type = (
+                "cuda" if self.value is torch.cuda.use_mem_pool else "xpu"
+            )
             unexpected_kwargs = [k for k in kwargs if k not in ("pool", "device")]
             if unexpected_kwargs:
                 raise_type_error(
@@ -792,7 +796,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 )
             mempool = args[0] if args else kwargs["pool"]
             device = args[1] if len(args) > 1 else kwargs.get("device")
-            return CUDAMemPoolContextVariable.create(tx, mempool, device)
+            return MemPoolContextVariable.create(
+                tx, mempool, device, device_type=device_type
+            )
         elif self.value is torch.enable_grad:
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable

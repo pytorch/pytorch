@@ -2491,6 +2491,57 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(pool), pool.id)
 
+    @unittest.skipIf(not torch.xpu.is_available(), "requires xpu")
+    def test_xpu_use_mem_pool_context_manager(self):
+        # Mirrors test_cuda_use_mem_pool_context_manager for the device-agnostic
+        # MemPoolContextVariable path: torch.xpu.use_mem_pool must trace through
+        # the same supported_ctx_manager_classes branch and route allocations
+        # into the user pool at runtime.
+        torch.xpu.empty_cache()
+
+        def fn(pool):
+            with torch.xpu.use_mem_pool(pool):
+                return torch.ones(16, device="xpu") + 1
+
+        pool = torch.xpu.MemPool()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(pool)
+        torch.xpu.synchronize()
+        self.assertEqual(res, torch.full((16,), 2.0, device="xpu"))
+        self.assertGreater(len(torch.xpu.memory.memory_snapshot(pool.id)), 0)
+
+    @unittest.skipIf(not torch.xpu.is_available(), "requires xpu")
+    def test_xpu_mem_pool_id(self):
+        # Exercises the builder wrap path for torch.xpu.MemPool objects
+        # (MemPoolVariable with device_type="xpu").
+        def fn(pool):
+            return pool.id
+
+        pool = torch.xpu.MemPool()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(pool), pool.id)
+
+    @unittest.skipIf(
+        not (torch.cuda.is_available() and torch.xpu.is_available()),
+        "requires cuda and xpu",
+    )
+    def test_use_mem_pool_cross_backend_rejected(self):
+        # A pool must match the use_mem_pool entry point's backend: tracing
+        # torch.cuda.use_mem_pool with an XPU pool is a type error, not a
+        # silent wrong-backend dispatch.
+        xpu_pool = torch.xpu.MemPool()
+
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda") + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"torch.cuda.use_mem_pool\(\) got a torch.xpu.MemPool argument",
+        ):
+            opt_fn(xpu_pool)
+
     @requires_cuda_and_triton
     def test_cuda_use_mem_pool_context_manager_inductor(self):
         self._check_cuda_use_mem_pool()

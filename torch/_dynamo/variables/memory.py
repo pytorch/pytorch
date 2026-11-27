@@ -23,10 +23,18 @@ if TYPE_CHECKING:
 from torch._library.custom_ops import custom_op
 
 
-def _current_cuda_device_source() -> CallFunctionNoArgsSource:
+def _current_device_source(device_type: str) -> CallFunctionNoArgsSource:
     return CallFunctionNoArgsSource(
-        AttrSource(AttrSource(ImportSource("torch"), "cuda"), "current_device")
+        AttrSource(AttrSource(ImportSource("torch"), device_type), "current_device")
     )
+
+
+def _get_device_index_for(device_type: str, device: Any) -> int:
+    if device_type == "cuda":
+        return torch.cuda._utils._get_device_index(device)
+    if device_type == "xpu":
+        return torch.xpu._get_device_index(device)
+    raise RuntimeError(f"mempool ops do not support device type {device_type}")
 
 
 def _get_mempool_and_iface(
@@ -84,23 +92,27 @@ def _(device_index: int, mempool_index: int) -> None:
 has_side_effect(torch.ops.mempool.end.default)
 
 
-class CUDAMemPoolVariable(VariableTracker):
-    """Represents a torch.cuda.MemPool object."""
+class MemPoolVariable(VariableTracker):
+    """Represents a torch.cuda.MemPool or torch.xpu.MemPool object."""
 
     def __init__(
         self,
         proxy: Proxy,
-        value: torch.cuda.MemPool,
+        value: Any,
         user_object_index: int,
+        device_type: str,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
         self.user_object_index = user_object_index
+        self.device_type = device_type
 
     def python_type(self) -> type:
-        return torch.cuda.MemPool
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        return get_interface_for_device(self.device_type).get_mempool_type()
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -131,17 +143,19 @@ class CUDAMemPoolVariable(VariableTracker):
         codegen.extend_output(create_call_function(1, False))
 
 
-class CUDAMemPoolContextVariable(ContextWrappingVariable):
-    """Represents the torch.cuda.use_mem_pool context manager."""
+class MemPoolContextVariable(ContextWrappingVariable):
+    """Represents a torch.cuda.use_mem_pool / torch.xpu.use_mem_pool context manager."""
 
     def __init__(
         self,
-        mempool: CUDAMemPoolVariable,
+        mempool: MemPoolVariable,
         device_index: int,
+        device_type: str,
         **kwargs: Any,
     ) -> None:
         self.mempool = mempool
         self.device_index = device_index
+        self.device_type = device_type
         super().__init__(target_values=(), initial_values=None, **kwargs)
 
     @staticmethod
@@ -149,34 +163,47 @@ class CUDAMemPoolContextVariable(ContextWrappingVariable):
         tx: "InstructionTranslatorBase",
         mempool: VariableTracker,
         device: VariableTracker | None = None,
+        device_type: str = "cuda",
         **kwargs: Any,
-    ) -> "CUDAMemPoolContextVariable":
-        if not isinstance(mempool, CUDAMemPoolVariable):
+    ) -> "MemPoolContextVariable":
+        if not isinstance(mempool, MemPoolVariable):
             raise_type_error(
                 tx,
-                "torch.cuda.use_mem_pool() expected a torch.cuda.MemPool argument",
+                f"torch.{device_type}.use_mem_pool() expected a "
+                f"torch.{device_type}.MemPool argument",
+            )
+        if mempool.device_type != device_type:
+            raise_type_error(
+                tx,
+                f"torch.{device_type}.use_mem_pool() got a "
+                f"torch.{mempool.device_type}.MemPool argument",
             )
 
         if device is None or (
             isinstance(device, ConstantVariable) and device.value is None
         ):
             install_guard(
-                _current_cuda_device_source().make_guard(GuardBuilder.EQUALS_MATCH)
+                _current_device_source(device_type).make_guard(
+                    GuardBuilder.EQUALS_MATCH
+                )
             )
-            device_index = torch.cuda.current_device()
+            device_index = getattr(torch, device_type).current_device()
         elif device.is_python_constant():
-            device_index = torch.cuda._utils._get_device_index(
-                device.as_python_constant()
+            device_index = _get_device_index_for(
+                device_type, device.as_python_constant()
             )
         else:
             unimplemented(
-                gb_type="torch.cuda.use_mem_pool with non-constant device",
+                gb_type=f"torch.{device_type}.use_mem_pool with non-constant device",
                 context=f"device={device}",
-                explanation="Dynamo requires the device argument to torch.cuda.use_mem_pool to be a Python constant.",
+                explanation=(
+                    "Dynamo requires the device argument to "
+                    f"torch.{device_type}.use_mem_pool to be a Python constant."
+                ),
                 hints=[],
             )
 
-        return CUDAMemPoolContextVariable(mempool, device_index, **kwargs)
+        return MemPoolContextVariable(mempool, device_index, device_type, **kwargs)
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         stack = ExitStack()
@@ -211,18 +238,22 @@ class CUDAMemPoolContextVariable(ContextWrappingVariable):
         return ConstantVariable.create(None)
 
     def module_name(self) -> str:
-        return "torch.cuda"
+        return f"torch.{self.device_type}"
 
     def fn_name(self) -> str:
         return "use_mem_pool"
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
         # Supporting graph breaks safely requires reconstructing the eager
-        # torch.cuda.use_mem_pool context on the resume path while keeping the
-        # compiled begin/end marker ops balanced around each compiled segment.
+        # torch.<device>.use_mem_pool context on the resume path while keeping
+        # the compiled begin/end marker ops balanced around each compiled
+        # segment.
         unimplemented(
-            gb_type="torch.cuda.use_mem_pool graph break",
+            gb_type=f"torch.{self.device_type}.use_mem_pool graph break",
             context=str(self),
-            explanation="Dynamo doesn't support graph breaks inside torch.cuda.use_mem_pool.",
+            explanation=(
+                f"Dynamo doesn't support graph breaks inside "
+                f"torch.{self.device_type}.use_mem_pool."
+            ),
             hints=[],
         )
