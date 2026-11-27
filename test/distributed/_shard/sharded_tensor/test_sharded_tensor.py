@@ -578,9 +578,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             local_shards = st.local_shards()
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(
-                torch.device(device_type, self.rank), local_shard.device
-            )
+            self.assertEqual(torch.device(device_type, self.rank), local_shard.device)
             if self.rank == 3:
                 self.assertEqual((1, 20), local_shard.size())
             else:
@@ -900,9 +898,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank >= 2:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(
-                torch.device(device_type, self.rank), local_shard.device
-            )
+            self.assertEqual(torch.device(device_type, self.rank), local_shard.device)
             self.assertEqual((5, 20), local_shard.size())
         else:
             self.assertEqual(0, len(local_shards))
@@ -959,9 +955,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank >= 2:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(
-                torch.device(device_type, self.rank), local_shard.device
-            )
+            self.assertEqual(torch.device(device_type, self.rank), local_shard.device)
             self.assertEqual((5, 20), local_shard.size())
         else:
             self.assertEqual(0, len(local_shards))
@@ -1071,9 +1065,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             local_shards = st.local_shards()
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(
-                torch.device(device_type, self.rank), local_shard.device
-            )
+            self.assertEqual(torch.device(device_type, self.rank), local_shard.device)
             self.assertEqual((10, 8), local_shard.size())
 
             # Validate global metadata.
@@ -1097,15 +1089,11 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         with self.assertRaisesRegex(
             NotImplementedError, "does not support named dimension"
         ):
-            spec = ChunkShardingSpec(
-                dim="H", placements=[f"rank:1/{device_type}:1"]
-            )
+            spec = ChunkShardingSpec(dim="H", placements=[f"rank:1/{device_type}:1"])
             sharded_tensor.empty(spec, 10, 20)
 
         for dim in [2, 3, 4, -3, -4, -5]:
-            spec = ChunkShardingSpec(
-                dim=dim, placements=[f"rank:1/{device_type}:1"]
-            )
+            spec = ChunkShardingSpec(dim=dim, placements=[f"rank:1/{device_type}:1"])
             with self.assertRaisesRegex(ValueError, "Invalid sharding dim"):
                 sharded_tensor.empty(spec, 10, 20)
 
@@ -1204,16 +1192,12 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         if self.rank <= 1:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(
-                torch.device(device_type, self.rank), local_shard.device
-            )
+            self.assertEqual(torch.device(device_type, self.rank), local_shard.device)
             self.assertEqual((1, 20), local_shard.size())
         else:
             self.assertEqual(1, len(local_shards))
             local_shard = local_shards[0].tensor
-            self.assertEqual(
-                torch.device(device_type, self.rank), local_shard.device
-            )
+            self.assertEqual(torch.device(device_type, self.rank), local_shard.device)
             self.assertEqual(local_shard.numel(), 0)
 
         # Validate global metadata.
@@ -1432,6 +1416,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_cleanup(self, device):
         device_type = torch.device(device).type
+
         def create_tensors():
             spec = ChunkShardingSpec(
                 dim=0,
@@ -3570,8 +3555,6 @@ class TestCreateTensorNoProcessGroupMode(TestCase):
         )
 
 
-
-
 class TestShardedTensorStateDictHookHost(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -3597,7 +3580,6 @@ class TestShardedTensorStateDictHookHost(TestCase):
         # Verify after load.
         self.assertEqual(m.weight, module_load.weight)
         self.assertEqual(m.bias, module_load.bias)
-
 
 
 instantiate_device_type_tests(
