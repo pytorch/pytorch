@@ -3113,11 +3113,14 @@ class TestAOTIUserStreams(InductorTestCase):
             self._compile_and_run(model, inputs)
 
 
-@torch._inductor.config.patch({"triton.cudagraphs": True})
 class TestStreamCudagraphInteraction(InductorTestCase):
     """Tests for user streams under cudagraph capture (reduce-overhead mode)."""
 
     hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(inductor_config.patch({"triton.cudagraphs": True}))
 
     @onlyAccelerator
     @xfailIfNoAcceleratorTriton
