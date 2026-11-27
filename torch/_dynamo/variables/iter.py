@@ -1010,6 +1010,13 @@ class DictViewIterator(IteratorVariable):
             install_guard(left.make_guard(check))
             return None
 
+        def guarded_type(var: VariableTracker) -> type | None:
+            if isinstance(var, variables.UserDefinedObjectVariable) and var.source:
+                guards = tx.output.guards.get_guards_for_source(var.source)
+                if any(g.create_fn is GuardBuilder.TYPE_MATCH for g in guards):
+                    return var.value_type
+            return None
+
         # Stack reconstruction precedes replay of mutations to a live input.
         side_effects = tx.output.side_effects
         if not container.source:
@@ -1023,6 +1030,7 @@ class DictViewIterator(IteratorVariable):
                     owner, bindings
                 ):
                     continue
+                owner_type = guarded_type(owner)
                 # A write to another input can target this namespace on a cache hit.
                 for target, writes in mutations.items():
                     if writes.keys() <= {"__dict__"} or isinstance(target, bindings):
@@ -1034,6 +1042,10 @@ class DictViewIterator(IteratorVariable):
                         continue
                     if any(isinstance(s, TempLocalSource) for s in (left, right)):
                         continue
+                    if owner_type is not None:
+                        target_type = guarded_type(target)
+                        if target_type is not None and target_type is not owner_type:
+                            continue
                     if reason := guard_distinct(left, right):
                         return reason
             return None

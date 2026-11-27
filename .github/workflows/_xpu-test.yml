@@ -8,6 +8,13 @@ name: xpu-test
 on:
   workflow_call:
     inputs:
+      keep-going:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          Keep running the rest of a test file after a consistent failure, in
+          addition to the branch/label rules of filter-test-configs.
       build-environment:
         required: true
         type: string
@@ -200,7 +207,7 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          CONTINUE_THROUGH_ERROR: ${{ (inputs.keep-going || steps.keep-going.outputs.keep-going == 'true') && 'True' || 'False' }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}

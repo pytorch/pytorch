@@ -18,10 +18,10 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
+    skipCUDAIf,
     toleranceOverride,
     tol,
 )
@@ -506,7 +506,7 @@ class TestScatterGatherDevice(TestCase):
         self.assertIs(result, out)
         self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
 
-    @onlyCUDA
+    @onlyAccelerator
     @serialTest()
     @largeTensorTest("5GB")
     def test_scatter_copy_large_slice(self, device):
@@ -677,9 +677,9 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[1] = 0
                 self.assertEqual(input, expected_result)
 
-    @onlyCUDA
-    @unittest.skipUnless(
-        TEST_CUDA and (torch.version.hip is not None or SM80OrLater),
+    @onlyAccelerator
+    @skipCUDAIf(
+        torch.version.hip is None and not SM80OrLater,
         "requires CUDA sm80+; ROCm runs the generic kernel",
     )
     @dtypes(torch.float16, torch.bfloat16)
@@ -811,7 +811,7 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[2] = 0
                 self.assertEqual(input, expected_result)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize(
         "op",
