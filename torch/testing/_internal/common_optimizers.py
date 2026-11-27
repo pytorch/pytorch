@@ -1227,6 +1227,15 @@ def optim_error_inputs_func_rmsprop(device, dtype):
                 error_type=ValueError,
                 error_regex="Invalid momentum value: -1.0",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, alpha=1.5),
+                    desc="alpha should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid alpha value: 1.5",
+            ),
         ]
     return error_inputs
 
@@ -1268,6 +1277,51 @@ def optim_error_inputs_func_rprop(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="Invalid eta values: 1.0, 0.5",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, step_sizes=(-2.0, -1.0)),
+                    desc="0 <= step_size_min <= step_size_max",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid step size values: -2.0, -1.0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, step_sizes=(-1.0, 50.0)),
+                    desc="0 <= step_size_min <= step_size_max",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid step size values: -1.0, 50.0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, step_sizes=(2.0, 1.0)),
+                    desc="0 <= step_size_min <= step_size_max",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid step size values: 2.0, 1.0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, step_sizes=(float("nan"), 50.0)),
+                    desc="step_size_min should not be NaN",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid step size values: nan, 50.0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, step_sizes=(0.0, float("nan"))),
+                    desc="step_size_max should not be NaN",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid step size values: 0.0, nan",
             ),
         ]
     return error_inputs

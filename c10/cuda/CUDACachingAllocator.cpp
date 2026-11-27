@@ -836,12 +836,9 @@ struct ExpandableSegment {
             c10::make_scope_exit([&myfd]() { close(static_cast<int>(myfd)); });
         CUmemGenericAllocationHandle handle = 0;
 #ifdef USE_ROCM
-#if ROCM_VERSION >= 70100
-        void* myfd_handle =
-            reinterpret_cast<void*>(static_cast<uintptr_t>(myfd));
-#else
-        void* myfd_handle = (void*)(uintptr_t)&myfd;
-#endif
+        void* myfd_handle = c10::cuda::hipMemImportTakesFdByValue()
+            ? reinterpret_cast<void*>(static_cast<uintptr_t>(myfd))
+            : static_cast<void*>(&myfd);
         C10_CUDA_CHECK(hipMemImportFromShareableHandle(
             &handle, myfd_handle, hipMemHandleTypePosixFileDescriptor));
 #else
@@ -1949,10 +1946,11 @@ class DeviceCachingAllocator {
 
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
-      // Do garbage collection if the flag is set.
+      // Do garbage collection if the flag is set. Not during graph capture:
+      // cudaFree invalidates it.
       if (allowed_memory_maximum.has_value() &&
-          AcceleratorAllocatorConfig::garbage_collection_threshold() > 0.0)
-          [[unlikely]] {
+          AcceleratorAllocatorConfig::garbage_collection_threshold() > 0.0 &&
+          !is_capture_context()) [[unlikely]] {
         garbage_collect_cached_blocks(context);
         drain_deferred_custom_frees_outside_lock(lock);
       }
@@ -4567,6 +4565,11 @@ class DeviceCachingAllocator {
         [&]() { drain_deferred_custom_frees_outside_lock(lock); });
     if (AcceleratorAllocatorConfig::max_split_size() ==
         std::numeric_limits<size_t>::max())
+      return false;
+    // Like release_cached_blocks, not during graph capture. The pool is then
+    // the capture's private pool, whose memory captured work can use, and
+    // cudaFree is not permitted during capture.
+    if (C10_UNLIKELY(is_capture_context()))
       return false;
     BlockPool& pool = *p.pool;
 

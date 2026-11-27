@@ -2116,6 +2116,12 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
 
+    @parametrize_test("fn", ["conv2d", "conv_transpose2d"])
+    def test_conv2d_batch_above_uint16(self, device, fn):
+        x = torch.randint(-2, 3, (2**16 + 1, 16, 3, 3), device=device).float()
+        w = torch.randint(-2, 3, (16, 16, 3, 3), device=device).float()
+        self.assertEqual(getattr(F, fn)(x, w), getattr(F, fn)(x.cpu(), w.cpu()))
+
     @dtypes(torch.float, torch.half, torch.bfloat16)
     @parametrize_test(
         "stride,dilation,groups", [(1, 3, 2), (2, 1, 1), (3, 2, 2), (1, 2, 16)]
@@ -3372,6 +3378,18 @@ class TestConvolutionNNDevice(NNTestCase):
         grad1 = grad1 * scale
         grad2 = grad2 * scale
         self.assertEqual(grad1, grad2, atol=5e-2, rtol=5e-3)
+
+    @skipCUDAIfNoCudnn
+    @parametrize_test("kh,kw", [(64, 1), (63, 1), (31, 31)])
+    @parametrize_test("channels", [3, 8])
+    @parametrize_test("layout", [torch.contiguous_format, torch.channels_last])
+    def test_conv2d_depthwise_large_filter(self, device, kh, kw, channels, layout):
+        x = torch.randint(-2, 3, (32, channels, kh + 3, kw + 31), device=device)
+        x = x.float().contiguous(memory_format=layout)
+        w = torch.randint(-2, 3, (channels, 1, kh, kw), device=device).float()
+        out = F.conv2d(x, w, groups=channels)
+        self.assertEqual(out, F.conv2d(x.cpu(), w.cpu(), groups=channels))
+        self.assertTrue(out.is_contiguous(memory_format=layout))
 
     @onlyAccelerator
     @largeTensorTest("20GB", "cpu")
