@@ -202,25 +202,25 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
   auto storage_offset = self.storage_offset();
   auto new_size_bytes = at::detail::computeStorageNbytesContiguous(size, itemsize, storage_offset);
   auto needs_resize_storage = new_size_bytes > self.storage().nbytes();
+  auto func_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
 
   if (needs_resize_storage) {
     // If resize_() actually increases the size of the storage, then we need to tell FunctionalTensorWrapper about it.
     // See Note[resize_() in functionalization pass]
-    auto func_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
     func_impl->maybe_replace_storage(tmp_output);
     // See the note - we're guaranteed at this point that "self" is *not* a view (and has no outstanding views)
     // So we don't need to treat the output of resize as view tensor.
     return self;
   }
 
-  // Otherwise, we know that we're resizing to a smaller size.
-  // resize_() is effectively a view operator.
+  // Otherwise, the new size fits in the existing storage and resize_() acts as a view.
   // The output of resizing is equivalent to taking a slice of a larger tensor.
   // We have to emulate this "slicing" with an as_strided call.
   auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+  const bool can_coalesce = !memory_format || *memory_format == at::MemoryFormat::Contiguous;
   auto view_meta = std::make_shared<at::functionalization::resize__ViewMeta>(
-      reapply_views, size.vec());
-  at::functionalization::impl::mutate_view_meta(self, view_meta);
+      reapply_views, size.vec(), can_coalesce);
+  func_impl->mutate_resize_view_meta(view_meta);
   return self;
 }
 

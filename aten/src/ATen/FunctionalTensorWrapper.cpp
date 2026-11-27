@@ -1,5 +1,6 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/FunctionalizeFallbackKernel.h>
 
 #include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
@@ -194,6 +195,26 @@ void FunctionalTensorWrapper::mutate_view_meta(const std::shared_ptr<at::functio
   at::AutoDispatchSkipFunctionalize guard;
   value_ = meta->forward(value_);
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
+}
+
+void FunctionalTensorWrapper::mutate_resize_view_meta(
+    const std::shared_ptr<functionalization::resize__ViewMeta>& meta) {
+  // A view preceding the resizes may not cover the full resized range.
+  const auto* previous = view_metas_.size() == 1
+      ? dynamic_cast<const functionalization::resize__ViewMeta*>(
+            view_metas_.back().get())
+      : nullptr;
+  if (previous && previous->can_coalesce && meta->can_coalesce &&
+      functional_storage_impl()->base().is_contiguous()) {
+    // The resizes preserve the offset. Replaying through the old size would
+    // truncate writes to elements that a later resize exposes.
+    TORCH_INTERNAL_ASSERT(is_up_to_date());
+    view_metas_.back() = meta;
+    has_metadata_mutation_ = true;
+    regenerate_from_base();
+    return;
+  }
+  mutate_view_meta(meta);
 }
 
 // Note [Functionalization: Mutation Removal]
