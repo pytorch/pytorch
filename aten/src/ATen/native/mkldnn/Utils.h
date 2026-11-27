@@ -13,7 +13,6 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <dnnl.hpp>
-#include <ideep/tensor.hpp>
 #include <ATen/native/mkldnn/detail/Attr.h>
 #include <ATen/native/mkldnn/detail/IdeepUtils.h>
 #endif // AT_MKLDNN_ENABLED()

@@ -5,12 +5,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
-#if AT_MKLDNN_ENABLED()
-
-#include <ideep/tensor.hpp>
-
-#endif // AT_MKLDNN_ENABLED()
-
 namespace torch::jit {
 
 #if AT_MKLDNN_ENABLED()

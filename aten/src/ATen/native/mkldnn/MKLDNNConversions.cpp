@@ -81,7 +81,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
           cpu_tensor.template mutable_data_ptr<Float8_e4m3fn>(),
           dnnl::memory::data_type::f8_e4m3);
       break;
-    default: TORCH_INTERNAL_ASSERT(false, "Unsupported dtype for ideep public tensor: ", data_type);
+    default: TORCH_INTERNAL_ASSERT(false, "Unsupported dtype for oneDNN public tensor: ", data_type);
   }
   cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
   // Make sure that NC11 strides follow formula of contiguous tensor.
@@ -101,7 +101,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
              "dense_to_mkldnn expects float, bfloat16, half, uint8, int8 tensor input");
   TORCH_CHECK(cpu_tensor.dim() <= 5,
              "Can't convert cpu tensor with the number of dimensions > 5");
-  // NOTE: forbid direct convert from non-contiguous (or channels last) to `ideep::tensor`.
+  // NOTE: forbid direct convert from non-contiguous (or channels last) to `MkldnnMemory`.
   auto cpu_tensor_cont = cpu_tensor.contiguous();
   auto data_type = dtype.has_value() ? dtype.value() : cpu_tensor.scalar_type();
   if (cpu_tensor.scalar_type() == ScalarType::Byte || cpu_tensor.scalar_type() == ScalarType::Char) {
@@ -147,7 +147,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
 
 // Mkldnn tensor has special non-public format for conv2d weights
 // (dense_to_mkldnn only converts dense tensor to mkldnn tensor with
-// public format). Ideep conv kernel will do implicit reorder if the
+// public format). The oneDNN conv kernel will do implicit reorder if the
 // weight is not already in this optimized format. By the time I'm
 // writing this note, we are seeing ~20% perf cost of doing the
 // on-the-fly reorder.
@@ -466,7 +466,7 @@ static std::tuple<mkldnn::MkldnnMemory, mkldnn::MkldnnMemory> get_lstm_packed_we
 }
 
 static bool should_use_plain_format(mkldnn::MkldnnMemory w) {
-#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3
+#if defined(DNNL_VERSION_MAJOR) && DNNL_VERSION_MAJOR>=3
   return w.get_desc().is_opaque() || w.get_desc().is_plain();
 # else
   return w.get_desc().is_rnn_packed() || w.get_desc().is_plain();

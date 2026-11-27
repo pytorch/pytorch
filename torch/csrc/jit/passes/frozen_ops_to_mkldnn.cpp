@@ -40,7 +40,6 @@
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/detail/Eltwise.h>
-#include <ideep.hpp>
 #endif
 
 // clang-format on
