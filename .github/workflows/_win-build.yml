@@ -200,7 +200,7 @@ jobs:
           for dll in "${CUDA_PATH}"/bin/cudart64_*.dll "${CUDA_PATH}"/bin/cudart.dll; do
             if [ -f "$dll" ]; then
               cp "$dll" /c/${{ github.run_id }}/build-results/
-              echo "Copied $(basename $dll)"
+              echo "Copied $(basename "$dll")"
             fi
           done
 

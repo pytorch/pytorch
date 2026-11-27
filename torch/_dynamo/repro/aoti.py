@@ -30,8 +30,8 @@ from typing import Any, IO
 
 import torch
 from torch._dynamo.debug_utils import (
-    _cuda_system_info_comment,
     BuckTargetWriter,
+    device_system_info_comment,
     extra_imports,
     generate_config_string,
     generate_env_vars_string,
@@ -264,7 +264,7 @@ isolate_fails_code_str = None
             model_str += f"# torch cuda version: {torch.version.cuda}\n"
         if hasattr(torch.version, "git_version"):
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
-        model_str += _cuda_system_info_comment()
+        model_str += device_system_info_comment()
     if save_dir:
         ep_path = os.path.join(save_dir, "exported_program.pt2")
     else:

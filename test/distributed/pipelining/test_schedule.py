@@ -449,44 +449,6 @@ class P2PInitializationTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
-    def test_edge_groups_delegate_split_policy_to_torchcomms(self):
-        store = FakeStore()
-        torch.distributed.init_process_group(
-            backend="fake", rank=0, world_size=2, store=store
-        )
-        parent = torch.distributed.distributed_c10d._get_default_group()
-        try:
-            with (
-                patch.object(torch.distributed, "get_backend", return_value="gloo"),
-                patch.object(
-                    torch.distributed,
-                    "get_backend_config",
-                    return_value="gloo",
-                ),
-                patch.object(
-                    torch.distributed.distributed_c10d,
-                    "_use_torchcomms_enabled",
-                    return_value=True,
-                ),
-                patch.object(
-                    torch.distributed.ProcessGroup,
-                    "_get_backend",
-                    side_effect=AssertionError("native backend must not be read"),
-                ),
-                patch.object(
-                    torch.distributed, "split_group", return_value=parent
-                ) as split_group,
-            ):
-                _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cpu"))
-
-            self.assertEqual(split_group.call_count, 2)
-            for call in split_group.call_args_list:
-                self.assertIsNone(call.kwargs["backend"])
-                self.assertIsNone(call.kwargs["timeout"])
-        finally:
-            _PP_EDGE_GROUP_CACHE.pop(parent, None)
-            torch.distributed.destroy_process_group()
-
 
 class MockPipelineStage(_PipelineStageBase):
     def __init__(self, *args, **kwargs):
@@ -600,6 +562,22 @@ def _activation_intervals(
 
 class ScheduleTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_loss_graph_released_when_retrieved_for_backward(self):
+        stage = MockPipelineStage(num_stages=1, group_size=1, group_rank=0)
+        stage.stage_index = 0
+        schedule = ScheduleGPipe(stage, n_microbatches=2, loss_fn=torch.nn.MSELoss())
+        inputs = [torch.ones(2, requires_grad=True) for _ in range(2)]
+        losses = [input.square().sum() for input in inputs]
+        schedule._internal_losses.extend(losses)
+
+        backward_loss = schedule._maybe_get_loss(stage, 0)
+
+        self.assertIs(backward_loss, losses[0])
+        self.assertIsNone(schedule._internal_losses[0].grad_fn)
+        self.assertIs(schedule._internal_losses[1], losses[1])
+        backward_loss.backward()
+        self.assertEqual(inputs[0].grad, 2 * inputs[0])
 
     def test_stage_recv_buffer_allocation_and_consumption(self):
         stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)

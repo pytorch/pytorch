@@ -122,6 +122,8 @@ torch_string_c_str(StringHandle handle, const char** data);
 // The returned handle uses cuBLAS's default workspace unless ATen workspace
 // caching is explicitly enabled. Internal ATen operations restore the default
 // workspace before releasing their eager workspace allocations.
+// The handle is borrowed from PyTorch and must not be destroyed by the caller.
+// Use torch_get_current_cuda_blas_handle_v2 to control setup explicitly.
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_current_cuda_blas_handle(void** ret_handle);
 
@@ -384,6 +386,41 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
+// Reads an integer from at::cpu::get_cpu_capabilities().
+// Key is borrowed and NUL-terminated. Outputs are caller-owned.
+// A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_int(
+    const char* key,
+    int64_t* ret_value,
+    bool* ret_key_exists);
+
+// Reads a string from at::cpu::get_cpu_capabilities().
+// Borrowed NUL-terminated key and caller-owned outputs.
+// A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
+// libtorch owns the returned string. Do not free it or use it after unload.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_string(
+    const char* key,
+    const char** ret_value,
+    bool* ret_key_exists);
+
+// Reads a boolean from at::cpu::get_cpu_capabilities().
+// Key is borrowed and NUL-terminated. Outputs are caller-owned.
+// A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_bool(
+    const char* key,
+    bool* ret_value,
+    bool* ret_key_exists);
+
+#ifdef USE_CUDA
+// Returns a borrowed, PyTorch-owned BLAS handle in caller-owned output storage.
+// The caller must not destroy the handle. setup=true is equivalent to
+// torch_get_current_cuda_blas_handle.
+// setup is forwarded to at::cuda::getCurrentCUDABlasHandle. See its
+// implementation in ATen/cuda/CublasHandlePool.cpp for setup behavior.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_current_cuda_blas_handle_v2(bool setup, void** ret_handle);
+#endif // USE_CUDA
+
 // Returns whether torch.set_warn_always(True) is in effect.
 AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();
 
@@ -398,6 +435,80 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 // Returns whether the tensor is an inference tensor.
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
+
+// Return the runtime's at::native::TransposeType encodings.
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_no_transpose();
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_transpose();
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_conj_transpose();
+
+// Calls the matching at::native::cpublas::brgemm overload. dtype_a, dtype_b,
+// and dtype_c use the runtime's c10::ScalarType values.
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    int32_t dtype_a,
+    int32_t dtype_b,
+    int32_t dtype_c,
+    bool add_C,
+    const void* A,
+    const void* B,
+    void* C,
+    bool is_vnni);
+
+// Calls at::native::cpublas::brgemm_release, which releases the BRGEMM hardware
+// context when is_vnni is true.
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(bool is_vnni);
+
+// Calls at::native::cpublas::gemm_no_downcast_stub. device_type, dtype, and
+// transa/transb use the runtime's DeviceType, ScalarType, and TransposeType
+// encodings. Only CPU has a registered kernel.
+// alpha and beta are doubles; for Half/BFloat16/Float8 inputs, c points to a
+// float output buffer.
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_float64(
+    int32_t device_type,
+    int32_t dtype,
+    int32_t transa,
+    int32_t transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    double alpha,
+    const void* a,
+    int64_t lda,
+    const void* b,
+    int64_t ldb,
+    double beta,
+    void* c,
+    int64_t ldc);
+
+// Calls at::native::cpublas::could_pack to report whether packing the given
+// ScalarType is supported and enabled on this CPU; writes the result to ret.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_could_pack(int32_t dtype, bool* ret);
+
+struct InferenceModeGuardOpaque;
+using InferenceModeGuardHandle = InferenceModeGuardOpaque*;
+
+// Constructs a c10::InferenceMode guard to set inference mode on the current
+// thread. On success, *ret_guard is an owning handle. Release it exactly once
+// with torch_delete_inference_mode_guard on the creating thread, in reverse
+// creation order.
+AOTI_TORCH_EXPORT AOTITorchError torch_create_inference_mode_guard(
+    bool enabled,
+    InferenceModeGuardHandle* ret_guard);
+
+// Deletes the owned guard, invoking c10::InferenceMode::~InferenceMode() to
+// restore the previous thread-local state. Passing nullptr succeeds without
+// changing the thread-local state.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_inference_mode_guard(InferenceModeGuardHandle guard);
+
+// Calls c10::InferenceMode::is_enabled() to query the current thread's state.
+AOTI_TORCH_EXPORT bool torch_is_inference_mode_enabled();
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 

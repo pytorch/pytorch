@@ -19,6 +19,8 @@
 
 #include <gtest/gtest.h>
 
+#include <stdexcept>
+
 namespace KN = KINETO_NAMESPACE;
 
 class XpuptiScopeProfilerTest : public ::testing::Test {
@@ -109,13 +111,19 @@ void RunTest(
   bool expectThrow = (perKernel == "false");
 
   if (expectThrow) {
-    EXPECT_THROW(
-        {
-          if (eptr) {
-            std::rethrow_exception(eptr);
-          }
-        },
-        std::runtime_error);
+    // Only the per-kernel rejection may end the run. Other runtime errors,
+    // such as a failed PTI call or configure returning no session, must not
+    // pass for it.
+    ASSERT_TRUE(eptr) << "expected the per-kernel rejection";
+    try {
+      std::rethrow_exception(eptr);
+    } catch (const std::runtime_error& e) {
+      EXPECT_NE(
+          std::string_view(e.what()).find(
+              "XPUPTI_PROFILER_ENABLE_PER_KERNEL has to be set to 1"),
+          std::string_view::npos)
+          << e.what();
+    }
   } else {
     if (eptr) {
       std::rethrow_exception(eptr);

@@ -44,6 +44,7 @@ def _current_cuda_device_source() -> CallFunctionNoArgsSource:
 @custom_op("mempool::begin", mutates_args=())
 def begin_mempool(device_index: int, mempool_index: int) -> None:
     mempool = _get_mempool_by_index(mempool_index)
+    torch.cuda.memory._check_mem_pool_device(mempool, device_index)
     torch.cuda.memory._cuda_beginAllocateCurrentThreadToPool(device_index, mempool.id)
 
 

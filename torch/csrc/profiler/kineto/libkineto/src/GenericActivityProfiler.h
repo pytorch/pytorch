@@ -121,8 +121,10 @@ class GenericActivityProfiler {
   GenericActivityProfiler& operator=(GenericActivityProfiler&&) = delete;
   virtual ~GenericActivityProfiler();
 
+  // The GPU tracer keeps its stopped state after a trace ends, so only a
+  // running trace that armed GPU tracing may report it.
   bool isStopped() const {
-    return isGpuCollectionStopped();
+    return gpuTracingArmed_.load() && isGpuCollectionStopped();
   }
 
   // Collect CPU and GPU traces
@@ -439,6 +441,13 @@ class GenericActivityProfiler {
 
   void resetTraceData();
 
+  // GPU tracing needs GPU support, which is fixed when the profiler is
+  // registered, and a trace config that allows device tracing, which can
+  // change with every trace.
+  bool shouldTraceGpu() const {
+    return !cpuOnly_ && config_ && config_->deviceTracingEnabled();
+  }
+
   void addOverheadSample(profilerOverhead& counter, int64_t overhead) {
     counter.overhead += overhead;
     counter.cntr++;
@@ -485,6 +494,8 @@ class GenericActivityProfiler {
   // the overhead to enable/disable activity tracking
   profilerOverhead setupOverhead_;
 
+  // True when the profiler has no GPU support. See shouldTraceGpu for the
+  // per-trace decision.
   bool cpuOnly_{false};
   bool gpuOnly_{false};
   bool cpuActivityPresent_{false};
@@ -494,6 +505,9 @@ class GenericActivityProfiler {
   // and resetInternal() — spans arriving outside this window are discarded.
   bool acceptCpuTraces_{false};
   std::atomic<bool> toggleState_{true};
+  // True from configuring a trace that arms GPU tracing until that trace
+  // stops. Atomic because other threads ask whether the trace stopped.
+  std::atomic<bool> gpuTracingArmed_{false};
 
   // ***************************************************************************
   // Below state is shared with external threads.
