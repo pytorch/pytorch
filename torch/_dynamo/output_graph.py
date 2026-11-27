@@ -1750,7 +1750,7 @@ class OutputGraph(OutputGraphCommon):
             )
             self.tracers.append(tracer)
             yield tracer
-            # Successful ordinary HOP traces contribute to enclosing reuse conditions.
+            # Each tracer push enters a scope, so the parent's own scope is its debug_level + 1.
             if tracer.parent is not None and tracer.parent.tracks_lexical_sources:
                 tracer.parent.has_container_identity |= tracer.has_container_identity
                 tracer.parent.traced_sources.update(tracer.traced_sources)
@@ -3977,6 +3977,7 @@ class OutputGraph(OutputGraphCommon):
         # some of the tensor objects to be held alive for longer than necessary.
         self.root_tx = None  # type: ignore[assignment]
         self.local_generators.clear()
+        self.created_enum_classes.clear()
         self.nn_modules.clear()
         self.used_inlined_inbuilt_modules_names.clear()
         self.param_name_to_source = None

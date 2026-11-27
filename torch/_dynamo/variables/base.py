@@ -2154,6 +2154,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             try:
                 value = tx.output.resolve_source_value(self.source)
             except Exception:
+                # Sources that need guard-scope helpers can't be resolved here.
                 pass
         real_type = (
             maybe_get_python_type(self) if value is NO_SUCH_SUBOBJ else type(value)
