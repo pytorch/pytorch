@@ -40,12 +40,12 @@ from torch.testing._internal.common_device_type import (
     skipIf,
     skipPRIVATEUSE1If,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
@@ -1278,13 +1278,13 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
         torch._dynamo.reset()
 
-    @requires_triton
-    @requires_capabilities(Capability.dtype.fp8)
-    @skipIf(not SM90OrLater, "sm89 errors out on this test", device_type="cuda")
     @skipPRIVATEUSE1If(
         True, "the privateuse1 test base does not declare the fp8 capability"
     )
     @skipHPUIf(True, "the hpu test base does not declare the fp8 capability")
+    @requires_triton
+    @requires_capabilities(Capability.dtype.fp8)
+    @skipIf(not SM90OrLater, "sm89 errors out on this test", device_type="cuda")
     def test_fp8_cast_and_t(self, device):
         """
         This test repros the not able to fuses issue in
@@ -1306,12 +1306,12 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, scale)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    @requires_triton
-    @requires_capabilities(Capability.dtype.fp8)
     @skipPRIVATEUSE1If(
         True, "the privateuse1 test base does not declare the fp8 capability"
     )
     @skipHPUIf(True, "the hpu test base does not declare the fp8 capability")
+    @requires_triton
+    @requires_capabilities(Capability.dtype.fp8)
     def test_fp8_pattern_2(self, device):
         """
         This test repros the fp8 fusion relation issue here:
