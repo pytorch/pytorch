@@ -42,10 +42,8 @@ def _default_trace_settings() -> tuple[list[ProfilerActivity], list[str]]:
     # otherwise for backward compatibility.
     if torch.accelerator.is_available():
         device_type = torch.accelerator.current_accelerator().type
-        activity = getattr(ProfilerActivity, device_type.upper(), None)
-        if activity is None:
-            # renamed PrivateUse1 backends report their own device type
-            activity = ProfilerActivity.PrivateUse1
+        dispatch_key = torch._C._dispatch_key_for_device(device_type)
+        activity = getattr(ProfilerActivity, dispatch_key, None)
         return [activity], [device_type]
     return [ProfilerActivity.CUDA], ["cuda"]
 

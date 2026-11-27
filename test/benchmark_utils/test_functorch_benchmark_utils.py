@@ -68,16 +68,22 @@ class TestFunctorchBenchmarkUtils(TestCase):
         self.assertEqual(devices, ["cuda"])
 
     def test_default_trace_settings_renamed_backend(self):
+        # a renamed PrivateUse1 backend reports its own device type while the
+        # dispatcher still resolves it to the PrivateUse1 key
         with (
             patch("torch.accelerator.is_available", return_value=True),
             patch(
                 "torch.accelerator.current_accelerator",
-                return_value=types.SimpleNamespace(type="foo"),
+                return_value=types.SimpleNamespace(type="npu"),
+            ),
+            patch(
+                "torch._C._dispatch_key_for_device",
+                return_value="PrivateUse1",
             ),
         ):
             activities, devices = benchmark_utils._default_trace_settings()
         self.assertEqual(activities, [ProfilerActivity.PrivateUse1])
-        self.assertEqual(devices, ["foo"])
+        self.assertEqual(devices, ["npu"])
 
 
 if __name__ == "__main__":
