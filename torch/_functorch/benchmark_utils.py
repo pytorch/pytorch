@@ -24,6 +24,32 @@ def synchronize() -> None:
     pass
 
 
+def _device_types(devices: list[str]) -> set[str]:
+    return {torch.device(device).type for device in devices}
+
+
+def _profiler_sync(devices: list[str]) -> Callable[[], None]:
+    # Sync the current accelerator for accelerator device lists, and never
+    # for cpu even when an accelerator is present; indexless normalization
+    # means "cpu:0" reads as cpu.
+    if _device_types(devices) != {"cpu"} and torch.accelerator.is_available():
+        return torch.accelerator.synchronize
+    return synchronize
+
+
+def _default_trace_settings() -> tuple[list[ProfilerActivity], list[str]]:
+    # Use the current accelerator when there is one, and the CUDA sentinel
+    # otherwise for backward compatibility.
+    if torch.accelerator.is_available():
+        device_type = torch.accelerator.current_accelerator().type
+        activity = getattr(ProfilerActivity, device_type.upper(), None)
+        if activity is None:
+            # renamed PrivateUse1 backends report their own device type
+            activity = ProfilerActivity.PrivateUse1
+        return [activity], [device_type]
+    return [ProfilerActivity.CUDA], ["cuda"]
+
+
 def dump_chrome_trace(
     f: Callable[[tuple[Any, ...]], _R],
     input_: tuple[Any, ...],
@@ -48,9 +74,7 @@ def dump_chrome_trace(
     if devices is None:
         devices = ["cuda"]
 
-    global synchronize
-    if devices != ["cpu"] and torch.accelerator.is_available():
-        synchronize = torch.accelerator.synchronize
+    sync = _profiler_sync(devices)
 
     if kwargs_for_f is None:
         kwargs_for_f = {}
@@ -61,22 +85,22 @@ def dump_chrome_trace(
         torch.manual_seed(1337)
         for _ in range(5):  # warmup runs
             f(input_, **kwargs_for_f)
-            synchronize()
+            sync()
         torch.manual_seed(1337)
         t0 = time.perf_counter()
         for _ in range(num_runs):
             f(input_, **kwargs_for_f)
-            synchronize()
+            sync()
         t1 = time.perf_counter()
     timing = t1 - t0
 
     with profile(activities=activities, **kwargs_for_profiler) as prof:
         with optimize_ctx:
-            synchronize()
+            sync()
             torch.manual_seed(1337)
             for _ in range(num_runs):
                 f(input_, **kwargs_for_f)
-                synchronize()
+                sync()
     prof.export_chrome_trace(trace_filename)
 
     return timing
@@ -229,14 +253,15 @@ def benchmark_utilization(
         optimize_ctx = contextlib.nullcontext()
 
     chrome_trace_file_name = os.path.join(trace_folder, trace_file_name + ".json")
+    activities, devices = _default_trace_settings()
     total_length = dump_chrome_trace(
         f,
         input_,
         chrome_trace_file_name,
         optimize_ctx,
-        [ProfilerActivity.CUDA],
+        activities,
         num_runs=num_runs,
-        devices=["cuda"],
+        devices=devices,
     )
     utilization, mm_conv_utilization = compute_utilization(
         chrome_trace_file_name, total_length
