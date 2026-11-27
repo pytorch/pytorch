@@ -40,6 +40,7 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed.remote_device import _remote_device
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
@@ -3579,6 +3580,11 @@ class TestShardedTensorStateDictHookHost(TestCase):
         # Verify after load.
         self.assertEqual(m.weight, module_load.weight)
         self.assertEqual(m.bias, module_load.bias)
+
+
+instantiate_device_type_tests(
+    TestShardedTensorChunked, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
