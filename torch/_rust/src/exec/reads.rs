@@ -3099,6 +3099,12 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
     if OWNER.get() == Owner::Recorder {
         return Ok((None, None));
     }
+    region_reads(py, given)
+}
+
+// What _region_reads answers for the Trace of this thread, whoever owns it
+// (the call-list recorder's is settled by the same code: settle_for_recorder).
+fn region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(Option<Py<Reads>>, Option<String>)> {
     // The entries that go here (swept, dropped, held weakly from now on)
     // and the rest of the trace's records let go of what they counted: a
     // frame that runs for it is seen (foreign.rs).
@@ -3345,4 +3351,61 @@ pub unsafe fn global_found(globals: *mut PyObject, builtins: *mut PyObject, name
 pub unsafe fn pinned(value: *mut PyObject) -> bool {
     let is = |i: &Item| i.want == Want::Is && i.value.as_ref().is_some_and(|v| v.is(value));
     standing().is_ok() && !value.is_null() && TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| t.entries.groups.iter().any(|g| g.items.iter().any(is))))
+}
+
+// ---- The recorder's reads as the checks of its list ---------------------------
+//
+// The recorded run is over and stands. Its reads are settled by the code that
+// settles a trace's (_region_settled: every read is as the run left it, or
+// the run's own recorded writes explain it; then region_reads: what was read
+// from the run's own temporaries is no entry, what no check covers is the
+// reason), the thread's reads are nobody's again, and the answer is what a
+// list recorded of the run is checked against on every later arrival
+// (Reads::check), or why the run rests on something no check covers.
+//   `ours`: the run's inputs and the results of its entries that live (the
+//     list compares the keys of the first and asserts those of the second);
+//   `cells`: the cells the body's frame made for this call. A read of one is
+//     a read of something every call has its own of: no later arrival finds
+//     that cell, so no check of it says anything. Err.
+// A frame that ran while the reads were settled (a finalizer of what they
+// let go) was called by no instruction of the run: Err (foreign.rs).
+pub unsafe fn settle_for_recorder(ours: &[*mut PyObject], cells: &[*mut PyObject]) -> Result<Py<Reads>, String> {
+    if OWNER.get() != Owner::Recorder {
+        return Err("a trace began under the recording".into());
+    }
+    let py = Python::assume_attached();
+    let own_cell = TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| t.entries.reads.iter().any(|r| r.name.is_none() && cells.contains(&r.obj.as_ptr()))));
+    let settled = if own_cell {
+        Err("it reads a cell that the body's frame made: every call has its own".to_string())
+    } else {
+        _region_settled(ours.iter().map(|o| Bound::from_borrowed_ptr(py, *o)).collect());
+        match region_reads(py, Vec::new()) {
+            Ok((Some(reads), _)) => Ok(reads),
+            Ok((None, why)) => Err(why.unwrap_or_else(|| "the reads of the run are gone".into())),
+            Err(error) => Err(format!("the reads of the run could not be kept: {error}")),
+        }
+    };
+    end_for_recorder();
+    match (settled, super::foreign::gate()) {
+        (Ok(reads), None) => Ok(reads),
+        (Ok(reads), Some(why)) => {
+            let _releasing = super::foreign::Releasing::start();
+            drop(reads);
+            Err(format!("code that no instruction of the run called ran while its reads were settled: {why}"))
+        }
+        (Err(why), _) => Err(why),
+    }
+}
+
+impl Reads {
+    // check(), asked for a list of the call-list recorder: Err names the kind
+    // of read that is not as it was. The miss is the list's and no region's:
+    // the count of the regions' misses is left as it was.
+    pub unsafe fn check_for_list(&self) -> Result<(), &'static str> {
+        if self.check() {
+            return Ok(());
+        }
+        MISSES.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        Err(self.last())
+    }
 }

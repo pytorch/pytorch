@@ -1654,8 +1654,9 @@ int tr_generic(_PyInterpreterFrame* f, int opcode, int oparg, PyObject* const* i
       }
       for (int i = 0; i < oparg; i++) {
         if (PyDict_SetItem(map, in[2 * i], in[2 * i + 1]) < 0) {
+          // CPython's instruction raises with its operands on the stack.
           Py_DECREF(map);
-          return -1;
+          return -3;
         }
       }
       out[0] = map;
@@ -1986,6 +1987,63 @@ int tr_generic(_PyInterpreterFrame* f, int opcode, int oparg, PyObject* const* i
   PyErr_Format(
       PyExc_NotImplementedError, "CFG executor: opcode %d is not supported", opcode);
   return -1;
+}
+
+// The instructions whose operands are references of the instruction's own,
+// as those of CPython's instruction are the stack's (order.rs `owns`): each
+// lets go of them as the instruction of CPython 3.12 does, in its order and
+// at its moment. Returns 0 with *out; -1 when it raised after it let go of
+// every operand; -3 when it raised before it took any (they are the
+// caller's still, as they are still on CPython's stack).
+int tr_generic_owned(int opcode, int oparg, PyObject** in, PyObject** out) {
+  switch (opcode) {
+    case BUILD_SET: {
+      PyObject* set = PySet_New(NULL);
+      if (set == NULL) {
+        return -3;
+      }
+      // An item that is not added dies here, one that was added with the
+      // set.
+      int err = 0;
+      for (int i = 0; i < oparg; i++) {
+        PyObject* item = in[i];
+        if (err == 0) {
+          err = PySet_Add(set, item);
+        }
+        Py_DECREF(item);
+      }
+      if (err != 0) {
+        Py_DECREF(set);
+        return -1;
+      }
+      *out = set;
+      return 0;
+    }
+    case CALL_FUNCTION_EX: {
+      // (unused, func, callargs, kwargs?)
+      PyObject* func = in[0];
+      PyObject* callargs = in[1];
+      PyObject* kwargs = (oparg & 1) ? in[2] : NULL;
+      if (!PyTuple_CheckExact(callargs)) {
+        if (check_args_iterable(func, callargs) < 0) {
+          return -3;
+        }
+        PyObject* tuple = PySequence_Tuple(callargs);
+        if (tuple == NULL) {
+          return -3;
+        }
+        // The iterable goes before the call.
+        Py_SETREF(callargs, tuple);
+      }
+      *out = PyObject_Call(func, callargs, kwargs);
+      Py_DECREF(func);
+      Py_DECREF(callargs);
+      Py_XDECREF(kwargs);
+      return *out ? 0 : -1;
+    }
+  }
+  PyErr_Format(PyExc_SystemError, "CFG executor: opcode %d does not own its operands", opcode);
+  return -3;
 }
 
 // What a traced region read (torch/_rust/src/exec/reads.rs). None of these

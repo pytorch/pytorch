@@ -317,6 +317,9 @@ impl Interp<'_> {
                     self.peek(&st, n)?;
                     let len = st.stack.len();
                     st.stack.swap(len - 1, len - n);
+                    let behind = self.ver().body.last().copied().unwrap_or(NULL);
+                    let stack = st.stack.clone();
+                    self.ver().swapped.push(Swapped { behind, stack });
                 }
                 oc::KW_NAMES => st.kw_names = Some(arg),
                 oc::LOAD_CONST => self.push(&mut st, Op::Const(arg))?,

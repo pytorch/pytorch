@@ -1217,7 +1217,9 @@ class TestVmTensorFacts(TestCase):
         # The list holds numbers while the calls are observed, and from the
         # seventh call on two tensors, which are then written in place. C++
         # reads the value of each tensor in the list with every mode off:
-        # no operator of a graph reads them, so the trace is refused.
+        # no operator of a graph reads them, so the trace is refused (by the
+        # rule table, which has no row for the call in that form, or by the
+        # check that was there before it).
         global CTOR_ITEMS
         CTOR_ITEMS = [0.5, 0.25]
         g = vm_early(fn)
@@ -1240,6 +1242,7 @@ class TestVmTensorFacts(TestCase):
         self.assertTrue(
             any(
                 "it makes a tensor from the values of the tensors in a list" in why
+                or "torch.tensor has no row for these operands" in why
                 for why in whys
             ),
             msg=str(whys),
@@ -1345,6 +1348,18 @@ def caught_factor(m):
 def caught_cholesky(x, m):
     y = ((x.sin() * 2).cos() + 1).tanh().exp()
     return y.sum() * caught_factor(m)
+
+
+def caught_rows(m):
+    try:
+        return torch.index_select(m, 0, m[0].long())
+    except IndexError:
+        return torch.eye(2, device=m.device)
+
+
+def caught_index_select(x, m):
+    y = ((x.sin() * 2).cos() + 1).tanh().exp()
+    return y.sum() * caught_rows(m)
 
 
 def uncaught_cholesky(x, m):
@@ -1542,14 +1557,46 @@ class TestVmGivenUpTraces(TestCase):
 
     @isolated
     def test_error_that_depends_on_the_data_caught_after_the_trace(self, device):
-        # Six calls that factor, then four that cannot: the region's graph
-        # raises, and the block runs as written, into its handler.
+        # Six calls that factor, then four that cannot. Whether cholesky
+        # raises follows a value an operator under it reads out of a tensor:
+        # the rule table has no row for it, no region holds the call, and
+        # the handler runs as written.
         good, bad = (
             torch.tensor([[2.0, 0.5], [0.5, 1.0]]),
             torch.tensor([[1.0, 2.0], [2.0, 1.0]]),
         )
+        g = vm_early(caught_cholesky)
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            m = (good if call < 6 else bad).to(device)
+            want = caught_cholesky(x, m)
+            self.assertEqual(g(x, m), want, atol=0, rtol=0, msg=f"call {call}")
+        places = vm.regions(g)
+        missed = [r["misses"] for r in places if r.get("misses")]
+        self.assertEqual(missed, [], msg=str(places))
+        stops = "torch._C._linalg.linalg_cholesky stops a trace"
+        self.assertTrue(
+            any(stops in str(r.get("why")) for r in places), msg=str(places)
+        )
+
+    @isolated
+    def test_error_of_a_kernel_that_depends_on_the_data_caught_after_the_trace(
+        self, device
+    ):
+        # Six calls whose index is in range, then four whose is not. The
+        # kernel checks its index itself (no operator hands a value out of
+        # the tensor): the call is in a region, the region's graph raises,
+        # and the block runs as written, into its handler.
+        if torch.device(device).type != "cpu":
+            self.skipTest("an index out of range is a device-side assert on CUDA")
+        good, bad = (
+            torch.tensor([[0.0, 1.0], [0.5, 1.0]]),
+            torch.tensor([[0.0, 3.0], [0.5, 1.0]]),
+        )
         rows = self.against_eager(
-            caught_cholesky, device, lambda call: good if call < 6 else bad
+            caught_index_select, device, lambda call: good if call < 6 else bad
         )
         self.assertEqual(rows[0]["state"], "region", msg=str(rows))
         self.assertEqual(rows[0]["misses"].get("its graph raised"), 4, msg=str(rows))
@@ -6202,19 +6249,19 @@ class EffectsKeeps(torch.nn.Module):
 
 
 class EffectsRaises(torch.nn.Module):
-    """Stores a tensor and then factors a matrix that may not be positive
-    definite."""
+    """Stores a tensor and then picks elements by an index that may be out
+    of range."""
 
     def __init__(self):
         super().__init__()
         self.lin = torch.nn.Linear(4, 4)
         self.last = None
 
-    def forward(self, x, shift):
+    def forward(self, x, index):
         y = torch.tanh(self.lin(x))
         self.last = y
-        factor = torch.linalg.cholesky(torch.outer(y, y) + shift)
-        return factor.diagonal().sum() + y.sum()
+        picked = torch.index_select(y, 0, index)
+        return picked.sum() * 2 + y.sum()
 
 
 class EffectsStep(torch.nn.Module):
@@ -6316,8 +6363,8 @@ def effects_call(x):
     return EFFECTS_NET(x)
 
 
-def effects_call_two(x, shift):
-    return EFFECTS_NET(x, shift)
+def effects_call_two(x, index):
+    return EFFECTS_NET(x, index)
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
@@ -6425,18 +6472,23 @@ class TestVmEffects(TestCase):
 
     @isolated
     def test_region_that_raises_leaves_what_eager_leaves(self, device):
-        # On one call the matrix is not positive definite and the kernel
-        # raises, behind the store. A region makes its writes after its
-        # graph ran, so it has made none when the graph raises; the call is
-        # then no call of the region's and the code runs as written: it
-        # makes the store and the caller sees the kernel's own error.
+        # On one call the index is out of range and the kernel raises,
+        # behind the store (the kernel checks its index itself: no operator
+        # hands a value out of a tensor, so the call is in the region). A
+        # region makes its writes after its graph ran, so it has made none
+        # when the graph raises; the call is then no call of the region's
+        # and the code runs as written: it makes the store and the caller
+        # sees the kernel's own error.
+        if torch.device(device).type != "cpu":
+            self.skipTest("an index out of range is a device-side assert on CUDA")
         global EFFECTS_NET
         torch.manual_seed(0)
         mine, theirs = EffectsRaises().to(device), EffectsRaises().to(device)
         theirs.load_state_dict(mine.state_dict())
         EFFECTS_NET = mine
         g = vm(effects_call_two, passes=WITH_EFFECTS)
-        good, bad = torch.eye(4, device=device) * 10, torch.eye(4, device=device) * -100
+        good = torch.tensor([0, 3, 1], device=device)
+        bad = torch.tensor([0, 9, 1], device=device)
         for call in range(40):
             x = torch.rand(4, device=device)
             if call != 34:
@@ -6447,9 +6499,9 @@ class TestVmEffects(TestCase):
                     mine.last, theirs.last, atol=0, rtol=0, msg=f"call {call}"
                 )
                 continue
-            with self.assertRaises(torch.linalg.LinAlgError) as ours:
+            with self.assertRaises(IndexError) as ours:
                 g(x, bad)
-            with self.assertRaises(torch.linalg.LinAlgError) as eagers:
+            with self.assertRaises(IndexError) as eagers:
                 theirs(x, bad)
             self.assertEqual(str(ours.exception), str(eagers.exception))
             self.assertEqual(mine.last, theirs.last, atol=0, rtol=0)

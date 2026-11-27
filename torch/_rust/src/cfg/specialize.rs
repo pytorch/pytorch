@@ -290,6 +290,7 @@ fn extract(cfg: &Cfg, region: &[BlockId], x: BlockId, handlers: &[BlockId]) -> C
             nver.body.push(nv);
         }
         nver.outputs = ver.outputs.iter().map(|o| get(&map, *o)).collect();
+        nver.swapped = ver.swapped_as(&map);
         nver.unwind = ver
             .unwind
             .iter()

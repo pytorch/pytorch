@@ -8794,6 +8794,83 @@ TORCH_FORM_STOPS = {
 # 0-dim tensor stands where an int is declared: the argument parser reads
 # its value, and a trace is cut in front of a read of a value too.
 TORCH_FORM_STOPS_ALONE = {"split_tensor", "repeat_tensor", "narrow_tensor"}
+# A program per C callee of torch under whose calls a value is read out of a
+# tensor whatever the form of its operands (the error check of a
+# decomposition), or under whose calls what ran could not be classified: the
+# member, and the construct. `e`: the identity, made of `y` by rows.
+TORCH_EYE = "e = (y[:, :6] * 0.0 + 1.0).tril().triu()\n"
+TORCH_READS = {
+    "cholesky": (
+        "torch._C._linalg.linalg_cholesky",
+        TORCH_EYE + "r = torch.linalg.cholesky(y[:, :6] @ y[:, :6].T + 8.0 * e)",
+    ),
+    "cond": ("torch._C._linalg.linalg_cond", "r = torch.linalg.cond(y[:, :6])"),
+    "inv": (
+        "torch._C._linalg.linalg_inv",
+        TORCH_EYE + "r = torch.linalg.inv(y[:, :6] + 8.0 * e)",
+    ),
+    "solve": (
+        "torch._C._linalg.linalg_solve",
+        TORCH_EYE + "r = torch.linalg.solve(y[:, :6] + 8.0 * e, y[:, 6:])",
+    ),
+    "matrix_norm": (
+        "torch._C._linalg.linalg_matrix_norm",
+        "r = torch.linalg.matrix_norm(y, 2)",
+    ),
+    "svdvals": ("torch._C._linalg.linalg_svdvals", "r = torch.linalg.svdvals(y)"),
+    "eigvalsh": (
+        "torch._C._linalg.linalg_eigvalsh",
+        "r = torch.linalg.eigvalsh(y[:, :6] @ y[:, :6].T)",
+    ),
+    "to_dense": ("torch.Tensor.to_dense", "r = y.to_sparse().to_dense()"),
+}
+# A program pair per C callee of torch under whose calls a value is read
+# out of a tensor in one form of its operands only (a 0-dim tensor where a
+# number is declared): the member, the form that reads and its construct,
+# a form that does not and its construct. The member's call is on line 10.
+TORCH_READ_FORMS = {
+    "masked_fill": (
+        "torch.Tensor.masked_fill",
+        ("0:T 1:T 2:T", "r = y.masked_fill(y > 0.5, x[0, 0])"),
+        ("0:T 1:T", "r = y.masked_fill(y > 0.5, 2.0)"),
+    ),
+    "foreach_add": (
+        "torch._foreach_add",
+        ("0:[T] 1:T", "r = torch._foreach_add([y, y], x[0, 0])[1]"),
+        ("0:[T] 1:[T]", "r = torch._foreach_add([y, y], [x, x])[1]"),
+    ),
+    "foreach_add_": (
+        "torch._foreach_add_",
+        ("0:[T] 1:T", "torch._foreach_add_([y], x[0, 0])\nr = y * 1.0"),
+        ("0:[T]", "torch._foreach_add_([y], 2.0)\nr = y * 1.0"),
+    ),
+    "foreach_maximum_": (
+        "torch._foreach_maximum_",
+        ("0:[T] 1:T", "torch._foreach_maximum_([y], x[0, 0])\nr = y * 1.0"),
+        ("0:[T] 1:[T]", "torch._foreach_maximum_([y], [x])\nr = y * 1.0"),
+    ),
+    "linspace": (
+        "torch.linspace",
+        ("0:T 1:T", "r = torch.linspace(x[0, 0], x[0, 1], 5)"),
+        ("plain", "r = torch.linspace(0.0, 1.0, 5)"),
+    ),
+    "tensor": (
+        "torch.tensor",
+        ("0:[T]", "r = torch.tensor([x[0, 0], x[0, 1]])"),
+        ("plain", "r = torch.tensor([1.0, 2.0])"),
+    ),
+    "quantize_per_tensor": (
+        "torch.quantize_per_tensor",
+        (
+            "0:T 1:T 2:T",
+            "r = torch.quantize_per_tensor(y, x[0, 0].abs() + 0.1, (x[0, 0] * 0).long(), torch.quint8).dequantize()",
+        ),
+        ("0:T", "r = torch.quantize_per_tensor(y, 0.1, 0, torch.quint8).dequantize()"),
+    ),
+}
+# Those of them whose row no region runs over: the result is a quantized
+# tensor, which the tracer of a region does not hold (the trace is given up).
+TORCH_READ_FORMS_UNTRACED = {"quantize_per_tensor"}
 TORCH_NO_ROW = {
     "out": ("torch.add", "r = torch.zeros_like(y)\ntorch.add(y, 1.0, out=r)"),
     "partial": ("torch.add", "r = functools.partial(torch.add, y)(1.0)"),
@@ -8877,8 +8954,13 @@ class TestVmRulesTorch(TestCase):
     (one that writes: TestVmRulesTorchWrites). A callee that only the sizes of its results stand against, and
     that was measured apart for each form of its operands, has a row for the
     forms whose own samples are clean; a call of it in any other form stops
-    the trace. The table is a file of measured verdicts; every name in it is
-    the object the measurement called."""
+    the trace. A callee under whose calls a value was read out of a tensor
+    (what the engine's witness saw under one call per sample), or no call of
+    which was witnessed, has no row: its result, or whether it raises,
+    follows the value; one that reads in some forms of its operands only
+    has a row for the forms whose calls read none. The table is a file of
+    measured verdicts; every name in it is the object the measurement
+    called."""
 
     hw_classification = HardwareClassification.GENERIC
     COLUMNS = [
@@ -8899,6 +8981,7 @@ class TestVmRulesTorch(TestCase):
         "A",
         "L",
         "O",
+        "X",
         "domain",
     ]
     KINDS = {
@@ -8935,6 +9018,25 @@ class TestVmRulesTorch(TestCase):
                 continue
             return functools.reduce(getattr, parts[at:], found)
         self.fail(f"{name} resolves to nothing")
+
+    def only_reads(self, line):
+        """Whether a member's line says of every call measured that it only
+        computes, and of some that a value was read out of a tensor under it
+        (X): nothing else stands against the member."""
+
+        def said(column):
+            return line[column].rpartition("@")[0]
+
+        return (
+            said("X").startswith("yes(")
+            and [said(c) for c in "WKDSR"] == ["no"] * 3 + ["key", "yes"]
+            and said("P").partition("(")[0] in ("no", "warn")
+            and all(int(line[c]) >= 5 for c in ("cpu", "cuda", "scpu", "scuda"))
+            and line["O"].startswith("nested=key")
+            and "no-tensor-result" not in line["A"]
+            and ("follows=" not in line["L"] or "follows=none" in line["L"])
+            and "pyval=data" not in line["L"]
+        )
 
     def test_the_file_parses_and_every_member_resolves(self):
         lines = self.lines()
@@ -9002,6 +9104,12 @@ class TestVmRulesTorch(TestCase):
                     self.assertNotIn("no-tensor-result", line["A"])
                     self.assertTrue(line["O"].startswith("nested=key"))
                     self.assertNotEqual(line["domain"], "-")
+                    # No call witnessed read a value out of a tensor.
+                    self.assertEqual(said(line, "X"), "no")
+                # A value was read under some call, or none was witnessed:
+                # no row but by a form of its own samples.
+                if said(line, "X") != "no" and not formed:
+                    self.assertNotEqual(status, "row")
                 # The operators under the call differ with the data.
                 if "nested=data" in line["O"]:
                     self.assertEqual(status, "stop")
@@ -9009,10 +9117,13 @@ class TestVmRulesTorch(TestCase):
                     member = line["member"]
                     want = "row" if member in rows else left.get(member, "stop")
                     self.assertEqual(status, want)
-                # (By its forms: a writer, or one that only its results
-                # following data, and draws, stand against.)
+                # (By its forms: a writer, one that only its results
+                # following data, and draws, stand against, or one that only
+                # a value read under some calls stands against.)
                 still = all(said(line, c) == "no" for c in "WK")
-                self.assertLessEqual(formed, writer or (sized and still and not python))
+                by_forms = writer or (sized and still and not python)
+                self.assertLessEqual(formed, by_forms or self.only_reads(line))
+                self.assertLessEqual(self.only_reads(line), formed)
                 # Python under the call: neither a row nor yet a stop.
                 self.assertEqual(python and not sized, status == "later:native")
                 if status.startswith("later:"):
@@ -9036,6 +9147,9 @@ class TestVmRulesTorch(TestCase):
             and "nested=data" not in x["O"]
         }
         self.assertLessEqual(whole, writers)
+        # The members that only a value read under some calls stands against.
+        readers = {x["member"] for x in self.lines() if self.only_reads(x)}
+        self.assertEqual(readers & writers, set())
         lines = [x for x in self.lines(forms=True) if x["member"] in by_form]
         self.assertEqual(sorted(forms), sorted((x["member"], x["form"]) for x in lines))
         rows, later = collections.Counter(), {}
@@ -9046,14 +9160,24 @@ class TestVmRulesTorch(TestCase):
                 enough = all(
                     int(line[d]) >= 5 for d in ("cpu", "cuda", "scpu", "scuda")
                 ) and line["O"].startswith("nested=key")
+                # No call of this form that was witnessed read a value.
+                unread = line["X"].rpartition("@")[0] == "no"
                 if line["member"] in writers:
                     # The form of a writer: what it writes is the row's.
                     del clean[1]
                     is_row = clean == ["no"] * 3 + ["key", "yes"] and enough
+                    is_row = is_row and unread
+                    self.assertEqual(status, "row" if is_row else "stop")
+                elif line["member"] in readers:
+                    # The member's line says the rest of every form; the
+                    # form's own says whether its calls read, on its samples.
+                    counts = [int(line[d]) for d in ("cpu", "cuda")]
+                    is_row = unread and min(counts) >= 5
                     self.assertEqual(status, "row" if is_row else "stop")
                 else:
                     is_row = clean == ["no"] * 4 + ["key", "yes"] and enough
                     is_row = is_row and "no-tensor-result" not in line["A"]
+                    is_row = is_row and unread
                     self.assertEqual(status == "row", is_row)
                     # Left to another family: calls that hand no tensor,
                     # with nothing against them but that nothing was compared.
@@ -9075,8 +9199,24 @@ class TestVmRulesTorch(TestCase):
             self.assertEqual(members[member], want, msg=member)
         self.assertEqual(
             {m for m, _ in TORCH_FORM_ROWS.values()},
-            {m for m in rows if rows[m] and m not in writers},
+            {m for m in rows if rows[m] and m not in writers | readers},
         )
+        # A member under whose calls a value is read in some form, and that
+        # has a row for another: a program for the form that reads and one
+        # for a form that does not.
+        reads = {
+            x["member"]
+            for x in self.lines()
+            if x["X"].startswith("yes(") and x["member"] in writers | readers
+        }
+        self.assertEqual(
+            {member for member, _, _ in TORCH_READ_FORMS.values()},
+            {m for m in reads if rows[m]},
+        )
+        # One that reads in every form stops whole, and has a program too.
+        whole = {m for m in reads if not rows[m]}
+        self.assertLessEqual(whole, {member for member, _ in TORCH_READS.values()})
+        self.assertEqual({members[m] for m in whole}, {"stop"})
 
     def test_every_data_sized_member_has_a_program(self):
         sized = {
@@ -9185,6 +9325,60 @@ class TestVmRulesTorch(TestCase):
         if name in TORCH_FORM_STOPS_ALONE:
             self.assertGreater(refused, 0, msg=str(vm.regions(compiled)))
         self.assertEqual(met, refused, msg=str(vm.regions(compiled)))
+
+    def test_every_member_that_a_value_read_stops_has_a_program(self):
+        stopped = {
+            line.split("\t")[2]
+            for line in torch._rust._rules_dump().splitlines()
+            if line.startswith("stop\ttorch\t")
+            and ("depends on a value of a tensor" in line or "not witnessed" in line)
+        }
+        self.assertEqual(stopped, {member for member, _ in TORCH_READS.values()})
+
+    @parametrize("name", list(TORCH_READS))
+    @checks_isolated
+    def test_a_member_that_reads_a_value_is_in_no_region(self, name):
+        member, construct = TORCH_READS[name]
+        table = {name: status for name, _, status in torch._rust._rules_torch()}
+        self.assertEqual(table[member], "stop")
+        compiled = self.calls(construct)
+        # The call is a place of its own, which no trace is begun over.
+        whys = [str(place.get("why")) for place in vm.regions(compiled)]
+        self.assertTrue(
+            any(f"{member} stops a trace" in why for why in whys), msg=str(whys)
+        )
+        met, refused = self.met_and_refused(compiled, member)
+        self.assertEqual(met, refused, msg=str(vm.regions(compiled)))
+
+    @parametrize("name", list(TORCH_READ_FORMS))
+    @checks_isolated
+    def test_a_form_that_reads_a_value_is_in_no_region(self, name):
+        member, (form, construct), _ = TORCH_READ_FORMS[name]
+        self.assertIn((member, form, "stop"), torch._rust._rules_torch_forms())
+        compiled = self.calls(construct)
+        met, refused = self.met_and_refused(compiled, member)
+        self.assertEqual(met, refused, msg=str(vm.regions(compiled)))
+
+    @parametrize("name", list(TORCH_READ_FORMS))
+    @checks_isolated
+    def test_a_region_runs_over_a_form_that_reads_no_value(self, name):
+        member, _, (form, construct) = TORCH_READ_FORMS[name]
+        self.assertIn((member, form, "row"), torch._rust._rules_torch_forms())
+        compiled = self.calls(construct)
+        met, refused = self.met_and_refused(compiled, member)
+        self.assertGreater(met, 0)
+        self.assertEqual(refused, 0, msg=str(vm.regions(compiled)))
+        if name in TORCH_READ_FORMS_UNTRACED:
+            return
+        # As for a row: the call is on line 10.
+        runs = sum(
+            r["runs"]
+            for r in vm.regions(compiled)
+            if r["function"] == "f"
+            and r["state"] == "region"
+            and r["lines"][0] < 10 < r["lines"][1]
+        )
+        self.assertGreater(runs, 0, msg=str(vm.regions(compiled)))
 
     @parametrize("name", list(TORCH_NO_ROW))
     @checks_isolated
@@ -9667,6 +9861,90 @@ TWO_OF = {
     "is_true": ((True,), lambda v: v, lambda v: v),
 }
 assert all(type(v[0]) is type(v[-1]) and v[0] == v[-1] and (v[0] is not v[-1] or len(v) == 1) for v, _, _ in TWO_OF.values())
+# The checks of a list (a later arrival that fails one is a miss).
+class Holder:
+    def __init__(self, k):
+        self.w = torch.full((8,), float(k))
+        self.child = lambda: k
+
+class Stopper:
+    def __init__(self):
+        pass
+
+HOLDERS = [Holder(1), Holder(2)]
+MOD = Holder(3)
+OTHER_W = torch.full((8,), 7.0)
+OWN_W = [torch.full((8,), float(k)) for k in range(6)]
+
+def chk_shadowed_builtin(x):
+    y = torch.relu(x) * 2
+    return y + max(1, 2)
+
+def chk_deleted_global(x):
+    y = torch.relu(x) * 2
+    return y + max(1, 2)
+
+def chk_grad_mode(x):
+    y = torch.relu(x) * 2
+    return y + 1
+
+def chk_anomaly(x):
+    y = torch.relu(x) * 2
+    return y + 1
+
+def chk_root(x, holder):
+    y = torch.relu(x) * 2
+    return y + holder.w
+
+def chk_led_output(x, holder):
+    y = torch.relu(x) * 2
+    child = holder.child
+    if NONE_FLAG is None:
+        y = y + 1
+    return y, child
+
+def chk_found_too(x, w):
+    y = torch.relu(x) + MOD.w
+    return y * w
+
+def make_closure(w):
+    def get():
+        return w
+    def closure_body(x):
+        y = torch.relu(x) * 2
+        return y + get()
+    return closure_body
+
+CLOSURES = [make_closure(torch.full((8,), float(k))) for k in (1, 2)]
+
+def chk_closure(x, k):
+    # (The recording of this block stops at the call of a class with an
+    # __init__ of Python: the closure's block is then a place of its own.)
+    Stopper()
+    return CLOSURES[k](x)
+
+def chk_own_cell(x, w):
+    def inner():
+        return w
+    y = torch.relu(x) * 2
+    if NONE_FLAG is None:
+        y = y * 2 + inner()
+    return y
+
+FRESH = {}
+
+def chk_fresh_code(x, i):
+    k = i // 3
+    if k not in FRESH:
+        # The earlier function dies here, with its code and its plan.
+        FRESH.clear()
+        space = {"torch": torch}
+        exec(f"fresh_body = lambda x: torch.relu(x) * {k + 2} + {k}", space)
+        FRESH[k] = space["fresh_body"]
+    # (As in chk_closure: the recording of this block stops first.)
+    return (Stopper(), FRESH[k](x))[1]
+
+SETUP = {"chk_deleted_global": lambda: globals().__setitem__("max", lambda a, b: 3.0)}
 LATE = ("overlap", "shifted")
 # A collection is due after every second allocation; in `collects_garbage`
 # the collector is off until the body turns it on.
@@ -9683,11 +9961,17 @@ BETWEEN = {
     "is_global": lambda: globals().__setitem__("SCALE_TOO", float("2.0")),
     "is_str": lambda: globals().__setitem__("MODE_TOO", "".join(["flo", "or"])),
     "out_flag": lambda: globals().__setitem__("NONE_FLAG", 0),
+    "chk_shadowed_builtin": lambda: globals().__setitem__("max", lambda a, b: 3.0),
+    "chk_deleted_global": lambda: globals().__delitem__("max"),
+    "chk_grad_mode": lambda: torch.set_grad_enabled(False),
+    "chk_anomaly": lambda: torch.autograd.set_detect_anomaly(True),
 }
 # What a program is called with besides (or in place of) the tensor, by call.
 ARGS = {"float_input": lambda i: (1.5,) if i < 4 else (2.5,)}
 ARGS.update({n: (lambda i, v=v, first=first, last=last: first(v) if i < 4 else last(v)) for n, (v, first, last) in TWO_OF.items()})
 ARGS.update(out_input=lambda i: (2.0 + i,), out_coincides=lambda i: (True,), out_tuple_valued=lambda i: (2.0,))
+ARGS.update(chk_root=lambda i: (HOLDERS[i >= 4],), chk_led_output=lambda i: (HOLDERS[i >= 4],), chk_found_too=lambda i: (MOD.w if i < 4 else OTHER_W,))
+ARGS.update(chk_closure=lambda i: (i % 2,), chk_own_cell=lambda i: (OWN_W[i],), chk_fresh_code=lambda i: (i,))
 KWARGS = ("in_kwargs",)
 # What a program changes before its second call: a way its first call, the
 # one the optimizer judged it by, did not take.
@@ -9708,6 +9992,12 @@ def run(f):
     globals().update(SCALE=SCALE0, SCALE_TOO=SCALE0, MODE_TOO=MODE, m=M0, NONE_FLAG=None)
     M0.copy_(M0C)
     default_helper.__defaults__ = (3,)
+    torch.set_grad_enabled(True)
+    torch.autograd.set_detect_anomaly(False)
+    globals().pop("max", None)
+    FRESH.clear()
+    if name in SETUP:
+        SETUP[name]()
     GRAD.grad = None
     outs = []
     for i, x in enumerate(inputs):
@@ -9776,21 +10066,21 @@ SHADOW_STOPS = {
 }  # fmt: skip
 
 # program: (a reason its recording must give, whether the list must differ
-# from the block on a later arrival: the program changes at its fifth call
-# what the list took by value).
+# from the block on a later arrival). Where a program changes at its fifth
+# call what its run read (a flag, a function's defaults), the read is a
+# check of the list and the later arrivals are misses: TestVmCallsShadow.CHECKS.
 SHADOW_PARTIAL = {
-    "chain": ("a pin: the reads that lead to it are not run as a check on a later arrival yet", False),
+    "chain": ("no row: LoadAttr (later: attributes) x module", False),
     "frame_under": ("no row: call py torch.nn.functional.relu (later: callees: python functions)", False),
-    "in_place": ("the reads of the run are recorded, and nothing runs them as checks on a later arrival yet", False),
-    "method_of_a_global": ("a pin: the reads that lead to it are not run as a check on a later arrival yet", False),
+    "in_place": ("no row: LoadAttr (later: attributes) x module", False),
+    "method_of_a_global": ("no row: LoadMethod (later: attributes) x torch.Tensor", False),
     "in_a_tuple": ("no row: BINARY_SUBSCR (later: subscripts) x tuple", False),
-    "reads_value": ("the witness of an entry disagrees with it: torch._C._linalg.linalg_cond", False),
-    "global_number": ("the reads of the run are recorded, and nothing runs them as checks on a later arrival yet", True),
-    "none_flag_under": ("the reads of the run are recorded, and nothing runs them as checks on a later arrival yet", True),
-    "imports_a_module": ("the reads of the run are recorded, and nothing runs them as checks on a later arrival yet", False),
-    "flag_under": ("a jump under the body tested the result of ToBool", True),
+    "reads_value": ("never run again and found equal: not validated: no output of the block is a result of an entry", False),
+    "none_flag_under": ("no row: call py __main__.none_helper (later: callees: python functions)", False),
+    "imports_a_module": ("no row: LoadAttr (later: attributes) x module", False),
+    "flag_under": ("a jump under the body tested the result of ToBool", False),
     "flag_operand": ("a jump under the body tested the result of ToBool", False),
-    "default_operand": ("an operand taken by value that is no constant of the code: int", True),
+    "default_operand": ("an operand taken by value that is no constant of the code: int", False),
 }  # fmt: skip
 
 # What the recorder's validation answers for a list of one entry, a slice of
@@ -9830,6 +10120,7 @@ class TestVmCallsShadow(TestCase):
         {
             *SHADOW_STOPS,
             *SHADOW_PARTIAL,
+            "global_number",
             "part",
             "sliced",
             "state",
@@ -9898,14 +10189,11 @@ class TestVmCallsShadow(TestCase):
         return found
 
     def test_nothing_runs_without_the_variable(self):
-        # The engine's regions differ from eager in the last bits of
-        # linalg.cond with the recorder and without: the same bits.
         for name in ("chain", "frame_under", "in_place", "writer", "state", "operators", "flag_under", "reads_value"):  # fmt: skip
             with self.subTest(name=name):
-                same = name != "reads_value"
-                on = self.program(name, same=same)
+                on = self.program(name)
                 for mode in (None, "0"):
-                    off = self.program(name, mode, same=same)
+                    off = self.program(name, mode)
                     self.assertEqual(off["shadow"], [])
                     # The regions are where they are without the recorder,
                     # and every output has the same bytes.
@@ -9975,7 +10263,9 @@ class TestVmCallsShadow(TestCase):
         self.assertEqual(found[0]["entries"], 5)
         self.assertRegex(found[0]["again"], r"^equal on 2 later arrival")
         # A list that is not the body: the way a frame under it took on a
-        # flag, which the program flips at its fifth call.
+        # flag, which the program flips at its fifth call. The read of the
+        # flag is a check of the list: the arrivals behind the flip are
+        # misses, not differences.
         found = [
             s
             for s in self.program("flag_under", "1")["shadow"]
@@ -9983,7 +10273,9 @@ class TestVmCallsShadow(TestCase):
         ]
         self.assertEqual(len(found), 1, found)
         self.assertTrue(found[0]["status"].startswith("partial: "), found)
-        self.assertTrue(found[0]["again"].startswith("DIFFERENT on a later arrival"))
+        self.assertEqual(
+            found[0]["missed"], [["a read: a namespace or a container", 2]], found
+        )
 
     def test_operators_on_inputs_and_constants_are_replayable(self):
         found = self.reached("operators")
@@ -10009,6 +10301,63 @@ class TestVmCallsShadow(TestCase):
             )
         else:
             self.assertFalse(found["again"].startswith("DIFFERENT"), found)
+
+    # program: (the start of the place its checks are of, the check its
+    # later arrivals miss by, or None; a reason its list has, or None: such
+    # a list is never run on a later arrival). Each program changes, between
+    # two of its calls, the one thing the check is for.
+    CHECKS = {
+        "global_number": ("global_number:", "a read: a namespace or a container", None),
+        "none_flag_under": ("none_flag_under:", "a read: a namespace or a container", None),
+        "out_flag": ("out_flag:bb1", "a read: a namespace or a container", None),
+        "chk_shadowed_builtin": ("chk_shadowed_builtin:", "a read: a namespace or a container", None),
+        "chk_deleted_global": ("chk_deleted_global:", "a read: a namespace or a container", None),
+        "chk_grad_mode": ("chk_grad_mode:", "thread state", None),
+        "chk_anomaly": ("chk_anomaly:", "thread state: not neutral: anomaly mode is on", None),
+        "chk_root": ("chk_root:", "a root the reads start from", None),
+        "chk_led_output": ("chk_led_output:bb1", "a root the reads start from", None),
+        "chk_found_too": ("chk_found_too:", "an input a read of the run also found", None),
+        "chk_closure": ("make_closure.<locals>.closure_body:", "the function of the body's frame", None),
+        "chk_own_cell": ("chk_own_cell:bb4", None, "the reads of the run are no check of a later arrival: it reads a cell that the body's frame made: every call has its own"),
+        "chk_fresh_code": ("<lambda>:", None, None),
+        "float_input": ("float_input:", "input value", None),
+        "flag_under": ("flag_under:", "a read: a namespace or a container", None),
+        "flag_operand": ("flag_operand:", "a read: a namespace or a container", None),
+        "default_operand": ("default_operand:", "a read: the code or the defaults of a function", None),
+    }  # fmt: skip
+
+    @parametrize("name", list(CHECKS))
+    def test_a_list_runs_again_only_where_its_checks_hold(self, name):
+        # A list is run on a later arrival only behind its checks: what its
+        # run read is as it was, the thread is neutral and in the state the
+        # run was in, the frame is of the recorded function, the inputs are
+        # found where they were with the keys and the values the list is for,
+        # a root its reads start from and an input a read also found are the
+        # recorded objects. An arrival that fails one is a miss, counted by
+        # the check, and the block runs as written: no such arrival is one
+        # where the list and the block differ.
+        place, check, reason = self.CHECKS[name]
+        for mode in ("shadow", "1"):
+            out = self.program(name, mode)
+            found = [s for s in out["shadow"] if s["place"].startswith(place)]
+            if mode == "shadow":
+                self.assertTrue(found, out["shadow"])
+                missed = [c for s in found for c, _ in s["missed"]]
+                if check is not None:
+                    self.assertIn(check, missed)
+                if reason is not None:
+                    listed = [
+                        s for s in found if reason in [w for w, _ in s["reasons"]]
+                    ]
+                    self.assertTrue(listed, found)
+                    self.assertEqual([s["again"] for s in listed], [""] * len(listed))
+            for s in found:
+                self.assertFalse(s["again"].startswith("DIFFERENT"), s)
+            for s in out["shadow"]:
+                self.assertFalse(
+                    s["status"] == "replayable" and s["again"].startswith("DIFFERENT"),
+                    s,
+                )
 
     @parametrize("name", list(SHADOW_STOPS))
     def test_a_stop_ends_the_recording_with_its_reason(self, name):
@@ -10209,7 +10558,8 @@ class TestVmCallsShadow(TestCase):
                 self.assertTrue(without[0].startswith(unstated), without)
             # What is stated is compared on the later arrivals: the block
             # made it there too, or the program had changed what the list
-            # rests on (out_flag sets the global before its fifth call). A
+            # rests on (out_flag sets the global before its fifth call: a
+            # miss by the read). A
             # list none of whose outputs is a result is never run again.
             if not ran:
                 self.assertTrue(found["validated"].startswith("not validated"))
@@ -10217,24 +10567,27 @@ class TestVmCallsShadow(TestCase):
                 continue
             self.assertEqual(found["validated"], "equal")
             if name == "out_flag":
+                # The read of the global is a check of the list: behind the
+                # program's change its arrivals are misses.
+                self.assertTrue(found["again"].startswith("equal on "), found["again"])
                 self.assertEqual(
-                    found["again"],
-                    "DIFFERENT on a later arrival: output 1 of the block is a bool where the list states a value it knows",  # noqa: B950
+                    found["missed"], [["a read: a namespace or a container", 2]]
                 )
             else:
                 self.assertTrue(found["again"].startswith("equal on "), found["again"])
                 self.assertIn(", 0 not comparable", found["again"])
 
-    def test_a_witness_that_disagrees_with_its_entry_gates_the_validation(self):
-        # linalg.cond's row says it only computes; an operator under it
-        # reads a value out of a tensor. The list is never run.
-        found = self.reached("reads_value", same=False)
-        self.assertEqual(
-            found["validated"],
-            "not validated: the witness of an entry disagrees with what the entry says",
-        )
-        self.assertEqual(found["again"], "")
-        self.assertTrue(any("read a value" in note for note in found["notes"]))
+    def test_a_callee_that_reads_a_value_is_no_entry(self):
+        # Under linalg.cond an operator reads a value out of a tensor (its
+        # error check): the table has no row for it, so no list has it as
+        # an entry, and no witness has an entry of it to disagree with.
+        places = self.places("reads_value")
+        for found in places:
+            self.assertNotIn("linalg_cond", found["text"])
+            self.assertNotIn("the witness of an entry", found["validated"])
+            self.assertFalse(any("read a value" in note for note in found["notes"]))
+        # (What follows the call is recorded as before.)
+        self.assertTrue(any("in0 + 1" in found["text"] for found in places), places)
 
     def test_a_method_looked_up_on_a_tensor_leaves_the_tensor_what_it_was(self):
         # LoadMethod hands the receiver back: it made no tensor.
@@ -10330,19 +10683,16 @@ class TestVmCallsShadow(TestCase):
         )
 
     def test_a_value_is_known_only_as_what_a_recorded_read_found(self):
-        pending = "the reads of the run are recorded, and nothing runs them as checks on a later arrival yet"
-
         def reasons(name):
             return [why for why, _ in self.reached(name)["reasons"]]
 
         # A float loaded from a global: the run's reads hold the item of the
         # namespace, so the operand is no value of unknown origin and the
-        # load no read without a check; the list rests on that read.
+        # load no read without a check; the list rests on that read, which
+        # is one of its checks (test_a_list_runs_again_only_where_its_checks_hold).
         found = reasons("global_number")
-        self.assertIn(pending, found)
-        self.assertFalse(
-            [w for w in found if "taken by value" in w or "LoadGlobal" in w]
-        )
+        self.assertEqual(found, [])
+        self.assertEqual(self.reached("global_number")["status"], "replayable")
         # `is None` of a global, tested by a jump in a frame under the body.
         found = self.reached("none_flag_under")
         self.assertEqual(found["jumps"], [1, 0])
@@ -10351,7 +10701,6 @@ class TestVmCallsShadow(TestCase):
         )
         # An import of a loaded module: its row recorded what it read.
         found = reasons("imports_a_module")
-        self.assertIn(pending, found)
         self.assertFalse([w for w in found if "IMPORT_NAME" in w])
         # The content of a cell, read in a frame under the body, is in no
         # list of kinds: a read with no check, and a value of no origin.
@@ -10378,17 +10727,15 @@ class TestVmCallsShadow(TestCase):
         # global, a pin; found in a dict with an int key that a local holds,
         # which is not walked and which no recorded read leads to, no list.
         for name in ("chain", "method_of_a_global"):
+            # (The reads that lead to a pin are checks of the list: a later
+            # arrival is entered under them or is a miss.)
             found = self.reached(name)
             self.assertGreater(found["pins"], 0)
-            self.assertNotEqual(found["status"], "replayable")
+            self.assertFalse(found["again"].startswith("DIFFERENT"), found)
         stopped = [s for s in self.places("in_a_dict_of_ints") if s["stop"] is not None]
         self.assertTrue(stopped)
         for found in stopped:
             self.assertEqual((found["pins"], found["entries"]), (0, 0))
-        for name in self.PROGRAMS:
-            for found in self.program(name, same=name != "reads_value")["shadow"]:
-                # No list with a pin passes for the body.
-                self.assertFalse(found["pins"] and found["status"] == "replayable")
 
     def test_a_trace_under_a_stopped_recording_is_the_engines_own(self):
         # `overlap` stops at relu_; behind the stop `twice` runs twice: the
@@ -10432,10 +10779,15 @@ class TestVmCallsShadow(TestCase):
         found = self.reached("patched_behind")
         self.assertIn("r0 = torch.relu(in0)", found["text"].splitlines()[0])
         self.assertEqual([check for check, _ in found["missed"]], ["class"])
-        # A list that gives other values than the block is a difference.
+        # A list whose run read what the program then changed is not run
+        # there either: a miss by the read, where the list would have given
+        # other values than the block.
         found = self.reached("global_number")
-        self.assertEqual(found["missed"], [])
-        self.assertTrue(found["again"].startswith("DIFFERENT"))
+        self.assertEqual(
+            [check for check, _ in found["missed"]],
+            ["a read: a namespace or a container"],
+        )
+        self.assertFalse(found["again"].startswith("DIFFERENT"))
         # A list with an entry that writes is never run again.
         found = self.reached("in_place")
         self.assertEqual((found["again"], found["missed"]), ("", []))
@@ -13567,7 +13919,13 @@ class TestVmEdgeAskers(TestCase):
 # instruction that lets go of a reference. Under "== name": definitions, a
 # line "--", and the statement (with no "--": the statement alone). The
 # operands are objects whose death is logged: T(name) by its __del__, a
-# tensor through F(tensor, name) by a weak reference's callback.
+# tensor through F(tensor, name) by a weak reference's callback. From "row:"
+# on the members hold the rows of the executor's order table against the
+# interpreter: "row" and "instruction" a statement (or several) per
+# instruction, "raise" an instruction that raises in C with operands under
+# it, "unwind" what an exception pops, "two places" an operand that stands
+# at two places of one instruction, "end" what a frame's end lets go of,
+# "kept" an instruction that leaves an operand on the stack.
 RELEASE_MEMBERS = r"""
 == operator: binary
 V("a") + V("b")
@@ -15051,6 +15409,873 @@ t = len("abc")
 b = [F(x + 1.0, "a")]
 t = b.pop()
 t = x + 2.0
+== row: BUILD_SET duplicates
+{H("a"), H("b"), H("c")}
+== row: BUILD_SET raises in C
+{T("a"), [], T("c")}
+== row: FORMAT_VALUE spec
+f"{V('a'):{Gf()}}"
+== row: FORMAT_VALUE conversion and spec
+f"{T('a')!r:{Gf()}}"
+== row: MATCH_CLASS
+match P(T("a"), T("b")):
+    case P(u, v):
+        del u, v
+== row: MATCH_CLASS keyword, fails
+match P(T("a"), T("b")):
+    case P(x=1, y=2):
+        pass
+    case _:
+        log("no")
+== row: except star
+try:
+    raise ExceptionGroup("g", [TE("a"), TE("b")])
+except* TE:
+    log("h")
+== row: except star, part
+try:
+    raise ExceptionGroup("g", [TE("a"), ValueError("b")])
+except* TE:
+    log("h")
+except* ValueError:
+    log("v")
+== row: CALL_INTRINSIC_2 typevar bound
+def g[X: T]():
+    pass
+del g
+== row: LOAD_SUPER_ATTR plain
+super(B1, B1("s")).m
+== row: LOAD_SUPER_ATTR method
+super(B1, B1("s")).meth()
+== row: LOAD_SUPER_ATTR under a temporary
+[T("u"), super(B1, B1("s")).m, T("w")]
+== row: binop, every operator
+W("a1") + W("b1")
+W("a2") - W("b2")
+W("a3") * W("b3")
+W("a4") @ W("b4")
+W("a5") / W("b5")
+W("a6") // W("b6")
+W("a7") % W("b7")
+W("a8") ** W("b8")
+W("a9") << W("b9")
+W("a10") >> W("b10")
+W("a11") & W("b11")
+W("a12") | W("b12")
+W("a13") ^ W("b13")
+== row: binop, in place
+G()[1] += W("b1")
+G()[2] -= W("b2")
+G()[3] *= W("b3")
+G()[4] @= W("b4")
+G()[5] /= W("b5")
+G()[6] //= W("b6")
+G()[7] %= W("b7")
+G()[8] **= W("b8")
+G()[9] <<= W("b9")
+G()[10] >>= W("b10")
+G()[11] &= W("b11")
+G()[12] |= W("b12")
+G()[13] ^= W("b13")
+== row: binop, reflected
+N("a") + R("b")
+N("c") + RS("d")
+1 + R("e")
+N("f") < R("g")
+== row: binop, raises in C under a temporary
+[T("u"), T("a") + T("b")]
+== row: compare, every operator
+W("a1") == W("b1")
+W("a2") != W("b2")
+W("a3") < W("b3")
+W("a4") <= W("b4")
+W("a5") > W("b5")
+W("a6") >= W("b6")
+T("a7") == T("b7")
+== row: is and in
+T("a") is T("b")
+T("c") is not T("d")
+T("e") in V("f")
+T("g") not in V("h")
+T("i") in (T("j"), T("k"))
+== row: subscr, load store delete
+V("c1")[T("k1")]
+V("c2")[T("k2")] = T("v2")
+del V("c3")[T("k3")]
+== row: slice, forms
+V("c1")[T("lo1"):T("hi1")]
+V("c2")[T("lo2"):T("hi2"):T("st2")]
+V("c3")[T("lo3"):T("hi3"), 1]
+V("c4")[T("lo4"):]
+V("c5")[:T("hi5")]
+V("c6")[T("lo6"):T("hi6")] = T("v6")
+V("c7")[T("lo7"):T("hi7"):T("st7")] = T("v7")
+del V("c8")[T("lo8"):T("hi8")]
+== row: attr, store delete load
+O("o1").x = T("v1")
+del O("o2").x
+O("o3").x
+V("a4").__neg__()
+T("a5").name
+== row: call, python callee
+f2(T("a1"), T("b1"))
+fk(T("a2"), k=T("b2"))
+fs(T("a3"), T("b3"), k=T("c3"))
+== row: call, C callee
+operator.is_(T("a1"), T("b1"))
+sorted([], key=T("k2"), reverse=T("r2"))
+isinstance(T("a3"), T)
+== row: call, finalizable callable
+C("c1")(T("a1"), T("b1"))
+C("c2")(T("a2"), k=T("b2"))
+== row: call, method and class
+MT("m1").meth(T("a1"), T("b1"))
+Cls(T("a2"), T("b2"))
+Cls().meth(T("a3"), k=T("b3"))
+== row: call, C callee raises under a temporary
+[T("u"), operator.add(T("a"), T("b"))]
+== row: call, bound builtin
+getattr(D(), "get")(T("a"), T("b"))
+== row: call ex, iterable dies before the call
+C("c1")(*I("i1"))
+== row: call ex, iterable and mapping
+C("c2")(*I("i2"), **M("m2"))
+== row: call ex, list and dict
+fs(*[T("a"), T("b")], **{"k": T("c")})
+C("c4")(*(T("a4"), T("b4")))
+== row: build, map and const key map
+{T("k1"): T("v1"), T("k2"): T("v2")}
+{"a": T("a3"), "b": T("b3")}
+== row: build, map raises in C
+{T("k1"): T("v1"), []: T("v2")}
+== row: build, list tuple string
+[T("a1"), T("b1")]
+(T("a2"), T("b2"))
+f"{V('a3')}{V('b3')}"
+== row: extend update merge
+[*I("i1"), *I("j1")]
+{*I("i2"), *I("j2")}
+{**M("m3"), **M("n3")}
+fs(**M("m4"), **M("n4"))
+(*I("i5"), *I("j5"))
+== row: comprehensions
+[T("l" + str(n)) for n in (1, 2)]
+{T("s" + str(n)) for n in (1,)}
+{n: T("d" + str(n)) for n in (1, 2)}
+{H("k" + str(n)): T("v" + str(n)) for n in (1, 2)}
+== row: unpack
+a, b = V("i1")
+a, *b = V("i2")
+== row: iter
+for _ in V("it1"):
+    pass
+for _ in It("it2"):
+    pass
+for _ in It2("it3"):
+    T("x")
+== row: raise from
+try:
+    raise TE("a") from TE("b")
+except TE:
+    log("h")
+== row: match, mapping and sequence
+match {"k": T("a")}:
+    case {"k": v}:
+        del v
+match [T("b"), T("c")]:
+    case [x, y]:
+        del x
+        del y
+== row: with
+with CM("m1"):
+    pass
+with CM("m2") as e:
+    del e
+with CMS("m3"):
+    int("x")
+== row: chained compare
+V("a1") < V("b1") < V("c1")
+Z("a2") < V("b2") < V("c2")
+== row: augmented
+V("d1")[T("k1")] += V("v1")
+V("c2")[T("lo2"):T("hi2")] += V("x2")
+O("o3").x += V("v3")
+== row: intrinsic 1 and unary
++W("a1")
+(*I("i2"),)
+-V("a3")
+not V("a4")
+~W("a5")
+== row: assert
+try:
+    assert Z("x"), T("m")
+except AssertionError:
+    log("h")
+== row: bool ops
+T("a1") and T("b1")
+Z("a2") or T("b2")
+T("a3") if Z("c3") else T("b3")
+== row: return, out of a for and a with
+def r1():
+    for _ in It2("i"):
+        return T("r")
+def r2():
+    with CM("m"):
+        return T("r2")
+def r3():
+    try:
+        return T("r3")
+    finally:
+        T("f3")
+--
+r1()
+r2()
+r3()
+== instruction: class body
+class K:
+    a: T = T("a")
+    b = T("b")
+    del a
+    c = b
+    b = T("b2")
+del K
+== instruction: class body of a generic class
+def outer():
+    v = T("v")
+    class K[X]:
+        w = v
+        u: X = T("u")
+    return K
+k = outer()
+log("mid")
+del k
+== instruction: global store and delete
+global GG
+GG = T("g1")
+GG = T("g2")
+log("mid")
+del GG
+== instruction: import
+import os.path as p
+from os import path as q, sep
+del p, q, sep
+== instruction: nonlocal store
+def outer():
+    v = T("a")
+    def inner():
+        nonlocal v
+        v = T("b")
+        log("stored")
+    inner()
+    log("mid")
+outer()
+== instruction: generator
+def gen():
+    got = yield T("y1")
+    del got
+    yield T("y2")
+g = gen()
+next(g)
+g.send(T("s1"))
+log("mid")
+del g
+== instruction: yield from
+def sub():
+    got = yield T("y1")
+    return T("r")
+def gen():
+    r = yield from sub()
+    log("back")
+    del r
+    yield T("y2")
+g = gen()
+next(g)
+g.send(T("s1"))
+log("mid")
+del g
+== instruction: yield from an iterable
+def gen():
+    yield from I("i")
+    yield from It2("j")
+for _ in gen():
+    pass
+== instruction: yield from, thrown into
+def sub():
+    try:
+        yield T("y1")
+    except TE:
+        return T("r")
+def gen():
+    r = yield from sub()
+    log("back")
+    del r
+g = gen()
+next(g)
+try:
+    g.throw(TE("e"))
+except StopIteration:
+    log("stop")
+del g
+== instruction: yield from, thrown into, not caught
+def gen():
+    yield from It2("j")
+g = gen()
+next(g)
+try:
+    g.throw(TE("e"))
+except TE:
+    log("h")
+del g
+== instruction: await
+class Aw(T):
+    def __await__(s):
+        return iter(())
+async def co():
+    await Aw("a")
+    r = await Aw("b")
+    return T("r")
+def drive(c):
+    try:
+        c.send(None)
+    except StopIteration as e:
+        return e.value
+--
+drive(co())
+== instruction: await raises
+async def co():
+    [T("u"), await T("x")]
+def drive(c):
+    try:
+        c.send(None)
+    except TypeError:
+        log("h")
+--
+drive(co())
+== instruction: async for
+class AI(T):
+    n = 0
+    def __aiter__(s):
+        return s
+    async def __anext__(s):
+        s.n += 1
+        if s.n > 2:
+            raise StopAsyncIteration
+        return T("n" + str(s.n))
+async def co():
+    async for v in AI("i"):
+        del v
+    log("end")
+def drive(c):
+    try:
+        c.send(None)
+    except StopIteration as e:
+        return e.value
+--
+drive(co())
+== instruction: async for raises
+class AI(T):
+    def __aiter__(s):
+        return s
+    async def __anext__(s):
+        raise ValueError("n")
+async def co():
+    async for v in AI("i"):
+        pass
+def drive(c):
+    try:
+        c.send(None)
+    except ValueError:
+        log("h")
+--
+drive(co())
+== instruction: async with
+class AC(T):
+    async def __aenter__(s):
+        return T("e" + s.name)
+    async def __aexit__(s, *a):
+        LOG.append("exit")
+        return False
+async def co():
+    async with AC("m"):
+        T("b")
+    async with AC("n") as e:
+        del e
+def drive(c):
+    try:
+        c.send(None)
+    except StopIteration as e:
+        return e.value
+--
+drive(co())
+== instruction: async with raises
+async def co():
+    async with T("x"):
+        pass
+def drive(c):
+    try:
+        c.send(None)
+    except TypeError:
+        log("h")
+--
+drive(co())
+== instruction: except star, the types a temporary
+class FT(tuple):
+    def __del__(s):
+        LOG.append("-ft")
+--
+try:
+    raise ExceptionGroup("g", [TE("a"), TE("b")])
+except* FT((TE,)):
+    log("h")
+== instruction: except star, not a type
+try:
+    try:
+        raise ExceptionGroup("g", [TE("a")])
+    except* T("t"):
+        log("h")
+except TypeError:
+    log("t")
+== instruction: except, the type a temporary
+class FT(tuple):
+    def __del__(s):
+        LOG.append("-ft")
+--
+try:
+    raise TE("a")
+except FT((TE,)):
+    log("h")
+== instruction: except, not a type
+try:
+    try:
+        raise TE("a")
+    except T("t"):
+        log("h")
+except TypeError:
+    log("t")
+== instruction: match keys
+class K:
+    a = H("ka")
+--
+match D(k=T("a")):
+    case {"k": v, "z": w}:
+        log("no")
+    case {"k": v}:
+        del v
+== instruction: match keys, a key raises
+class HR(T):
+    def __hash__(s):
+        raise ValueError("hash")
+class K:
+    a = HR("ka")
+--
+try:
+    match D(k=T("a")):
+        case {K.a: v}:
+            log("no")
+except ValueError:
+    log("h")
+== instruction: match class raises
+try:
+    match [T("u"), Q("q")]:
+        case [_, P(u=1)]:
+            pass
+except ValueError:
+    log("h")
+== instruction: get len
+match Sq(lambda: T("a")):
+    case [x]:
+        del x
+== instruction: unpack ex raises
+try:
+    a, *b = T("x")
+except TypeError:
+    log("h")
+== instruction: with exit, the exit raises
+class CR(T):
+    def __enter__(s):
+        return T("e" + s.name)
+    def __exit__(s, *a):
+        raise ValueError("exit")
+--
+try:
+    with CR("m"):
+        T("b")
+except ValueError:
+    log("h")
+== instruction: with exit, the body raised and the exit raises
+class CR(T):
+    def __enter__(s):
+        return T("e" + s.name)
+    def __exit__(s, *a):
+        raise ValueError("exit")
+--
+try:
+    with CR("m"):
+        boom()
+except ValueError:
+    log("h")
+== instruction: dict merge raises under a temporary
+[T("u"), fs(**{"k": T("a")}, **T("m"))]
+== instruction: dict update raises under a temporary
+[T("u"), {"k": T("a"), **T("m")}]
+== instruction: set update raises under a temporary
+[T("u"), {T("a"), *T("x")}]
+== instruction: list extend under a kept list
+[T("u"), [T("w"), *I("i")]]
+== instruction: set add raises under an iterator
+{[] if n > 1 else T("s" + str(n)) for n in It2("i")}
+== instruction: map add raises under an iterator
+{([] if n > 1 else H("k" + str(n))): T("v" + str(n)) for n in It2("i")}
+== instruction: build set raises, one before and two behind
+{T("a"), [], T("c"), T("d")}
+== instruction: build set raises under a temporary
+[T("u"), {T("a"), [], T("c")}]
+== instruction: build const key map
+[T("u"), {"a": T("a"), "b": T("b")}]
+== instruction: build string
+f"{V('a')}{V('b')}{T('c')}"
+== instruction: swap, a call raises above
+x, y = T("a"), T("b")
+[T("u"), T("v"), boom()]
+== instruction: swapped three and a store that raises
+class OR(T):
+    def __setattr__(s, n, v):
+        if n == "x":
+            raise ValueError("set")
+        object.__setattr__(s, n, v)
+--
+o = OR("o")
+try:
+    o.x, b, c = T("p"), T("q"), T("r")
+except ValueError:
+    log("h")
+del o
+== instruction: swapped four and a store that raises
+class OR(T):
+    def __setattr__(s, n, v):
+        if n == "x":
+            raise ValueError("set")
+        object.__setattr__(s, n, v)
+--
+o = OR("o")
+try:
+    a, o.x, b, c = T("p"), T("q"), T("r"), T("s")
+except ValueError:
+    log("h")
+del o
+== instruction: star call, the callee raises
+[T("u"), C2("c")(*I("i"), **{"k": T("kv")})]
+== instruction: star call of a tuple and a dict
+C("c")(*(T("a"), T("b")), **{"k": T("kv")})
+== instruction: star call, the iterable is read twice
+i = I("i")
+C("c")(*i)
+log("mid")
+del i
+== instruction: augmented attribute raises
+class OR(T):
+    x = 1
+    def __setattr__(s, n, v):
+        if n == "x":
+            raise ValueError("set")
+        object.__setattr__(s, n, v)
+--
+try:
+    OR("o").x += V("v")
+except ValueError:
+    log("h")
+== instruction: augmented subscript raises under a temporary
+[T("u"), V("d").__setitem__(T("k"), boom())]
+== instruction: with, three managers and a raise
+try:
+    with CM("m1"), CM("m2") as e2, CM("m3"):
+        boom()
+except ValueError:
+    log("h")
+== instruction: class body, a name of an alias
+class A:
+    type B = T
+    c = T("c")
+A.B.__value__
+del A
+== raise: BINARY_SUBSCR
+[T("u"), T("c")[T("k")]]
+== raise: STORE_SUBSCR
+T("c")[T("k")] = T("v")
+== raise: DELETE_SUBSCR
+del T("c")[T("k")]
+== raise: COMPARE_OP
+[T("u"), T("a") < T("b")]
+== raise: CONTAINS_OP
+[T("u"), T("a") in T("b")]
+== raise: STORE_ATTR
+class NS:
+    __slots__ = ("name",)
+    def __init__(s, name):
+        s.name = name
+    def __del__(s):
+        LOG.append("-" + s.name)
+--
+NS("o").x = T("v")
+== raise: CALL not callable
+[T("u"), T("f")(T("a"), T("b"))]
+== raise: CALL keyword not callable
+[T("u"), T("f")(T("a"), k=T("b"))]
+== raise: CALL_FUNCTION_EX not callable
+[T("u"), T("f")(*I("i"))]
+== raise: CALL_FUNCTION_EX not iterable
+C("c")(*T("x"))
+== raise: CALL_FUNCTION_EX not iterable, mapping
+[T("u"), C("c")(*T("x"), **{"k": T("kv")})]
+== raise: DICT_MERGE not a mapping
+[T("u"), C("c")(*(T("a"),), **T("m"))]
+== raise: FORMAT_VALUE spec
+[T("u"), f"{T('a'):{Gf()}}"]
+== raise: BUILD_MAP under a temporary
+[T("u"), {T("k1"): T("v1"), []: T("v2")}]
+== raise: BUILD_MAP one value
+[T("u"), {[]: T("v")}]
+== raise: MAP_ADD
+class UK(T):
+    __hash__ = None
+--
+{UK("k" + str(n)): T("v" + str(n)) for n in (1, 2)}
+== raise: RAISE_VARARGS not an exception
+raise T("a") from T("b")
+== raise: RAISE_VARARGS bad cause
+raise TE("a") from T("b")
+== raise: UNPACK and GET_ITER and BEFORE_WITH
+try:
+    a, b = T("x1")
+except TypeError:
+    pass
+try:
+    for _ in T("x2"):
+        pass
+except TypeError:
+    pass
+try:
+    with T("x3"):
+        pass
+except TypeError:
+    pass
+try:
+    [T("u4"), *T("x4")]
+except TypeError:
+    pass
+== raise: BUILD_SLICE subscript
+[T("u"), T("c")[T("lo"):T("hi"):T("st")]]
+== unwind: three on the stack
+[T("a"), T("b"), boom()]
+== unwind: nested calls
+f2(T("a"), f2(T("b"), boom()))
+== unwind: finalizable callables
+C("c1")(T("a"), C("c2")(T("b"), boom()))
+== unwind: comprehension
+[T("e" + str(n)) if n < 2 else boom() for n in It2("i")]
+== unwind: comprehension, C raise
+[T("e" + str(n)) if n < 2 else int("x") for n in It2("i")]
+== unwind: dict comprehension
+{n: T("e" + str(n)) if n < 2 else boom() for n in It2("i")}
+== unwind: with body
+with CM("m"):
+    [T("a"), boom()]
+== unwind: with body, as
+with CM("m") as e:
+    [T("a"), T("b"), boom()]
+== unwind: two with
+with CM("m"), CM("n"):
+    f2(T("a"), boom())
+== unwind: for over a temporary
+for _ in It2("i"):
+    [T("a"), boom()]
+== unwind: nested for
+for _ in It2("i"):
+    for _ in It2("j"):
+        f2(T("a"), boom())
+== unwind: try, the handler reads a local
+loc = T("loc")
+try:
+    [T("a"), T("b"), boom()]
+except ValueError:
+    log(loc.name)
+== unwind: try finally
+try:
+    [T("a"), T("b"), boom()]
+finally:
+    log("f")
+== unwind: locals in the traceback
+l1 = T("l1")
+l2 = T("l2")
+[T("a"), T("b"), boom()]
+== unwind: locals in the traceback, bound against the slots
+l2 = None
+l1 = T("l1")
+l2 = T("l2")
+[T("a"), T("b"), boom()]
+== unwind: through two frames
+def inner(p):
+    q = T("q")
+    return [T("s"), boom()]
+def outer():
+    o = T("o")
+    return f2(T("t"), inner(T("p")))
+--
+outer()
+== unwind: through two frames, caught
+def inner(p):
+    q = T("q")
+    return [T("s"), int("x")]
+def outer():
+    o = T("o")
+    return f2(T("t"), inner(T("p")))
+--
+try:
+    outer()
+except ValueError:
+    log("h")
+== unwind: chained compare raises
+T("a") < T("b") < T("c")
+== unwind: chained compare, second raises
+V("a") < T("b") < T("c")
+== unwind: augmented subscript, the store raises
+GO("d")[T("k")] += V("v")
+== unwind: augmented slice, operand raises
+V("c")[T("lo"):T("hi")] += boom()
+== unwind: match sequence capture
+match Sq(lambda: T("a"), lambda: T("b"), lambda: Q("q")):
+    case [x, y, P(u=1)]:
+        pass
+== unwind: match sequence star capture
+match Sq(lambda: T("a"), lambda: Q("q"), lambda: T("b")):
+    case [x, P(u=1), *y]:
+        pass
+== unwind: swapped pair
+x, y = T("a"), T("b")
+del x
+del y
+== two places: call, later
+def p1():
+    f3(T("a"), T("m"), None)
+dup(p1, 2)
+--
+p1()
+== two places: call, adjacent
+def p2():
+    f3(T("m"), T("a"), None)
+dup(p2, 1)
+--
+p2()
+== two places: binary
+def p3():
+    V("a") + None
+dup(p3, 1)
+--
+p3()
+== two places: slice
+def p4():
+    V("c")[T("a"):None]
+dup(p4, 1)
+def p5():
+    V("c")[T("a"):None] = 1
+dup(p5, 1)
+--
+p4()
+p5()
+== two places: subscript store
+def p6():
+    V("c")[None] = T("a")
+dup(p6, 2)
+--
+p6()
+== two places: inlined callee
+def g1(p):
+    return f3(p, T("m"), p)
+def g2(p):
+    return f3(p, p, T("m"))
+--
+g1(T("a1"))
+g2(T("a2"))
+== two places: a local read twice
+p = T("a")
+f3(p, T("m"), p)
+f3(p, p, T("n"))
+del p
+== end: locals bound against the slots
+def h(a=None):
+    b = T("b")
+    a = T("a")
+def h3(a=None, c=None):
+    b = T("b")
+    c = T("c")
+    a = T("a")
+    return 1
+--
+h()
+h3()
+== end: locals of the body bound against the slots
+a = None
+b = T("b")
+a = T("a")
+== end: three locals of the body
+c = a = None
+b = T("b")
+c = T("c")
+a = T("a")
+== end: locals at an exception
+def h2(a=None):
+    b = T("b")
+    a = T("a")
+    int("x")
+--
+try:
+    h2()
+except ValueError:
+    log("h")
+== end: locals at an exception, uncaught
+a = None
+b = T("b")
+a = T("a")
+int("x")
+== end: dead stores
+u = T("u")
+v = T("v")
+u = T("u2")
+v = T("v2")
+== end: return with locals
+def h4():
+    b = T("b")
+    a = T("a")
+    return T("r")
+--
+h4()
+== kept: LIST_EXTEND
+[T("u"), *I("i")]
+== kept: SET_UPDATE
+{T("u"), *I("i")}
+== kept: DICT_UPDATE
+{"k": T("u"), **M("m")}
+== kept: DICT_MERGE
+fs(**{"k": T("u")}, **M("m"))
+== kept: LIST_APPEND duplicate-free
+[T("e" + str(n)) for n in It2("i")]
+== kept: call star
+fs(T("a"), *I("i"))
+== kept: tuple star
+(T("u"), *I("i"))
+== kept: SET_ADD raises
+{T("s" + str(n)) if n < 2 else [] for n in It2("i")}
+== kept: with exit raises
+class CX(T):
+    def __enter__(s):
+        return T("e" + s.name)
+    __exit__ = None
+--
+try:
+    with CX("m"):
+        T("b")
+except TypeError:
+    log("h")
 """
 
 # The calls of a member: the first; later ones (its plans were made again
@@ -15061,6 +16286,49 @@ RELEASE_WAYS = (("F", (0,)), ("L", (1, 2)), ("T", (3,)), ("R", (4, 5, 6, 7)))
 # between two marks and two tensor computations; between two tensor
 # computations with no mark (inside what is traced as one region).
 RELEASE_FORMS = ("alone", "between", "inside")
+# The instructions the executor runs by an op of its own, or that only move
+# the stack: each is in a member's statement, as every opcode of the generic
+# instruction is.
+RELEASE_OWN_OPS = (
+    "CALL",
+    "KW_NAMES",
+    "STORE_ATTR",
+    "LOAD_ATTR",
+    "BINARY_OP",
+    "COMPARE_OP",
+    "GET_ITER",
+    "FOR_ITER",
+    "BUILD_TUPLE",
+    "MAKE_FUNCTION",
+    "SEND",
+    "YIELD_VALUE",
+    "STORE_FAST",
+    "STORE_DEREF",
+    "LOAD_FROM_DICT_OR_DEREF",
+    "POP_JUMP_IF_TRUE",
+    "POP_JUMP_IF_NONE",
+    "RAISE_VARARGS",
+    "RERAISE",
+    "RETURN_VALUE",
+    "POP_TOP",
+    "END_FOR",
+    "END_SEND",
+    "SWAP",
+    "COPY",
+)
+# The members whose first call differs from CPython's: a value that CPython
+# pops later than its last use dies at that use (the iterator of a loop that
+# is left by a break or a return, the result of a comprehension, the exit
+# function of a with statement, a value under a pattern that fails).
+RELEASE_POPPED_LATER = [
+    "loop: for with a break",
+    "loop: for that returns",
+    "loop: comprehension with a condition",
+    "with: the exception is suppressed",
+    "with: __exit__ deletes its arguments",
+    "unwind: match sequence capture",
+    "kept: LIST_APPEND duplicate-free",
+]
 
 RELEASE_PROGRAM = r"""
 import gc, importlib, json, os, signal, sys, time
@@ -15182,6 +16450,252 @@ def F(tensor, name):
 
     REFS.append(weakref.ref(tensor, died))
     return tensor
+
+
+# What the statements of the rows use (TestVmReleaseOrder, the members from
+# "row:" on): operands whose death is logged, by what the instruction asks
+# of them.
+import collections.abc
+import dis
+
+
+class W(T):
+    def __add__(s, o):
+        return 1
+    __sub__ = __mul__ = __matmul__ = __truediv__ = __floordiv__ = __mod__ = __pow__ = __add__
+    __lshift__ = __rshift__ = __and__ = __or__ = __xor__ = __add__
+    __iadd__ = __isub__ = __imul__ = __imatmul__ = __itruediv__ = __add__
+    __ifloordiv__ = __imod__ = __ipow__ = __add__
+    __ilshift__ = __irshift__ = __iand__ = __ior__ = __ixor__ = __add__
+
+    def __eq__(s, o):
+        return True
+    __ne__ = __lt__ = __le__ = __gt__ = __ge__ = __eq__
+    __hash__ = None
+
+    def __pos__(s):
+        return 1
+    __invert__ = __pos__
+
+
+class N(T):
+    def __add__(s, o):
+        return NotImplemented
+
+    def __lt__(s, o):
+        return NotImplemented
+
+    def __iadd__(s, o):
+        return NotImplemented
+
+
+class R(T):
+    def __radd__(s, o):
+        return 1
+
+    def __gt__(s, o):
+        return True
+
+
+class RS(N):
+    def __radd__(s, o):
+        return 1
+
+
+class G:
+    def __getitem__(s, k):
+        return W("a" + str(k))
+
+    def __setitem__(s, k, v):
+        pass
+
+
+class GO(T):
+    def __getitem__(s, k):
+        return 1
+
+
+class O(T):
+    def __init__(s, name):
+        object.__setattr__(s, "name", name)
+
+    def __setattr__(s, n, v):
+        pass
+
+    def __delattr__(s, n):
+        pass
+
+    def __getattr__(s, n):
+        return 1
+
+
+class C(T):
+    def __call__(s, *a, **k):
+        LOG.append("call")
+
+
+class C2(T):
+    def __call__(s, *a, **k):
+        raise ValueError("call")
+
+
+class I(T):
+    def __iter__(s):
+        return iter(())
+
+
+class M(T):
+    def keys(s):
+        return ["k" + s.name]
+
+    def __getitem__(s, k):
+        return 1
+
+
+class It(T):
+    def __iter__(s):
+        return s
+
+    def __next__(s):
+        raise StopIteration
+
+
+class It2(T):
+    n = 0
+
+    def __iter__(s):
+        return s
+
+    def __next__(s):
+        s.n += 1
+        if s.n > 2:
+            raise StopIteration
+        return s.n
+
+
+class CM(T):
+    def __enter__(s):
+        return T("e" + s.name)
+
+    def __exit__(s, *a):
+        LOG.append("exit")
+        return False
+
+
+class CMS(CM):
+    def __exit__(s, *a):
+        LOG.append("exit")
+        return True
+
+
+class H(T):
+    def __hash__(s):
+        return 1
+
+    def __eq__(s, o):
+        return True
+
+
+class FS(str):
+    def __del__(s):
+        LOG.append("-spec")
+
+
+class Gf:
+    def __format__(s, spec):
+        return FS("x")
+
+
+class TE(Exception):
+    def __init__(s, name):
+        s.name = name
+
+    def __del__(s):
+        LOG.append("-" + s.name)
+
+
+class P:
+    __match_args__ = ("x", "y")
+
+    def __init__(s, x, y):
+        s.x, s.y = x, y
+
+
+class Q(T):
+    @property
+    def u(s):
+        raise ValueError("u")
+
+
+class Sq(collections.abc.Sequence):
+    def __init__(s, *items):
+        s.make = items
+
+    def __len__(s):
+        return len(s.make)
+
+    def __getitem__(s, i):
+        return s.make[i]()
+
+
+class B0:
+    m = 1
+
+    def meth(s):
+        return None
+
+
+class B1(B0, T):
+    pass
+
+
+class Cls:
+    def __init__(s, *a, **k):
+        pass
+
+    def meth(s, *a, **k):
+        return None
+
+
+class MT(T, Cls):
+    pass
+
+
+class D(dict):
+    def __del__(s):
+        LOG.append("-d")
+
+
+def f2(a, b):
+    return None
+
+
+def f3(a, b, c):
+    return None
+
+
+def fk(a, k=None):
+    return None
+
+
+def fs(*a, **k):
+    return None
+
+
+def boom(*a):
+    raise ValueError("boom")
+
+
+def dup(fn, n):
+    # The function with its LOAD_CONST None replaced by COPY n: an operand
+    # at two places of one instruction, both references the stack's own.
+    code = fn.__code__
+    raw = bytearray(code.co_code)
+    loads = [i for i in dis.get_instructions(fn) if i.opname == "LOAD_CONST"]
+    at = [i.offset for i in loads if i.argval is None][0]
+    raw[at], raw[at + 1] = dis.opmap["COPY"], n
+    fn.__code__ = code.replace(co_code=bytes(raw))
+    return fn
 '''
 
 FORMS = {
@@ -15753,10 +17267,6 @@ inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
 inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
 == tensor: torch function, keyword
 inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
-== tensor: torch function, starred
-inside deaths ..TR -b -a RET DROP GC | -a -b RET DROP GC
-== tensor: torch function, ** dict
-inside views ..TR a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
 == tensor: torch function of a list
 inside deaths ..TR -b -a RET DROP GC | -a -b RET DROP GC
 == tensor: temporaries of an expression
@@ -15831,6 +17341,267 @@ inside views .LTR a@body:3{t=3,x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 alone views .LTR a@body:4{b=list,t=tensor,x=tensor} | a@body:4{b=list,x=tensor}
 between views .LTR a@body:5{b=list,t=tensor,x=tensor,y=tensor} | a@body:5{b=list,x=tensor,y=tensor}
 inside views .LTR a@body:4{b=list,t=tensor,x=tensor,y=tensor} | a@body:5{b=list,x=tensor,y=tensor}
+== row: FORMAT_VALUE spec
+inside views ..TR a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== row: LOAD_SUPER_ATTR plain
+inside views .LTR s@body:2{x=tensor,y=tensor} | s@body:2{x=tensor}
+== row: LOAD_SUPER_ATTR method
+alone views ..T. s@body:2{x=tensor} | s@body
+between views ..TR s@body:3{x=tensor,y=tensor} | s@body
+inside views .LTR s@body:2{x=tensor,y=tensor} | s@body:2{x=tensor}
+== row: LOAD_SUPER_ATTR under a temporary
+alone deaths .LTR in -s -w -u out RET DROP GC | in -u -s -w out RET DROP GC
+between deaths .LTR in -s -w -u out RET DROP GC | in -u -s -w out RET DROP GC
+inside deaths .LTR -s -w -u RET DROP GC | -u -s -w RET DROP GC
+== row: binop, every operator
+alone views ..T. a1@body:2{x=tensor} | a1@body
+between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body
+inside views .LTR a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
+== row: binop, in place
+alone views ..T. a1@body:2{x=tensor} | a1@body
+between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body
+inside views .LTR a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
+== row: binop, reflected
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== row: compare, every operator
+alone views ..T. a1@body:2{x=tensor} | a1@body
+between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body
+inside views .LTR a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
+== row: is and in
+alone deaths ..T. in -a -b -c -d -e -f -g -h -i -k -j out RET DROP GC | in -a -b -c -d -e -g -i -j -k -f -h out RET DROP GC
+between deaths ..TR in -a -b -c -d -e -f -g -h -i -k -j out RET DROP GC | in -a -b -c -d -e -g -i -j -k -f -h out RET DROP GC
+inside deaths ..T. -a -b -c -d -e -f -g -h -i -k -j RET DROP GC | -a -b -c -d -e -g -i -j -k -f -h RET DROP GC
+inside views .L.R a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== row: subscr, load store delete
+alone views ..T. c1@body:2{x=tensor} | c1@body
+between views ..TR c1@body:3{x=tensor,y=tensor} | c1@body
+inside views .LTR c1@body:2{x=tensor,y=tensor} | c1@body:2{x=tensor}
+== row: slice, forms
+alone deaths ..T. in -lo1 -hi1 -c1 -c2 -st2 -lo2 -hi2 -c3 -lo3 -hi3 -lo4 -c4 -hi5 -c5 -lo6 -hi6 -v6 -c6 -v7 -c7 -st7 -lo7 -hi7 -c8 -lo8 -hi8 out RET DROP GC | in -lo2 -hi2 -st2 -lo3 -hi3 -c1 -lo1 -hi1 -c2 -c3 -c4 -lo4 -c5 -hi5 -lo6 -hi6 -v6 -c6 -v7 -c7 -st7 -lo7 -hi7 -c8 -lo8 -hi8 out RET DROP GC
+between deaths ..TR in -lo1 -hi1 -c1 -c2 -st2 -lo2 -hi2 -c3 -lo3 -hi3 -lo4 -c4 -hi5 -c5 -lo6 -hi6 -v6 -c6 -v7 -c7 -st7 -lo7 -hi7 -c8 -lo8 -hi8 out RET DROP GC | in -lo2 -hi2 -st2 -lo3 -hi3 -c1 -lo1 -hi1 -c2 -c3 -c4 -lo4 -c5 -hi5 -lo6 -hi6 -v6 -c6 -v7 -c7 -st7 -lo7 -hi7 -c8 -lo8 -hi8 out RET DROP GC
+inside deaths ..T. -lo1 -hi1 -c1 -c2 -st2 -lo2 -hi2 -c3 -lo3 -hi3 -lo4 -c4 -hi5 -c5 -lo6 -hi6 -v6 -c6 -v7 -c7 -st7 -lo7 -hi7 -c8 -lo8 -hi8 RET DROP GC | -lo2 -hi2 -st2 -lo3 -hi3 -c1 -lo1 -hi1 -c2 -c3 -c4 -lo4 -c5 -hi5 -lo6 -hi6 -v6 -c6 -v7 -c7 -st7 -lo7 -hi7 -c8 -lo8 -hi8 RET DROP GC
+inside views .L.R lo1@body:2{x=tensor,y=tensor} | lo1@body:2{x=tensor}
+== row: attr, store delete load
+alone deaths ..T. in -v1 -o1 -o2 -o3 -a4 -a5 out RET DROP GC | in -v1 -o1 -o2 -a4 -a5 -o3 out RET DROP GC
+between deaths ..TR in -v1 -o1 -o2 -o3 -a4 -a5 out RET DROP GC | in -v1 -o1 -o2 -a4 -a5 -o3 out RET DROP GC
+inside deaths ..T. -v1 -o1 -o2 -o3 -a4 -a5 RET DROP GC | -v1 -o1 -o2 -a4 -a5 -o3 RET DROP GC
+== row: call, python callee
+alone views ..T. a1@body:2{x=tensor} | a1@body
+alone cpythons FLTR in -a1 -b1 -a2 -b2 -b3 -a3 -c3 out RET DROP GC | in -a1 -b1 -a2 -b2 -a3 -b3 -c3 out RET DROP GC
+between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body
+between cpythons FLTR in -a1 -b1 -a2 -b2 -b3 -a3 -c3 out RET DROP GC | in -a1 -b1 -a2 -b2 -a3 -b3 -c3 out RET DROP GC
+inside views .LTR a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
+inside cpythons FLTR -a1 -b1 -a2 -b2 -b3 -a3 -c3 RET DROP GC | -a1 -b1 -a2 -b2 -a3 -b3 -c3 RET DROP GC
+== row: call, C callee
+alone views ..T. k2@body:3{x=tensor} | k2@body
+between views ..TR k2@body:4{x=tensor,y=tensor} | k2@body
+inside views ..T. k2@body:3{x=tensor,y=tensor} | k2@body
+== row: call, method and class
+alone deaths ..T. in -m1 -a1 -b1 -a2 -b2 -a3 -b3 out RET DROP GC | in -a1 -b1 -a2 -b2 -a3 -b3 -m1 out RET DROP GC
+alone cpythons FLTR in -m1 -b1 -a1 -a2 -b2 -a3 -b3 out RET DROP GC | in -m1 -a1 -b1 -a2 -b2 -a3 -b3 out RET DROP GC
+between deaths ..TR in -m1 -a1 -b1 -a2 -b2 -a3 -b3 out RET DROP GC | in -a1 -b1 -a2 -b2 -a3 -b3 -m1 out RET DROP GC
+between cpythons FLTR in -m1 -b1 -a1 -a2 -b2 -a3 -b3 out RET DROP GC | in -m1 -a1 -b1 -a2 -b2 -a3 -b3 out RET DROP GC
+inside deaths ..T. -m1 -a1 -b1 -a2 -b2 -a3 -b3 RET DROP GC | -a1 -b1 -a2 -b2 -a3 -b3 -m1 RET DROP GC
+inside views .L.R m1@body:2{x=tensor,y=tensor} | m1@body:2{x=tensor}
+inside cpythons FLTR -m1 -b1 -a1 -a2 -b2 -a3 -b3 RET DROP GC | -m1 -a1 -b1 -a2 -b2 -a3 -b3 RET DROP GC
+== row: call, bound builtin
+alone deaths .LTR in -a -d -b out RET DROP GC | in -d -a -b out RET DROP GC
+alone calls .LTR in -d -a -b out RET DROP GC | in -a -d -b out RET DROP GC
+between deaths .LTR in -a -d -b out RET DROP GC | in -d -a -b out RET DROP GC
+between calls .LTR in -d -a -b out RET DROP GC | in -a -d -b out RET DROP GC
+inside deaths .LTR -a -d -b RET DROP GC | -d -a -b RET DROP GC
+inside calls .LTR -d -a -b RET DROP GC | -a -d -b RET DROP GC
+== row: call ex, iterable and mapping
+alone views ..T. m2@body:2{x=tensor} | m2@body
+between views ..TR m2@body:3{x=tensor,y=tensor} | m2@body
+inside views .LTR m2@body:2{x=tensor,y=tensor} | m2@body:2{x=tensor}
+== row: build, map and const key map
+alone views ..T. k1@body:2{x=tensor} | k1@body
+between views ..TR k1@body:3{x=tensor,y=tensor} | k1@body
+inside views .LTR k1@body:2{x=tensor,y=tensor} | k1@body:2{x=tensor}
+== row: build, list tuple string
+alone deaths .LTR in -b1 -a1 -b2 -a2 -a3 -b3 out RET DROP GC | in -a1 -b1 -a2 -b2 -a3 -b3 out RET DROP GC
+between deaths .LTR in -b1 -a1 -b2 -a2 -a3 -b3 out RET DROP GC | in -a1 -b1 -a2 -b2 -a3 -b3 out RET DROP GC
+inside deaths .LTR -b1 -a1 -b2 -a2 -a3 -b3 RET DROP GC | -a1 -b1 -a2 -b2 -a3 -b3 RET DROP GC
+== row: extend update merge
+alone deaths ..T. in -i1 -j1 -i2 -j2 -m3 -n3 -m4 -n4 -i5 -j5 out RET DROP GC | in -i1 -j1 -i2 -j2 -i5 -j5 -m3 -n3 -m4 -n4 out RET DROP GC
+between deaths ..TR in -i1 -j1 -i2 -j2 -m3 -n3 -m4 -n4 -i5 -j5 out RET DROP GC | in -i1 -j1 -i2 -j2 -i5 -j5 -m3 -n3 -m4 -n4 out RET DROP GC
+inside deaths ..T. -i1 -j1 -i2 -j2 -m3 -n3 -m4 -n4 -i5 -j5 RET DROP GC | -i1 -j1 -i2 -j2 -i5 -j5 -m3 -n3 -m4 -n4 RET DROP GC
+inside views .L.R i1@body:2{x=tensor,y=tensor} | i1@body:2{x=tensor}
+== row: comprehensions
+alone views FLTR l2@body:2{x=tensor} | l2@body:2{n=2,x=tensor}
+between views FLTR l2@body:3{x=tensor,y=tensor} | l2@body:3{n=2,x=tensor,y=tensor}
+inside views FLTR l2@body:2{x=tensor,y=tensor} | l2@body:2{n=2,x=tensor,y=tensor}
+== row: unpack
+alone views .LTR i2@body:3{a=1,b=2,x=tensor} | i2@body:3{x=tensor}
+between views .LTR i2@body:4{a=1,b=2,x=tensor,y=tensor} | i2@body:4{x=tensor,y=tensor}
+inside views .LTR i1@body:2{x=tensor,y=tensor} | i1@body:2{x=tensor}
+== row: iter
+alone views .LTR x@body:7{_=1,x=tensor} | x@body:7{_=2,x=tensor}
+between views .LTR x@body:8{_=1,x=tensor,y=tensor} | x@body:8{_=2,x=tensor,y=tensor}
+inside views .LTR it1@body:2{x=tensor,y=tensor} | it1@body:2{x=tensor}
+== row: chained compare
+alone deaths ..T. in -a1 -b1 -c1 -a2 -b2 out RET DROP GC | in -a1 -c1 -b1 -a2 -b2 out RET DROP GC
+between deaths ..TR in -a1 -b1 -c1 -a2 -b2 out RET DROP GC | in -a1 -c1 -b1 -a2 -b2 out RET DROP GC
+inside deaths ..T. -a1 -b1 -c1 -a2 -b2 RET DROP GC | -a1 -c1 -b1 -a2 -b2 RET DROP GC
+inside views .L.R a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
+== row: augmented
+alone views ..T. v1@body:2{x=tensor} | v1@body
+between views ..TR v1@body:3{x=tensor,y=tensor} | v1@body
+inside views .LTR v1@body:2{x=tensor,y=tensor} | v1@body:2{x=tensor}
+== row: intrinsic 1 and unary
+alone views ..T. a1@body:2{x=tensor} | a1@body
+between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body
+inside views .LTR a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
+== row: assert
+alone views ..T. x@body:3{x=tensor} | x@body
+between views ..TR x@body:4{x=tensor,y=tensor} | x@body
+inside views .LTR x@body:3{x=tensor,y=tensor} | x@body:3{x=tensor}
+== row: bool ops
+alone deaths ..T. in -a1 -b1 -a2 -b2 -c3 -b3 out RET DROP GC | in -a1 -b1 -b2 -b3 -a2 -c3 out RET DROP GC
+alone views FL.R b1@body:?{x=tensor} | b1@body:2{x=tensor}
+between deaths ..T. in -a1 -b1 -a2 -b2 -c3 -b3 out RET DROP GC | in -a1 -b1 -b2 -b3 -a2 -c3 out RET DROP GC
+between views FL.R b1@body:?{x=tensor,y=tensor} | b1@body:3{x=tensor,y=tensor}
+inside deaths ..T. -a1 -b1 -a2 -b2 -c3 -b3 RET DROP GC | -a1 -b1 -b2 -b3 -a2 -c3 RET DROP GC
+inside views FL.R b1@body:?{x=tensor,y=tensor} | b1@body:2{x=tensor,y=tensor}
+== row: return, out of a for and a with
+alone views FLTR i@r1:2{_=1} | i@r1:1{}
+between views FLTR i@r1:2{_=1} | i@r1:1{}
+inside views FLTR i@r1:2{_=1} | i@r1:1{}
+== instruction: unpack ex raises
+inside views .LTR x@body:3{x=tensor,y=tensor} | x@body:3{x=tensor}
+== instruction: list extend under a kept list
+alone deaths .LTR in -i -w -u out RET DROP GC | in -u -i -w out RET DROP GC
+between deaths .LTR in -i -w -u out RET DROP GC | in -u -i -w out RET DROP GC
+inside deaths .LTR -i -w -u RET DROP GC | -u -i -w RET DROP GC
+== instruction: set add raises under an iterator
+alone views FLTR s1@body:?{n=2,x=tensor} | s1@body:2{n=2,x=tensor}
+between views FLTR s1@body:?{n=2,x=tensor,y=tensor} | s1@body:3{n=2,x=tensor,y=tensor}
+inside views FLTR s1@body:?{n=2,x=tensor,y=tensor} | s1@body:2{n=2,x=tensor,y=tensor}
+== instruction: map add raises under an iterator
+alone views FLTR k1@body:?{n=2,x=tensor} | k1@body:2{n=2,x=tensor}
+between views FLTR k1@body:?{n=2,x=tensor,y=tensor} | k1@body:3{n=2,x=tensor,y=tensor}
+inside views FLTR k1@body:?{n=2,x=tensor,y=tensor} | k1@body:2{n=2,x=tensor,y=tensor}
+== instruction: build const key map
+alone deaths .LTR in -a -b -u out RET DROP GC | in -u -a -b out RET DROP GC
+between deaths .LTR in -a -b -u out RET DROP GC | in -u -a -b out RET DROP GC
+inside deaths .LTR -a -b -u RET DROP GC | -u -a -b RET DROP GC
+== instruction: build string
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== instruction: swapped three and a store that raises
+alone deaths .LTR in -q -r h -p -o out RET DROP GC | in -r -q h -p -o out RET DROP GC
+between deaths .LTR in -q -r h -p -o out RET DROP GC | in -r -q h -p -o out RET DROP GC
+inside deaths .LTR -q -r h -p -o RET DROP GC | -r -q h -p -o RET DROP GC
+== instruction: with, three managers and a raise
+alone views FLTR m3@body:4{e2=T(em2),x=tensor} | m3@body:3{e2=T(em2),x=tensor}
+between views FLTR m3@body:5{e2=T(em2),x=tensor,y=tensor} | m3@body:4{e2=T(em2),x=tensor,y=tensor}
+inside views FLTR m3@body:4{e2=T(em2),x=tensor,y=tensor} | m3@body:3{e2=T(em2),x=tensor,y=tensor}
+== raise: UNPACK and GET_ITER and BEFORE_WITH
+inside views .LTR x1@body:3{x=tensor,y=tensor} | x1@body:3{x=tensor}
+== unwind: comprehension
+alone views FLTR e1@body:?{n=2,x=tensor} | e1@body:2{n=2,x=tensor}
+between views FLTR e1@body:?{n=2,x=tensor,y=tensor} | e1@body:3{n=2,x=tensor,y=tensor}
+inside views FLTR e1@body:?{n=2,x=tensor,y=tensor} | e1@body:2{n=2,x=tensor,y=tensor}
+== unwind: comprehension, C raise
+alone views FLTR e1@body:?{n=2,x=tensor} | e1@body:2{n=2,x=tensor}
+between views FLTR e1@body:?{n=2,x=tensor,y=tensor} | e1@body:3{n=2,x=tensor,y=tensor}
+inside views FLTR e1@body:?{n=2,x=tensor,y=tensor} | e1@body:2{n=2,x=tensor,y=tensor}
+== unwind: dict comprehension
+alone views FLTR e1@body:?{n=2,x=tensor} | e1@body:2{n=2,x=tensor}
+between views FLTR e1@body:?{n=2,x=tensor,y=tensor} | e1@body:3{n=2,x=tensor,y=tensor}
+inside views FLTR e1@body:?{n=2,x=tensor,y=tensor} | e1@body:2{n=2,x=tensor,y=tensor}
+== unwind: with body
+alone views FLTR m@body:3{x=tensor} | m@body:2{x=tensor}
+between views FLTR m@body:4{x=tensor,y=tensor} | m@body:3{x=tensor,y=tensor}
+inside views FLTR m@body:3{x=tensor,y=tensor} | m@body:2{x=tensor,y=tensor}
+== unwind: with body, as
+alone views FLTR m@body:3{e=T(em),x=tensor} | m@body:2{e=T(em),x=tensor}
+between views FLTR m@body:4{e=T(em),x=tensor,y=tensor} | m@body:3{e=T(em),x=tensor,y=tensor}
+inside views FLTR m@body:3{e=T(em),x=tensor,y=tensor} | m@body:2{e=T(em),x=tensor,y=tensor}
+== unwind: two with
+alone views FLTR n@body:3{x=tensor} | n@body:2{x=tensor}
+between views FLTR n@body:4{x=tensor,y=tensor} | n@body:3{x=tensor,y=tensor}
+inside views FLTR n@body:3{x=tensor,y=tensor} | n@body:2{x=tensor,y=tensor}
+== unwind: match sequence capture
+alone deaths FLTR in -q -a -b out RET DROP GC | in -q -b -a out RET DROP GC
+between deaths FLTR in -q -a -b out RET DROP GC | in -q -b -a out RET DROP GC
+inside deaths FLTR -q -a -b RET DROP GC | -q -b -a RET DROP GC
+== two places: call, later
+alone deaths ..T. in -m -a out RET DROP GC | in -a -m out RET DROP GC
+between deaths ..T. in -m -a out RET DROP GC | in -a -m out RET DROP GC
+inside deaths ..T. -m -a RET DROP GC | -a -m RET DROP GC
+== two places: call, adjacent
+alone views ..T. m@p2:1{} | m@body
+between views ..T. m@p2:1{} | m@body
+inside views ..T. m@p2:1{} | m@body
+== two places: binary
+alone views ..T. a@p3:1{} | a@body
+between views ..T. a@p3:1{} | a@body
+inside views ..T. a@p3:1{} | a@body
+== two places: slice
+alone deaths ..T. in -a -c -a -c out RET DROP GC | in -c -a -a -c out RET DROP GC
+between deaths ..T. in -a -c -a -c out RET DROP GC | in -c -a -a -c out RET DROP GC
+inside deaths ..T. -a -c -a -c RET DROP GC | -c -a -a -c RET DROP GC
+== two places: inlined callee
+alone views ..T. m@g1:1{p=T(a1)} | m@body
+between views ..T. m@g1:1{p=T(a1)} | m@body
+inside views ..T. m@g1:1{p=T(a1)} | m@body
+== two places: a local read twice
+alone views .LTR m@body:3{p=T(a),x=tensor} | m@body:3{x=tensor}
+between views .LTR m@body:4{p=T(a),x=tensor,y=tensor} | m@body:4{x=tensor,y=tensor}
+inside views .LTR m@body:3{p=T(a),x=tensor,y=tensor} | m@body:3{x=tensor}
+== end: locals bound against the slots
+alone deaths .LTR in -a -b -a -c -b out RET DROP GC | in -a -b -a -b -c out RET DROP GC
+between deaths .LTR in -a -b -a -c -b out RET DROP GC | in -a -b -a -b -c out RET DROP GC
+inside deaths .LTR -a -b -a -c -b RET DROP GC | -a -b -a -b -c RET DROP GC
+== end: dead stores
+alone views .LTR u@body:4{u=T(u2),v=T(v),x=tensor} | u@body:6{x=tensor}
+between views .LTR u@body:5{u=T(u2),v=T(v),x=tensor,y=tensor} | u@body:7{x=tensor,y=tensor}
+inside views .LTR u@body:4{u=T(u2),v=T(v),x=tensor,y=tensor} | u@body:6{x=tensor}
+== end: return with locals
+alone views .LTR b@body:2{x=tensor} | b@h4:3{}
+between views .LTR b@body:3{x=tensor,y=tensor} | b@h4:3{}
+inside views .LTR b@body:2{x=tensor,y=tensor} | b@h4:3{}
+== kept: LIST_EXTEND
+alone deaths ..T. in -i -u out RET DROP GC | in -u -i out RET DROP GC
+between deaths ..TR in -i -u out RET DROP GC | in -u -i out RET DROP GC
+inside deaths ..T. -i -u RET DROP GC | -u -i RET DROP GC
+inside views .L.R i@body:2{x=tensor,y=tensor} | i@body:2{x=tensor}
+== kept: SET_UPDATE
+alone deaths ..T. in -i -u out RET DROP GC | in -u -i out RET DROP GC
+between deaths ..TR in -i -u out RET DROP GC | in -u -i out RET DROP GC
+inside deaths ..T. -i -u RET DROP GC | -u -i RET DROP GC
+inside views .L.R i@body:2{x=tensor,y=tensor} | i@body:2{x=tensor}
+== kept: DICT_UPDATE
+alone deaths ..T. in -m -u out RET DROP GC | in -u -m out RET DROP GC
+between deaths ..TR in -m -u out RET DROP GC | in -u -m out RET DROP GC
+inside deaths ..T. -m -u RET DROP GC | -u -m RET DROP GC
+inside views .L.R m@body:2{x=tensor,y=tensor} | m@body:2{x=tensor}
+== kept: DICT_MERGE
+alone views ..T. m@body:2{x=tensor} | m@body
+between views ..TR m@body:3{x=tensor,y=tensor} | m@body
+inside views .LTR m@body:2{x=tensor,y=tensor} | m@body:2{x=tensor}
+== kept: LIST_APPEND duplicate-free
+alone deaths FLTR in -i -e2 -e1 out RET DROP GC | in -e2 -e1 -i out RET DROP GC
+between deaths FLTR in -i -e2 -e1 out RET DROP GC | in -e2 -e1 -i out RET DROP GC
+inside deaths FLTR -i -e2 -e1 RET DROP GC | -e2 -e1 -i RET DROP GC
+== kept: call star
+alone views ..T. i@body:2{x=tensor} | i@body
+between views ..TR i@body:3{x=tensor,y=tensor} | i@body
+inside views .LTR i@body:2{x=tensor,y=tensor} | i@body:2{x=tensor}
+== kept: tuple star
+alone deaths ..T. in -i -u out RET DROP GC | in -u -i out RET DROP GC
+between deaths ..TR in -i -u out RET DROP GC | in -u -i out RET DROP GC
+inside deaths ..T. -i -u RET DROP GC | -u -i RET DROP GC
+inside views .L.R i@body:2{x=tensor,y=tensor} | i@body:2{x=tensor}
+== kept: SET_ADD raises
+alone views FLTR s1@body:?{n=2,x=tensor} | s1@body:2{n=2,x=tensor}
+between views FLTR s1@body:?{n=2,x=tensor,y=tensor} | s1@body:3{n=2,x=tensor,y=tensor}
+inside views FLTR s1@body:?{n=2,x=tensor,y=tensor} | s1@body:2{n=2,x=tensor,y=tensor}
 """
 
 
@@ -15946,7 +17717,7 @@ class TestVmReleaseOrder(TestCase):
 
     def test_the_record_names_members_of_the_table(self):
         table = release_table(RELEASE_MEMBERS)
-        self.assertEqual(len(table), 247)
+        self.assertEqual(len(table), 407)
         for name, lines in release_table(RELEASE_KNOWN).items():
             self.assertIn(name, table)
             self.assertTrue(lines, msg=name)
@@ -15958,9 +17729,10 @@ class TestVmReleaseOrder(TestCase):
 
     def test_every_generic_instruction_has_an_order(self):
         # In which order a step lets go of its operands is a row per kind of
-        # instruction (exec/order.rs), not the numbers of the values: every
-        # opcode the generic instruction runs has a row, and the rows that
-        # are not the stack's own order are the two slice instructions.
+        # instruction (exec/order.rs), not the numbers of the values. Every
+        # opcode the generic instruction runs has a row, and a member of the
+        # table whose statement compiles to it, so the row is held against
+        # the interpreter itself where the member runs.
         with open(os.path.join(os.path.dirname(CRATE), "csrc", "exec_ops.c")) as f:
             source = f.read()
         generic = source[source.index("int tr_generic(") :]
@@ -15968,42 +17740,114 @@ class TestVmReleaseOrder(TestCase):
         opcodes = dict(torch._rust._cfg_opcodes())
         cases = [n for n in re.findall(r"case ([A-Z_0-9]+):", generic) if n in opcodes]
         self.assertGreater(len(cases), 55)
-        operands = {"STORE_SLICE": 4}
-        other = {}
+        # The instructions of the members, with their arguments: those of
+        # the statement and of what the member defines.
+        met = {}
+
+        def instructions(code):
+            for ins in dis.get_instructions(code):
+                met.setdefault(ins.opname, set()).add(ins.arg or 0)
+            for const in code.co_consts:
+                if isinstance(const, types.CodeType):
+                    instructions(const)
+
+        for lines in release_table(RELEASE_MEMBERS).values():
+            cut = lines.index("--") if "--" in lines else -1
+            text = "\n".join(lines[: max(cut, 0)]) + "\ndef body(x):\n"
+            text += "\n".join("    " + line for line in lines[cut + 1 :]) + "\n"
+            instructions(compile(text, "<member>", "exec"))
+        other, kept = {}, {}
         for name in cases:
-            n = operands.get(name, 3)
-            order = torch._rust._cfg_releases(opcodes[name], n)
-            self.assertIsNotNone(order, msg=name)
-            if order != list(range(n)):
-                other[name] = order
+            self.assertIn(name, met, msg="no member of the table runs it")
+            for oparg in sorted(met[name]):
+                row = torch._rust._cfg_releases(opcodes[name], oparg)
+                self.assertIsNotNone(row, msg=name)
+                order, stays = row
+                self.assertEqual(sorted(order), list(range(len(stays))), msg=name)
+                taken = [place for place in order if not stays[place]]
+                if taken != sorted(taken):
+                    other[name] = taken
+                if any(stays):
+                    kept.setdefault(name, set()).add(tuple(order))
+        # The operands an instruction takes off the stack go in the stack's
+        # order but for the two slice instructions.
         self.assertEqual(
             other, {"BINARY_SLICE": [1, 2, 0], "STORE_SLICE": [2, 3, 0, 1]}
         )
-        # An opcode the generic instruction does not run has no row, and
-        # neither has a slice instruction with other operands than its own.
-        self.assertIsNone(torch._rust._cfg_releases(opcodes["POP_TOP"], 1))
-        self.assertIsNone(torch._rust._cfg_releases(opcodes["BINARY_SLICE"], 2))
+        # What an instruction leaves on the stack goes behind what it takes
+        # (a pop behind the instruction takes it), the top one first.
+        self.assertEqual(
+            {name: sorted(orders) for name, orders in kept.items()},
+            {
+                "GET_LEN": [(0,)],
+                "MATCH_MAPPING": [(0,)],
+                "MATCH_SEQUENCE": [(0,)],
+                "MATCH_KEYS": [(1, 0)],
+                "PUSH_EXC_INFO": [(0,)],
+                "CHECK_EXC_MATCH": [(1, 0)],
+                "WITH_EXCEPT_START": [(1, 0)],
+                "LIST_APPEND": [(1, 0)],
+                "SET_ADD": [(1, 0)],
+                "MAP_ADD": [(1, 2, 0)],
+                "LIST_EXTEND": [(1, 0)],
+                "SET_UPDATE": [(1, 0)],
+                "DICT_UPDATE": [(1, 0)],
+                "DICT_MERGE": [(2, 1, 0)],
+                "IMPORT_FROM": [(0,)],
+                "GET_ANEXT": [(0,)],
+            },
+        )
+        # The instructions the executor has an op of its own for, and those
+        # that only move the stack, are in the members too.
+        for name in RELEASE_OWN_OPS:
+            self.assertIn(name, met, msg="no member of the table runs it")
+        # An opcode the generic instruction does not run has no row.
+        self.assertIsNone(torch._rust._cfg_releases(opcodes["POP_TOP"], 0))
+
+    def test_the_plan_as_written_lets_go_where_cpython_does(self):
+        # A member's first call runs the plan as it was written (nothing is
+        # traced, no plan was made again): there every row of the order
+        # table is the interpreter's, in every form. What differs there is
+        # one kind: a value CPython pops later than its last use.
+        first = [
+            name
+            for name, lines in release_table(RELEASE_KNOWN).items()
+            if any(
+                line.split(" ")[1] == "deaths" and line.split(" ")[2][0] == "F"
+                for line in lines
+            )
+        ]
+        self.assertEqual(first, RELEASE_POPPED_LATER)
 
     def test_where_the_two_cpythons_differ_torch_vm_is_the_hooked_one(self):
         # A member in which a hook alone moves a death: torch.vm lets go
-        # where the hooked CPython does, in every form and way.
+        # where the hooked CPython does, in every form, in the calls that run
+        # the code as it is written or planned again (what a traced call
+        # and a region's run do to the order is theirs).
         marked = {}
         for name, lines in release_table(RELEASE_KNOWN).items():
             kinds = [line.split(" ", 2)[1] for line in lines]
             if "cpythons" in kinds:
-                marked[name] = kinds
-        self.assertEqual(len(marked), 29)
-        for name, kinds in marked.items():
-            self.assertNotIn("deaths", kinds, msg=name)
-        # One member's own calls differ in both CPythons alike: a method
-        # call CPython specializes after the first call.
+                marked[name] = lines
+        self.assertEqual(len(marked), 31)
+        for name, lines in marked.items():
+            for line in lines:
+                _, kind, ways = line.split(" ", 3)[:3]
+                if kind == "deaths":
+                    self.assertEqual(ways[:2], "..", msg=f"{name}: {line}")
+        # Two members' own calls differ in both CPythons alike: a call of a
+        # builtin method CPython specializes after the first call (the
+        # arguments, or the receiver, go before the callable).
         own = [
             name
             for name, lines in release_table(RELEASE_KNOWN).items()
             if any(line.split(" ", 2)[1] == "calls" for line in lines)
         ]
-        self.assertEqual(own, ["C method: of a temporary container"])
-        self.assertNotIn(own[0], marked)
+        self.assertEqual(
+            own, ["C method: of a temporary container", "row: call, bound builtin"]
+        )
+        for name in own:
+            self.assertNotIn(name, marked)
 
 
 # The tensors over one buffer of 6 x 8 floats that TestVmRulesTorchUndo

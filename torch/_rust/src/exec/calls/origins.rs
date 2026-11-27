@@ -50,7 +50,9 @@
 //     do) lead to it from what was there before the run: a namespace a
 //     global was loaded from, a cell the run did not make, or a ROOT, an
 //     input object that takes a weak reference (a module, a function, a
-//     class). The reads that lead to it are its check. A tensor that no
+//     class). The reads that lead to it are its check (reading.rs settles
+//     them when the run is over; again.rs asks them, the root at its path
+//     and the pin's key before the list runs again). A tensor that no
 //     recorded read leads to (handed out by C code, found in a list or a
 //     dict that is an input) has no origin: Err, and the recording stops;
 //   - anything else has no origin: Err says what, and the recording stops.
@@ -144,8 +146,14 @@ pub struct Origins {
     start: Vec<usize>,
     // The immutable inputs the list is specialized on: (position, value).
     pub exact: Vec<(u32, Py<PyAny>)>,
-    // The input objects a recorded read can start from, held weakly.
-    roots: Vec<Pin>,
+    // The input objects a recorded read can start from, held weakly, each
+    // with the path it was found by (walk); and those of them that a pin or
+    // a stated output was led from: what a later arrival must have at that
+    // path, by identity, for the reads that start there to be its checks.
+    roots: Vec<(Box<[u32]>, Pin)>,
+    rooted: Vec<usize>,
+    // The key each pin had where it was first an operand.
+    pub pin_keys: Vec<Option<crate::exec::tensor_key::TensorKey>>,
     // Immutable operands taken by value, by class.
     pub by_value: HashMap<&'static str, u64>,
 }
@@ -297,7 +305,7 @@ impl Origins {
                     // program keeps it.
                     let root = Pin::weak(o);
                     if root.counts().is_none() {
-                        origins.roots.push(root);
+                        origins.roots.push((path.into(), root));
                     }
                 }
             });
@@ -350,6 +358,16 @@ impl Origins {
         gone.filter_map(|(_, origin)| if let Origin::Res(j) = origin { Some(j) } else { None }).collect()
     }
 
+    // The tensors of the list that live: its inputs and what its entries
+    // made (borrowed).
+    pub fn ours(&self) -> Vec<*mut PyObject> {
+        let ours = |(o, (weak, origin)): (&usize, &(Py<PyAny>, Origin))| {
+            let referent = unsafe { (*(weak.as_ptr() as *mut ffi::PyWeakReference)).wr_object };
+            (referent as usize == *o && matches!(origin, Origin::In(_) | Origin::Res(_) | Origin::Part(..))).then_some(referent)
+        };
+        self.held.iter().filter_map(ours).collect()
+    }
+
     // The slots whose tensor result is alive.
     pub fn alive(&self) -> Vec<(u32, *mut PyObject)> {
         let slot = |(o, (_, origin)): (&usize, &(Py<PyAny>, Origin))| if let Origin::Res(j) = origin { Some((*j, *o as *mut PyObject)) } else { None };
@@ -392,10 +410,40 @@ impl Origins {
 
     // Whether the reads recorded so far lead to `o` from what was there
     // before the run (reads.rs leads_to): the namespaces, the cells the run
-    // did not make, the roots that live.
-    pub unsafe fn led(&self, o: *mut PyObject) -> bool {
-        let roots: Vec<*mut PyObject> = self.roots.iter().filter_map(|r| r.live()).filter(|r| !r.is_null()).collect();
-        unsafe { crate::exec::reads::leads_to(o, &roots) }
+    // did not make, the roots that live. A root they lead from is noted
+    // (rooted): where no single root is found to lead there, every root.
+    pub unsafe fn led(&mut self, o: *mut PyObject) -> bool {
+        unsafe {
+            let live = |r: &(Box<[u32]>, Pin)| r.1.live().filter(|r| !r.is_null());
+            let roots: Vec<*mut PyObject> = self.roots.iter().filter_map(live).collect();
+            if !crate::exec::reads::leads_to(o, &roots) {
+                return false;
+            }
+            if !crate::exec::reads::leads_to(o, &[]) {
+                let from = self.roots.iter().position(|r| live(r).is_some_and(|r| crate::exec::reads::leads_to(o, &[r])));
+                let noted: Vec<usize> = from.map_or((0..self.roots.len()).collect(), |i| vec![i]);
+                noted.into_iter().for_each(|i| if !self.rooted.contains(&i) { self.rooted.push(i) });
+            }
+            true
+        }
+    }
+
+    // The roots that a pin or a stated output was led from, with their
+    // paths: taken once, when the run is over.
+    pub fn rooted(&mut self) -> Vec<(Box<[u32]>, Pin)> {
+        let mut rooted = std::mem::take(&mut self.rooted);
+        rooted.sort();
+        let mut roots: Vec<Option<(Box<[u32]>, Pin)>> = std::mem::take(&mut self.roots).into_iter().map(Some).collect();
+        rooted.into_iter().filter_map(|i| roots.get_mut(i).and_then(Option::take)).collect()
+    }
+
+    // The inputs (by their number) that the recorded reads lead to as well:
+    // the run may have come by such a tensor through a read, and an origin
+    // is by identity, so the list names it as the input. Asked while the
+    // reads are the recording's.
+    pub unsafe fn found_too(&mut self) -> Vec<u32> {
+        let live: Vec<(u32, *mut PyObject)> = self.inputs.iter().enumerate().filter_map(|(k, p)| p.live().filter(|o| !o.is_null()).map(|o| (k as u32, o))).collect();
+        live.into_iter().filter(|(_, o)| unsafe { self.led(*o) }).map(|(k, _)| k).collect()
     }
 
     fn constant(&mut self, o: *mut PyObject) -> Tmpl {
@@ -433,6 +481,7 @@ impl Origins {
                             return Err("an operand of unknown origin: a tensor no weak reference can be made to".into());
                         }
                         self.pins.push(Pin::weak(o));
+                        self.pin_keys.push(crate::exec::tensor_key::TensorKey::of(o));
                         Tmpl::Pin(i)
                     }
                 };

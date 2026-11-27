@@ -244,6 +244,6 @@ pub fn add_training_version(cfg: &mut Cfg, b: BlockId, checks: Vec<(Option<u32>,
     let mut body = vec![v];
     body.extend(outputs.iter().copied());
     let unwind = handler.map(|h| vec![UnwindSegment { from: 0, handler: h }]).unwrap_or_default();
-    cfg[b].versions.insert(0, Version { guard, body, outputs, unwind, inputs });
+    cfg[b].versions.insert(0, Version { guard, body, outputs, unwind, inputs, swapped: vec![] });
     Ok(())
 }

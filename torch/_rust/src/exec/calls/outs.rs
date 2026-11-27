@@ -40,8 +40,8 @@
 //     address.
 // What it may not assume
 //   - that an object the reads lead to is the same on a later arrival: the
-//     reads are the check, and until they run the list rests on them
-//     (known.rs PENDING).
+//     reads are the check, asked before the list runs (again.rs), and the
+//     statement is compared behind them.
 
 use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;

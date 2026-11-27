@@ -23,7 +23,10 @@
 //     instruction of the executor's inline path.
 // What it guarantees
 //   - a recording begins only under a neutral ambient state and with the
-//     reads of the thread its own (reading.rs): the activations of the run
+//     reads of the thread its own (reading.rs), and every entry is made
+//     under the thread state the run began under (its word, ambient.rs: an
+//     entry under another is a stop, and a body that ends under another is
+//     a reason): a list has no entry that changes it. The activations of the run
 //     record what they read (Act::reading), and reads() says so to run.rs.
 //     A trace of today's engine that begins while the recording has them
 //     takes them, and the recording stops ("a trace began under the
@@ -55,10 +58,10 @@
 //     an instruction that is no entry, no kind of known::neutral and no key
 //     fact of a tensor whose key the list compares; an operand taken by
 //     value that is no constant of the code; a conditional jump under the
-//     body on a value that is not known; a pin (the reads that lead to it
-//     are recorded, and nothing runs them as a check on a later arrival
-//     yet); an output that the list does not state (outs.rs has what a
-//     statement is);
+//     body on a value that is not known; reads that are no check of a later
+//     arrival (reading.rs: one that no check covers, one of a cell the
+//     body's frame made for the call); an output that the list does not
+//     state (outs.rs has what a statement is);
 //     a release that was not seen; an operator between the instructions;
 //     an exception raised under the body; a generator's yield; a witness
 //     that disagrees with its entry;
@@ -72,6 +75,12 @@
 //     it (the finalizer of garbage the collector found) is a stop like any;
 //   - nothing is witnessed behind a stop: the entry's witness, if its call
 //     is in flight, and the run's are ended there;
+//   - A PLACE is the plan's serial number (never used twice in a process:
+//     exec/mod.rs Prepared) and the block; the recording keeps, weakly, the
+//     function and the code of the body's frame, and a later arrival is of
+//     the place only in a frame of that very function (again.rs): its
+//     closure's cells, its globals and its builtins are then the same
+//     objects (none of the three can be assigned on a function);
 //   - every recording is kept: one that begins inside a stopped one (a
 //     block of a frame entered later) is recorded on top of it, and both end
 //     where their blocks end.
@@ -96,6 +105,10 @@ pub use super::known::Plain;
 use super::origins::{class_text, plain_tensor, Leaving, Origin, Origins};
 use super::shadow::{self, Shadow};
 use super::{reading, slots, witness, Assert, Callee, Entry, Tmpl, PURE};
+use crate::bindings::ffi::Word;
+use crate::exec::ambient;
+use crate::exec::ffi::tr_frame_code;
+use crate::exec::pin::Pin;
 use crate::cfg::ir::{Instr, Op};
 use crate::cfg::opcodes::IS_OP;
 use crate::exec::ffi::{tr_frame_func, tr_frame_localsplus, tr_frame_nlocalsplus, tr_frame_qualname, Frame};
@@ -135,7 +148,7 @@ thread_local! {
     // The recordings in flight, innermost last: all but the last stopped.
     static REC: RefCell<Vec<Rec>> = const { RefCell::new(Vec::new()) };
     // The places (plan, block) a run was recorded of.
-    static TAKEN: RefCell<std::collections::HashSet<(usize, u32)>> = RefCell::new(std::collections::HashSet::new());
+    static TAKEN: RefCell<std::collections::HashSet<(u64, u32)>> = RefCell::new(std::collections::HashSet::new());
 }
 
 // Whether the run being recorded on this thread records what it reads: an
@@ -145,7 +158,7 @@ pub fn reads() -> bool {
 }
 
 // Whether a run of the place with this key was recorded on this thread.
-pub fn taken(key: (usize, u32)) -> bool {
+pub fn taken(key: (u64, u32)) -> bool {
     TAKEN.with_borrow(|t| t.contains(&key))
 }
 
@@ -204,6 +217,19 @@ pub(super) struct Rec {
     reads: bool,
     // What is known of each value the body hands on, told where it leaves.
     pub(super) leaving: Vec<Leaving>,
+    // The thread state the run began under (None: it did not begin).
+    pub(super) word: Option<Word>,
+    // The function and the code of the body's frame, weakly (None: one of
+    // them takes no weak reference).
+    pub(super) home: Option<(Pin, Pin)>,
+    // What the body's frame holds in its slots when the run begins and that
+    // is no cell of its function's closure, by address: among them the cells
+    // the frame made for this call (reads.rs asks only about reads of cells).
+    cells: Vec<usize>,
+    // When the run is over: what its list is checked against on a later
+    // arrival (reads.rs), and the inputs its reads lead to as well.
+    pub(super) checks: Option<Py<reads::Reads>>,
+    pub(super) found_too: Vec<u32>,
 }
 
 impl Rec {
@@ -311,6 +337,11 @@ impl Rec {
             };
             let why = match call {
                 Some(Ok(mut call)) => {
+                    // A list has no entry that changes the thread's state:
+                    // each is made under the word the run began under.
+                    if self.word.is_none_or(|word| ambient::state() != Ok(word)) {
+                        return self.stop(&name, "the thread's state is not the one the run began under: no entry of a list changes it".into());
+                    }
                     self.flush();
                     self.baked();
                     call.operands.iter().enumerate().for_each(|(i, o)| shadow::tensors(*o, i, &mut call.ids));
@@ -407,10 +438,7 @@ impl Rec {
                     let result = results.first().copied().unwrap_or(std::ptr::null_mut());
                     let held = match found {
                         Some((found, unread)) => match found.holds(result).filter(|_| ok) {
-                            Some(kind) => {
-                                self.reasons.add(known::PENDING.into());
-                                Some(kind)
-                            }
+                            Some(kind) => Some(kind),
                             None => {
                                 unread.into_iter().for_each(|unread| self.reasons.add(unread));
                                 None
@@ -501,7 +529,7 @@ fn with<R: Default>(f: impl FnOnce(&mut Rec) -> R) -> R {
 // which are the values `ids` of the activation about to begin, in the frame
 // `frame`. A recording in flight has stopped (shadow_due): this one is
 // recorded on top of it.
-pub unsafe fn begin(place: String, key: (usize, u32), params: &[*mut PyObject], ids: &[u32], frame: *mut Frame) {
+pub unsafe fn begin(place: String, key: (u64, u32), params: &[*mut PyObject], ids: &[u32], frame: *mut Frame) {
     unsafe {
         TAKEN.with_borrow_mut(|t| t.insert(key));
         let locals = tr_frame_localsplus(frame);
@@ -509,13 +537,19 @@ pub unsafe fn begin(place: String, key: (usize, u32), params: &[*mut PyObject], 
         let origins = Origins::begin(params.iter().copied().chain((0..tr_frame_nlocalsplus(frame) as usize).map(|i| *locals.add(i))), known);
         let shadow = Shadow { place, key, ..Shadow::default() };
         witness::begin();
-        let mut rec = Rec { shadow, origins, entries: Vec::new(), stack: Vec::new(), window: None, drops: Vec::new(), tuples: Vec::new(), at: 0, claimed: 0, pure: true, left: HashMap::new(), handed: HashMap::new(), reasons: Reasons::default(), disagreed: false, entry_open: false, entry_seen: None, outer: None, reads: false, leaving: Vec::new() };
+        // The frame's function and code, weakly; the cells it made itself.
+        let (func, code) = (tr_frame_func(frame), tr_frame_code(frame));
+        let home = Some((Pin::weak(func), Pin::weak(code))).filter(|(f, c)| !func.is_null() && !code.is_null() && f.counts().is_none() && c.counts().is_none());
+        let closure = if func.is_null() || ffi::PyFunction_Check(func) == 0 { std::ptr::null_mut() } else { (*(func as *mut ffi::PyFunctionObject)).func_closure };
+        let free = |cell: *mut PyObject| !closure.is_null() && ffi::PyTuple_Check(closure) != 0 && (0..ffi::PyTuple_GET_SIZE(closure)).any(|i| ffi::PyTuple_GET_ITEM(closure, i) == cell);
+        let cells = (0..tr_frame_nlocalsplus(frame) as usize).map(|i| *locals.add(i)).filter(|o| !o.is_null() && !free(*o)).map(|o| o as usize).collect();
+        let mut rec = Rec { shadow, origins, entries: Vec::new(), stack: Vec::new(), window: None, drops: Vec::new(), tuples: Vec::new(), at: 0, claimed: 0, pure: true, left: HashMap::new(), handed: HashMap::new(), reasons: Reasons::default(), disagreed: false, entry_open: false, entry_seen: None, outer: None, reads: false, leaving: Vec::new(), word: None, home, cells, checks: None, found_too: Vec::new() };
         // No recording of a run that a list could not be entered under, and
         // none whose reads are not recorded.
         let began = reading::begin();
         LIVE.set(true);
         match began {
-            Ok(()) => rec.reads = true,
+            Ok(word) => (rec.reads, rec.word) = (true, Some(word)),
             Err(why) => drop(rec.stop("the start of the body", why)),
         }
         REC.with_borrow_mut(|r| r.push(rec));
@@ -534,11 +568,21 @@ pub unsafe fn end(outs: Option<&[*mut PyObject]>) {
         // recording's: an object is stated by the reads that lead to it.
         let stated = outs.filter(|_| rec.shadow.stop.is_none()).map(|outs| rec.state(outs));
         // Whether every read of the run was recorded, asked before they are
-        // let go of; then what they held is released, as early as it can be.
-        let stood = if std::mem::take(&mut rec.reads) { reading::end() } else { None };
+        // let go of; then they are settled into the checks of the list, and
+        // what they held is released, as early as it can be.
+        let ended = if std::mem::take(&mut rec.reads) {
+            rec.found_too = rec.origins.found_too();
+            let (ours, cells): (Vec<*mut PyObject>, Vec<*mut PyObject>) = (rec.origins.ours(), rec.cells.iter().map(|c| *c as *mut PyObject).collect());
+            Some(reading::end(&ours, &cells))
+        } else {
+            None
+        };
         reading::release();
-        if let Some(why) = stood {
-            rec.stop("the end of the body", why);
+        match ended {
+            Some(reading::Ended::Checks(checks)) => rec.checks = Some(checks),
+            Some(reading::Ended::Loose(why)) => rec.reasons.add(format!("the reads of the run are no check of a later arrival: {why}")),
+            Some(reading::Ended::Fell(why)) => drop(rec.stop("the end of the body", why)),
+            None => {}
         }
         let (shadow, armed) = rec.end(stated, outer);
         // What ran under this recording ran behind the stop of the one around it.
@@ -685,7 +729,7 @@ pub unsafe fn frame(frame: *mut Frame, runs: bool) {
 }
 
 // Whether the list of the place `key` is to run on this arrival (again.rs).
-pub fn again_due(key: (usize, u32)) -> bool {
+pub fn again_due(key: (u64, u32)) -> bool {
     !LIVE.get() && again::armed(key)
 }
 
@@ -700,7 +744,7 @@ pub fn stop(at: &str, why: &str) {
 }
 
 // Today's engine traces the place with this key.
-pub fn traced(key: (usize, u32)) {
+pub fn traced(key: (u64, u32)) {
     shadow::traced(key);
 }
 

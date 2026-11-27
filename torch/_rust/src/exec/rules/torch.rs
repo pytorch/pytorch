@@ -62,6 +62,18 @@
 //     writes is told of each tensor, torch/_rust_inductor/undo.py; given
 //     up, the trace undoes its writes, the last first, and it no longer
 //     takes the call for one that leaves nothing behind);
+//   - NO ROW for a line under whose calls a VALUE was read out of a tensor
+//     (X: what the engine's witness of the dispatcher saw under one call per
+//     sample; anything but `no` is no row, so also a line no call of which
+//     was witnessed). The sweep compares memory and results, and a value
+//     that only decides whether the call raises (the error check of a
+//     decomposition), or that the argument parser takes from a 0-dim tensor
+//     where a number is declared, changes neither. A member that only this
+//     stands against has a line per form too, and goes by its forms: its
+//     own line says of every call measured that it only computes, the line
+//     of a form says whether calls of that form read (form_that_reads). A
+//     form in which they do, or with too few samples, or with no line,
+//     stops the trace; a member that reads in every form stops whole;
 //   - LATER, with the family that will take it, for a member that draws,
 //     makes a tensor of no tensor or
 //     follows ambient state (ambient), returns a fact or a value of a tensor
@@ -128,6 +140,7 @@ const WHY_WARN: &str = "As a member that only computes, but it can show a warnin
 const ROW: Row = Row { operands: &[], reads: &[], writes: Write::None, result: Res::Entry, enters: Enters::Never, scalars: Scalars::Operand, why: WHY, before: Some(plain_call), form: "" };
 const WHY_FORM: &str = "As a member that only computes, for the forms of operands measured so, each on its own samples: in another form of operands the count or the sizes of its results follow data, or it was not measured, and a call of that form stops the trace.";
 const ROW_FORM: Row = Row { operands: &[], reads: &[Read::Class], writes: Write::None, result: Res::Entry, enters: Enters::Never, scalars: Scalars::Operand, why: WHY_FORM, before: Some(formed_call), form: "" };
+const WHY_READS_FORM: &str = "As a member that only computes, for the forms of operands in which no call witnessed read a value out of a tensor: in another form its result, or whether it raises, follows a value of a tensor (a 0-dim tensor where a number is declared, an error check on data), and a call of that form stops the trace.";
 const ROW_WARN: Row = Row { operands: &[], reads: &[], writes: Write::None, result: Res::Entry, enters: Enters::Foreign, scalars: Scalars::Operand, why: WHY_WARN, before: Some(plain_call), form: "" };
 const WHY_WRITES: &str = "Measured on the CPU and on CUDA: the call writes the memory of the operands named and no other, changes no operand's key, moves no generator and gives the same bits twice; every write measured is one the schema of its operator declares, on the same operands in every form of the call that was measured.";
 const WHY_WRITES_FORM: &str = "As a member that writes operands, for one form of the call's operands (a bool among them by its value) on that form's own samples: which operands the call writes, declared by a schema or not, is what was measured in this form. A call of a form with no row stops the trace.";
@@ -175,6 +188,9 @@ struct Member {
     by_form: bool,
     // Whether its line says that it writes or re-keys an operand.
     writer: bool,
+    // The row its own line would give if no call of it read a value out of
+    // a tensor, where only that stands against it: its forms say which do.
+    but_reads: Option<&'static Row>,
     // The classes its returning samples had in each place among their
     // operands (a position, or a keyword's name).
     domain: Vec<(&'static str, Vec<&'static str>)>,
@@ -219,12 +235,19 @@ fn members() -> &'static Members {
                     Taken::Later("writes") => {
                         let whole = writer(line, "");
                         let declared = matches!(whole, Taken::Rows(rows) if matches!(rows[0].writes, Write::Operands(written) if written.iter().all(|w| w.declared)));
-                        Member { name: line[0], taken: whole, object: 0, forms: vec![], by_form: !declared, writer: true, domain: domain(line) }
+                        Member { name: line[0], taken: whole, object: 0, forms: vec![], by_form: !declared, writer: true, but_reads: None, domain: domain(line) }
                     }
-                    taken => Member { name: line[0], taken, object: 0, forms: vec![], by_form: matches!(taken, Taken::Stop(_)), writer: false, domain: domain(line) },
+                    taken => {
+                        let but_reads = match (taken, but_reads(line)) {
+                            (Taken::Stop(_), Taken::Rows(rows)) => rows.first(),
+                            _ => None,
+                        };
+                        Member { name: line[0], taken, object: 0, forms: vec![], by_form: matches!(taken, Taken::Stop(_)), writer: false, but_reads, domain: domain(line) }
+                    }
                 }),
                 (Some(_), Some(member)) if member.name == line[0] && !member.by_form => {}
                 (Some(form), Some(member)) if member.name == line[0] && member.writer => member.forms.push((form, writer(line, form))),
+                (Some(form), Some(Member { name, forms, but_reads: Some(whole), .. })) if *name == line[0] => forms.push((form, form_that_reads(line, whole))),
                 (Some(form), Some(member)) if member.name == line[0] => member.forms.push((form, match verdict(line) {
                     Taken::Rows(_) => Taken::Rows(&[ROW_FORM]),
                     Taken::Stop(why) => Taken::Stop(why),
@@ -233,7 +256,7 @@ fn members() -> &'static Members {
                     Taken::Later(family) if *form == "plain" => Taken::Later(family),
                     _ => Taken::Stop("in this form it was not measured to only compute"),
                 })),
-                _ => all.push(Member { name: line[0], taken: Taken::Stop("its line of the table of torch's members is of no member"), object: 0, forms: vec![], by_form: false, writer: false, domain: vec![] }),
+                _ => all.push(Member { name: line[0], taken: Taken::Stop("its line of the table of torch's members is of no member"), object: 0, forms: vec![], by_form: false, writer: false, but_reads: None, domain: vec![] }),
             }
         }
         // A member that goes by its forms has the rows of its forms. One
@@ -245,7 +268,9 @@ fn members() -> &'static Members {
             let rows: Vec<Row> = member.forms.iter().filter_map(|(_, taken)| if let Taken::Rows(rows) = taken { Some(Row { ..rows[0] }) } else { None }).collect();
             let later = member.forms.iter().find_map(|(_, taken)| if let Taken::Later(family) = taken { Some(*family) } else { None });
             if !rows.is_empty() {
-                member.taken = if member.writer { Taken::Rows(Box::leak(rows.into_boxed_slice())) } else { Taken::Rows(&[ROW_FORM]) };
+                // A row per form of a member that writes; one row for all
+                // the forms of one that only computes (theirs are the same).
+                member.taken = Taken::Rows(Box::leak(if member.writer { rows } else { rows.into_iter().take(1).collect() }.into_boxed_slice()));
             } else if let (Some(family), false) = (later, member.writer) {
                 member.taken = Taken::Later(family);
             } else if member.writer && !matches!(member.taken, Taken::Stop(_)) {

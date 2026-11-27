@@ -48,7 +48,7 @@ use crate::exec::tensor_key::TensorKey;
 pub struct Shadow {
     pub place: String,
     // The plan and block the run was of (run.rs's key of a place).
-    pub key: (usize, u32),
+    pub key: (u64, u32),
     // Today's engine went on to trace the place.
     pub traced: bool,
     // Entries made (drops are not counted), instructions the run ran, and
@@ -127,7 +127,7 @@ pub fn amend(at: usize, f: impl FnOnce(&mut Shadow)) {
     KEPT.with_borrow_mut(|kept| kept.get_mut(at).map(f));
 }
 
-pub fn traced(key: (usize, u32)) {
+pub fn traced(key: (u64, u32)) {
     at_exit();
     KEPT.with_borrow_mut(|kept| {
         let mut found = false;

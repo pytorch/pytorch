@@ -4,25 +4,41 @@
 //
 // What it is given
 //   - by record.rs, behind a recording whose list validated equal on the
-//     recorded run: the list, the keys of its inputs, its pins held weakly,
-//     which of the block's outputs its outputs are (arm);
+//     recorded run and whose reads were settled into checks: the list with
+//     what it is checked against (Armed), and which of the block's outputs
+//     its outputs are (arm);
 //   - by run.rs, at a later arrival at the place, before a version of the
 //     block is selected: the block's params and frame (begin); when the
 //     block has run, however today's engine ran it: its outputs (outs).
 // What it guarantees
 //   - a list is run again only if record.rs armed it: every entry is one
 //     whose row says it only computes, and the witness of none disagreed;
-//   - it runs on an arrival only if that arrival's inputs (origins.rs walk:
-//     the params, then the frame's locals, and what the exact tuples, lists
-//     and dicts of str keys among them hold, each tensor once) are found by
-//     the same paths as the recorded run's, under the same dict keys, and
-//     have the same keys, and every pin is alive; any other arrival is
-//     counted "not comparable";
-//   - an arrival on which an input that the list is specialized on (an
-//     immutable the recorded run took by value: origins.rs exact) is not
-//     exactly the recorded value (exec/exact.rs) is a MISS of the list,
-//     counted as "input value": the list is for that value only, and the
-//     block runs as written;
+//   - THE CHECKS ARE ASKED FIRST, and a list runs on an arrival only if
+//     every one holds (Armed::checks, in the order region.rs's
+//     Variant::enter asks a region's; a list will come through that entry
+//     as a region whose function is the list). Each "no" is a MISS of the
+//     list, counted by the check, and the block runs as written:
+//       the frame is of the recorded function and code (so its closure's
+//         cells, its globals and its builtins are the recorded ones);
+//       the thread is neutral (ambient.rs);
+//       the arrival's inputs (origins.rs walk: the params, then the frame's
+//         locals, and what the exact tuples, lists and dicts of str keys
+//         among them hold, each tensor once) are found by the same paths
+//         as the recorded run's, under the same dict keys, with the same
+//         keys;
+//       an input the list is specialized on (an immutable the recorded run
+//         took by value: origins.rs exact) is exactly the recorded value
+//         (exec/exact.rs);
+//       every root a pin or a stated output was led from is the recorded
+//         object at its path; every pin lives and has the key it had; an
+//         input that a recorded read also found is the recorded object;
+//       the thread's word is the word the recording ran under;
+//       what the run read is as it was (reads.rs Reads::check);
+//     and, behind every check and whatever a check let go of, the thread's
+//     state is read again as the last thing before the list runs;
+//   - a list whose function, code, root or pin died, or whose reads expect
+//     an object that died, can never pass again: it is dropped where that
+//     is found, outside every borrow (what it held may run a finalizer);
 //   - what the block made is compared with what the list states: each
 //     output that is stated with its statement (outs.rs holds: a value, an
 //     object by identity, a new container by its structure), and the
@@ -37,7 +53,11 @@
 //     as written there, which is what it did. Any other stop (an entry that
 //     raised, a stop that is not restartable, a refusal to run) is a
 //     difference: the block ran to its end on those operands;
-//   - at most LATER arrivals per place.
+//   - at most LATER arrivals per place: behind the last, and behind the
+//     first difference, the list leaves the table and what its reads count
+//     (a container that takes no weak reference, as a region's reads count
+//     it) is let go of. Until then such a container lives as long as the
+//     list: under `shadow` that is longer than the program keeps it.
 // What it may not assume
 //   - that the block's own outputs are eager's: they are what today's engine
 //     made on that arrival (a region of it, or the block as written).
@@ -49,6 +69,10 @@ use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;
 
 use super::origins::{plain_tensor, walk, KEY};
+use crate::bindings::ffi::Word;
+use crate::exec::ambient;
+use crate::exec::ffi::{tr_frame_code, tr_frame_func};
+use crate::exec::reads::Reads;
 use super::outs::{Kept, Out};
 use super::run::{Stop, What};
 use super::{shadow, List};
@@ -69,6 +93,20 @@ pub struct Armed {
     pub names: Vec<(Box<[u32]>, Py<PyAny>)>,
     pub exact: Vec<(u32, Py<PyAny>)>,
     pub pins: Vec<Pin>,
+    pub pin_keys: Vec<TensorKey>,
+    // The roots a pin or a stated output was led from, with their paths.
+    pub roots: Vec<(Box<[u32]>, Pin)>,
+    // The recorded run's inputs, weakly, and those of them (by number) that
+    // a recorded read also found.
+    pub inputs: Vec<Pin>,
+    pub found_too: Vec<u32>,
+    // What the run read, settled: the checks of reads.rs.
+    pub reads: Py<Reads>,
+    // The thread state the recording ran under.
+    pub word: Word,
+    // The function and the code of the body's frame.
+    pub func: Pin,
+    pub code: Pin,
     // The outputs of the block that the list states: the position among
     // the block's outputs, and the statement.
     pub stated: Vec<(usize, Out)>,
@@ -79,7 +117,7 @@ pub struct Armed {
 
 struct Pending {
     id: u64,
-    key: (usize, u32),
+    key: (u64, u32),
     frame: usize,
     // What the list made (owned), and the storages it ran on.
     made: *mut PyObject,
@@ -89,16 +127,24 @@ struct Pending {
 }
 
 thread_local! {
-    static ARMED: RefCell<HashMap<(usize, u32), Armed>> = RefCell::new(HashMap::new());
+    static ARMED: RefCell<HashMap<(u64, u32), Armed>> = RefCell::new(HashMap::new());
     static PENDING: RefCell<Vec<Pending>> = const { RefCell::new(Vec::new()) };
     static NEXT: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
 }
 
-pub fn arm(key: (usize, u32), armed: Armed) {
-    ARMED.with_borrow_mut(|a| a.insert(key, Armed { left: LATER, ..armed }));
+pub fn arm(key: (u64, u32), armed: Armed) {
+    // The lists that can never pass again leave the table here, with the
+    // one this replaces: all are dropped outside the borrow.
+    let gone: Vec<Armed> = ARMED.with_borrow_mut(|a| {
+        let dead: Vec<(u64, u32)> = a.iter().filter(|(_, x)| x.gone()).map(|(k, _)| *k).collect();
+        let mut gone: Vec<Armed> = dead.into_iter().filter_map(|k| a.remove(&k)).collect();
+        gone.extend(a.insert(key, Armed { left: LATER, ..armed }));
+        gone
+    });
+    drop(gone);
 }
 
-pub fn armed(key: (usize, u32)) -> bool {
+pub fn armed(key: (u64, u32)) -> bool {
     ARMED.with_borrow(|a| a.get(&key).is_some_and(|x| x.left > 0))
 }
 
@@ -123,7 +169,10 @@ impl Drop for Again {
     fn drop(&mut self) {
         let gone = PENDING.with_borrow_mut(|p| p.iter().position(|x| x.id == self.0).map(|i| p.remove(i)));
         if let Some(pending) = gone {
+            // (A list with no arrival left goes with it, outside the borrow.)
+            let spent = ARMED.with_borrow_mut(|a| if a.get(&pending.key).is_some_and(|x| x.left == 0) { a.remove(&pending.key) } else { None });
             unsafe { ffi::Py_DECREF(pending.made) };
+            drop(spent);
         }
     }
 }
@@ -136,22 +185,29 @@ struct Arrival {
     paths: Vec<Box<[u32]>>,
     keys: HashMap<Box<[u32]>, *mut PyObject>,
     all: Vec<*mut PyObject>,
+    // How many of the roots asked for are the recorded object at their path.
+    rooted: usize,
 }
 
-unsafe fn arrival(params: &[*mut PyObject], frame: *mut Frame) -> Arrival {
+unsafe fn arrival(params: &[*mut PyObject], frame: *mut Frame, roots: &[(Box<[u32]>, Pin)]) -> Arrival {
     unsafe {
         let locals = tr_frame_localsplus(frame);
         let all: Vec<*mut PyObject> = params.iter().copied().chain((0..tr_frame_nlocalsplus(frame) as usize).map(|i| *locals.add(i))).collect();
         let (mut inputs, mut paths, mut keys): (Vec<*mut PyObject>, Vec<Box<[u32]>>, HashMap<Box<[u32]>, *mut PyObject>) = (Vec::new(), Vec::new(), HashMap::new());
+        let mut rooted = 0;
         walk(all.iter().copied(), &mut |path, o| {
             if path.last().is_some_and(|step| step & KEY != 0) {
                 keys.insert(path.into(), o);
-            } else if plain_tensor(o) && !inputs.contains(&o) {
-                inputs.push(o);
-                paths.push(path.into());
+            } else if plain_tensor(o) {
+                if !inputs.contains(&o) {
+                    inputs.push(o);
+                    paths.push(path.into());
+                }
+            } else {
+                rooted += roots.iter().filter(|(at, root)| **at == *path && root.is(o)).count();
             }
         });
-        Arrival { inputs, paths, keys, all }
+        Arrival { inputs, paths, keys, all, rooted }
     }
 }
 
@@ -162,28 +218,84 @@ fn miss(kept: usize, check: &str) {
     })
 }
 
+// What an arrival that passed the checks runs on: its inputs, the pins
+// (counted while the list runs), and what it began on.
+type Passed = (Vec<*mut PyObject>, Vec<Py<PyAny>>, Vec<*mut PyObject>);
+
+impl Armed {
+    // The checks of a later arrival on `params` (borrowed) in `frame`, in
+    // order; Err: the check that does not hold (the miss's reason). Nothing
+    // of the list has run.
+    unsafe fn checks(&self, params: &[*mut PyObject], frame: *mut Frame) -> Result<Passed, String> {
+        unsafe {
+            let py = Python::assume_attached();
+            if !self.func.is(tr_frame_func(frame)) || !self.code.is(tr_frame_code(frame)) {
+                return Err("the function of the body's frame".into());
+            }
+            let word = ambient::state().map_err(|why| format!("thread state: not neutral: {why}"))?;
+            let Arrival { inputs, paths, keys, all, rooted } = arrival(params, frame, &self.roots);
+            let named = self.names.iter().all(|(path, name)| keys.get(path).is_some_and(|k| exact::same(*k, name.as_ptr())));
+            if !named || paths != self.paths {
+                return Err("where the inputs are found".into());
+            }
+            if inputs.len() != self.keys.len() || !inputs.iter().zip(&self.keys).all(|(o, k)| TensorKey::of(*o).as_ref() == Some(k)) {
+                return Err("the key of an input".into());
+            }
+            // The list is for these values of its immutable inputs.
+            if !self.exact.iter().all(|(position, value)| all.get(*position as usize).is_some_and(|o| exact::same(*o, value.as_ptr()))) {
+                return Err("input value".into());
+            }
+            if rooted != self.roots.len() {
+                return Err("a root the reads start from".into());
+            }
+            let pins = self.pins.iter().map(|p| p.live().filter(|o| !o.is_null()).map(|o| Py::<PyAny>::from_borrowed_ptr(py, o))).collect::<Option<Vec<_>>>();
+            let Some(pins) = pins.filter(|pins| pins.iter().zip(&self.pin_keys).all(|(o, k)| TensorKey::of(o.as_ptr()).as_ref() == Some(k))) else {
+                return Err("a pin".into());
+            };
+            if !self.found_too.iter().all(|k| self.inputs.get(*k as usize).is_some_and(|recorded| inputs.get(*k as usize).is_some_and(|o| recorded.is(*o)))) {
+                return Err("an input a read of the run also found".into());
+            }
+            // Before anything of the list runs.
+            if word != self.word {
+                return Err("thread state".into());
+            }
+            if let Err(read) = self.reads.get().check_for_list() {
+                return Err(format!("a read: {read}"));
+            }
+            // The last look at the thread: a check may have let go of what
+            // it held, and what runs for that may have changed the state.
+            if ambient::state() != Ok(self.word) {
+                return Err("thread state, behind the checks".into());
+            }
+            Ok((inputs, pins, all))
+        }
+    }
+
+    // Whether no arrival can pass the checks again.
+    fn gone(&self) -> bool {
+        self.func.dead() || self.code.dead() || self.roots.iter().any(|(_, root)| root.dead()) || self.pins.iter().any(Pin::dead) || self.reads.get().dead()
+    }
+}
+
 // A later arrival at the place `key` on `params` (borrowed) in `frame`.
-pub unsafe fn begin(key: (usize, u32), params: &[*mut PyObject], frame: *mut Frame) -> Option<Again> {
+pub unsafe fn begin(key: (u64, u32), params: &[*mut PyObject], frame: *mut Frame) -> Option<Again> {
     unsafe {
         let py = Python::assume_attached();
-        let Arrival { inputs, paths, keys, all } = arrival(params, frame);
-        // The list leaves the table while it runs: nothing it runs can find it.
+        // The list leaves the table while it is checked and while it runs:
+        // nothing that runs meanwhile can find it.
         let mut armed = ARMED.with_borrow_mut(|a| a.remove(&key))?;
         armed.left -= 1;
-        let named = armed.names.iter().all(|(path, name)| keys.get(path).is_some_and(|k| exact::same(*k, name.as_ptr())));
-        let same = named && paths == armed.paths && inputs.len() == armed.keys.len() && inputs.iter().zip(&armed.keys).all(|(o, k)| TensorKey::of(*o).as_ref() == Some(k));
-        let pins = armed.pins.iter().map(|p| p.live().filter(|o| !o.is_null()).map(|o| Py::<PyAny>::from_borrowed_ptr(py, o))).collect::<Option<Vec<_>>>();
-        let (true, Some(pins)) = (same, pins) else {
-            shadow::amend(armed.kept, |s| s.again.1 += 1);
-            ARMED.with_borrow_mut(|a| a.insert(key, armed));
-            return None;
+        let (inputs, pins, all) = match armed.checks(params, frame) {
+            Ok(passed) => passed,
+            Err(check) => {
+                miss(armed.kept, &check);
+                // (Dropped here, where nothing is borrowed.)
+                if !armed.gone() && armed.left > 0 {
+                    ARMED.with_borrow_mut(|a| a.insert(key, armed));
+                }
+                return None;
+            }
         };
-        // The list is for these values of its immutable inputs.
-        if !armed.exact.iter().all(|(position, value)| all.get(*position as usize).is_some_and(|o| exact::same(*o, value.as_ptr()))) {
-            miss(armed.kept, "input value");
-            ARMED.with_borrow_mut(|a| a.insert(key, armed));
-            return None;
-        }
         let pointers: Vec<*mut PyObject> = pins.iter().map(|o| o.as_ptr()).collect();
         let ran = crate::exec::outside_executor(|| armed.list.run(py, &inputs, &pointers));
         let found = match ran {
@@ -208,19 +320,24 @@ pub unsafe fn begin(key: (usize, u32), params: &[*mut PyObject], frame: *mut Fra
                 None
             }
         };
-        ARMED.with_borrow_mut(|a| a.insert(key, armed));
+        // (A list that stopped for good, or whose block's outputs are not
+        // awaited and that has no arrival left, is dropped here.)
+        if armed.left > 0 || found.is_some() {
+            ARMED.with_borrow_mut(|a| a.insert(key, armed));
+        }
         found
     }
 }
 
 // The block of the place `key` in `frame` has run and made `outs`
-// (borrowed, in the order of the block's outputs).
-pub unsafe fn outs(key: (usize, u32), frame: *mut Frame, outs: &[*mut PyObject]) {
+// (borrowed, in the order of the block's outputs). A list that is not to run
+// again leaves the table here and is dropped outside the borrow: what its
+// reads count is let go of with it.
+pub unsafe fn outs(key: (u64, u32), frame: *mut Frame, outs: &[*mut PyObject]) {
     unsafe {
         let found = PENDING.with_borrow_mut(|p| p.iter().rposition(|x| x.key == key && x.frame == frame as usize).map(|i| p.remove(i)));
         let Some(pending) = found else { return };
-        ARMED.with_borrow_mut(|a| {
-            let Some(armed) = a.get_mut(&key) else { return };
+        if let Some(mut armed) = ARMED.with_borrow_mut(|a| a.remove(&key)) {
             // The block's tensor for each output of the list, found by the
             // statements; a statement that does not hold is the difference.
             let mut wanted = vec![std::ptr::null_mut(); armed.list.outputs.len()];
@@ -248,7 +365,10 @@ pub unsafe fn outs(key: (usize, u32), frame: *mut Frame, outs: &[*mut PyObject])
             } else {
                 shadow::amend(armed.kept, |s| s.again.1 += 1);
             }
-        });
+            if armed.left > 0 {
+                ARMED.with_borrow_mut(|a| a.insert(key, armed));
+            }
+        }
         ffi::Py_DECREF(pending.made);
     }
 }

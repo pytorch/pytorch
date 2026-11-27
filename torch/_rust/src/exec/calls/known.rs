@@ -39,7 +39,9 @@
 //     into when it loaded it; origins.rs keeps the value, and a later
 //     arrival is asked for exactly it), or the result of an instruction of
 //     one of the kinds of FOUND for which reads.rs holds the read that gave
-//     it. A parameter of a frame under the body, a default, the content of
+//     it: that read is one of the list's checks, settled when the run is
+//     over and asked before the list runs on a later arrival (reading.rs,
+//     again.rs). A parameter of a frame under the body, a default, the content of
 //     a cell, a value read from any object by any other kind: NOT known;
 //   - FOUND, the kinds whose result IS what a recorded read found, each with
 //     the statement that makes it so (Found::of) and the door of reads.rs
@@ -54,9 +56,9 @@
 //         exact str or int: the executor's hook records the item
 //         (reads::subscript); asked: item_found. (It has no row: the
 //         instruction stays a reason, its result is known.)
-//     NOT in the list, with why: LoadDeref (the cell is the body frame's
-//     own, made when the frame began and before the block, or one of the
-//     function object's closure; nothing ties it to a later arrival yet);
+//     NOT in the list, with why: LoadDeref (no row says its result is what
+//     the read of the cell found; a cell the body's frame made is another
+//     on every call, and reads of it make the reads no check: reading.rs);
 //     an attribute of a module or an object, a method, a truth test, a
 //     membership test (no row says what the lookup resolves to);
 //   - NEUTRAL names every kind of instruction that a recorded run may run
@@ -77,11 +79,6 @@ use crate::cfg::opcodes::*;
 use crate::exec::ffi::{tr_frame_builtins, tr_frame_globals};
 use crate::exec::reads;
 use crate::exec::rules::{Enters, Read, Res, Row, Site};
-
-// A list that rests on a read which reads.rs holds: the reads are its
-// checks, and until a later arrival is entered under them the list is not
-// shown to be the body.
-pub const PENDING: &str = "the reads of the run are recorded, and nothing runs them as checks on a later arrival yet";
 
 // What is asked behind an instruction of one of the kinds of FOUND (see the
 // head of the file). The objects are borrowed: the frame, its code and the

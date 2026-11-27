@@ -215,6 +215,10 @@ pub struct Prepared {
     // Something refers to it by address for longer than a frame runs it (an
     // autograd node: see autograd.rs's Where): its Plan is never freed.
     pub kept: AtomicBool,
+    // A number no other Prepared of the process has or will have: what the
+    // call-list recorder knows a place by (calls/record.rs). An address
+    // would name another plan once this one is freed.
+    pub serial: u64,
     // Whether running it records (see run.rs's recording): until every block
     // of the Cfg has been offered to the optimizer, which reads nothing
     // recorded after that. Optimized versions never record, and origins always
@@ -375,6 +379,10 @@ impl Prepared {
             region_types: (0..cfg_blocks).map(|_| ffi::GilCell::new(vec![])).collect(),
             region_lineage: ffi::GilCell::new(vec![]),
             kept: AtomicBool::new(false),
+            serial: {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            },
             record: true,
             // The pins the previous Cfg already had (pins are only added).
             pins: Python::attach(|py| prev.map_or(vec![], |p| p.pins.iter().map(|o| o.clone_ref(py)).collect())),
@@ -2190,7 +2198,7 @@ fn add_region_to(c: &Compiled, prep: usize, b: BlockId, traced: region::Traced) 
         crate::cfg::ir::Handler::Propagate => vec![],
         handler => vec![crate::cfg::ir::UnwindSegment { from: 0, handler }],
     };
-    cfg[b].versions.insert(0, crate::cfg::ir::Version { guard, body, outputs, unwind, inputs });
+    cfg[b].versions.insert(0, crate::cfg::ir::Version { guard, body, outputs, unwind, inputs, swapped: vec![] });
     crate::cfg::verify::verify(&cfg).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("CFG verification failed: {e}")))?;
     swap_plan(c, plan, plan, cfg, plan.prep.record, vec![], HashMap::new(), |_| {})?;
     let new = &c.plan().prep;

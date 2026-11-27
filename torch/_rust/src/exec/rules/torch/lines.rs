@@ -5,11 +5,23 @@
 use super::*;
 
 // What a measured line means, a member's or a form's: the columns are
-// member, form, kind, cpu, cuda, out, P, W, K, D, S, R, A, L (the head of the
-// file says what each is). A line that is none of the cases written here is
-// a stop.
+// member, form, kind, cpu, cuda, scpu, scuda, out, P, W, K, D, S, R, A, L,
+// O, X, domain (the head of the file says what each is). A line that is none
+// of the cases written here is a stop; and a line that would be a row is
+// one only if no call witnessed read a value out of a tensor (X).
 pub(super) fn verdict(line: &[&str]) -> Taken {
-    let &[_, _, _, cpu, cuda, scpu, scuda, _, p, w, k, d, s, r, a, l, o, _] = line else { return Taken::Stop("its line of the table of torch's members has other columns than the rules read") };
+    match (but_reads(line), line.get(X).and_then(|x| read_under(x))) {
+        (Taken::Rows(_), Some(why)) => Taken::Stop(Box::leak(why.into_boxed_str())),
+        (taken, _) => taken,
+    }
+}
+
+// Where the column X is in a line.
+const X: usize = 17;
+
+// What a line means by every column but X.
+pub(super) fn but_reads(line: &[&str]) -> Taken {
+    let &[_, _, _, cpu, cuda, scpu, scuda, _, p, w, k, d, s, r, a, l, o, _, _] = line else { return Taken::Stop("its line of the table of torch's members has other columns than the rules read") };
     let is = |verdict: &str, word: &str| verdict.split('@').next() == Some(word);
     let stop = |why: String| Taken::Stop(Box::leak(why.into_boxed_str()));
     let enough = |n: &str| n.parse::<u32>().is_ok_and(|n| n >= 5);
@@ -39,6 +51,39 @@ pub(super) fn verdict(line: &[&str]) -> Taken {
         Taken::Rows(&[ROW_WARN])
     } else {
         Taken::Rows(&[ROW])
+    }
+}
+
+// Why a line whose column X is `x` is no row, or None. The sweep compares
+// memory and results, and a value that is read and only decides whether the
+// call raises changes neither: X is what the engine's witness of the
+// dispatcher saw under one call per sample. Anything but `no` is no row:
+// an operator handed a value out of a tensor (an error check on data, a
+// number taken from a 0-dim tensor), or no call was witnessed, or the
+// witness could not classify what ran.
+pub(super) fn read_under(x: &str) -> Option<String> {
+    match x.split('@').next() {
+        Some("no") => None,
+        Some(said) if said.starts_with("yes(") => Some(format!("its result, or whether it raises, depends on a value of a tensor: under calls of it an operator handed a value out of a tensor (measured: {x})")),
+        _ => Some(format!("what runs under a call of it was not witnessed, or the witness could not classify it (measured: {x})")),
+    }
+}
+
+// What the line of one form means for a member that only X stands against:
+// its own line says of every call measured, whatever its form, that it only
+// computes (`whole`: the row that line would give), and the lines of its
+// forms say which form's calls read a value. A row if none of this form's
+// did, on the samples a row needs on each device.
+pub(super) fn form_that_reads(line: &[&str], whole: &Row) -> Taken {
+    let &[_, _, _, cpu, cuda, .., x, _] = line else { return Taken::Stop("its line of the table of torch's members has other columns than the rules read") };
+    let stop = |why: String| Taken::Stop(Box::leak(why.into_boxed_str()));
+    let enough = |n: &str| n.parse::<u32>().is_ok_and(|n| n >= 5);
+    if let Some(why) = read_under(x) {
+        stop(why)
+    } else if !enough(cpu) || !enough(cuda) {
+        stop(format!("in this form it has under 5 returning samples on a device (cpu {cpu}, cuda {cuda})"))
+    } else {
+        Taken::Rows(Box::leak(Box::new([Row { reads: &[Read::Class], why: WHY_READS_FORM, before: Some(formed_call), ..*whole }])))
     }
 }
 
@@ -75,7 +120,7 @@ pub(super) fn of_the_write(k: &str, written: &[Written]) -> bool {
 // written, or a stop. The result is an operand where every call measured
 // returned that operand itself (A).
 pub(super) fn writer(line: &[&str], form: &'static str) -> Taken {
-    let &[_, _, _, cpu, cuda, scpu, scuda, _, p, w, k, d, s, r, a, _, o, _] = line else { return Taken::Stop("its line of the table of torch's members has other columns than the rules read") };
+    let &[_, _, _, cpu, cuda, scpu, scuda, _, p, w, k, d, s, r, a, _, o, x, _] = line else { return Taken::Stop("its line of the table of torch's members has other columns than the rules read") };
     let is = |verdict: &str, word: &str| verdict.split('@').next() == Some(word);
     let stop = |why: String| Taken::Stop(Box::leak(why.into_boxed_str()));
     let enough = |n: &str| n.parse::<u32>().is_ok_and(|n| n >= 5);
@@ -95,6 +140,9 @@ pub(super) fn writer(line: &[&str], form: &'static str) -> Taken {
     }
     if !enough(scpu) || !enough(scuda) {
         return stop(format!("too few compared runs: the count and keys of its results were compared on other data in under 5 samples on a device (cpu {scpu}, cuda {scuda})"));
+    }
+    if let Some(why) = read_under(x) {
+        return stop(why);
     }
     let Some(written) = written else { return stop(format!("its measured line names what it writes in a way the rules do not read ({w})")) };
     let result = a.rsplit_once('@').and_then(|(a, _)| a.strip_prefix("r=is(")).filter(|a| !a.contains([';', '|', '/'])).and_then(|a| a.split_once(')')).and_then(|(k, _)| k.parse().ok()).map_or(Res::Entry, Res::Operand);

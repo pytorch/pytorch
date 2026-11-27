@@ -27,10 +27,14 @@ fn opaque_helper(py: pyo3::Python<'_>) -> pyo3::PyResult<pyo3::Bound<'_, pyo3::P
 
 // How an exception was raised: Error adds a traceback entry for this frame
 // (the default loop's `error:`); Reraise doesn't (`exception_unwind:`).
+// Kept: an Error of an instruction that left its operands on the stack (it
+// raised before it took them: BUILD_MAP with a key that has no hash, a call
+// whose star argument is not iterable); the unwind pops them with the rest.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Exc {
     Error,
     Reraise,
+    Kept,
 }
 
 type R = Result<(), Exc>;
@@ -71,6 +75,7 @@ fn status(rc: c_int) -> R {
     match rc {
         0 => Ok(()),
         -2 => Err(Exc::Reraise),
+        -3 => Err(Exc::Kept),
         _ => Err(Exc::Error),
     }
 }
@@ -130,6 +135,9 @@ struct Act<'a> {
     // TORCH_RUST_CALLS=shadow: 1, this activation is the body of a recorded
     // run; 2, a frame under it; else 0 (see calls/record.rs).
     shadow: u8,
+    // What the step that is running drops behind it (slow_step): an
+    // instruction that owns its operands takes these with it (exec).
+    dying: *const [ValueId],
 }
 
 // A block's params, held from before its version is selected for the run
@@ -184,6 +192,9 @@ pub struct Code {
     // (those its outputs or only its unwind segments use), in the order the
     // block got them (order.rs).
     pub exit_kill: Vec<ValueId>,
+    // Where the compiler reordered the stack: what an unwind from that
+    // place of the body on drops, in its order (order.rs `stacks`).
+    pub stacks: Vec<(usize, Vec<ValueId>)>,
     // For each exit of the terminator (Jump: one, Branch: then and else) that
     // goes to a block, how the version's values pass to its params.
     pub edges: Vec<Option<Transfer>>,
@@ -262,7 +273,7 @@ impl Code {
                     Some(Transfer { target: edge.target, moves, rest })
                 })
                 .collect();
-            Code { steps, kills, exit_kill, edges }
+            Code { steps, kills, exit_kill, stacks: super::order::stacks(blk, ver), edges }
         };
         cfg.blocks
             .iter()
@@ -337,6 +348,7 @@ pub unsafe fn run(c: &Compiled, prep: &Prepared, f: *mut Frame, start: Start) ->
             reading: reads::entered_by_body() || (shadow != 0 && super::calls::record::reads()),
             under_body: reads::entered_by_body(),
             shadow,
+            dying: &[],
         };
         // Between this frame's instrs no instr is running (the caller puts
         // back what was, once the frame is gone).
@@ -390,6 +402,7 @@ pub unsafe fn run_graph(prep: &Prepared, inputs: &[*mut PyObject]) -> Result<Vec
         reading: false,
         under_body: false,
         shadow: 0,
+        dying: &[],
     };
     for (obj, p) in inputs.iter().zip(&prep.cfg[ENTRY].params) {
         act.set(*p, xincref(*obj));
@@ -522,8 +535,13 @@ impl Act<'_> {
     }
 
     // Drops what is left of a version's values when control leaves the
-    // block, the top one first (order.rs).
-    unsafe fn clear(&mut self, b: BlockId, ver: usize) {
+    // block at body[at], the top one of the stack first (order.rs).
+    unsafe fn clear(&mut self, b: BlockId, ver: usize, at: usize) {
+        let p = self.p;
+        let stacks = p.code.get(b.idx()).and_then(|c| c.get(ver)).map_or(&[][..], |c| &c.stacks);
+        if let Some((_, order)) = stacks.iter().rev().find(|(from, _)| *from <= at) {
+            return self.drop_all(order);
+        }
         let blk = &self.cfg[b];
         for v in super::order::top_down(blk, &blk.versions[ver]) {
             self.set(v, std::ptr::null_mut());
@@ -829,7 +847,7 @@ impl Act<'_> {
             if !ffi::PyErr_Occurred().is_null() {
                 ffi::PyErr_Clear();
             }
-            this.clear(b, 0);
+            this.clear(b, 0, 0);
             let result = this.run_origin(b, saved);
             this.after_origin(b, result)
         };
@@ -903,7 +921,7 @@ impl Act<'_> {
                 Unwound::Propagate => Err(Outcome::Error),
             };
         }
-        self.clear(b, 0);
+        self.clear(b, 0, 0);
         self.after_origin(b, result)
     }
 
@@ -961,6 +979,7 @@ impl Act<'_> {
                 reading: self.reading || (shadow != 0 && super::calls::record::reads()),
                 under_body: self.under_body,
                 shadow,
+                dying: &[],
             };
             for (obj, q) in params.into_iter().zip(&origin.cfg[ENTRY].params) {
                 sub.set(*q, obj);
@@ -982,7 +1001,7 @@ impl Act<'_> {
         match result {
             Outcome::Leave(outs) => {
                 if super::calls::record::on() {
-                    super::calls::record::again_outs((self.p as *const Prepared as usize, b.0), self.f, &outs);
+                    super::calls::record::again_outs((self.p.serial, b.0), self.f, &outs);
                 }
                 let next = self.take_exit(b, &outs, None);
                 for o in outs {
@@ -1108,7 +1127,7 @@ impl Act<'_> {
         if self.shadow != 0 {
             super::calls::record::unseen("an exception was raised under the body: which handler takes it is a later unit");
         }
-        if how == Exc::Error {
+        if how != Exc::Reraise {
             // A failure replaces the pending exception, which is what CPython
             // does too.
             self.traceback_here();
@@ -1121,14 +1140,22 @@ impl Act<'_> {
             None | Some(Handler::Propagate) => vec![],
             Some(Handler::Block(_, args) | Handler::Outer(_, args)) => take(args),
         };
-        // The instruction that raised let go of its operands before the
-        // stack is unwound: what the step would have dropped, in its order
-        // (the handler holds its own references by now); then the rest.
+        // The instruction that raised let go of the operands it takes off
+        // the stack before the stack is unwound: what the step would have
+        // dropped, in its order (the handler holds its own references by
+        // now). What it leaves on the stack, and all of them when it raised
+        // before it took any, goes with the rest, the top one first.
         let code = &self.p.code[b.idx()][ver];
-        if let Some(step) = code.steps.get(at) {
-            self.drop_all(&code.kills[step.kill.0 as usize..step.kill.1 as usize]);
+        if let (Some(step), true) = (code.steps.get(at), how != Exc::Kept) {
+            let ins = &cfg[step.v];
+            let stays = super::order::kept(&ins.op, ins.args.len());
+            for k in &code.kills[step.kill.0 as usize..step.kill.1 as usize] {
+                if !ins.args.iter().zip(&stays).any(|(a, kept)| *kept && a == k) {
+                    self.set(*k, std::ptr::null_mut());
+                }
+            }
         }
-        self.clear(b, ver);
+        self.clear(b, ver, at);
         let h = match segment {
             None | Some(Handler::Propagate) => return Unwound::Propagate,
             Some(Handler::Block(k, _)) => blk.handlers[*k],
@@ -1195,7 +1222,7 @@ impl Act<'_> {
             // TORCH_RUST_CALLS=shadow: the list recorded of this place ran on
             // this arrival's operands, and awaits what the block makes.
             let mut again: Option<super::calls::record::Again> = None;
-            let place = (self.p as *const Prepared as usize, b.0);
+            let place = (self.p.serial, b.0);
             let (mut vi, first) = match resume.take() {
                 Some(r) => r,
                 None if self.p.autograd[b.idx()].load(std::sync::atomic::Ordering::Relaxed) && self.wants_autograd(b) => match self.bootstrap(b) {
@@ -1834,7 +1861,7 @@ impl Act<'_> {
             } else if super::region::enabled() {
                 self.p.region_runs[b.idx()].load(relaxed) + 2 == super::region::after()
             } else {
-                super::region::observing() && !super::calls::record::taken((self.p as *const Prepared as usize, b.0))
+                super::region::observing() && !super::calls::record::taken((self.p.serial, b.0))
             }
     }
 
@@ -1843,10 +1870,10 @@ impl Act<'_> {
     // (`held`), with the call-list recorder looking on. Then as after_origin.
     unsafe fn shadow_run(&mut self, b: BlockId, vi: usize, mut held: Held) -> Result<BlockId, Outcome> {
         let params = std::mem::take(&mut held.0);
-        self.clear(b, vi);
+        self.clear(b, vi, 0);
         let name = self.block_name(self.c.expect("checked by shadow_due"), b, vi);
         let ids: Vec<u32> = self.p.origins[b.idx()].as_ref().map_or(Vec::new(), |origin| origin.cfg[ENTRY].params.iter().map(|p| p.0).collect());
-        super::calls::record::begin(name, (self.p as *const Prepared as usize, b.0), &params, &ids, self.f);
+        super::calls::record::begin(name, (self.p.serial, b.0), &params, &ids, self.f);
         let result = self.run_origin_as(b, params, 1);
         super::calls::record::end(if let Outcome::Leave(outs) = &result { Some(outs) } else { None });
         self.after_origin(b, result)
@@ -1881,7 +1908,7 @@ impl Act<'_> {
         let ver = &blk.versions[vi];
         let code = &self.p.code[b.idx()][vi];
         if super::calls::record::on() {
-            super::calls::record::traced((self.p as *const Prepared as usize, b.0));
+            super::calls::record::traced((self.p.serial, b.0));
             super::calls::record::yields();
         }
         let ids: Vec<ValueId> = blk.params.iter().chain(&ver.inputs).copied().collect();
@@ -2028,7 +2055,7 @@ impl Act<'_> {
                 tr_frame_push(self.f, xincref(self.val(*a)));
             }
             let value = xincref(self.val(*value));
-            self.clear(b, vi);
+            self.clear(b, vi, i);
             return Next::Done(Outcome::Yield { value, unit: ins.origin });
         }
         if flags & FLAG_RAISE != 0 {
@@ -2070,7 +2097,9 @@ impl Act<'_> {
         if let Some(cl) = clone {
             super::NEXT_CLONE.set((cl.code.as_ptr() as usize, self.f as usize, Arc::as_ptr(&cl.compiled) as usize));
         }
+        self.dying = kills;
         let done = self.guarded(*v, ins, callee);
+        self.dying = &[];
         if clone.is_some() {
             super::NEXT_CLONE.set((0, 0, 0));
         }
@@ -2567,6 +2596,33 @@ impl Act<'_> {
             {
                 let _paused = reads::Recording::pause();
                 check(super::outside_executor(|| self.opaque_call_ex(a(0), a(1), if ins.args.len() > 2 { a(2) } else { std::ptr::null_mut() })))?
+            }
+            // The instruction gets references of its own, as CPython's has
+            // the stack's, and lets go of them itself (order.rs `owns`):
+            // what the step drops is moved to it, the rest is shared. A
+            // traced or recorded run reads the operands behind the
+            // instruction: it holds them, as every other instruction does.
+            Op::Bytecode { opcode, arg } if super::order::owns(&ins.op) && !self.reading && self.shadow == 0 => {
+                let dying = &*self.dying;
+                let mut own: Vec<*mut PyObject> = Vec::with_capacity(ins.args.len());
+                for (i, x) in ins.args.iter().enumerate() {
+                    let moved = !x.is_reserved() && dying.contains(x) && !ins.args[i + 1..].contains(x);
+                    own.push(if moved { std::mem::replace(&mut self.vals[x.idx()], std::ptr::null_mut()) } else { xincref(self.val(*x)) });
+                }
+                let mut out = std::ptr::null_mut();
+                let rc = tr_generic_owned(*opcode as c_int, *arg as c_int, own.as_mut_ptr(), &mut out);
+                if rc == -3 {
+                    // It took none of them: they are where they were.
+                    for (x, o) in ins.args.iter().zip(own) {
+                        if !x.is_reserved() && self.vals[x.idx()].is_null() {
+                            self.vals[x.idx()] = o;
+                        } else {
+                            ffi::Py_XDECREF(o);
+                        }
+                    }
+                }
+                status(rc)?;
+                out
             }
             Op::Bytecode { opcode, arg } if super::trampoline::needed(*opcode, *arg) => {
                 let args = self.args(ins);

@@ -281,6 +281,17 @@ pub struct UnwindSegment {
     pub handler: Handler,
 }
 
+// The stack where the compiler reordered it (SWAP): `stack` is the block's
+// stack, bottom first, as it stands behind the instr `behind` of the body
+// (a reserved value: from the block's start); what the body makes later
+// lies above it, until the next record. Only the order of an unwind's drops
+// reads it (exec/order.rs).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Swapped {
+    pub behind: ValueId,
+    pub stack: Vec<ValueId>,
+}
+
 // Conditions a guard checks before any of a version runs, on a value (a
 // block param or read, see Guard) or, for the global ones, on nothing.
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Debug)]
@@ -414,12 +425,25 @@ pub struct Version {
     pub unwind: Vec<UnwindSegment>,
     // The Block::reads the body uses, read on entry before it runs.
     pub inputs: Vec<ValueId>,
+    // Where the stack is not in the order the block got its values, as the
+    // interpreter saw it. A pass that copies a version renames them
+    // (swapped_as); a record whose `behind` a pass took out of the body
+    // says nothing any more.
+    pub swapped: Vec<Swapped>,
 }
 
 impl Version {
     // The handler a raise at body[i] goes to.
     pub fn handler_at(&self, i: usize) -> Handler {
         self.unwind.iter().rev().find(|s| s.from <= i).map_or(Handler::Propagate, |s| s.handler.clone())
+    }
+
+    // The records of the reordered stack for a copy of the version whose
+    // values are `names`: a value with no name there is not in the copy.
+    pub fn swapped_as(&self, names: &HashMap<ValueId, ValueId>) -> Vec<Swapped> {
+        let name = |v: &ValueId| if v.is_reserved() { Some(*v) } else { names.get(v).copied() };
+        let renamed = |s: &Swapped| Some(Swapped { behind: name(&s.behind)?, stack: s.stack.iter().filter_map(name).collect() });
+        self.swapped.iter().filter_map(renamed).collect()
     }
 
     // Sets the unwind segments from the handler of each instr.

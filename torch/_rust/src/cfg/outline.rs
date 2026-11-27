@@ -111,6 +111,14 @@ pub fn outline(cfg: &mut Cfg, chain: &[BlockId], mode: Outline) {
             let args = cfg[*v].args.iter().map(|a| get(&subst, *a)).collect();
             cfg[*v].args = args;
         }
+        // A record from the block's start stands behind what the chain
+        // has so far.
+        let so_far = merged.body.last().copied();
+        let behind = |v: ValueId| if v.is_reserved() { so_far.unwrap_or(v) } else { v };
+        for s in &ver.swapped {
+            let stack = s.stack.iter().map(|a| get(&subst, *a)).collect();
+            merged.swapped.push(Swapped { behind: behind(s.behind), stack });
+        }
         merged.body.extend(&ver.body);
         let outputs: Vec<ValueId> = ver.outputs.iter().map(|o| get(&subst, *o)).collect();
         match chain.get(i + 1) {
@@ -190,6 +198,7 @@ fn extract(cfg: &Cfg, chain: &[BlockId], handlers: &[BlockId]) -> Cfg {
             nver.body.push(nv);
         }
         nver.outputs = ver.outputs.iter().map(|o| get(&map, *o)).collect();
+        nver.swapped = ver.swapped_as(&map);
         nver.unwind = ver
             .unwind
             .iter()

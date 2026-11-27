@@ -6,23 +6,32 @@
 // __del__, the callback of a weak reference). The executor holds each value
 // once and drops, behind a step, the operands nothing reads again (live.rs).
 // This module says in which order, per kind of instruction, as CPython
-// 3.12's definition of the instruction has it (Python/bytecodes.c), never
-// by the numbers the values happen to have.
+// 3.12's instruction does it (the interpreter itself is the reference: every
+// row has a statement in the table of deaths that runs on it), never by the
+// numbers the values happen to have.
 //
 // What it is given: the op of a step and its operands (ir.rs), or what a
 // block holds.
 // What it guarantees
-//   - `releases`: the operands of the step, each once, in the order in
-//     which the GENERIC form of the instruction lets go of them; an operand
+//   - `releases`: the operands of the step, each once: first those the
+//     GENERIC form of the instruction takes off the stack, in the order in
+//     which it lets go of them; then those it leaves on the stack (`kept`:
+//     the container under LIST_EXTEND, the subject of a match), the top one
+//     first, as a pop behind the instruction would take them. An operand
 //     that stands at two places dies at the later one. Every op of the IR
 //     has a row, and every opcode the generic instruction runs (exec_ops.c
 //     tr_generic); an opcode with no row has no order and its code is not
 //     planned (it runs on CPython).
-//   - `top_down`: what a block holds of the stack, in the order CPython
-//     pops it: the last one the block got first (the body's values, then
-//     what the version read on entry, then the params, each from its end).
-//     An unwind uses it for what the raising instruction did not let go
-//     of, and a version for the params it does not use.
+//   - `kept`: the operands an instruction leaves on the stack. When it
+//     raises they are still there: the unwind takes them with the rest of
+//     the stack, not with what the instruction let go of.
+//   - `top_down`: what a block holds, in the order CPython pops its stack:
+//     the last one the block got first (the body's values, then what the
+//     version read on entry, then the params, each from its end). An unwind
+//     uses it for what the raising instruction did not let go of, and a
+//     version for the params it does not use.
+//   - `stacks`: the same where the compiler reordered the stack (SWAP): the
+//     stack as it stood there (Version::swapped), for the unwinds behind.
 //   - `as_got`: the same values in the order the block got them. The end of
 //     a version uses it for what no step dropped: in a plan as written that
 //     is one value at most on any path the table of deaths knows; in an
@@ -31,12 +40,15 @@
 //     the slots, at the frame's exit).
 // What it does not cover
 //   - an instruction CPython specialized after its first runs may let go in
-//     another order (CALL of list.append: the receiver before the callable);
+//     another order (CALL of a builtin method object: the arguments before
+//     the callable; of list.append: the receiver before the callable);
 //   - an operand CPython keeps on the stack and pops later (the list under
 //     LIST_APPEND, the iterator of a loop) is dropped behind its last use,
 //     with the operands of that step;
-//   - the stack's own order where the compiler swapped it (SWAP): `top_down`
-//     goes by when the block got a value.
+//   - a version whose body a pass made again has no record of the stack's
+//     own order: `top_down` goes by when the block got a value.
+
+use std::collections::HashSet;
 
 use pyo3::prelude::*;
 
@@ -170,8 +182,8 @@ fn order(op: &Op) -> Option<Order> {
             | oc::BUILD_CONST_KEY_MAP
             | oc::BUILD_SLICE
             | oc::BUILD_STRING => Order::Stack,
-            // The container stays on the stack and what is put into it
-            // moves in or is let go of in its order: (list, v), (set, v),
+            // The container stays on the stack (`kept`) and what is put into
+            // it moves in or is let go of in its order: (list, v), (set, v),
             // (dict, key, value), (container, iterable), (func, dict,
             // update); MATCH_KEYS and WITH_EXCEPT_START keep their
             // operands; BUILD_LIST moves its items into the list.
@@ -190,8 +202,29 @@ fn order(op: &Op) -> Option<Order> {
     })
 }
 
+// Which of the `n` operands of an instr with `op` the instruction leaves on
+// the stack: by the stack signature of its opcode (an input that is also an
+// output), and SEND's receiver.
+pub fn kept(op: &Op, n: usize) -> Vec<bool> {
+    let mut out = vec![false; n];
+    match op {
+        Op::Send if n == 2 => out[0] = true,
+        Op::Bytecode { opcode, arg } => {
+            let Some(sig) = oc::signature(*opcode, *arg, false) else { return out };
+            let used = sig.inputs.iter().enumerate().filter(|(_, k)| **k == oc::In::Used).map(|(i, _)| i);
+            for (place, input) in used.enumerate().take(n) {
+                out[place] = sig.outputs.contains(&oc::Out::Keep(input));
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
 // The operands of an instr with `op` and `args` in the order the instr lets
-// go of them, each once at its last place; None: the op has no row.
+// go of them, each once at its last place: what it takes off the stack in
+// its row's order, then what it leaves there, the top one first; None: the
+// op has no row.
 pub fn releases(op: &Op, args: &[ValueId]) -> Option<Vec<ValueId>> {
     let mut out: Vec<ValueId> = Vec::with_capacity(args.len());
     let mut put = |a: ValueId| {
@@ -200,13 +233,25 @@ pub fn releases(op: &Op, args: &[ValueId]) -> Option<Vec<ValueId>> {
             out.push(a);
         }
     };
+    let stays = kept(op, args.len());
     match order(op)? {
-        Order::Stack => args.iter().for_each(|a| put(*a)),
+        Order::Stack => (0..args.len()).filter(|p| !stays[*p]).for_each(|p| put(args[p])),
         // An instr the optimizer gave other operands has no places.
-        Order::Places(places) if places.len() == args.len() => places.iter().for_each(|p| put(args[*p])),
+        Order::Places(places) if places.len() == args.len() => places.iter().filter(|p| !stays[**p]).for_each(|p| put(args[*p])),
         Order::Places(_) => return None,
     }
+    (0..args.len()).rev().filter(|p| stays[*p]).for_each(|p| put(args[p]));
     Some(out)
+}
+
+// Whether the instruction's operands are handed to it as references of its
+// own (those the step drops are moved, not shared): the instructions whose
+// order of deaths no order of drops behind the step gives. BUILD_SET that
+// raises lets go of the items from the failing one on and then of the set
+// that holds the earlier ones; CALL_FUNCTION_EX replaces an iterable that is
+// no tuple by a tuple BEFORE the call.
+pub fn owns(op: &Op) -> bool {
+    matches!(op, Op::Bytecode { opcode: oc::BUILD_SET | oc::CALL_FUNCTION_EX, .. })
 }
 
 // What a version of a block holds, in the order the block got it.
@@ -219,11 +264,45 @@ pub fn top_down<'a>(blk: &'a Block, ver: &'a Version) -> impl Iterator<Item = Va
     as_got(blk, ver).rev()
 }
 
+// Where that is not the order of CPython's stack: (the place in the body
+// from which it holds, what the version holds with the top of the stack
+// first), by place. An unwind at body[at] takes the last one whose place is
+// not behind `at`.
+pub fn stacks(blk: &Block, ver: &Version) -> Vec<(usize, Vec<ValueId>)> {
+    let mut out: Vec<(usize, Vec<ValueId>)> = vec![];
+    for s in &ver.swapped {
+        // The stack as it stood behind `behind`, bottom first; what the
+        // body made later lies above it.
+        let from = match ver.body.iter().position(|v| *v == s.behind) {
+            Some(k) => k + 1,
+            None if s.behind.is_reserved() => 0,
+            None => continue,
+        };
+        let later: HashSet<ValueId> = ver.body[from..].iter().copied().collect();
+        let mut on_stack: HashSet<ValueId> = HashSet::new();
+        // An entry the stack has twice is popped last at its lower place.
+        let stack: Vec<ValueId> = s.stack.iter().copied().filter(|v| !v.is_reserved() && !later.contains(v) && on_stack.insert(*v)).collect();
+        // What is in neither left the stack before, or never was on it: it
+        // is held no more, or is no value of the stack. It goes last.
+        let mut order: Vec<ValueId> = as_got(blk, ver).filter(|v| !on_stack.contains(v) && !later.contains(v)).collect();
+        order.extend(stack.into_iter().filter(|v| as_got(blk, ver).any(|x| x == *v)));
+        order.extend(&ver.body[from..]);
+        order.reverse();
+        out.push((from, order));
+    }
+    out.sort_by_key(|(from, _)| *from);
+    out
+}
+
 /// The places of a generic instruction's operands (among its args, bottom
-/// first) in the order in which the instruction lets go of them, for one
-/// with `nargs` operands; None for an opcode with no row (for tests).
+/// first) in the order in which the instruction lets go of them, and which
+/// of them it leaves on the stack, for the instruction `opcode` with
+/// `oparg`; None for an opcode with no row (for tests).
 #[pyfunction]
-pub fn _cfg_releases(opcode: u8, nargs: u32) -> Option<Vec<u32>> {
+pub fn _cfg_releases(opcode: u8, oparg: u32) -> Option<(Vec<u32>, Vec<bool>)> {
+    let nargs = oc::signature(opcode, oparg, false)?.inputs.iter().filter(|k| **k == oc::In::Used).count() as u32;
     let args: Vec<ValueId> = (0..nargs).map(|i| ValueId(NUM_RESERVED + i)).collect();
-    releases(&Op::Bytecode { opcode, arg: 0 }, &args).map(|vs| vs.iter().map(|v| v.0 - NUM_RESERVED).collect())
+    let op = Op::Bytecode { opcode, arg: oparg };
+    let order = releases(&op, &args)?;
+    Some((order.iter().map(|v| v.0 - NUM_RESERVED).collect(), kept(&op, nargs as usize)))
 }

@@ -30,7 +30,7 @@ use super::origins::{class_text, plain_tensor, Origin, Origins};
 use super::outs::Out;
 use super::record::Rec;
 use super::shadow::{self, Shadow};
-use super::{known, witness, Callee, List, Tmpl};
+use super::{witness, Callee, List, Tmpl};
 use crate::exec::pin::Pin;
 use crate::exec::tensor_key::TensorKey;
 
@@ -106,10 +106,7 @@ impl Rec {
                     (None, None) if (*ffi::Py_TYPE(o)).tp_weaklistoffset != 0 && self.origins.led(o) => {
                         let pin = Pin::weak(o);
                         // The reads that lead to it are its check.
-                        pin.counts().is_none().then(|| {
-                            self.reasons.add(known::PENDING.into());
-                            Out::Led(pin)
-                        })
+                        pin.counts().is_none().then(|| Out::Led(pin))
                     }
                     (None, None) => None,
                 };
@@ -177,13 +174,12 @@ impl Rec {
                 self.reasons.add("operator(s) ran between the instructions of the run".into());
                 self.shadow.notes.push(format!("{outside} operator(s) ran between the instructions of the run"));
             }
-            // The reads that lead to a pin are recorded; until a later
-            // arrival is entered under them, a list with a pin is not shown
-            // to be the body.
+            // (The reads that lead to a pin are the list's checks: again.rs.)
             self.shadow.specialized = self.origins.exact.len() as u32;
             self.shadow.pins = self.origins.pins.len() as u32;
-            if self.shadow.pins > 0 {
-                self.reasons.add("a pin: the reads that lead to it are not run as a check on a later arrival yet".into());
+            // A list has no entry that changes the thread's state.
+            if self.word.is_none_or(|word| crate::exec::ambient::state() != Ok(word)) {
+                self.reasons.add("the thread's state where the body ends is not the one the run began under".into());
             }
             if Origins::lost() {
                 self.reasons.add("a death was not noted: the releases are not known".into());
@@ -210,9 +206,20 @@ impl Rec {
             if self.shadow.validated != "equal" {
                 self.shadow.reasons.push((format!("never run again and found equal: {}", self.shadow.validated), 1));
             }
+            // Armed only with its checks: the reads of the run, settled, the
+            // thread state it ran under, and the frame it is of.
             let keys = self.origins.inputs.iter().map(|p| p.live().and_then(|o| TensorKey::of(o))).collect::<Option<Vec<_>>>();
+            let pin_keys = std::mem::take(&mut self.origins.pin_keys).into_iter().collect::<Option<Vec<_>>>();
             let (paths, names, exact) = (std::mem::take(&mut self.origins.paths), std::mem::take(&mut self.origins.keys), std::mem::take(&mut self.origins.exact));
-            let armed = keys.filter(|_| self.shadow.validated == "equal").map(|keys| Armed { list, keys, paths, names, exact, pins: std::mem::take(&mut self.origins.pins), stated: outs, kept: 0, left: 0 });
+            let checked = (keys, pin_keys, self.checks.take(), self.word, self.home.take());
+            let armed = match checked {
+                (Some(keys), Some(pin_keys), Some(reads), Some(word), Some((func, code))) if self.shadow.validated == "equal" => {
+                    let (inputs, pins, roots, found_too) = (std::mem::take(&mut self.origins.inputs), std::mem::take(&mut self.origins.pins), self.origins.rooted(), std::mem::take(&mut self.found_too));
+                    Some(Armed { list, keys, paths, names, exact, pins, pin_keys, roots, inputs, found_too, reads, word, func, code, stated: outs, kept: 0, left: 0 })
+                }
+                // (What is not armed lets go here, where nothing is borrowed.)
+                _ => None,
+            };
             (self.shadow, armed)
         }
     }
