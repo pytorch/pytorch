@@ -1276,6 +1276,130 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @setSdpaBackendsToDefaultFinally
+    @parametrize(
+        "sdpa_backend",
+        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize(
+        "seq_lens",
+        [
+            [(1, 40)],
+            [(1, 17), (1, 128), (1, 1)],
+            [(3, 40), (16, 16), (5, 77)],
+            [(40, 10), (8, 3)],
+        ],
+    )
+    def test_causal_bottom_right_aligned(
+        self, device, dtype, seq_lens, sdpa_backend=None
+    ):
+        # Query i of a sequence attends to keys 0..i + k_len - q_len.
+        if TEST_WITH_ROCM:
+            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+
+        torch.manual_seed(42)
+        num_heads, head_dim = 8, 64
+
+        def pack(lens):
+            seqs = [torch.randn(n, num_heads, head_dim, device=device) for n in lens]
+            packed, cu_seq, max_len = pack_sequences(seqs, device)
+            return packed.to(dtype).requires_grad_(), cu_seq, max_len
+
+        q_lens, k_lens = zip(*seq_lens)
+        q, cu_seq_q, max_q = pack(q_lens)
+        k, cu_seq_k, max_k = pack(k_lens)
+        v = torch.randn_like(k).requires_grad_()
+
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            out = varlen_attn(
+                q, k, v, cu_seq_q, cu_seq_k, max_q, max_k, window_size=(-1, 0)
+            )
+        grad_out = torch.randn_like(out)
+        grads = torch.autograd.grad(out, (q, k, v), grad_out)
+
+        q_starts, k_starts = cu_seq_q.tolist(), cu_seq_k.tolist()
+        for i, (q_len, k_len) in enumerate(seq_lens):
+            q_rows = slice(q_starts[i], q_starts[i + 1])
+            k_rows = slice(k_starts[i], k_starts[i + 1])
+            rows = (q_rows, k_rows, k_rows)
+            ref_inputs = [
+                t.detach()[r].float().transpose(0, 1).requires_grad_()
+                for t, r in zip((q, k, v), rows)
+            ]
+            mask = torch.ones(q_len, k_len, dtype=torch.bool, device=device)
+            with sdpa_kernel(SDPBackend.MATH):
+                ref = F.scaled_dot_product_attention(
+                    *ref_inputs, attn_mask=mask.tril(k_len - q_len)
+                )
+            ref_grads = torch.autograd.grad(
+                ref, ref_inputs, grad_out[q_rows].float().transpose(0, 1)
+            )
+            for actual, expected, r in zip(
+                (out, *grads), (ref, *ref_grads), (q_rows, *rows)
+            ):
+                self.assertEqual(
+                    actual[r],
+                    expected.transpose(0, 1),
+                    atol=2e-2,
+                    rtol=2e-2,
+                    exact_dtype=False,
+                )
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @setSdpaBackendsToDefaultFinally
+    @parametrize(
+        "sdpa_backend",
+        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
+    )
+    def test_bf16_rounding(self, device, sdpa_backend=None):
+        # Truncating float to bf16 can stay within tolerance, so check the
+        # direction of the error: with V and grad_out >= 0, truncation puts out and
+        # dv below the float64 result every time, round-to-nearest about half.
+        if TEST_WITH_ROCM:
+            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+        torch.manual_seed(0)
+        num_heads, head_dim, lens = 4, 64, [128, 77, 200]
+        cu_seq = torch.tensor(
+            [0, *torch.tensor(lens).cumsum(0).tolist()],
+            device=device,
+            dtype=torch.int32,
+        )
+        shape = (sum(lens), num_heads, head_dim)
+        q, k = (torch.randn(shape, device=device, dtype=torch.bfloat16) for _ in "qk")
+        v = torch.rand(shape, device=device, dtype=torch.bfloat16)
+        q, k, v = (t.requires_grad_() for t in (q, k, v))
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            out = varlen_attn(
+                q, k, v, cu_seq, cu_seq, max(lens), max(lens), window_size=(-1, 0)
+            )
+        grad_out = torch.rand_like(out)
+        (dv,) = torch.autograd.grad(out, (v,), grad_out)
+
+        refs, ref_dvs = [], []
+        for start, end in zip(cu_seq[:-1].tolist(), cu_seq[1:].tolist()):
+            qi, ki, vi = (
+                t.detach()[start:end].double().transpose(0, 1).requires_grad_()
+                for t in (q, k, v)
+            )
+            ref = F.scaled_dot_product_attention(qi, ki, vi, is_causal=True)
+            (ref_dv,) = torch.autograd.grad(
+                ref, (vi,), grad_out[start:end].double().transpose(0, 1)
+            )
+            refs.append(ref.transpose(0, 1))
+            ref_dvs.append(ref_dv.transpose(0, 1))
+
+        for actual, expected in ((out, torch.cat(refs)), (dv, torch.cat(ref_dvs))):
+            actual = actual.double()
+            diff = actual != expected
+            toward_zero = (actual.abs() < expected.abs())[diff].float().mean().item()
+            self.assertLess(toward_zero, 0.6)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support block_table")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("page_size", [32, 64, 128, 256])
