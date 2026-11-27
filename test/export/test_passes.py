@@ -581,6 +581,18 @@ class TestPasses(TestCase):
             count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0
         )
 
+    def test_replace_view_ops_slice_unbacked_end(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, n):
+                return x[: n.item()]
+
+        x = torch.randn(8, 4)
+        n = torch.tensor(3)
+        ep = export(M(), (x, n), strict=False)
+        ep = ep._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
+        self.assertEqual(count_call_function(ep.graph, torch.ops.aten.slice.Tensor), 0)
+        self.assertGreater(count_call_function(ep.graph, torch.ops.aten.slice_copy.Tensor), 0)
+
     def test_views_op_having_view_copy(self) -> None:
         schemas = torch._C._dispatch_get_registrations_for_dispatch_key("")
         aten_schemas = [s[6:] for s in schemas if s.startswith("aten::")]
