@@ -63,7 +63,7 @@ pub mod ffi {
         fn region_not_neutral(own: &AmbientModes) -> u8;
         fn set_grad_mode(on: bool) -> bool;
         fn tensor_version(t: &Tensor) -> i64;
-        fn tensor_data_address(t: &Tensor) -> usize;
+        fn tensor_home(t: &Tensor, storage: &mut usize) -> usize;
         fn tensor_span(t: &Tensor, out: &mut TensorSpan) -> bool;
         fn tensor_is_cow(t: &Tensor) -> bool;
         fn forward_ad_active() -> bool;

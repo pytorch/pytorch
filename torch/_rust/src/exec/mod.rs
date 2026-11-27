@@ -418,6 +418,13 @@ fn plain_tensor_types() -> [usize; 2] {
     })
 }
 
+// torch.dtype, device, layout, memory_format and Size, by address: the
+// classes of rules::Group::TorchConstant.
+fn torch_constant_types() -> [usize; 5] {
+    static TYPES: OnceLock<[usize; 5]> = OnceLock::new();
+    *TYPES.get_or_init(|| Python::attach(|py| ["dtype", "device", "layout", "memory_format", "Size"].map(|n| py.import("torch").and_then(|m| m.getattr(n)).map_or(0, |t| t.as_ptr() as usize))))
+}
+
 // torch.Size and torch.device, by address: the two classes of torch whose
 // instances a check compares by value (exact.rs).
 fn torch_value_types() -> [usize; 2] {
@@ -2242,7 +2249,7 @@ fn observed_ops(
                         // A call is one only of a callable the engine's
                         // own tables have, whatever it ran (see shown.rs).
                         let listed = if one_op { shown::runs_operators(prep, *v, &f) } else { shown::computes(&f) };
-                        if !listed || first.as_deref().is_some_and(sets_tensor_state) {
+                        if !listed || rules::advice_callee(f.as_ptr()).is_err() || first.as_deref().is_some_and(sets_tensor_state) {
                             continue;
                         }
                         calls.push((*v, f.unbind(), (one_op || quiet).then(|| if one_op { args() } else { None }), false));
@@ -3057,6 +3064,9 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, code: usize, v: ValueId, clones: 
     let here = || format!("%{} {:?}", v.0, ins.op);
     // What the rule table stops under a trace sits in no region.
     rules::advice(&ins.op).map_err(|why| format!("{}: {why}", here()))?;
+    if let Some(f) = unsafe { &*prep.callees.get() }.get(&v).and_then(|c| c.get(py)) {
+        rules::advice_callee(f.as_ptr()).map_err(|why| format!("{}: {why}", here()))?;
+    }
     // In a callee (depth > 0), its own cells, and containers it made, die
     // with its frame (unless it returns them, as a region rebuilds them).
     let own_cell = |slot: u32| free_index(&prep.cfg, slot).is_none();
@@ -3575,7 +3585,7 @@ fn is_leaf(f: &Bound<'_, PyAny>) -> bool {
     let quiet_known = first.prep.cfg.instrs.iter().enumerate().all(|(i, ins)| {
         let v = ValueId(i as u32);
         let ran_nothing = effects.get(Site::Instr(v)).iter().all(|(seq, _)| seq.is_empty());
-        !is_call(&ins.op) || !ran_nothing || callees.get(&v).is_none() || callees.get(&v).and_then(|c| c.get(f.py())).is_some_and(|g| shown::computes(&g))
+        !is_call(&ins.op) || !ran_nothing || callees.get(&v).is_none() || callees.get(&v).and_then(|c| c.get(f.py())).is_some_and(|g| shown::computes(&g) && rules::advice_callee(g.as_ptr()).is_ok())
     });
     !writes && quiet_known && effects.sites().all(|(seqs, varies)| !varies && seqs.iter().flat_map(|(seq, _)| seq).all(|e| matches!(e, effects::Effect::TorchOp { .. })))
 }
@@ -3714,6 +3724,7 @@ pub fn call_with_cfg_execution<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     trampoline::init(func.py())?;
     shown::ready();
+    rules::torch::ready();
     // Made here, as shown's tables are: a traced run asks for them
     // (made.rs), and making them runs Python code.
     makers();

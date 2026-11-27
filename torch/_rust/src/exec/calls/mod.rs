@@ -6,19 +6,28 @@
 // lists.
 //
 // Slot j holds the result of entry j, from that entry (if it keeps a result:
-// `out`) to the ONE place the list states for its release:
-//   ("move", j)  as an operand: the slot's last use. The reference goes when
-//                the callee returns, with the other arguments and what was
-//                built for the call, in argument order, before the result is
-//                stored or dropped (what CALL does with its arguments). A
-//                move inside a seq, map or slice belongs to that container.
+// `out`) to the ONE place the list states for its release. That place also
+// says what the slot is in the body, a temporary on its stack or a local:
+//   ("move", j)  as an operand: the slot's last use, and the slot is a
+//                TEMPORARY. The reference goes when the callee returns, with
+//                the other operands and what was built for the call, in the
+//                order the callee's instruction releases them (the table
+//                ORDER of slots.rs: a call its arguments in order, a slice of
+//                two bounds before its container, ...), before the result is
+//                stored or dropped. A move inside a seq, map or slice belongs
+//                to that container.
 //   a drop entry releases its slots, in the order given, at its place among
-//                the entries (a local overwritten, `del`, the end of the body).
-//   an output    a slot that an output names stays to the end of the run.
-// A result with `out` None is released after the arguments (the POP_TOP that
+//                the entries (a local overwritten, `del`, the end of the
+//                body): the slot is a LOCAL.
+//   an output    a slot that an output names stays to the end of the run: a
+//                local.
+// A result with `out` None is released after the operands (the POP_TOP that
 // follows). A slot with none of the three, a use after a move or drop, and a
-// second release are refused. A list that stops releases nothing: the live
-// slots go to the caller with the stop (run.rs).
+// second release are refused.
+// A list that stops lets go of its temporaries before it returns or raises,
+// as the unwind of the body's stack does (run.rs), and of no local: the live
+// locals go to the caller with the stop (the body's frame keeps them while a
+// handler runs).
 //
 // The spec `_calls_make` takes, of exact tuples, lists, strs and ints only
 // (spec.rs decodes it; check.rs refuses what it does not understand):
@@ -53,18 +62,21 @@
 // pin; another class is the stop "class" and the entry has not run. So an
 // operand that is a result needs a class its producer asserts: ("class", t)
 // or a key. A part needs its producer asserted to be a tuple or a struct
-// sequence type, and is read off exactly those. For a slot callee (binary,
-// compare, unary, the subscripts, the attributes) `_calls_make` resolves,
-// from the pinned classes, what the slot would run and refuses a method of a
-// class that is Python or that it does not cover (csrc/calls_slots.c says
-// which slots); the classes it decided on are compared by version at every
-// run, so a class changed since is the stop "class" too.
+// sequence type, and is read off exactly those. A slot callee (binary,
+// compare, unary, the subscripts, the attributes) is taken only if the
+// pinned classes of ALL its operands are a line of the license table
+// (slots.rs: the table, why each line runs C code only, and what is in no
+// line: a subclass of Tensor, a class written in Python, an nn.Module, a
+// dict as a container, a store to an attribute; rows of the rule table will
+// widen it), and if what csrc/calls_slots.c resolves from the same classes
+// agrees. Every class an operand of such an entry is pinned to is compared
+// by version at every run, so a class changed since is the stop "class" too.
 //
 // NOT decided here: which C callables may be vector entries at all
-// (`type.__call__`, `exec`, `sorted` are C callables by their type), and what
-// a C function does with operands of the pinned classes. Both are the
-// license of a rule (the callee's row of the table), which the recorder will
-// ask; until then lists are made by tests only.
+// (`type.__call__`, `exec`, `sorted`, `operator.add` are C callables by
+// their type), and what such a callee does with operands of the pinned
+// classes. Both are the license of a rule (the callee's row of the table),
+// which the recorder will ask; until then lists are made by tests only.
 
 mod check;
 mod run;
@@ -185,8 +197,8 @@ pub struct Entry {
     pub assert: Option<Assert>,
     // One per leaf of `args` (Tmpl::leaves): its pinned class, None for Null.
     pub classes: Box<[Option<Py<PyAny>>]>,
-    // Filled by List::new: the classes a slot callee was resolved on, each
-    // with its version then; the releases behind the call.
+    // Filled by List::new: the classes the operands of a slot callee are
+    // pinned to, each with its version then; the releases behind the call.
     pub decided: Box<[(Py<PyAny>, u32)]>,
     pub release: Box<[Release]>,
 }
@@ -199,11 +211,15 @@ pub struct List {
     ninputs: u32,
     npins: u32,
     outputs: Box<[Tmpl]>,
+    // By slot: the entry and the operand of it that move the slot (it is a
+    // temporary of the body); None for a local and for no slot.
+    moved: Box<[Option<(u32, u32)>]>,
     // The first entry that cannot be taken back; the count of entries if none.
     first_irreversible: usize,
     max_args: usize,
-    // How the last `_calls_run` stopped, with the slots that were live, for
-    // tests. Never locked while a reference is released.
+    // How the last `_calls_run` stopped, with the locals that were live, for
+    // tests. Never locked while a reference is released: a stop is taken out
+    // under the lock and dropped outside it.
     stopped: Mutex<Option<Stop>>,
 }
 
@@ -211,8 +227,8 @@ pub struct List {
 impl List {
     /// None after a run that returned its outputs, else (entry, "raised" |
     /// "assert" | "part" | "class" | "refused", restartable, {slot: object})
-    /// of the last `_calls_run`: the list keeps the slots that were live
-    /// until the next run or `release()`.
+    /// of the last `_calls_run`: the list keeps the locals that were live
+    /// (the temporaries went with the stop) until the next run or `release()`.
     #[getter]
     fn stopped<'py>(&self, py: Python<'py>) -> PyResult<Option<(usize, &'static str, bool, Bound<'py, PyDict>)>> {
         let held = self.stopped.lock().unwrap().as_ref().map(|s| (s.entry, s.what.text(), s.restartable, s.live.iter().map(|(j, x)| (*j, x.clone_ref(py))).collect::<Vec<_>>()));
@@ -224,7 +240,7 @@ impl List {
         Ok(Some((entry, what, restartable, live)))
     }
 
-    /// Releases the slots a stopped run left, in slot order.
+    /// Releases the locals a stopped run left, in slot order.
     fn release(&self) {
         let live = self.stopped.lock().unwrap().as_mut().map(|s| std::mem::take(&mut s.live));
         live.into_iter().flatten().for_each(drop);
@@ -236,6 +252,20 @@ impl List {
 pub fn _calls_text(list: &Bound<'_, List>) -> String {
     let (py, list) = (list.py(), list.get());
     (0..list.entries.len()).map(|k| list.line(py, k)).collect::<Vec<_>>().join("\n")
+}
+
+/// For tests and for who writes a recorder: the two tables of slots.rs.
+/// (license, order, groups): license lines (name, kind, operators or names,
+/// the operands' groups, why); order lines (kind, whether the key is a slice
+/// of two bounds, instruction, operand positions in the order of their
+/// release, in words); (group, what it is).
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+pub fn _calls_tables() -> (Vec<(&'static str, &'static str, Vec<&'static str>, Vec<String>, &'static str)>, Vec<(&'static str, bool, &'static str, Vec<usize>, &'static str)>, Vec<(String, &'static str)>) {
+    let license = slots::LICENSE.iter().map(|l| (l.name, l.kind, l.ops.to_vec(), l.operands.iter().map(|is| format!("{is:?}")).collect(), l.why));
+    let order = slots::ORDER.iter().map(|o| (o.kind, o.two_bounds, o.instruction, o.operands.to_vec(), o.how));
+    let groups = slots::EVERY_IS.iter().map(|is| (format!("{is:?}"), is.sentence()));
+    (license.collect(), order.collect(), groups.collect())
 }
 
 // Whether `x` is an exact int, float, bool, str or bytes, or None: the values

@@ -354,15 +354,22 @@ bool tensor_span(const Tensor& t, TensorSpan& out) noexcept {
   }
 }
 
-std::uintptr_t tensor_data_address(const Tensor& t) noexcept {
+std::uintptr_t tensor_home(
+    const Tensor& t,
+    std::uintptr_t& storage) noexcept {
+  storage = 0;
   const c10::TensorImpl* impl = t.unsafeGetTensorImpl();
   if (!t.defined() || impl->is_python_dispatch() || !impl->has_storage() ||
       t.layout() != c10::kStrided) {
     return 0;
   }
   try {
-    return reinterpret_cast<std::uintptr_t>(impl->data());
+    const c10::StorageImpl* s = impl->unsafe_storage().unsafeGetStorageImpl();
+    storage = reinterpret_cast<std::uintptr_t>(s);
+    return reinterpret_cast<std::uintptr_t>(s->data()) +
+        static_cast<size_t>(impl->storage_offset()) * impl->itemsize();
   } catch (...) {
+    storage = 0;
     return 0;
   }
 }

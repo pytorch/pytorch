@@ -53,6 +53,8 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.vm import _writes
 
+from . import stays as _stays
+
 
 log = logging.getLogger(__name__)
 
@@ -2483,15 +2485,25 @@ def _input_types(args, plan, types, consts):
     return out + floats + [_types.exact(c, const=True) for c in consts]
 
 
-def _overlap(tensors, consts):
+def _overlap(tensors, consts, gm, lowered):
     """How the tensors of a traced call stand to one another in memory (see
     exec/overlap.rs): every region is entered only by a call whose tensors
     stand so again, whatever runs for its graph, and what is made of a graph
-    is made for that too. Refuses a trace with a tensor whose place cannot be
-    said: it is not taken to be apart from the others."""
-    overlap = _rust().Overlap(tensors, consts)
+    is made for that too: with ``lowered`` and a graph that may write to a
+    tensor, also for where in its storage each tensor that overlaps another
+    starts. Refuses a trace with a tensor whose place cannot be said: it is
+    not taken to be apart from the others. And, for a lowering, one with two
+    tensors in one storage that do not overlap if a node of ``gm`` may reach
+    from one to the other (stays.py): what is made of a graph takes such two
+    for independent."""
+    overlap = _rust().Overlap(tensors, consts, lowered and _stays.writes(gm))
     if overlap.unplaced is not None:
         raise _Refused(overlap.unplaced)
+    leaving = _stays.leaves(gm) if lowered and overlap.apart else None
+    if leaving is not None:
+        raise _Refused(
+            f"two of its tensors are in one storage without overlapping and {leaving}"
+        )
     return overlap
 
 
@@ -3117,12 +3129,15 @@ def _trace_region(
             result["repeatable"] = not backups
             backups.clear()
             as_given.clear()
-            # Everything is as the run left it, the stand-ins where the body
-            # found them or wrote them: what the run read that is no longer
-            # as it was read, and that its own writes do not explain
-            # (exec/reads.rs). And which tensors are the trace's own, while
-            # it still knows: its inputs and the results of the operators it
-            # recorded.
+            # In this order (exec/reads.rs): the record of the run's writes
+            # lets go of what its stores replaced, and a finalizer that runs
+            # for it changes what it changes; then, with the stand-ins where
+            # the body found them or wrote them, what the run read that is
+            # no longer as it was read and that its own writes do not
+            # explain is noted (both in _region_settled); only then do the
+            # writes turn into what a region makes again. And which tensors
+            # are the trace's own, while it still knows: its inputs and the
+            # results of the operators it recorded.
             _rust()._region_settled(list(fx_tracers[-1].tensor_tracker.keys()))
             written.take(_rust()._region_writes(), _plain_result)
             # A comprehension's loop body adds to a container it was given
@@ -3298,7 +3313,7 @@ def _trace_region(
             raise _Refused(
                 "a tensor with the conjugate or the negative bit under a lowering"
             )
-        overlap = _overlap(example[:n_tensors], consts)
+        overlap = _overlap(example[:n_tensors], consts, gm, lowered)
     except _Refused as e:
         stats["refused"] += 1
         _traced(name, "refused", str(e))

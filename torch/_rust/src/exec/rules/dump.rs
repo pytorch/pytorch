@@ -58,7 +58,8 @@ pub fn _rules_kinds() -> Vec<(String, String)> {
         Taken::Stop(_) => "stop".to_string(),
         Taken::Rows(_) => "row".to_string(),
     };
-    FAMILIES.iter().flat_map(|f| (f.table)()).map(|(what, taken)| (what, status(taken))).collect()
+    // (The torch family lists callees, not kinds: _rules_torch has them.)
+    FAMILIES.iter().filter(|f| f.name != super::torch::FAMILY.name).flat_map(|f| (f.table)()).map(|(what, taken)| (what, status(taken))).collect()
 }
 
 /// The groups of the rule table that the exact class of ``obj`` is in.

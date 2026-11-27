@@ -124,6 +124,8 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_dump, m)?)?;
     m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_kinds, m)?)?;
     m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_groups, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_forms, m)?)?;
     m.add_class::<exec::graph::Ref>()?;
     m.add_function(wrap_pyfunction!(exec::joint::_trace_joint, m)?)?;
     m.add_function(wrap_pyfunction!(exec::autograd::_set_cfg_autograd, m)?)?;
@@ -133,6 +135,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::calls::_calls_make, m)?)?;
     m.add_function(wrap_pyfunction!(exec::calls::_calls_run, m)?)?;
     m.add_function(wrap_pyfunction!(exec::calls::_calls_text, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::_calls_tables, m)?)?;
     m.add_class::<exec::calls::List>()?;
     m.add_function(wrap_pyfunction!(exec::calls::_witness, m)?)?;
     m.add_function(wrap_pyfunction!(exec::calls::witness::_witness_names, m)?)?;

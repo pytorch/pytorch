@@ -1,10 +1,10 @@
 // Runs a call list. Per entry: every operand is built from its template and
 // its class compared with the pin, the callee is called as the executor
 // calls it for the instruction (the same helpers), the arguments are
-// released as CALL releases them (in their order: the slots the entry moves,
-// what was built for the call), the entry's assert is evaluated and the
-// result goes to the entry's slot or is dropped. A drop entry releases its
-// slots. No frame, no gate, no dispatch hook.
+// released as the callee's instruction releases them (the order of slots.rs:
+// the slots the entry moves, what was built for the call), the entry's
+// assert is evaluated and the result goes to the entry's slot or is dropped.
+// A drop entry releases its slots. No frame, no gate, no dispatch hook.
 //
 // A run ends with the tuple of its outputs (the slots that are left, the
 // outputs', are released behind it), or with a Stop:
@@ -23,7 +23,14 @@
 //            (RecursionError).
 // For Assert, Part and Class: restartable -> no exception is set (a miss);
 // else a RuntimeError naming the entry is set, never a value.
-// A stop releases no slot: `live` hands every slot that holds a result to the
+// At a stop the temporaries that hold a result (the slots a later operand
+// moves) are released before the run returns, with the exception still set,
+// as the unwind of the body's stack releases them: the last made first; a
+// container the body had built by then (every slot under it holds a result)
+// is built and dropped whole, so its parts go as its type lets go of them (a
+// dict in order, a slice step, start, stop). The bounds of a BINARY_SLICE or
+// STORE_SLICE are no built slice: they are on the stack one by one.
+// No local is released: `live` hands every local that holds a result to the
 // caller, who puts them where the program's own run has them (the frame a
 // traceback holds keeps its locals until the handler is done).
 
@@ -83,7 +90,7 @@ pub struct Stop {
     pub entry: usize,
     pub what: What,
     pub restartable: bool,
-    // (slot, its result) of every slot that held one, in slot order.
+    // (slot, its result) of every local that held one, in slot order.
     pub live: Vec<(u32, Py<PyAny>)>,
 }
 
@@ -290,6 +297,60 @@ impl Run<'_> {
         }
     }
 
+    // The outermost container under `t` that moves slot `j` and whose slots
+    // all hold a result: the body had built it.
+    fn built<'t>(&self, t: &'t Tmpl, j: u32) -> Option<&'t Tmpl> {
+        let parts: &[Tmpl] = match t {
+            Tmpl::Seq(_, parts) | Tmpl::Map(_, parts) => parts,
+            Tmpl::Slice(parts) => &parts[..],
+            Tmpl::In(_) | Tmpl::Pin(_) | Tmpl::Res(_) | Tmpl::Move(_) | Tmpl::Part(..) | Tmpl::Const(_) | Tmpl::Null => return None,
+        };
+        let mut leaves = Vec::new();
+        t.leaves(&mut leaves);
+        if !leaves.iter().any(|l| matches!(l, Tmpl::Move(i) if *i == j)) {
+            return None;
+        }
+        let held = |l: &&Tmpl| match l {
+            Tmpl::Res(i) | Tmpl::Move(i) | Tmpl::Part(i, _) => !self.slots[*i as usize].is_null(),
+            Tmpl::In(_) | Tmpl::Pin(_) | Tmpl::Const(_) | Tmpl::Null | Tmpl::Seq(..) | Tmpl::Map(..) | Tmpl::Slice(_) => true,
+        };
+        if leaves.iter().all(held) { Some(t) } else { parts.iter().find_map(|p| self.built(p, j)) }
+    }
+
+    // Releases the temporaries that hold a result, as the head says.
+    unsafe fn unwind(&mut self) {
+        unsafe {
+            let list = self.list;
+            let raised = ffi::PyErr_GetRaisedException();
+            for j in (0..self.slots.len()).rev() {
+                let Some((entry, operand)) = list.moved[j] else { continue };
+                if self.slots[j].is_null() {
+                    continue;
+                }
+                let e = &list.entries[entry as usize];
+                let t = &e.args[operand as usize];
+                let on_stack = matches!((&e.callee, t), (Callee::GetItem | Callee::SetItem, Tmpl::Slice(p)) if matches!(p[2], Tmpl::Null));
+                let Some(container) = (if on_stack { None } else { self.built(t, j as u32) }) else {
+                    self.release(j as u32);
+                    continue;
+                };
+                let made = self.operand(container, None);
+                let mut leaves = Vec::new();
+                container.leaves(&mut leaves);
+                for l in leaves {
+                    if let Tmpl::Move(i) = l {
+                        self.release(*i);
+                    }
+                }
+                if let Ok(x) = made {
+                    ffi::Py_DECREF(x);
+                }
+            }
+            // Also drops what a container that could not be built left set.
+            ffi::PyErr_SetRaisedException(raised);
+        }
+    }
+
     unsafe fn outputs(&mut self) -> Result<*mut PyObject, What> {
         unsafe {
             let outputs = &self.list.outputs;
@@ -362,10 +423,9 @@ impl List {
             if ended.is_ok() {
                 ended = run.outputs().map_err(|what| (n, what));
             }
-            let slots = std::mem::take(&mut run.slots);
             let (entry, what) = match ended {
                 Ok(outputs) => {
-                    slots.into_iter().for_each(|s| ffi::Py_XDECREF(s));
+                    std::mem::take(&mut run.slots).into_iter().for_each(|s| ffi::Py_XDECREF(s));
                     return Ok(outputs);
                 }
                 Err(stop) => stop,
@@ -390,6 +450,8 @@ impl List {
                 };
                 PyRuntimeError::new_err(format!("torch.vm: call list entry {entry}: {why}, and what ran before cannot be taken back: {}", line.trim_start())).restore(py);
             }
+            run.unwind();
+            let slots = std::mem::take(&mut run.slots);
             let live = slots.into_iter().enumerate().filter(|(_, s)| !s.is_null()).map(|(j, s)| (j as u32, Py::from_owned_ptr(py, s))).collect();
             Err(Stop { entry, what, restartable, live })
         }
@@ -399,7 +461,7 @@ impl List {
 /// Runs a list made by `_calls_make` on a tuple of inputs and a tuple of pins.
 /// Returns the tuple of the outputs, or None for a miss (nothing that cannot
 /// be taken back was done); an entry's exception is raised as it is. How a run
-/// ended otherwise is on the list's `stopped`, with the slots that were live:
+/// ended otherwise is on the list's `stopped`, with the locals that were live:
 /// the list keeps them until the next run or `release()`.
 #[pyfunction]
 pub fn _calls_run<'py>(list: &Bound<'py, List>, inputs: &Bound<'py, PyAny>, pins: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -420,7 +482,10 @@ pub fn _calls_run<'py>(list: &Bound<'py, List>, inputs: &Bound<'py, PyAny>, pins
             Ok(outputs) => Ok(Bound::from_owned_ptr(py, outputs)),
             Err(stop) => {
                 let raised = stop.what == What::Raised || stop.what == What::Refused;
-                *l.stopped.lock().unwrap() = Some(stop);
+                // Another thread's stop may be there: out under the lock,
+                // dropped outside it (its locals' finalizers read `stopped`).
+                let before = l.stopped.lock().unwrap().replace(stop);
+                drop(before);
                 match PyErr::take(py) {
                     Some(error) => Err(error),
                     None if raised => Err(PySystemError::new_err("torch.vm call list: a stop that raises set no exception")),

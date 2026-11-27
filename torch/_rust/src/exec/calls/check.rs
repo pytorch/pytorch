@@ -2,8 +2,9 @@
 // fully understand, with the reason, so that the interpreter has no case to
 // guess at: an operand that is not there when its entry runs, a slot with no
 // stated release or with two, a callee that could enter a Python frame by
-// its type or (a slot callee) by the pinned classes of its operands, an
-// operand whose class nothing establishes, flags that contradict each other.
+// its type, a slot callee whose operands' pinned classes are no line of the
+// license (slots.rs), an operand whose class nothing establishes, flags that
+// contradict each other.
 
 use std::ptr::addr_of_mut;
 use std::sync::Mutex;
@@ -12,7 +13,8 @@ use pyo3::ffi::{self, PyObject, PyTypeObject};
 use pyo3::prelude::*;
 
 use super::super::ffi::{tr_type_heap, tr_type_version};
-use super::{plain, slots, Callee, Entry, List, Release, Tmpl, DRAWS, EFFECT, FLAG_NAMES, FRESH, OPAQUE, PURE, STATE, UNARY_OPS};
+use super::slots::{self, Shape};
+use super::{plain, Callee, Entry, List, Release, Tmpl, DRAWS, EFFECT, FLAG_NAMES, FRESH, OPAQUE, PURE, STATE, UNARY_OPS};
 use crate::cfg::ir::{BINARY_OPS, COMPARE_OPS};
 
 // The exact types of a callee that is called as C code: a builtin function or
@@ -42,44 +44,54 @@ struct Scope<'a> {
     class: Vec<Option<usize>>,
 }
 
-// What the operand at each position is pinned to: the class of a leaf, the
-// type a container is built as; null for a null.
-unsafe fn operand_classes(e: &Entry) -> Vec<*mut PyTypeObject> {
-    let mut at = 0;
-    let mut leaves = Vec::new();
-    e.args
-        .iter()
-        .map(|t| {
-            let first = at;
-            leaves.clear();
-            t.leaves(&mut leaves);
-            at += leaves.len();
-            match t {
-                Tmpl::Seq(true, _) => addr_of_mut!(ffi::PyList_Type),
-                Tmpl::Seq(false, _) => addr_of_mut!(ffi::PyTuple_Type),
-                Tmpl::Map(..) => addr_of_mut!(ffi::PyDict_Type),
-                Tmpl::Slice(_) => addr_of_mut!(ffi::PySlice_Type),
-                Tmpl::In(_) | Tmpl::Pin(_) | Tmpl::Res(_) | Tmpl::Move(_) | Tmpl::Part(..) | Tmpl::Const(_) | Tmpl::Null => {
-                    e.classes.get(first).and_then(|c| c.as_ref()).map_or(std::ptr::null_mut(), |c| c.as_ptr() as *mut PyTypeObject)
-                }
+// What the license sees of each operand of `e`: the pinned class of a leaf,
+// the parts of what is built, the items of a constant that is an exact tuple.
+unsafe fn shapes(e: &Entry, consts: &[Py<PyAny>]) -> Vec<Shape> {
+    unsafe fn constant(x: *mut PyObject) -> Shape {
+        unsafe {
+            if ffi::PyTuple_CheckExact(x) == 0 {
+                return Shape::Leaf(ffi::Py_TYPE(x));
             }
-        })
-        .collect()
+            Shape::Tuple((0..ffi::PyTuple_GET_SIZE(x)).map(|i| constant(ffi::PyTuple_GET_ITEM(x, i))).collect())
+        }
+    }
+    unsafe fn one(t: &Tmpl, pins: &mut std::slice::Iter<'_, Option<Py<PyAny>>>, consts: &[Py<PyAny>]) -> Shape {
+        unsafe {
+            let mut all = |parts: &[Tmpl]| parts.iter().map(|p| one(p, pins, consts)).collect::<Vec<_>>();
+            match t {
+                Tmpl::Seq(true, parts) => Shape::List(all(parts)),
+                Tmpl::Seq(false, parts) => Shape::Tuple(all(parts)),
+                Tmpl::Map(_, parts) => Shape::Map(all(parts)),
+                Tmpl::Slice(parts) => Shape::Slice(all(&parts[..])),
+                Tmpl::Const(i) => {
+                    pins.next();
+                    constant(consts[*i as usize].as_ptr())
+                }
+                Tmpl::In(_) | Tmpl::Pin(_) | Tmpl::Res(_) | Tmpl::Move(_) | Tmpl::Part(..) | Tmpl::Null => match pins.next() {
+                    Some(Some(class)) => Shape::Leaf(class.as_ptr() as *mut PyTypeObject),
+                    Some(None) | None => Shape::Null,
+                },
+            }
+        }
+    }
+    let mut pins = e.classes.iter();
+    e.args.iter().map(|t| unsafe { one(t, &mut pins, consts) }).collect()
 }
 
-// The slots an entry moves and the containers it builds, as the call
-// releases them: by argument, a container behind the slots moved into it.
-fn releases(e: &Entry) -> Box<[Release]> {
+// The slots an entry moves and the containers it builds, as the entry lets go
+// of them: operand by operand in the order of the callee's instruction
+// (slots.rs), a container behind the slots moved into it.
+fn releases(e: &Entry) -> Option<Box<[Release]>> {
     let mut out = Vec::new();
-    for (pos, t) in e.args.iter().enumerate() {
+    for pos in slots::order(&e.callee, &e.args)? {
         let mut leaves = Vec::new();
-        t.leaves(&mut leaves);
+        e.args[pos].leaves(&mut leaves);
         out.extend(leaves.iter().filter_map(|l| if let Tmpl::Move(j) = l { Some(Release::Slot(*j)) } else { None }));
-        if t.made() {
+        if e.args[pos].made() {
             out.push(Release::Arg(pos as u32));
         }
     }
-    out.into()
+    Some(out.into())
 }
 
 impl Scope<'_> {
@@ -153,7 +165,7 @@ impl Scope<'_> {
         Ok(())
     }
 
-    // Ok: the classes a slot callee was resolved on, with their versions.
+    // Ok: the classes of the operands of a slot callee, with their versions.
     fn entry(&self, k: usize, e: &Entry) -> Result<Decided, String> {
         // (the count of operands or None for any, whether there is a result)
         let (arity, result) = match &e.callee {
@@ -217,19 +229,21 @@ impl Scope<'_> {
                 return Err("an assert where there is no result, or on an operand that is not there".into());
             }
         }
-        let Some((first, second)) = slots::deciding(&e.callee) else { return Ok(Box::default()) };
-        let classes = unsafe { operand_classes(e) };
-        let (a, b) = (classes[first], second.map_or(std::ptr::null_mut(), |i| classes[i]));
-        unsafe { slots::resolve(&e.callee, a, b) }.map_err(|why| format!("the callee's slot would run Python, or is not covered: {why}"))?;
-        let mut decided = Vec::new();
-        for class in [a, b] {
-            if !class.is_null() && !decided.iter().any(|(c, _): &(Py<PyAny>, u32)| c.as_ptr() == class as *mut PyObject) {
-                let version = unsafe { tr_type_version(class) };
-                if version == 0 {
-                    return Err("a class of an operand has no version: a change to it could not be seen".into());
-                }
-                decided.push((unsafe { Py::from_borrowed_ptr(Python::assume_attached(), class as *mut PyObject) }, version));
+        if matches!(e.callee, Callee::Vector(..)) {
+            return Ok(Box::default());
+        }
+        unsafe { slots::license(&e.callee, &shapes(e, self.consts)) }?;
+        // What the license was given: every class an operand is pinned to.
+        let mut decided: Vec<(Py<PyAny>, u32)> = Vec::new();
+        for class in e.classes.iter().flatten() {
+            if decided.iter().any(|(c, _)| c.as_ptr() == class.as_ptr()) {
+                continue;
             }
+            let version = unsafe { tr_type_version(class.as_ptr() as *mut PyTypeObject) };
+            if version == 0 {
+                return Err("a class of an operand has no version: a change to it could not be seen".into());
+            }
+            decided.push((unsafe { Py::from_borrowed_ptr(Python::assume_attached(), class.as_ptr()) }, version));
         }
         Ok(decided.into())
     }
@@ -256,6 +270,7 @@ fn reversible(e: &Entry, entries: &[Entry]) -> bool {
 impl List {
     pub fn new(ninputs: u32, npins: u32, consts: Vec<Py<PyAny>>, mut entries: Vec<Entry>, outputs: Vec<Tmpl>) -> Result<List, String> {
         let mut scope = Scope { ninputs, npins, consts: &consts, live: Vec::with_capacity(entries.len()), class: Vec::with_capacity(entries.len()) };
+        let mut moved = vec![None; entries.len()];
         for k in 0..entries.len() {
             let e = &entries[k];
             if let Callee::Drop(slots) = &e.callee {
@@ -270,10 +285,19 @@ impl List {
                 continue;
             }
             let decided = scope.entry(k, e).map_err(|why| format!("entry {k}: {why}"))?;
-            let release = releases(e);
+            let Some(release) = releases(e) else { return Err(format!("entry {k}: no order of releases is stated for its callee")) };
             for r in release.iter() {
                 if let Release::Slot(j) = r {
                     scope.live[*j as usize] = false;
+                }
+            }
+            for (pos, t) in e.args.iter().enumerate() {
+                let mut leaves = Vec::new();
+                t.leaves(&mut leaves);
+                for l in leaves {
+                    if let Tmpl::Move(j) = l {
+                        moved[*j as usize] = Some((k as u32, pos as u32));
+                    }
                 }
             }
             scope.live.push(e.out.is_some());
@@ -297,6 +321,6 @@ impl List {
         }
         let first_irreversible = entries.iter().position(|e| !reversible(e, &entries)).unwrap_or(entries.len());
         let max_args = entries.iter().map(|e| e.args.len()).max().unwrap_or(0);
-        Ok(List { entries: entries.into(), consts: consts.into(), ninputs, npins, outputs: outputs.into(), first_irreversible, max_args, stopped: Mutex::new(None) })
+        Ok(List { entries: entries.into(), consts: consts.into(), ninputs, npins, outputs: outputs.into(), moved: moved.into(), first_irreversible, max_args, stopped: Mutex::new(None) })
     }
 }

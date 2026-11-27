@@ -35,7 +35,8 @@
 //     another's word too, where it asks about nothing else: the executor's
 //     hooks record there, and this is in their place;
 //   - advice() is Err where license() is NoRow for every class: a stop, or
-//     taken over with no row at all. It never says more than that: a verdict
+//     taken over with no row at all; advice_callee() is Err for a callee a
+//     family stops. It never says more than that: a verdict
 //     is advice on where a region may be, and license() is asked again;
 //   - no answer here runs code of the program: a class is compared by
 //     address, a callee is an address.
@@ -53,6 +54,7 @@ pub mod dump;
 pub mod groups;
 pub mod imports;
 pub mod ops;
+pub mod torch;
 
 pub use groups::{Class, Group};
 
@@ -81,7 +83,7 @@ impl What {
         match *self {
             What::Op(k) => format!("{k:?}"),
             What::Opcode(op, arg) => ops::opcode_name(op, arg),
-            What::Callee(f) => format!("the callee at {f:p}"),
+            What::Callee(f) => unsafe { torch::name(f) }.map_or_else(|| format!("the callee at {f:p}"), str::to_string),
         }
     }
 }
@@ -118,12 +120,13 @@ pub enum Enters { Never, Named, Foreign }
 pub enum Scalars { None, Operand, Parts, Specialize }
 
 // Where an instruction is about to run: its frame, the names of the frame's
-// code (an oparg that is a name counts into them) and its operands, all
-// borrowed.
+// code (an oparg that is a name counts into them), its operands and, for a
+// call with keywords, the tuple of their names (else NULL), all borrowed.
 pub struct Site<'a> {
     pub frame: *mut Frame,
     pub names: *const *mut PyObject,
     pub operands: &'a [*mut PyObject],
+    pub kwnames: *mut PyObject,
 }
 
 // See "a row with reads of its own" at the head of the file.
@@ -177,7 +180,7 @@ pub struct Family {
     pub table: fn() -> Vec<(String, Taken)>,
 }
 
-static FAMILIES: &[Family] = &[ops::FAMILY, imports::FAMILY];
+static FAMILIES: &[Family] = &[ops::FAMILY, imports::FAMILY, torch::FAMILY];
 
 // What the families say of `what`: Err, why it stops; None, nobody took it
 // over; else the rows of every family that did.
@@ -212,10 +215,22 @@ pub unsafe fn license(what: &What, classes: &[Class], site: &Site) -> License {
     License::NoRow(why)
 }
 
-// Whether rows of `what` record what the instruction reads themselves: it
-// is asked about wherever it runs under a trace, also where nothing else is.
+// Whether `what` is asked about wherever it runs under a trace, also where
+// nothing else is (under a call taken at another's word): rows of it record
+// what the instruction reads themselves, or it is a callee that stops a
+// trace, which it does wherever it is called.
 pub fn records(what: &What) -> bool {
-    FAMILIES.iter().any(|family| matches!((family.rule)(what), Taken::Rows(rows) if rows.iter().any(|r| r.before.is_some())))
+    FAMILIES.iter().any(|family| match (family.rule)(what) {
+        Taken::Rows(rows) => rows.iter().any(|r| r.before.is_some() && !r.reads.is_empty()),
+        Taken::Stop(_) => matches!(what, What::Callee(_)),
+        _ => false,
+    })
+}
+
+// Asked by a verdict about the callee its visits called: Err, with the
+// reason, if the table stops that callee.
+pub fn advice_callee(f: *mut PyObject) -> Result<(), String> {
+    rows(&What::Callee(f)).map(|_| ())
 }
 
 // Asked by a verdict, which knows no operand: Err, with the reason, if no

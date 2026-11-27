@@ -49,9 +49,11 @@ SYMBOL = {float: torch.SymFloat, int: torch.SymInt, bool: torch.SymBool}
 NEEDS_VALUE = (GuardOnDataDependentSymNode,)
 _ASSERT = torch.ops.aten._assert_scalar.default
 _READ_OPS = (torch.ops.aten._local_scalar_dense.default, torch.ops.aten.item.default)
-# What a slot callee runs, as the C function of the operator module: the
-# interpreter resolves a slot from classes, and takes no class that defines
-# the slot's method in Python, as the symbolic scalars do.
+# What a slot callee runs, as the C function of the operator module. The
+# interpreter takes a slot callee only for operands of the classes its
+# license names, and the tensors and scalars of the data-free run are of
+# none of them (a fake tensor is a subclass of Tensor, a symbolic scalar's
+# methods are Python): there every slot callee is such a function.
 _BINARY = {
     "+": operator.add, "&": operator.and_, "//": operator.floordiv,
     "<<": operator.lshift, "@": operator.matmul, "*": operator.mul,
@@ -69,6 +71,13 @@ _COMPARE = {
 }  # fmt: skip
 _UNARY = {"-": operator.neg, "~": operator.invert, "+": operator.pos}
 _SLOTS = {"binary": _BINARY, "compare": _COMPARE, "unary": _UNARY}
+# The other slot callees: the function, and where each operand of the entry
+# goes among its arguments (a store's operands are value, container, key).
+_PLACED = {
+    "getitem": (operator.getitem, (0, 1)),
+    "setitem": (operator.setitem, (2, 0, 1)),
+    "delitem": (operator.delitem, (0, 1)),
+}
 # The subscripts, and where their key is among the operands.
 _KEYED = {"getitem": 1, "setitem": 2, "delitem": 1}
 
@@ -134,22 +143,36 @@ def symbols(entries):
     return out, refused
 
 
-def in_run(e, k, symbols):
-    """The callee and the asserts of entry ``k`` (``e``) for the data-free
-    run: a slot callee with a symbolic operand is the operator module's
-    function of the same instruction, and a result that is a scalar is
+def in_run(e, k, symbols, pins, consts):
+    """Entry ``k`` (``e``) as the data-free run has it: (callee, operands,
+    flags, asserts, pins). A slot callee is the function of the same
+    instruction, on the same operands in that function's order (``pins``
+    and the operand positions of the flags go with them; the name of an
+    attribute is appended to ``consts``), and a result that is a scalar is
     asserted to be of the symbolic class."""
-    callee, asserts = e[0], e[6]
+    callee, args, flags, asserts = e[0], list(e[1]), e[5], e[6]
     table = _SLOTS.get(callee[0])
-    if table is not None and _uses(e[1], symbols):
+    if table is not None:
         f = table[callee[1]]
         callee = ("vector", f, f"operator.{f.__name__}")
+    elif callee[0] in _PLACED:
+        f, at = _PLACED[callee[0]]
+        callee = ("vector", f, f"operator.{f.__name__}")
+        order = sorted(range(len(at)), key=at.__getitem__)
+        args, pins = [args[i] for i in order], tuple(pins[i] for i in order)
+        flags = tuple(
+            x if type(x) is str else (x[0], tuple(at[i] for i in x[1])) for x in flags
+        )
+    elif callee[0] == "getattr":
+        consts.append(callee[1])
+        args, pins = [*args, ("const", len(consts) - 1)], (*pins, str)
+        callee = ("vector", getattr, "getattr")
     if k in symbols:
         asserts = tuple(
             ("class", SYMBOL[a[1]]) if a[0] == "class" and a[1] in SYMBOL else a
             for a in asserts
         )
-    return callee, asserts
+    return callee, args, flags, asserts, pins
 
 
 def settled(gm, results, shape_env):

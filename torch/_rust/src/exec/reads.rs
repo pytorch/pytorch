@@ -111,7 +111,7 @@ use super::pin::{self, Pin};
 use super::special;
 use crate::bindings::ffi as tffi;
 use super::tensor_key::TensorKey;
-use super::wrote::{self, How};
+use super::wrote::{self, How, Since};
 
 // What a tensor answers about itself that a region neither checks nor
 // computes, so that a trace that asks is refused: what autograd keeps on it,
@@ -333,8 +333,10 @@ struct Trace {
     // The run's recorded writes, as what they left where it had read, until
     // the body is over (see _region_settled).
     wrote: wrote::Log,
-    // What was no longer as it was read when the body was over, by the
-    // address of what it was read from (see _region_settled).
+    // What was no longer as it was read, and no write of the run explains
+    // it, by the address of what it was read from: found when the run read
+    // an item again (see item) and when the body was over (see
+    // _region_settled).
     stale: Vec<(Stale, usize, String)>,
     // The cells whose content then was what the run's own last store into
     // them put there: what such a cell held before is no check.
@@ -641,6 +643,16 @@ unsafe fn size(holder: *mut PyObject, kind: Holder) -> isize {
     }
 }
 
+// What the run's recorded writes since `after` say of item `key` of
+// `holder` (an index of a list from the front, as an item is read).
+unsafe fn put(log: &wrote::Log, holder: *mut PyObject, kind: Holder, key: *mut PyObject, after: usize) -> Since {
+    match kind {
+        Holder::Dict => log.item(holder, after, key),
+        Holder::List => log.index(holder, after, ffi::PyLong_AsSsize_t(key)),
+        Holder::Set => Since::Nothing,
+    }
+}
+
 impl Item {
     // What `holder` has as this item now (borrowed), NULL for nothing.
     unsafe fn now(&self, holder: *mut PyObject, kind: Holder) -> *mut PyObject {
@@ -658,23 +670,32 @@ impl Item {
         same(self.now(holder, kind), self.want, self.value.as_ref())
     }
 
-    // What the run's own last write to the item since the read put there
-    // (NULL: nothing); None if it made none.
-    unsafe fn put(&self, log: &wrote::Log, holder: *mut PyObject, kind: Holder) -> Option<*mut PyObject> {
-        match kind {
-            Holder::Dict => log.item(holder, self.after, self.key.as_ptr()),
-            Holder::List => log.index(holder, self.after, ffi::PyLong_AsSsize_t(self.key.as_ptr())),
-            Holder::Set => None,
+    // What the run's own writes since the read say of the item.
+    unsafe fn put(&self, log: &wrote::Log, holder: *mut PyObject, kind: Holder) -> Since {
+        put(log, holder, kind, self.key.as_ptr(), self.after)
+    }
+
+    // Whether the item is as the run left it: what its own last write put
+    // there, or with no such write, as it was read. Never with a write the
+    // log cannot place.
+    unsafe fn settled(&self, log: &wrote::Log, holder: *mut PyObject, kind: Holder) -> bool {
+        match self.put(log, holder, kind) {
+            Since::Put(put) => left(self.now(holder, kind), put),
+            Since::Nothing => self.holds(holder, kind),
+            Since::Unplaced => false,
         }
     }
 
-    // Whether the item is as the run left it: what its own write put there,
-    // or with no such write, as it was read.
-    unsafe fn settled(&self, log: &wrote::Log, holder: *mut PyObject, kind: Holder) -> bool {
-        match self.put(log, holder, kind) {
-            Some(put) => left(self.now(holder, kind), put),
-            None => self.holds(holder, kind),
-        }
+    // For a refusal: what the item was to be, and what is there.
+    unsafe fn differs(&self, log: &wrote::Log, holder: *mut PyObject, kind: Holder) -> String {
+        let was = match (self.put(log, holder, kind), self.want) {
+            (Since::Put(put), _) => format!("{} by the run's own write", shown(put)),
+            (Since::Unplaced, _) => "what a write of the run that cannot be placed left (under a key that may be this one, or behind a deletion from the list)".into(),
+            (Since::Nothing, Want::Absent) => "nothing".into(),
+            (Since::Nothing, Want::Present) => "something".into(),
+            (Since::Nothing, Want::Is | Want::Equal) => shown(self.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr())),
+        };
+        format!("item {} of a {}, which was {was} and is {}", shown(self.key.as_ptr()), type_name(holder), shown(self.now(holder, kind)))
     }
 }
 
@@ -781,20 +802,41 @@ impl Trace {
         &mut self.entries.groups[i]
     }
 
-    // The first read of an item is the one recorded: a later one that differs
-    // is of something the traced run changed.
+    // The first read of an item is the one recorded. A later one is to find
+    // what the first found, or what the run's own writes since made of it:
+    // anything else changed under the run by no write it recorded, and is
+    // noted at once (see _region_settled), whatever the run writes there
+    // afterwards.
     unsafe fn item(&mut self, holder: *mut PyObject, kind: Holder, key: *mut PyObject, want: Want, value: *mut PyObject) {
-        // What the run wrote itself is what it reads back.
-        if self.written.contains(&(holder as usize, key as usize)) || self.own.contains(&(holder as usize)) {
+        if self.own.contains(&(holder as usize)) {
             return;
+        }
+        let mut noted = false;
+        if self.written.contains(&(holder as usize, key as usize)) {
+            match put(&self.wrote, holder, kind, key, 0) {
+                // What the run wrote itself is what it reads back, and no
+                // entry: if its last write put what is there.
+                Since::Put(p) if left(value, p) => return,
+                // No recorded write is to the item (the one that marked it
+                // raised, or was to a slot of that name): a read as any.
+                Since::Nothing => {}
+                _ => {
+                    self.stale.push((Stale::Group, holder as usize, format!("item {} of a {}, which the run wrote and which is {} when it reads it back", shown(key), type_name(holder), shown(value))));
+                    noted = true;
+                }
+            }
         }
         let value = (!value.is_null() && matches!(want, Want::Is | Want::Equal)).then(|| counted(value));
         let after = self.wrote.len();
-        if !self.seen.insert((holder as usize, key as usize)) {
+        // (Seen and no item of the holder: the pair is another kind of read
+        // of an object that is also a dict. Then this is the first.)
+        let first = if self.seen.insert((holder as usize, key as usize)) { None } else { self.group_of.get(&(holder as usize)).and_then(|g| self.entries.groups[*g].items.iter_mut().find(|i| i.key.as_ptr() == key)) };
+        if let Some(i) = first {
+            if !noted && !i.settled(&self.wrote, holder, kind) {
+                self.stale.push((Stale::Group, holder as usize, format!("{} when the run reads it again", i.differs(&self.wrote, holder, kind))));
+            }
             // `key in d` and then `d[key]`: the value is what is checked.
-            if value.is_some()
-                && let Some(i) = self.group(holder, kind).items.iter_mut().find(|i| i.key.as_ptr() == key && i.want == Want::Present)
-            {
+            if value.is_some() && i.want == Want::Present {
                 i.want = want;
                 i.value = value;
                 i.after = after;
@@ -1273,7 +1315,19 @@ pub(super) fn wrote_item(holder: *mut PyObject, key: *mut PyObject) {
 // store into a cell, which a region does not make again), or made one that
 // raised and is none: see wrote.rs. `key` and `value`: NULL for none.
 pub(super) unsafe fn wrote(target: *mut PyObject, token: usize, how: How, key: *mut PyObject, value: *mut PyObject, grew: isize) {
-    with(|t| t.wrote.add(target, token, how, key, value, grew));
+    let mut over = None;
+    with(|t| {
+        // A store into a cell the run has not read answers no question (a
+        // read made later is of what the store put), and the log would be
+        // all that keeps the value alive once the cell is gone. A cell
+        // that was read is held by its entry, and holds the value itself.
+        if how != How::Cell || t.seen.contains(&(target as usize, 0)) {
+            over = t.wrote.add(target, token, how, key, value, grew);
+        }
+    });
+    // (What an earlier store into the cell put there: let go of here,
+    // where the trace is not borrowed.)
+    drop(over);
 }
 
 pub(super) fn unwrote(token: usize) {
@@ -1574,6 +1628,12 @@ pub unsafe fn built_starred(callee: *mut PyObject, args: *mut PyObject, kwargs: 
     built(callee, &super::built::spread(args, kwargs), result);
 }
 
+// Where a tensor's first element is and in which storage (tensor_home).
+fn home(t: &tffi::Tensor) -> (usize, usize) {
+    let mut storage = 0;
+    (tffi::tensor_home(t, &mut storage), storage)
+}
+
 // A tensor the region's graph reads that is none of its arguments: a weight.
 // The region holds the object (the read of its home says it is still the
 // one) and is entered while it has the metadata of the trace, which the
@@ -1585,7 +1645,9 @@ struct Constant {
     // What it was at the trace (the class too: the program can bind another
     // to the same object).
     key: TensorKey,
-    at: Cell<usize>,
+    // Where its first element was at the last look, and in which storage
+    // (tensor_home).
+    home: Cell<(usize, usize)>,
     // For a constant a pass keeps something derived from (torch.vm.Unwritten):
     // its version counter when the pass looked. The region is entered while
     // the counter is that and the storage's copy-on-write mark is still set.
@@ -2006,7 +2068,8 @@ impl Reads {
     // under torch.vm.Unwritten, not having been written to. For a lowering
     // bound to the constants, and for the check of how the region's tensors
     // share memory, also notes whether the data of one is somewhere else
-    // than at the last look.
+    // than at the last look; for that check, also whether it is in another
+    // storage.
     unsafe fn constants_fail(&self) -> Option<&'static str> {
         let metadata = "the class, shape, dtype, device or requires_grad of a constant";
         let overlap = (*self.overlap.get()).as_ref();
@@ -2022,10 +2085,10 @@ impl Reads {
                 return Some("a constant that was to stay unwritten");
             }
             if watch {
-                let at = tffi::tensor_data_address(t);
-                if at != c.at.get() {
-                    c.at.set(at);
-                    self.moved.set(true);
+                let now = home(t);
+                let was = c.home.replace(now);
+                if was != now {
+                    self.moved.set(self.moved.get() || was.0 != now.0);
                     overlap.iter().for_each(|o| o.get().moved());
                 }
             }
@@ -2092,8 +2155,8 @@ impl Reads {
         let list = unsafe { &mut *self.consts.get() };
         for (x, unwritten) in consts.into_iter().zip(unwritten) {
             let Some(key) = (unsafe { TensorKey::of(x.as_ptr()) }) else { continue };
-            let at = unsafe { tffi::tensor_by_type(x.as_ptr() as usize).as_ref() }.map_or(0, tffi::tensor_data_address);
-            list.push(Constant { obj: x.unbind(), key, at: Cell::new(at), unwritten });
+            let home = unsafe { tffi::tensor_by_type(x.as_ptr() as usize).as_ref() }.map_or((0, 0), home);
+            list.push(Constant { obj: x.unbind(), key, home: Cell::new(home), unwritten });
         }
         list.len()
     }
@@ -2104,7 +2167,7 @@ impl Reads {
     fn bound(&self, rebind: Bound<'_, PyAny>) {
         for c in unsafe { &*self.consts.get() } {
             if let Some(t) = unsafe { tffi::tensor_by_type(c.obj.as_ptr() as usize).as_ref() } {
-                c.at.set(tffi::tensor_data_address(t));
+                c.home.set(home(t));
             }
         }
         unsafe { *self.rebind.get() = Some(rebind.unbind()) };
@@ -2221,23 +2284,34 @@ pub fn _region_known(obj: &Bound<'_, PyAny>, given: Vec<Bound<'_, PyAny>>) -> bo
     TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| unsafe { led(&t.entries, Start::Before(&given)).contains(&(obj.as_ptr() as usize)) }))
 }
 
-/// The body of the trace on this thread is over, and everything is still as
-/// its run left it (the trace's stand-ins for the floats are where the body
-/// found them or wrote them): notes every read that is not as the run left
-/// it. That is as it was read, or, where the run itself wrote there since
-/// the read (wrote.rs has its recorded writes), what those writes made of
-/// it: an item or a cell holds what the last of them to that very item or
-/// cell put there; a container read whole holds what was read with each of
-/// them made on it in order; a length is the one read and what they added.
+/// The body of the trace on this thread is over and its run stands. First
+/// the record of its writes lets go of what its stores replaced
+/// (writes.rs), so that every finalizer those stores set off has run. Then,
+/// with everything as the run left it (the trace's stand-ins for the floats
+/// are where the body found them or wrote them): notes every read that is
+/// not as the run left it. That is as it was read, or, where the run itself
+/// wrote there since the read (wrote.rs has its recorded writes), what those
+/// writes made of it: an item or a cell holds what the last of them to that
+/// very item or cell put there; a container read whole holds what was read
+/// with each of them made on it in order; a length is the one read and what
+/// they added.
 /// A write to another item of the same holder says nothing about this
-/// one, and neither does a write whose value something else then replaced.
-/// `_region_reads` refuses the trace for each note whose holder outlives
-/// the run.
+/// one, and neither does a write whose value something else then replaced;
+/// a write the log cannot place (wrote.rs) leaves the read unexplained.
+/// `_region_reads` refuses the trace for each note, of this moment or of a
+/// read the run made again (see Trace::item), whose holder outlives the
+/// run. Call it before `_region_writes`, which turns the stand-ins the run
+/// wrote into floats and judges the writes by reference counts: the log of
+/// the writes counts what it compares, and is dropped here.
 /// ``ours``: the tensors that are the trace's inputs or the results of the
 /// operators it recorded, as far as they are alive; of the tensors the run
 /// asked about, those are the guard's to compare or the graph's to make.
 #[pyfunction]
 pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
+    // The run stands: what its stores replaced is let go of first. The
+    // finalizer of an object that dies of it is the last thing the run's
+    // own writes set off, and what it changes is compared below.
+    super::writes::let_go();
     TRACE.with_borrow_mut(|t| {
         let Some(t) = t else { return };
         for o in &ours {
@@ -2264,35 +2338,27 @@ pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
                             t.restored.insert(cell as usize);
                         }
                     }
-                    _ => stale.push((Stale::Cell, cell as usize, format!("a cell that held {} and holds {}", shown(was), shown(now)))),
+                    _ => stale.push((Stale::Cell, cell as usize, format!("a cell that held {} and holds {} when the traced run ends", shown(was), shown(now)))),
                 }
             }
             for f in e.functions.iter().filter(|f| !f.holds()) {
-                stale.push((Stale::Function, f.func.as_ptr() as usize, format!("the code and the defaults of {}, which are others", text((*(f.func.as_ptr() as *mut ffi::PyFunctionObject)).func_qualname))));
+                stale.push((Stale::Function, f.func.as_ptr() as usize, format!("the code and the defaults of {}, which are others when the traced run ends", text((*(f.func.as_ptr() as *mut ffi::PyFunctionObject)).func_qualname))));
             }
             for d in e.dicted.iter().filter(|d| tr_instance_dict(d.obj.as_ptr()) != d.dict.as_ptr()) {
-                stale.push((Stale::Dict, d.obj.as_ptr() as usize, format!("the __dict__ of a {}, which is another dict", type_name(d.obj.as_ptr()))));
+                stale.push((Stale::Dict, d.obj.as_ptr() as usize, format!("the __dict__ of a {}, which is another dict when the traced run ends", type_name(d.obj.as_ptr()))));
             }
             for g in &e.groups {
                 let (h, kind) = (g.holder.as_ptr(), g.kind);
                 let of = type_name(h);
-                let item = g.items.iter().find(|i| !i.settled(&log, h, kind)).map(|i| {
-                    let was = match (i.put(&log, h, kind), i.want) {
-                        (Some(put), _) => format!("{} by the run's own write", shown(put)),
-                        (None, Want::Absent) => "nothing".into(),
-                        (None, Want::Present) => "something".into(),
-                        (None, Want::Is | Want::Equal) => shown(i.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr())),
-                    };
-                    format!("item {} of a {of}, which was {was} and is {}", shown(i.key.as_ptr()), shown(i.now(h, kind)))
-                });
+                let item = g.items.iter().find(|i| !i.settled(&log, h, kind)).map(|i| i.differs(&log, h, kind));
                 let whole = g.whole.as_ref().filter(|w| !w.settled(&log, h, kind)).map(|w| format!("a {of} whole{}, which holds something else", w.at));
                 let len = g.len.filter(|n| size(h, kind) != *n + log.grew(h, g.len_after)).map(|n| format!("the length of a {of}, which was {n} and is {}", size(h, kind)));
                 if let Some(what) = item.or(whole).or(len) {
-                    stale.push((Stale::Group, h as usize, what));
+                    stale.push((Stale::Group, h as usize, format!("{what} when the traced run ends")));
                 }
             }
         }
-        t.stale = stale;
+        t.stale.extend(stale);
     });
 }
 
@@ -2366,7 +2432,7 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
         // What was no longer as it was read when the body was over (see
         // _region_settled), in something that outlives the run: a region
         // without that check would run on a state its trace did not see.
-        let stale = |what: &str| -> PyResult<(Option<Py<Reads>>, Option<String>)> { Ok((None, Some(format!("it read {what} when the traced run ends, and no write the run recorded explains it")))) };
+        let stale = |what: &str| -> PyResult<(Option<Py<Reads>>, Option<String>)> { Ok((None, Some(format!("it read {what}, and no write the run recorded explains it")))) };
         let at = |o: &Pin| o.as_ptr() as usize;
         if let Some((_, _, what)) = t.stale.iter().find(|(kind, a, _)| match kind {
             Stale::Cell => e.reads.iter().any(|r| r.name.is_none() && at(&r.obj) == *a),
@@ -2405,7 +2471,7 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
                 return Ok((None, Some(format!("it asks about a {} it read from state that has no key (no plain dense tensor of exactly torch.Tensor or nn.Parameter), which it cannot check", type_name(o)))));
             };
             if !key.holds(o) {
-                return stale(&format!("the class, dtype, device, shape or requires_grad of a {}, which is another", type_name(o)));
+                return stale(&format!("the class, dtype, device, shape or requires_grad of a {}, which is another when the traced run ends", type_name(o)));
             }
             e.keyed.push(Keyed { obj: counted(o), key, ours: a.ours });
         }

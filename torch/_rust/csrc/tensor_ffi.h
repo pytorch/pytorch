@@ -60,20 +60,24 @@ std::uint8_t region_not_neutral(const AmbientModes& own);
 bool set_grad_mode(bool on);
 // The version counter in-place ops bump (Tensor._version).
 int64_t tensor_version(const Tensor& t);
-// Where t's first element is, 0 if t has no memory of its own to point at
+// Where t's first element is or, for a tensor without elements, would be
+// (the storage's address and t's offset in it), and into `storage` which
+// storage that is: what tensor_span gives as `low` and `storage`, without
+// the walk over the sizes. Both 0 if t has no memory of its own to point at
 // (undefined, not strided, a Python-dispatch tensor). Read without asking
 // for a mutable pointer, so a copy-on-write storage stays one.
-std::uintptr_t tensor_data_address(const Tensor& t) noexcept;
+std::uintptr_t tensor_home(const Tensor& t, std::uintptr_t& storage) noexcept;
 // Defined by the cxx bridge (src/bindings/ffi.rs).
 struct TensorSpan;
 // Where t's elements are: the storage and how many bytes into it the first
 // starts, and the addresses from the first element to the end of the last,
-// [low, high) (low == high for a tensor without elements), in the memory of
-// which device type. False, and nothing of `out` to be read, for a tensor
+// [low, high) (low == high for a tensor without elements: where its first
+// would be), in the memory of which device type. False, and nothing of
+// `out` to be read, for a tensor
 // whose place cannot be said so: undefined, not strided, a Python-dispatch
 // tensor, without a storage or with one that gives no address for its
 // elements, or on a device type that is neither the CPU nor CUDA. Read
-// without asking for a mutable pointer (see tensor_data_address).
+// without asking for a mutable pointer (see tensor_home).
 bool tensor_span(const Tensor& t, TensorSpan& out) noexcept;
 // Whether t's storage is marked copy-on-write. The mark is cleared by the
 // first request for a mutable pointer to the storage, through whichever

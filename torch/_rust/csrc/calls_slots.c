@@ -1,6 +1,8 @@
 // What a slot callee of a call list (torch/_rust/src/exec/calls) would run
 // for operands of given exact classes, decided from the classes alone, on
-// CPython 3.12. No code of the program runs here.
+// CPython 3.12. No code of the program runs here. This is the second of two
+// checks: the license table (calls/slots.rs) says which classes a slot
+// callee may have at all, and what is resolved here must agree with it.
 //
 // A class that defines a special method in Python (or holds anything but a
 // slot wrapper under its name) gets one of typeobject.c's dispatchers in the
@@ -15,20 +17,19 @@
 //   binary        nb_<op> of both classes, nb_inplace_<op> of the left one
 //                 (sq_concat, sq_repeat and their in-place forms are never a
 //                 dispatcher: typeobject.c has no function for them)
-//   compare       tp_richcompare of both classes (for != also __eq__, which
-//                 object.__ne__ calls)
+//   compare       tp_richcompare of both classes, the reflected method also
+//                 for two operands of one class (CPython asks the right
+//                 operand when the left one answers NotImplemented); for !=
+//                 also __eq__, which object.__ne__ calls
 //   unary         nb_negative, nb_invert, nb_positive
 //   subscripts    mp_subscript / sq_item, mp_ass_subscript / sq_ass_item of
 //                 the container's class; a container that is itself a class
 //                 is refused (__class_getitem__)
-//   attributes    only a class whose tp_getattro / tp_setattro is object's,
-//                 and then only a name that the class resolves to nothing,
-//                 to a plain value, or to a descriptor of a C type listed in
-//                 attribute(): a property or any other __get__ / __set__ is
-//                 refused
-// What the C function found does with the OTHER operands (a key's __index__,
-// an iterable's __iter__, an operand's __torch_function__) is not decided
-// here: that is the license of the callee, as for any C callable.
+//   index         nb_index of a class (a bound of a slice)
+//   attribute     a load only, of a class whose tp_getattro is object's, of
+//                 a name the class resolves to a getset descriptor of that
+//                 name: its getter is a C function and, a data descriptor,
+//                 it is found before anything the instance holds
 
 #include <Python.h>
 
@@ -98,8 +99,8 @@ static int ready(void) {
     failed = PyDict_SetItemString(names, BINARY[i][0], Py_None) < 0 ||
         PyDict_SetItemString(names, BINARY[i][2], Py_None) < 0;
   }
-  static const char* const more[] = {"__neg__", "__invert__", "__pos__", "__lt__", "__getitem__", "__setitem__"};
-  for (int i = 0; i < 6 && !failed; i++) {
+  static const char* const more[] = {"__neg__", "__invert__", "__pos__", "__lt__", "__getitem__", "__setitem__", "__index__"};
+  for (int i = 0; i < 7 && !failed; i++) {
     failed = PyDict_SetItemString(names, more[i], Py_None) < 0;
   }
   PyObject* args = failed ? NULL : Py_BuildValue("(s()O)", "Dispatchers", names);
@@ -177,32 +178,25 @@ static const char* subscript(PyTypeObject* tp, int store, const char* name) {
   return python ? method(tp, name) : NULL;
 }
 
-static const char* attribute(PyTypeObject* tp, PyObject* name, int store) {
+static const char* attribute(PyTypeObject* tp, PyObject* name) {
   if (name == NULL || !PyUnicode_CheckExact(name)) {
     return refuse("no attribute name for", NULL, tp);
   }
-  if (store ? tp->tp_setattro != PyObject_GenericSetAttr : tp->tp_getattro != PyObject_GenericGetAttr) {
-    return refuse(store ? "not covered: its own __setattr__," : "not covered: its own __getattribute__ or __getattr__,", NULL, tp);
+  if (tp->tp_getattro != PyObject_GenericGetAttr) {
+    return refuse("its own __getattribute__ or __getattr__,", NULL, tp);
   }
   PyObject* found = _PyType_Lookup(tp, name);
-  if (found == NULL) {
-    return NULL;
+  if (found == NULL || Py_TYPE(found) != &PyGetSetDescr_Type || PyUnicode_Compare(PyDescr_NAME(found), name) != 0) {
+    PyErr_Clear();
+    return refuse("no getset descriptor of that name is what the name is", NULL, tp);
   }
-  PyTypeObject* kind = Py_TYPE(found);
-  if (store) {
-    return kind->tp_descr_set == NULL || kind == &PyGetSetDescr_Type || kind == &PyMemberDescr_Type
-        ? NULL : refuse("not covered: the __set__ of what the name is", NULL, tp);
-  }
-  return kind->tp_descr_get == NULL || kind == &PyGetSetDescr_Type || kind == &PyMemberDescr_Type ||
-          kind == &PyMethodDescr_Type || kind == &PyWrapperDescr_Type || kind == &PyClassMethodDescr_Type ||
-          kind == &PyFunction_Type || kind == &PyStaticMethod_Type
-      ? NULL : refuse("not covered: the __get__ of what the name is", NULL, tp);
+  return NULL;
 }
 
 // kind: 0 binary (op: BINARY_OP's oparg), 1 compare (op: Py_LT ..), 2 unary
-// (op: 0 "-", 1 "~", 2 "+"), 3 getitem, 4 setitem, 5 delitem, 6 getattr,
-// 7 setattr (name). `a` is the class of the operand that decides (the left
-// one, the container, the owner), `b` the right one's for 0 and 1.
+// (op: 0 "-", 1 "~", 2 "+"), 3 getitem, 4 setitem, 5 delitem, 6 getattr
+// (name), 8 index. `a` is the class of the operand that decides (the left
+// one, the container, the owner, the bound), `b` the right one's for 0 and 1.
 // NULL: no Python-level method of a class is run by the slot itself. Else
 // the reason, valid until the next call.
 const char* tr_slot_python(int kind, int op, PyTypeObject* a, PyTypeObject* b, PyObject* name) {
@@ -231,7 +225,7 @@ const char* tr_slot_python(int kind, int op, PyTypeObject* a, PyTypeObject* b, P
       if ((r = compare(a, op, 0)) != NULL) {
         return r;
       }
-      return a == b ? NULL : compare(b, op, 1);
+      return compare(b, op, 1);
     case 2:
       if (op < 0 || op >= 3) {
         break;
@@ -244,9 +238,9 @@ const char* tr_slot_python(int kind, int op, PyTypeObject* a, PyTypeObject* b, P
     case 5:
       return subscript(a, 1, "__delitem__");
     case 6:
-      return attribute(a, name, 0);
-    case 7:
-      return attribute(a, name, 1);
+      return attribute(a, name);
+    case 8:
+      return number(a, NB(nb_index), "__index__");
     default:
       break;
   }

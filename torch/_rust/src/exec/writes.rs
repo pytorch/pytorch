@@ -461,7 +461,11 @@ pub unsafe fn store_item(container: *mut PyObject, key: *mut PyObject, value: *m
         let old = ffi::PyList_GET_ITEM(container, i);
         // The index is in range for a list as long as this one.
         reads::needs_length(container);
-        reads::wrote_item(container, key);
+        // (After a deletion the index holds what was behind it, which the
+        // run did not write: what it reads there is a read.)
+        if !del {
+            reads::wrote_item(container, key);
+        }
         changes(container);
         let token = if del { push(&w.list_delitem, container, &[key], Some((&w.list_insert, vec![key, old]))) } else { push(&w.list_setitem, container, &[key, value], Some((&w.list_setitem, vec![key, old]))) };
         reads::wrote(container, token, How::Index(i), std::ptr::null_mut(), value, -(del as isize));
@@ -589,6 +593,16 @@ pub fn undo() {
     }
 }
 
+// The body is over and its run stands: nothing is taken back from here on,
+// and what the stores replaced is let go of. An object that dies of it may
+// have a finalizer (code of the program): no record is borrowed while it
+// runs, and reads.rs compares what the run read only afterwards
+// (_region_settled, which calls this).
+pub(super) fn let_go() {
+    let replaced: Vec<_> = WRITES.with_borrow_mut(|ws| ws.iter_mut().filter_map(|w| w.undo.take()).collect());
+    drop(replaced);
+}
+
 /// The writes of the traced run that a region is to make again, once the
 /// body is over, in order: ``(how, target, args)``, each made as
 /// ``how(target, *args)``. A write to an object that nothing but the trace's
@@ -596,9 +610,10 @@ pub fn undo() {
 /// run made, filled and let go of).
 #[pyfunction]
 pub fn _region_writes(py: Python<'_>) -> PyResult<Vec<(Py<PyAny>, Py<PyAny>, Py<pyo3::types::PyTuple>)>> {
+    // (Already done where the reads were compared first; the counts below
+    // are of the records without what the stores replaced.)
+    let_go();
     let mut ws = WRITES.take();
-    // The run is over and stands: nothing is taken back from here on.
-    ws.iter_mut().for_each(|w| w.undo = None);
     loop {
         // The records of what the run read from its temporaries hold what
         // those held (a call's arguments, in the cells of a closure): they

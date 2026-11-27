@@ -292,24 +292,26 @@ class _Read:
         (``checks``, ``tensor_pins``). The other asserts and pins (a count,
         "the result is operand i", the class of what is no tensor) are the
         list's own, held by the interpreter as in any run; a scalar read
-        from a tensor is of its symbolic class there (lower_scalars)."""
-        entries = []
+        from a tensor is of its symbolic class there, and a slot callee is
+        the function of its instruction (lower_scalars): no line of the
+        interpreter's license takes a fake tensor."""
+        entries, consts = [], list(self.consts)
         for k, e in enumerate(self.entries):
             if e[0] == "drop":
                 entries.append(("drop", (), e[2]))
                 continue
-            callee, said = in_run(e, k, self.symbols)
+            callee, args, flags, said, pins = in_run(
+                e, k, self.symbols, self.fake_pins[k], consts
+            )
             tensor = [
                 a[0] == "key" or (a[0] == "class" and a[1] in _TENSORS) for a in said
             ]
             asserts = tuple(("class", _FAKE) if t else a for t, a in zip(tensor, said))
             out = k if self.results[k] else None
-            args = [_held(t) for t in e[1]]
-            entries.append(
-                (callee, args, e[2], out, e[4], e[5], asserts, self.fake_pins[k])
-            )
+            args = [_held(t) for t in args]
+            entries.append((callee, args, e[2], out, e[4], flags, asserts, pins))
         every = [("res", k) for k, has in enumerate(self.results) if has]
-        return (self.ninputs, self.npins, self.consts, entries, [*self.outputs, *every])
+        return (self.ninputs, self.npins, consts, entries, [*self.outputs, *every])
 
     def checks(self):
         """What the asserts say of a tensor, as (entry, what): the Key of the
