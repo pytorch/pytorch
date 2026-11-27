@@ -787,6 +787,8 @@ class OutputGraph(OutputGraphCommon):
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
+        # Different exact types rule out memo hits for objects held by one owner. IDs taken in copy
+        # or on dict/list coexist with the input key (owner=None). Unknown IDs need a memo check.
         self.deepcopy_id_types: dict[VariableTracker, tuple[type, Source | None]] = {}
         self.builtin_method_keys = BuiltinMethodKeyTracker()
         # List of TensorVariables that are leaf tensors created in-graph
@@ -1753,7 +1755,7 @@ class OutputGraph(OutputGraphCommon):
             )
             self.tracers.append(tracer)
             yield tracer
-            # Successful ordinary HOP traces contribute to enclosing reuse conditions.
+            # Each tracer push enters a scope, so the parent's own scope is its debug_level + 1.
             if tracer.parent is not None and tracer.parent.tracks_lexical_sources:
                 tracer.parent.has_container_identity |= tracer.has_container_identity
                 tracer.parent.traced_sources.update(tracer.traced_sources)
@@ -3980,6 +3982,7 @@ class OutputGraph(OutputGraphCommon):
         # some of the tensor objects to be held alive for longer than necessary.
         self.root_tx = None  # type: ignore[assignment]
         self.local_generators.clear()
+        self.created_enum_classes.clear()
         self.nn_modules.clear()
         self.used_inlined_inbuilt_modules_names.clear()
         self.param_name_to_source = None

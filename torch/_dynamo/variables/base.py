@@ -792,9 +792,11 @@ def _wrap_indexargfunc(
     func: Callable[..., VariableTracker],
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
+    *,
+    name: str = "this method",
 ) -> VariableTracker:
     if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
+        raise_type_error(tx, f"{name} takes no keyword arguments")
     from .object_protocol import pynumber_as_ssize_t
 
     check_positional(tx, "", len(args), 1, 1)
@@ -1240,7 +1242,7 @@ class SlotDef:
     wrapper: WrapperType
 
     def __post_init__(self) -> None:
-        if self.wrapper in (_wrap_binaryfunc, _wrap_binaryfunc_r):
+        if self.wrapper in (_wrap_binaryfunc, _wrap_binaryfunc_r, _wrap_indexargfunc):
             named = functools.partial(self.wrapper, name=f"wrapper {self.name}()")
             object.__setattr__(self, "wrapper", named)
 
@@ -2164,6 +2166,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             try:
                 value = tx.output.resolve_source_value(self.source)
             except Exception:
+                # Sources that need guard-scope helpers can't be resolved here.
                 pass
         real_type = (
             maybe_get_python_type(self) if value is NO_SUCH_SUBOBJ else type(value)
