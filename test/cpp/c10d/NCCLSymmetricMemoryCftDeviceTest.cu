@@ -14,7 +14,7 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
@@ -132,11 +132,11 @@ RankFixture setUpRank(const std::string& path, int rank, int size) {
   c10::cuda::CUDAGuard guard(device);
 
   auto store = c10::make_intrusive<c10d::FileStore>(path, size);
-  auto opts = c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
+  auto opts = c10::make_intrusive<c10d::NCCLOptions>();
   opts->group_name = kGroupName;
   opts->config.hostCftMode = ncclHostCftFallback;
-  auto backend =
-      c10::make_intrusive<c10d::ProcessGroupNCCL>(store, rank, size, opts);
+  auto backend = c10::make_intrusive<c10d::nccl2::ProcessGroupNCCL>(
+      store, rank, size, opts);
 
   auto pg = c10::make_intrusive<c10d::ProcessGroup>(store, rank, size);
   pg->setDefaultBackend(c10d::ProcessGroup::BackendType::NCCL);
@@ -223,9 +223,11 @@ void testDevicePutCft(
     for (const auto w : c10::irange(kSlotWords)) {
       const auto got = static_cast<uint32_t>(data[src * kSlotWords + w]);
       // Nobody writes into their own slot, so it must still read zero.
-      const uint32_t want =
-          src == rank ? 0u : valueBase(src, rank, size) + static_cast<uint32_t>(w);
-      ASSERT_EQ(got, want) << "rank " << rank << " slot " << src << " word " << w;
+      const uint32_t want = src == rank
+          ? 0u
+          : valueBase(src, rank, size) + static_cast<uint32_t>(w);
+      ASSERT_EQ(got, want) << "rank " << rank << " slot " << src << " word "
+                           << w;
     }
   }
 

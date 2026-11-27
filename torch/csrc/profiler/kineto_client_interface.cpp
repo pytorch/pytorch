@@ -1,9 +1,10 @@
 #ifdef USE_KINETO
-#include <ATen/Context.h>
+#include <c10/util/env.h>
 #include <libkineto.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/csrc/mtia/profiler/MTIAMemoryProfiler.h>
 #include <torch/csrc/profiler/kineto_client_interface.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 
 // Ondemand tracing is not supported on Apple or edge platform
 #if defined(__APPLE__) || defined(EDGE_PROFILER_USE_KINETO)
@@ -22,9 +23,7 @@ using namespace torch::autograd::profiler;
 
 class LibKinetoClient : public libkineto::ClientInterface {
  public:
-  void init() override {
-    ::torch::mtia::initMemoryProfiler();
-  }
+  void init() override {}
 
   void prepare(
       bool report_input_shapes = false,
@@ -61,6 +60,9 @@ class LibKinetoClient : public libkineto::ClientInterface {
 
   void start_memory_profile() override {
     LOG(INFO) << "Starting on-demand memory profile";
+    // Device availability can load the MTIA runtime, which is unsafe during
+    // static initialization when this client is registered.
+    ::torch::mtia::initMemoryProfiler();
     startMemoryProfile();
   }
 
@@ -90,9 +92,9 @@ class LibKinetoClient : public libkineto::ClientInterface {
 void global_kineto_init() {
   if constexpr (kEnableGlobalObserver) {
     if (c10::utils::get_env("KINETO_USE_DAEMON").has_value()) {
-      libkineto_init(
-          /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
-          /*logOnError=*/true);
+      const bool cpuOnly =
+          profiler::impl::kineto::supportedDeviceActivities().empty();
+      libkineto_init(cpuOnly, /*logOnError=*/true);
       libkineto::api().suppressLogMessages();
     }
   }

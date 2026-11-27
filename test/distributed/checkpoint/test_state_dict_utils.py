@@ -22,12 +22,20 @@ from torch.distributed._state_dict_utils import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
-from torch.testing._internal.common_utils import run_tests, TEST_XPU
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_XPU,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 class TestStateDictUtils(DTensorContinuousTestBase):
@@ -299,6 +307,40 @@ class TestStateDictUtils(DTensorContinuousTestBase):
         _copy_state_dict(sd, cpu_sd, non_blocking=True)
         torch.accelerator.synchronize()
         self.assertTrue(torch.equal(sd["k"].cpu(), cpu_sd["k"]))
+
+
+class TestCreateCpuStateDictStorageOffset(TestCase):
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    @parametrize("offset", [0, 4])
+    def test_create_and_copy_cpu_state_dict(self, offset):
+        mesh = init_device_mesh("cpu", (1,))
+        a, b = torch.arange(12.0), torch.arange(12.0) + 100
+        state_dict = {
+            "dtensor": DTensor.from_local(
+                a[offset : offset + 4], mesh, [Shard(0)], run_check=False
+            ),
+            "two_tensor": TwoTensor(a[offset : offset + 4], b[offset : offset + 4]),
+        }
+        cpu_state_dict = _create_cpu_state_dict(state_dict)
+        self.assertIs(type(cpu_state_dict["dtensor"]), DTensor)
+        self.assertIs(type(cpu_state_dict["two_tensor"]), TwoTensor)
+
+        _copy_state_dict(state_dict, cpu_state_dict)
+        self.assertEqual(
+            cpu_state_dict["dtensor"].to_local(), state_dict["dtensor"].to_local()
+        )
+        self.assertEqual(cpu_state_dict["two_tensor"].a, state_dict["two_tensor"].a)
+        self.assertEqual(cpu_state_dict["two_tensor"].b, state_dict["two_tensor"].b)
+
+
+instantiate_parametrized_tests(TestCreateCpuStateDictStorageOffset)
 
 
 if __name__ == "__main__":
