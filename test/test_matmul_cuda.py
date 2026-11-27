@@ -833,6 +833,38 @@ class TestMatmulCuda(InductorTestCase):
 
 
     @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("shape", [(16, 16, 1 << 16), (8, 8, 1 << 17), (64, 64, 1 << 15)])
+    def test_cublaslt_bias_splitk_intermediate_rounding(self, dtype, shape):
+        # A Split-K bias epilogue must not round A @ B to the output dtype before
+        # adding the bias. The data is built so that only this intermediate rounding can
+        # show up:
+        # - fp16: A @ B = 81920 overflows to inf, while A @ B + bias = 16416 is finite;
+        # - bf16: A @ B = 16416 rounds to 16384, so the result would be 0 instead of 32.
+        # The two nonzero weights are placed at the first and the last k index so that
+        # they land in different splits, whatever the number of splits is. Each split
+        # then produces a partial sum that is a single exact value. If both were in
+        # the same split, that partial (81920 or 16416) would not be representable
+        # and, with a reduced precision workspace (allowed by default), would be
+        # rounded or overflow before the bias is involved, with or without the fix.
+        m, n, k = shape
+        x = torch.ones(m, k, device="cuda", dtype=dtype)
+        w = torch.zeros(n, k, device="cuda", dtype=dtype)
+        if dtype == torch.float16:
+            w[:, 0], w[:, -1] = 40960.0, 40960.0
+            bias_val = -65504.0
+        else:
+            w[:, 0], w[:, -1] = 16384.0, 32.0
+            bias_val = -16384.0
+        bias = torch.full((n,), bias_val, device="cuda", dtype=dtype)
+        with blas_library_context("cublaslt"):
+            out = torch.nn.functional.linear(x, w, bias)
+            # All inputs and the result are exact in fp32, so this is the exact answer.
+            expected = torch.nn.functional.linear(x.float(), w.float(), bias.float()).to(dtype)
+        self.assertEqual(out, expected)
+
+    @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-4, rtol=1e-4),
                         torch.bfloat16: xtol(atol=1e-4, rtol=1e-4),
