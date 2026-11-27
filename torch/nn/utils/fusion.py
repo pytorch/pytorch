@@ -80,6 +80,34 @@ def fuse_conv_bn_weights(
     Returns:
         Tuple[torch.nn.Parameter, torch.nn.Parameter]: Fused convolutional weight and bias.
     """
+    if conv_w.ndim < 2:
+        raise ValueError(
+            f"Expected conv_w to have at least 2 dimensions, got {conv_w.ndim}D tensor with shape {tuple(conv_w.shape)}"
+        )
+
+    for name, tensor in (
+        ("bn_rm", bn_rm),
+        ("bn_rv", bn_rv),
+        ("bn_w", bn_w),
+        ("bn_b", bn_b),
+        ("conv_b", conv_b),
+    ):
+        if tensor is not None:
+            if tensor.ndim != 1:
+                raise ValueError(
+                    f"Expected 1D tensor for {name}, got {tensor.ndim}D tensor with shape {tuple(tensor.shape)}"
+                )
+            if tensor.shape != bn_rm.shape:
+                raise ValueError(
+                    f"Expected {name} to have shape {tuple(bn_rm.shape)} matching bn_rm, got {tuple(tensor.shape)}"
+                )
+
+    out_channels = conv_w.shape[1 if transpose else 0]
+    if out_channels != bn_rm.shape[0] and bn_rm.shape[0] != 1 and out_channels != 1:
+        raise ValueError(
+            f"Expected conv_w output channels ({out_channels}) to match bn_rm size ({bn_rm.shape[0]})"
+        )
+
     conv_weight_dtype = conv_w.dtype
     conv_bias_dtype = conv_b.dtype if conv_b is not None else conv_weight_dtype
     if conv_b is None:
