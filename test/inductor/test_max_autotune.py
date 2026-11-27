@@ -498,6 +498,83 @@ class TestMaxAutotune(TestCase):
 
     @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
     @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
+    def test_max_autotune_xpu_mm_templates_reject_unbacked_m(self):
+        """An unbacked M must not be admitted to the XPU descriptor templates.
+
+        The descriptor routes the operand extents through
+        `SizeVarAllocator.lookup_precomputed_size`, which interns a composite
+        extent as a `psN` and has the wrapper emit `int64_t psN = <expr>;` in the
+        prologue. An extent built from an unbacked symbol -- here `381 + u0`, an
+        M made by concatenating a constant with a `nonzero` result -- refers to
+        a symbol that a later kernel declares, so the generated C++ does not
+        compile. Rejecting the shape falls back to the ordinary Triton mm
+        template, which needs no descriptor. Compiling with the cpp wrapper keeps
+        that failure mode covered.
+        """
+        M, N, K = 381, 384, 256
+        from torch.xpu._utils import XPUArch
+
+        a = torch.randn((M, K), dtype=torch.bfloat16, device=GPU_TYPE)
+        # Every row qualifies, so the runtime extent is the constant 2*M while
+        # the traced one stays unbacked (`nonzero` is data dependent). That keeps
+        # the expected value simple without making the shape static.
+        a[:, 0] = a[:, 0].abs()
+        b = torch.randn((K, N), dtype=torch.bfloat16, device=GPU_TYPE)
+        choice_names: list[str] = []
+
+        def record_choices(choices):
+            choice_names.extend(choice.name for choice in choices)
+            return choices
+
+        add_preprocessing_fn(record_choices)
+        try:
+            with (
+                fresh_cache(),
+                mock.patch(
+                    "torch.xpu._utils.get_xpu_arch",
+                    return_value=XPUArch.Xe2,
+                ),
+                torch._dynamo.config.patch(
+                    {
+                        "capture_scalar_outputs": True,
+                        "capture_dynamic_output_shape_ops": True,
+                    }
+                ),
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "triton.native_matmul": False,
+                        "triton.enable_xpu_mm_templates": True,
+                        "cpp_wrapper": True,
+                    }
+                ),
+            ):
+                reset()
+
+                def f(x, y):
+                    # `nonzero` makes the count unbacked; the cat makes the
+                    # extent `M + u0` instead of a bare symbol.
+                    idx = torch.nonzero(x[:, 0] > 0).flatten()
+                    keep = torch.cat([x, x.index_select(0, idx)], dim=0)
+                    return keep @ y
+
+                result = torch.compile(f)(a, b)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        # No XPU descriptor template candidate was produced for this shape.
+        self.assertFalse(
+            any("mm_xpu_" in name for name in choice_names),
+            [name for name in choice_names if "mm_xpu_" in name],
+        )
+        # The plain Triton mm template is still available, so autotuning is not
+        # left empty.
+        self.assertTrue(any(name.startswith("triton_mm") for name in choice_names))
+        expected = torch.cat([a, a], dim=0) @ b
+        torch.testing.assert_close(result, expected, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
+    @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
     def test_max_autotune_xpu_mm_templates_aoti_dynamic_k(self):
         from torch._inductor import aoti_compile_and_package, aoti_load_package
         from torch.xpu._utils import XPUArch

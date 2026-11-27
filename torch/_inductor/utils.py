@@ -3128,6 +3128,30 @@ def _xpu_descriptor_operands_compatible(matrices: Sequence[IRNode]) -> bool:
 
     sizevars = V.graph.sizevars
     aot_mode = V.graph.aot_mode
+    # A descriptor hands the operand extents to the kernel as arguments, and
+    # `BlockDescriptorOptions.create` runs them through
+    # `SizeVarAllocator.lookup_precomputed_size`, which interns each composite
+    # extent as a `psN` and has the wrapper emit `int64_t psN = <expr>;` in the
+    # prologue. A backed symbol is known at wrapper entry, so that placement is
+    # fine; an unbacked one is bound by a graph operation much later, so an
+    # extent such as `381 + u0` (an M produced by concatenating a constant with
+    # a `nonzero` result) refers to `u0` before its declaration and the
+    # generated C++ fails to compile with "'u0' was not declared in this
+    # scope". Reject those shapes here and let them fall back to the ordinary
+    # Triton mm template, which indexes with plain pointer arithmetic and needs
+    # no descriptor -- and therefore no precomputed size.
+    # `lookup_precomputed_size` is also applied to the strides and to the
+    # constant offset, so every extent that can reach it is checked.
+    if any(
+        free_unbacked_symbols(expr)
+        for mat in matrices
+        for expr in (
+            *mat.get_size(),
+            *mat.get_stride(),
+            mat.get_layout().offset,
+        )
+    ):
+        return False
     conditions = []
     for mat in matrices:
         strides = mat.get_stride()
