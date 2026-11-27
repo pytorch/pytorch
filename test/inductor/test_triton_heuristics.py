@@ -1804,12 +1804,9 @@ class TestDumpLaunchTensors(TestCase):
                 os.environ["TORCHINDUCTOR_DUMP_LAUNCH_TENSORS"] = old_dump_env
 
 
-@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @instantiate_parametrized_tests
-class TestRecheckAutotuneCache(TestCase):
-    """Tests for CachingAutotuner.recheck_autotune_cache"""
-
-    hw_classification = HardwareClassification.ACCELERATOR
+class TestStaticRecheckAutotuneCache(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize("tuned_options", [False, True])
     def test_static_restore_selects_extra_options_winner(self, tuned_options):
@@ -1896,6 +1893,18 @@ class TestRecheckAutotuneCache(TestCase):
         result = MagicMock(spec=StaticTritonCompileResult)
         result.config = cfg
         return result
+
+
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
+@instantiate_parametrized_tests
+class TestRecheckAutotuneCache(TestCase):
+    """Tests for CachingAutotuner.recheck_autotune_cache"""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    _make_compile_result = staticmethod(
+        TestStaticRecheckAutotuneCache._make_compile_result
+    )
 
     @staticmethod
     def _make_autotuner_with_results(configs, compile_results):
