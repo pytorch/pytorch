@@ -592,7 +592,6 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
         return x + a
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
     def _test_export_same_as_eager(self, f, args, kwargs=None):
@@ -4172,6 +4171,11 @@ def forward(self, add_tensor):
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
+    # Disabled on every other platform by https://github.com/pytorch/pytorch/issues/198148
+    # (flaky); Windows is not on that issue's platform list.
+    @unittest.skipIf(
+        IS_WINDOWS, "flaky, see https://github.com/pytorch/pytorch/issues/198148"
+    )
     def test_non_strict_export_distribution_validation(self):
         prev_validate_args = torch.distributions.Distribution._validate_args
         torch.distributions.Distribution.set_default_validate_args(True)

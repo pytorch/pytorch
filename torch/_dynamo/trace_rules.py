@@ -47,6 +47,7 @@ import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
 from torch._environment import is_fbcode
+from torch._utils import _to_posix_separators
 from torch.utils import _config_module
 
 from . import config
@@ -4151,6 +4152,7 @@ def get_ngb_suppress_inlinelist() -> set[str]:
 
 
 def is_ngb_suppressed_inline(filename: str) -> bool:
+    filename = _to_posix_separators(filename)
     return any(filename.startswith(d) for d in get_ngb_suppress_inlinelist())
 
 
@@ -4290,6 +4292,7 @@ def _lookup_inner(
                 reasons.add("get_torch_obj_rule_map")
             return rule
     elif name is not None and filename is not None and not is_direct_call:
+        filename = _to_posix_separators(filename)
         if name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
             rule = get_torch_obj_rule_map().get(
                 filename + "#" + TORCH_DYNAMO_RESUME_IN_PREFIX, None

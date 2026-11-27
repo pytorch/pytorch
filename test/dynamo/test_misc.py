@@ -8555,9 +8555,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(finalizer.atexit)
         self.assertEqual(calls, [(token, token)] if operation == "call" else [])
 
-    @skipIfWindows(
-        msg="TODO(xuhancn): confirm, AssertionError: tensor([0.0290, 0.4019, 0.2598, 0.3666]) is not None"
-    )
     def test_release_input_memory(self):
         x = torch.rand([4])
         x_ref = weakref.ref(x)
@@ -8573,9 +8570,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         del x
         self.assertIs(x_ref(), None)
 
-    @skipIfWindows(
-        msg="TODO: (xuhancn) conform, AssertionError: Linear(in_features=10, out_features=10, bias=True) is not None"
-    )
     def test_release_module_memory(self):
         mod = torch.nn.Linear(10, 10)
         x = torch.rand([10, 10])
@@ -8607,7 +8601,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNone(mod_ref(), None)
         self.assertIsNone(mod_weight_ref(), None)
 
-    @skipIfWindows(msg="TODO: (xuhancn) conform, AssertionError: False is not true")
     def test_release_scope_memory(self):
         def inner(y):
             y
@@ -8624,7 +8617,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         del x
         self.assertTrue(p_ref() is None)
 
-    @skipIfWindows(msg="Tensor lifetime checks are unreliable on Windows")
     def test_release_input_memory_hop_dunder_dict(self):
         # Accessing a nested function's __dict__ inside a HOP body used to
         # create a reference cycle through the speculated SideEffects table,
@@ -17403,9 +17395,6 @@ ShapeEnv not equal: field values don't match:
             else:
                 res.backward(grad)
 
-    @skipIfWindows(
-        msg="AssertionError: False is not true : Encountered an unexpected fallback to 'aten pow' in dynamo compiled code"
-    )
     @unittest.skipIf(
         torch._inductor.config.cpu_backend != "cpp",
         "Skip for non cpp backend CPU as comments contain 'aten.pow' ",
@@ -17532,9 +17521,6 @@ ShapeEnv not equal: field values don't match:
             torch.compile(fn4, backend="eager")(x)
             self.assertEqual(3, len(torch._dynamo.utils.get_compilation_metrics()))
 
-    @skipIfWindows(
-        msg="TypeError: sequence item 0: expected str instance, NoneType found"
-    )
     def test_funcname_cache(self):
         src = """\
 import torch

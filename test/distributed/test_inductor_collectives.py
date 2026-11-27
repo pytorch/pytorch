@@ -4811,6 +4811,7 @@ def _build_graph_with_duplicate_rs(
     return torch.fx.GraphModule(torch.nn.Module(), graph)
 
 
+@unittest.skipIf(not hasattr(c10d, "HashStore"), "HashStore is not available")
 class TestDedupReduceScatter(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()

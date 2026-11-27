@@ -277,7 +277,12 @@ class CoordescTuner:
     @staticmethod
     def has_improvement(baseline, test):
         threshold = 0.001  # 0.1%
-        return test is not None and test < baseline * (1 - threshold)
+        # GPU event timers (e.g. HIP on Windows) can report negative times. For a
+        # negative baseline, baseline * (1 - threshold) is above the baseline, so an
+        # equal timing would count as an improvement and autotune() would cycle
+        # between cached configs forever. (1 + threshold) keeps the 0.1% decrease.
+        factor = (1 - threshold) if baseline >= 0 else (1 + threshold)
+        return test is not None and test < baseline * factor
 
     def is_valid_config(self, config) -> bool:
         # Rounded size hints can overestimate launchable legacy 3D grids.

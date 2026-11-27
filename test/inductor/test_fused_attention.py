@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     add_skip_condition,
     HardwareClassification,
     IS_LINUX,
+    IS_WINDOWS,
     isRocmArchAnyOf,
     MI200_ARCH,
     recover_orig_fp32_precision,
@@ -2724,5 +2725,5 @@ if RUN_CPU:
 
 
 if __name__ == "__main__":
-    if IS_LINUX:
+    if IS_LINUX or IS_WINDOWS:
         run_tests()

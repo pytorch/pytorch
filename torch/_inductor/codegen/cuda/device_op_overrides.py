@@ -73,6 +73,10 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         # NVIDIA devices have a warp size of 32, while AMD devices can have a
         # warp size of 32 or 64 depending on the architecture.
         source_codes = """
+            #if defined(USE_ROCM) && defined(_WIN32)
+            #include <fstream>
+            #endif
+
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
                 CUresult code = EXPR;                          \\
@@ -147,7 +151,20 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
 
                 CUmodule mod;
                 CUfunction func;
+            #if defined(USE_ROCM) && defined(_WIN32)
+                // hipModuleLoad keeps the file locked after hipModuleUnload, so read it into
+                // memory and load it with hipModuleLoadData; the file is then never held open.
+                std::ifstream file(filePath, std::ios::binary);
+                if (!file) {
+                    throw std::runtime_error("Failed to open " + filePath);
+                }
+                std::vector<char> image(
+                    (std::istreambuf_iterator<char>(file)),
+                    std::istreambuf_iterator<char>());
+                CUDA_DRIVER_CHECK(cuModuleLoadData(&mod, image.data()));
+            #else
                 CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
+            #endif
                 if (loaded_modules) {
                     loaded_modules->push_back(mod);
                 }

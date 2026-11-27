@@ -16,11 +16,16 @@ from torch._inductor.exc import CUDACompileError, XPUCompileError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch.testing._internal.common_utils import skipIfRocmWindows, TEST_WITH_ROCM
 from torch.testing._internal.triton_utils import (
     requires_gpu_and_triton,
     requires_xpu_and_triton,
 )
+
+
+# ROCmCodeCache builds Linux .so files (-fPIC, -lpthread, visibility exports)
+# and rocm_compiler() returns None off Linux.
+_ROCM_CODECACHE_LINUX_ONLY = "ROCmCodeCache only supports Linux"
 
 
 def _has_rocm_compiler():
@@ -121,6 +126,7 @@ def _call_saxpy(dll, device_type, n, a, x, y):
 
 class TestGPUCodeCache(InductorTestCase):
     @requires_gpu_and_triton
+    @skipIfRocmWindows(msg=_ROCM_CODECACHE_LINUX_ONLY)
     def test_gpu_load(self):
         device = self.device_type
         if not _has_gpu_codecache_compiler(device):
@@ -154,6 +160,7 @@ class TestGPUCodeCache(InductorTestCase):
             torch.testing.assert_close(y, expected_y)
 
     @requires_gpu_and_triton
+    @skipIfRocmWindows(msg=_ROCM_CODECACHE_LINUX_ONLY)
     def test_compilation_error(self):
         device = self.device_type
         if not _has_gpu_codecache_compiler(device):
@@ -165,6 +172,7 @@ class TestGPUCodeCache(InductorTestCase):
                 codecache.compile(error_source_code, "o")
 
     @requires_gpu_and_triton
+    @skipIfRocmWindows(msg=_ROCM_CODECACHE_LINUX_ONLY)
     def test_async_compile(self):
         device = self.device_type
         if not _has_gpu_codecache_compiler(device):

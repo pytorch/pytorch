@@ -2,8 +2,10 @@
 import copy
 import os
 import random
+import unittest
 
 import torch
+import torch.distributed as dist
 from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import config
@@ -14,6 +16,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
+HAS_NCCL = dist.is_available() and dist.is_nccl_available()
 
 
 class Model2Conv(nn.Module):
@@ -40,7 +43,9 @@ class TestLayoutOptim(TestCase):
     def setUpClass(cls):
         super().setUpClass()
 
-        import torch.distributed as dist
+        # Only the DDP-wrapped tests need the process group.
+        if not HAS_NCCL:
+            return
 
         # not use a fixed port for stress test
         tot_retry = 5
@@ -122,12 +127,14 @@ class TestLayoutOptim(TestCase):
     def verify_accuracy_for_train(self, *args, **kwargs):
         self.verify_accuracy(*args, **kwargs, is_train=True)
 
+    @unittest.skipIf(not HAS_NCCL, "requires NCCL")
     def test_2conv_with_graph_break(self):
         """
         Make sure graph break does not cause any accuracy issue.
         """
         self.verify_accuracy_for_infer(Model2Conv)
 
+    @unittest.skipIf(not HAS_NCCL, "requires NCCL")
     def test_3conv_with_graph_break(self):
         class Model(nn.Module):
             def __init__(
@@ -195,6 +202,7 @@ class TestLayoutOptim(TestCase):
         ):
             self.test_keep_output_layout_infer()
 
+    @unittest.skipIf(not HAS_NCCL, "requires NCCL")
     def test_training_acc(self):
         self.verify_accuracy_for_train(Model2Conv)
 
@@ -235,6 +243,7 @@ class TestLayoutOptim(TestCase):
         y = f(x)
         self.assertTrue(torch.equal(y, torch.ones(3, 2).to(GPU_TYPE) * 2))
 
+    @unittest.skipIf(not HAS_NCCL, "requires NCCL")
     @tf32_off()
     def test_mutate_base_for_conv_output(self):
         class Model(nn.Module):
@@ -253,6 +262,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model)
 
+    @unittest.skipIf(not HAS_NCCL, "requires NCCL")
     @tf32_off()
     def test_mutate_view_for_conv_output(self):
         class Model(nn.Module):

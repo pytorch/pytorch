@@ -534,6 +534,10 @@ print(json.dumps([before, loaded, sorted(os.listdir(root))]))
                     finally:
                         shutil.rmtree(collision_dir)
 
+                    # Windows cannot move a loaded DLL.
+                    del loaded
+                    gc.collect()
+
                     # Verify robustness: move data deeper
                     nested_dir = os.path.join(temp_dir, "nested_dir")
                     os.makedirs(nested_dir)
@@ -548,7 +552,6 @@ print(json.dumps([before, loaded, sorted(os.listdir(root))]))
                     self.assertEqual(actual_nested, expected)
 
                     # Determine if destructor deletes the files
-                    del loaded
                     del loaded_nested
                     gc.collect()
 

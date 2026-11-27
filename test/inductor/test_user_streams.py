@@ -323,9 +323,12 @@ with torch.xpu._DeviceGuard(0):
                 return x + 1
 
         x = torch.ones(4, 4, device=GPU_TYPE)
+        # fn's side stream does not wait for the default stream that produced x.
+        torch.accelerator.synchronize()
         result, code = run_and_get_code(torch.compile(fn), x)
         FileCheck().check("_get_stream_by_index").run(code[0])
-        expected = fn(torch.ones(4, 4, device=GPU_TYPE))
+        expected = fn(x)
+        torch.accelerator.synchronize()
         torch.testing.assert_close(result, expected)
 
 
@@ -1456,6 +1459,8 @@ class TestUserStreamCompile(InductorTestCase):
         q = torch.randn(8, 64, 32, device=GPU_TYPE)
         k = torch.randn(8, 64, 32, device=GPU_TYPE)
         v = torch.randn(8, 64, 32, device=GPU_TYPE)
+        # fn's side stream does not wait for the default stream that produced q, k, v.
+        torch.accelerator.synchronize()
         expected = fn(q, k, v)
         result, (code,) = run_and_get_code(torch.compile(fn), q, k, v)
         self.assertEqual(result, expected)
@@ -2551,9 +2556,13 @@ class TestStreamIdentity(InductorTestCase):
                 return x * 2
 
         x = torch.randn(1024, device="cuda")
+        # fn's side stream does not wait for the default stream that produced x.
+        torch.cuda.synchronize()
         result, (code,) = run_and_get_code(torch.compile(fn), x)
+        expected = fn(x)
+        torch.cuda.synchronize()
 
-        self.assertEqual(result, fn(x))
+        self.assertEqual(result, expected)
         self.assertIn("_get_stream_by_index", code)
         self.assertNotIn("torch.cuda.Stream(device=", code)
 

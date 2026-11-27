@@ -12359,11 +12359,11 @@ op_db: list[OpInfo] = [
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad',
-                                    dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                                    dtypes=[torch.cdouble], active_if=IS_WINDOWS and not TEST_WITH_ROCM),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_method_grad',
-                                    dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                                    dtypes=[torch.cdouble], active_if=IS_WINDOWS and not TEST_WITH_ROCM),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_inplace_grad',
-                                    dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                                    dtypes=[torch.cdouble], active_if=IS_WINDOWS and not TEST_WITH_ROCM),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD',
                                     dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_inplace_forward_mode_AD',
@@ -22312,6 +22312,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          "test_noncontiguous_samples", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_variant_consistency_eager", device_type="mps"),
+            # The clang-cl CPU kernel does not fuse the coordinate unnormalize into an FMA
+            # (GCC and the GPU kernel do), so one coordinate differs by 1 ulp; bicubic on the
+            # large reference inputs amplifies it. Both backends are ~1e-2 from float64.
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-2, rtol=1e-3)}), "TestCommon",
+                         "test_compare_cpu", device_type="cuda", active_if=IS_WINDOWS and TEST_WITH_ROCM),
        )),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(

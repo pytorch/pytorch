@@ -2,6 +2,7 @@
 
 import functools
 import logging
+import unittest
 from types import SimpleNamespace
 from unittest import mock
 
@@ -115,6 +116,7 @@ class TestBench(TestCase):
         log.warning("do_bench result: %s", res)
         self.assertGreater(res, 0)
 
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     def test_do_bench_using_profiling(self):
         res = do_bench_using_profiling(self._bench_fn)
         log.warning("do_bench_using_profiling result: %s", res)

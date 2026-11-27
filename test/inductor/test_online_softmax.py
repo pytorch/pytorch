@@ -13,7 +13,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_TRITON
@@ -807,5 +806,5 @@ class TestScalarAccumulators(TestCase):
 instantiate_parametrized_tests(TestOnlineSoftmax)
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU and HAS_TRITON:
+    if HAS_GPU and HAS_TRITON:
         run_tests()

@@ -658,13 +658,11 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     def get_event_pairs_min_timing(
         self: Self, event_pairs: list[tuple[Any, Any]]
     ) -> float:
-        """Get the minimum timing, in milliseconds, for a group of event pairs."""
-        return min(
-            [
-                start_event.elapsed_time(end_event)
-                for start_event, end_event in event_pairs
-            ]
-        )
+        """Get the minimum positive timing, in milliseconds, for a group of event pairs."""
+        # GPU event timers (e.g. HIP on Windows) can report non-positive elapsed
+        # times; drop them so a bogus sample cannot win an autotune ranking.
+        timings = [start.elapsed_time(end) for start, end in event_pairs]
+        return min((t for t in timings if t > 0), default=float("inf"))
 
     @may_distort_benchmarking_result
     @time_and_count

@@ -619,9 +619,9 @@ class AOTICustomOpTestCase(TestCase):
         elif IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
         else:
-            lib_file_path = find_library_location("libaoti_custom_ops.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("aoti_custom_ops.dll")
+            lib_file_path = find_library_location(
+                "aoti_custom_ops.dll" if IS_WINDOWS else "libaoti_custom_ops.so"
+            )
             if not os.path.exists(lib_file_path):
                 raise unittest.SkipTest("libaoti_custom_ops not built!")
             torch.ops.load_library(str(lib_file_path))

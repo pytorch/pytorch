@@ -69,6 +69,7 @@ from torch._functorch.aot_autograd import (
     aot_export_joint_with_descriptors,
 )
 from torch._guards import tracing, TracingContext
+from torch._inductor.codecache import WritableTempFile
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._graph_pickler import GraphPickler
@@ -11349,7 +11350,7 @@ from user code:
 
             # Pre-create a temp file path and remove delete=False since we control cleanup
             with (
-                tempfile.NamedTemporaryFile(suffix=".pt") as f,
+                WritableTempFile("wb", suffix=".pt") as f,
                 torch._functorch.config.patch(force_autograd_cache=True),
             ):
                 serialization_path = f.name

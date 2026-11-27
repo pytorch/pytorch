@@ -2140,6 +2140,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             raise unittest.SkipTest("Requires Triton")
         from torch._inductor.runtime.autotune_cache import (
             _AutotuneCacheBundlerImpl as Bundler,
+            create_cache,
         )
         from torch._inductor.utils import fresh_cache
 
@@ -2152,13 +2153,20 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         ]
         cold = unittest.mock.Mock()
         cold.get.return_value = None
+
+        # Only the bundled cache is cold.
+        def create_cold_bundled_cache(key, *args, **kwargs):
+            if key == "bundled-autotune-v1":
+                return cold
+            return create_cache(key, *args, **kwargs)
+
         ctx = DiskDynamoStore()
         with (
             fresh_cache(),
             torch._inductor.config.patch(bundled_autotune_remote_cache=True),
             patch(
                 "torch._inductor.runtime.autotune_cache.create_cache",
-                return_value=cold,
+                side_effect=create_cold_bundled_cache,
             ),
             # Without Triton the bundler has no backend hash and fails before
             # it reaches the one-bundle check.

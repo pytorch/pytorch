@@ -62,7 +62,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
-    skipIfWindows,
     subtest,
     TEST_CUDA,
     TEST_WITH_ASAN,
@@ -858,9 +857,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    @skipIfWindows(
-        msg="Known issue: Window can't delete loaded modules, so we can't clear module cache."
-    )
     def test_clear_fx_graph_cache(self):
         """
         Verify the interactions between FXGraphCache and AOTAutogradCache.

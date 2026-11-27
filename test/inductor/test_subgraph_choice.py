@@ -22,6 +22,8 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
+    isRocmArchAnyOf,
+    lazy_skip_if,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
@@ -99,6 +101,16 @@ class TestSubgraphChoice(TestCase):
         unittest.skip("MetaWS and partial configs only apply to the Triton backend"),
         lambda params: params["backend"] == "aten"
         and (params["meta_ws"] or params["config_index"]),
+    )
+    @decorateIf(
+        lazy_skip_if(
+            lambda: isRocmArchAnyOf(("gfx1151",))
+            and torch.backends.cuda.preferred_blas_library()
+            == torch._C._BlasBackend.Cublaslt,
+            "hipBLASLt bf16 x bf16 -> fp32 BMM is not exact on gfx1151",
+        ),
+        lambda params: params["backend"] == "aten"
+        and params["dtype"] == torch.bfloat16,
     )
     @parametrize("backend", ("aten", "triton"))
     @parametrize("meta_ws", (False, True))

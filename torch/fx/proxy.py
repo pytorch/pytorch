@@ -17,6 +17,7 @@ import torch.fx.traceback as fx_traceback
 from torch._C import _fx_map_arg as map_arg
 from torch._library.opaque_object import is_opaque_constant_type
 from torch._logging import getArtifactLogger
+from torch._utils import _to_posix_separators
 from torch.utils._pytree import tree_map_
 from torch.utils._traceback import CapturedTraceback
 
@@ -303,7 +304,9 @@ class TracerBase:
                 for frame in user_stack_summary
                 if (
                     frame.name == "forward"
-                    or frame.filename.endswith("torch/__init__.py")
+                    or _to_posix_separators(frame.filename).endswith(
+                        "torch/__init__.py"
+                    )
                     or (frame.filename, frame.name) in _STACK_TRACE_ANCHORS
                 )
             ]
@@ -396,7 +399,8 @@ class TracerBase:
         while frame:
             frame = frame.f_back
             if frame and all(
-                not frame.f_code.co_filename.endswith(file) for file in pt_files
+                not _to_posix_separators(frame.f_code.co_filename).endswith(file)
+                for file in pt_files
             ):
                 break
 

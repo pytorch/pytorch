@@ -1200,7 +1200,9 @@ def load_pt2(
     if isinstance(f, (io.IOBase, IO)):
         if len(aoti_model_names) > 0:
             # Workaround for AOTIModelPackageLoader not reading buffers
-            with tempfile.NamedTemporaryFile(suffix=".pt2") as tf:
+            from torch._inductor.codecache import WritableTempFile
+
+            with WritableTempFile("wb", suffix=".pt2") as tf:
                 f.seek(0)
                 tf.write(f.read())
                 f.seek(0)

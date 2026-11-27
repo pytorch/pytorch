@@ -46,6 +46,7 @@ from weakref import WeakKeyDictionary
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
 from torch._guards import Source
+from torch._utils import _to_posix_separators
 from torch.utils._pytree import is_namedtuple_class
 
 from .. import config, graph_break_hints, polyfills, variables
@@ -578,10 +579,9 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> VariableTracker:
         # Ignore patch_track_step_called from torch/optim/lr_scheduler.py - it just patches
         # the optimizer.step method and we don't need to trace it
-        if (
-            self.get_name() == "patch_track_step_called"
-            and self.get_filename().endswith("torch/optim/lr_scheduler.py")
-        ):
+        if self.get_name() == "patch_track_step_called" and _to_posix_separators(
+            self.get_filename()
+        ).endswith("torch/optim/lr_scheduler.py"):
             return ConstantVariable.create(None)
         return tx.inline_user_function_return(
             self,
@@ -731,7 +731,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
 
         filename = self.get_filename()
-        if any(filename.startswith(d) for d in BUILTIN_INLINE_WHEN_CALLED):
+        if any(
+            _to_posix_separators(filename).startswith(d)
+            for d in BUILTIN_INLINE_WHEN_CALLED
+        ):
             return False
         if is_ngb_suppressed_inline(filename):
             return False

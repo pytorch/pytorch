@@ -270,7 +270,9 @@ class OpNamespace:
             name = "CppNode" + name
             count = self.custom_function_name_counter[name]
             self.custom_function_name_counter[name] += 1
-            name = f"{name}{count}"
+            # The separator keeps names unique: without it, the 21st "Foo" and
+            # the first "Foo2" would both be named "Foo20".
+            name = f"{name}_{count}"
 
         if hasattr(self, name):
             raise AssertionError(f"Op with name '{name}' already exists")

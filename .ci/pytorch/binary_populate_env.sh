@@ -133,6 +133,20 @@ if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_B
     fi
 fi
 
+# Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for Windows ROCm wheels
+# (triton-windows has no free-threaded build). Uses PyPI triton-windows until
+# PyTorch-built Windows triton-rocm wheels are published.
+if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*rocm.* && ( "${OSTYPE}" == "msys" || "${OSTYPE}" == "cygwin" ) && "${DESIRED_PYTHON}" != *t ]]; then
+    TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_windows_version.txt)
+    WINDOWS_TRITON_CONSTRAINT="platform_system == 'Windows' and python_version < '3.16'"
+    TRITON_REQUIREMENT="triton-windows~=${TRITON_VERSION}; ${WINDOWS_TRITON_CONSTRAINT}"
+    if [[ -z "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
+        export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${TRITON_REQUIREMENT}"
+    else
+        export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
+    fi
+fi
+
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton xpu package
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
     TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_xpu_version.txt)

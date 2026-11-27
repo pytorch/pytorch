@@ -613,8 +613,9 @@ class TestModuleLevelKernels(TestCase):
                     f.write(code)
                 env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
                 cmd = [sys.executable, path, flag]
-                out = subprocess.check_output(cmd, env=env, stderr=subprocess.STDOUT)
-            return out.decode()
+                return subprocess.check_output(
+                    cmd, env=env, stderr=subprocess.STDOUT, text=True
+                )
 
         defs = re.findall(r"^def triton_\w+\(", code, re.MULTILINE)
         keys = ast.literal_eval(re.search(r"kernel_modules=(\[.*?\])", code).group(1))

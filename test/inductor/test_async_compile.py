@@ -33,9 +33,9 @@ from torch._inductor.utils import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
     skipIfNoCuteDSL,
-    skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -294,7 +294,6 @@ def test_flydsl_loader_main(value, stream):
         "spawn" not in multiprocessing.get_all_start_methods(),
         "requires spawn multiprocessing start method",
     )
-    @skipIfWindows(msg="SubprocPool uses pass_fds, which is not supported on Windows.")
     def test_daemon_process_allows_subprocess_compile_process_pool(self):
         use_process_pool, worker_start_method = self._run_daemon_compile_worker(
             "subprocess"
@@ -355,10 +354,21 @@ def test_flydsl_loader_main(value, stream):
             self.assertTrue(ready_future_cleared)
             self.assertFalse(use_process_pool)
 
+    def _assert_fork_pool_unsupported_on_windows(self):
+        # Windows has no fork(), so asking for a fork pool raises a clear error.
+        with config.patch(worker_start_method="fork", compile_threads=2):
+            shutdown_compile_workers()
+            with self.assertRaisesRegex(RuntimeError, "not supported on Windows"):
+                AsyncCompile.wait_pool_ready()
+
     @requires_gpu()
     @requires_triton()
     @parametrize("method", ("subprocess", "fork", "spawn"))
     def test_pool(self, method):
+        if method == "fork" and IS_WINDOWS:
+            self._assert_fork_pool_unsupported_on_windows()
+            return
+
         def fn(x, y):
             return x + y
 
@@ -379,6 +389,10 @@ def test_flydsl_loader_main(value, stream):
     def test_pool_compile_on_one_rank_without_triton_cache_dir(self, method):
         # compile_on_one_rank kernels carry no device index, and a worker forked after
         # CUDA initialization cannot look up the current device to pick a cache dir.
+        if method == "fork" and IS_WINDOWS:
+            self._assert_fork_pool_unsupported_on_windows()
+            return
+
         def fn(x, y):
             return x + y
 
@@ -456,6 +470,10 @@ def test_flydsl_loader_main(value, stream):
     @patch("torch._inductor.runtime.coordinate_descent_tuner.CoordescTuner.autotune")
     @parametrize("method", ("subprocess", "fork", "spawn"))
     def test_autotune_lookup_table(self, mock_autotune, method):
+        if method == "fork" and IS_WINDOWS:
+            self._assert_fork_pool_unsupported_on_windows()
+            return
+
         def f(a, b):
             return (a @ b).to(torch.float32).sum(dim=1)
 

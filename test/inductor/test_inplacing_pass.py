@@ -36,7 +36,6 @@ from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
     subtest,
 )
@@ -2796,5 +2795,5 @@ instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 instantiate_parametrized_tests(TestScatterChainReinplacing)
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if HAS_GPU:
         run_tests(needs="filelock")

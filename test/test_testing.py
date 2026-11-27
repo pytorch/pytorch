@@ -4913,7 +4913,6 @@ instantiate_device_type_tests(TestOpInfoSampleFunctions, globals(), allow_xpu=Tr
 instantiate_parametrized_tests(TestImports)
 
 
-@unittest.skipIf(IS_WINDOWS, "dynamo test failures are not looked up on Windows")
 class TestDynamoTestFailuresDir(TestCase):
     def test_found_from_working_directory(self):
         # pytest-xdist workers of an installed build have neither a local

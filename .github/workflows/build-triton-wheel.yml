@@ -19,6 +19,8 @@ on:
       - .github/scripts/windows/build_triton.bat
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
+      - .ci/docker/ci_commit_pins/triton-windows.txt
+      - .ci/docker/triton_windows_version.txt
   workflow_dispatch:
   pull_request:
     paths:
@@ -30,6 +32,8 @@ on:
       - .github/scripts/windows/build_triton.bat
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
+      - .ci/docker/ci_commit_pins/triton-windows.txt
+      - .ci/docker/triton_windows_version.txt
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -90,7 +94,13 @@ jobs:
       fail-fast: false
       matrix:
         py_vers: [ "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
-        device: ["xpu"]
+        device: ["xpu", "rocm"]
+        exclude:
+          # triton-windows has no free-threaded build.
+          - py_vers: "3.14t"
+            device: "rocm"
+          - py_vers: "3.15t"
+            device: "rocm"
     timeout-minutes: 40
     env:
       PY_VERS: ${{ matrix.py_vers }}
@@ -178,7 +188,7 @@ jobs:
       extra_artifact_pattern: triton-wheel-*-aarch64-manylinux_2_28_x86_64
 
   upload-wheel-rocm:
-    needs: build-wheel-rocm
+    needs: [build-wheel-rocm, build-wheel-win]
     permissions:
       id-token: write
       contents: read
@@ -186,6 +196,7 @@ jobs:
     secrets: inherit
     with:
       artifact_pattern: triton-wheel-*-rocm-manylinux_2_28_x86_64
+      extra_artifact_pattern: triton-wheel-win-*-rocm
 
   upload-wheel-xpu:
     needs: [build-wheel-xpu, build-wheel-win]
@@ -196,4 +207,4 @@ jobs:
     secrets: inherit
     with:
       artifact_pattern: triton-wheel-*-xpu-manylinux_2_28_x86_64
-      extra_artifact_pattern: triton-wheel-win-*
+      extra_artifact_pattern: triton-wheel-win-*-xpu

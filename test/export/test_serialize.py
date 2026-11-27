@@ -1124,7 +1124,6 @@ class _DeserializeGraphMixin:
             _check_graph(pre_dispatch=False)
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestDeserialize(_DeserializeGraphMixin, TestCase):
@@ -3163,7 +3162,6 @@ class TestSerializeAccelerator(TestCase):
         self.assertIsNotNone(triton_node)
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestDeserializeAccelerator(_DeserializeGraphMixin, TestCase):

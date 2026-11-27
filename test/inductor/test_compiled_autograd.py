@@ -28,7 +28,6 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
-from torch._inductor.cpp_builder import is_msvc_cl
 from torch._inductor.test_case import run_tests, TestCase
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -47,7 +46,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     scoped_load_inline,
     skipIfCppFakeTensor,
-    skipIfWindows,
     skipIfXpu,
     TEST_WITH_ROCM,
 )
@@ -267,15 +265,8 @@ main()
 
     def gen_cache_miss_log_prefix(self):
         if IS_WINDOWS:
-            if is_msvc_cl():
-                return "Cache miss due to new autograd node: struct "
-            else:
-                self.fail(
-                    "Compilers other than msvc have not yet been verified on Windows."
-                )
-                return ""
-        else:
-            return "Cache miss due to new autograd node: "
+            return "Cache miss due to new autograd node: struct "
+        return "Cache miss due to new autograd node: "
 
     def test_reset(self):
         compiled_autograd.compiled_autograd_enabled = True
@@ -3722,7 +3713,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             raise AssertionError
         self.assertEqual(len(matches1), len(patterns1))
 
-    @skipIfWindows(msg="node name demangling inconsistent on windows")
     def test_verbose_logs_dynamic_shapes(self):
         logs, ctx = logs_to_string(
             torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
@@ -4270,7 +4260,6 @@ class CompiledAutograd1(torch.nn.Module):
             fn, compiler_fn=make_compiler_fn(gm_hook=check)
         )
 
-    @skipIfWindows(msg="temp dir not compatible")
     def test_disk_offloading(self):
         with tempfile.TemporaryDirectory() as d:
 
@@ -4353,7 +4342,6 @@ class CompiledAutograd1(torch.nn.Module):
                 compiler_fn=make_compiler_fn(fullgraph=False, gm_hook=check),
             )
 
-    @skipIfWindows(msg="node name demangling inconsistent on windows")
     def test_backward_hook_relative_ordering_partial(self):
         # test backward hooks for cases that CA matches eager
 

@@ -745,6 +745,7 @@ class TestProvenanceTracingStackTraces(TestCase):
         self.assertTrue(any(n.startswith("## Call CompiledFxGraph ") for n in names))
 
     @requires_cuda_and_triton
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     @torch._inductor.config.patch(
         {
             "trace.provenance_tracking_level": 2,

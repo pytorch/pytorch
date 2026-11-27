@@ -39,6 +39,7 @@ from torch._inductor.codecache import (
     XPUCodeCache,
 )
 from torch._inductor.compile_worker.timer import Timer
+from torch._inductor.compile_worker.utils import popen_pass_fds, wait_readable_win32
 from torch._inductor.utils import (
     apply_subprocess_env,
     clear_caches,
@@ -50,6 +51,7 @@ from torch._inductor.utils import (
     python_subprocess_env,
 )
 from torch._logging import getArtifactLogger
+from torch._utils import IS_WINDOWS
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -197,14 +199,16 @@ class TuningProcess:
         self.read_pipe = os.fdopen(read_fd, "rb")
 
         self.selector = selectors.DefaultSelector()
-        self.selector.register(self.read_pipe, selectors.EVENT_READ)
+        if not IS_WINDOWS:
+            self.selector.register(self.read_pipe, selectors.EVENT_READ)
 
+        child_fds, popen_kwargs = popen_pass_fds((subproc_read_fd, subproc_write_fd))
         cmd = [
             sys.executable,
             entry,
             f"--parent={os.getpid()}",
-            f"--read-fd={str(subproc_read_fd)}",
-            f"--write-fd={str(subproc_write_fd)}",
+            f"--read-fd={str(child_fds[0])}",
+            f"--write-fd={str(child_fds[1])}",
         ]
         env = {
             **python_subprocess_env(),
@@ -223,7 +227,7 @@ class TuningProcess:
         self.process = subprocess.Popen(
             cmd,
             env=env,
-            pass_fds=(subproc_read_fd, subproc_write_fd),
+            **popen_kwargs,
         )
         os.close(subproc_read_fd)
         os.close(subproc_write_fd)
@@ -250,7 +254,11 @@ class TuningProcess:
         raises EOFError if the subprocess crashes.
         """
         try:
-            if not self.selector.select(timeout):
+            if IS_WINDOWS:
+                ready = wait_readable_win32(self.read_pipe, timeout)
+            else:
+                ready = bool(self.selector.select(timeout))
+            if not ready:
                 raise TimeoutError(f"Timeout in autotune subprocess {self.process.pid}")
             result, _ = TuningProcess.recv(self.read_pipe)
         except TimeoutError:

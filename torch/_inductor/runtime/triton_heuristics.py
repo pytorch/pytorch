@@ -5910,9 +5910,9 @@ class GridExpr:
             return items[0]
         if self.mode == "python":
             return f"max({', '.join(map(str, items))})"
-        # Cast int constants to (long) to avoid type deduction errors with std::max
-        # when mixing long variables with int literals
-        cpp_items = [f"(long){x}" if isinstance(x, int) else str(x) for x in items]
+        # Cast int constants to (int64_t) to avoid type deduction errors with std::max
+        # when mixing int64_t variables with int literals
+        cpp_items = [f"(int64_t){x}" if isinstance(x, int) else str(x) for x in items]
         return functools.reduce(lambda x, y: f"std::max({x}, {y})", cpp_items)
 
     def summation(self, seq: list[int | str]) -> int | str:

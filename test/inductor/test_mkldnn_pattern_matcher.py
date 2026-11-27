@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    IS_WINDOWS,
     requires_mkl,
     skipIfXpu,
     TEST_ACL,
@@ -1956,5 +1957,5 @@ instantiate_device_type_tests(
 )
 instantiate_parametrized_tests(TestPatternMatcher)
 if __name__ == "__main__":
-    if IS_LINUX and (HAS_CPU) and torch.backends.mkldnn.is_available():
+    if (IS_LINUX or IS_WINDOWS) and HAS_CPU and torch.backends.mkldnn.is_available():
         run_tests()

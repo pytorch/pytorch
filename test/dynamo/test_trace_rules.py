@@ -32,7 +32,6 @@ from torch._dynamo.variables import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfWindows,
     TEST_CUDA,
     TEST_XPU,
 )
@@ -567,9 +566,6 @@ class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(
         not torch.distributed.is_available(),
         "need to import MLP module from distributed",
-    )
-    @skipIfWindows(
-        msg="AssertionError: False is not true : MLP did not survive skip files"
     )
     def test_module_survive_skip_files(self):
         from torch.testing._internal.common_fsdp import MLP

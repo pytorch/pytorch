@@ -33,9 +33,13 @@ from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.compile_worker.tracked_process_pool import (
     TrackedProcessPoolExecutor,
 )
-from torch._inductor.compile_worker.utils import _async_compile_initializer
+from torch._inductor.compile_worker.utils import (
+    _async_compile_initializer,
+    popen_pass_fds,
+)
 from torch._inductor.utils import get_ld_library_path, python_subprocess_env
 from torch._logging import trace_structured
+from torch._utils import IS_WINDOWS
 from torch._utils_internal import find_compile_subproc_binary
 from torch.monitor import _WaitCounter, _WaitCounterTracker
 
@@ -189,6 +193,8 @@ class SubprocPool:
     ) -> None:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
         self.pickler = pickler or SubprocPickler()
+        if IS_WINDOWS and kind == SubprocKind.FORK:
+            kind = SubprocKind.SPAWN
         self.kind = kind
 
         subproc_read_fd, write_fd = os.pipe()
@@ -197,6 +203,7 @@ class SubprocPool:
         self.read_pipe = os.fdopen(read_fd, "rb")
         torch_key_str = base64.b64encode(torch_key()).decode("utf-8")
 
+        child_fds, popen_kwargs = popen_pass_fds((subproc_read_fd, subproc_write_fd))
         cmd = [
             sys.executable,
             entry,
@@ -209,8 +216,8 @@ class SubprocPool:
             f"--kind={self.kind.value}",
             f"--workers={nprocs}",
             f"--parent={os.getpid()}",
-            f"--read-fd={str(subproc_read_fd)}",
-            f"--write-fd={str(subproc_write_fd)}",
+            f"--read-fd={str(child_fds[0])}",
+            f"--write-fd={str(child_fds[1])}",
             f"--torch-key={torch_key_str}",
         ]
         cmd.extend(args)
@@ -240,9 +247,9 @@ class SubprocPool:
                 # Some internal usages need a modified LD_LIBRARY_PATH.
                 "LD_LIBRARY_PATH": get_ld_library_path(),
             },
-            pass_fds=(subproc_read_fd, subproc_write_fd),
             stdout=self.log_file,
             stderr=self.log_file,
+            **popen_kwargs,
         )
         # The sidecar inherited these via pass_fds; the parent uses its own ends
         # (write_pipe/read_pipe) and must drop its copies. Otherwise the parent

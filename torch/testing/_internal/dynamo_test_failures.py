@@ -30,9 +30,6 @@ def find_test_dir() -> str | None:
     # Find the path to the dynamo expected failure and skip files.
     from os.path import abspath, basename, dirname, exists, join, normpath
 
-    if sys.platform == "win32":
-        return None
-
     # Check relative to this file (local build):
     test_dir = normpath(join(dirname(abspath(__file__)), "../../../test"))
     if exists(join(test_dir, "dynamo_expected_failures")):

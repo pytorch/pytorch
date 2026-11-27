@@ -12,11 +12,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    IS_LINUX,
-    parametrize,
-)
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
 from torch.utils._triton import has_triton
 
 
@@ -171,5 +167,5 @@ instantiate_device_type_tests(
 
 
 if __name__ == "__main__":
-    if IS_LINUX and has_triton():
+    if has_triton():
         run_tests(needs="filelock")
