@@ -32,7 +32,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_device_type import (
     onlyCPU, onlyCUDA, onlyNativeDeviceTypes, onlyOn, disablecuDNN,
     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
-    skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, skipXPUIf, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
+    skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, skipGPUIf, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
 )
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUBLASLT_MNK4, PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
@@ -17642,11 +17642,7 @@ op_db: list[OpInfo] = [
         supports_forward_ad=False,
         check_batched_forward_grad=False,
         decorators=[
-            skipXPUIf(
-                not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-                "This platform doesn't support Flash Attention",
-            ),
-            skipCUDAIf(
+            skipGPUIf(
                 not PLATFORM_SUPPORTS_FLASH_ATTENTION,
                 "This platform doesn't support Flash Attention",
             ),

@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     skipIfXpu,
     TEST_WITH_ROCM,
-    TEST_XPU,
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import (
@@ -2394,12 +2393,12 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_5_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
         test_sdpa_rewriter_6_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_6
         test_sdpa_rewriter_7_gpu = unittest.skipIf(
-            TEST_XPU and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+            GPU_TYPE == "xpu" and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
             "XPU Flash Attention is not supported",
         )(TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_7)
         test_sdpa_rewriter_8_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_8
         test_sdpa_rewriter_9_gpu = unittest.skipIf(
-            TEST_XPU and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+            GPU_TYPE == "xpu" and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
             "XPU Flash Attention is not supported",
         )(TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_9)
         test_sdpa_rewriter_10_gpu = (

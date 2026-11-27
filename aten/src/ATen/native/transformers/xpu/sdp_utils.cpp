@@ -172,7 +172,7 @@ inline bool check_flash_attention_deterministic(
 
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
   constexpr auto constraints =
-      std::array<bool (*)(sdp_params const&, bool), 13>{
+      std::to_array<bool (*)(sdp_params const&, bool)>({
           is_flash_attention_available,
           check_flash_attention_hardware_support,
           check_for_attn_mask,
@@ -185,7 +185,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
           check_flash_attention_datatype,
           check_flash_attention_head_dim_size,
           check_flash_attention_layout,
-          check_flash_attention_deterministic};
+          check_flash_attention_deterministic});
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
