@@ -1,9 +1,10 @@
 //! The state around a call that is no argument of it: what a region is
 //! traced under and entered under.
 //!
-//! Two parts. The WORD (region_thread_state of csrc/tensor_ffi.h) is state a
+//! Two parts. The WORD (region_word of csrc/tensor_ffi.h) is state a
 //! region is for: autocast, the default dtype, the determinism and backend
-//! flags, grad mode, inference mode, the current CUDA device. A region is
+//! flags, the float32 precision of every backend and operator, grad mode,
+//! inference mode, the current CUDA device. A region is
 //! entered only under the word of its trace (compared with the reads, see
 //! reads.rs's `Reads::check`). Everything else must be NEUTRAL, at the
 //! start of a trace and at every entry: no dispatch mode and no torch
@@ -34,7 +35,7 @@ use crate::bindings::ffi as tffi;
 
 thread_local! {
     // What the tracer has on while a traced body runs on this thread.
-    static OWN: Cell<tffi::AmbientModes> = const { Cell::new(tffi::AmbientModes { dispatch_modes: 0, function_modes: 0, fx_tracing: false }) };
+    static OWN: Cell<tffi::AmbientModes> = const { Cell::new(tffi::AmbientModes { dispatch_modes: 0, function_modes: 0, fx_tracing: 0 }) };
 }
 
 // While it lives, the modes on now are the engine's own: taken where the
@@ -55,8 +56,19 @@ impl Drop for Own {
     }
 }
 
+// The word of the thread now. None: some of it cannot be read, or has a
+// value the word has no room for; under that no trace starts and no region
+// is entered.
+pub fn word() -> Option<tffi::Word> {
+    let mut w = tffi::Word::default();
+    tffi::region_word(&mut w).then_some(w)
+}
+
 // What is not neutral, if anything is.
 pub fn not_neutral() -> Option<&'static str> {
+    if word().is_none() {
+        return Some("the state of the thread cannot be read");
+    }
     Some(match tffi::region_not_neutral(&OWN.get()) {
         0 => return None,
         1 => "a dispatch mode is on",
@@ -67,9 +79,17 @@ pub fn not_neutral() -> Option<&'static str> {
         6 => "the JIT is tracing",
         7 => "torch.fx is tracing",
         8 => "anomaly mode is on",
-        // 9, and whatever the C++ side comes to name: not neutral.
-        _ => "autocast is on for another device type",
+        9 => "autocast is on for another device type",
+        // 255, and whatever the C++ side comes to name: not neutral.
+        _ => "the state of the thread cannot be asked",
     })
+}
+
+/// The ambient word of the thread, as two ints (see the module), or None if
+/// it cannot be read: equal words are one state to every region.
+#[pyfunction]
+pub fn _ambient_word() -> Option<(u64, u64)> {
+    word().map(|w| (w.a, w.b))
 }
 
 /// What of the thread's state is not neutral (see the module), or None.

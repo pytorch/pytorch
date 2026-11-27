@@ -21,11 +21,13 @@ impl Tensor {
         ffi::tensor_stride_at(self, dim)
     }
 
-    pub fn sizes(&self) -> &[i64] {
+    // Err for a tensor whose sizes cannot be read as a list of ints (a
+    // nested tensor, symbolic sizes, a Python-dispatch tensor that raises).
+    pub fn sizes(&self) -> Result<&[i64], cxx::Exception> {
         ffi::tensor_sizes(self)
     }
 
-    pub fn strides(&self) -> &[i64] {
+    pub fn strides(&self) -> Result<&[i64], cxx::Exception> {
         ffi::tensor_strides(self)
     }
 

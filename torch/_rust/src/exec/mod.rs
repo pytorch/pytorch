@@ -1,7 +1,7 @@
 // CFG executor: a PEP 523 eval-frame hook that runs each Python frame by
 // converting its code object to a CFG (see cfg/) and interpreting that, instead
-// of CPython's bytecode loop. Anything it can't run faithfully fails hard with
-// an exception rather than falling back to CPython.
+// of CPython's bytecode loop. A frame that is not the executor's to run is
+// handed to CPython as it arrived (see who_runs and own.rs).
 
 pub mod ambient;
 mod asked;
@@ -21,6 +21,7 @@ mod kinds;
 mod live;
 mod made;
 pub mod overlap;
+pub mod own;
 pub mod pin;
 mod raises;
 pub mod reads;
@@ -74,6 +75,8 @@ fn live(enter: bool) {
         } else {
             *n -= 1;
             if *n == 0 {
+                // Resumes are not seen from here on (see own.rs).
+                own::forget_all();
                 _PyInterpreterState_SetEvalFrameFunc(interp, std::mem::transmute::<usize, EvalFrameFn>(PREV_EVAL_FRAME.load(Ordering::Acquire)));
             }
         }
@@ -116,7 +119,9 @@ pub struct SiteClone {
 }
 
 // Runs f with no executor active on this thread: frames it runs are left to
-// CPython, and no effects are recorded.
+// CPython, and no effects are recorded. The hook stays installed meanwhile
+// if the executor has suspended generator frames (see own.rs): what f
+// resumes of them is seen, and the others stay the executor's.
 pub(crate) fn outside_executor<R>(f: impl FnOnce() -> R) -> R {
     struct Restore(usize, *mut effects::Recorder);
     impl Drop for Restore {
@@ -132,7 +137,7 @@ pub(crate) fn outside_executor<R>(f: impl FnOnce() -> R) -> R {
         }
     }
     let _restore = Restore(ACTIVE.replace(0), effects::set_current(std::ptr::null_mut()));
-    let _live = (_restore.0 > 0).then(|| {
+    let _live = (_restore.0 > 0 && !own::any()).then(|| {
         live(false);
         Live
     });
@@ -846,6 +851,17 @@ unsafe fn tracer_code(code: *mut pyo3::ffi::PyObject) -> Option<bool> {
     }
 }
 
+// Who runs a frame that arrived at the hook.
+enum Runs<'a> {
+    // _PyEval_EvalFrameDefault, the frame as it arrived; `deep`: with every
+    // frame it enters (outside the executor), else those are the
+    // executor's again.
+    CPython { deep: bool },
+    // No plan could be made for its code: an exception is set.
+    Failed,
+    Executor { c: &'a Compiled, plan: &'a Plan, start: run::Start, observed: bool },
+}
+
 unsafe extern "C" fn eval_frame(
     tstate: *mut pyo3::ffi::PyThreadState,
     frame: *mut Frame,
@@ -853,12 +869,44 @@ unsafe extern "C" fn eval_frame(
 ) -> *mut pyo3::ffi::PyObject {
     let prev: EvalFrameFn = std::mem::transmute(PREV_EVAL_FRAME.load(Ordering::Acquire));
     calls::witness::frame_entered();
+    // A generator's frame, resumed. The executor's mark on it (see own.rs)
+    // is taken whoever runs the frame now.
+    let gen_frame = tr_frame_owned_by_generator(frame) != 0;
+    let own = gen_frame && own::take(frame);
     if ACTIVE.get() == 0 {
         return prev(tstate, frame, throwflag);
     }
-    // Resuming a generator (created by either engine): the frame is owned by
-    // the generator object, and we continue from where it was suspended.
-    let gen_frame = tr_frame_owned_by_generator(frame) != 0;
+    // An exception thrown into the frame is put aside while the entry
+    // decides: what the entry calls must find nothing pending (a lookup
+    // that fails and is forgiven would take the thrown exception with it).
+    let thrown = if throwflag != 0 { pyo3::ffi::PyErr_GetRaisedException() } else { std::ptr::null_mut() };
+    let runs = who_runs(tstate, frame, gen_frame, own, throwflag != 0);
+    if !thrown.is_null() {
+        if matches!(runs, Runs::Failed) {
+            pyo3::ffi::Py_DECREF(thrown);
+        } else {
+            pyo3::ffi::PyErr_SetRaisedException(thrown);
+        }
+    }
+    match runs {
+        Runs::CPython { deep: false } => prev(tstate, frame, throwflag),
+        Runs::CPython { deep: true } => outside_executor(|| prev(tstate, frame, throwflag)),
+        Runs::Failed if gen_frame => {
+            tr_frame_enter(tstate, frame);
+            leave(tstate, frame, gen_frame, run::Outcome::Error)
+        }
+        Runs::Failed => {
+            tr_frame_clear_and_pop(tstate, frame);
+            std::ptr::null_mut()
+        }
+        Runs::Executor { c, plan, start, observed } => run_frame(tstate, frame, gen_frame, c, plan, start, observed),
+    }
+}
+
+// Decides who runs `frame` and touches nothing of it. `own`: the executor
+// suspended it and nothing has resumed it since; `thrown`: it is resumed
+// with an exception. The case nobody listed is CPython's.
+unsafe fn who_runs<'a>(tstate: *mut pyo3::ffi::PyThreadState, frame: *mut Frame, gen_frame: bool, own: bool, thrown: bool) -> Runs<'a> {
     let code = tr_frame_code(frame);
     // While a region's body is traced the executor runs every frame under
     // it, cold code too, so that what the frames read is recorded (see
@@ -875,6 +923,18 @@ unsafe extern "C" fn eval_frame(
     if shadow {
         calls::record::frame(frame, true);
     }
+    // A frame the executor could run is left to CPython for `why`: nothing
+    // of what it does is seen, so no trace goes through it.
+    let cpython = |why: &str| {
+        if shadow {
+            calls::record::frame(frame, false);
+        }
+        if reads::on() {
+            let name = Bound::from_borrowed_ptr(Python::assume_attached(), tr_frame_qualname(frame)).to_string();
+            reads::refuse(format!("it runs {name}, {why}, which runs on CPython"));
+        }
+        Runs::CPython { deep: false }
+    };
     if !gen_frame && SKIP_ANY.load(Ordering::Relaxed) && SKIPPED.lock().unwrap().contains(&(code as usize)) {
         if shadow {
             calls::record::frame(frame, false);
@@ -886,7 +946,7 @@ unsafe extern "C" fn eval_frame(
             let name = Bound::from_borrowed_ptr(Python::assume_attached(), tr_frame_qualname(frame)).to_string();
             reads::refuse(format!("it runs {name}, which the VM was told to skip"));
         }
-        return outside_executor(|| prev(tstate, frame, throwflag));
+        return Runs::CPython { deep: true };
     }
     // What the interpreter runs from wherever something happens is no code
     // of the instr running then: a collection's callback, and, while a
@@ -896,13 +956,21 @@ unsafe extern "C" fn eval_frame(
         if shadow {
             calls::record::frame(frame, false);
         }
-        return outside_executor(|| prev(tstate, frame, throwflag));
+        return Runs::CPython { deep: true };
     }
     if tracing && let Some(deep) = tracer_code(code) {
         if NEXT_CLONE.get().0 == code as usize {
             NEXT_CLONE.set((0, 0, 0));
         }
-        return if deep { outside_executor(|| prev(tstate, frame, throwflag)) } else { prev(tstate, frame, throwflag) };
+        return Runs::CPython { deep };
+    }
+    // See own.rs: a generator's frame is the executor's to start with a
+    // value sent, and to resume only where the executor itself suspended
+    // it. Every other is CPython's, as it arrived.
+    if gen_frame && !(if tr_frame_unstarted(frame) != 0 { !thrown } else { own }) {
+        // The instr that resumed it did enter a frame.
+        effects::frame_entered(frame, gen_frame);
+        return cpython("a generator's frame the executor did not suspend");
     }
     let plain = (tracing && *TRACE_PLAIN) || shadow;
     let pending = NEXT_CLONE.get();
@@ -919,7 +987,7 @@ unsafe extern "C" fn eval_frame(
                 if shadow {
                     calls::record::frame(frame, false);
                 }
-                return prev(tstate, frame, throwflag);
+                return Runs::CPython { deep: false };
             }
             Lookup::Outside => {
                 if shadow {
@@ -933,7 +1001,7 @@ unsafe extern "C" fn eval_frame(
                 }
                 // The instr that entered it did enter a frame.
                 effects::frame_entered(frame, gen_frame);
-                return outside_executor(|| prev(tstate, frame, throwflag));
+                return Runs::CPython { deep: true };
             }
             Lookup::Error => None,
         }
@@ -947,33 +1015,19 @@ unsafe extern "C" fn eval_frame(
             c.cold.store(true, Ordering::Relaxed);
         }
         if c.cold.load(Ordering::Relaxed) && !tracing && !shadow && !(!gen_frame && covered::observes(c)) {
-            return if c.deep.load(Ordering::Relaxed) { outside_executor(|| prev(tstate, frame, throwflag)) } else { prev(tstate, frame, throwflag) };
+            return Runs::CPython { deep: c.deep.load(Ordering::Relaxed) };
         }
     }
     effects::frame_entered(frame, gen_frame);
-    if !gen_frame {
-        let Some(c) = compiled else {
-            tr_frame_clear_and_pop(tstate, frame);
-            return std::ptr::null_mut();
-        };
-        if c.flags & GENERATOR_FLAGS != 0 {
-            // Calling a generator function runs only its prologue, up to
-            // RETURN_GENERATOR, which creates the generator object (from
-            // CPython internals that aren't exported). The executor runs the
-            // body when the generator is resumed.
-            return prev(tstate, frame, throwflag);
-        }
-    }
-    if tr_frame_enter(tstate, frame) < 0 || compiled.is_none() {
-        return leave(tstate, frame, gen_frame, run::Outcome::Error);
-    }
-    let c = compiled.unwrap();
-    if tr_tracing_active(tstate) != 0 {
-        fail(
-            "CFG executor: sys.settrace/setprofile/monitoring are not supported",
-            pyo3::ffi::PyExc_RuntimeError,
-        );
-        return leave(tstate, frame, gen_frame, run::Outcome::Error);
+    let Some(c) = compiled else {
+        return Runs::Failed;
+    };
+    if !gen_frame && c.flags & GENERATOR_FLAGS != 0 {
+        // Calling a generator function runs only its prologue, up to
+        // RETURN_GENERATOR, which creates the generator object (from
+        // CPython internals that aren't exported). The executor runs the
+        // body when the generator is resumed.
+        return Runs::CPython { deep: false };
     }
     // A frame of code that a trace was refused for runs the first plan,
     // which records, so that the next trace finds what it ran judged (see
@@ -984,16 +1038,36 @@ unsafe extern "C" fn eval_frame(
     let start = if gen_frame {
         let unit = tr_frame_get_instr(frame) as u32;
         let Some(&(b, ver, i)) = plan.resume.get(&unit) else {
-            fail(
-                &format!("CFG executor: can't resume a generator at offset {}", unit * 2),
-                pyo3::ffi::PyExc_RuntimeError,
-            );
-            return leave(tstate, frame, gen_frame, run::Outcome::Error);
+            return cpython("resumed at a place its plan does not resume at");
         };
-        run::Start::Resume { b, ver, i, throw: throwflag != 0 }
+        run::Start::Resume { b, ver, i, throw: thrown }
     } else {
         run::Start::Entry
     };
+    Runs::Executor { c, plan, start, observed }
+}
+
+// Runs a frame that is the executor's (see who_runs) on its plan.
+unsafe fn run_frame(
+    tstate: *mut pyo3::ffi::PyThreadState,
+    frame: *mut Frame,
+    gen_frame: bool,
+    c: &Compiled,
+    plan: &Plan,
+    start: run::Start,
+    observed: bool,
+) -> *mut pyo3::ffi::PyObject {
+    let (tracing, shadow) = (region::tracing(), calls::record::recording());
+    if tr_frame_enter(tstate, frame) < 0 {
+        return leave(tstate, frame, gen_frame, run::Outcome::Error);
+    }
+    if tr_tracing_active(tstate) != 0 {
+        fail(
+            "CFG executor: sys.settrace/setprofile/monitoring are not supported",
+            pyo3::ffi::PyExc_RuntimeError,
+        );
+        return leave(tstate, frame, gen_frame, run::Outcome::Error);
+    }
     let in_instr = tracing && reads::in_instr();
     let outcome = {
         let _using = Using::new(plan);
@@ -1055,6 +1129,8 @@ unsafe fn leave(
     let result = match outcome {
         run::Outcome::Yield { value, unit } => {
             tr_gen_suspend(tstate, frame, unit as c_int);
+            // The executor's to resume, until something else does (own.rs).
+            own::suspended(frame);
             return value;
         }
         run::Outcome::Return(v) => v,

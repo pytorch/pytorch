@@ -127,6 +127,8 @@ bool make_cfg_node(
     PyErr_SetString(PyExc_RuntimeError, e.what_without_backtrace());
   } catch (const std::exception& e) {
     PyErr_SetString(PyExc_RuntimeError, e.what());
+  } catch (...) {
+    PyErr_SetString(PyExc_RuntimeError, "an exception that is no std::exception");
   }
   return false;
 }

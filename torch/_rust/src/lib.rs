@@ -14,8 +14,8 @@ fn test_function() -> &'static str {
 }
 
 #[pyfunction]
-fn tensor_size(t: &Tensor) -> Vec<i64> {
-    t.sizes().to_vec()
+fn tensor_size(t: &Tensor) -> PyResult<Vec<i64>> {
+    t.sizes().map(<[i64]>::to_vec).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.what().to_string()))
 }
 
 #[pyfunction]
@@ -98,6 +98,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::_reoptimize_all, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_bypass_cold, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_skip, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::own::_cfg_own_frames, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_impure, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_set_cfg_pass_hook, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_opaque, m)?)?;
@@ -105,6 +106,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::_set_cfg_scalar_reads, m)?)?;
     m.add_function(wrap_pyfunction!(exec::exact::_same, m)?)?;
     m.add_function(wrap_pyfunction!(exec::ambient::_not_neutral, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::ambient::_ambient_word, m)?)?;
     m.add_class::<exec::TreeChecks>()?;
     m.add_class::<exec::tensor_key::TensorKey>()?;
     m.add_function(wrap_pyfunction!(exec::region::_region_given_up, m)?)?;

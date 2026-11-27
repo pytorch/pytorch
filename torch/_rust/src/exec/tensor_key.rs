@@ -42,7 +42,11 @@ impl TensorKey {
         let parameter = super::plain_tensor_types().iter().position(|t| *t == class)? == 1;
         let t = tffi::tensor_by_type(obj as usize).as_ref()?;
         let mut facts = tffi::TensorFacts::default();
-        tffi::tensor_key(t, &mut facts).then(|| TensorKey { parameter, facts, sizes: tffi::tensor_sizes(t).to_vec(), strides: tffi::tensor_strides(t).to_vec() })
+        if !tffi::tensor_key(t, &mut facts) {
+            return None;
+        }
+        // (A tensor that has a key has sizes and strides to read.)
+        Some(TensorKey { parameter, facts, sizes: tffi::tensor_sizes(t).ok()?.to_vec(), strides: tffi::tensor_strides(t).ok()?.to_vec() })
     }
 
     pub unsafe fn holds(&self, obj: *mut PyObject) -> bool {

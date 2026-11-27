@@ -4,6 +4,26 @@
 // block alongside the existing ones and put the Rust-side impls in a sibling
 // file under `bindings/`.
 
+//
+// THE RULE OF THE BRIDGE: no C++ exception leaves a function declared here.
+// The shim cxx makes for a function that does not return Result is noexcept:
+// an exception there ends the process, whatever the program was doing. So a
+// function declared in an `extern "C++"` block is one of three kinds, and
+// test_vm_gate.py (TestVmBridge) holds the list, with the reason of each:
+//   plain   its C++ body cannot throw: it reads fields of a tensor or
+//           thread-locals that have no failing path, and calls nothing of
+//           torch that checks, allocates or runs Python code;
+//   edge    its body can throw (a c10::Error from a torch call, bad_alloc, a
+//           Python error turned into an exception) and is inside `edge(...)`
+//           (csrc/tensor_ffi.cpp), which catches everything and answers the
+//           function's refusing value: the one its callers take for "not a
+//           tensor", "no key", "no word", "not neutral", a miss;
+//   result  it returns Result, and the caller's Err branch refuses.
+// A new function is added to that list with its kind. The functions of the
+// `extern "Rust"` blocks go the other way: a panic in one ends the process
+// (cxx's own guard), so they do not panic. The `extern "C"` blocks elsewhere
+// in the crate declare C code and CPython's API, which throw nothing.
+
 #[cxx::bridge(namespace = "torch::rust")]
 pub mod ffi {
     // See tensor_meta in tensor_ffi.h. The device and dtype are c10's enums.
@@ -28,12 +48,19 @@ pub mod ffi {
         bits: u8,
     }
 
+    // See region_word in tensor_ffi.h.
+    #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+    struct Word {
+        a: u64,
+        b: u64,
+    }
+
     // See region_modes in tensor_ffi.h.
     #[derive(Default, Clone, Copy)]
     struct AmbientModes {
         dispatch_modes: i64,
         function_modes: i64,
-        fx_tracing: bool,
+        fx_tracing: u8,
     }
 
     // See tensor_span in tensor_ffi.h.
@@ -58,7 +85,7 @@ pub mod ffi {
 
         fn torch_function_mode_active() -> bool;
         fn grad_mode_enabled() -> bool;
-        fn region_thread_state() -> u64;
+        fn region_word(out: &mut Word) -> bool;
         fn region_modes(out: &mut AmbientModes);
         fn region_not_neutral(own: &AmbientModes) -> u8;
         fn set_grad_mode(on: bool) -> bool;
@@ -75,8 +102,8 @@ pub mod ffi {
         fn tensor_size_at(t: &Tensor, dim: i64) -> i64;
         fn tensor_stride_at(t: &Tensor, dim: i64) -> i64;
 
-        fn tensor_sizes(t: &Tensor) -> &[i64];
-        fn tensor_strides(t: &Tensor) -> &[i64];
+        fn tensor_sizes(t: &Tensor) -> Result<&[i64]>;
+        fn tensor_strides(t: &Tensor) -> Result<&[i64]>;
 
         fn tensor_is_contiguous(t: &Tensor) -> bool;
         fn tensor_is_cpu(t: &Tensor) -> bool;

@@ -11,6 +11,7 @@ every instruction the engine knows), not over the cases somebody thought of.
 import ast
 import builtins
 import collections
+import concurrent.futures
 import contextlib
 import dis
 import enum
@@ -9278,6 +9279,991 @@ class TestVmCallsShadow(TestCase):
         ]
         self.assertTrue(found)
         self.assertIn("later: writes", found[0]["stop"][0])
+
+
+# What a generator's frame can be when a torch.vm function's run meets it:
+# the kind, where it was started, what resumes it, and from where.
+EDGE_KINDS = ("generator", "coroutine", "async generator")
+# Started (resumed once) by plain code; by an earlier call of a torch.vm
+# function; by the torch.vm call that goes on to resume it; made and not
+# started, outside and inside the call.
+EDGE_STARTED = (
+    "outside",
+    "earlier vm call",
+    "same vm call",
+    "new outside",
+    "new inside",
+)
+# "drop": its last reference goes; "cycle": the collector finds it.
+EDGE_RESUMES = ("next", "send", "throw", "close", "drop", "cycle")
+# In the body of the torch.vm function; by plain code behind the call; by a
+# finalizer that the body's store sets off.
+EDGE_FROM = ("vm", "plain", "finalizer")
+# The interpreter's shutdown: the torch.vm function exits the interpreter
+# while its frame holds the last reference; the process ends with the frame
+# suspended; a finalizer resumes it while the modules are taken down; the
+# same end while another thread is inside a torch.vm function.
+EDGE_EXITS = ("vm", "plain", "finalizer", "hooked")
+
+EDGE_PROGRAM = r"""
+import gc, json, resource, sys, threading
+import torch
+from torch import vm
+
+# A crash is to end the process at once, without a core file.
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+EARLY = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+CALLS = 5
+SOURCE = '''
+class Awaited:
+    def __init__(self, v):
+        self.v = v
+
+    def __await__(self):
+        got = yield self.v
+        return got
+
+
+def make_generator(log, box):
+    def body():
+        got = None
+        try:
+            for i in range(4):
+                try:
+                    got = yield (i, got)
+                    log.append(("got", i, got))
+                except KeyError as e:
+                    log.append(("caught", i, str(e)))
+        finally:
+            log.append(("finally", box is None))
+
+    return body()
+
+
+def make_coroutine(log, box):
+    async def body():
+        got = None
+        try:
+            for i in range(4):
+                try:
+                    got = await Awaited((i, got))
+                    log.append(("got", i, got))
+                except KeyError as e:
+                    log.append(("caught", i, str(e)))
+        finally:
+            log.append(("finally", box is None))
+
+    return body()
+
+
+def make_async_generator(log, box):
+    async def body():
+        got = None
+        try:
+            for i in range(4):
+                try:
+                    got = yield (i, got)
+                    log.append(("got", i, got))
+                except KeyError as e:
+                    log.append(("caught", i, str(e)))
+        finally:
+            log.append(("finally", box is None))
+
+    return body()
+'''
+
+
+def fresh(kind):
+    # The maker of a kind, of code objects that nothing has run.
+    names = {}
+    exec(compile(SOURCE, "<edge>", "exec"), names)
+    return names["make_" + kind.replace(" ", "_")]
+
+
+# The method of an async generator that sends it a value (spelled so for the
+# spelling check).
+SEND = "a" + "send"
+
+
+def drive(awaitable):
+    try:
+        awaitable.send(None)
+    except StopIteration as e:
+        return e.value
+    raise AssertionError("the async generator awaited something")
+
+
+def resume(kind, h, how):
+    if kind == "async generator":
+        if how == "next":
+            return drive(getattr(h, SEND)(None))
+        if how == "send":
+            return drive(getattr(h, SEND)(7))
+        if how == "throw":
+            return drive(h.athrow(KeyError("thrown")))
+        return drive(h.aclose())
+    if how == "next":
+        return h.send(None)
+    if how == "send":
+        return h.send(7)
+    if how == "throw":
+        return h.throw(KeyError("thrown"))
+    return h.close()
+
+
+def outcome(f, *args):
+    try:
+        return ("returned", f(*args))
+    except BaseException as e:
+        return ("raised", type(e).__name__, str(e))
+
+
+class Finalized:
+    def __init__(self, act):
+        self.act = act
+
+    def __del__(self):
+        self.act()
+
+
+def work(x):
+    return ((x.sin() * 2).cos() + 1).tanh().exp()
+
+
+def scenario(member, wrap):
+    kind, started, how, where = member
+    log, held, make = [], {"h": None, "f": None}, fresh(kind)
+
+    def create():
+        box = [] if how == "cycle" else None
+        held["h"] = make(log, box)
+        if box is not None:
+            box.append(held["h"])
+
+    def start():
+        create()
+        log.append(("start", outcome(resume, kind, held["h"], "next")))
+
+    def act():
+        if how in ("drop", "cycle"):
+            held["h"] = None
+            if how == "cycle":
+                gc.collect()
+        else:
+            log.append((how, outcome(resume, kind, held["h"], how)))
+
+    def body(x):
+        y = work(x)
+        if started == "same vm call":
+            start()
+        elif started == "new inside":
+            create()
+        if where == "vm":
+            act()
+        elif where == "finalizer":
+            held["f"] = None
+        return work(y * 2.0)
+
+    compiled, compiled_start = wrap(body), wrap(start)
+    for call in range(CALLS):
+        if started == "outside":
+            start()
+        elif started == "earlier vm call":
+            compiled_start()
+        elif started == "new outside":
+            create()
+        if where == "finalizer":
+            held["f"] = Finalized(act)
+        out = compiled(torch.full((4, 8), call + 1.0))
+        if where == "plain":
+            act()
+        if held["h"] is not None:
+            log.append(("after", outcome(resume, kind, held["h"], "next")))
+            log.append(("closed", outcome(resume, kind, held["h"], "close")))
+            held["h"] = None
+        gc.collect()
+        log.append(("out", out))
+    # No mark outlives the hook (see the test of the marks).
+    log.append(("own", getattr(torch._rust, "_cfg_own_frames", lambda: 0)()))
+    return log
+
+
+def same(a, b):
+    if isinstance(a, torch.Tensor):
+        return isinstance(b, torch.Tensor) and torch.equal(a, b)
+    if isinstance(a, (tuple, list)):
+        return type(a) is type(b) and len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
+    return type(a) is type(b) and a == b
+
+
+class Printed(list):
+    def append(self, entry, print=print):
+        print("LOG", entry, flush=True)
+
+
+def exits(member, wrap):
+    kind, started, _, where = member
+    log, held, make = Printed(), {"h": None}, fresh(kind)
+    parked, leave = threading.Event(), threading.Event()
+
+    def create():
+        held["h"] = make(log, None)
+
+    def start():
+        create()
+        log.append(("start", outcome(resume, kind, held["h"], "next")))
+
+    def body(x, last):
+        y = work(x)
+        if started == "same vm call":
+            start()
+        elif started == "new inside":
+            create()
+        if last and where == "vm":
+            mine = held.pop("h")
+            sys.exit(0)
+        if last and where == "hooked":
+            parked.set()
+            leave.wait()
+        return work(y * 2.0)
+
+    # What it needs is bound to it: the module's names are gone when it runs.
+    def at_exit(log=log, held=held, kind=kind, send=SEND):
+        try:
+            h = held["h"]
+            if kind == "async generator":
+                h = getattr(h, send)(None)
+            log.append(("at exit", h.send(None)))
+        except BaseException as e:
+            log.append(("at exit raised", type(e).__name__, str(e)))
+
+    compiled, compiled_start = wrap(body), wrap(start)
+    for call in range(CALLS):
+        last = call == CALLS - 1
+        if held["h"] is not None:
+            outcome(resume, kind, held["h"], "close")
+        if started == "outside":
+            start()
+        elif started == "earlier vm call":
+            compiled_start()
+        elif started == "new outside":
+            create()
+        x = torch.full((4, 8), call + 1.0)
+        if not last:
+            compiled(x, False)
+            continue
+        globals()["KEPT"] = held
+        if where == "finalizer":
+            globals()["KEPT_FINALIZED"] = Finalized(at_exit)
+        if where == "hooked":
+            threading.Thread(target=compiled, args=(x, True), daemon=True).start()
+            parked.wait()
+        else:
+            compiled(x, True)
+
+
+wrap = lambda f: vm(f, passes=EARLY)
+if sys.argv[1] == "walk":
+    for i, member in json.loads(sys.argv[2]):
+        print(f"BEGIN {i}", flush=True)
+        try:
+            want, got = scenario(member, lambda f: f), scenario(member, wrap)
+            show = lambda log: [e for e in log if e[0] != "out"]
+            verdict = "same" if same(got, want) else f"differs: eager {show(want)} vm {show(got)}"
+        except BaseException as e:
+            verdict = f"raised {type(e).__name__}: {str(e)[:300]}"
+        print(f"END {i} {verdict}", flush=True)
+else:
+    exits(json.loads(sys.argv[2]), wrap if sys.argv[3] == "vm" else lambda f: f)
+"""
+
+EDGE_OWN_PROGRAM = r"""
+import json, sys
+import torch
+from torch import vm
+
+EARLY = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+own = torch._rust._cfg_own_frames
+HELD = {}
+
+
+def work(x):
+    return ((x.sin() * 2).cos() + 1).tanh().exp()
+
+
+def counted(n):
+    for i in range(n):
+        yield float(i + 1)
+
+
+def body(x, seen):
+    y = work(x)
+    g = counted(3)
+    seen.append(("made", own()))
+    k = next(g)
+    seen.append(("suspended by the executor", own()))
+    # The run of a region (from the fifth call on) is made outside the executor.
+    y = work(y * k)
+    seen.append(("after a region ran", own()))
+    k = k + next(g)
+    seen.append(("resumed and suspended again", own()))
+    k = k + next(g)
+    for _ in g:
+        pass
+    seen.append(("run to its end", own()))
+    seen.append(("from outside, resumed inside", next(HELD["outside"]), own()))
+    HELD["inside"] = counted(100)
+    seen.append(("kept past the call", next(HELD["inside"]), own()))
+    return work(y * k)
+
+
+def outside():
+    HELD["outside"] = counted(100)
+    next(HELD["outside"])
+
+
+compiled = vm(body, passes=EARLY)
+rows = []
+for call in range(6):
+    want, got = [], []
+    x = torch.full((4, 8), call + 1.0)
+    outside()
+    a = body(x, want)
+    outside()
+    b = compiled(x, got)
+    got.append(("behind the call", own()))
+    got.append(("the kept one resumed outside", next(HELD["inside"]), own()))
+    runs = sum(r["runs"] for r in vm.regions(compiled) if r["state"] == "region")
+    rows.append({"same": torch.equal(a, b), "want": want, "got": got, "runs": runs})
+print(json.dumps(rows))
+"""
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+@instantiate_parametrized_tests
+class TestVmEdgeGenerators(TestCase):
+    """The executor runs a frame from its first instruction, or resumes it
+    where the executor itself suspended it and nothing has run it since; it
+    knows the second by a mark of its own. Every other frame of a generator,
+    a coroutine or an async generator is CPython's, as it arrived: started
+    by plain code or by an earlier call, resumed by ``next``, ``send``,
+    ``throw``, ``close``, the death of its last reference, the collector or
+    the interpreter's shutdown, from the body of a ``torch.vm`` function,
+    from plain code or from a finalizer. Every member computes and logs what
+    eager does; none ends the process or hangs (each runs in a child process
+    that is killed when it takes too long).
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def child(self, *args, timeout=600):
+        """(exit status or None when it had to be killed, stdout, stderr)."""
+        command = [sys.executable, "-c", EDGE_PROGRAM, *args]
+        try:
+            ran = subprocess.run(
+                command, capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired as e:
+            return None, (e.stdout or b"").decode(), (e.stderr or b"").decode()
+        return ran.returncode, ran.stdout, ran.stderr
+
+    def walk(self, members):
+        """The verdict of every member, by its index. One child runs them in
+        turn; a member that ends its child is named, and another child goes
+        on behind it."""
+        verdicts, todo = {}, list(members)
+        while todo:
+            status, out, err = self.child("walk", json.dumps(todo))
+            began = None
+            for line in out.splitlines():
+                word, _, rest = line.partition(" ")
+                if word == "BEGIN":
+                    began = int(rest)
+                elif word == "END":
+                    index, _, verdict = rest.partition(" ")
+                    verdicts[int(index)] = verdict
+                    began = None
+            if began is None:
+                self.assertEqual(status, 0, msg=err[-2000:])
+                break
+            if status is None:
+                # Not walked further: every hang takes its whole time.
+                verdicts[began] = "hangs"
+                break
+            verdicts[began] = (
+                f"dies of signal {-status}" if status < 0 else f"exits with {status}"
+            )
+            todo = [(i, m) for i, m in todo if i > began]
+        return verdicts
+
+    @parametrize("kind", EDGE_KINDS)
+    def test_a_frame_resumed_in_every_way_from_every_place(self, kind):
+        members = [
+            (kind, started, how, where)
+            for started in EDGE_STARTED
+            for how in EDGE_RESUMES
+            for where in EDGE_FROM
+        ]
+        parts = [
+            [(i, m) for i, m in enumerate(members) if m[1] == started]
+            for started in EDGE_STARTED
+        ]
+        verdicts = {}
+        with concurrent.futures.ThreadPoolExecutor(len(parts)) as pool:
+            for part in pool.map(self.walk, parts):
+                verdicts.update(part)
+        found = {m: verdicts.get(i, "not run") for i, m in enumerate(members)}
+        self.assertEqual([f"{m}: {v}" for m, v in found.items() if v != "same"], [])
+        self.assertEqual(len(found), 90)
+
+    @parametrize("kind", EDGE_KINDS)
+    def test_the_interpreters_shutdown(self, kind):
+        members = [
+            (kind, started, "exit", where)
+            for started in EDGE_STARTED
+            for where in EDGE_EXITS
+        ]
+
+        def ends(member):
+            both = []
+            for how in ("eager", "vm"):
+                status, out, err = self.child(
+                    "exit", json.dumps(member), how, timeout=300
+                )
+                log = [line for line in out.splitlines() if line.startswith("LOG")]
+                both.append((status, log))
+            return both
+
+        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+            found = dict(zip(members, pool.map(ends, members)))
+        differ = [f"{m}: {both}" for m, both in found.items() if both[0] != both[1]]
+        self.assertEqual(differ, [])
+        # Every member ran to the interpreter's end, and its frame was started.
+        self.assertEqual({both[0][0] for both in found.values()}, {0})
+        started = [m for m in members if not m[1].startswith("new")]
+        self.assertTrue(all(found[m][0][1] for m in started))
+
+    def test_the_mark_is_on_what_the_executor_suspended_and_nothing_else(self):
+        command = [sys.executable, "-c", EDGE_OWN_PROGRAM]
+        ran = subprocess.run(command, capture_output=True, text=True, timeout=600)
+        self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+        rows = json.loads(ran.stdout.splitlines()[-1])
+        self.assertEqual(len(rows), 6)
+        for call, row in enumerate(rows):
+            self.assertTrue(row["same"], msg=str(call))
+            # In eager nothing is the executor's.
+            self.assertEqual(
+                [e[:-1] for e in row["got"][:7]], [e[:-1] for e in row["want"]]
+            )
+            self.assertEqual({e[-1] for e in row["want"]}, {0})
+            marks = {e[0]: e[-1] for e in row["got"]}
+            self.assertEqual(
+                marks,
+                {
+                    "made": 0,
+                    "suspended by the executor": 1,
+                    # The hook stays while a mark is there: the frame is
+                    # still the executor's behind the region's run.
+                    "after a region ran": 1,
+                    "resumed and suspended again": 1,
+                    "run to its end": 0,
+                    # CPython's: started outside, and so not marked when
+                    # CPython suspends it again.
+                    "from outside, resumed inside": 0,
+                    "kept past the call": 1,
+                    # No mark outlives the hook.
+                    "behind the call": 0,
+                    "the kept one resumed outside": 0,
+                },
+                msg=str(call),
+            )
+        self.assertGreater(rows[-1]["runs"], rows[3]["runs"])
+
+
+# The bridge between the executor (Rust) and torch (C++): the rule is at the
+# head of torch/_rust/src/bindings/ffi.rs. Every function Rust calls across
+# it, with its kind and the reason:
+#   plain   its C++ body cannot throw;
+#   edge    it can, and catches at its edge to answer its refusing value;
+#   result  it returns Result, and the caller's failure branch refuses.
+BRIDGE_FUNCTIONS = {
+    "tensor_from_pyobject": ("edge", "isinstance may run Python code and raise: null"),
+    "tensor_by_type": ("plain", "a walk of the type's bases and a field of the object"),
+    "torch_function_mode_active": ("plain", "a thread-local"),
+    "grad_mode_enabled": ("plain", "a thread-local"),
+    "region_word": ("edge", "a getter of the context or of CUDA may raise: no word"),
+    "region_modes": (
+        "plain",
+        "two thread-locals; fx's flag by the C API, 2 on failure",
+    ),
+    "region_not_neutral": ("edge", "what cannot be asked is 255: not neutral"),
+    "set_grad_mode": ("plain", "a thread-local"),
+    "tensor_version": ("edge", "an inference tensor has no counter and raises: -1"),
+    "tensor_home": ("edge", "a tensor's layout and storage may raise: 0"),
+    "tensor_span": ("edge", "a tensor's device, sizes and storage may raise: false"),
+    "tensor_is_cow": ("plain", "the storage's data pointer, read without a check"),
+    "forward_ad_active": ("plain", "a count behind a mutex and a thread-local"),
+    "saved_tensor_hooks_active": ("plain", "the thread's stack of hooks"),
+    "tensor_key": ("edge", "a tensor's device and dtype may raise: false, no key"),
+    "tensor_key_is": ("edge", "as tensor_key: false, another key"),
+    "tensor_dim": ("edge", "a Python-dispatch tensor answers in Python: -1"),
+    "tensor_numel": ("edge", "as tensor_dim: -1"),
+    "tensor_size_at": ("edge", "a dimension out of range raises: -1"),
+    "tensor_stride_at": ("edge", "as tensor_size_at: -1"),
+    "tensor_sizes": ("result", "a nested tensor and symbolic sizes raise"),
+    "tensor_strides": ("result", "as tensor_sizes"),
+    "tensor_is_contiguous": (
+        "edge",
+        "a Python-dispatch tensor answers in Python: false",
+    ),
+    "tensor_is_cpu": ("edge", "a tensor without a device raises: false"),
+    "tensor_is_cuda": ("edge", "as tensor_is_cpu: false"),
+    "tensor_defined": ("plain", "a pointer comparison"),
+    "tensor_requires_grad": ("plain", "a field of the autograd metadata"),
+    "tensor_is_leaf": ("plain", "a field of the autograd metadata"),
+    "tensor_meta": ("edge", "dtype, device and sizes may raise: undefined, no shape"),
+    "dtype_name": ("edge", "making the string may raise: the empty string"),
+    "device_name": ("edge", "an unknown device type raises: the empty string"),
+    "op_hook_enable": ("plain", "a pointer and a bit of the thread's dispatch keys"),
+    "op_hook_disable": ("plain", "as op_hook_enable"),
+    "op_hook_pause": ("plain", "as op_hook_enable"),
+    "op_hook_witness": ("plain", "as op_hook_enable, and clearing a table"),
+    "op_hook_seeing": ("plain", "thread-locals"),
+    "op_hook_depth": ("plain", "a thread-local"),
+    "op_hook_serial": ("plain", "a thread-local"),
+    "op_hook_innermost": ("plain", "a thread-local"),
+    "tensor_ident": ("plain", "two pointers of the tensor"),
+    "make_cfg_node": ("edge", "false with a Python error set, which the caller raises"),
+}
+# The other way: what C++ calls of Rust. A panic in one ends the process.
+BRIDGE_RUST_SIDE = [
+    "node_apply",
+    "node_release",
+    "on_torch_op",
+    "on_witness_made",
+    "on_witness_op",
+]
+# The files that declare C code or CPython's API (`extern "C"`): no C++.
+BRIDGE_C_DECLARED_IN = ["bytecode_printer.rs", "exec/calls/slots.rs", "exec/ffi.rs"]
+# What is compiled beside the crate: C++ only behind the bridge above.
+BRIDGE_SOURCES = [
+    "autograd_node.cpp",
+    "calls_slots.c",
+    "exec_ops.c",
+    "frame_shim.c",
+    "op_hook.cpp",
+    "tensor_ffi.cpp",
+]
+
+
+class TestVmBridge(TestCase):
+    """No C++ exception leaves a function the executor calls across its
+    bridge to torch: one that did would end the process. The functions are
+    the ones recorded here, each with its kind; a function that joins the
+    bridge and is not recorded fails, as does one whose kind is not what its
+    declaration and its C++ body show."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def bridge(self):
+        if not os.path.isdir(CRATE):
+            self.skipTest("the executor's source is not beside the tests")
+        with open(os.path.join(CRATE, "bindings", "ffi.rs")) as f:
+            text = re.sub(r"//[^\n]*", "", f.read())
+        declared, rust_side = {}, []
+        for way, block in re.findall(
+            r'extern "(C\+\+|Rust)" \{(.*?)\n    \}', text, re.DOTALL
+        ):
+            for name, returns in re.findall(
+                r"\bfn (\w+)\([^;]*?\)([^;]*);", block, re.DOTALL
+            ):
+                if way == "Rust":
+                    rust_side.append(name)
+                else:
+                    declared[name] = "Result<" in returns
+        return declared, sorted(rust_side)
+
+    def body(self, name):
+        """The C++ definition of the bridge's function ``name``."""
+        csrc = os.path.join(os.path.dirname(CRATE), "csrc")
+        found = []
+        for source in BRIDGE_SOURCES:
+            if not source.endswith(".cpp"):
+                continue
+            with open(os.path.join(csrc, source)) as f:
+                text = f.read()
+            head = rf"^(?!\s)[^\n;{{}}()]*\b{name}\([^;{{}}]*\)\s*(noexcept\s*)?\{{"
+            for m in re.finditer(head, text, re.MULTILINE):
+                found.append(
+                    (
+                        m.group(1) is not None,
+                        text[m.end() : text.index("\n}\n", m.end())],
+                    )
+                )
+        self.assertEqual(len(found), 1, msg=name)
+        return found[0]
+
+    def test_every_function_of_the_bridge_is_recorded(self):
+        declared, rust_side = self.bridge()
+        self.assertEqual(
+            (
+                sorted(set(declared) - set(BRIDGE_FUNCTIONS)),
+                sorted(set(BRIDGE_FUNCTIONS) - set(declared)),
+            ),
+            ([], []),
+            "functions of the bridge that are not recorded; recorded functions that are gone",
+        )
+        self.assertEqual(rust_side, BRIDGE_RUST_SIDE)
+
+    def test_a_function_is_of_its_recorded_kind(self):
+        declared, _ = self.bridge()
+        for name, (kind, why) in BRIDGE_FUNCTIONS.items():
+            self.assertIn(kind, ("plain", "edge", "result"), msg=name)
+            self.assertTrue(why, msg=name)
+            self.assertEqual(declared[name], kind == "result", msg=name)
+            noexcept, body = self.body(name)
+            catches = "edge(" in body or "catch (...)" in body
+            if kind == "edge":
+                self.assertTrue(
+                    noexcept and catches, msg=f"{name} is to catch at its edge"
+                )
+            else:
+                self.assertFalse(catches, msg=f"{name} catches: its kind is edge")
+            if kind == "result":
+                self.assertFalse(noexcept, msg=name)
+
+    def test_no_other_file_declares_cxx_and_c_is_declared_where_recorded(self):
+        if not os.path.isdir(CRATE):
+            self.skipTest("the executor's source is not beside the tests")
+        cxx, c = [], []
+        for path in sorted(
+            glob.glob(os.path.join(CRATE, "**", "*.rs"), recursive=True)
+        ):
+            with open(path) as f:
+                text = re.sub(r"//[^\n]*", "", f.read())
+            if "cxx::bridge" in text or 'extern "C++"' in text:
+                cxx.append(os.path.relpath(path, CRATE))
+            if re.search(r'extern "C" \{', text):
+                c.append(os.path.relpath(path, CRATE))
+        self.assertEqual(cxx, ["bindings/ffi.rs"])
+        self.assertEqual(c, BRIDGE_C_DECLARED_IN)
+        csrc = os.path.join(os.path.dirname(CRATE), "csrc")
+        sources = sorted(f for f in os.listdir(csrc) if not f.endswith(".h"))
+        self.assertEqual(sources, BRIDGE_SOURCES)
+
+    @unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension")
+    @checks_isolated
+    def test_a_fallible_function_refuses(self):
+        # Sizes that cannot be read as a list of ints: an error, where the
+        # process ended.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            nested = torch.nested.nested_tensor([torch.ones(2), torch.ones(3)])
+        with self.assertRaisesRegex(RuntimeError, "sizes"):
+            torch._rust.tensor_size(nested)
+        self.assertEqual(torch._rust.tensor_size(torch.ones(2, 3)), [2, 3])
+
+
+# The float32 precision family: every (backend, operator) pair of the new
+# API and the legacy switches, which write pairs of it.
+AMBIENT_FP32_BACKENDS = ("generic", "cuda", "mkldnn")
+AMBIENT_FP32_OPS = ("all", "conv", "rnn", "matmul")
+AMBIENT_FP32_PAIRS = [
+    ("generic", "all"),
+    *[(b, o) for b in ("cuda", "mkldnn") for o in AMBIENT_FP32_OPS],
+]
+AMBIENT_FP32_PRECISIONS = ("none", "ieee", "tf32", "bf16", "bfx9")
+
+
+def ambient_fp32_pair_setter(backend, op):
+    return lambda value: torch._C._set_fp32_precision_setter(backend, op, value)
+
+
+# member -> (how it is set, every value it takes). A value torch refuses for
+# a member (bf16 on cuda, bfx9 anywhere but cuda.matmul) raises there. The
+# legacy switches by the functions torch.backends calls for them.
+AMBIENT_FP32 = {
+    **{
+        f"{backend}.{op}.fp32_precision": (
+            ambient_fp32_pair_setter(backend, op),
+            AMBIENT_FP32_PRECISIONS,
+        )
+        for backend, op in AMBIENT_FP32_PAIRS
+    },
+    "set_float32_matmul_precision": (
+        lambda value: torch.set_float32_matmul_precision(value),
+        ("highest", "high", "medium"),
+    ),
+    "cuda.matmul.allow_tf32": (
+        lambda value: torch._C._set_cublas_allow_tf32(value),
+        (True, False),
+    ),
+    "cudnn.allow_tf32": (
+        lambda value: torch._C._set_cudnn_allow_tf32(value),
+        (False, True),
+    ),
+    "mkldnn.allow_tf32": (
+        lambda value: torch._C._set_onednn_allow_tf32(value),
+        (True, False),
+    ),
+}
+
+
+def ambient_fp32_read():
+    """Every answer of the family that a kernel reads, as Python reads it."""
+    pairs = [torch._C._get_fp32_precision_getter(b, o) for b, o in AMBIENT_FP32_PAIRS]
+    return (*pairs, torch._C._get_onednn_allow_tf32())
+
+
+@contextlib.contextmanager
+def ambient_fp32_left_as_found():
+    """The family is put back as the test found it (a test may not leave it
+    changed): the pairs others inherit from first, then what torch's own
+    snapshot reads."""
+    wide = [(b, o) for b, o in AMBIENT_FP32_PAIRS if o == "all"]
+    found = [torch._C._get_fp32_precision_getter(b, o) for b, o in wide]
+    snapshot = _snapshot_fp32_precision()
+    try:
+        yield
+    finally:
+        for (b, o), value in zip(wide, found):
+            torch._C._set_fp32_precision_setter(b, o, value)
+        _restore_fp32_precision(snapshot)
+
+
+def ambient_fp32_pair_getter(backend, op):
+    return lambda: torch._C._get_fp32_precision_getter(backend, op)
+
+
+# What a program reads of the family: the pairs, and the legacy getters,
+# which raise once the two APIs were mixed and which no kernel asks.
+AMBIENT_FP32_LEGACY_GETTERS = (
+    "get_float32_matmul_precision",
+    "cuda.matmul.allow_tf32",
+    "cudnn.allow_tf32",
+)
+AMBIENT_FP32_GETTERS = {
+    **{f"{b}.{o}": ambient_fp32_pair_getter(b, o) for b, o in AMBIENT_FP32_PAIRS},
+    "onednn_allow_tf32": lambda: torch._C._get_onednn_allow_tf32(),
+    "get_float32_matmul_precision": lambda: torch.get_float32_matmul_precision(),
+    "cuda.matmul.allow_tf32": lambda: torch.backends.cuda.matmul.allow_tf32,
+    "cudnn.allow_tf32": lambda: torch.backends.cudnn.allow_tf32,
+}
+
+# Settings after which only a legacy getter answers otherwise: the pairs are
+# as before the last one, the legacy matmul precision is not.
+AMBIENT_FP32_LEGACY_ONLY = [
+    ("cuda.matmul.fp32_precision", "tf32"),
+    ("set_float32_matmul_precision", "medium"),
+    ("mkldnn.matmul.fp32_precision", "none"),
+    ("cuda.matmul.allow_tf32", True),
+]
+
+
+def ambient_fp32_legacy():
+    """What the legacy getters answer, or that they raise."""
+    asked = [AMBIENT_FP32_GETTERS[name] for name in AMBIENT_FP32_LEGACY_GETTERS]
+    outcomes = [checks_outcome(get) for get in asked]
+    return [type(o) if isinstance(o, Exception) else o for o in outcomes]
+
+
+AMBIENT_FRESH_BODY = """
+def {name}(x):
+    y = x.sin() * 2 + torch.ones(8)
+    {read}
+    return (y @ y.t()).cos().tanh().exp(), k
+"""
+
+
+def ambient_fresh_body(name, read=None):
+    """A function of its own code object (a region belongs to the code)."""
+    scope = {"torch": torch, "read": read}
+    text = AMBIENT_FRESH_BODY.format(name=name, read="k = read()" if read else "k = 0")
+    exec(compile(text, f"<{name}>", "exec"), scope)
+    return scope[name]
+
+
+# How a function gets onto the VM and how a call of it is made: entry(fn)
+# gives (call, compiled); `compiled` is what the regions of fn are counted
+# on, and `exact` says whether its results are eager's to the bit.
+def ambient_entered_directly(fn):
+    compiled = vm(fn, passes=CHECKS_EARLY)
+    return compiled, compiled
+
+
+def ambient_entered_on_another_thread(fn):
+    compiled = vm(fn, passes=CHECKS_EARLY)
+    calls = itertools.count()
+
+    def call(x):
+        # Every other call, the traced one among them, on a thread of its own.
+        if next(calls) % 2 == 0:
+            return compiled(x)
+        box = []
+        thread = threading.Thread(
+            target=lambda: box.append(checks_outcome(compiled, x))
+        )
+        thread.start()
+        thread.join()
+        if isinstance(box[0], Exception):
+            raise box[0]
+        return box[0]
+
+    return call, compiled
+
+
+def ambient_entered_from_another_function(fn):
+    compiled = vm(fn, passes=CHECKS_EARLY)
+
+    def ambient_outer(x):
+        return compiled(x)
+
+    return vm(ambient_outer, passes=CHECKS_EARLY), compiled
+
+
+def ambient_entered_under_the_fast_list(fn):
+    fast = vm.configure(vm.FAST, regions={"at": 3, "observe": 1}, pure_calls=1)
+    compiled = vm(fn, passes=fast)
+    return compiled, compiled
+
+
+AMBIENT_ENTRY = {
+    "directly": (ambient_entered_directly, True),
+    "on_another_thread": (ambient_entered_on_another_thread, True),
+    "from_another_function": (ambient_entered_from_another_function, True),
+    "under_the_fast_list": (ambient_entered_under_the_fast_list, False),
+}
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmAmbientFloat32(TestCase):
+    """The float32 precision of every backend and operator is in the ambient
+    word, as a kernel reads it: a region is for the precisions of its trace,
+    whichever API set them and however the two were mixed, and no state of
+    the family ends the process. The legacy getters, which raise in a mixed
+    state, are not in the word: a body that asks one gets the answer of its
+    own call."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def settings(self):
+        return [(m, v) for m, (_, values) in AMBIENT_FP32.items() for v in values]
+
+    def put(self, member, value):
+        """Whether torch took the value."""
+        try:
+            AMBIENT_FP32[member][0](value)
+        except RuntimeError:
+            return False
+        return True
+
+    def test_the_members_are_the_pairs_this_build_has(self):
+        valid = []
+        for backend, op in itertools.product(AMBIENT_FP32_BACKENDS, AMBIENT_FP32_OPS):
+            try:
+                torch._C._get_fp32_precision_getter(backend, op)
+            except RuntimeError:
+                continue
+            valid.append((backend, op))
+        self.assertEqual(sorted(valid), sorted(AMBIENT_FP32_PAIRS))
+
+    @checks_isolated
+    def test_the_word_follows_every_member_and_every_value(self):
+        word = torch._rust._ambient_word
+        took = set()
+        with ambient_fp32_left_as_found():
+            # Twice: every setting is made from more than one state.
+            for member, value in self.settings() * 2:
+                before, was = ambient_fp32_read(), word()
+                if not self.put(member, value):
+                    continue
+                took.add(member)
+                after, now = ambient_fp32_read(), word()
+                msg = f"{member} = {value!r}: {before} -> {after}"
+                self.assertIsNotNone(now, msg=msg)
+                self.assertIsNone(torch._rust._not_neutral(), msg=msg)
+                self.assertEqual(after != before, now != was, msg=msg)
+        self.assertEqual(took, set(AMBIENT_FP32))
+
+    @parametrize("entry", list(AMBIENT_ENTRY))
+    @parametrize("member", list(AMBIENT_FP32))
+    @checks_isolated
+    def test_a_member_set_between_calls(self, member, entry):
+        with ambient_fp32_left_as_found():
+            for k, value in enumerate(AMBIENT_FP32[member][1]):
+                self.set_between_calls(member, value, k, *AMBIENT_ENTRY[entry])
+
+    def set_between_calls(self, member, value, k, enter, exact):
+        tolerance = {"atol": 0, "rtol": 0} if exact else {"atol": 1e-05, "rtol": 1e-04}
+        fn = ambient_fresh_body(f"ambient_fp32_{k}")
+        call, compiled = enter(fn)
+        runs, changed = [], None
+        for n in range(10):
+            if n == 6:
+                before = ambient_fp32_read()
+                if not self.put(member, value):
+                    return
+                changed = ambient_fp32_read() != before
+            torch.manual_seed(n)
+            x = torch.randn(4, 8, requires_grad=True)
+            ran = checks_region_runs(compiled, fn)
+            got = call(x)
+            runs.append(checks_region_runs(compiled, fn) - ran)
+            msg = f"{member} = {value!r}, call {n}"
+            self.assertEqual(got[0], fn(x)[0], msg=msg, **tolerance)
+        msg = f"{member} = {value!r}: {runs}"
+        self.assertGreaterEqual(runs[5], 1, msg=msg)
+        # The first call under other precisions is no region's; a call under
+        # the same ones is.
+        self.assertEqual(runs[6] == 0, changed, msg=msg)
+        self.assertGreaterEqual(runs[9], 1, msg=msg)
+
+    @parametrize("getter", list(AMBIENT_FP32_GETTERS))
+    @checks_isolated
+    def test_a_body_that_reads_the_family_gets_its_calls_answer(self, getter):
+        read = AMBIENT_FP32_GETTERS[getter]
+        fn = ambient_fresh_body("ambient_fp32_reads", read)
+        compiled = vm(fn, passes=CHECKS_EARLY)
+
+        def outcome(f, x):
+            got = checks_outcome(f, x)
+            return type(got) if isinstance(got, Exception) else got
+
+        with ambient_fp32_left_as_found():
+            ran, raised, unseen = self.reads_between_settings(fn, compiled, outcome)
+        self.assertGreater(ran, 0)
+        # The walk has settings the word does not see, which change what a
+        # legacy getter answers.
+        self.assertGreater(unseen, 0)
+        if getter in ("get_float32_matmul_precision", "cuda.matmul.allow_tf32"):
+            # And states in which the getter raises.
+            self.assertGreater(raised, 0)
+
+    def reads_between_settings(self, fn, compiled, outcome):
+        ran = raised = unseen = 0
+        settings = [*self.settings() * 2, *AMBIENT_FP32_LEGACY_ONLY]
+        for step, (member, value) in enumerate(settings):
+            before = (ambient_fp32_read(), ambient_fp32_legacy())
+            self.put(member, value)
+            after = (ambient_fp32_read(), ambient_fp32_legacy())
+            unseen += after[0] == before[0] and after[1] != before[1]
+            for again in range(3):
+                torch.manual_seed(step)
+                x = torch.randn(4, 8, requires_grad=True)
+                runs = checks_region_runs(compiled, fn)
+                got, want = outcome(compiled, x), outcome(fn, x)
+                ran += checks_region_runs(compiled, fn) - runs
+                msg = f"after {member} = {value!r}, call {again}"
+                if isinstance(want, type):
+                    raised += 1
+                    self.assertIs(got, want, msg=msg)
+                else:
+                    self.assertEqual(got[1], want[1], msg=msg)
+                    self.assertEqual(got[0], want[0], atol=0, rtol=0, msg=msg)
+        return ran, raised, unseen
 
 
 if __name__ == "__main__":

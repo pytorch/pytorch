@@ -84,6 +84,13 @@ int tr_frame_owned_by_generator(_PyInterpreterFrame* f) {
   return f->owner == FRAME_OWNED_BY_GENERATOR;
 }
 
+// Whether nothing of the frame's body has run: a generator's frame as
+// RETURN_GENERATOR left it, before its first resume. (The test of
+// _PyFrame_IsIncomplete, which answers no for every generator's frame.)
+int tr_frame_unstarted(_PyInterpreterFrame* f) {
+  return f->prev_instr < _PyCode_CODE(f->f_code) + f->f_code->_co_firsttraceable;
+}
+
 // The executor points the frame at code unit `unit`, as if that instruction
 // is executing, by storing code_units + unit to prev_instr: tracebacks,
 // f_lineno and f_lasti read it.

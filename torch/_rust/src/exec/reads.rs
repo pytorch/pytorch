@@ -308,7 +308,7 @@ impl Entries {
 // The reads of a trace in progress.
 #[derive(Default)]
 struct Trace {
-    thread: u64,
+    thread: Option<tffi::Word>,
     entries: Entries,
     group_of: HashMap<usize, usize>,
     class_of: HashMap<usize, usize>,
@@ -407,7 +407,7 @@ pub fn begin() {
     super::made::clear();
     asked::init();
     super::built::init();
-    TRACE.set(Some(Trace { thread: tffi::region_thread_state(), ..Trace::default() }));
+    TRACE.set(Some(Trace { thread: super::ambient::word(), ..Trace::default() }));
 }
 
 pub fn end() {
@@ -1713,7 +1713,7 @@ struct Constant {
 // file). Made by torch._rust._region_reads when the body's trace is over.
 #[pyclass(frozen, module = "torch._rust")]
 pub struct Reads {
-    thread: u64,
+    thread: Option<tffi::Word>,
     entries: GilCell<Entries>,
     consts: GilCell<Vec<Constant>>,
     // Called before the region's function when a constant's data moved (set
@@ -2067,7 +2067,7 @@ impl Reads {
             }
             ok
         };
-        let why = if tffi::region_thread_state() != self.thread {
+        let why = if self.thread.is_none() || super::ambient::word() != self.thread {
             "thread state"
         } else if tffi::torch_function_mode_active() {
             // The mode is to see the program's own calls: a region makes none.
@@ -2278,7 +2278,7 @@ impl Reads {
             if unsafe { exact_scalar(o.as_ptr()) } || o.is_none() || o.is_instance_of::<pyo3::types::PyBool>() { format!("{}", o.repr().map_or("?".into(), |r| r.to_string())) } else { format!("<{tp} at {:p}>", o.as_ptr()) }
         };
         let show = |p: &Pin| unsafe { Bound::from_borrowed_ptr_or_opt(py, p.as_ptr()) }.map_or("<an object that died>".into(), |o| shown(&o.unbind()));
-        let mut out = vec![format!("thread state {:#x}", self.thread)];
+        let mut out = vec![format!("thread state {}", self.thread.map_or("unread".into(), |w| format!("{:#x} {:#x}", w.a, w.b)))];
         out.extend(unsafe { &*self.consts.get() }.iter().map(|c| format!("{} stays a {}", shown(&c.obj), c.key)));
         out.extend(e.keyed.iter().map(|k| format!("{}, which was asked about, stays a {}", show(&k.obj), k.key)));
         out.extend(e.typed.iter().map(|t| format!("type({}) is {}", show(&t.obj), show(&t.class))));
