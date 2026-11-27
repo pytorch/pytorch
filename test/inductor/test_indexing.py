@@ -64,6 +64,7 @@ DENSE_X_INDEX_LOAD = r"tl\.load\([^\n]*tl\.broadcast_to\(x\d+, \[XBLOCK, R0_BLOC
 REDUCTION_DEPENDENT_LOAD = r"tl\.load\([^\n]*r0_"
 
 
+@instantiate_parametrized_tests
 class TestIndexingSimplification(InductorTestCase):
     def test_simplify_index_in_vec_range(self):
         i = sympy.Symbol("i", integer=True, nonnegative=True)
@@ -431,7 +432,7 @@ class TestIndexingSimplification(InductorTestCase):
 
         # the FloorDiv pattern can simplify away: FloorDiv(64 * i0, 64) is i0, so
         # the matching term has no FloorDiv
-        expr8 = ModularIndexing(64 * i0, 1, 64) + 64 * i0
+        expr8 = ModularIndexing(64 * i0, 1, 64, evaluate=False) + 64 * i0
         self.assertEqual(join_dimensions(expr8), 64 * i0)
 
     def test_modular_indexing_pairs_merged(self):
@@ -458,6 +459,64 @@ class TestIndexingSimplification(InductorTestCase):
         actual = sizevars.combine_modular_indexing_pairs(expr2)
         self.assertEqual(expr2, actual)
         self.assertNotEqual(ModularIndexing(x, 1, b), actual)
+
+    def test_modular_indexing_symbolic_whole_period(self):
+        w = sympy.Symbol("w", integer=True, positive=True)
+        self.assertEqual(ModularIndexing(w, 1, w), 0)
+
+    @parametrize("divisor", [2, 3])
+    def test_modular_indexing_factored_period(self, divisor):
+        s, x, y = sympy.symbols("s x y", integer=True, positive=True)
+        expr = ModularIndexing(divisor * x * (s + 1) + y, divisor, s + 1)
+
+        self.assertEqual(expr, ModularIndexing(y, divisor, s + 1))
+
+    def test_modular_indexing_cancel_fractional_period(self):
+        s, x = sympy.symbols("s x", integer=True, positive=True)
+        expr = ModularIndexing(x * (s**2 + s) / 2, 1, s + 1)
+
+        self.assertEqual(expr.subs({x: 1, s: 3}), 2)
+
+    def test_modular_indexing_cancel_fractional_even_period(self):
+        s = sympy.Symbol("s", integer=True, positive=True)
+        e = sympy.Symbol("e", even=True, positive=True)
+        expr = ModularIndexing(e * (s**2 + 2 * s + 1) / 18, 1, s + 1)
+
+        self.assertEqual(expr.subs({s: 2, e: 2}), 1)
+
+    def test_modular_indexing_fractional_period(self):
+        w = sympy.Symbol("w", integer=True, positive=True)
+        expr = ModularIndexing(w * (w + 1) / 2 + 1, 1, w)
+
+        self.assertEqual(expr.subs(w, 4), 3)
+
+    @parametrize("value", [2, 4, 22, 44])
+    @parametrize("offset", [0, 1])
+    def test_modular_indexing_fractional_even_period(self, value, offset):
+        w = sympy.Symbol("w", integer=True, positive=True)
+        e = sympy.Symbol("e", even=True, positive=True)
+        expr = ModularIndexing(w * e / 22 + offset, 1, w)
+
+        self.assertEqual(expr.subs({w: 22, e: value}), (value + offset) % 22)
+
+    @parametrize("divisor", [1, 2])
+    @parametrize("whole_period", [False, True])
+    def test_modular_indexing_piecewise_base(self, divisor, whole_period):
+        x = sympy.Symbol("x", integer=True, positive=True)
+        scale = 1024 * divisor if whole_period else 1
+        base = scale * sympy.Piecewise((x, x < 10), (x + 1, True))
+        expr = ModularIndexing(base, divisor, 1024)
+
+        self.assertEqual(expr.subs(x, 5), (scale * 5 // divisor) % 1024)
+        self.assertEqual(expr.subs(x, 15), (scale * 16 // divisor) % 1024)
+
+    def test_modular_indexing_piecewise_modulus(self):
+        x = sympy.Symbol("x", integer=True, positive=True)
+        modulus = sympy.Piecewise((x, x < 10), (x + 1, True)) + 1
+        expr = ModularIndexing(x * modulus + 1, 1, modulus)
+
+        self.assertEqual(expr.subs(x, 5), 1)
+        self.assertEqual(expr.subs(x, 15), 1)
 
     def test_modular_indexing_positive(self):
         x = sympy.Symbol("x", integer=True, positive=True)
@@ -1842,12 +1901,9 @@ class TestOptimizationHintIdentityExpansion(InductorTestCase):
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
 
-        # Mirrors the real bug: -u0 * (-Identity(1) + Identity(0))
-        # simplifies to -u0 * (0 - 1) = u0.
-        # Without expand(identity=True) after _sub_unbacked_exprs,
-        # subs({u0: fallback}) leaves -Identity(1) + Identity(0) unexpanded,
-        # causing RuntimeError("Failed to realize expression to int").
-        expr = -u0 * (-Identity(sympy.Integer(1)) + Identity(sympy.Integer(0)))
+        one = Identity(sympy.Integer(1), evaluate=False)
+        zero = Identity(sympy.Integer(0), evaluate=False)
+        expr = -u0 * (-one + zero)
         hint = sizevars.optimization_hint(expr, fallback=42)
         self.assertEqual(hint, 42)
 

@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest import mock
 
-from sympy import I, Max, Min, Symbol, sympify
+from sympy import Float, I, Integer, Max, Min, nan, Rational, Symbol, sympify
 
 import torch
 from torch._dynamo import device_interface as di
@@ -415,6 +415,58 @@ class TestCUDAGraphUtils(TestCase):
         self.assertIs(compiled_graph.current_callable, original_callable)
 
 
+@instantiate_parametrized_tests
+class TestCutlassTemplateEligibility(TestCase):
+    @parametrize(
+        "arch,supported",
+        (
+            ("75", False),
+            ("80", True),
+            ("89", True),
+            ("90a", True),
+            ("sm_100", True),
+            ("103", True),
+            ("120", False),
+            ("invalid", False),
+            (None, False),
+        ),
+    )
+    def test_cuda_arch(self, arch, supported):
+        self._check_eligibility("cuda", arch, supported)
+
+    @parametrize("device_type", ("xpu", "cpu"))
+    def test_other_device(self, device_type):
+        self._check_eligibility(device_type, None, device_type == "xpu")
+
+    def _check_eligibility(self, device_type, arch, supported):
+        from torch._inductor.ir import FixedLayout
+
+        layout = FixedLayout(torch.device(device_type), torch.float16, [4, 4])
+        graph = mock.MagicMock()
+        graph.sizevars.optimization_hint.return_value = 64
+        settings = {"max_autotune": True, "max_autotune_gemm_backends": "CUTLASS"}
+        with (
+            inductor_config.patch(settings),
+            V.set_graph_handler(graph),
+            mock.patch.object(torch.version, "hip", None),
+            mock.patch(
+                "torch._inductor.codegen.cutlass.utils.get_cuda_arch", return_value=arch
+            ) as get_arch,
+            mock.patch(
+                "torch._inductor.codegen.cutlass.utils.try_import_cutlass",
+                return_value=True,
+            ) as import_cutlass,
+            mock.patch.object(
+                inductor_utils, "_use_template_for_gpu", return_value=True
+            ) as use_template,
+        ):
+            result = inductor_utils.use_cutlass_template(layout, 4, 4, 4)
+            self.assertEqual(result, supported)
+        self.assertEqual(import_cutlass.call_count, int(supported))
+        self.assertEqual(use_template.call_count, int(supported))
+        self.assertEqual(get_arch.call_count, int(device_type == "cuda"))
+
+
 class TestUtils(TestCase):
     @unittest.skipIf(torch.version.hip is not None, "SM threshold is not used on ROCm")
     def test_is_big_gpu_min_sms_config(self):
@@ -522,19 +574,32 @@ class TestUtils(TestCase):
         result = sympy_subs(expr, {q0: I})
         self.assertTrue(result.has(I))
 
+    def testSympySubsIdentityNumberInMinMax(self):
+        q0 = Symbol("q0", integer=True, nonnegative=True)
+        self.assertEqual(sympy_subs(Max(-4, -Identity(q0)), {q0: 0}), 0)
+        self.assertTrue(sympy_subs(Max(-4, -Identity(q0)), {q0: Float(0.0)}).is_zero)
+        self.assertTrue(sympy_subs(Max(-4, -Identity(q0)), {q0: nan}).has(Identity))
+
+    def testIdentityOfComparableNumberCollapses(self):
+        self.assertIsInstance(Identity(sympify("-6")), Integer)
+        self.assertEqual(Identity(sympify("1/7")), Rational(1, 7))
+        self.assertIsInstance(Identity(Float(0.0)), Float)
+        self.assertIsInstance(Identity(nan), Identity)
+        self.assertIsInstance(Identity(I), Identity)
+
     def testIdentityComparisonNoRecursion(self):
-        self.assertTrue(Identity(sympify("0")) >= 0)
-        self.assertFalse(Identity(sympify("-6")) >= 0)
-        self.assertTrue(0 >= Identity(sympify("-6")))
+        self.assertTrue(Identity(sympify("0"), evaluate=False) >= 0)
+        self.assertFalse(Identity(sympify("-6"), evaluate=False) >= 0)
+        self.assertTrue(0 >= Identity(sympify("-6"), evaluate=False))
 
     def testIdentityComparableNumbersInMinMax(self):
-        expr = Identity(sympify("-6"))
+        expr = Identity(sympify("-6"), evaluate=False)
         self.assertTrue(expr.is_number)
         self.assertTrue(expr.is_comparable)
         self.assertEqual(Max(0, expr), 0)
 
     def testIdentityRationalComparisonNoRecursion(self):
-        expr = Identity(sympify("1/7"))
+        expr = Identity(sympify("1/7"), evaluate=False)
         self.assertTrue(expr >= 0)
         self.assertTrue(Max(0, expr).has(expr))
 
