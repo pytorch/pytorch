@@ -50,6 +50,7 @@ from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     dtype_name,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -222,6 +223,8 @@ def _force_pdl_nvgemm_choice():
 class TestNVUniversalGemmDense(TestCase):
     """Dense NVIDIA Universal GEMM coverage for SM90 and later."""
 
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize(
         "layout_a,layout_b",
@@ -286,6 +289,8 @@ class TestNVUniversalGemmDense(TestCase):
 @instantiate_parametrized_tests
 class TestNVUniversalGemmPDLMetadata(TestCase):
     """Hardware-independent tests for selective NVGEMM PDL metadata."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def _make_pdl_chain():
@@ -490,6 +495,8 @@ class TestNVUniversalGemmPDLMetadata(TestCase):
 @instantiate_parametrized_tests
 class TestNVUniversalGemm(TestCase):
     """Test cases for NVIDIA Universal GEMM functionality."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def _compile_pdl_consumer(self, fn, *args, **overrides):
         torch._dynamo.reset()
@@ -2179,6 +2186,8 @@ class TestNVUniversalGemm(TestCase):
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 class TestNVUniversalGemmScheduling(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
 
@@ -2521,6 +2530,8 @@ class TestNVUniversalGemmScheduling(TestCase):
 @instantiate_parametrized_tests
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @staticmethod
     def _make_nvfp4_benchmark_request(
@@ -4181,6 +4192,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
 class TestNVUniversalGemmHeuristicsIntegration(TestCase):
     """Integration tests for nvMatmulHeuristics with real library calls."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def test_fp4_heuristic_configs(self):
         """Test that nvMatmulHeuristics returns configs for FP4 blockscaled GEMM."""
         heuristics = NVUniversalGemmHeuristics()
@@ -4243,6 +4256,8 @@ class TestNVUniversalGemmHeuristicsIntegration(TestCase):
 @instantiate_parametrized_tests
 class TestNVUniversalGemmDynamicShapes(TestCase):
     """Test cases for NVIDIA Universal GEMM with dynamic shapes."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @torch._dynamo.config.patch({"capture_dynamic_output_shape_ops": True})
     def test_unbacked_rows(self):
@@ -4447,6 +4462,8 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
     "Requires cutlass.operators and Blackwell",
 )
 class TestNVUniversalGemmDynamicShapeComments(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize("op", ("addmm", "bmm"))
     def test_computed_view_requires_aligned_offset(self, device, op):
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
@@ -4577,6 +4594,8 @@ instantiate_device_type_tests(
 class TestNVUniversalGemmLaunchContract(TestCase):
     """Boundary tests for _kernel_launch_checks on synthetic layouts."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     INT32_MAX = 2**31 - 1
 
     def _launch_ok(
@@ -4699,6 +4718,8 @@ class TestNVUniversalGemmLaunchContract(TestCase):
 
 @instantiate_parametrized_tests
 class TestNVUniversalGemmOriginalGuardContracts(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("mode", ("frozen", "size_oblivious"))
     @parametrize("proven", (False, True))
     def test_guards_require_existing_proof(self, mode, proven):
@@ -5013,6 +5034,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     generated code for epilogue markers. Benchmarks are mocked to make fusion
     decisions independent of GPU noise.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     M, N, K = 512, 512, 512
 
