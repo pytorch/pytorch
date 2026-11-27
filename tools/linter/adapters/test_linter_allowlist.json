@@ -308,7 +308,6 @@
   "test/functorch/test_ac.py",
   "test/functorch/test_ac_knapsack.py",
   "test/functorch/test_aot_joint_with_descriptors.py",
-  "test/functorch/test_aotdispatch.py",
   "test/functorch/test_compile_to_python.py",
   "test/functorch/test_control_flow.py",
   "test/functorch/test_eager_transforms.py",

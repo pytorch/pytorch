@@ -5186,7 +5186,6 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
         self.assertIsNone(input_view_ref())
         self.assertIsNone(non_leaf_base_ref())
 
-    @onlyAccelerator
     def test_synthetic_base_base_attribute_is_none(self, device):
         def f(a, b):
             a.add_(1)
@@ -5202,14 +5201,12 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
-    @onlyAccelerator
     def test_autocast_disable_guard(self, device):
         with torch._C._DisableAutocast():
             x = torch.rand([4, 4]).to(device=device)
             y = x @ x
             self.assertEqual(y.dtype, torch.float32)
 
-    @onlyAccelerator
     def test_nonidempotent_amp(self, device):
         def f(self_s_emb, add_3):
             einsum_2 = torch.functional.einsum("ah,th->t", self_s_emb, add_3)
@@ -5228,59 +5225,6 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
         with torch.amp.autocast(device_type, enabled=True):
             self.verify_aot_autograd(f, args)
 
-    @onlyAccelerator
-    @skipCUDAIf(not torch.backends.cudnn.is_available(), "CUDNN is unavailable")
-    def test_batch_norm_amp(self, device):
-        input_dtype = torch.float16
-        param_dtype = torch.float32
-        weight, bias = (
-            torch.ones(64, device=device, dtype=param_dtype, requires_grad=True)
-            for _ in range(2)
-        )
-        running_mean, running_var = (
-            torch.ones(64, device=device, dtype=param_dtype) for _ in range(2)
-        )
-
-        device_type = torch.device(device).type
-
-        def bn(x):
-            fn = (
-                torch.ops.aten.native_batch_norm
-                if device_type == "xpu"
-                else torch.ops.aten.cudnn_batch_norm
-                if torch.version.hip is None
-                else torch.ops.aten.miopen_batch_norm
-            )
-            return fn(
-                x,
-                weight,
-                bias,
-                running_mean,
-                running_var,
-                False,
-                0.1,
-                1e-05,
-            )
-
-        inp = torch.ones(
-            torch.Size([16, 64, 112, 112]), dtype=input_dtype, device=device
-        )
-
-        ref = bn(inp)
-        batch_norm_decomp = torch._decomp.get_decompositions(
-            {
-                torch.ops.aten.native_batch_norm
-                if device_type == "xpu"
-                else torch.ops.aten.cudnn_batch_norm
-            }
-        )
-        aot_fn = make_fx(bn, decomposition_table=batch_norm_decomp)(inp)
-        res = aot_fn(inp)
-        for a, b in zip(ref, res):
-            if not torch.allclose(a, b):
-                raise AssertionError(f"Tensors not allclose: {a} vs {b}")
-
-    @onlyAccelerator
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
     @torch._functorch.config.patch(recompute_views=True)
     def test_saved_tensors_hooks_mutations_raise(self, device):
@@ -5374,7 +5318,6 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             "removing all user-visible references",
         )
 
-    @onlyAccelerator
     def test_tangent_freed_compiled_model_and_loss(self, device):
         """Scenario: compiled model + compiled loss (torchtitan simple_fsdp pattern).
 
@@ -5403,7 +5346,6 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         self._assert_no_extra_refs(refcount_box)
 
-    @onlyAccelerator
     def test_tangent_freed_compiled_model_eager_loss(self, device):
         """Scenario: compiled model + eager loss (common training pattern).
 
@@ -5421,7 +5363,6 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         self._assert_no_extra_refs(refcount_box)
 
-    @onlyAccelerator
     def test_tangent_user_provided_via_pop(self, device):
         """Scenario: user creates tangent but releases it before backward runs.
 
@@ -10605,7 +10546,7 @@ def forward(self, primals_1, tangents_1):
 
 
 class TestPartitioningCheckpointHooks(AOTTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_register_hook_in_checkpoint_accumulated_grad(self, device):
         def body(y):
@@ -10632,7 +10573,6 @@ class TestPartitioningCheckpointHooks(AOTTestCase):
 class TestPartitioningDevice(AOTTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_autocast(self, device):
         mod = torchvision.models.resnet18().to(device)
@@ -12480,7 +12420,6 @@ Expected a .* tangent but got a plain Tensor.""",
 class TestAOTModuleSimplifiedDevice(AOTTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
     def test_rms_norm(self, device):
         # Only CUDA rms norm fails to be decomposed
         def fn(x):
@@ -12814,7 +12753,6 @@ class TestAOTModuleSimplifiedDevice(AOTTestCase):
                 #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
                 # )
 
-    @onlyAccelerator
     @skipCUDAIf(not SM80OrLater, "bfloat16, float8")
     def test_saved_tensors_hooks_params(self, device):
         with torch.library._scoped_library("_test_aotdispatch_lib", "FRAGMENT") as lib:
@@ -12830,12 +12768,11 @@ class TestAOTModuleSimplifiedDevice(AOTTestCase):
             def log_meta(x):
                 return x.clone()
 
-            for backend in ["CPU", "CUDA", "XPU"]:
-                lib.impl(
-                    "log",
-                    log_impl,
-                    backend,
-                )
+            lib.impl(
+                "log",
+                log_impl,
+                torch._C._dispatch_key_for_device(torch.device(device).type),
+            )
             lib.impl("log", log_meta, "Meta")
 
             def pack_fp8_with_scale_and_log(x):
@@ -12936,7 +12873,6 @@ class TestAOTModuleSimplifiedDevice(AOTTestCase):
                 self.assertTrue([2, 2, 2] in logged_shapes)
                 self.assertTrue(torch.float64 in logged_dtypes)
 
-    @onlyAccelerator
     @skipCUDAIf(not SM80OrLater, "bfloat16, float8")
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
     def test_saved_tensors_hooks_recompile(self, device):
@@ -13300,7 +13236,7 @@ def _test_aot_autograd_module_helper(
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @ops(_aot_autograd_ops, allowed_dtypes=(torch.float,))
     @skipOps(aot_autograd_failures)
@@ -13373,7 +13309,7 @@ symbolic_aot_autograd_module_failures = {
 
 
 class TestEagerFusionModuleInfo(AOTTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(unittest.expectedFailure, aot_autograd_module_failures)
@@ -13805,64 +13741,21 @@ class _AOTAutogradHardwareTestBase(_TestAOTAutogradBase):
     _compile_autocast = TestAOTAutogradDevice._compile_autocast
 
 
-class TestAOTAutogradAutocast(_AOTAutogradHardwareTestBase):
-    hw_classification = HardwareClassification.CPU
-
-    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
-    def test_backward_pass_autocast_on(self, device):
-        out, grad = self._compile_autocast(device, forward_autocast=True)
-        self.assertEqual(out, torch.zeros_like(out))
-        self.assertEqual(grad, torch.ones_like(grad))
-
-    @torch._functorch.config.patch(backward_pass_autocast="off")
-    def test_backward_pass_autocast_off(self, device):
-        out, grad = self._compile_autocast(device, forward_autocast=True)
-        self.assertEqual(out, torch.zeros_like(out))
-        self.assertEqual(grad, torch.zeros_like(grad))
-
-    @torch._functorch.config.patch(backward_pass_autocast="off")
-    def test_backward_pass_autocast_custom(self, device):
-        device_type = torch.device(device).type
-        with torch._functorch.config.patch(
-            backward_pass_autocast=[{"device_type": device_type}]
-        ):
-            out, grad = self._compile_autocast(device, forward_autocast=False)
-            self.assertEqual(out, torch.zeros_like(out))
-            self.assertEqual(grad, torch.ones_like(grad))
-
-
-@inherit_device_tests
-class TestAOTAutogradWithDynamoAutocast(
-    _AOTAutogradDynamoMixin, TestAOTAutogradAutocast
-):
-    hw_classification = HardwareClassification.CPU
-
-
-@inherit_device_tests
-class TestAOTAutogradWithCacheAutocast(
-    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoAutocast
-):
-    hw_classification = HardwareClassification.CPU
-
-
 class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
     @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
     def test_backward_pass_autocast_on(self, device):
         out, grad = self._compile_autocast(device, forward_autocast=True)
         self.assertEqual(out, torch.zeros_like(out))
         self.assertEqual(grad, torch.ones_like(grad))
 
-    @onlyAccelerator
     @torch._functorch.config.patch(backward_pass_autocast="off")
     def test_backward_pass_autocast_off(self, device):
         out, grad = self._compile_autocast(device, forward_autocast=True)
         self.assertEqual(out, torch.zeros_like(out))
         self.assertEqual(grad, torch.zeros_like(grad))
 
-    @onlyAccelerator
     @torch._functorch.config.patch(backward_pass_autocast="off")
     def test_backward_pass_autocast_custom(self, device):
         device_type = torch.device(device).type
@@ -13888,6 +13781,94 @@ class TestAOTAutogradWithCacheAccelerator(
     hw_classification = HardwareClassification.ACCELERATOR
 
 
+class TestAOTAutogradBatchNormCUDA(_AOTAutogradHardwareTestBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @skipCUDAIf(not torch.backends.cudnn.is_available(), "CUDNN is unavailable")
+    def test_batch_norm_amp(self, device):
+        input_dtype = torch.float16
+        param_dtype = torch.float32
+        weight, bias = (
+            torch.ones(64, device=device, dtype=param_dtype, requires_grad=True)
+            for _ in range(2)
+        )
+        running_mean, running_var = (
+            torch.ones(64, device=device, dtype=param_dtype) for _ in range(2)
+        )
+
+        device_type = torch.device(device).type
+
+        def bn(x):
+            fn = (
+                torch.ops.aten.native_batch_norm
+                if device_type == "xpu"
+                else torch.ops.aten.cudnn_batch_norm
+                if torch.version.hip is None
+                else torch.ops.aten.miopen_batch_norm
+            )
+            return fn(
+                x,
+                weight,
+                bias,
+                running_mean,
+                running_var,
+                False,
+                0.1,
+                1e-05,
+            )
+
+        inp = torch.ones(
+            torch.Size([16, 64, 112, 112]), dtype=input_dtype, device=device
+        )
+
+        ref = bn(inp)
+        batch_norm_decomp = torch._decomp.get_decompositions(
+            {
+                torch.ops.aten.native_batch_norm
+                if device_type == "xpu"
+                else torch.ops.aten.cudnn_batch_norm
+            }
+        )
+        aot_fn = make_fx(bn, decomposition_table=batch_norm_decomp)(inp)
+        res = aot_fn(inp)
+        for a, b in zip(ref, res):
+            if not torch.allclose(a, b):
+                raise AssertionError(f"Tensors not allclose: {a} vs {b}")
+
+
+@inherit_device_tests
+class TestAOTAutogradBatchNormXPU(TestAOTAutogradBatchNormCUDA):
+    hw_classification = HardwareClassification.XPU
+
+
+@inherit_device_tests
+class TestAOTAutogradWithDynamoBatchNormCUDA(
+    _AOTAutogradDynamoMixin, TestAOTAutogradBatchNormCUDA
+):
+    hw_classification = HardwareClassification.CUDA
+
+
+@inherit_device_tests
+class TestAOTAutogradWithCacheBatchNormCUDA(
+    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoBatchNormCUDA
+):
+    hw_classification = HardwareClassification.CUDA
+
+
+@inherit_device_tests
+class TestAOTAutogradWithDynamoBatchNormXPU(
+    _AOTAutogradDynamoMixin, TestAOTAutogradBatchNormXPU
+):
+    hw_classification = HardwareClassification.XPU
+
+
+@inherit_device_tests
+class TestAOTAutogradWithCacheBatchNormXPU(
+    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoBatchNormXPU
+):
+    hw_classification = HardwareClassification.XPU
+
+
 instantiate_parametrized_tests(TestAOTAutograd)
 instantiate_device_type_tests(TestAOTAutogradDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(
@@ -13901,23 +13882,6 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 
-instantiate_device_type_tests(
-    TestAOTAutogradAutocast,
-    globals(),
-    only_for=("cpu",),
-)
-
-instantiate_device_type_tests(
-    TestAOTAutogradWithDynamoAutocast,
-    globals(),
-    only_for=("cpu",),
-)
-
-instantiate_device_type_tests(
-    TestAOTAutogradWithCacheAutocast,
-    globals(),
-    only_for=("cpu",),
-)
 
 instantiate_device_type_tests(
     TestAOTAutogradAccelerator,
@@ -13952,8 +13916,31 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 
-instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
+instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), allow_xpu=True)
+
+
+instantiate_device_type_tests(
+    TestAOTAutogradBatchNormCUDA, globals(), only_for=("cuda",), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestAOTAutogradWithDynamoBatchNormCUDA,
+    globals(),
+    only_for=("cuda",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestAOTAutogradWithCacheBatchNormCUDA, globals(), only_for=("cuda",), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestAOTAutogradBatchNormXPU, globals(), only_for=("xpu",), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestAOTAutogradWithDynamoBatchNormXPU, globals(), only_for=("xpu",), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestAOTAutogradWithCacheBatchNormXPU, globals(), only_for=("xpu",), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
