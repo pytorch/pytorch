@@ -102,7 +102,6 @@ from torch.testing._internal.common_utils import (
     IS_S390X,
     parametrize,
     recover_orig_fp32_precision,
-    scoped_load_inline,
     set_default_dtype,
     skipIfCppFakeTensor,
     skipIfHpu,
@@ -114,10 +113,6 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest,
 )
 from torch.utils._sympy.numbers import int_oo
-
-
-if IS_FBCODE:
-    from caffe2.test.dynamo import _pybind11_enum_test
 
 
 pytree_modules = {
@@ -230,23 +225,6 @@ class UserDefineSetAttr:
             return None
 
 
-@functools.cache
-@scoped_load_inline
-def _load_pybind11_enum_mod(*, load_inline):
-    cpp_source = """
-    #include <torch/extension.h>
-
-    enum class E { A = 0, B = 1 };
-
-    PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-        py::enum_<E>(m, "E")
-            .value("A", E::A)
-            .value("B", E::B);
-    }
-    """
-    return load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
-
-
 class MiscTests(torch._inductor.test_case.TestCase):
     def test_storage_offset_scalar_output(self):
         def fn(x):
@@ -302,13 +280,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertEqual(len(entries), 0)
 
     def test_pybind11_enum_conversion(self):
-        if IS_FBCODE:
-            # fbcode's Python runtime lacks the shared libs load_inline needs, so
-            # we use the Buck-prebuilt fixture instead of the load_inline argument.
-            mod = _pybind11_enum_test
-        else:
-            mod = _load_pybind11_enum_mod()
-        e = mod.E.A
+        ProfilerActivity = torch._C._profiler.ProfilerActivity
+        e = ProfilerActivity.CPU
         self.assertEqual(
             torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
         )
@@ -317,7 +290,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(
             torch.compile(lambda x: [10, 20][x], backend="eager", fullgraph=True)(
-                mod.E.B
+                ProfilerActivity.XPU
             ),
             20,
         )
@@ -3039,6 +3012,89 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNone(opt_fn(v, v))
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
+
+    def test_setattr_readonly_function_closure(self):
+        def make_f():
+            a = 12
+
+            def f():
+                return a
+
+            return f
+
+        def try_readonly(f):
+            results = []
+            try:
+                f.__closure__ = f.__closure__
+            except AttributeError:
+                results.append("set")
+            try:
+                del f.__closure__
+            except AttributeError:
+                results.append("del")
+            try:
+                f.__globals__ = {}
+            except AttributeError:
+                results.append("globals")
+            try:
+                f.__builtins__ = {}
+            except AttributeError:
+                results.append("builtins")
+            return results
+
+        def nested(x):
+            return x + 1, try_readonly(make_f())
+
+        def sourced(x, f):
+            return x + 1, try_readonly(f)
+
+        x = torch.ones(1)
+        for fn, args in ((nested, (x,)), (sourced, (x, make_f()))):
+            ref = fn(*args)
+            res = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            self.assertEqual(ref, res)
+            self.assertEqual(res[1], ["set", "del", "globals", "builtins"])
+
+    def test_setattr_writable_function_attributes(self):
+        def make_g():
+            def g():
+                pass
+
+            return g
+
+        def fn(x, g):
+            g.foo = 1
+            g.__annotations__ = {"x": int}
+            return x + g.foo
+
+        x = torch.ones(1)
+        g_ref, g_res = make_g(), make_g()
+        ref = fn(x, g_ref)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, g_res)
+        self.assertEqual(ref, res)
+        self.assertEqual(g_res.foo, 1)
+        self.assertEqual(g_res.__annotations__, {"x": int})
+
+    def test_setattr_readonly_names_on_lru_cache_wrapper(self):
+        @functools.lru_cache
+        def g():
+            return 1
+
+        def fn(x):
+            try:
+                g.__closure__ = None
+                ok = True
+            except AttributeError:
+                ok = False
+            return x + 1, ok
+
+        # The lru_cache wrapper is not a FunctionType, so eager allows the write.
+        # Replaying it onto the wrapper's __dict__ is tracked in #202350.
+        x = torch.ones(1)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(ref, res)
+        self.assertTrue(res[1])
 
     # Asserting on the graph break counters rather than on the compiled result:
     # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method

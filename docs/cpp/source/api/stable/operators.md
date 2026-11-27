@@ -127,6 +127,24 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::pad
 ```
 
+```{doxygenfunction} torch::stable::roll
+```
+
+```{doxygenfunction} torch::stable::repeat_interleave(const torch::stable::Tensor&, int64_t, std::optional<int64_t>, std::optional<int64_t>)
+```
+
+```{doxygenfunction} torch::stable::repeat_interleave(const torch::stable::Tensor&, std::optional<int64_t>)
+```
+
+```{doxygenfunction} torch::stable::repeat_interleave(const torch::stable::Tensor&, const torch::stable::Tensor&, std::optional<int64_t>, std::optional<int64_t>)
+```
+
+```{doxygenfunction} torch::stable::expand
+```
+
+```{doxygenfunction} torch::stable::nonzero
+```
+
 ## Device and Type Conversion
 
 ```{doxygenfunction} torch::stable::to(const torch::stable::Tensor &self, std::optional<torch::headeronly::ScalarType> dtype, std::optional<torch::headeronly::Layout> layout, std::optional<torch::stable::Device> device, std::optional<bool> pin_memory, bool non_blocking, bool copy, std::optional<torch::headeronly::MemoryFormat> memory_format)
@@ -147,6 +165,12 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::copy_
+```
+
+```{doxygenfunction} torch::stable::index_fill_(const torch::stable::Tensor &self, int64_t dim, const torch::stable::Tensor &index, const torch::stable::Tensor &value)
+```
+
+```{doxygenfunction} torch::stable::index_fill_(const torch::stable::Tensor &self, int64_t dim, const torch::stable::Tensor &index, double value)
 ```
 
 ## Mathematical Operations
@@ -206,4 +230,22 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::masked_select
+```
+
+```{doxygenfunction} torch::stable::all(const torch::stable::Tensor&)
+```
+
+```{doxygenfunction} torch::stable::all(const torch::stable::Tensor&, int64_t, bool)
+```
+
+```{doxygenfunction} torch::stable::all(const torch::stable::Tensor&, std::optional<torch::headeronly::IntHeaderOnlyArrayRef>, bool)
+```
+
+```{doxygenfunction} torch::stable::equal
+```
+
+```{doxygenfunction} torch::stable::median(const torch::stable::Tensor&, int64_t, bool)
+```
+
+```{doxygenfunction} torch::stable::median(const torch::stable::Tensor&)
 ```

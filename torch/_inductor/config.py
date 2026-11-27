@@ -626,6 +626,9 @@ max_autotune_gemm_min_sms: int | None = (
 incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
 )
+# Extend the default kernel allowlist when incremental autotuning is enabled.
+# An explicit TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_INCLUDE still takes precedence.
+incremental_autotune_reduction = False
 # Per-state dispatch budget for incremental autotuning; 0 disables the cap.
 # A torch.compile option overrides this default for every generated kernel.
 incremental_autotune_max_dispatches = int(
@@ -2553,6 +2556,15 @@ class triton:
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
     force_cooperative_reductions = False
 
+    # Lower a split reduction as an extra grid dim rather than reshaping the
+    # reduction axis, so stage-1 loads stay block_ptr-eligible. Requires
+    # split_reductions. Applies only to reductions with a single non-unit reduction
+    # dim that are not strict; Welford, online softmax and other multi-output
+    # reductions, and reductions taking the aligned split, keep the classic lowering.
+    split_reductions_as_grid = (
+        os.environ.get("TORCHINDUCTOR_SPLIT_REDUCTIONS_AS_GRID", "0") == "1"
+    )
+
     # Lower/upper bounds between two-step variance and Welford variance for
     # non-split CUDA Triton half/bfloat16 reductions. Mid-sized reductions use
     # two-step for throughput; smaller reductions keep the old heuristic because
@@ -2655,6 +2667,8 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Intel XPU mm templates (mm_xpu_persistent, mm_xpu_non_persistent) for BF16/FP16.
+    enable_xpu_mm_templates = os.environ.get("ENABLE_XPU_MM_TEMPLATES", "1") == "1"
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"

@@ -420,7 +420,9 @@ class TORCH_API Context {
   bool allowFP16AccumulationCuBLAS() const;
   void setAllowFP16AccumulationCuBLAS(bool /*b*/);
   bool rocmAllowGroupGemmCk() const;
-  bool rocmAllowGroupGemmCkTile() const;
+  // ROCM_ALLOW_GROUP_GEMM_CK_TILE: true forces CK-tile grouped GEMM, false
+  // disables it, nullopt (unset) lets a heuristic pick per call.
+  std::optional<bool> rocmAllowGroupGemmCkTile() const;
   bool preferCublasltGroupedGemm() const;
   void setPreferCublasltGroupedGemm(bool /*b*/);
 

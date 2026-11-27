@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
-    from .codegen.multi_kernel import MultiKernel
+    from .codegen.multi_kernel import MultiKernelBase
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
     from .memory import FreeableInputBuffer
@@ -106,6 +106,22 @@ from .virtualized import V
 
 
 log = logging.getLogger(__name__)
+
+
+def grid_split_factors(nodes: Iterable[BaseSchedulerNode]) -> OrderedSet[int | None]:
+    """Split-as-grid factors of the reductions in `nodes`; None marks a reduction
+    without one. See ir.Reduction.create_multilayer_split_as_grid."""
+    return OrderedSet(
+        n.node._grid_split_factor if isinstance(n.node, ir.ComputedBuffer) else None
+        for n in nodes
+        if n.is_reduction()
+    )
+
+
+def _has_grid_split(node: BaseSchedulerNode) -> bool:
+    return config.triton.split_reductions_as_grid and any(
+        split is not None for split in grid_split_factors(node.get_nodes())
+    )
 
 
 def _real_dep_names(deps: OrderedSet[Dep]) -> OrderedSet[str]:
@@ -470,6 +486,8 @@ class MixOrderReduction:
         Check whether we can fuse two reductions with mix loop orders.
         """
         if not config.triton.mix_order_reduction:
+            return False
+        if _has_grid_split(node1) or _has_grid_split(node2):
             return False
 
         # TODO: Mix order reduction is not supported with cpp_wrapper yet
@@ -2487,6 +2505,8 @@ class NestedReduction:
 
     @classmethod
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        if _has_grid_split(node1) or _has_grid_split(node2):
+            return False
         return cls.plan(node1, node2) is not None
 
     @classmethod
@@ -3362,6 +3382,7 @@ class BaseSchedulerNode:
                                 ir.NoneLayout,
                                 ir.MultiOutputLayout,
                                 ir.MutationLayoutSHOULDREMOVE,
+                                ir.NonOwningLayout,
                                 ir.CommBufferLayout,
                             ),
                         )
@@ -13745,7 +13766,7 @@ class BaseScheduling:  # noqa: docstring_linter
 
     def codegen_node(
         self, node: FusedSchedulerNode | SchedulerNode
-    ) -> Kernel[Any] | MultiKernel | None:
+    ) -> Kernel[Any] | MultiKernelBase | None:
         """
         Generate a kernel given a list of pre-fused nodes.
         """

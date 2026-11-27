@@ -437,13 +437,13 @@ See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
     input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
-    kernel_size: size of the pooling region. Can be a single number or a
+    kernel_size: size of the pooling region. Can be a single number, a single-element tuple or a
       tuple `(kT, kH, kW)`
-    stride: stride of the pooling operation. Can be a single number or a
+    stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`. Should be at most half
-      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
+      single number, a single-element tuple or a tuple `(padT, padH, padW)`.
+      Should be at most half of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
       Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
@@ -6223,7 +6223,7 @@ def normalize(
     input: Tensor,
     p: float = 2.0,
     dim: int = 1,
-    eps: float = 1e-12,
+    eps: float | None = None,
     out: Tensor | None = None,
 ) -> Tensor:
     r"""Perform :math:`L_p` normalization of inputs over specified dimension.
@@ -6240,7 +6240,10 @@ def normalize(
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int or tuple of ints): the dimension to reduce. Default: 1
-        eps (float): small value to avoid division by zero. Default: 1e-12
+        eps (float, optional): small value to avoid division by zero. If not specified,
+            uses the machine epsilon of the norm's dtype, ``torch.finfo(dtype).eps``.
+            The norm's dtype can differ from the input's, e.g. it is real for complex
+            inputs and float32 under CUDA or XPU autocast. Default: ``None``
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
@@ -6248,11 +6251,14 @@ def normalize(
         return handle_torch_function(
             normalize, (input, out), input, p=p, dim=dim, eps=eps, out=out
         )
+    norm = input.norm(p, dim, keepdim=True)
+    if eps is None:
+        eps = torch.finfo(norm.dtype).eps
     if out is None:
-        denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
+        denom = norm.clamp_min(eps).expand_as(input)
         return input / denom
     else:
-        denom = input.norm(p, dim, keepdim=True).clamp_min_(eps).expand_as(input)
+        denom = norm.clamp_min_(eps).expand_as(input)
         return torch.div(input, denom, out=out)
 
 

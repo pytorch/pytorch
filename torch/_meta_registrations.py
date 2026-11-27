@@ -3800,13 +3800,13 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
                       size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
         )
     torch._check_value(
+        self.ndim == 3 or self.ndim == 4,
+        lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
+    )
+    torch._check_value(
         self.ndim == ndim,
         lambda: f"adaptive_avg_pool2d_backward(): Expected dimensions {self.ndim} "
         f"for `grad_output` but got dimensions {ndim}",
-    )
-    torch._check_value(
-        ndim == 3 or ndim == 4,
-        lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
     )
     for i in range(ndim - 2):
         torch._check_value(
@@ -3817,6 +3817,10 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
     torch._check_value(
         self.dtype == grad_out.dtype,
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
+    )
+    torch._check_not_implemented(
+        self.dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16],
+        lambda: f"adaptive_avg_pool2d_backward not implemented for '{self.dtype}'",
     )
     memory_format = torch.contiguous_format
     if is_channels_last(self):

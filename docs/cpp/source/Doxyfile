@@ -74,6 +74,7 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../torch/csrc/stable/ops.h \
                          ../../../torch/csrc/stable/tensor_struct.h \
                          ../../../torch/csrc/stable/device_struct.h \
+                         ../../../torch/csrc/stable/generator_struct.h \
                          ../../../torch/csrc/stable/inference_mode.h \
                          ../../../torch/csrc/stable/accelerator.h \
                          ../../../torch/csrc/stable/cpu.h \

@@ -1,3 +1,7 @@
+"""
+Classes and implementations related to precompile
+"""
+
 import copy
 import json
 import logging
@@ -16,10 +20,6 @@ from torch._dynamo.package import (
 )
 
 
-"""
-Classes and implementations related to precompile
-"""
-
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class BackendCacheArtifact(Generic[T]):
 
     Example implementation:
 
-    class MyPrecompileCacheArtifact(PrecompileCacheArtifact[MySerializableType]):
+    class MyPrecompileCacheArtifact(BackendCacheArtifact[MySerializableType]):
         my_field: int
 
         def after_deserialization(self) -> MySerializableType:
@@ -72,18 +72,12 @@ class BypassDynamoCacheEntry(Exception):
 
 class PrecompileContext:
     """
-    PrecompileContext is a special CacheArtifactManager for handling precompilation
-    It uses the same interface as CacheArtifactManager, but handles deserialization differently: instead
-    of placing each artifact into respective caches, it will stitch all the cache artifacts for a single key
-    together and place it into a global Precompile Cache.
-
-    PrecompileContext has two main portions: dynamo_cache_entries and backend_cache_artifacts.
-    When saving, PrecompileContext.serialize() will serialize all dynamo cache entries along with any PrecompileCacheArtifacts that
-    are needed to save those dynamo cache entries.
-
-    The following artifact types are supported by PrecompileContext:
-     - BundledAOTAutogradCacheArtifact
-
+    Process-global record of what precompile compiled: the dynamo cache entries,
+    keyed by their CompilePackage's source id, and the backend artifacts they
+    name (BundledAOTAutogradCacheArtifact, EagerCacheArtifact), keyed by backend
+    id. create_cache_entries() stitches each dynamo cache entry together with
+    its backend artifacts into a PrecompileCacheEntry, and save_to_dynamo_cache()
+    writes those to DynamoCache.
     """
 
     # Protected by the compile_lock
@@ -91,8 +85,6 @@ class PrecompileContext:
     # Each object here must be serializable
     _backend_artifacts_by_key: dict[_BackendId, BackendCacheArtifact[Any]] = {}
 
-    # On call to `serialize()`, all cache artifacts in _dynamo_cache_entries are converted
-    # into DynamoCacheArtifacts and added to _new_cache_artifacts for serialization
     _dynamo_cache_entries: dict[str, _DynamoCacheEntry] = {}
 
     @classmethod
@@ -156,8 +148,8 @@ class PrecompileContext:
         backend_artifacts: dict[_BackendId, BackendCacheArtifact[Any]],
     ) -> dict[str, Any]:
         """
-        Return a JSON serializable debug dump of all entries in the precompile context
-        Called in serialize before serialization, and in populate_caches after deserialization
+        Return a JSON serializable debug dump of all entries in the precompile context.
+        create_cache_entries logs it as a structured trace artifact and returns it.
         """
         debug_info: defaultdict[str, list[Any]] = defaultdict(list)
         for key, cache_entry in dynamo_entries.items():

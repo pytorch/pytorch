@@ -739,6 +739,8 @@ RecordQueue::RecordQueue(
   }
 }
 
+RecordQueue::~RecordQueue() = default;
+
 bool RecordQueue::tracePython() const {
   return config_.with_stack && activities_.contains(ActivityType::CPU);
 }
@@ -1031,11 +1033,10 @@ void passEventsToKineto(
   // Generate Kineto events for each event recorded by the PyTorch profiler.
   for (const auto i : c10::irange(results.size())) {
     const auto& e = results[i];
-    // Here we are essentially setting the duration to -1 if the event never
-    // ends. This way Kineto will extend the event to the end of the trace. This
-    // is useful so that we can still have 0 duration events if necessary
-    // without extension
-    int64_t act_end_time = std::max(e->endTimeNS(), e->start_time_ns_ - 1);
+    // Only genuinely unfinished events use the negative-duration sentinel.
+    const int64_t act_end_time = std::max(
+        std::min(e->endTimeNS(), static_cast<int64_t>(end_time_ns)),
+        e->start_time_ns_ - 1);
     std::string name = e->name();
     if (!e->overload_name().empty()) {
       name = fmt::format("{}.{}", e->name(), e->overload_name());
@@ -1755,6 +1756,16 @@ RecordQueue::getRecords(
     out.insert(out.end(), ev.begin(), ev.end());
     python_tracer_.reset();
   }
+
+  // A worker thread can still start an event after a trace stopped early.
+  out.erase(
+      std::remove_if(
+          out.begin(),
+          out.end(),
+          [end_time_ns](const auto& r) {
+            return r->start_time_ns_ > static_cast<c10::time_t>(end_time_ns);
+          }),
+      out.end());
 
   if (config_.experimental_config.adjust_timestamps) {
     std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
