@@ -657,6 +657,7 @@ class TestIndexingSimplificationAccelerator(InductorTestCase):
 class TestIndexingSimplificationCpu(InductorTestCase):
     hw_classification = HardwareClassification.CPU
 
+    @skipIf(not HAS_CPU, "requires CPU")
     def test_bool_minimum_maximum_index_propagation(self):
         def foo(x):
             thresh = torch.nn.functional.threshold(x, 6.08522335982976, -0.05932757)
