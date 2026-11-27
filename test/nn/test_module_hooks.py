@@ -1240,14 +1240,16 @@ class TestModuleGlobalHooks(TestCase):
 
     @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_global_hooks_with_kwargs(self):
+        observed = []
+
         def kwarg_global_forward_hook(
             module: nn.Module,
             args: tuple[torch.Tensor],
             kwargs: dict[str, Any],
-            out: torch.Tensor,
+            out: torch.Tensor | None,
         ) -> Any:
-            out = out + kwargs["bias"]
-            return out
+            observed.append((kwargs["bias"], out))
+            return None if out is None else out + kwargs["bias"]
 
         model = KwargModel()
         hooks = nn.modules.module
@@ -1259,6 +1261,9 @@ class TestModuleGlobalHooks(TestCase):
         bias: torch.Tensor = torch.randn(10, 20)
         out = model(x, bias=bias)
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
+        with self.assertRaises(TypeError):
+            model(bias=bias)
+        self.assertEqual(observed[-1], (bias, None))
         handle.remove()
         self.assertNotIn(handle.id, hooks._global_forward_hooks_with_kwargs)
         self.assertNotIn(handle.id, hooks._global_forward_hooks_always_called)
