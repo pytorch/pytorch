@@ -626,6 +626,17 @@ class TestExport(TestCase):
 
         self.assertIsNotNone(guards_fn)
 
+    def test_exported_program_lazy_guards_code(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        ep = export(M(), (torch.randn(4, 4),))
+        self.assertIsNone(ep._cached_guards_code)
+        guards = ep._guards_code
+        self.assertIsNotNone(guards)
+        self.assertIsNotNone(ep._cached_guards_code)
+
     def _check_dynamic_shapes_specs_and_shapes(
         self,
         model,

@@ -375,7 +375,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         )
 
     if not _is_joint_ir_decomp(ep, joint_loss_index):
-        mod = ep.module()
+        mod = ep.module(check_guards=False)
 
         wrapped_params_buffers = {
             **dict(mod.named_parameters(remove_duplicate=False)),
@@ -1141,7 +1141,7 @@ class ExportedProgram:
     _verifiers: list[type[Verifier]]
     """List of verifier classes used to validate the exported program."""
 
-    _guards_code: list[str]
+    _cached_guards_code: list[str] | None = None
 
     def __init__(
         self,
@@ -1184,7 +1184,17 @@ class ExportedProgram:
         # Validate should be always the last step of the constructor.
         self.validate()
 
-        self._guards_code = _convert_guards_to_code(self._graph_module)
+        self._cached_guards_code = None
+
+    @property
+    def _guards_code(self) -> list[str]:
+        if self._cached_guards_code is None:
+            self._cached_guards_code = _convert_guards_to_code(self._graph_module)
+        return self._cached_guards_code
+
+    @_guards_code.setter
+    def _guards_code(self, val: list[str] | None) -> None:
+        self._cached_guards_code = val
 
     @property
     @compatibility(is_backward_compatible=False)
