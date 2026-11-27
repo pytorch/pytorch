@@ -550,9 +550,6 @@ class LoopOrderingTest(TestCase):
     def setUp(self):
         super().setUp()
         metrics.reset()
-        # config.patch cannot be a class decorator here: it returns a subclass
-        # whose __dict__ holds no test methods, so instantiate_device_type_tests
-        # would silently collect zero tests.
         ctx = inductor_config.patch(
             {
                 "benchmark_kernel": True,
@@ -1671,9 +1668,6 @@ class MemoryCoalescingTest(MockSchedulerTest):
     def setUp(self):
         super().setUp()
         metrics.reset()
-        # config.patch cannot be a class decorator here: it returns a subclass
-        # whose __dict__ holds no test methods, so instantiate_device_type_tests
-        # would silently collect zero tests.
         ctx = inductor_config.patch(
             {
                 "triton.unique_kernel_names": True,
@@ -2237,9 +2231,6 @@ class TestTiling(TestCase):
 
     def setUp(self):
         super().setUp()
-        # config.patch cannot be a class decorator here: it returns a subclass
-        # whose __dict__ holds no test methods, so instantiate_device_type_tests
-        # would silently collect zero tests.
         ctx = inductor_config.patch(
             {
                 "triton.unique_kernel_names": True,
