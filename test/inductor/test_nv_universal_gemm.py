@@ -4579,7 +4579,7 @@ instantiate_device_type_tests(
 )
 @instantiate_parametrized_tests
 class TestNVUniversalGemmLaunchContract(TestCase):
-    """Boundary tests for _kernel_launch_checks on synthetic layouts."""
+    """Boundary tests for guarded launch and operand requirements."""
 
     INT32_MAX = 2**31 - 1
 
@@ -4641,10 +4641,11 @@ class TestNVUniversalGemmLaunchContract(TestCase):
             caller.kernel = provider(metadata=metadata)
         caller.kernel.impl = SimpleNamespace(use_clc_dynamic_scheduler=clc)
         subs = {} if static else dict(zip((m, n, k), values, strict=True))
-        return all(
-            sympy.sympify(condition).xreplace(subs) is sympy.true
-            for condition, _ in caller._guarded_requirements()
-        )
+        with V.set_graph_handler(SimpleNamespace(unaligned_buffers=set())):
+            return all(
+                sympy.sympify(condition).xreplace(subs) is sympy.true
+                for condition, _ in caller._guarded_requirements()
+            )
 
     @parametrize("clc", (False, True))
     def test_grid_y_limit(self, clc):
@@ -4704,6 +4705,54 @@ class TestNVUniversalGemmLaunchContract(TestCase):
         with self.assertRaisesRegex(ValueError, "no symbolic launch contract"):
             self._launch_ok((64, 128, 8), workspace=1)
 
+    @parametrize("alignment", (4, 16, 32))
+    def test_operand_base_alignment(self, alignment):
+        from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
+
+        constraint = SimpleNamespace(
+            stride=None, divisibility=1, ptr_alignment_bytes=alignment
+        )
+        checks = NVUniversalGemmCaller._tensor_constraint_checks(
+            [128], [1], constraint, torch.float8_e8m0fnu
+        )
+        if alignment > 16:
+            with self.assertRaisesRegex(ValueError, "unsupported base alignment"):
+                list(checks)
+        else:
+            self.assertTrue(all(condition is sympy.true for condition, _ in checks))
+
+    @parametrize("alignment", (4, 16))
+    def test_unaligned_scale_operand_declines(self, alignment):
+        from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
+
+        matrix = SimpleNamespace(ptr_alignment_bytes=16)
+        scale = SimpleNamespace(ptr_alignment_bytes=alignment)
+        caller = object.__new__(NVUniversalGemmCaller)
+        caller.variant = GemmVariant.SCALED_GEMM
+        caller.swap_ab = False
+        caller.kernel = SimpleNamespace(
+            metadata=SimpleNamespace(
+                operands=SimpleNamespace(
+                    A=SimpleNamespace(quantized=matrix, scale=scale),
+                    B=SimpleNamespace(quantized=matrix, scale=scale),
+                    out=matrix,
+                )
+            )
+        )
+        layout = ir.FixedLayout(torch.device("cuda"), torch.float8_e8m0fnu, [128], [1])
+        caller.input_nodes = [
+            ir.Buffer(name=name, layout=layout) for name in ("a", "b", "sa", "sb")
+        ]
+        caller._kernel_layout = layout
+        with V.set_graph_handler(SimpleNamespace(unaligned_buffers={"sa"})):
+            if alignment >= 16:
+                with self.assertRaisesRegex(
+                    ValueError, "base pointer violates alignment"
+                ):
+                    list(caller._operand_constraints())
+            else:
+                self.assertEqual(len(list(caller._operand_constraints())), 5)
+
 
 @instantiate_parametrized_tests
 class TestNVUniversalGemmOriginalGuardContracts(TestCase):
@@ -4728,10 +4777,12 @@ class TestNVUniversalGemmOriginalGuardContracts(TestCase):
         before = len(env.guards)
         caller = object.__new__(NVUniversalGemmCaller)
         caller.variant = GemmVariant.GEMM
-        constraint = SimpleNamespace(stride=(None, 1), divisibility=8)
+        constraint = SimpleNamespace(
+            stride=(None, 1), divisibility=8, ptr_alignment_bytes=16
+        )
         caller._kernel_launch_checks = mock.Mock(return_value=[])
         caller._operand_constraints = mock.Mock(
-            return_value=[([64, size], [size, 1], constraint)]
+            return_value=[([64, size], [size, 1], constraint, torch.bfloat16, 0)]
         )
         with (
             exp_config.patch(backed_size_oblivious=mode == "size_oblivious"),
@@ -4758,9 +4809,11 @@ class TestNVUniversalGemmOriginalGuardContracts(TestCase):
         caller = object.__new__(NVUniversalGemmCaller)
         caller.variant = GemmVariant.GEMM
         caller._kernel_launch_checks = mock.Mock(return_value=[])
-        constraint = SimpleNamespace(stride=(None, 1), divisibility=8)
+        constraint = SimpleNamespace(
+            stride=(None, 1), divisibility=8, ptr_alignment_bytes=16
+        )
         caller._operand_constraints = mock.Mock(
-            return_value=[([64, size], [size, 1], constraint)]
+            return_value=[([64, size], [size, 1], constraint, torch.bfloat16, 0)]
         )
         with V.set_graph_handler(SimpleNamespace(sizevars=SizeVarAllocator(env))):
             self.assertTrue(caller._check_guarded_requirements(install_guards=False))
@@ -4787,10 +4840,12 @@ class TestNVUniversalGemmOriginalGuardContracts(TestCase):
 
         caller = object.__new__(NVUniversalGemmCaller)
         caller.variant = GemmVariant.GEMM
-        constraint = SimpleNamespace(stride=expected, divisibility=8)
+        constraint = SimpleNamespace(
+            stride=expected, divisibility=8, ptr_alignment_bytes=16
+        )
         caller._kernel_launch_checks = mock.Mock(return_value=[])
         caller._operand_constraints = mock.Mock(
-            return_value=[(size, stride, constraint)]
+            return_value=[(size, stride, constraint, torch.bfloat16, 0)]
         )
         with V.set_graph_handler(SimpleNamespace(sizevars=SizeVarAllocator())):
             self.assertEqual(
@@ -4884,7 +4939,11 @@ class TestNVUniversalGemmOriginalGuardContracts(TestCase):
                 (
                     [64, size],
                     [size, 1],
-                    SimpleNamespace(stride=(None, 1), divisibility=8),
+                    SimpleNamespace(
+                        stride=(None, 1), divisibility=8, ptr_alignment_bytes=16
+                    ),
+                    torch.bfloat16,
+                    0,
                 )
             ]
         )
@@ -4918,7 +4977,11 @@ class TestNVUniversalGemmOriginalGuardContracts(TestCase):
                 (
                     [64, 256],
                     [256, stride],
-                    SimpleNamespace(stride=(None, 1), divisibility=1),
+                    SimpleNamespace(
+                        stride=(None, 1), divisibility=1, ptr_alignment_bytes=16
+                    ),
+                    torch.bfloat16,
+                    0,
                 )
             ]
         )
@@ -4966,7 +5029,11 @@ class TestNVUniversalGemmOriginalGuardContracts(TestCase):
                 (
                     [64, size],
                     [size, 1],
-                    SimpleNamespace(stride=(None, 1), divisibility=8),
+                    SimpleNamespace(
+                        stride=(None, 1), divisibility=8, ptr_alignment_bytes=16
+                    ),
+                    torch.bfloat16,
+                    0,
                 )
             ]
         )
@@ -4999,7 +5066,11 @@ class TestNVUniversalGemmOriginalGuardContracts(TestCase):
                 (
                     [64, size],
                     [size, 1],
-                    SimpleNamespace(stride=(None, 1), divisibility=8),
+                    SimpleNamespace(
+                        stride=(None, 1), divisibility=8, ptr_alignment_bytes=16
+                    ),
+                    torch.bfloat16,
+                    0,
                 )
             ]
         )
@@ -6539,14 +6610,18 @@ class TestNVUniversalGemmDynamicOperators(TestCase):
                 compiled(*args), torch.addmm(*args), atol=1e-2, rtol=1.6e-2
             )
 
+            column = torch.randn(64, dtype=a.dtype, device=device)
+
             def unbacked_addmm(count, aligned):
                 extent = count.item()
                 torch._check_is_size(extent)
                 torch._check(extent > 0)
                 torch._check(extent <= 32)
                 k = 8 * extent if aligned else extent
+                rows = torch.arange(64, device=device).to(a.dtype).view(64, 1)
+                cols = torch.arange(k, device=device).to(a.dtype).view(1, k)
                 return torch.addmm(
-                    bias.new_zeros(64), a.new_ones((64, k)), b.new_ones((k, 64))
+                    column, (rows + cols) % 3 - 1, b.new_ones((k, 64)) * column
                 )
 
             compiled, args, _ = self._check_dynamic_shapes(
@@ -6587,6 +6662,11 @@ class TestNVUniversalGemmDynamicOperators(TestCase):
             (128, 384, 64),
         ):
             a, b, sa, sb = _make_nvfp4_scaled_mm_inputs(m, n, k, device=device)
+            padded_a = torch.empty_strided(
+                a.shape, (a.shape[1] + 16, 1), dtype=torch.uint8, device=device
+            )
+            padded_a.copy_(a.view(torch.uint8))
+            a = padded_a.view(a.dtype)
             inputs.append((a, b, sa.view(m, -1), sb.view(n, -1)))
         with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
             compiled, args, _ = self._check_dynamic_shapes(
@@ -6599,9 +6679,34 @@ class TestNVUniversalGemmDynamicOperators(TestCase):
             ):
                 compiled(bad, *args[1:])
             self.assertEqual(compiled(*args), _nvfp4_scaled_mm(*args), equal_nan=True)
+            scale = torch.empty(args[2].numel() + 4, dtype=torch.uint8, device=device)[
+                4:
+            ]
+            scale.copy_(args[2].flatten().view(torch.uint8))
+            bad_args = (
+                args[0],
+                args[1],
+                scale.view(args[2].dtype).view_as(args[2]),
+                args[3],
+            )
+            self.assertEqual(
+                compiled(*bad_args), _nvfp4_scaled_mm(*args), equal_nan=True
+            )
+            torch._dynamo.reset()
+            with (
+                config.patch(force_disable_caches=True),
+                self.assertRaisesRegex(
+                    torch._dynamo.exc.BackendCompilerFailed, "NoValidChoicesError"
+                ),
+            ):
+                torch.compile(_nvfp4_scaled_mm, dynamic=True, fullgraph=True)(*bad_args)
+            self.assertEqual(compiled(*args), _nvfp4_scaled_mm(*args), equal_nan=True)
 
     def test_dynamic_scaled_mm_mxfp8(self, device):
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
+        from torch._inductor.heuristics.template.nv_universal_gemm import (
+            get_nvgemm_heuristics,
+        )
 
         def scaled_mm(a, b, sa, sb):
             return torch._scaled_mm(a, b, sa, sb, out_dtype=torch.float32)
@@ -6635,7 +6740,21 @@ class TestNVUniversalGemmDynamicOperators(TestCase):
                 make_inputs(128, n, 256, index)
                 for index, n in enumerate((32, 16, 64, 32))
             ]
-            with _force_nvgemm_choice(narrow):
+
+            def select_narrow(kernels, *_args, **_kwargs):
+                selected = [
+                    kernel
+                    for kernel in kernels
+                    if kernel.metadata.design.tile_shape[1] == 32
+                ]
+                return selected or kernels
+
+            with (
+                mock.patch.object(
+                    get_nvgemm_heuristics(), "filter_kernels", side_effect=select_narrow
+                ),
+                _force_nvgemm_choice(narrow),
+            ):
                 _, _, code = self._check_dynamic_shapes(
                     scaled_mm, inputs, expected_graphs=2
                 )
@@ -6654,7 +6773,13 @@ class TestNVUniversalGemmDynamicOperators(TestCase):
         ):
             g = len(group_ms)
             a = torch.randn(sum(group_ms), k, dtype=torch.bfloat16, device=device)
-            b = torch.randn(g, n, k, dtype=a.dtype, device=device).transpose(-1, -2)
+            b = (
+                torch.empty_strided(
+                    (g, n, k), (n * k + 16, k, 1), dtype=a.dtype, device=device
+                )
+                .normal_()
+                .transpose(-1, -2)
+            )
             base_offsets = torch.tensor(
                 [-1] + [sum(group_ms[: index + 1]) - 1 for index in range(g)],
                 dtype=torch.int32,

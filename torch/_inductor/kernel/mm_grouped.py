@@ -645,9 +645,7 @@ def _tuned_grouped_mm_common(
         and not b_is_2d
         and offs is not None
         and not scaled
-        and use_nv_universal_gemm_template(
-            layout, m, n, k, mat_a, mat_b, offs, g, allow_symbolic_shapes=True
-        )
+        and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b, offs, g)
     ):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
             add_nv_universal_grouped_gemm_choices,

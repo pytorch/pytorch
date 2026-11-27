@@ -440,6 +440,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 # requirements (non-empty sizes, aligned pointer offsets, 32-bit indexing and,
 # with symbolic shapes, an audited provider launch contract). Each candidate
 # kernel has its own requirements (from its metadata, tile and cluster shape).
+# Scaled kernels also require exact scale counts and a single narrow N tile;
+# grouped kernels require one offset per group.
 # They are symbolic predicates, listed once by _guarded_requirements(), and
 # evaluated in two phases. Guards are installed only if an NVGEMM kernel wins
 # autotuning, and only for that kernel's requirements; losing NVGEMM candidates,
@@ -559,10 +561,14 @@ class NVUniversalGemmCaller(ChoiceCaller):
 
     @staticmethod
     def _tensor_constraint_checks(size, stride, constraint, dtype=None, offset=0):
+        """Yield physical layout requirements; reject unsupported metadata with ValueError."""
         rank = len(stride)
         if rank == 0 or len(size) != rank:
             raise ValueError("NVGEMM operand constraint has incompatible rank")
         if dtype is not None:
+            # Inductor guarantees only 16-byte alignment for buffer bases.
+            if constraint.ptr_alignment_bytes > 16:
+                raise ValueError("NVGEMM operand requires unsupported base alignment")
             yield (
                 sympy.Eq(
                     sympy.Mod(
@@ -576,6 +582,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         expected = constraint.stride
         divisor = constraint.divisibility
         if dtype == torch.float4_e2m1fn_x2:
+            # Convert logical FP4 divisibility to packed tensor elements.
             divisor //= math.gcd(divisor, 2)
         if expected is None:
             for dim, step in enumerate(stride):
@@ -584,11 +591,11 @@ class NVUniversalGemmCaller(ChoiceCaller):
                         sympy.Eq(size[dim], 1),
                         sympy.Eq(step, math.prod(size[dim + 1 :])),
                     ),
-                    "NVGEMM scale operand is not contiguous",
+                    "NVGEMM flat operand is not contiguous",
                 )
             yield (
                 sympy.Eq(sympy.Mod(math.prod(size), divisor), 0),
-                "NVGEMM scale element count violates alignment",
+                "NVGEMM flat operand element count violates alignment",
             )
             return
         if len(expected) not in (rank, rank + 1):
@@ -611,6 +618,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
                     )
 
     def _operand_constraints(self):
+        """Yield physical (size, stride, constraint, dtype, offset), honoring swap_ab."""
         operands = self.kernel.metadata.operands
         if self.variant == GemmVariant.GROUPED_GEMM:
             nodes = [
@@ -642,6 +650,11 @@ class NVUniversalGemmCaller(ChoiceCaller):
                     ]
                 )
         for node, constraint, transpose in nodes:
+            if (
+                constraint.ptr_alignment_bytes >= 16
+                and node.get_name() in V.graph.unaligned_buffers
+            ):
+                raise ValueError("NVGEMM operand base pointer violates alignment")
             size, stride = list(node.get_size()), list(node.get_stride())
             if transpose:
                 size[-2:] = reversed(size[-2:])
@@ -713,6 +726,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         if self.variant == GemmVariant.SCALED_GEMM:
             yield from self._scaled_launch_checks(m, n, k, batch)
         elif self.variant == GemmVariant.GROUPED_GEMM:
+            # Offset values rely on _grouped_mm's nondecreasing, final-M contract.
             yield (
                 sympy.Eq(sympy_product(geometry[2][0]), groups),
                 "NVGEMM grouped offsets must match the group count",
@@ -824,6 +838,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         if self.variant == GemmVariant.SCALED_GEMM:
             tile_n = self.kernel.metadata.design.tile_shape[1]
             if tile_n < 64:
+                # supports() checked the hint; runtime N must also fit one tile.
                 yield (
                     sympy.Le(self._kernel_layout.size[-1], tile_n),
                     "NVGEMM narrow kernel requires a single N tile",
@@ -1292,6 +1307,21 @@ def _add_nv_gemm_choices_impl(
         classifier_key="nvgemm_efc_partition_v1",
         scaled_use_pdl=scaled_use_pdl,
     )
+
+    def supported_alignment(kernel):
+        operands = kernel.metadata.operands
+        constraints = [operands.A, operands.B, operands.out]
+        if variant == GemmVariant.SCALED_GEMM:
+            constraints.extend((operands.A.scale, operands.B.scale))
+        elif variant == GemmVariant.GROUPED_GEMM:
+            constraints.append(operands.offsets)
+        return all(constraint.ptr_alignment_bytes <= 16 for constraint in constraints)
+
+    # Reject unsupported alignment before ranking consumes the profiling budget.
+    non_efc_kernels = [
+        kernel for kernel in non_efc_kernels if supported_alignment(kernel)
+    ]
+    efc_kernels = [kernel for kernel in efc_kernels if supported_alignment(kernel)]
     if not config.epilogue_fusion:
         efc_kernels = []
     if bias_node is not None:
