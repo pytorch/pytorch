@@ -27,9 +27,8 @@ size_t get_cpuset_num_threads() {
 #endif
   return 0;
 }
-} // namespace
 
-size_t TaskThreadPoolBase::defaultNumThreads() {
+size_t compute_default_num_threads() {
   size_t num_threads = 0;
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
@@ -61,6 +60,12 @@ size_t TaskThreadPoolBase::defaultNumThreads() {
   if (num_threads == 0) {
     num_threads = 1;
   }
+  return num_threads;
+}
+} // namespace
+
+size_t TaskThreadPoolBase::defaultNumThreads() {
+  static const size_t num_threads = compute_default_num_threads();
   return num_threads;
 }
 
