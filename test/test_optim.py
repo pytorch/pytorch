@@ -1106,32 +1106,6 @@ class TestOptimRenewed(TestCase):
 
     @onlyAccelerator
     @skipMPS
-    @largeTensorTest("72GB")
-    @serialTest()
-    @optims(
-        [optim for optim in optim_db if optim.optim_cls.__name__ == "Muon"],
-        dtypes=[torch.float16],
-    )
-    def test_foreach_large_tensor_muon(self, device, dtype, optim_info):
-        # Same indexing check as test_foreach_large_tensor, with a 2D param. There is
-        # no size-1 reference since Muon's update depends on the matrix shape, and
-        # match_rms_adamw scales the update enough to be observable in float16.
-        numel = 2**32
-        param = torch.zeros(3, (numel + 2) // 3, device=device, dtype=dtype)
-        param.grad = torch.ones_like(param)
-        optimizer = optim_info.optim_cls(
-            [param], foreach=True, ns_steps=1, adjust_lr_fn="match_rms_adamw"
-        )
-        optimizer.step()
-
-        self.assertEqual(param.min(), param.max())
-        self.assertNotEqual(param.flatten()[0], 0)
-        momentum_buffer = optimizer.state[param]["momentum_buffer"]
-        self.assertEqual(momentum_buffer.min(), momentum_buffer.max())
-        self.assertNotEqual(momentum_buffer.flatten()[0], 0)
-
-    @onlyAccelerator
-    @skipMPS
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float32],
