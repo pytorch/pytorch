@@ -1568,12 +1568,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def mul(x, y):
-        if (
-            utils.is_strict_cuda_triton()
-            and get_dtype_handler().mul(x, y) == torch.float64
-        ):
-            x = TritonOverrides._cast_libdevice_arg(x, torch.float64)
-            y = TritonOverrides._cast_libdevice_arg(y, torch.float64)
+        if utils.is_strict_cuda_triton() and (
+            dtype := get_dtype_handler().mul(x, y)
+        ) in (torch.float32, torch.float64):
+            x = TritonOverrides._cast_libdevice_arg(x, dtype)
+            y = TritonOverrides._cast_libdevice_arg(y, dtype)
             # CUDA chooses the first NaN; fusion can commute the multiplication.
             result = f"triton_helpers.eager_unary_nan({y}, {x} * {y})"
             return f"triton_helpers.eager_unary_nan({x}, {result})"
@@ -2719,10 +2718,14 @@ class TritonKernelOverrides(TritonOverrides):
             torch.float16,
             torch.bfloat16,
             torch.float32,
+            torch.float64,
         ):
             from torch._inductor.codegen.common import OpDecompositions
 
-            return OpDecompositions._strict_i1(ops.to_dtype(x, torch.float32)).value
+            dtype = (
+                torch.float64 if triton_arg_dtype(x) == torch.float64 else torch.float32
+            )
+            return OpDecompositions._strict_i1(ops.to_dtype(x, dtype), dtype).value
         return _triton_cyl_bessel_i(1, x)
 
     @staticmethod
