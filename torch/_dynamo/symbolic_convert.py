@@ -4478,16 +4478,10 @@ class InstructionTranslatorBase(
         self.pop()
 
     def _convert_value(self, value: VariableTracker, flag: int) -> VariableTracker:
-        if (
-            flag
-            and self.output.side_effects.store_attr_mutations
-            and isinstance(value, UserDefinedObjectVariable)
-        ):
+        mutations = self.output.side_effects.store_attr_mutations
+        if flag and mutations and isinstance(value, UserDefinedObjectVariable):
             slots = ("__str__", "__repr__") if flag == 1 else ("__repr__",)
-            if slot := BuiltinVariable.pending_format_slot(self, value, slots):
-                BuiltinVariable.unsupported_format(
-                    value, f"pending class mutation: {slot}"
-                )
+            BuiltinVariable.check_format_slots(self, value, slots)
         if flag == 1:
             return VariableTracker.build(self, str).call_function(self, [value], {})  # type: ignore[arg-type]
         elif flag == 2:
