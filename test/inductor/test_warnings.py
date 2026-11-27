@@ -26,6 +26,8 @@ TF32_ADVISORY = "TensorFloat32 tensor cores for float32 matrix multiplication av
 def _has_tf32() -> bool:
     # On ROCm, capability >= (8, 0) is true for MI200 and RDNA, which do not
     # have XF32. is_tf32_supported() is gfx94x/gfx95x only.
+    if GPU_TYPE not in ("cuda", "xpu"):
+        return False
     dev = torch.get_device_module(GPU_TYPE)
     return dev.is_available() and dev.is_tf32_supported()
 
