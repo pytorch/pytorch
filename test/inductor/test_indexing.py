@@ -1901,12 +1901,9 @@ class TestOptimizationHintIdentityExpansion(InductorTestCase):
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
 
-        # Mirrors the real bug: -u0 * (-Identity(1) + Identity(0))
-        # simplifies to -u0 * (0 - 1) = u0.
-        # Without expand(identity=True) after _sub_unbacked_exprs,
-        # subs({u0: fallback}) leaves -Identity(1) + Identity(0) unexpanded,
-        # causing RuntimeError("Failed to realize expression to int").
-        expr = -u0 * (-Identity(sympy.Integer(1)) + Identity(sympy.Integer(0)))
+        one = Identity(sympy.Integer(1), evaluate=False)
+        zero = Identity(sympy.Integer(0), evaluate=False)
+        expr = -u0 * (-one + zero)
         hint = sizevars.optimization_hint(expr, fallback=42)
         self.assertEqual(hint, 42)
 
