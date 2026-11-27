@@ -126,6 +126,10 @@ class NotReversibleNone:
         return idx
 
 
+class NamespaceOwner:
+    pass
+
+
 @instantiate_parametrized_tests
 class TestIterators(torch._dynamo.test_case.TestCase):
     """Test iterator support in Dynamo"""
@@ -142,32 +146,21 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         torch._dynamo.config.enable_trace_unittest = self._u_prev
 
     @parametrize("created", [False, True])
-    def test_iterable_attribute_error_metadata(self, created):
+    @parametrize("name", ["__name__", "__qualname__", "__mro__", "mro", "missing"])
+    def test_iterable_attribute_error_metadata(self, created, name):
         def fn(x, iterator):
             obj = zip([1], [2]) if created else next(iterator)
-            missing = hasattr(obj, "missing")
+            missing = hasattr(obj, name)
             try:
                 obj.missing
             except AttributeError as error:
                 return x + 1, missing, error.name, error.obj is obj
 
         x = torch.ones(1)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                x, iter((bytearray(b"a"),))
-            ),
-            (x + 1, False, "missing", True),
-        )
-
-    @parametrize("name", ["__name__", "__qualname__", "__mro__", "mro", "missing"])
-    def test_iterator_missing_instance_attribute(self, name):
-        def fn(x):
-            iterator = zip([1], [2])
-            return x + 1, hasattr(iterator, name)
-
-        x = torch.ones(1)
-        self.assertEqual(fn(x), (x + 1, False))
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+        for run in (fn, torch.compile(fn, backend="eager", fullgraph=True)):
+            self.assertEqual(
+                run(x, iter((bytearray(b"a"),))), (x + 1, False, "missing", True)
+            )
 
     @parametrize("method", ["__getattr__", "__getattribute__"])
     def test_slotted_iterable_custom_attribute(self, method):
@@ -270,7 +263,7 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         mapping["a"] = 4
         self.assertEqual(list(iterator), [4, 3, 2])
 
-    def _assert_iterator_reconstruction_fallback(
+    def _assert_iterator_fallback(
         self, fn, *args, reason="Cannot reconstruct a live container iterator"
     ):
         with self.assertRaisesRegex(Unsupported, reason):
@@ -278,36 +271,28 @@ class TestIterators(torch._dynamo.test_case.TestCase):
 
     @parametrize("kind", ["instance", "class", "module"])
     def test_escape_namespace_iterator_after_attribute_write(self, kind):
-        class Box:
-            pass
-
         def fn(x, obj):
             obj.second = 2
             return x + 1, iter(obj.__dict__)
 
-        obj = {"instance": Box(), "class": Box, "module": types.ModuleType("mod")}[kind]
+        obj = type("Owner", (), {}) if kind == "class" else NamespaceOwner()
+        if kind == "module":
+            obj = types.ModuleType("mod")
         obj.first = 1
         expected_keys = [*vars(obj), "second"]
         x = torch.zeros(1)
-        self._assert_iterator_reconstruction_fallback(fn, x, obj)
+        self._assert_iterator_fallback(fn, x, obj)
         result, keys = torch.compile(fn, backend="eager")(x, obj)
-        self.assertEqual(result, torch.ones(1))
-        self.assertEqual(obj.second, 2)
-        self.assertEqual(list(keys), expected_keys)
+        self.assertEqual((result, obj.second, list(keys)), (x + 1, 2, expected_keys))
 
     def test_escape_new_namespace_values_iterator(self):
-        class Box:
-            pass
-
         def fn(x):
-            obj = Box()
+            obj = NamespaceOwner()
             obj.a = 1
             return x + 1, obj, iter(obj.__dict__.values())
 
         x = torch.ones(1)
-        self._assert_iterator_reconstruction_fallback(
-            fn, x, reason="new instance namespace"
-        )
+        self._assert_iterator_fallback(fn, x, reason="new instance namespace")
         result, obj, values = torch.compile(fn, backend="eager")(x)
         self.assertEqual(result, x + 1)
         obj.a = 5
@@ -316,40 +301,60 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, "changed size"):
             next(values)
 
-    @parametrize("local_owner", [False, True])
-    def test_escape_rebound_namespace_iterator(self, local_owner):
-        class Box:
-            pass
-
+    @parametrize("kind", ["input", "local", "chained"])
+    def test_escape_rebound_namespace_iterator(self, kind):
         def fn(x, obj, target):
-            if local_owner:
-                obj = target = Box()
+            if kind == "local":
+                obj = target = NamespaceOwner()
             namespace = {"a": 1}
             obj.__dict__ = namespace
+            if kind == "chained":
+                target.__dict__ = obj.__dict__
             target.b = 2
             return x + 1, iter(namespace)
 
-        x = torch.zeros(1)
-        obj, other = Box(), Box()
+        x, obj = torch.zeros(1), NamespaceOwner()
+        previous = vars(obj)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        if not local_owner:
+        if kind == "input":
+            other = NamespaceOwner()
             result, keys = compiled(x, obj, other)
-            self.assertEqual((result, list(keys), other.b), (x + 1, ["a"], 2))
-        with self.assertRaisesRegex(Unsupported, "rebound instance namespace"):
-            compiled(x, obj, obj)
-        result, keys = torch.compile(fn, backend="eager")(x, obj, obj)
+            self.assertEqual((result, vars(obj), other.b), (x + 1, {"a": 1}, 2))
+            obj.c = 3
+            with self.assertRaisesRegex(RuntimeError, "changed size"):
+                next(keys)
+        target = NamespaceOwner() if kind == "chained" else obj
+        reason = "'__dict__'" if kind == "chained" else "rebound instance namespace"
+        with self.assertRaisesRegex(Unsupported, reason):
+            compiled(x, obj, target)
+        result, keys = torch.compile(fn, backend="eager")(x, obj, target)
         self.assertEqual((result, list(keys)), (x + 1, ["a", "b"]))
+        self.assertEqual(previous, {})
+        if kind == "chained":
+            self.assertIs(vars(obj), vars(target))
+            self.assertEqual(vars(obj), {"a": 1, "b": 2})
+        if kind == "input":
+            for target in (NamespaceOwner(), types.SimpleNamespace()):
+                report = torch._dynamo.explain(fn)(x, obj, target)
+                self.assertEqual(report.graph_break_count, 0)
+                guard_types = {
+                    t for g in report.out_guards for t in g.guard_types or ()
+                }
+                same_type = type(obj) is type(target)
+                self.assertEqual("NOT_DUPLICATE_INPUT" in guard_types, same_type)
 
     @parametrize(
-        "kind", ["module", "instance", "ordered_instance", "globals", "mapping_write"]
+        "kind",
+        ["module", "instance", "ordered_instance", "globals", "mapping_write", "cond"],
     )
     def test_escape_iterator_aliasing_namespace(self, kind):
-        class Box:
-            pass
+        writes_mapping = kind in ("mapping_write", "cond")
 
         def fn(x, mod, namespace):
-            if kind == "mapping_write":
+            if writes_mapping:
                 namespace["second"] = 2
+                if kind == "cond":
+                    x = torch.cond(x.sum() > 0, torch.clone, torch.neg, (x,))
                 return x + 1, iter(mod.__dict__)
             mod.second = 2
             return x + 1, iter(namespace)
@@ -359,12 +364,10 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             second = 2
             return x + 1, iter(namespace)
 
-        if kind in ("instance", "ordered_instance", "mapping_write"):
-            mod = Box()
-            if kind == "ordered_instance":
-                mod.__dict__ = OrderedDict()
-        else:
-            mod = types.ModuleType("mod")
+        is_module = kind in ("module", "globals")
+        mod = types.ModuleType("mod") if is_module else NamespaceOwner()
+        if kind == "ordered_instance":
+            mod.__dict__ = OrderedDict()
         namespace = vars(mod)
         namespace["first"] = 1
         if kind == "globals":
@@ -372,51 +375,29 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             fn = types.FunctionType(write_global.__code__, namespace)
         x = torch.ones(1)
         mappings = namespace.copy(), namespace
-        if kind == "mapping_write":
+        if writes_mapping:
             compiled = torch.compile(fn, backend="eager", fullgraph=True)
             result, keys = compiled(x, mod, mappings[0])
             self.assertEqual((result, list(keys)), (x + 1, list(namespace)))
             self.assertEqual(mappings[0].pop("second"), 2)
-            self._assert_iterator_reconstruction_fallback(fn, x, mod, namespace)
+            with self.assertRaisesRegex(
+                Unsupported, "Cannot reconstruct a live container iterator"
+            ):
+                compiled(x, mod, namespace)
         else:
             for mapping in mappings:
-                self._assert_iterator_reconstruction_fallback(
+                self._assert_iterator_fallback(
                     fn, x, mod, mapping, reason="pending write to 'second'"
                 )
         for mapping in mappings:
             torch._dynamo.reset()
             result, keys = torch.compile(fn, backend="eager")(x, mod, mapping)
             self.assertEqual(result, x + 1)
-            self.assertEqual(
-                list(keys), list(namespace if kind == "mapping_write" else mapping)
-            )
-            if kind == "mapping_write":
+            self.assertEqual(list(keys), list(namespace if writes_mapping else mapping))
+            if writes_mapping:
                 mapping.pop("second")
             else:
                 del mod.second
-
-    def test_escape_namespace_iterator_after_cond(self):
-        class Box:
-            pass
-
-        def fn(x, obj, namespace):
-            namespace["second"] = 2
-            y = torch.cond(x.sum() > 0, lambda t: t + 1, lambda t: t - 1, (x,))
-            return y, iter(obj.__dict__)
-
-        obj = Box()
-        obj.first = 1
-        x = torch.ones(1)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        other = vars(obj).copy()
-        result, keys = compiled(x, obj, other)
-        self.assertEqual((result, list(keys), other["second"]), (x + 1, ["first"], 2))
-        with self.assertRaisesRegex(
-            Unsupported, "Cannot reconstruct a live container iterator"
-        ):
-            compiled(x, obj, vars(obj))
-        result, keys = torch.compile(fn, backend="eager")(x, obj, vars(obj))
-        self.assertEqual((result, list(keys)), (x + 1, ["first", "second"]))
 
     @parametrize("factory", [dict, OrderedDict, set])
     def test_escape_iterator_after_owner_mutation(self, factory):
@@ -432,7 +413,7 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         owner = factory({1: 1, 2: 2})
         result, iterator = compiled(x, owner, owner.copy())
         self.assertEqual((result, list(iterator)), (x + 1, list(owner)))
-        self._assert_iterator_reconstruction_fallback(
+        self._assert_iterator_fallback(
             fn, x, owner, owner, reason=r"pending mutation of L\['target'\]"
         )
         result, iterator = torch.compile(fn, backend="eager")(x, owner, owner)
