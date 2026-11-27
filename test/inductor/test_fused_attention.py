@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     MI200_ARCH,
     recover_orig_fp32_precision,
+    skipIfXpu,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
@@ -2558,6 +2559,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_27
             )
 
+        @skipIfXpu(msg="Tests CUDA's tf32 fusion gate")
         def test_skip_non_tf32(self):
             try:
                 orig = torch.backends.cuda.matmul.fp32_precision
@@ -2582,9 +2584,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
                         t5 = t4.matmul(v)
                         return t5
 
-                func = Model().to(self.device)
-                x1 = torch.randn(1, 16, 64, 64, device=self.device)
-                attn_mask = torch.zeros(1, 1, 16, 16, device=self.device)
+                func = Model().to("cuda")
+                x1 = torch.randn(1, 16, 64, 64, device="cuda")
+                attn_mask = torch.zeros(1, 1, 16, 16, device="cuda")
                 test_inputs = [x1, attn_mask]
 
                 out, code = run_and_get_code(torch.compile(func), *test_inputs)

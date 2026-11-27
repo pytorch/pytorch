@@ -2902,6 +2902,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
     software log2 near exact powers of 2 (gh-178045).
     """
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6057")
     def test_pattern_fires_and_is_correct(self):
         """The log2+ceil pattern should be matched and produce correct uint8."""
         _misc_patterns_init("cuda")
