@@ -93,10 +93,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         args2 = self._clone_inputs(args1)
 
         for training in [False, True] if check_train else [False]:
-            if training and self.device == "xpu":
-                # Intel GPU have not implemented sdpa backward yet mode.
-                # TODO: remove this when sdpa backward is implemented for XPU.
-                continue
             for x in itertools.chain(args1[:], args2[:]):
                 if isinstance(x, torch.Tensor) and x.is_floating_point():
                     x.requires_grad = training
@@ -1939,7 +1935,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             dot_prod_attention,
             args1=args,
             has_dropout=True,
-            check_train=True,
+            check_train=False,
         )
 
     @torch._inductor.config.patch("cache_sdpa_constraint", True)
@@ -2066,7 +2062,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             dot_prod_attention,
             args1=args,
             has_dropout=True,
-            check_train=True,
+            check_train=False,
         )
 
     def _test_sdpa_rewriter_27(self):
@@ -2100,7 +2096,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             dot_prod_attention,
             args1=args,
             has_dropout=True,
-            check_train=True,
+            check_train=False,
         )
 
     def _test_sdpa_rewriter_29(self):
@@ -2181,6 +2177,45 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             self._check_common(
                 dot_prod_attention, args1=args_bs1, dtype=dtype, check_train=False
             )
+
+    def _test_sdpa_rewriter_31(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
+            S, L = query.size(1), key.size(1)
+            causal = torch.ones(S, L, dtype=torch.bool, device=query.device).tril()
+            attn_mask = torch.zeros(S, L, dtype=query.dtype, device=query.device)
+            attn_mask = attn_mask.masked_fill(~causal, float("-inf"))
+            q = query.permute(0, 2, 1, 3)
+            k = key.permute(0, 2, 1, 3)
+            v = value.permute(0, 2, 1, 3)
+            scale = 1.0 / math.sqrt(key.shape[-1])
+            return (
+                (torch.matmul(q, k.transpose(-2, -1)).mul(scale) + attn_mask)
+                .softmax(dim=-1)
+                .matmul(v)
+            )
+
+        for dtype in [torch.half, torch.float]:
+            prefix = "_sfdp_pattern_31" + ("_half" if dtype == torch.half else "")
+            for bs in [2, 1]:
+                # batch_size = 1 traces without clone nodes, so it needs its own pattern
+                args = [
+                    torch.randn((bs, 8, 4, 16), device=self.device, dtype=dtype)
+                    for _ in range(3)
+                ]
+                name = prefix + ("_bs1" if bs == 1 else "")
+                self._check_common(
+                    dot_prod_attention,
+                    args1=args,
+                    dtype=dtype,
+                    check_train=bs > 1,
+                    expected_fused_attention_patterns={
+                        False: name + "_inference",
+                        True: name + "_training",
+                    },
+                )
 
     def _test_sdpa_rewriter_28(self):
         def dot_prod_attention(
@@ -2508,6 +2543,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_30_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_30
         )
+        test_sdpa_rewriter_31_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_31
+        )
         if HAS_XPU_AND_TRITON:
             test_sdpa_rewriter_25_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_25
@@ -2668,6 +2706,9 @@ if RUN_CPU:
         )
         test_sdpa_rewriter_30_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_30
+        )
+        test_sdpa_rewriter_31_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_31
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):

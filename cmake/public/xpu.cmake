@@ -38,24 +38,17 @@ if(NOT SYCL_FOUND)
 endif()
 set(PYTORCH_FOUND_XPU TRUE)
 
-# SYCL library interface
-add_library(torch::sycl INTERFACE IMPORTED)
-
-set_property(
-    TARGET torch::sycl PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${SYCL_INCLUDE_DIR})
-set_property(
-    TARGET torch::sycl PROPERTY INTERFACE_LINK_DIRECTORIES
-    ${SYCL_LIBRARY_DIR})
-set_property(
-    TARGET torch::sycl PROPERTY INTERFACE_LINK_LIBRARIES
-    ${SYCL_LIBRARY})
-
 # xpurt
 add_library(torch::xpurt INTERFACE IMPORTED)
 set_property(
+    TARGET torch::xpurt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${SYCL_INCLUDE_DIR})
+set_property(
+    TARGET torch::xpurt PROPERTY INTERFACE_LINK_DIRECTORIES
+    ${SYCL_LIBRARY_DIR})
+set_property(
     TARGET torch::xpurt PROPERTY INTERFACE_LINK_LIBRARIES
-    torch::sycl)
+    ${SYCL_LIBRARY})
 
 # setting xpu arch flags
 torch_xpu_get_arch_list(XPU_ARCH_FLAGS)

@@ -135,6 +135,9 @@ void CUDAGraph::retain_pool(MempoolId_t pool) {
   }
   c10::cuda::CUDACachingAllocator::createOrIncrefPool(capture_dev_, pool);
   record_retained_pool(pool);
+  if (at::getHostAllocator(at::kCUDA)->retain_pool(pool)) {
+    retained_host_mempool_ids_.push_back(pool);
+  }
 }
 
 template <>
@@ -158,6 +161,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   TORCH_CHECK(!has_graph_exec_ && !has_graph_ && !allocated_pool_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, call reset() or create a new instance.");
+  // The host allocator rejects this too, but only after the device allocator
+  // has been routed to the pool, so check before any state changes.
+  TORCH_CHECK(
+      !at::getHostAllocator(at::kCUDA)->is_host_mem_pool(pool),
+      "Pool (", pool.first, ", ", pool.second,
+      ") belongs to a HostMemPool and cannot be used as a graph capture pool");
 
   capture_mode_ = capture_mode;
 
@@ -379,7 +388,8 @@ void CUDAGraph::instantiate() {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
-#if !defined(USE_ROCM)
+  // HIP before ROCm 10.2 rejects combined instantiate flags with hipErrorInvalidValue.
+#if !defined(USE_ROCM) || ROCM_VERSION >= 100200
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
                                                 cudaGraphInstantiateFlagAutoFreeOnLaunch | cudaGraphInstantiateFlagUseNodePriority));
@@ -446,6 +456,14 @@ cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
   return graph_exec_;
 }
 
+void CUDAGraph::set_raw_cuda_graph_exec(cudaGraphExec_t graph_exec) {
+  TORCH_CHECK(capture_ended_, "capture_end() must have been called before setting a graph executable");
+  TORCH_CHECK(keep_graph_, "set_raw_cuda_graph_exec() requires keep_graph=True");
+  TORCH_CHECK(has_graph_, "set_raw_cuda_graph_exec() requires a retained cudaGraph_t");
+  graph_exec_ = graph_exec;
+  has_graph_exec_ = graph_exec != nullptr;
+}
+
 void CUDAGraph::reset() {
   // These checks warn instead of throwing: reset() is called from the
   // destructor, and at least one CI build refuses to compile with a throwing
@@ -492,7 +510,14 @@ void CUDAGraph::reset() {
       c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, pool);
     }
     retained_mempool_ids_.clear();
+    // The graph's own pool first, as above: blocks that its capture kept in a
+    // retained pool are then reclaimed while that pool is still referenced,
+    // and releasing the pool can free them.
     at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
+    for (const auto& pool : retained_host_mempool_ids_) {
+      at::getHostAllocator(at::kCUDA)->release_pool(pool);
+    }
+    retained_host_mempool_ids_.clear();
     capture_ended_ = false;
     allocated_pool_ = false;
   }
@@ -582,6 +607,30 @@ void CUDAGraph::begin_capture_to_while_node(
 }
 
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+// Routes allocations of the innermost active capture (the root capture, or the
+// conditional body on top of conditional_graph_capture_ids_) to the graph's
+// pool. The caller has already ended the previous routing.
+void CUDAGraph::route_pool_to_innermost_capture() {
+  if (conditional_graph_capture_ids_.empty()) {
+    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+        capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
+    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, create_allocate_filter<c10::Stream>());
+  } else {
+    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+        capture_dev_, mempool_id_, create_child_allocate_filter());
+    auto filter = create_child_allocate_filter();
+    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
+      return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
+    });
+  }
+  // beginAllocateToPool takes a reference on the pool, but the graph already
+  // holds one for the whole capture (taken in capture_begin, released in
+  // reset()). Drop the new one, or each conditional node would keep the pool
+  // from becoming freeable after reset().
+  c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
+}
+
 void CUDAGraph::begin_capture_to_conditional_node(
     const at::Tensor& scalar_cuda_pred_tensor,
     cudaGraphConditionalNodeType conditional_type) {
@@ -679,12 +728,7 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
-  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-      capture_dev_, mempool_id_, create_child_allocate_filter());
-  auto filter = create_child_allocate_filter();
-  at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
-    return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
-  });
+  route_pool_to_innermost_capture();
 
   AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
       child_stream,
@@ -752,21 +796,13 @@ void CUDAGraph::end_capture_to_conditional_node() {
   conditional_graph_capture_ids_.pop();
   conditional_node_handles_.pop();
 
+  // Destroys the body's stream. The pool's blocks and expandable segments do
+  // not refer to it: the allocator files allocations made on a conditional
+  // body's stream under its parent's stream (CaptureTracker::reuseStream).
   TORCH_INTERNAL_ASSERT(!conditional_node_raw_streams_.empty());
   conditional_node_raw_streams_.pop();
 
-  if (conditional_graph_capture_ids_.empty()) {
-    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-        capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
-    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, create_allocate_filter<c10::Stream>());
-  } else {
-    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-        capture_dev_, mempool_id_, create_child_allocate_filter());
-    auto filter = create_child_allocate_filter();
-    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
-      return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
-    });
-  }
+  route_pool_to_innermost_capture();
   TORCH_CHECK(
       invalid_capture_free_count == 0,
       "A CUDA graph allocation was freed from an invalid conditional capture "

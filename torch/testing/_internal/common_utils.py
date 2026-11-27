@@ -1780,6 +1780,7 @@ IS_AVX512_VNNI_SUPPORTED = torch.cpu.get_capabilities().get("avx512_vnni", False
 IS_CPU_EXT_SVE_SUPPORTED = torch.cpu.get_capabilities().get("sve", False)
 IS_CPU_CAPABILITY_SVE = torch._C._get_cpu_capability() in ("SVE128", "SVE256")
 IS_CPU_CAPABILITY_SVE256 = torch._C._get_cpu_capability() == "SVE256"
+IS_CPU_CAPABILITY_ZVECTOR = torch._C._get_cpu_capability() == "Z VECTOR"
 
 if IS_WINDOWS:
     @contextmanager
@@ -2013,7 +2014,7 @@ TEST_CONFIG: str | None = TestEnvironment.def_setting(
 TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     "TEST_WITH_PERIODIC",
     env_var="PYTORCH_TEST_WITH_PERIODIC",
-    implied_by_fn=lambda: TEST_CONFIG == "periodic",
+    implied_by_fn=lambda: TEST_CONFIG in ("periodic", "periodic_daily"),
 )
 # Runs inductor's RUN_CPU test classes even when ONLY_FOR leaves out cpu (unless
 # EXCEPT_FOR excludes it); see inductor_utils.RUN_CPU
@@ -3190,12 +3191,22 @@ def requires_multigpu(fn):
     return unittest.skipIf(skip, reason)(wrapper)
 
 
-def periodic(fn):
+def periodic(fn=None, *, hours=4):
     """Marks a test that CI runs only in periodic test mode.
 
-    The periodic test configuration selects the corresponding pytest marker
-    and sets PYTORCH_TEST_WITH_PERIODIC. Other periodic jobs can also run the
-    @periodic tests in their own files by setting PYTORCH_TEST_WITH_PERIODIC.
+    In periodic-strict, plain @periodic runs every four hours and
+    @periodic(hours=24) runs daily. They select the periodic and periodic_daily
+    pytest markers, respectively. Whenever effective markers combine,
+    including through class/method decoration, stacking or inheritance,
+    periodic_daily takes precedence over periodic. Both reuse
+    PYTORCH_TEST_WITH_PERIODIC to enable tests in periodic mode.
+
+    The periodic test config selects "periodic and not periodic_daily";
+    periodic_daily selects "periodic_daily". Both set PYTORCH_TEST_WITH_PERIODIC.
+    Other periodic jobs setting that flag without a marker filter run both
+    groups on their own cadence; hours does not enforce timing in those jobs.
+    Non-scheduled periodic-strict runs cover both groups by default; manual
+    dispatch can select either.
     Tests in files outside the default Python test sweep (e.g. distributed or
     quantization) never run in CI unless such a job runs those files.
 
@@ -3207,12 +3218,23 @@ def periodic(fn):
     while the periodic gate keeps a test marked both out of the slow shards.
     Such a test runs only in jobs that set both flags, like periodic-strict.
     """
+    if fn is not None and not callable(fn):
+        raise TypeError(
+            f"periodic() expects a test function or class, got {type(fn).__name__}; "
+            "pass hours by keyword (hours=4 or hours=24)"
+        )
+    if hours not in (4, 24):
+        raise ValueError("periodic supports only hours=4 or hours=24")
+    if fn is None:
+        return partial(periodic, hours=hours)
+
+    marker = "periodic_daily" if hours == 24 else "periodic"
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
     skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC
 
     if isinstance(fn, type):
         if has_pytest:
-            fn = pytest.mark.periodic(fn)
+            fn = getattr(pytest.mark, marker)(fn)
         return unittest.skipIf(skip, reason)(fn)
 
     # Isolate decorator metadata when parameter variants share the original
@@ -3222,7 +3244,7 @@ def periodic(fn):
         return fn(*args, **kwargs)
 
     if has_pytest:
-        wrapper = pytest.mark.periodic(wrapper)
+        wrapper = getattr(pytest.mark, marker)(wrapper)
 
     return unittest.skipIf(skip, reason)(wrapper)
 
@@ -4640,17 +4662,21 @@ class TestCase(expecttest.TestCase):
             hasattr(self, '_prev_fp32_precision')
             and os.environ.get('PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK') != '1'
         ):
+            prev = self._prev_fp32_precision
             current = _snapshot_fp32_precision()
-            if current != self._prev_fp32_precision:
-                _restore_fp32_precision(self._prev_fp32_precision)
-                specs = _fp32_precision_flag_specs()
+            if current != prev:
+                _restore_fp32_precision(prev)
+                labels = torch.backends._FP32_PRECISION_KEYS
                 mismatches = [
-                    f"  {label}: was {prev!r}, became {cur!r}"
-                    for (label, _, _), prev, cur in zip(specs, self._prev_fp32_precision, current)
-                    if prev != cur
+                    f"  {labels.get(key, key)}: was {prev[key]!r}, became {current[key]!r}"
+                    for key in prev
+                    if prev[key] != current[key]
                 ]
                 raise AssertionError(
-                    "fp32 precision flag leak detected:\n" + "\n".join(mismatches)
+                    "fp32 precision flag leak detected:\n" + "\n".join(mismatches) + "\n"
+                    "'none' and 'default' mean the setting inherits from its parent ('default' "
+                    "falls back to tf32). Assigning back a value read from a getter does not "
+                    "restore inheritance; use recover_orig_fp32_precision or a flags() context manager."
                 )
 
     @staticmethod
@@ -7083,74 +7109,16 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
     return wrapper
 
-# The legacy getter cross-checks the Float32MatmulPrecision enum against the
-# new backend-specific values and raises when they disagree, so a snapshot
-# taken while a test has them out of sync would throw from setUp/tearDown
-# instead of reporting the leak. Report a sentinel instead; restoring the
-# backend-specific values is what puts the pair back in sync.
-_INCONSISTENT_MATMUL_PRECISION = "<inconsistent legacy/new matmul precision>"
 
-
-def _get_legacy_float32_matmul_precision():
-    try:
-        return torch.get_float32_matmul_precision()
-    except RuntimeError:
-        return _INCONSISTENT_MATMUL_PRECISION
-
-
-def _set_legacy_float32_matmul_precision(value):
-    if value != _INCONSISTENT_MATMUL_PRECISION:
-        torch.set_float32_matmul_precision(value)
-
-
-# Single source of truth for which globals count as "fp32 precision state".
-# Add a new flag here and both recover_orig_fp32_precision and the TestCase
-# leak detector pick it up automatically.
-def _fp32_precision_flag_specs():
-    return (
-        # Must stay first: set_float32_matmul_precision also writes the cuda
-        # and mkldnn matmul entries, so it has to be restored before them.
-        ("torch.get_float32_matmul_precision()",
-            _get_legacy_float32_matmul_precision,
-            _set_legacy_float32_matmul_precision),
-        ("torch.backends.cuda.matmul.fp32_precision",
-            lambda: torch.backends.cuda.matmul.fp32_precision,
-            lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),
-        ("torch.backends.cudnn.conv.fp32_precision",
-            lambda: torch.backends.cudnn.conv.fp32_precision,  # type: ignore[attr-defined]
-            lambda v: setattr(torch.backends.cudnn.conv, "fp32_precision", v)),
-        ("torch.backends.cudnn.rnn.fp32_precision",
-            lambda: torch.backends.cudnn.rnn.fp32_precision,  # type: ignore[attr-defined]
-            lambda v: setattr(torch.backends.cudnn.rnn, "fp32_precision", v)),
-        ("torch.backends.mkldnn.matmul.fp32_precision",
-            lambda: torch.backends.mkldnn.matmul.fp32_precision,  # type: ignore[attr-defined]
-            lambda v: setattr(torch.backends.mkldnn.matmul, "fp32_precision", v)),
-        ("torch.backends.mkldnn.conv.fp32_precision",
-            lambda: torch.backends.mkldnn.conv.fp32_precision,  # type: ignore[attr-defined]
-            lambda v: setattr(torch.backends.mkldnn.conv, "fp32_precision", v)),
-        ("torch.backends.mkldnn.rnn.fp32_precision",
-            lambda: torch.backends.mkldnn.rnn.fp32_precision,  # type: ignore[attr-defined]
-            lambda v: setattr(torch.backends.mkldnn.rnn, "fp32_precision", v)),
-    )
-
-
-def _snapshot_fp32_precision():
-    return tuple(get() for _, get, _ in _fp32_precision_flag_specs())
+# The snapshot is the stored state, not the values the getters resolve to:
+# writing a resolved value back through a setter pins a setting that was
+# inheriting from its parent, a leak that only shows once the parent changes.
+def _snapshot_fp32_precision(*keys):
+    return torch.backends._get_fp32_precision_state(*keys)
 
 
 def _restore_fp32_precision(snapshot):
-    specs = _fp32_precision_flag_specs()
-    if not isinstance(snapshot, tuple) or len(snapshot) != len(specs):
-        # Catches accidental shadowing of self._prev_fp32_precision by a
-        # subclass (e.g. assigning a scalar); without this check zip() would
-        # silently iterate over the wrong sequence.
-        raise TypeError(
-            f"fp32 precision snapshot must be a {len(specs)}-tuple, "
-            f"got {type(snapshot).__name__} of length "
-            f"{len(snapshot) if hasattr(snapshot, '__len__') else 'unknown'}"
-        )
-    for (_, _, set_), value in zip(specs, snapshot):
-        set_(value)
+    torch.backends._set_fp32_precision_state(snapshot)
 
 
 def recover_orig_fp32_precision(fn):

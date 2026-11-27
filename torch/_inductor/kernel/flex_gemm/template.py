@@ -10,7 +10,6 @@ import sympy
 import torch
 from torch._higher_order_ops.flex_gemm import FlexGemmOpSpec
 from torch._inductor.codegen.common import IndentedBuffer
-from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
 from torch._inductor.codegen.cutedsl.cutedsl_template import (
     CuteDSLTemplate,
@@ -26,6 +25,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 )
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.select_algorithm import PartialRender
+from torch._native.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch.utils._ordered_set import OrderedSet
 
 

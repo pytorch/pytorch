@@ -27,7 +27,6 @@ from _common import write_env_exports
 # macOS arm64 build flags.
 # USE_DISTRIBUTED=1 needs libuv, built as part of the tensorpipe submodule.
 MACOS_BUILD_ENV: dict[str, str] = {
-    "TH_BINARY_BUILD": "1",
     "INSTALL_TEST": "0",
     "MACOSX_DEPLOYMENT_TARGET": "14.0",
     "USE_DISTRIBUTED": "1",

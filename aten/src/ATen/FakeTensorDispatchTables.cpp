@@ -1,44 +1,19 @@
 #include <ATen/FakeTensorDispatchTables.h>
 
-#include <c10/util/Exception.h>
 #include <c10/util/LeftRight.h>
 
-#include <unordered_set>
+#include <unordered_map>
 
 namespace at::impl {
 namespace {
 
-struct FakeDispatchTables {
-  std::unordered_set<c10::OperatorName> decomp;
-  std::unordered_set<c10::OperatorName> meta;
-  std::unordered_set<c10::OperatorName> op_impl;
-  std::unordered_set<c10::OperatorName> prim_meta;
-  std::unordered_set<c10::OperatorName> python_cia;
-  std::unordered_set<c10::OperatorName> custom_op_impl;
-};
+// The categories each registered operator is in, as a fakeDispatchCategoryBit
+// mask; operators in none are absent
+using FakeDispatchTables = std::unordered_map<c10::OperatorName, uint32_t>;
 
 c10::LeftRight<FakeDispatchTables>& fakeDispatchTables() {
   static c10::LeftRight<FakeDispatchTables> tables;
   return tables;
-}
-
-template <typename Tables>
-auto& setForCategory(Tables& t, FakeDispatchCategory category) {
-  switch (category) {
-    case FakeDispatchCategory::Decomp:
-      return t.decomp;
-    case FakeDispatchCategory::Meta:
-      return t.meta;
-    case FakeDispatchCategory::OpImpl:
-      return t.op_impl;
-    case FakeDispatchCategory::PrimMeta:
-      return t.prim_meta;
-    case FakeDispatchCategory::PythonCIA:
-      return t.python_cia;
-    case FakeDispatchCategory::CustomOpImpl:
-      return t.custom_op_impl;
-  }
-  TORCH_INTERNAL_ASSERT(false, "unknown FakeDispatchCategory");
 }
 
 } // namespace
@@ -46,22 +21,33 @@ auto& setForCategory(Tables& t, FakeDispatchCategory category) {
 void fakeDispatchTableAdd(
     FakeDispatchCategory category,
     const c10::OperatorName& name) {
-  fakeDispatchTables().write(
-      [&](FakeDispatchTables& t) { setForCategory(t, category).insert(name); });
+  fakeDispatchTables().write([&](FakeDispatchTables& t) {
+    t[name] |= fakeDispatchCategoryBit(category);
+  });
 }
 
 void fakeDispatchTableRemove(
     FakeDispatchCategory category,
     const c10::OperatorName& name) {
-  fakeDispatchTables().write(
-      [&](FakeDispatchTables& t) { setForCategory(t, category).erase(name); });
+  fakeDispatchTables().write([&](FakeDispatchTables& t) {
+    const auto it = t.find(name);
+    if (it != t.end() &&
+        (it->second &= ~fakeDispatchCategoryBit(category)) == 0) {
+      t.erase(it);
+    }
+  });
 }
 
 bool fakeDispatchTableContains(
     FakeDispatchCategory category,
     const c10::OperatorName& name) {
+  return fakeDispatchCategoriesHave(fakeDispatchTableCategories(name), category);
+}
+
+uint32_t fakeDispatchTableCategories(const c10::OperatorName& name) {
   return fakeDispatchTables().read([&](const FakeDispatchTables& t) {
-    return setForCategory(t, category).contains(name);
+    const auto it = t.find(name);
+    return it == t.end() ? 0 : it->second;
   });
 }
 

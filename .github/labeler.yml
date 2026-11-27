@@ -53,11 +53,8 @@
 - test/test_mkldnn.py
 
 "module: mkldnn":
-- third_party/ideep
-- caffe2/ideep/**
-- caffe2/python/ideep/**
+- third_party/oneDNN
 - cmake/Modules/FindMKLDNN.cmake
-- third_party/mkl-dnn.BUILD
 - torch/csrc/jit/codegen/onednn/**
 - test/test_jit_llga_fuser.py
 - test/test_mkldnn.py
@@ -172,7 +169,10 @@
 - torch/_inductor/kernel/templates/cutedsl_mm_grouped.py.jinja
 - torch/_inductor/kernel/vendored_templates/cutedsl/**
 - torch/_inductor/heuristics/template/cutedsl.py
+- torch/_higher_order_ops/cutedsl_kernel_wrap.py
+- torch/_higher_order_ops/user_kernel_hop.py
 - test/inductor/test_cutedsl_grouped_mm.py
+- test/inductor/test_cutedsl_kernels.py
 - test/inductor/test_cutedsl_template.py
 - test/python_native/**
 
