@@ -962,9 +962,7 @@ class _ABCHolder(metaclass=abc.ABCMeta):  # noqa: B024 - exercise a concrete ABC
         self.unused = threading.Lock()
 
 
-_pruning_graph = functools.partial(
-    types.SimpleNamespace, torch_function_mode_stack=(), fx_annotation=None
-)
+_PRUNING_GRAPH_DEFAULTS = {"torch_function_mode_stack": (), "fx_annotation": None}
 
 
 class DictionaryToken:
@@ -1978,7 +1976,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             scope = {"proxy": proxy, **scope}
         scope["second"] = types.MappingProxyType(backing)
         dictionaries = [] if source == "list" else [items]
-        error = r"L\['proxy'\] needs pruned (dict|DictionaryToken) state"
+        kind = "dict" if source == "dict" else "DictionaryToken"
+        error = rf"L\['proxy'\] needs pruned {kind} state in its copy\. Expose the dependency"
         with self.assertRaisesRegex(PackageError, error):
             self._roundtrip_pruned(scope, dictionaries)
         backing.copy.assert_called_once_with()
@@ -2001,20 +2000,21 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             def __hash__(cls):
                 return hash(PlainNamespaceDict)
 
-        class Mapping(dict, metaclass=Meta):
+        class Key:
             @property
             def __class__(self):
                 raise AssertionError("Required-state traversal must not read __class__")
 
-        mapping, plain = Mapping(), PlainNamespaceDict()
-        mapping.state = [{"saved": _Mode.FAST}]
-        pickler = GuardsStatePickler({}, {}, {}, {}, io.BytesIO())
-        with mock.patch.dict(copyreg.dispatch_table, {Mapping: tuple}):
+        mapping_type = Meta("Mapping", (dict,), {})
+        mapping, plain, key = mapping_type(), PlainNamespaceDict(), Key()
+        key.state = [{"saved": _Mode.FAST}]
+        pickler = GuardsStatePickler({id(key): key}, {}, {}, {}, io.BytesIO())
+        with mock.patch.dict(copyreg.dispatch_table, {mapping_type: tuple}):
             pickler.prune_scopes({}, {}, [mapping, plain])
         self.assertNotIn(id(mapping), pickler._pruned_dictionary_ids)
         self.assertIn(id(plain), pickler._pruned_dictionary_ids)
-        pickler._retain_required_state((mapping,))
-        for value in (mapping, mapping.state, mapping.state[0], _Mode.FAST):
+        pickler._retain_required_state((key,))
+        for value in (key, key.state, key.state[0], _Mode.FAST):
             self.assertIs(pickler._whole_compared_values[id(value)], value)
 
     hw_classification = HardwareClassification.GENERIC
@@ -2546,7 +2546,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # An unguarded symbolic LOCAL is a bystander: pickle_guards_state
         # registers it and it is pruned before the refusal is reached.
         s, x = env.create_unbacked_symint(), torch.randn(2)
-        graph = _pruning_graph(
+        graph = types.SimpleNamespace(
+            **_PRUNING_GRAPH_DEFAULTS,
             guards=[],
             local_scope={"s": s, "x": x},
             global_scope={},
@@ -2625,7 +2626,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         def fn(a, cfg=[1, m.cfg]):  # noqa: B006
             return a
 
-        graph = _pruning_graph(
+        graph = types.SimpleNamespace(
+            **_PRUNING_GRAPH_DEFAULTS,
             guards=[],
             local_scope={"m": m, "fn": fn},
             global_scope={},
@@ -2657,7 +2659,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         def fn(a, cfg=_Cfg(m.cfg)):
             return a
 
-        graph = _pruning_graph(
+        graph = types.SimpleNamespace(
+            **_PRUNING_GRAPH_DEFAULTS,
             guards=[],
             local_scope={"m": m, "fn": fn},
             global_scope={},
@@ -2743,7 +2746,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             pass
 
         t = torch.randn(2)
-        graph = _pruning_graph(
+        graph = types.SimpleNamespace(
+            **_PRUNING_GRAPH_DEFAULTS,
             guards=[],
             local_scope={
                 "dt": torch.float32,
@@ -2792,7 +2796,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 buf = io.BytesIO()
                 GuardsStatePickler({}, {}, {}, {}, buf).dump({"o": obj})
                 self.assertIsInstance(load_guards_state(buf.getvalue())["o"], _Missing)
-                graph = _pruning_graph(
+                graph = types.SimpleNamespace(
+                    **_PRUNING_GRAPH_DEFAULTS,
                     guards=[],
                     local_scope={"o": obj},
                     global_scope={},
@@ -3659,19 +3664,50 @@ class TestGuardSerialization(TestGuardSerializationBase):
         check(inputs, True)
         return check
 
+    @parametrize("proxy_first", [False, True])
+    @parametrize("custom_copy", [False, True])
+    def test_module_attribute_alias_in_proxy_copy(self, proxy_first, custom_copy):
+        def proxy_then_module(x, opts, m):
+            return m(x) + opts["scale"]
+
+        def module_then_proxy(x, m, opts):
+            return m(x) + opts["scale"]
+
+        m = GlobalNestedModule()
+        m.token = DictionaryToken(value=3)
+        m.cfg = {"token": m.token}
+        backing = {"scale": 2, "consumer": _MappingCallable(m.cfg)}
+        if custom_copy:
+            backing = PlainNamespaceDict(backing)
+            backing.copy = functools.partial(PlainNamespaceDict, backing)
+        fn = proxy_then_module if proxy_first else module_then_proxy
+        kinds = ("TYPE_MATCH", "TENSOR_MATCH", "CONSTANT_MATCH")
+        inputs = dict(x=torch.ones(1, 10), opts=types.MappingProxyType(backing), m=m)
+        if custom_copy and not proxy_first:
+            with self.assertRaisesRegex(PackageError, "needs pruned .* state"):
+                self._test_serialization(kinds, fn, **inputs)
+            return
+        self._roundtrip_checks(kinds, fn, inputs)
+        saved = self._saved_scope
+        m, opts = saved["m"], saved["opts"]
+        self.assertIs(opts["consumer"].cfg, m.cfg)
+        self.assertIs(m.cfg["token"], m.token)
+        self.assertEqual(opts["consumer"](), 3)
+
     def test_saved_constructor_and_annotation_aliases(self):
-        def fn(x, m, items, holder):
-            return m.linear(x) + items[1] + holder.weight
+        def fn(x, holder, items=()):
+            return x + holder.weight + (items[1] if items else 0)
 
         first, second, direct = (DictionaryToken() for _ in range(3))
-        holder = DictionaryToken(weight=3, cb=TokenConsumer(first).__reduce_ex__)
-        m = GlobalNestedModule()
-        m.stages = [0, 1]
-        items = [first, 5, second, direct]
-        inputs = dict(x=torch.ones(1, 10), m=m, items=items, holder=holder)
-        with torch.fx.traceback.annotate({"stages": m.stages}):
-            check = self._roundtrip_checks(("TYPE_MATCH", "FX_ANNOTATION"), fn, inputs)
+        holder = DictionaryToken(weight=3, stages=[0, 1])
+        holder.cb = TokenConsumer(first).__reduce_ex__
+        inputs = dict(x=torch.ones(1), holder=holder)
+        with torch.fx.traceback.annotate({"stages": holder.stages}):
+            kinds = ("CONSTANT_MATCH", "FX_ANNOTATION")
+            check = self._roundtrip_checks(kinds, fn, inputs)
         check(inputs, False)
+        self.assertEqual(self._saved_scope["holder"].stages, [0, 1])
+        inputs["items"] = [first, 5, second, direct]
         annotation = {"consumer": TokenConsumer(second), "token": direct}
         with torch.fx.traceback.annotate(annotation):
             self._test_serialization("CONSTANT_MATCH", fn, **inputs)

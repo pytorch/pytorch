@@ -971,8 +971,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             from .builder import SourcelessBuilder
 
             check = SourcelessBuilder.create_internal_user_function(is_deepcopy_atomic)
-            # Input mapping keys and values coexist, including when a custom copier
-            # returns self and deepcopy skips its keepalive list.
             item_type = type(item.value)
             keys: list[VariableTracker] = []
             owner = get_item_source_base(source.base)

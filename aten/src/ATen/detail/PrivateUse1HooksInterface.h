@@ -8,6 +8,7 @@
 #include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
 
+#include <cstdint>
 
 namespace at {
 
@@ -66,6 +67,8 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
       size_t /*newsize*/) const {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
+
+  virtual int32_t getDLDeviceType() const;
 
 #undef FAIL_PRIVATEUSE1HOOKS_FUNC
 };
