@@ -202,6 +202,26 @@ class TestAutocastMPS(TestCase):
         y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
         self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/201630
+    # None and "eager" are baselines that worked before the fix. "aot_eager"
+    # used to fail.
+    @parametrize("backend", [None, "eager", "aot_eager"])
+    def test_nested_autocast_compiled(self, backend):
+        def f(x):
+            with torch.autocast(device_type=x.device.type, enabled=False):
+                return x @ x
+
+        device = "mps"
+
+        x = torch.rand(64, 64, device=device) + 10.0
+        x.requires_grad_()
+        torch._dynamo.reset()
+        fn = f if backend is None else torch.compile(f, fullgraph=True, backend=backend)
+        with torch.autocast(device, dtype=torch.float16):
+            out = fn(x)
+
+        self.assertEqual(out.dtype, x.dtype)
+
     def test_conv_transpose3d_autocast_fp32(self):
         m = nn.ConvTranspose3d(16, 33, 3, stride=2).to("mps")
         x = torch.randn(20, 16, 10, 50, 100, device="mps")
@@ -735,7 +755,7 @@ class TestAvgPool(TestCaseMPS):
         # complex input should raise NotImplementedError instead of
         # an opaque Metal RuntimeError on MPS.
         x = torch.randn(5, 1, 5, 2, 6, dtype=torch.complex64, device="mps")
-        with self.assertRaisesRegex(NotImplementedError, "complex"):
+        with self.assertRaisesRegex(NotImplementedError, "ComplexFloat"):
             F.local_response_norm(x, size=4)
 
     def test_channels_last_storage_offset(self):
@@ -3317,8 +3337,7 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(freq_cpu, freq_mps)
 
     def test_fft_transform_dims_outside_last_four(self):
-        # MPSGraph FFT only handles the last four dims; the backend transposes
-        # outer transform dims into that window. See https://github.com/pytorch/pytorch/issues/124096
+        # Transforms over outer dims, see https://github.com/pytorch/pytorch/issues/124096
         def check(fn, x_cpu, **kwargs):
             x_mps = x_cpu.detach().to("mps")
             self.assertEqual(fn(x_cpu, **kwargs), fn(x_mps, **kwargs).cpu())
@@ -9144,6 +9163,49 @@ class TestMPS(TestCaseMPS):
         print(f"Recommended Max Memory : {max_memory / 1024 ** 3} GB")
         self.assertGreater(max_memory, 0)
 
+    def test_large_alloc_threshold(self):
+        def heap_growth(threshold_mb):
+            torch._C._accelerator_setAllocatorSettings(f"mps_large_alloc_threshold_mb:{threshold_mb}")
+            torch.mps.empty_cache()
+            baseline = torch.mps.driver_allocated_memory()
+            x = torch.ones(50 * 1024 * 1024 // 4, device="mps")
+            growth = torch.mps.driver_allocated_memory() - baseline
+            self.assertEqual(x.sum().item(), x.numel())
+            del x
+            return growth
+
+        self.addCleanup(torch.mps.empty_cache)
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        # By default a 50 MB tensor is placed in a shared 1 GiB XLARGE heap
+        self.assertGreater(heap_growth(0), 900 * 1024 * 1024)
+        self.assertLess(heap_growth(10), 100 * 1024 * 1024)
+
+    def test_large_alloc_threshold_keeps_heaps_separate(self):
+        self.addCleanup(torch.mps.empty_cache)
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:64")
+        torch.mps.empty_cache()
+        baseline = torch.mps.driver_allocated_memory()
+        # Below the threshold: a shared 1 GiB heap. At or above it: a heap of its own,
+        # even though the shared heap has room, so freeing the small one releases 1 GiB.
+        small = torch.empty(50 * 1024 * 1024, dtype=torch.uint8, device="mps")
+        large = torch.empty(100 * 1024 * 1024, dtype=torch.uint8, device="mps")
+        del small
+        torch.mps.empty_cache()
+        self.assertLess(torch.mps.driver_allocated_memory() - baseline, 200 * 1024 * 1024)
+        del large
+
+    def test_large_alloc_threshold_config_keys(self):
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        with self.assertRaisesRegex(ValueError, "Unrecognized key 'mps_larg_alloc_threshold_mb'"):
+            torch._C._accelerator_setAllocatorSettings("mps_larg_alloc_threshold_mb:64")
+        with self.assertRaisesRegex(ValueError, "at most 512"):
+            torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:1024")
+        # Keys of other backends in the shared env var must not break MPS
+        env = {**os.environ, "PYTORCH_ALLOC_CONF": "backend:native,mps_large_alloc_threshold_mb:64"}
+        cmd = [sys.executable, "-c", "import torch; print(torch.ones(1, device='mps').item())"]
+        self.assertEqual(subprocess.check_output(cmd, env=env, text=True).strip(), "1.0")
+
     def test_host_alias_storage(self):
         n = 1024
         dtype = torch.float32
@@ -13997,12 +14059,7 @@ class TestNondeterministic(TestCaseMPS):
         input = torch.randn(1, 2, 6, 6, device=device, requires_grad=True)
         res = module(input)
         grad = torch.ones_like(res)
-
-        def f():
-            res.backward(grad, retain_graph=True)
-            return input.grad
-
-        return f
+        return lambda: torch.autograd.grad(res, input, grad, retain_graph=True)
 
     def _case_upsample_bilinear2d_aa_backward(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
@@ -14713,9 +14770,8 @@ class TestConsistency(TestCaseMPS):
             return (7e-4, 2e-3)
         if op.name == "native_layer_norm":
             return (1e-4, 1.3e-5)
-        if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
-            # TODO: Investigate why this is needed
-            # See https://github.com/pytorch/pytorch/issues/120237
+        if op.name in ['fft.hfftn', 'fft.hfft2', 'fft.hfft']:
+            # float32 rounding at the scale of the unnormalized outputs: https://github.com/pytorch/pytorch/issues/120237
             return (3e-5, 3e-5)
         # Integral linspace can differ from CPU by one due to interpolation rounding.
         if op.name == 'linspace' and dtype in [torch.int8, torch.uint8, torch.int32, torch.int16, torch.int64]:
@@ -15569,27 +15625,42 @@ class TestCommon(TestCase):
         self.assertEqual(result, x, atol=0.5 if dtype == torch.complex32 else 1e-3, rtol=0)
 
     def test_fft_private_ops_edge_dims(self, device):
-        # The private ops wrap negative dims like the CPU
+        # The private ops wrap negative dims and transform empty axes like the CPU
         x = torch.randn(3, 16, dtype=torch.complex64, device=device)
         self.assertEqual(torch._fft_c2c(x, [-1], 0, True), torch.fft.fft(x))
+        self.assertEqual(torch._fft_c2r(x[:, :9], [-1], 2, 16), torch.fft.irfft(x[:, :9], n=16))
+        self.assertEqual(torch._fft_r2c(x.real[:, :0], [-1], 0, True), torch.zeros(3, 1, dtype=x.dtype, device=device))
+
+    @serialTest()
+    @parametrize("n", [1 << 16, 176400, 16 * 3**6 * 13, 3**15, 25 * 13**5, 1 << 25])
+    @largeTensorTest("4GB")
+    def test_rfft_long(self, device, n):
+        # Packed four-step, global passes (packed radix 13 first), odd lengths without a two-pass split, above 2^24
+        x = torch.randn(2, n)
+        y = torch.fft.rfft(x.to(device)).cpu()
+        self.assertEqual(y, torch.fft.rfft(x), atol=1e-5 * n**0.5, rtol=0)  # the default atol at the outputs' scale
+        self.assertEqual(torch.fft.irfft(y.to(device), n=n).cpu(), x)
 
     @dtypes(torch.float32, torch.float16)
-    @parametrize("n", [64, 128, 200, 240, 256, 512, 1024, 2048, 2401, 4096, 4099])
-    @parametrize("kind", ["fft", "ifft"])
+    @parametrize("n", [8, 10, 32, 64, 128, 160, 200, 240, 256, 512, 640, 1024, 2048, 2401, 4095, 4096, 4099, 8190])
+    @parametrize("kind", ["fft", "ifft", "rfft", "irfft"])
     @parametrize("layout", ["contiguous", "transposed", "sliced", "out"])
     def test_fft_strides(self, device, dtype, n, kind, layout):
         complex_dtype = torch.complex32 if dtype == torch.float16 else torch.complex64
-        x = torch.randn(5, 2 * n + 3, device=device, dtype=complex_dtype)
-        x = {"sliced": x[:, 3::2], "transposed": x[:, :n].t().contiguous().t()}.get(layout, x[:, :n].contiguous())
-        op = getattr(torch.fft, kind)
-        kwargs = {"norm": "ortho"}
-        reference = op(x.cpu().to(torch.complex128), **kwargs)
+        length = 2 * n if kind == "rfft" else n + 1 if kind == "irfft" else n
+        x = torch.randn(5, 2 * length + 3, device=device, dtype=dtype if kind == "rfft" else complex_dtype)
+        x = {"sliced": x[:, 3::2], "transposed": x[:, :length].t().contiguous().t()}.get(layout, x[:, :length].contiguous())
+        op = torch._fft_r2c if kind == "rfft" else getattr(torch.fft, kind)
+        kwargs = {"dim": [1], "normalization": 1, "onesided": True} if kind == "rfft" else {"norm": "ortho"}
+        kwargs.update({"n": 2 * n} if kind == "irfft" else {})
+        reference = op(x.cpu().to(torch.complex128 if x.is_complex() else torch.float64), **kwargs)
         if layout == "out":
-            kwargs["out"] = torch.empty(5, 2 * reference.size(-1) + 3, device=device, dtype=complex_dtype)[:, 3::2]
+            out_dtype = dtype if kind == "irfft" else complex_dtype
+            kwargs["out"] = torch.empty(5, 2 * reference.size(-1) + 3, device=device, dtype=out_dtype)[:, 3::2]
         result, tol = op(x, **kwargs), 2e-3 if dtype == torch.float16 else None  # None: the default tolerance
         self.assertEqual(result.cpu(), reference.to(result.dtype), atol=tol, rtol=tol)
 
-    @parametrize("n", [3 * 2**17, 441000, 4 * 3**10, 8 * 5**7, 2 * 7**6, 4 * 5**7, 2**20])
+    @parametrize("n", [3 * 2**17, 441000, 4 * 3**10, 8 * 5**7, 2 * 7**6, 4 * 5**7, 13 * 2**17, 2**20])
     @parametrize("kind", ["fft", "ifft"])
     @parametrize("dim", [0, 1])
     def test_fft_long(self, device, n, kind, dim):
@@ -15599,6 +15670,15 @@ class TestCommon(TestCase):
         reference = op(x.cpu().to(torch.complex128), dim=dim, norm="ortho")
         self.assertEqual(op(x, dim=dim, norm="ortho").cpu(), reference.to(torch.complex64))
 
+    @serialTest()
+    @parametrize("n", [1009, 1031, 2062, 1 << 16, 2 * 8388617])
+    @parametrize("dim", [0, 1])
+    @largeTensorTest("3GB")
+    def test_fft_real_two_sided(self, device, n, dim):
+        # Bluestein lengths (all but 1009 mirror on the host, the last past two tile passes) and a packed four-step
+        x, kwargs = torch.randn((n, 3) if dim == 0 else (3, n)), {"dim": dim, "norm": "ortho"}
+        self.assertEqual(torch.fft.fft(x.to(device), **kwargs).cpu(), torch.fft.fft(x, **kwargs))
+
     def test_fft_bluestein_long(self, device):
         # A prime above 2^23: Bluestein's transforms take 2^25 points, past the two tile passes
         x = torch.randn(8388617, device=device, dtype=torch.complex64)
@@ -15607,7 +15687,7 @@ class TestCommon(TestCase):
 
     @serialTest()
     @dtypes(torch.complex32, torch.complex64)
-    @parametrize("n", [16, 32, 96, 2401, 4096, 8192])
+    @parametrize("n", [16, 32, 96, 2401, 4095, 4096, 8192])
     @largeTensorTest(lambda self, device, dtype, n: 2**31 * dtype.itemsize + 2**30)
     @largeMPSBufferTest(lambda self, device, dtype, n: 2**31 * dtype.itemsize + 2**30)
     def test_fft_64bit_offsets(self, device, dtype, n):
@@ -15763,6 +15843,15 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertRaises(ValueError, lambda: lib.full(mps_tensor, threads=(3, max_thread_group_size),
                                                        group_size=(3, max_thread_group_size)))
 
+    @parametrize("ndim", [1, 2, 3])
+    def test_metal_dispatch_over_uint32_threads(self, ndim):
+        # thread_position_in_grid is 32-bit per axis; oversize the last axis so every axis must be checked
+        lib = torch.mps.compile_shader("kernel void full(device float* x, uint3 idx [[thread_position_in_grid]]) { x[idx.x] = 1.0; }")
+        threads = [1] * (ndim - 1) + [2**32]
+        grid = "x".join(map(str, threads))
+        with self.assertRaisesRegex(ValueError, f"Dispatch grid {grid} exceeds 2\\^32 - 1 threads along one axis"):
+            lib.full(torch.zeros(4, device="mps"), threads=threads)
+
     def test_metal_randn(self):
         lib = torch.mps.compile_shader("""
             #include <c10/metal/random.h>
@@ -15910,6 +15999,16 @@ class TestMetalLibrary(TestCaseMPS):
         for inp in inputs:
             correct += inp
         self.assertEqual(correct, output)
+        # The kernel reaches the inputs only through their addresses, so unless they are
+        # declared to the encoder, it can run before the writes that fill them complete
+        for _ in range(20):
+            # Leave garbage in the memory that the inputs get allocated from
+            garbage = [torch.full((1 << 20,), -1000.0, device="mps") for _ in range(64)]
+            del garbage
+            inputs = [torch.full((1 << 20,), float(i), device="mps") for i in range(64)]
+            output = torch.empty_like(inputs[0])
+            lib.sum_all(output, inputs)
+            self.assertEqual(output, torch.full_like(output, sum(range(64))))
 
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):

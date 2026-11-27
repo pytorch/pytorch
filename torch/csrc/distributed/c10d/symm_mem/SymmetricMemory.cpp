@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <ATen/EmptyTensor.h>
 #include <torch/custom_class.h>
 
 #include <atomic>
@@ -151,14 +152,9 @@ static at::Tensor empty_strided_p2p_persistent(
         "is still active.");
   }
 
-  const size_t numel = std::accumulate(
-      size.begin(),
-      size.end(),
-      static_cast<size_t>(1),
-      // NOLINTNEXTLINE(modernize-use-transparent-functors)
-      std::multiplies<size_t>());
-  const size_t element_size = c10::elementSize(dtype);
-  const size_t alloc_size = numel * element_size;
+  at::detail::check_size_nonnegative(size);
+  const size_t alloc_size =
+      at::detail::computeStorageNbytes(size, stride, c10::elementSize(dtype));
 
   auto allocator = get_allocator(device.type());
   void* dev_ptr = nullptr;
@@ -267,14 +263,9 @@ at::Tensor empty_strided_p2p(
     return empty_strided_p2p_persistent(
         size, stride, dtype, device, group_name, *alloc_id);
   }
-  const size_t numel = std::accumulate(
-      size.begin(),
-      size.end(),
-      static_cast<size_t>(1),
-      // NOLINTNEXTLINE(modernize-use-transparent-functors)
-      std::multiplies<size_t>());
-  const size_t element_size = c10::elementSize(dtype);
-  const size_t alloc_size = numel * element_size;
+  at::detail::check_size_nonnegative(size);
+  const size_t alloc_size =
+      at::detail::computeStorageNbytes(size, stride, c10::elementSize(dtype));
 
   auto allocator = get_allocator(device.type());
   void* dev_ptr = allocator->alloc(alloc_size, device.index(), group_name);
