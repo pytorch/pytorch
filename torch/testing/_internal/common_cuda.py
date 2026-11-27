@@ -284,7 +284,10 @@ def evaluate_platform_supports_efficient_attention():
     if TEST_CUDA:
         return True
     if TEST_XPU:
-        return True
+        # XPU's EFFICIENT_ATTENTION resolves to the math fallback in
+        # select_sdp_backend_xpu, not a fused kernel (intel/torch-xpu-ops#6282
+        # tracks a real implementation).
+        return False
     if TEST_MTIA:
         return True
     return False

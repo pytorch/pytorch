@@ -1261,7 +1261,7 @@ class TestModuleGlobalHooks(TestCase):
         bias: torch.Tensor = torch.randn(10, 20)
         out = model(x, bias=bias)
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(TypeError, "positional argument: 'x'"):
             model(bias=bias)
         self.assertEqual(observed[-1], (bias, None))
         handle.remove()
