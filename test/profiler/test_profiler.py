@@ -513,31 +513,46 @@ if not any(e.device_type == DeviceType.CUDA for e in prof.events()):
 instantiate_device_type_tests(TestProfilerCUDA, globals(), only_for=("cuda",))
 
 
-class TestProfilerAtExitCUDA(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestProfilerAtExit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_profiler_left_running_at_exit_cuda(self):
+    def test_profiler_left_running_at_exit(self, device):
         # With GPU tracing still on at exit, BLAS libraries' static destructors
         # make traced runtime calls after the main thread's thread_locals are
         # destroyed. MALLOC_PERTURB_ poisons freed memory so a use of freed
         # per-thread tracer state faults instead of passing silently.
+        device_type = device.split(":")[0]
+        device_activity = getattr(ProfilerActivity, device_type.upper(), None)
+        if device_activity not in supported_activities():
+            self.skipTest(f"{device_type.upper()} profiling is not supported")
         script = """
+import sys
 import torch
 from torch.profiler import profile, ProfilerActivity
-p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA])
+device = sys.argv[1]
+device_type = device.split(":")[0]
+activities = [ProfilerActivity.CPU]
+if device_type != "cpu":
+    activities.append(getattr(ProfilerActivity, device_type.upper()))
+p = profile(activities=activities)
 p.start()
-x = torch.randn(64, 64, device="cuda")
+torch.ones(10) * 2
+x = torch.randn(64, 64, device=device)
 (x @ x).sum().item()
 """
         proc = subprocess.run(
-            [sys.executable, "-c", script],
+            [sys.executable, "-c", script, device],
             capture_output=True,
             text=True,
             env={**os.environ, "MALLOC_PERTURB_": "165"},
             timeout=60,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
+
+
+instantiate_device_type_tests(
+    TestProfilerAtExit, globals(), allow_xpu=True
+)
 
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
@@ -1301,22 +1316,6 @@ class TestProfiler(TestCase):
                     ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits"
                 )
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
-
-    def test_profiler_left_running_at_exit(self):
-        # A profiler that is never stopped (e.g. an exception between start() and
-        # stop()) used to segfault during static destruction: ~ProfilerStateBase
-        # soft-asserted through libkineto after libkineto's singleton was gone.
-        script = """
-import torch
-from torch.profiler import profile, ProfilerActivity
-p = profile(activities=[ProfilerActivity.CPU])
-p.start()
-torch.ones(10) * 2
-"""
-        proc = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, text=True
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
 
     @unittest.skipIf(IS_WINDOWS, "uses libc exit() through ctypes")
     @parametrize("stop", [False, True])
