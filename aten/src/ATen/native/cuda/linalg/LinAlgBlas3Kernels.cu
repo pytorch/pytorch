@@ -674,6 +674,10 @@ batched_panel_colserial_fused_kernel(
       }
     }
     int pivot_row = block_argmax<real_t, BS>(my_max, my_idx, sdata, sidx, tid);
+    // All NaN cols will return a sentinel, -1. Setting it to k disables swaps
+    if (pivot_row < 0) {
+      pivot_row = k;
+    }
     if (tid == 0) {
       dipiv[batch * ipiv_stride + k] = pivot_row + 1; // 1-based!
     }
