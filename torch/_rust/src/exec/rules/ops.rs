@@ -6,6 +6,8 @@
 //     the classes of its operands: slots of the frame, constants, cells,
 //     globals, moves on the stack, new exact containers that only hold their
 //     operands, identity tests, the handler's bookkeeping;
+//   - LINES by the class of an operand, where a family of such rules is
+//     written (truth.rs: the truth test);
 //   - AS the kinds an opcode is lowered to (cfg/interp.rs), which have their
 //     own entries;
 //   - LATER, with the family that takes it (imports.rs has the two import
@@ -125,7 +127,8 @@ fn kind(k: Kind) -> Taken {
         Kind::CopyFreeVars => Taken::Rows(&[COPY_FREE_VARS_ROW]),
         Kind::LoadDeref => Taken::Rows(&[LOAD_DEREF_ROW]),
         Kind::LoadAttr | Kind::LoadMethod => Taken::Later("attributes"),
-        Kind::ToBool | Kind::Compare => Taken::Later("subscripts"),
+        Kind::ToBool => Taken::Lines(super::truth::LINES),
+        Kind::Compare => Taken::Later("subscripts"),
         Kind::GetIter | Kind::IterNext | Kind::Send | Kind::Yield => Taken::Later("iteration"),
         Kind::Binary => Taken::Later("torch"),
         Kind::Call => Taken::Later("functions"),
@@ -185,8 +188,10 @@ const OPCODES: &[(&[u8], Taken)] = &[
     (&[FOR_ITER], Taken::As(&[Kind::IterNext, Kind::Project])),
     (&[SEND], Taken::As(&[Kind::Send, Kind::Project])),
     (&[LOAD_SUPER_ATTR], Taken::Later("attributes")),
+    // A truth test, as ToBool.
+    (&[UNARY_NOT], Taken::Lines(super::truth::LINES)),
     // The last four hash their operands: code of the keys' classes.
-    (&[UNARY_NOT, CONTAINS_OP, BINARY_SUBSCR, BINARY_SLICE, BUILD_MAP, BUILD_SET, MAP_ADD, SET_ADD], Taken::Later("subscripts")),
+    (&[CONTAINS_OP, BINARY_SUBSCR, BINARY_SLICE, BUILD_MAP, BUILD_SET, MAP_ADD, SET_ADD], Taken::Later("subscripts")),
     (&[RETURN_GENERATOR, UNPACK_SEQUENCE, UNPACK_EX, LIST_EXTEND, SET_UPDATE, DICT_UPDATE, DICT_MERGE], Taken::Later("iteration")),
     (&[UNARY_NEGATIVE, UNARY_INVERT], Taken::Later("torch")),
     (&[FORMAT_VALUE], Taken::Later("descriptors")),

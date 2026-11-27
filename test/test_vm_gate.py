@@ -4685,6 +4685,7 @@ RULES_COLUMNS = {
         "Pending",
         "Modules",
         "Attribute",
+        "Length",
     ),
     "writes": r"None|Slot|Handled|Fills\(\d+\)|Operands\(\w+!?(,\w+!?)*\)|Draws\((-|\w+!?(,\w+!?)*)\)",
     "result": r"None|Lit|Entry|Slot|Part|Made|Pinned|Return|Operand\(\d+\)",
@@ -5011,6 +5012,7 @@ class TestVmRulesOps(TestCase):
     def test_the_dump_is_regular(self):
         fields = {"row": 11, "stop": 4, "later": 4, "as": 4, "group": 4}
         fields |= {"default": 5, "unheard": 4, "form": 6, "before": 5, "order": 5}
+        fields |= {"stop-on": 5, "later-on": 5}
         table = self.statuses()
         seen = collections.Counter()
         dumped = set()
@@ -5022,6 +5024,11 @@ class TestVmRulesOps(TestCase):
         for _, callee, kind, answer in rules_callables():
             if answer in RULES_CALLEES or RULES_CALLEE_KINDS.get(kind) == answer:
                 callables[kind].append({"callee": callee, "operands": [callee]})
+        rowed = {
+            (line.split("\t")[2], "row")
+            for line in torch._rust._rules_dump().splitlines()
+            if line.startswith("row\t")
+        }
         for line in torch._rust._rules_dump().splitlines():
             parts = line.split("\t")
             with self.subTest(line=line):
@@ -5031,6 +5038,13 @@ class TestVmRulesOps(TestCase):
                 seen[parts[0]] += 1
                 if parts[0] in ("group", "form", "before", "order"):
                     # (What these say: TestVmRulesDump.)
+                    continue
+                if parts[0] in ("stop-on", "later-on"):
+                    # A line for operands of the classes it names, of a What
+                    # that has rows (asked about in TestVmRulesDump).
+                    self.assertIn(parts[1], RULES_FAMILIES)
+                    self.assertRegex(parts[3], r"^-?\d+:\w+(,-?\d+:\w+)*$")
+                    self.assertIn((parts[2], "row"), dumped | rowed)
                     continue
                 if parts[0] == "default" and parts[1] != "callees":
                     continue
@@ -5129,7 +5143,12 @@ class TestVmRulesOps(TestCase):
         for kind in defaults:
             self.assertGreater(len(callables[kind]), 0, msg=kind)
 
-    def test_a_group_is_a_list_of_exact_classes(self):
+    def test_the_groups_of_a_class(self):
+        """A group is a list of exact classes, or is computed from the exact
+        class: from what it has under the names a truth test looks up and
+        from the builtin it is a subclass of. A subclass of a member of a
+        listed group is no member of that group."""
+
         class Int(int):
             pass
 
@@ -5137,19 +5156,33 @@ class TestVmRulesOps(TestCase):
             pass
 
         groups = torch._rust._rules_groups
-        for value in (1, 1.5, True, "a", b"a", None, ...):
+        for value in (1, 1.5, True, "a", b"a", None):
             self.assertEqual(groups(value), ["Immutable"], msg=repr(value))
+        # (The ellipsis has no truth of its own, as any object without one.)
+        self.assertEqual(groups(...), ["Immutable", "NoTruth"])
         self.assertEqual(groups([]), ["ExactList"])
         self.assertEqual(groups(()), ["ExactTuple"])
         self.assertEqual(groups({}), ["ExactDict"])
         self.assertEqual(groups(set()), ["ExactSet"])
         self.assertEqual(groups(torch.ones(1)), ["PlainTensor"])
         self.assertEqual(groups(torch.nn.Parameter(torch.ones(1))), ["PlainTensor"])
-        # A subclass of a member is no member, nor is any other class.
-        Point = collections.namedtuple("Point", "x")
-        others = (Int(1), Tensor(), Point(1), collections.OrderedDict(), frozenset())
-        for value in (*others, 1j, object(), int, numpy.float64(1.0)):
+        # A subclass of a member of a listed group is no member of it, nor
+        # is any other class; some are in no group at all.
+        for value in (Tensor(), 1j, numpy.float64(1.0), collections.deque()):
             self.assertEqual(groups(value), [], msg=repr(value))
+        # The computed groups of a truth test, by what the class has under
+        # __bool__ and __len__ (TestVmRulesTruth): a subclass of a builtin
+        # that has there what the builtin has, an immutable container, an
+        # exact class of collections, a class with no truth of its own.
+        Point = collections.namedtuple("Point", "x")
+        for value in (Int(1), Point(1)):
+            self.assertEqual(groups(value), ["FixedSubclass"], msg=repr(value))
+        self.assertEqual(groups(collections.defaultdict(int)), ["SizedSubclass"])
+        for value in (frozenset(), range(1)):
+            self.assertEqual(groups(value), ["ImmutableSized"], msg=repr(value))
+        self.assertEqual(groups(collections.OrderedDict()), ["ExactOrderedDict"])
+        self.assertEqual(groups(object()), ["NoTruth"])
+        self.assertEqual(groups(int), ["NoTruth"])
 
     def test_every_stop_has_a_program(self):
         table = self.statuses()
@@ -7198,8 +7231,11 @@ class TestVmRulesImports(TestCase):
         class Lazy(types.ModuleType):
             pass
 
-        self.assertEqual(torch._rust._rules_groups(types), ["ExactModule"])
-        self.assertEqual(torch._rust._rules_groups(Lazy("lazy")), [])
+        # (A module, of either class, has no truth of its own: the group
+        # of a truth test, not of the import.)
+        groups = torch._rust._rules_groups
+        self.assertEqual(groups(types), ["ExactModule", "NoTruth"])
+        self.assertEqual(groups(Lazy("lazy")), ["NoTruth"])
 
     def test_every_way_has_a_program(self):
         for name, program in IMPORTS_PROGRAMS.items():
@@ -9729,7 +9765,10 @@ def callback(x):
 
 def lost(x):
     y = torch.relu(x)
-    torch.relu_(y)
+    # (A builtin bound to its receiver is no entry: the recording stops at
+    # the operator that runs under it.)
+    again = y.relu_
+    again()
     return F.relu(y) + 1
 
 def in_a_tuple(*args):
@@ -9929,12 +9968,14 @@ def twice(y):
 
 def overlap(x):
     y = torch.relu(x)
-    torch.relu_(y)
+    again = y.relu_
+    again()
     return twice(twice(y)) + 1
 
 def shifted(x):
     y = twice(x + 1)
-    torch.relu_(y)
+    again = y.relu_
+    again()
     return twice(y) + 1
 
 # Which object a value is: `is` between two operands the list knows by value.
@@ -10049,6 +10090,11 @@ HOLDERS = [Holder(1), Holder(2)]
 MOD = Holder(3)
 OTHER_W = torch.full((8,), 7.0)
 OWN_W = [torch.full((8,), float(k)) for k in range(6)]
+PIN_W = torch.full((8,), 2.0)
+
+def chk_pin_key(x):
+    y = torch.relu(x) * 2
+    return y + PIN_W
 
 # What a list keeps alive: the body reads an object that takes no weak
 # reference and has a finalizer; the program lets go of it before its fifth
@@ -10203,6 +10249,7 @@ BETWEEN = {
     "chk_anomaly": lambda: torch.autograd.set_detect_anomaly(True),
     "moment": lambda: BARE.__setitem__(0, None),
     "chk_two_roots_dead": lambda: DYING.clear(),
+    "chk_pin_key": lambda: PIN_W.requires_grad_(True),
 }
 # What a program is called with besides (or in place of) the tensor, by call.
 ARGS = {"float_input": lambda i: (1.5,) if i < 4 else (2.5,)}
@@ -10245,6 +10292,7 @@ def run(f):
         MOMENTS.clear()
     FRESH.clear()
     DYING.clear()
+    PIN_W.requires_grad_(False)
     if name in SETUP:
         SETUP[name]()
     GRAD.grad = None
@@ -10299,7 +10347,6 @@ print(json.dumps({"same": same, "regions": regions, "digest": digest.hexdigest()
 # program: (the instruction a recording of it stopped at, why): each a part of
 # the text the recorder gives.
 SHADOW_STOPS = {
-    "writer": ("relu_", "ran under an instruction that is no entry (the last: aten::relu_)"),
     "value_read": ("item (later: facts)", "aten::item"),
     "no_row": ("add", "has no row for these operands: it passes out="),
     "kept_list": ("cat", "a container the body did not build for this instruction: list"),
@@ -10607,6 +10654,7 @@ class TestVmCallsShadow(TestCase):
         "chk_root": ("chk_root:", "a root the reads start from", KEEPS, None),
         "chk_led_output": ("chk_led_output:", "a root the reads start from", KEEPS, None),
         "chk_found_too": ("chk_found_too:", "an input a read of the run also found", KEEPS, None),
+        "chk_pin_key": ("chk_pin_key:", "a pin", KEEPS + "dict", None),
         "chk_two_roots": ("chk_two_roots:", "a root the reads start from", KEEPS, None),
         "chk_two_roots_dead": ("chk_two_roots_dead:", "a root the reads start from", KEEPS, None),
         "chk_two_ways": ("chk_two_ways:", "a root the reads start from", KEEPS, None),
@@ -10750,10 +10798,13 @@ class TestVmCallsShadow(TestCase):
         # The witness saw the write the entry states, and nothing else.
         self.assertEqual([note for note in found["notes"] if "+=" in note], [])
 
+    WRITES = "an entry that writes, or whose callee has a row that writes: the list is not run a second time, so nothing validates it until its effects are entries in place"
+
     def test_a_list_that_was_never_run_again_is_not_replayable(self):
         # Every instruction of the block is an entry and nothing else is met:
-        # the list has no other reason. One of its entries writes, so it is
-        # never run again, and nothing shows that it is the body.
+        # the list has no other reason. One of its entries writes: run a
+        # second time it would write a second time, so it is never run
+        # again, and nothing shows that it is the body.
         for mode in ("shadow", "1"):
             found = next(
                 s
@@ -10763,12 +10814,12 @@ class TestVmCallsShadow(TestCase):
             self.assertEqual(found["stop"], None)
             self.assertEqual(
                 [why for why, _ in found["reasons"]],
-                ["never run again and found equal: not validated: an entry writes"],
+                [
+                    self.WRITES,
+                    "never run again and found equal: not validated: an entry writes",
+                ],
             )
-            self.assertEqual(
-                found["status"],
-                "partial: never run again and found equal: not validated: an entry writes",
-            )
+            self.assertEqual(found["status"], "partial: " + self.WRITES)
             self.assertEqual(found["again"], "")
 
     # program: (whether the list knows which objects the operands of its `is`
@@ -10938,9 +10989,54 @@ class TestVmCallsShadow(TestCase):
         self.assertIn("in0[(None:None:None, 1:3:None)]", found["text"].splitlines()[0])
         self.assertEqual(found["validated"], "equal")
 
+    def test_a_call_that_writes_operands_is_an_entry_that_says_so(self):
+        # torch.relu_ writes its operand and hands it back: its row says so,
+        # the entry states the write and that its result is that operand, and
+        # the list goes on behind it. Run a second time it would write a
+        # second time: such a list is never run again to be compared, so
+        # nothing validates it and it is partial with that reason.
+        writes = self.WRITES
+        for mode in ("shadow", "1"):
+            found = [
+                s
+                for s in self.program("writer", mode)["shadow"]
+                if s["place"].startswith("writer:")
+            ]
+            self.assertEqual(len(found), 1, found)
+            found = found[0]
+            lines = found["text"].splitlines()
+            self.assertEqual(
+                (found["stop"], found["entries"], len(lines)), (None, 3, 3)
+            )
+            self.assertIn("torch.relu_(r0)", lines[1])
+            self.assertIn("[writes(0)] assert is(operand 0)", lines[1])
+            self.assertIn("r2 = move r0 + 1", lines[2])
+            self.assertIn(writes, [why for why, _ in found["reasons"]])
+            self.assertTrue(found["status"].startswith("partial: "), found)
+            self.assertEqual(
+                (found["validated"], found["again"], found["notes"]),
+                ("not validated: an entry writes", "", []),
+            )
+        # A counter of state written in place (a pin), and batch norm in
+        # training mode: it writes its running statistics, which no
+        # operator's schema declares, and hands back a new tensor. The
+        # witness sees no declared write there and that is agreement.
+        found = self.reached("state")
+        self.assertIn("torch.Tensor.add_(pin0, 1)", found["text"])
+        self.assertIn(
+            "torch.batch_norm(in0, pin1, pin2, pin3, pin4, True", found["text"]
+        )
+        self.assertIn("[writes(3, 4)]", found["text"])
+        self.assertEqual(found["notes"], [])
+        self.assertIn(writes, [why for why, _ in found["reasons"]])
+        self.assertEqual(
+            (found["validated"], found["again"]), ("not validated: an entry writes", "")
+        )
+
     def test_a_recording_inside_a_stopped_one_keeps_both(self):
-        # The body stops at relu_; F.relu's blocks, entered behind the stop,
-        # are recorded on their own.
+        # The body stops at relu_ called through a builtin bound to its
+        # receiver; F.relu's blocks, entered behind the stop, are recorded on
+        # their own.
         shadow = self.program("lost")["shadow"]
         self.assertTrue(
             any(s["place"].startswith("lost:") and s["stop"] for s in shadow)
@@ -11059,7 +11155,8 @@ class TestVmCallsShadow(TestCase):
             self.assertEqual((found["pins"], found["entries"]), (0, 0))
 
     def test_a_trace_under_a_stopped_recording_is_the_engines_own(self):
-        # `overlap` stops at relu_; behind the stop `twice` runs twice: the
+        # `overlap` stops at relu_ called through a builtin bound to its
+        # receiver; behind the stop `twice` runs twice: the
         # first run of its block is recorded on top, the second is due for a
         # trace of today's engine, which begins while the stopped recording
         # is still there. Values and regions are what they are without the
@@ -11325,6 +11422,7 @@ RULES_LICENSE_NAMES = [
     "ffi::PyDict_Type",
     "ffi::PyErr_Clear",
     "ffi::PyFloat_Type",
+    "ffi::PyFrozenSet_Type",
     "ffi::PyFunction_Type",
     "ffi::PyImport_GetModuleDict",
     "ffi::PyList_GET_ITEM",
@@ -11338,6 +11436,7 @@ RULES_LICENSE_NAMES = [
     "ffi::PyModule_GetDef",
     "ffi::PyModule_GetDict",
     "ffi::PyModule_Type",
+    "ffi::PyRange_Type",
     "ffi::PySet_Type",
     "ffi::PyTuple_GET_ITEM",
     "ffi::PyTuple_GET_SIZE",
@@ -11345,6 +11444,7 @@ RULES_LICENSE_NAMES = [
     "ffi::PyTypeObject",
     "ffi::PyType_Check",
     "ffi::PyType_GetFlags",
+    "ffi::PyType_IsSubtype",
     "ffi::PyType_Type",
     "ffi::PyUnicode_AsUTF8",
     "ffi::PyUnicode_CompareWithASCIIString",
@@ -11359,6 +11459,8 @@ RULES_LICENSE_NAMES = [
     "ffi::Py_Ellipsis",
     "ffi::Py_False",
     "ffi::Py_None",
+    "ffi::Py_TPFLAGS_DICT_SUBCLASS",
+    "ffi::Py_TPFLAGS_LIST_SUBCLASS",
     "ffi::Py_TPFLAGS_TYPE_SUBCLASS",
     "ffi::Py_TYPE",
     "ffi::Py_True",
@@ -11369,9 +11471,11 @@ RULES_LICENSE_NAMES = [
     "opcodes::name",
     "reads::attr",
     "reads::class_is",
+    "reads::class_of",
     "reads::dict_get",
     "reads::subscript",
     "reads::text",
+    "reads::truth",
     "reads::type_name",
     "scalars::stand_in",
     "super::super::plain_tensor_types",
@@ -11385,7 +11489,7 @@ def rules_license_reach(rules):
     """By the source under exec/rules: what the license of an instruction
     can run, and what that names outside the table's own source. Returns
     (reach, names, python). `reach`: the functions reachable from
-    rules::license, each family's rule and each row's `before` by a call, a
+    rules::license, rules::names, each family's rule and each row's `before` by a call, a
     method call or a function handed over by its name, as (file, function).
     `names`: every path those functions name that is not of the table's own
     modules, enums and structs or of Rust's library, and the words of pyo3
@@ -11424,7 +11528,9 @@ def rules_license_reach(rules):
             return [(file, name)]
         return [(other, name) for other in defined.get(name, ())]
 
-    todo = named("mod.rs", "license")
+    # (names(): what a row that enters Python code names, asked where the
+    # instruction is asked about.)
+    todo = named("mod.rs", "license") + named("mod.rs", "names")
     for file, text in texts.items():
         for name in re.findall(r"before: Some\((\w+)\)", text):
             todo += named(file, name)
@@ -11703,6 +11809,7 @@ class TestVmRulesTorchWrites(TestCase):
             python,
             {
                 ("callees.rs", "ready"),
+                ("groups.rs", "ready"),
                 ("dump.rs", "_rules_callee_kind"),
                 ("dump.rs", "_rules_groups"),
                 ("dump.rs", "_rules_hear"),
@@ -11751,7 +11858,7 @@ class TestVmRulesTorchWrites(TestCase):
             for inside, body in re.findall(
                 r"fn (\w+)[^{]*\{(.*?)\n\}", text, flags=re.DOTALL
             ):
-                if re.search(r"\bcallees::ready\(\)", body):
+                if re.search(r"\b(callees|groups)::ready\(\)", body):
                     made_by.add((os.path.relpath(path, rules), inside))
         self.assertEqual(made_by, {("mod.rs", "ready")})
 
@@ -18757,6 +18864,31 @@ class RulesPlain:
     pass
 
 
+class RulesTruthful:
+    def __bool__(self):
+        return True
+
+
+class RulesCounted:
+    def __len__(self):
+        return 1
+
+
+class RulesKeyed(dict):
+    pass
+
+
+class RulesInt(int):
+    pass
+
+
+def rules_stand_in():
+    """The engine's stand-in for a number that is an input of a region."""
+    from torch._rust_inductor import _Scalar
+
+    return _Scalar(1.5)
+
+
 class RulesWithInit:
     def __init__(self):
         self.k = 1
@@ -19251,13 +19383,19 @@ RULES_ROW_ASKS = {
     ("IMPORT_FROM", "0:ExactModule"): {"operands": [math], "names": ["sqrt"], "frame": True},
 }  # fmt: skip
 # Each `before` function the dump names: an instruction its row's classes
-# take and it refuses, and what the reason says.
+# take and it refuses, and what the reason says; None for a function that
+# refuses nothing (it records what its row reads).
 RULES_REFUSED = {
     "import_name": ({"opcode": opcode.opmap["IMPORT_NAME"], "operands": [1, None], "names": ["math"], "frame": True}, "a relative import"),
     "import_from": ({"opcode": opcode.opmap["IMPORT_FROM"], "operands": [math], "names": ["no_such_name"], "frame": True}, "no_such_name"),
     "plain_call": ({"callee": torch.sin, "operands": [torch.sin, object()]}, "it is handed a object"),
     "formed_call": ({"callee": torch.Tensor.chunk, "operands": [torch.Tensor.chunk, torch.ones(2), torch.ones(2)]}, "called on (0:T 1:T)"),
     "writing_call": ({"callee": torch.Tensor.add_, "operands": [torch.Tensor.add_]}, "it writes operand 0 of the calls measured"),
+    "truth_fixed": None,
+    "truth_length": None,
+    "truth_sized": None,
+    "truth_python": None,
+    "truth_none": None,
 }  # fmt: skip
 # The callees of torch whose lines per form of operands are not heard: the
 # callee as a whole is left to a name, which is answered before any operand
@@ -19379,6 +19517,14 @@ class TestVmRulesDump(TestCase):
         groups = {"Immutable": 0, "ExactList": [], "ExactTuple": (), "ExactDict": {}}
         groups |= {"ExactSet": set(), "ExactModule": math, "PlainTensor": x}
         groups |= {"TorchConstant": torch.float32}
+        groups |= {"ExactOrderedDict": collections.OrderedDict()}
+        groups |= {"StandIn": rules_stand_in()}
+        groups |= {"PythonTruth": RulesTruthful(), "NoTruth": RulesPlain()}
+        groups |= {"PythonLength": RulesCounted(), "ImmutableSized": frozenset()}
+        groups |= {"FixedSubclass": RulesInt(1), "SizedSubclass": RulesKeyed()}
+        # Every group of the dump has an operand here.
+        named_groups = {p[2].split(" ")[0] for p in self.lines() if p[0] == "group"}
+        self.assertEqual(named_groups, set(groups))
         domain = collections.defaultdict(dict)
         for member, place, classes in torch._rust._rules_torch_domain():
             domain[member][place] = classes
@@ -19431,8 +19577,10 @@ class TestVmRulesDump(TestCase):
                     if (what, spec) in RULES_ROW_ASKS:
                         ask |= RULES_ROW_ASKS[what, spec]
                     else:
-                        # A row with a `before` is for values: asked by hand.
-                        self.assertEqual(parts[10], "-")
+                        # A row with a `before` that tests values is asked
+                        # by hand; one that only records, as a row with none.
+                        if parts[10] != "-":
+                            self.assertIsNone(RULES_REFUSED[parts[10]], parts[10])
                         named = dict(o.split(":") for o in spec.split(",") if o != "-")
                         last = "-1" in named
                         ask["operands"] = [groups[named.pop("-1")]] if last else []
@@ -19441,9 +19589,23 @@ class TestVmRulesDump(TestCase):
                             ask["operands"].insert(int(at), groups[group])
                     self.assertEqual(hear(**ask), ("row", line))
                     self.assertEqual(hear(**ask, at_a_word=True), ("row", line))
-                    if spec != "-":
-                        # An operand of a class the row does not name.
-                        ask["operands"] = [object() for _ in ask["operands"]]
+                    for probe in (object(), 1j) if spec != "-" else ():
+                        # An operand of a class the row does not name: an
+                        # object of no class of its own, and a complex. (An
+                        # instruction with a line for the class of a probe is
+                        # not asked with that probe: a truth test has one for
+                        # an object with no truth.)
+                        mine = set(torch._rust._rules_groups(probe))
+                        named_here = {
+                            o.partition(":")[2]
+                            for p in lines
+                            if p[2] == what and p[0] in ("row", "stop-on", "later-on")
+                            for o in p[3].split(",")
+                        }
+                        if mine & named_here:
+                            self.assertIn(what, ("ToBool", "UNARY_NOT"))
+                            continue
+                        ask["operands"] = [probe for _ in ask["operands"]]
                         refused = hear(**ask)
                         self.assertEqual(refused[0], "stop")
                         self.assertIn(
@@ -19455,6 +19617,27 @@ class TestVmRulesDump(TestCase):
                     # form, and it is no row.
                     self.assertNotEqual(parts[4], "row")
                     continue
+                elif how in ("stop-on", "later-on"):
+                    # A line for operands of the classes it names.
+                    ask = asked_of(self, family, what)
+                    named = dict(o.split(":") for o in parts[3].split(","))
+                    self.assertEqual(
+                        sorted(named), [str(at) for at in range(len(named))]
+                    )
+                    ask["operands"] = [groups[named[at]] for at in sorted(named)]
+                    answer = hear(**ask)
+                    word = hear(**ask, at_a_word=True)
+                    if how == "stop-on":
+                        self.assertEqual(answer[0], "stop")
+                        self.assertTrue(
+                            answer[1].startswith(f"{what} stops a trace on")
+                        )
+                        self.assertTrue(answer[1].endswith(f": {parts[4]}"), answer[1])
+                        self.assertEqual(word, answer)
+                    else:
+                        self.assertEqual(answer, ("older", parts[4]))
+                        self.assertIn(parts[4], RULES_UNHEARD)
+                        self.assertEqual(word, ("unheard", parts[4]))
                 elif how == "form":
                     ask = self.torch_ask(what, parts[3], domain, x)
                     if ask is None:
@@ -19508,6 +19691,17 @@ class TestVmRulesDump(TestCase):
                 self.assertEqual(used[name], {family})
                 self.assertRegex(says, r"\b[Rr]efuses\b")
                 self.assertRegex(says, r"\b[Rr]ecords\b")
+                if RULES_REFUSED[name] is None:
+                    # One that only records: it says so, and every row that
+                    # names it has operands of one group alone, so that the
+                    # test of every line asks that row with an operand of
+                    # the group and is answered the row.
+                    self.assertIn("Refuses nothing. Records ", says)
+                    mine = [p for p in lines if p[0] == "row" and p[10] == name]
+                    self.assertGreater(len(mine), 0)
+                    for parts in mine:
+                        self.assertRegex(parts[3], r"^0:\w+$")
+                    continue
                 ask, why = RULES_REFUSED[name]
                 refused = hear(**ask)
                 self.assertEqual(refused[0], "stop")
@@ -19517,9 +19711,12 @@ class TestVmRulesDump(TestCase):
     def test_the_order_is_the_families(self):
         lines = self.lines()
         order = {parts[2]: parts for parts in lines if parts[0] == "order"}
-        self.assertEqual(sorted(order), ["families", "rows"])
+        self.assertEqual(sorted(order), ["families", "results", "rows"])
         self.assertEqual(order["families"][3], ",".join(RULES_FAMILIES))
         self.assertEqual(order["rows"][3], "first")
+        # How a result is known, for every value of RESULT that says so.
+        for result in order["results"][3].split(","):
+            self.assertIn(f"{result}: ", order["results"][4])
         # The lines of the families come in that order.
         families = [parts[1] for parts in lines if parts[1] in RULES_FAMILIES]
         firsts = [f for at, f in enumerate(families) if f not in families[:at]]
@@ -20434,6 +20631,526 @@ class TestVmEdgeHanded(TestCase):
             self.assertIn(
                 "would take with it an operand that is read behind it", left[0]
             )
+
+
+# The programs of a truth test, by the line of the rule table the operand's
+# class meets: (the line: a group with a row, "stop" or "none" for a class
+# no line takes; setup; the construct, which sets `k`; what changes between
+# calls; the state compared). The construct tests an object of that class;
+# `change(second)` puts what the truth depends on into the state B on calls
+# 7 to 9 and into the state A on the others.
+TRUTH_BOX = "class Box:\n    pass\nBOX = Box()\nBOX.v = True"
+TRUTH_TEST = "k = 2.0 if BOX.v else 3.0"
+TRUTH_FLAG = (
+    "class Flag:\n    def __init__(self):\n        self.on = True\n"
+    "    def __bool__(self):\n        return self.on\n"
+    "class Sub(Flag):\n    pass\n"
+    "def no(self):\n    return False\n"
+    "def zero(self):\n    return 0\n"
+    "OWN = Flag.__bool__\nFLAG = Sub()"
+)
+TRUTH_COUNTED = (
+    "class Counted:\n    def __init__(self):\n        self.items = [1]\n"
+    "    def __len__(self):\n        return len(self.items)\n"
+    "def no(self):\n    return False\n"
+    "def zero(self):\n    return 0\n"
+    "OWN = Counted.__len__\nFLAG = Counted()"
+)
+TRUTH_PLAIN = (
+    "class Base:\n    pass\nclass Plain(Base):\n    pass\n"
+    "def no(self):\n    return False\n"
+    "def zero(self):\n    return 0\n"
+    "FLAG = Plain()"
+)
+TRUTH_FIXED = (
+    "class Base(int):\n    pass\nclass Int(Base):\n    pass\n"
+    "def no(self):\n    return False\n"
+    "FLAG = Int(3)"
+)
+TRUTH_SIZED = (
+    "class Base(dict):\n    pass\nclass Keyed(Base):\n    pass\n"
+    "def no(self):\n    return False\n"
+    "def zero(self):\n    return 0\n"
+    "FLAG = Keyed(a=1)"
+)
+TRUTH_MODULE = (
+    "import types\n"
+    "class Falsy(types.ModuleType):\n    def __bool__(self):\n        return False\n"
+    "class Empty(types.ModuleType):\n    def __len__(self):\n        return 0\n"
+    "FLAG = types.ModuleType('m')"
+)
+TRUTH_IF = "k = 2.0 if FLAG else 3.0"
+TRUTH_GAINS = "if second:\n    {0} = {1}\nelif '{2}' in vars({3}):\n    del {0}"
+TRUTH_PROGRAMS = {
+    # An immutable: the truth is a function of the value, which is what the
+    # attribute load before the test read.
+    "bool": ("Immutable", TRUTH_BOX, TRUTH_TEST, "BOX.v = not second", "None"),
+    "none": ("Immutable", TRUTH_BOX, TRUTH_TEST, "BOX.v = None if second else 1", "None"),
+    "int": ("Immutable", TRUTH_BOX, TRUTH_TEST, "BOX.v = 0 if second else 3", "None"),
+    "float": ("Immutable", TRUTH_BOX, TRUTH_TEST, "BOX.v = 0.0 if second else 1.5", "None"),
+    "str": ("Immutable", TRUTH_BOX, TRUTH_TEST, "BOX.v = '' if second else 'a'", "None"),
+    "bytes": ("Immutable", TRUTH_BOX, TRUTH_TEST, "BOX.v = b'' if second else b'a'", "None"),
+    "ellipsis": ("Immutable", TRUTH_BOX, TRUTH_TEST, "BOX.v = 0 if second else ...", "None"),
+    "not_a_bool": ("Immutable", TRUTH_BOX, "flag = not BOX.v\nk = 2.0 if flag else 3.0", "BOX.v = not second", "None"),
+    # An exact tuple: another tuple between calls, from a global, from an
+    # attribute; and one the run built.
+    "tuple_global": ("ExactTuple", "T = (1,)", "k = 2.0 if T else 3.0", "global T\nT = () if second else (1,)", "None"),
+    "tuple_attribute": ("ExactTuple", TRUTH_BOX, TRUTH_TEST, "BOX.v = () if second else (1,)", "None"),
+    "tuple_built": ("ExactTuple", TRUTH_BOX, "t = (y,) if BOX.v else ()\nk = 2.0 if t else 3.0", "BOX.v = not second", "None"),
+    # An exact container that outlives the call: filled and emptied.
+    "ordered_dict": ("ExactOrderedDict", "import collections\nD = collections.OrderedDict(a=1)", "k = 2.0 if D else 3.0", "D.clear()\nif not second:\n    D['a'] = 1", "len(D)"),
+    "dict": ("ExactDict", "D = {'a': 1}", "k = 2.0 if D else 3.0", "D.clear()\nif not second:\n    D['a'] = 1", "len(D)"),
+    "list": ("ExactList", "D = [1]", "k = 2.0 if D else 3.0", "D.clear()\nif not second:\n    D.append(1)", "len(D)"),
+    "set": ("ExactSet", "D = {1}", "k = 2.0 if D else 3.0", "D.clear()\nif not second:\n    D.add(1)", "len(D)"),
+    "not_a_list": ("ExactList", "D = [1]", "flag = not D\nk = 3.0 if flag else 2.0", "D.clear()\nif not second:\n    D.append(1)", "len(D)"),
+    # The dicts of hooks that a call of a module tests.
+    "hooks_of_a_module": (
+        "ExactOrderedDict",
+        "M = torch.nn.Tanh()\nHANDLES = []\ndef hook(module, args, out):\n    return out * 2.0",
+        "k = M(y)",
+        "while HANDLES:\n    HANDLES.pop().remove()\nif second:\n    HANDLES.append(M.register_forward_hook(hook))",
+        "len(M._forward_hooks)",
+    ),
+    # A class with a Python __bool__: the state it reads; the function
+    # replaced, on the class it is defined on (a base of the operand's); a
+    # __bool__ of the operand's own class in front of it; another class.
+    "python_bool_state": ("PythonTruth", TRUTH_FLAG, TRUTH_IF, "FLAG.on = not second", "None"),
+    "python_bool_replaced": ("PythonTruth", TRUTH_FLAG, TRUTH_IF, "Flag.__bool__ = no if second else OWN", "None"),
+    "python_bool_shadowed": ("PythonTruth", TRUTH_FLAG, TRUTH_IF, TRUTH_GAINS.format("Sub.__bool__", "no", "__bool__", "Sub"), "None"),
+    "python_bool_class": ("PythonTruth", TRUTH_FLAG + "\nclass Off(Flag):\n    __bool__ = no", TRUTH_IF, "FLAG.__class__ = Off if second else Sub", "None"),
+    # A class with a Python __len__ and no __bool__: the state it reads; the
+    # function replaced; a __bool__ the class gains in front of it.
+    "python_len_state": ("PythonLength", TRUTH_COUNTED, TRUTH_IF, "FLAG.items.clear()\nif not second:\n    FLAG.items.append(1)", "None"),
+    "python_len_replaced": ("PythonLength", TRUTH_COUNTED, TRUTH_IF, "Counted.__len__ = zero if second else OWN", "None"),
+    "python_len_gains_bool": ("PythonLength", TRUTH_COUNTED, TRUTH_IF, TRUTH_GAINS.format("Counted.__bool__", "no", "__bool__", "Counted"), "None"),
+    "sequential": ("PythonLength", "TANH = torch.nn.Tanh()\nSEQ = torch.nn.Sequential(TANH)", "k = 2.0 if SEQ else 3.0", "if second and len(SEQ):\n    del SEQ[0]\nif not second and not len(SEQ):\n    SEQ.append(TANH)", "len(SEQ)"),
+    # A class with no truth of its own: it gains a __bool__, a __len__, on
+    # the class and on a base; a module; a C type, which cannot gain one.
+    "plain_gains_bool": ("NoTruth", TRUTH_PLAIN, TRUTH_IF, TRUTH_GAINS.format("Plain.__bool__", "no", "__bool__", "Plain"), "None"),
+    "plain_gains_len": ("NoTruth", TRUTH_PLAIN, TRUTH_IF, TRUTH_GAINS.format("Plain.__len__", "zero", "__len__", "Plain"), "None"),
+    "base_gains_bool": ("NoTruth", TRUTH_PLAIN, TRUTH_IF, TRUTH_GAINS.format("Base.__bool__", "no", "__bool__", "Base"), "None"),
+    "base_gains_len": ("NoTruth", TRUTH_PLAIN, TRUTH_IF, TRUTH_GAINS.format("Base.__len__", "zero", "__len__", "Base"), "None"),
+    "plain_class": ("NoTruth", TRUTH_PLAIN + "\nclass Off(Plain):\n    __bool__ = no", TRUTH_IF, "FLAG.__class__ = Off if second else Plain", "None"),
+    "module_gains_len": (
+        "NoTruth",
+        "class Net(torch.nn.Module):\n    pass\ndef zero(self):\n    return 0\nNET = Net()",
+        "k = 2.0 if NET else 3.0",
+        TRUTH_GAINS.format("Net.__len__", "zero", "__len__", "Net"),
+        "None",
+    ),
+    "method_descriptor": ("NoTruth", TRUTH_BOX, TRUTH_TEST, "BOX.v = str.lower if second else str.upper", "None"),
+    # A tensor: a value of data.
+    "tensor": ("stop", "", "k = 2.0 if y.sum() > 0 else 3.0", "pass", "None"),
+    # Classes that no line takes: a subclass of dict with a Python truth and
+    # a class whose metaclass has one (nothing would check what the lookup
+    # of __bool__ found: the function is replaced between calls), and C
+    # truths that no row describes.
+    "dict_subclass_bool": (
+        "none",
+        "class Sized(dict):\n    def __bool__(self):\n        return True\n"
+        "def no(self):\n    return False\nOWN = Sized.__bool__\nFLAG = Sized()",
+        TRUTH_IF,
+        "Sized.__bool__ = no if second else OWN",
+        "None",
+    ),
+    "list_subclass_len": (
+        "none",
+        "class Sized(list):\n    def __len__(self):\n        return 1\n"
+        "def zero(self):\n    return 0\nOWN = Sized.__len__\nFLAG = Sized()",
+        TRUTH_IF,
+        "Sized.__len__ = zero if second else OWN",
+        "None",
+    ),
+    "metaclass_bool": (
+        "none",
+        "class Meta(type):\n    def __bool__(cls):\n        return True\n"
+        "class FLAG(metaclass=Meta):\n    pass\n"
+        "def no(self):\n    return False\nOWN = Meta.__bool__",
+        TRUTH_IF,
+        "Meta.__bool__ = no if second else OWN",
+        "None",
+    ),
+    "float_subclass": ("none", TRUTH_BOX + "\nclass Real(float):\n    pass", TRUTH_TEST, "BOX.v = Real(0.0) if second else Real(3.0)", "None"),
+    # An exact frozenset or range: another one between calls.
+    "frozenset": ("ImmutableSized", TRUTH_BOX, TRUTH_TEST, "BOX.v = frozenset() if second else frozenset((1,))", "None"),
+    "range": ("ImmutableSized", TRUTH_BOX, TRUTH_TEST, "BOX.v = range(0) if second else range(3)", "None"),
+    # A subclass of tuple, int or str with the builtin's own truth: another
+    # object between calls; the class, and a base, gains a truth of its own.
+    "int_subclass": ("FixedSubclass", TRUTH_BOX + "\nclass Int(int):\n    pass", TRUTH_TEST, "BOX.v = Int(0) if second else Int(3)", "None"),
+    "str_subclass": ("FixedSubclass", TRUTH_BOX + "\nclass Str(str):\n    pass", TRUTH_TEST, "BOX.v = Str('') if second else Str('a')", "None"),
+    "namedtuple": ("FixedSubclass", TRUTH_BOX + "\nimport collections\nPoint = collections.namedtuple('Point', 'x')\nEmpty = collections.namedtuple('Empty', '')", TRUTH_TEST, "BOX.v = Empty() if second else Point(1)", "None"),
+    "int_enum": ("FixedSubclass", TRUTH_BOX + "\nimport enum\nclass Level(enum.IntEnum):\n    OFF = 0\n    ON = 1", TRUTH_TEST, "BOX.v = Level.OFF if second else Level.ON", "None"),
+    "size": ("FixedSubclass", "SKIP = 1", "k = 2.0 if x.shape[SKIP:] else 3.0", "global SKIP\nSKIP = 2 if second else 1", "None"),
+    "int_subclass_gains_bool": ("FixedSubclass", TRUTH_FIXED, TRUTH_IF, TRUTH_GAINS.format("Int.__bool__", "no", "__bool__", "Int"), "None"),
+    "int_subclass_base_gains_bool": ("FixedSubclass", TRUTH_FIXED, TRUTH_IF, TRUTH_GAINS.format("Base.__bool__", "no", "__bool__", "Base"), "None"),
+    "namedtuple_gains_len": ("FixedSubclass", "import collections\nPoint = collections.namedtuple('Point', 'x')\ndef zero(self):\n    return 0\nFLAG = Point(1)", TRUTH_IF, TRUTH_GAINS.format("Point.__len__", "zero", "__len__", "Point"), "None"),
+    "int_subclass_class": ("FixedSubclass", TRUTH_FIXED + "\nclass Off(Int):\n    __bool__ = no", TRUTH_IF, "FLAG.__class__ = Off if second else Int", "None"),
+    # A subclass of dict, list or set with the builtin's own length: filled
+    # and emptied; the class, and a base, gains a truth of its own; the
+    # object is given another class. (With a Python truth such a class has
+    # no line: the sixth field says that the test stops a trace in B.)
+    "dict_subclass": ("SizedSubclass", TRUTH_SIZED, TRUTH_IF, "FLAG.clear()\nif not second:\n    FLAG['a'] = 1", "len(FLAG)"),
+    "ordered_dict_subclass": ("SizedSubclass", "import collections\nclass Ordered(collections.OrderedDict):\n    pass\nFLAG = Ordered(a=1)", TRUTH_IF, "FLAG.clear()\nif not second:\n    FLAG['a'] = 1", "len(FLAG)"),
+    "defaultdict": ("SizedSubclass", "import collections\nD = collections.defaultdict(int, a=1)", "k = 2.0 if D else 3.0", "D.clear()\nif not second:\n    D['a'] = 1", "len(D)"),
+    "counter": ("SizedSubclass", "import collections\nD = collections.Counter('a')", "k = 2.0 if D else 3.0", "D.clear()\nif not second:\n    D['a'] = 1", "len(D)"),
+    "list_subclass": ("SizedSubclass", "class Listed(list):\n    pass\nFLAG = Listed([1])", TRUTH_IF, "FLAG.clear()\nif not second:\n    FLAG.append(1)", "len(FLAG)"),
+    "set_subclass": ("SizedSubclass", "class Members(set):\n    pass\nFLAG = Members([1])", TRUTH_IF, "FLAG.clear()\nif not second:\n    FLAG.add(1)", "len(FLAG)"),
+    "dict_subclass_gains_bool": ("SizedSubclass", TRUTH_SIZED, TRUTH_IF, TRUTH_GAINS.format("Keyed.__bool__", "no", "__bool__", "Keyed"), "len(FLAG)", "no line in B"),
+    "dict_subclass_gains_len": ("SizedSubclass", TRUTH_SIZED, TRUTH_IF, TRUTH_GAINS.format("Keyed.__len__", "zero", "__len__", "Keyed"), "None", "no line in B"),
+    "dict_subclass_base_gains_bool": ("SizedSubclass", TRUTH_SIZED, TRUTH_IF, TRUTH_GAINS.format("Base.__bool__", "no", "__bool__", "Base"), "len(FLAG)", "no line in B"),
+    "dict_subclass_class": ("SizedSubclass", TRUTH_SIZED + "\nclass Off(Keyed):\n    __bool__ = no", TRUTH_IF, "FLAG.__class__ = Off if second else Keyed", "len(FLAG)", "no line in B"),
+    # A module is of a class that cannot change and can be given another
+    # class all the same: one with a truth of its own.
+    "module_class_bool": ("NoTruth", TRUTH_MODULE, TRUTH_IF, "FLAG.__class__ = Falsy if second else types.ModuleType", "None"),
+    "module_class_attribute": ("NoTruth", TRUTH_MODULE + "\n" + TRUTH_BOX + "\nBOX.v = FLAG", TRUTH_TEST, "BOX.v.__class__ = Falsy if second else types.ModuleType", "None"),
+    "module_class_not": ("NoTruth", TRUTH_MODULE, "k = 3.0 if not FLAG else 2.0", "FLAG.__class__ = Falsy if second else types.ModuleType", "None"),
+    "module_class_len": ("NoTruth", TRUTH_MODULE, TRUTH_IF, "FLAG.__class__ = Empty if second else types.ModuleType", "None"),
+}  # fmt: skip
+# The lines of a truth test in the order the table tries them: how the dump
+# says each (the kind of line, the operand, what a row reads, its result,
+# what it enters, its `before`).
+TRUTH_LINES = (
+    ("stop-on", "0:PlainTensor"),
+    ("later-on", "0:StandIn", "recorder"),
+    ("row", "0:Immutable", "-", "Lit", "Never", "-"),
+    ("row", "0:ExactTuple", "Identity", "Lit", "Never", "-"),
+    ("row", "0:ImmutableSized", "Identity", "Lit", "Never", "-"),
+    ("row", "0:FixedSubclass", "Class,Identity", "Lit", "Never", "truth_fixed"),
+    ("row", "0:ExactOrderedDict", "Length", "Lit", "Never", "truth_length"),
+    ("row", "0:ExactDict", "Length", "Lit", "Never", "truth_length"),
+    ("row", "0:ExactList", "Length", "Lit", "Never", "truth_length"),
+    ("row", "0:ExactSet", "Length", "Lit", "Never", "truth_length"),
+    ("row", "0:SizedSubclass", "Class,Length", "Lit", "Never", "truth_sized"),
+    ("row", "0:PythonTruth", "Class", "Return", "Named", "truth_python"),
+    ("later-on", "0:PythonLength", "subscripts"),
+    ("row", "0:NoTruth", "Class", "Lit", "Never", "truth_none"),
+)
+# How the result of a row is known, by what the row reads: the sentence of
+# the row's line that the recorder of call lists reads.
+TRUTH_KNOWN = {
+    "-": "The result is known when the value of the operand is known.",
+    "Identity": "The result is known when it is known which object the operand is, or when the run itself built it.",
+    "Class,Identity": "The result is known when it is known which object the operand is, or when the run itself built it.",
+    "Length": "The result is known by the length that was recorded.",
+    "Class,Length": "The result is known by the length that was recorded.",
+}  # fmt: skip
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRulesTruth(TestCase):
+    """A truth test (the test of a conditional jump, ``not``) has lines in
+    the rule table by the exact class of what is tested, following what the
+    interpreter does with an object of that class: an immutable, an exact
+    tuple, an exact container (its length), a class written in Python whose
+    truth is one function (which the row names), a class with no truth of
+    its own. A plain tensor stops a trace, and so does a class no line takes.
+    Whatever the truth depends on changes between two calls, the program
+    computes what eager computes."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def lines(self, what):
+        dump = torch._rust._rules_dump().splitlines()
+        return [p for p in (line.split("\t") for line in dump) if p[2] == what]
+
+    def test_the_lines_of_a_truth_test(self):
+        for what in ("ToBool", "UNARY_NOT"):
+            said = []
+            for parts in self.lines(what):
+                self.assertEqual(parts[1], "ops")
+                if parts[0] == "row":
+                    said.append(
+                        ("row", parts[3], parts[4], parts[6], parts[7], parts[10])
+                    )
+                    # A truth test writes nothing.
+                    self.assertEqual(parts[5], "None")
+                    if parts[4] in TRUTH_KNOWN:
+                        self.assertIn(TRUTH_KNOWN[parts[4]], parts[9])
+                elif parts[0] == "later-on":
+                    said.append(tuple(parts[i] for i in (0, 3, 4)))
+                else:
+                    said.append(tuple(parts[i] for i in (0, 3)))
+            self.assertEqual(tuple(said), TRUTH_LINES, msg=what)
+        # The jumps on a truth are that instruction.
+        table = dict(torch._rust._rules_kinds())
+        self.assertEqual(table["POP_JUMP_IF_TRUE"], "as:ToBool")
+        self.assertEqual(table["POP_JUMP_IF_FALSE"], "as:ToBool")
+
+    def test_a_class_meets_the_line_of_its_group(self):
+        class Truthful:
+            def __bool__(self):
+                return True
+
+        class Under(Truthful):
+            pass
+
+        class Counted:
+            def __len__(self):
+                return 1
+
+        class Both(Counted):
+            def __bool__(self):
+                return True
+
+        class Plain:
+            pass
+
+        class SizedDict(dict):
+            def __bool__(self):
+                return True
+
+        class SizedList(list):
+            def __len__(self):
+                return 1
+
+        class SizedSet(set):
+            def __bool__(self):
+                return True
+
+        class Meta(type):
+            def __bool__(cls):
+                return True
+
+        class OfMeta(metaclass=Meta):
+            pass
+
+        class PlainMeta(type):
+            pass
+
+        class OfPlainMeta(metaclass=PlainMeta):
+            pass
+
+        class Int(int):
+            pass
+
+        class Tensor(torch.Tensor):
+            pass
+
+        class TruthfulTensor(torch.Tensor):
+            def __bool__(self):
+                return True
+
+        class Blocked:
+            __bool__ = None
+
+        class Keyed(dict):
+            pass
+
+        class Ordered(collections.OrderedDict):
+            pass
+
+        class Listed(list):
+            pass
+
+        class Level(enum.IntEnum):
+            LOW = 1
+
+        class Mark(enum.Flag):
+            ON = 1
+
+        Point = collections.namedtuple("Point", "x")
+
+        class Partial:
+            __bool__ = functools.partial(bool, 1)
+
+        x = torch.ones(2)
+        od = collections.OrderedDict()
+        # (object, the line it meets: the operand of a line, or None; the
+        # function a row for it names, if it names one).
+        cases = [
+            (True, "0:Immutable", None), (None, "0:Immutable", None), (0, "0:Immutable", None),
+            (1.5, "0:Immutable", None), ("a", "0:Immutable", None), (b"", "0:Immutable", None),
+            (..., "0:Immutable", None), ((), "0:ExactTuple", None), (od, "0:ExactOrderedDict", None),
+            ({}, "0:ExactDict", None), ([], "0:ExactList", None), (set(), "0:ExactSet", None),
+            (x, "0:PlainTensor", None), (torch.nn.Parameter(x), "0:PlainTensor", None),
+            (rules_stand_in(), "0:StandIn", None),
+            (Truthful(), "0:PythonTruth", Truthful.__bool__),
+            (Under(), "0:PythonTruth", Truthful.__bool__),
+            (Both(), "0:PythonTruth", Both.__bool__),
+            (Mark.ON, "0:PythonTruth", enum.Flag.__bool__),
+            # A truth through a Python __len__: left, by name, to the code
+            # that decided before the table.
+            (Counted(), "0:PythonLength", None),
+            (torch.nn.Sequential(), "0:PythonLength", None),
+            (torch.nn.ModuleList(), "0:PythonLength", None),
+            # A subclass of a builtin with the builtin's own truth.
+            (Int(1), "0:FixedSubclass", None), (Point(1), "0:FixedSubclass", None),
+            (Level.LOW, "0:FixedSubclass", None), (torch.Size((1,)), "0:FixedSubclass", None),
+            (Keyed(), "0:SizedSubclass", None), (Ordered(), "0:SizedSubclass", None),
+            (Listed(), "0:SizedSubclass", None),
+            (collections.defaultdict(int), "0:SizedSubclass", None),
+            (collections.Counter(), "0:SizedSubclass", None),
+            (frozenset(), "0:ImmutableSized", None), (range(3), "0:ImmutableSized", None),
+            (x.as_subclass(TruthfulTensor), "0:PythonTruth", TruthfulTensor.__bool__),
+            (Plain(), "0:NoTruth", None), (torch.nn.Linear(2, 2), "0:NoTruth", None),
+            (str.upper, "0:NoTruth", None), (len, "0:NoTruth", None), (Plain, "0:NoTruth", None),
+            (math, "0:NoTruth", None), (object(), "0:NoTruth", None),
+            # No line: a container subclass with a Python truth, a class of a
+            # metaclass written in Python, C truths no row describes, what a
+            # class has under __bool__ that is no function.
+            (SizedDict(), None, None), (SizedList(), None, None), (SizedSet(), None, None),
+            (OfMeta, None, None), (OfPlainMeta, None, None),
+            (x.as_subclass(Tensor), None, None),
+            (collections.deque(), None, None), (1j, None, None),
+            (NotImplemented, None, None), (Blocked(), None, None), (Partial(), None, None),
+            (numpy.float32(1.0), None, None), (numpy.ones(1), None, None),
+        ]  # fmt: skip
+        hear = torch._rust._rules_hear
+        lines = {line[1]: line for line in TRUTH_LINES}
+        met = set()
+        for obj, operand, function in cases:
+            for ask in ({"kind": "ToBool"}, {"opcode": opcode.opmap["UNARY_NOT"]}):
+                with self.subTest(obj=repr(obj)[:60], ask=str(ask)):
+                    answer = hear(**ask, operands=[obj])
+                    word = hear(**ask, operands=[obj], at_a_word=True)
+                    if operand is None:
+                        self.assertEqual(answer[0], "stop")
+                        self.assertIn(
+                            "has no row for operands of the classes", answer[1]
+                        )
+                        self.assertEqual(word, answer)
+                        continue
+                    met.add(operand)
+                    line = lines[operand]
+                    if line[0] == "stop-on":
+                        self.assertEqual(answer[0], "stop")
+                        self.assertIn(
+                            "stops a trace on operands of the classes", answer[1]
+                        )
+                        self.assertEqual(word, answer)
+                    elif line[0] == "later-on":
+                        self.assertEqual(answer, ("older", line[2]))
+                        self.assertEqual(word, ("unheard", line[2]))
+                    else:
+                        self.assertEqual(answer[0], "row")
+                        self.assertEqual(answer[1].split("\t")[3], operand)
+                        self.assertEqual(word[0], "row")
+                        named = hear(**ask, operands=[obj], enters=True)
+                        self.assertEqual(named[0], "enters")
+                        # By identity: the function the test enters.
+                        self.assertEqual(len(named[1]), function is not None)
+                        if function is not None:
+                            # (A function of a class is the same object
+                            # however it is reached.)
+                            self.assertIs(named[1][0], function)
+        self.assertEqual(met, set(lines))
+
+    def test_every_line_has_a_program(self):
+        lines = {line[1].partition(":")[2] for line in TRUTH_LINES if line[0] == "row"}
+        # (A truth through a Python __len__ is left by name: its programs
+        # are held to what a row's are.)
+        programs = {program[0] for program in TRUTH_PROGRAMS.values()}
+        self.assertEqual(programs, lines | {"PythonLength", "stop", "none"})
+        for name in TRUTH_PROGRAMS:
+            source = rules_source(name, TRUTH_PROGRAMS)
+            held = rules_opnames(compile(source, "<truth>", "exec"))
+            self.assertTrue(
+                held & {"POP_JUMP_IF_TRUE", "POP_JUMP_IF_FALSE", "UNARY_NOT", "CALL"},
+                msg=name,
+            )
+
+    @parametrize("name", list(TRUTH_PROGRAMS))
+    @checks_isolated
+    def test_a_truth_between_calls(self, name):
+        os.environ["TORCH_RUST_GATE_HIST"] = "1"
+        line = TRUTH_PROGRAMS[name][0]
+        source = rules_source(name, TRUTH_PROGRAMS)
+        eager, traced = {}, {}
+        exec(compile(source, "<truth eager>", "exec"), eager)
+        exec(compile(source, "<truth vm>", "exec"), traced)
+        compiled = vm(traced["f"], passes=CHECKS_EARLY)
+        for call in range(13):
+            # What the truth depends on: A, then B, then A again.
+            second = 7 <= call < 10
+            torch.manual_seed(call)
+            x = torch.randn(4, 8)
+            eager["change"](second)
+            want = eager["f"](x)
+            traced["change"](second)
+            got = compiled(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(traced["state"](), eager["state"](), msg=f"call {call}")
+        refusals = [
+            str(why)
+            for place in vm.regions(compiled)
+            for state, why in place.get("traces", ())
+            if state != "region"
+        ]
+        named = [why for why in refusals if "no row for: ToBool " in why]
+        named += [why for why in refusals if "no row for: UNARY_NOT " in why]
+        # The traces that ran a truth test, the body's own or under it.
+        rows = torch._rust._gate_report()["rows"]
+        met = sum(
+            traces
+            for _, what, _, traces, _, _ in rows
+            if what in ("ToBool", "UNARY_NOT")
+        )
+        if line == "stop":
+            # A tensor: the place ends in front of the test (it reads a
+            # value), so no trace meets it.
+            self.assertEqual((met, named), (0, []), msg=str(refusals))
+            return
+        if line == "none":
+            # Every trace that met the test was refused for it.
+            self.assertGreater(met, 0)
+            self.assertEqual(met, len(named), msg=str(refusals))
+            return
+        # Traces met the test, none was refused for it, and regions of the
+        # function ran. (Where a region sits is not asserted: a class that
+        # is given another one, or gains a truth, ends its place there.)
+        self.assertGreater(met, 0)
+        if len(TRUTH_PROGRAMS[name]) > 5:
+            # The class has a row in A and no line in B: the traces that
+            # met the test in B were refused for it, and no others.
+            self.assertGreater(len(named), 0)
+            self.assertLess(len(named), met)
+        else:
+            self.assertEqual(named, [])
+        runs = sum(
+            r["runs"]
+            for r in vm.regions(compiled)
+            if r["function"] == "f" and r["state"] == "region"
+        )
+        self.assertGreater(runs, 0, msg=str(vm.regions(compiled)))
+
+    @checks_isolated
+    def test_a_stand_in_is_left_to_todays_tracer(self):
+        """A float that is an input of a region is a stand-in of the engine
+        while the region is traced: its truth test is left, by name, to the
+        code that decided before the table (it specializes the region on the
+        value), and the program computes what eager computes."""
+        os.environ["TORCH_RUST_GATE_HIST"] = "1"
+
+        def f(x, s):
+            y = torch.sin(x) * s + torch.cos(x)
+            k = 2.0 if s else 3.0
+            return (y * k + torch.tanh(y)).sum(-1)
+
+        compiled = vm(f, passes=CHECKS_EARLY)
+        for call in range(13):
+            s = 0.0 if 7 <= call < 10 else 1.5 + call
+            torch.manual_seed(call)
+            x = torch.randn(4, 8)
+            self.assertEqual(
+                compiled(x, s), f(x, s), atol=0, rtol=0, msg=f"call {call}"
+            )
+        rows = torch._rust._gate_report()["rows"]
+        met = sum(
+            traces
+            for _, what, classes, traces, _, _ in rows
+            if what == "ToBool" and classes == ("torch._rust_inductor._Scalar",)
+        )
+        self.assertGreater(met, 0, msg=str(rows))
+        refusals = [
+            str(why)
+            for place in vm.regions(compiled)
+            for state, why in place.get("traces", ())
+            if state != "region"
+        ]
+        self.assertEqual([why for why in refusals if "ToBool" in why], [])
+        runs = sum(r["runs"] for r in vm.regions(compiled) if r["state"] == "region")
+        self.assertGreater(runs, 0)
 
 
 if __name__ == "__main__":

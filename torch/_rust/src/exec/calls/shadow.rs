@@ -204,8 +204,12 @@ extern "C" fn dump() {
 /// check of lists refused what was recorded: ``refused``). ``traced``: today's
 /// engine went on to trace the place. ``validated``: "equal", "DIFFERENT: ..."
 /// or "not validated: ...", on the recorded run's operands; ``again``: the same
-/// on later arrivals at the place; ``missed``: the later arrivals on which the
-/// list's own check ended it with nothing done, by the check. ``pins``: tensors that were there before
+/// on later arrivals at the place; ``missed``: the later arrivals the list
+/// was not run on, or ended with nothing done, by the check that said so
+/// (one of the checks it is entered behind: what its run read, the thread's
+/// state, the frame's function, where its inputs are and their keys and
+/// values, a root, a pin; or the list's own check of an entry).
+/// ``pins``: tensors that were there before
 /// the run and that the reads it recorded lead to. ``specialized``: immutable
 /// inputs the list took by value; a later arrival with another value there is
 /// a miss ("input value"). ``stated``: outputs of the block that are no
@@ -275,8 +279,11 @@ pub unsafe fn tensors(o: *mut PyObject, position: usize, into: &mut Vec<(TensorI
 
 // Where what the witness saw under an entry's call is not what the entry
 // says: `ids`, the tensors among its operands with their positions;
-// `writes`, the positions the entry says it writes. One line each.
-pub fn disagreements(seen: &Witnessed, ids: &[(TensorIdent, usize)], writes: &[u32]) -> Vec<String> {
+// `writes`, the positions the entry says it writes; `undeclared`, those of
+// them that the entry's row says no operator's schema declares (measured,
+// and nothing the witness can see: no declared write there is agreement).
+// One line each.
+pub fn disagreements(seen: &Witnessed, ids: &[(TensorIdent, usize)], writes: &[u32], undeclared: &[u32]) -> Vec<String> {
     let flags = seen.flags();
     if flags.opaque {
         return vec![format!("the witness could not judge the call: {}", seen.why)];
@@ -293,7 +300,7 @@ pub fn disagreements(seen: &Witnessed, ids: &[(TensorIdent, usize)], writes: &[u
             None => {}
         }
     }
-    out.extend(writes.iter().filter(|p| !written.contains(p)).map(|p| format!("the entry says it writes operand {p}, and no operator declared that write")));
+    out.extend(writes.iter().filter(|p| !written.contains(p) && !undeclared.contains(p)).map(|p| format!("the entry says it writes operand {p}, and no operator declared that write")));
     let said = [(flags.drew, "an operator that draws ran"), (flags.read_value, "an operator read a value out of a tensor"), (flags.data_sized, "an operator whose result is sized by data ran"), (flags.entered_python, "a Python frame was entered")];
     out.extend(said.iter().filter(|(on, _)| *on).map(|(_, what)| what.to_string()));
     out.sort();

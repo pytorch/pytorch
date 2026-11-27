@@ -43,7 +43,10 @@
 //     frame the executor does not run, a frame under an entry's call, a
 //     call that raised, an instruction the optimizer made;
 //   - an ENTRY exists only for a C callee with a row whose result is an
-//     entry (rules::license), and for an operator, a subscript or an
+//     entry or one of the call's operands (rules::license; a row that says
+//     the call writes operands states which: entries.rs Call::stated; a
+//     result that is not the operand the row names is a stop), and for an
+//     operator, a subscript or an
 //     attribute instruction on a plain tensor that a line of the license of
 //     slots.rs takes; its operands are templates from their origins;
 //   - what the rule table has not taken over (NotMine) is neither: it is
@@ -68,7 +71,11 @@
 //     state (outs.rs has what a statement is);
 //     a release that was not seen; an operator between the instructions;
 //     an exception raised under the body; a generator's yield; a witness
-//     that disagrees with its entry;
+//     that disagrees with its entry; an entry that is not pure (it writes
+//     an operand, or its callee has a row that does: run a second time the
+//     list would write a second time, so it is never run again to be
+//     compared and nothing validates it until effects are entries that
+//     are run in place);
 //   - a Python frame is the body's only if the instruction in flight in the
 //     innermost activation of the run names its function and has entered no
 //     frame yet (frames.rs). Any other frame (a finalizer, a weak-reference
@@ -335,7 +342,7 @@ impl Rec {
             }
             let facts = self.shadow.facts;
             let call = match (row, callee) {
-                (Some(row), Some(f)) if row.result == Res::Entry => Some(self.maker().vector(f, ins, all, site.kwnames)),
+                (Some(row), Some(f)) if matches!(row.result, Res::Entry | Res::Operand(_)) => Some(self.maker().vector(f, ins, all, site.kwnames).and_then(|call| call.stated(row, site.kwnames))),
                 (None, None) => self.maker().slot(ins, site),
                 _ => None,
             };
@@ -469,9 +476,9 @@ impl Rec {
                 }
                 Pending::Entry(call) => {
                     self.claimed += now.saturating_sub(ops);
-                    let Call { mut entry, label, ids, operands } = *call;
+                    let Call { mut entry, label, ids, operands, returns, undeclared } = *call;
                     let k = self.entries.len() as u32;
-                    let notes = shadow::disagreements(&seen.unwrap_or_default(), &ids, &entry.flags.writes);
+                    let notes = shadow::disagreements(&seen.unwrap_or_default(), &ids, &entry.flags.writes, &undeclared);
                     // A list with such an entry is never run again: the row
                     // it rests on did not say what the call did.
                     self.disagreed |= !notes.is_empty();
@@ -490,6 +497,10 @@ impl Rec {
                             self.stop(&label, "the result is a tensor of the list that is no operand of the call".into());
                             return;
                         };
+                        if returns.is_some_and(|k| k as usize != same) {
+                            self.stop(&label, format!("the result is operand {same} of the call, where its row says operand {}", returns.unwrap_or_default()));
+                            return;
+                        }
                         entry.assert = Some(Assert { same: Some(same as u32), ..Assert::default() });
                     } else if plain_tensor(result) {
                         let key = TensorKey::of(result);
@@ -512,6 +523,16 @@ impl Rec {
                     } else {
                         self.stop(&label, format!("the result of an entry is a {}: results that are no tensors are a later unit", class_text(result)));
                         return;
+                    }
+                    // What the row says the result is must be what it was.
+                    if returns.is_some() && entry.assert.as_ref().is_none_or(|a| a.same.is_none()) {
+                        self.stop(&label, "the result is no operand of the call, where its row says it is one".into());
+                        return;
+                    }
+                    if entry.flags.bits & PURE == 0 {
+                        // Run a second time it would write a second time:
+                        // such a list is never run again to be compared.
+                        self.reasons.add("an entry that writes, or whose callee has a row that writes: the list is not run a second time, so nothing validates it until its effects are entries in place".into());
                     }
                     self.pure &= entry.flags.bits & PURE != 0;
                     self.window = Some(self.entries.len());

@@ -16,13 +16,23 @@
 //     whether it has taken it over, and then its rows or why it stops.
 // What it guarantees
 //   - license() is NoRow, with the reason, for a What that a family stops,
-//     and for one that families have rows for of which none takes these
+//     and for one that families have lines for of which none takes these
 //     classes, or these values; Row for the first row that does; NotMine
-//     where no family has a stop or rows for the What: the code that decided
+//     where no family has a stop or lines for the What: the code that decided
 //     before decides, and the What is left BY NAME (later()) to rules that
 //     are not written: an instruction by its family's list, a callee no
 //     family lists by its kind (callees.rs). No What is NotMine without a
 //     name, and one that nothing names is a stop;
+//   - A WHAT WHOSE ANSWER GOES BY THE CLASS OF AN OPERAND has LINES
+//     (Taken::Lines), tried in their order: a row; a stop for operands of
+//     the classes the line names, with its reason; or, for such operands,
+//     the name of the rules they are left to (NotMine for those operands
+//     only: later_of() says the name). Operands that no line takes are a
+//     stop, as with rows;
+//   - A ROW THAT ENTERS PYTHON CODE (Enters::Named) names the functions:
+//     names() gives them, by identity, found by the lookup the instruction
+//     itself does, in C. A frame of any other function under the
+//     instruction is not the row's;
 //   - A ROW WITH READS OF ITS OWN (Row::before). What an instruction reads
 //     besides its operands is recorded, as checks of the region being traced,
 //     by hooks of the executor for most kinds still. A row may carry that
@@ -72,6 +82,7 @@ pub mod groups;
 pub mod imports;
 pub mod ops;
 pub mod torch;
+pub mod truth;
 
 pub use groups::{Class, Group};
 
@@ -112,9 +123,9 @@ impl What {
 // object an operand is, an operand's class and its MRO, the characters of a
 // str, the exception the thread handles, the interpreter's pending work, an
 // item of the interpreter's table of loaded modules, an attribute of an
-// object as its class resolves it.
+// object as its class resolves it, how many items a container holds.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Read { Slot, Constant, Global, Cell, Closure, Identity, Class, Text, Handled, Pending, Modules, Attribute }
+pub enum Read { Slot, Constant, Global, Cell, Closure, Identity, Class, Text, Handled, Pending, Modules, Attribute, Length }
 // What is written: a slot of the frame, the container at an operand (one
 // the frame is building), the exception the thread handles, the memory of
 // tensors among the operands of a call, the state of the default random
@@ -134,6 +145,10 @@ pub struct Written {
 // Where the result is from: a value of the engine's, an entry of the
 // region's list, an operand, what a slot holds, a part of an operand's
 // result, a new object, an object a check pins, a frame's return.
+// HOW A RESULT IS KNOWN (RESULTS below says it in the dump): Lit is a
+// function of the operands and of what the row reads: it is known by its
+// VALUE when those are, and says nothing of which object it is; Pinned is
+// the OBJECT that a recorded read holds.
 #[allow(dead_code)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Res { None, Lit, Entry, Operand(u8), Slot, Part, Made, Pinned, Return }
@@ -183,13 +198,12 @@ pub struct Row {
     pub form: &'static str,
 }
 
-impl Row {
-    unsafe fn takes(&self, classes: &[Class]) -> bool {
-        self.operands.iter().all(|(at, want)| {
-            let k = if *at < 0 { classes.len() as isize + *at as isize } else { *at as isize };
-            usize::try_from(k).ok().and_then(|k| classes.get(k)).is_some_and(|have| want.takes(*have))
-        })
-    }
+// Whether operands of the classes `classes` are what `operands` names.
+unsafe fn takes(operands: &[(i8, Class)], classes: &[Class]) -> bool {
+    operands.iter().all(|(at, want)| {
+        let k = if *at < 0 { classes.len() as isize + *at as isize } else { *at as isize };
+        usize::try_from(k).ok().and_then(|k| classes.get(k)).is_some_and(|have| want.takes(*have))
+    })
 }
 
 pub enum License {
@@ -199,9 +213,19 @@ pub enum License {
     NotMine,
 }
 
+// One line of a What whose answer goes by the classes of its operands: a
+// row; or, for operands of the classes named (as a row names them), a stop
+// and why, or the name of the rules those operands are left to.
+pub enum Line {
+    Row(Row),
+    Stop(&'static [(i8, Class)], &'static str),
+    Later(&'static [(i8, Class)], &'static str),
+}
+
 // A family's answer for a What: not its own; its own when the family named
 // is written; an opcode that is instructions of these kinds; a stop and why;
-// its rows; an opcode no list of the family has.
+// its rows; its lines by the classes of the operands; an opcode no list of
+// the family has.
 #[derive(Copy, Clone)]
 pub enum Taken {
     No,
@@ -209,7 +233,16 @@ pub enum Taken {
     As(&'static [Kind]),
     Stop(&'static str),
     Rows(&'static [Row]),
+    Lines(&'static [Line]),
     Unlisted,
+}
+
+// A line as license() goes through it.
+#[derive(Copy, Clone)]
+enum Entry {
+    Row(&'static Row),
+    Stop(&'static [(i8, Class)], &'static str),
+    Later(&'static [(i8, Class)], &'static str),
 }
 
 pub struct Family {
@@ -225,22 +258,22 @@ static FAMILIES: &[Family] = &[ops::FAMILY, imports::FAMILY, torch::FAMILY];
 enum Said {
     // No trace runs it, and why.
     Stop(String),
-    // The rows of every family that has rows for it.
-    Rows(Vec<&'static Row>),
+    // The lines of every family that has rows or lines for it.
+    Lines(Vec<Entry>),
     // No family has rows for it: it is left, by this name, to a family of
     // rules that is not written.
     Later(&'static str),
 }
 
 // The one walk of the families, for license(), later() and the advice. A
-// stop of any family wins over the rows of another; the rows of all
+// stop of any family wins over the lines of another; the lines of all
 // families that have some are tried together, in the order of FAMILIES and
 // of each family's list; a family that only names who will take the What
-// counts where nobody has rows. Where no family says anything: a callee is
+// counts where nobody has lines. Where no family says anything: a callee is
 // told by its kind (callees.rs: the name it is left under, or a stop), and
 // anything else is a stop.
 fn said(what: &What) -> Said {
-    let mut found: Option<Vec<&'static Row>> = None;
+    let mut found: Option<Vec<Entry>> = None;
     let mut later = None;
     for family in FAMILIES {
         match (family.rule)(what) {
@@ -248,11 +281,16 @@ fn said(what: &What) -> Said {
             Taken::Later(name) => later = later.or(Some(name)),
             Taken::Stop(why) => return Said::Stop(format!("{} stops a trace: {why}", what.name())),
             Taken::As(_) | Taken::Unlisted => return Said::Stop(format!("{} is no instruction the rules list", what.name())),
-            Taken::Rows(rows) => found.get_or_insert_default().extend(rows),
+            Taken::Rows(rows) => found.get_or_insert_default().extend(rows.iter().map(Entry::Row)),
+            Taken::Lines(lines) => found.get_or_insert_default().extend(lines.iter().map(|line| match line {
+                Line::Row(row) => Entry::Row(row),
+                Line::Stop(operands, why) => Entry::Stop(operands, why),
+                Line::Later(operands, name) => Entry::Later(operands, name),
+            })),
         }
     }
     match (found, later, what) {
-        (Some(rows), ..) => Said::Rows(rows),
+        (Some(lines), ..) => Said::Lines(lines),
         (None, Some(name), _) => Said::Later(name),
         (None, None, What::Callee(f)) => match unsafe { callees::of(*f) } {
             Taken::Later(name) => Said::Later(name),
@@ -267,8 +305,11 @@ fn said(what: &What) -> Said {
 // of the families, and of the rows.
 pub const ORDER: [&str; 2] = [
     "A stop of any family is the answer whatever rows another family has. Else the rows of every family that has rows for the instruction are tried together: family by family in this order, and within a family in the order of its lines.",
-    "The first row whose classes take the operands and whose before, if it has one, does not refuse them is the answer: no row after it is asked.",
+    "The first line whose classes take the operands is the answer, and no line after it is asked: a stop for those operands, the name they are left under, or a row. A row whose before refuses the operands is no answer: the lines after it are asked.",
 ];
+
+// How a result is known from the RESULT column of a row, for the dump.
+pub const RESULTS: &str = "Lit: a function of the operands and of what the row reads, known by its value when those are known (which object it is, is not said; a bool is one object per value). Pinned: the object that a recorded read holds.";
 
 // What is answered where no line of a family decides, for the dump: the
 // case, the answer, and why. (A callee that no family lists
@@ -294,7 +335,7 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
 // function that is on no family's list is shown as UNNAMED, and a test
 // fails for it.
 pub type Says = (Before, &'static str, &'static str);
-pub const BEFORES: &[(&str, &[Says])] = &[("imports", imports::BEFORES), ("torch", torch::BEFORES)];
+pub const BEFORES: &[(&str, &[Says])] = &[("ops", truth::BEFORES), ("imports", imports::BEFORES), ("torch", torch::BEFORES)];
 
 // The name of a row's `before` for the dump: "-" where it has none, UNNAMED
 // for a function that is on no family's list.
@@ -307,20 +348,54 @@ pub fn before_name(row: &Row) -> &'static str {
 // operand, in order; `site`: where it runs. NotMine is never silent: later()
 // names the family the What is left to.
 pub unsafe fn license(what: &What, classes: &[Class], site: &Site) -> License {
-    let rows = match said(what) {
-        Said::Stop(why) => return License::NoRow(why),
-        Said::Later(_) => return License::NotMine,
-        Said::Rows(rows) => rows,
+    answer(what, classes, site).0
+}
+
+// license(), and with NotMine the name of the rules the instruction is left
+// to: the What's, or that of the line that takes these operands.
+unsafe fn answer(what: &What, classes: &[Class], site: &Site) -> (License, Option<&'static str>) {
+    let lines = match said(what) {
+        Said::Stop(why) => return (License::NoRow(why), None),
+        Said::Later(name) => return (License::NotMine, Some(name)),
+        Said::Lines(lines) => lines,
     };
-    let mut why = format!("{} has no row for operands of the classes ({})", what.name(), classes.iter().map(|c| c.name()).collect::<Vec<_>>().join(", "));
-    for row in rows.into_iter().filter(|r| r.takes(classes)) {
-        match row.before.map_or(Ok(()), |before| before(row, what, site)) {
-            Ok(()) => return License::Row(row),
-            Err(values) => why = format!("{} has no row for these operands: {values}", what.name()),
+    let of_classes = || classes.iter().map(|c| c.name()).collect::<Vec<_>>().join(", ");
+    let mut why = format!("{} has no row for operands of the classes ({})", what.name(), of_classes());
+    for line in lines {
+        match line {
+            Entry::Row(row) if takes(row.operands, classes) => match row.before.map_or(Ok(()), |before| before(row, what, site)) {
+                Ok(()) => return (License::Row(row), None),
+                Err(values) => why = format!("{} has no row for these operands: {values}", what.name()),
+            },
+            Entry::Stop(operands, reason) if takes(operands, classes) => return (License::NoRow(format!("{} stops a trace on operands of the classes ({}): {reason}", what.name(), of_classes())), None),
+            Entry::Later(operands, name) if takes(operands, classes) => return (License::NotMine, Some(name)),
+            Entry::Row(_) | Entry::Stop(..) | Entry::Later(..) => {}
         }
     }
-    License::NoRow(why)
+    (License::NoRow(why), None)
 }
+
+// The name of the rules that an instruction on operands of these classes is
+// left to, where license() is NotMine for them.
+pub unsafe fn later_of(what: &What, classes: &[Class], site: &Site) -> Option<&'static str> {
+    answer(what, classes, site).1
+}
+
+// The Python functions that the instruction enters by the row license()
+// chose for it, borrowed, by identity (NULL: none in that place). A row
+// that does not say Enters::Named names none; for one that does, the
+// family that has the row says which, by the lookup the instruction itself
+// does. Runs no code of the program.
+pub unsafe fn names(row: &Row, what: &What, site: &Site) -> [*mut PyObject; 2] {
+    let none = [std::ptr::null_mut(); 2];
+    let (Enters::Named, Some(before)) = (row.enters, row.before) else { return none };
+    NAMERS.iter().find(|(of, _)| *of as usize == before as usize).map_or(none, |(_, namer)| namer(row, what, site))
+}
+
+// For each `before` of a row that enters Python code it names: the function
+// that says which.
+pub type Namer = unsafe fn(&Row, &What, &Site) -> [*mut PyObject; 2];
+const NAMERS: &[(Before, Namer)] = &[(truth::python_truth, truth::enters)];
 
 // What a call taken at another's word may run without a rule being heard:
 // the families of rules that are not written yet, by the name an entry of
@@ -333,7 +408,7 @@ pub unsafe fn license(what: &What, classes: &[Class], site: &Site) -> License {
 // named; where there is none, the entry says so.
 pub const UNHEARD: &[(&str, &str)] = &[
     ("attributes", "an attribute load hands the object, the name and what it found to the executor's hook (reads::attr, reads::super_attr) wherever it runs"),
-    ("subscripts", "a truth test, a comparison, a subscript and a membership test hand what they read to the executor's hooks (reads::truth, used, subscript, contains) wherever they run; a display of a dict or a set reads no object but through the hash of its keys"),
+    ("subscripts", "a truth test through a Python __len__ (the one truth test that has no line of its own), a comparison, a subscript and a membership test hand what they read to the executor's hooks (reads::truth, used, subscript, contains) wherever they run; a display of a dict or a set reads no object but through the hash of its keys"),
     ("iteration", "what is iterated or unpacked is handed to the executor's hooks whole when the iteration begins (reads::iterated, used), wherever it runs; a step of an iterator that was there before the trace has no hook, here as outside such a call"),
     ("torch", "an operator hands both operands to the executor's hook (reads::used) wherever it runs, and on tensors it is an operator the trace sees"),
     ("functions", "a call with starred arguments hands the callee and what it is given to the executor's hooks (reads::called, starred, spread) wherever it runs, and the frames it enters are asked about one instruction at a time"),
@@ -374,11 +449,12 @@ pub enum Heard {
 // no family has taken over is run unheard there only if UNHEARD lists the
 // family it is left to, and is a stop if not.
 pub unsafe fn hear(what: &What, classes: &[Class], site: &Site, at_a_word: bool) -> Heard {
-    match license(what, classes, site) {
+    let (license, left_to) = answer(what, classes, site);
+    match license {
         License::NoRow(why) => Heard::Stop(why),
         License::Row(row) => Heard::Row(row),
         License::NotMine if !at_a_word => Heard::Older,
-        License::NotMine => match later(what) {
+        License::NotMine => match left_to {
             Some(family) if UNHEARD.iter().any(|(listed, _)| *listed == family) => Heard::Unheard(family),
             Some(family) => Heard::Stop(format!("{} is left to the rules of {family}, which are not written, and is not among what a call taken at another's word may run unheard", what.name())),
             None => Heard::Stop(format!("{} is left to no family of rules, and a call taken at another's word runs unheard only what the rules list", what.name())),
@@ -386,8 +462,9 @@ pub unsafe fn hear(what: &What, classes: &[Class], site: &Site, at_a_word: bool)
     }
 }
 
-// The family of rules that `what` is left to, where license() is NotMine:
-// for a report, and for what a call taken at another's word runs unheard.
+// The family of rules that `what` is left to whatever its operands are,
+// where license() is NotMine for every operand: for a report. (Where only
+// the operands of some classes are left to a name: later_of.)
 pub fn later(what: &What) -> Option<&'static str> {
     match said(what) {
         Said::Later(name) => Some(name),
@@ -410,7 +487,7 @@ pub fn advice(op: &Op) -> Result<(), String> {
     let what = ops::what(op, None);
     match said(&what) {
         Said::Stop(why) => Err(why),
-        Said::Rows(rows) if rows.is_empty() => Err(format!("{} has no row", what.name())),
+        Said::Lines(lines) if lines.iter().all(|line| matches!(line, Entry::Stop(..))) => Err(format!("{} has no row", what.name())),
         _ => Ok(()),
     }
 }
@@ -423,4 +500,5 @@ pub fn ready() {
     torch::ready();
     super::plain_tensor_types();
     callees::ready();
+    groups::ready();
 }

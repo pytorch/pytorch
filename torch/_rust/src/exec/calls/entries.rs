@@ -11,6 +11,14 @@
 //     that it writes no operand (rules::torch::only_computes); Err for a form of call whose
 //     operands are not all on the instruction (a star call, a partial, a
 //     builtin bound to its receiver) and for an operand with no origin;
+//   - Call::stated(): what the ROW of the call states beyond that, taken
+//     from the row and from nothing else: the operands the call writes
+//     (flags.writes: each place the row names, a position or a keyword,
+//     among this call's operands; Err if the call does not hand it one
+//     there), which of them no operator's schema declares (the witness
+//     cannot see those), and the operand the result is, if the row says the
+//     call hands one back. A row that writes anything else than operands
+//     is no entry: Err;
 //   - slot(): the entry of an operator, a subscript or an attribute
 //     instruction that has a plain tensor where its line of the license
 //     wants one: Some(Ok) only if slots::license takes it on the classes of
@@ -44,6 +52,44 @@ pub struct Call {
     // operands themselves.
     pub ids: Vec<(TensorIdent, usize)>,
     pub operands: Vec<*mut PyObject>,
+    // What the callee's row states (stated): the operand the result is, and
+    // the written operands that no schema declares.
+    pub returns: Option<u32>,
+    pub undeclared: Vec<u32>,
+}
+
+impl Call {
+    pub unsafe fn stated(mut self, row: &rules::Row, kwnames: *mut PyObject) -> Result<Call, String> {
+        unsafe {
+            let n = self.entry.args.len();
+            let named = if kwnames.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(kwnames) as usize };
+            let place = |at: &str| -> Option<u32> {
+                match at.parse::<usize>() {
+                    Ok(k) => (k + named < n).then_some(k as u32),
+                    Err(_) => (0..named).find(|i| text(ffi::PyTuple_GET_ITEM(kwnames, *i as ffi::Py_ssize_t)) == at).map(|i| (n - named + i) as u32),
+                }
+            };
+            match row.writes {
+                rules::Write::None => {}
+                rules::Write::Operands(written) => {
+                    let mut writes = Vec::new();
+                    for w in written {
+                        let Some(p) = place(w.at) else { return Err(format!("its row says it writes operand {}, which this call does not hand it in that place", w.at)) };
+                        writes.push(p);
+                        if !w.declared {
+                            self.undeclared.push(p);
+                        }
+                    }
+                    self.entry.flags.writes = writes.into();
+                }
+                other => return Err(format!("its row writes what no entry of a list states: {other:?}")),
+            }
+            if let rules::Res::Operand(k) = row.result {
+                self.returns = Some(k as u32);
+            }
+            Ok(self)
+        }
+    }
 }
 
 pub fn blank(callee: Callee, at: u32) -> Entry {
@@ -123,7 +169,7 @@ impl Maker<'_> {
                 flags: Flags { bits: if rules::torch::only_computes(f) { PURE } else { 0 }, ..Flags::default() },
                 ..blank(Callee::Vector(Py::from_borrowed_ptr(Python::assume_attached(), f), label.clone().into()), self.at)
             };
-            Ok(Call { entry, label, ids: Vec::new(), operands: all[first..].to_vec() })
+            Ok(Call { entry, label, ids: Vec::new(), operands: all[first..].to_vec(), returns: None, undeclared: Vec::new() })
         }
     }
 
@@ -174,7 +220,7 @@ impl Maker<'_> {
                 let flags = Flags { bits: if writes.is_empty() { PURE } else { 0 }, writes, ..Flags::default() };
                 let entry = Entry { args: args.into(), classes: classes.into(), flags, ..blank(callee, self.at) };
                 slots::license(&entry.callee, &check::shapes(&entry, &self.origins.consts))?;
-                Ok(Call { entry, label, ids: Vec::new(), operands: objects })
+                Ok(Call { entry, label, ids: Vec::new(), operands: objects, returns: None, undeclared: Vec::new() })
             }))
         }
     }

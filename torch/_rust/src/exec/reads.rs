@@ -1361,6 +1361,10 @@ impl Trace {
     }
 
     // As typed, for a special method the interpreter looks up by its name.
+    // A module can be given another class although the class of modules
+    // itself cannot change (`m.__class__ = Sub`), and what the interpreter
+    // looks up follows the module's class: which class it is of is recorded
+    // (of_class), as it is for an instance of a class that can change.
     unsafe fn special(&mut self, obj: *mut PyObject, name: &std::ffi::CStr) {
         if !obj.is_null() && tr_type_heap(ffi::Py_TYPE(obj)) != 0 && ffi::PyType_Check(obj) == 0 {
             let name = ffi::PyUnicode_InternFromString(name.as_ptr());
@@ -1368,6 +1372,8 @@ impl Trace {
                 self.typed(obj, name);
                 ffi::Py_DECREF(name);
             }
+        } else if !obj.is_null() && ffi::PyModule_Check(obj) != 0 {
+            self.of_class(obj);
         }
     }
 

@@ -7,13 +7,16 @@
 //   row    FAMILY  WHAT  OPERANDS  READS  WRITES  RESULT  ENTERS  SCALARS  WHY  BEFORE
 //   stop   FAMILY  WHAT  WHY
 //   later  FAMILY  WHAT  THE NAME IT IS LEFT UNDER
+//   stop-on  FAMILY  WHAT  OPERANDS  WHY   (a stop for operands of these classes only)
+//   later-on FAMILY  WHAT  OPERANDS  THE NAME OPERANDS OF THESE CLASSES ARE LEFT UNDER
 //   as     FAMILY  WHAT  KIND,KIND   (an opcode that is instructions of these kinds, or of none: -)
 //   form   -       WHAT  FORM  row | stop | later:NAME  MEASURED   (a callee with lines of its own per form of
 //                                 a call's operands: what a call of that form is answered, and what the form's
 //                                 own line says, row | stop: they differ where the callee as a whole stops or
 //                                 is left to a name, which is answered before any operand is looked at)
 //   before -       NAME  FAMILY  WHAT IT REFUSES AND WHAT IT RECORDS   (a function rows name in BEFORE)
-//   order  -       families | rows  VALUE  WHY   (in which order license() goes through the lines)
+//   order  -       families | rows | results  VALUE  WHY   (in which order license() goes through the
+//                                 lines; and how a result is known from a row's RESULT)
 //   default callees | rules  CASE  later:NAME | stop  WHY   (what is answered where no line decides: a
 //                                 callee no family lists, by its kind; and every other such case)
 //   unheard -      NAME  WHY   (what a call taken at another's word may run with no rule heard)
@@ -37,7 +40,7 @@ use pyo3::ffi;
 use pyo3::prelude::*;
 
 use super::super::ffi::tr_current_frame;
-use super::{callees, groups, Class, Heard, Kind, Row, Site, Taken, What, Write, BEFORES, DEFAULTS, FAMILIES, KINDS, ORDER, UNHEARD};
+use super::{callees, groups, Class, Heard, Kind, Line, Row, Site, Taken, What, Write, BEFORES, DEFAULTS, FAMILIES, KINDS, ORDER, RESULTS, UNHEARD};
 
 fn join(parts: Vec<String>) -> String {
     if parts.is_empty() { "-".to_string() } else { parts.join(",") }
@@ -45,6 +48,10 @@ fn join(parts: Vec<String>) -> String {
 
 // The line of the row `r` of `family` for `what`: as the dump prints it, and
 // as the door answers with it.
+fn operands_of(operands: &[(i8, Class)]) -> String {
+    join(operands.iter().map(|(at, c)| format!("{at}:{}", unsafe { c.name() })).collect())
+}
+
 fn row_line(family: &str, what: &str, r: &Row) -> String {
     let what = if r.form.is_empty() { what.to_string() } else { format!("{what} ({})", r.form) };
     let writes = match r.writes {
@@ -52,7 +59,7 @@ fn row_line(family: &str, what: &str, r: &Row) -> String {
         Write::Draws(written) => format!("Draws({})", join(written.iter().map(|w| format!("{}{}", w.at, if w.declared { "" } else { "!" })).collect())),
         other => format!("{other:?}"),
     };
-    let operands = join(r.operands.iter().map(|(at, c)| format!("{at}:{}", unsafe { c.name() })).collect());
+    let operands = operands_of(r.operands);
     let reads = join(r.reads.iter().map(|x| format!("{x:?}")).collect());
     format!("row\t{family}\t{what}\t{operands}\t{reads}\t{writes}\t{:?}\t{:?}\t{:?}\t{}\t{}", r.result, r.enters, r.scalars, r.why, super::before_name(r))
 }
@@ -62,11 +69,14 @@ fn row_line(family: &str, what: &str, r: &Row) -> String {
 fn line_of(asked: &What, row: &Row) -> String {
     let name = asked.name();
     for family in FAMILIES {
-        if let Taken::Rows(rows) = (family.rule)(asked) {
-            let line = row_line(family.name, &name, row);
-            if rows.iter().any(|r| row_line(family.name, &name, r) == line) {
-                return line;
-            }
+        let rows: Vec<&Row> = match (family.rule)(asked) {
+            Taken::Rows(rows) => rows.iter().collect(),
+            Taken::Lines(lines) => lines.iter().filter_map(|line| if let Line::Row(r) = line { Some(r) } else { None }).collect(),
+            _ => continue,
+        };
+        let line = row_line(family.name, &name, row);
+        if rows.iter().any(|r| row_line(family.name, &name, r) == line) {
+            return line;
         }
     }
     "a row that no family has".to_string()
@@ -86,6 +96,11 @@ pub fn _rules_dump() -> String {
                 Taken::As(kinds) => out += &format!("as\t{name}\t{what}\t{}\n", join(kinds.iter().map(|k| format!("{k:?}")).collect())),
                 Taken::Stop(why) => out += &format!("stop\t{name}\t{what}\t{why}\n"),
                 Taken::Rows(rows) => rows.iter().for_each(|r| out += &format!("{}\n", row_line(name, &what, r))),
+                Taken::Lines(lines) => lines.iter().for_each(|line| match line {
+                    Line::Row(r) => out += &format!("{}\n", row_line(name, &what, r)),
+                    Line::Stop(operands, why) => out += &format!("stop-on\t{name}\t{what}\t{}\t{why}\n", operands_of(operands)),
+                    Line::Later(operands, other) => out += &format!("later-on\t{name}\t{what}\t{}\t{other}\n", operands_of(operands)),
+                }),
             }
         }
     }
@@ -109,6 +124,7 @@ pub fn _rules_dump() -> String {
     }
     out += &format!("order\t-\tfamilies\t{}\t{}\n", join(FAMILIES.iter().map(|f| f.name.to_string()).collect()), ORDER[0]);
     out += &format!("order\t-\trows\tfirst\t{}\n", ORDER[1]);
+    out += &format!("order\t-\tresults\tLit,Pinned\t{RESULTS}\n");
     for (kind, taken, why) in callees::KINDS {
         match taken {
             Taken::Later(family) => out += &format!("default\tcallees\t{kind}\tlater:{family}\t{why}\n"),
@@ -138,7 +154,7 @@ pub fn _rules_kinds() -> Vec<(String, String)> {
         Taken::Later(family) => format!("later:{family}"),
         Taken::As(kinds) => format!("as:{}", kinds.iter().map(|k| format!("{k:?}")).collect::<Vec<_>>().join(",")),
         Taken::Stop(_) => "stop".to_string(),
-        Taken::Rows(_) => "row".to_string(),
+        Taken::Rows(_) | Taken::Lines(_) => "row".to_string(),
     };
     // (The torch family lists callees, not kinds: _rules_torch has them.)
     FAMILIES.iter().filter(|f| f.name != super::torch::FAMILY.name).flat_map(|f| (f.table)()).map(|(what, taken)| (what, status(taken))).collect()
@@ -147,6 +163,9 @@ pub fn _rules_kinds() -> Vec<(String, String)> {
 /// The groups of the rule table that the exact class of ``obj`` is in.
 #[pyfunction]
 pub fn _rules_groups(obj: &Bound<'_, PyAny>) -> Vec<String> {
+    // (Some groups compare with classes that are found where a function
+    // goes onto the executor; a test may ask before any did.)
+    super::ready();
     let tp = unsafe { ffi::Py_TYPE(obj.as_ptr()) };
     groups::GROUPS.iter().filter(|g| unsafe { g.holds(tp) }).map(|g| format!("{g:?}")).collect()
 }
@@ -172,12 +191,15 @@ pub fn _rules_unheard() -> Vec<(String, String)> {
 /// told by are not made first. ``("stop", why)``, ``("row", the row's line
 /// of the dump)``, ``("older", name)`` (left to the code that decided before
 /// the table, and by name to the rules that will take it) or ``("unheard",
-/// name)``. For tests; the object ``None`` cannot be asked about as a callee
-/// here (it means "no callee").
+/// name)``. With ``enters`` true the answer for a row is instead
+/// ``("enters", [function, ...])``: the Python functions the row names for
+/// these operands. For tests; the object ``None`` cannot be asked about as a
+/// callee here (it means "no callee").
 #[pyfunction]
-#[pyo3(signature = (*, kind=None, opcode=None, callee=None, operands=Vec::new(), kwnames=None, at_a_word=false, oparg=0, names=Vec::new(), frame=false, make=true))]
+#[pyo3(signature = (*, kind=None, opcode=None, callee=None, operands=Vec::new(), kwnames=None, at_a_word=false, oparg=0, names=Vec::new(), frame=false, make=true, enters=false))]
 #[allow(clippy::too_many_arguments)]
 pub fn _rules_hear(
+    py: Python<'_>,
     kind: Option<String>,
     opcode: Option<u8>,
     callee: Option<&Bound<'_, PyAny>>,
@@ -188,7 +210,8 @@ pub fn _rules_hear(
     names: Vec<Py<PyAny>>,
     frame: bool,
     make: bool,
-) -> PyResult<(String, String)> {
+    enters: bool,
+) -> PyResult<(String, Py<PyAny>)> {
     let asked = match (kind, opcode, callee) {
         (Some(name), None, None) => {
             let kind: Option<&Kind> = KINDS.iter().find(|k| format!("{k:?}") == name);
@@ -212,11 +235,17 @@ pub fn _rules_hear(
         operands: &operands,
         kwnames: kwnames.map_or(std::ptr::null_mut(), |k| k.as_ptr()),
     };
+    let text = |s: &str| pyo3::types::PyString::new(py, s).into_any().unbind();
     Ok(match unsafe { super::hear(&asked, &classes, &site, at_a_word) } {
-        Heard::Stop(why) => ("stop".into(), why),
-        Heard::Row(row) => ("row".into(), line_of(&asked, row)),
-        Heard::Older => ("older".into(), super::later(&asked).unwrap_or("").into()),
-        Heard::Unheard(family) => ("unheard".into(), family.into()),
+        Heard::Stop(why) => ("stop".into(), text(&why)),
+        Heard::Row(row) if enters => {
+            let named = unsafe { super::names(row, &asked, &site) };
+            let functions: Vec<Py<PyAny>> = named.iter().filter(|f| !f.is_null()).map(|f| unsafe { Py::from_borrowed_ptr(py, *f) }).collect();
+            ("enters".into(), pyo3::types::PyList::new(py, functions)?.into_any().unbind())
+        }
+        Heard::Row(row) => ("row".into(), text(&line_of(&asked, row))),
+        Heard::Older => ("older".into(), text(unsafe { super::later_of(&asked, &classes, &site) }.unwrap_or(""))),
+        Heard::Unheard(family) => ("unheard".into(), text(family)),
     })
 }
 
