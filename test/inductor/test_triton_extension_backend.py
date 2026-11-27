@@ -53,6 +53,7 @@ from torch._inductor.utils import get_triton_code, run_and_get_triton_code
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    skipIf,
 )
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -161,7 +162,7 @@ class TritonExtensionBackendGenericTests(_TritonExtensionBackendTestsBase):
             "@triton.jit"
         ).check("tl_math.sin").run(code)
 
-    @unittest.skipUnless(has_triton_package(), "Requires the triton package")
+    @skipIf(not has_triton_package(), "Requires the triton package")
     def test_flex_attention_open_device_registration(self):
         torch._register_device_module("privateuseone", self.module)
         # ExtensionScheduling.codegen_template is a no-op, so the flex template
@@ -265,7 +266,7 @@ class TritonExtensionBackendAcceleratorTests(_TritonExtensionBackendTestsBase):
             ExtensionPythonWrapperCodegen,
         )
 
-    @unittest.skipUnless(HAS_TRITON or TRITON_HAS_CPU, "requires triton")
+    @skipIf(not (HAS_TRITON or TRITON_HAS_CPU), "requires triton")
     def test_codegen_with_custom_heuristics_module(self, device):
         self._register_custom_backend_with_heuristics(device)
 
@@ -281,7 +282,7 @@ class TritonExtensionBackendAcceleratorTests(_TritonExtensionBackendTestsBase):
             f"{EXTENSION_TRITON_META_FIELD}"
         ).check("@triton.jit").run(code)
 
-    @unittest.skipUnless(HAS_TRITON or TRITON_HAS_CPU, "requires triton")
+    @skipIf(not (HAS_TRITON or TRITON_HAS_CPU), "requires triton")
     def test_codegen_with_custom_heuristics_module_udtk(self, device):
         self._register_custom_backend_with_heuristics(device)
 

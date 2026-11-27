@@ -263,6 +263,7 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
 
 
 instantiate_parametrized_tests(DeviceToAtenTests)
+instantiate_parametrized_tests(ExtensionBackendTests)
 
 
 if __name__ == "__main__":
