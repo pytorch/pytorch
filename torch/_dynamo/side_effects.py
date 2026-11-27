@@ -1327,7 +1327,7 @@ class SideEffects:
                     )
                 if var.mutation_type.cls_source is None:
                     if type(var) is variables.OrderedDictVariable:
-                        var.unsupported_instance_state("returning a local OrderedDict")
+                        var.unsupported_instance_state("OrderedDict reconstruction")
                     unimplemented(
                         gb_type="Reconstruct user defined class without a source",
                         context=f"Class: {var.python_type().__name__}",
