@@ -361,7 +361,7 @@ class DeterministicTestAccelerator(TestCase):
 instantiate_device_type_tests(
     DeterministicTestAccelerator,
     globals(),
-    except_for=("cpu", "privateuse1", "hpu"),
+    except_for="cpu",
     allow_xpu=True,
 )
 
