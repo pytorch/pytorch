@@ -258,8 +258,6 @@ class TritonExtensionBackendAcceleratorTests(_TritonExtensionBackendTestsBase):
                     )
                 return ExtensionPythonWrapperCodegen()
 
-        # register_backend_for_device() keys backends by device type, while the
-        # injected `device` carries an index (e.g. "cuda:0"), so strip the index.
         register_backend_for_device(
             torch.device(device).type,
             ExtensionTritonScheduling,
