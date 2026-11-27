@@ -7547,8 +7547,8 @@ class ConcatKernel(NopKernel):
             any_input_is_storage_and_layout is False
             and isinstance(fx_node_args, list)
             and any(
-                # pyrefly: ignore [missing-attribute]
-                "val" in arg.meta
+                isinstance(arg, torch.fx.Node)
+                and isinstance(arg.meta.get("val"), torch.Tensor)
                 and (
                     is_contiguous_for_memory_format_or_false(
                         # pyrefly: ignore [missing-attribute]

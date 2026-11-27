@@ -221,6 +221,150 @@ def pow_integer(base, exponent):
 
 
 @triton.jit
+def elementwise_output_stride(
+    sizes, strides, DIM: tl.constexpr, ALLOW_FAST, PRESERVE_DENSE
+):
+    r"""elementwise_output_stride(sizes, strides, DIM, ALLOW_FAST, PRESERVE_DENSE) -> int64
+
+    Compute one output stride using TensorIterator's layout rules. ``sizes``
+    describes the broadcast output and ``strides`` contains each input's strides.
+    ``ALLOW_FAST`` enables contiguous and dense shortcuts. ``PRESERVE_DENSE``
+    selects the stride rules for dtype copies, which retain dense input layouts.
+    """
+    rank: tl.constexpr = len(sizes)
+    inputs: tl.constexpr = len(strides)
+    permutation = ()
+    for i in tl.static_range(rank):
+        entry = (rank - i - 1, tl.cast(sizes[rank - i - 1], tl.int64))
+        for t in tl.static_range(inputs):
+            entry += (tl.cast(strides[t][rank - i - 1], tl.int64),)
+        permutation += (entry,)
+    for i in tl.static_range(1, rank):
+        candidate = permutation[i]
+        position = tl.full([], i, tl.int32)
+        active = tl.full([], True, tl.int1)
+        for left_index in tl.static_range(i - 1, -1, -1):
+            left = permutation[left_index]
+            comparison = tl.full([], 0, tl.int32)
+            for t in tl.static_range(inputs - 1, -1, -1):
+                s0, s1 = left[t + 2], candidate[t + 2]
+                greater = (s0 > s1) | ((s0 == s1) & (left[1] > candidate[1]))
+                decisive = (s0 != 0) & (s1 != 0) & ((s0 != s1) | greater)
+                comparison = tl.where(decisive, tl.where(greater, 1, -1), comparison)
+            swap = active & (comparison > 0)
+            updated = ()
+            for j in tl.static_range(rank):
+                entry = ()
+                for k in tl.static_range(inputs + 2):
+                    if j == left_index:
+                        value = tl.where(swap, candidate[k], left[k])
+                    elif j > left_index and j <= i:
+                        value = tl.where(
+                            swap & (position == j), left[k], permutation[j][k]
+                        )
+                    else:
+                        value = permutation[j][k]
+                    entry += (value,)
+                updated += (entry,)
+            permutation = updated
+            position = tl.where(swap, left_index, position)
+            active = active & (comparison >= 0)
+    result = tl.full([], 0, tl.int64)
+    stride = tl.full([], 1, tl.int64)
+    inverted = tl.full([], True, tl.int1)
+    for i in tl.static_range(rank):
+        entry = permutation[i]
+        inverted = inverted & (entry[0] == rank - i - 1)
+        result = tl.where(entry[0] == DIM, stride, result)
+        stride *= tl.where(PRESERVE_DENSE != 0, tl.maximum(entry[1], 1), entry[1])
+    contiguous_stride = tl.full([], 1, tl.int64)
+    contiguous = tl.full([], True, tl.int1)
+    empty = tl.full([], False, tl.int1)
+    expected = tl.full([], 1, tl.int64)
+    for i in tl.static_range(rank - 1, -1, -1):
+        if i == DIM:
+            contiguous_stride = expected
+        for t in tl.static_range(inputs):
+            contiguous = contiguous & ((sizes[i] == 1) | (strides[t][i] == expected))
+        empty = empty | (sizes[i] == 0)
+        expected *= tl.maximum(tl.cast(sizes[i], tl.int64), 1)
+    result = tl.where(inverted, contiguous_stride, result)
+    dense = tl.full([], True, tl.int1)
+    same_layout = tl.full([], True, tl.int1)
+    for t in tl.static_range(inputs):
+        for i in tl.static_range(rank):
+            expected = tl.full([], 1, tl.int64)
+            for j in tl.static_range(rank):
+                if i != j:
+                    before = (strides[t][j] < strides[t][i]) | (
+                        (strides[t][j] == strides[t][i]) & (j < i)
+                    )
+                    expected *= tl.where(
+                        (sizes[j] >= 2) & before, tl.cast(sizes[j], tl.int64), 1
+                    )
+            dense = dense & ((sizes[i] < 2) | (strides[t][i] == expected))
+            same_layout = same_layout & (strides[t][i] == strides[inputs - 1][i])
+    dense = same_layout & (empty | dense)
+    result = tl.where(
+        (ALLOW_FAST != 0) & (PRESERVE_DENSE == 0) & dense,
+        tl.cast(strides[inputs - 1][DIM], tl.int64),
+        result,
+    )
+    if rank == 4:
+        c = tl.cast(sizes[1], tl.int64)
+        w = tl.cast(sizes[3], tl.int64)
+        h = tl.cast(sizes[2], tl.int64)
+        if DIM == 1:
+            channel_stride = tl.full([], 1, tl.int64)
+        elif DIM == 3:
+            channel_stride = c
+        elif DIM == 2:
+            channel_stride = c * w
+        else:
+            channel_stride = c * w * h
+        channels = tl.full([], True, tl.int1)
+        for t in tl.static_range(inputs):
+            channels &= (sizes[1] == 1) | (strides[t][1] == 1)
+            channels &= (sizes[3] == 1) | (strides[t][3] == c)
+            channels &= (sizes[2] == 1) | (strides[t][2] == c * w)
+            channels &= (sizes[0] == 1) | (strides[t][0] == c * w * h)
+        result = tl.where(
+            (ALLOW_FAST != 0) & (PRESERVE_DENSE == 0) & channels, channel_stride, result
+        )
+    result = tl.where(
+        (ALLOW_FAST != 0) & (PRESERVE_DENSE == 0) & (empty | contiguous),
+        contiguous_stride,
+        result,
+    )
+    result = tl.where(
+        (PRESERVE_DENSE != 0) & dense,
+        tl.cast(strides[inputs - 1][DIM], tl.int64),
+        result,
+    )
+    return result
+
+
+@triton.jit
+def is_non_overlapping_and_dense_indicator(sizes, strides):
+    if len(sizes) == 1:
+        return tl.cast((strides[0] == 1) | (sizes[0] < 2), tl.int64)
+    dense = True
+    for i in tl.static_range(len(sizes)):
+        expected_stride = tl.cast(1, tl.int64)
+        for j in tl.static_range(len(sizes)):
+            if i != j:
+                before = (strides[j] < strides[i]) | (
+                    (strides[j] == strides[i]) & (j < i)
+                )
+                factor = tl.where(
+                    (sizes[j] != 1) & before, tl.cast(sizes[j], tl.int64), 1
+                )
+                expected_stride *= factor
+        dense = dense & ((sizes[i] == 1) | (strides[i] == expected_stride))
+    return tl.cast(dense, tl.int64)
+
+
+@triton.jit
 def _aten_bessel_poly(t, coefficients: tl.constexpr, monic: tl.constexpr = False):
     # Native numerators start at zero; monic denominators start at one.
     # Fold the first numerator coefficient into the initial value.

@@ -158,6 +158,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
       ArrayRef<SymNode> /*strides*/) {
     TORCH_CHECK(false, "NYI");
   }
+  virtual SymNode elementwise_output_stride(ArrayRef<SymNode> /*args*/) {
+    TORCH_CHECK(false, "NYI");
+  }
   virtual SymNode clone() {
     TORCH_CHECK(false, "NYI");
   }

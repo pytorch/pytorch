@@ -11,10 +11,12 @@ from torch.utils._sympy.functions import (
     BitwiseFn_bitwise_and,
     BitwiseFn_bitwise_or,
     BitwiseFn_bitwise_xor,
+    ElementwiseOutputStride,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
     IntTrueDiv,
+    IsNonOverlappingAndDenseIndicator,
     Max,
     Min,
     Mod,
@@ -27,6 +29,7 @@ from torch.utils._sympy.functions import (
     RoundToInt,
     ToFloat,
     TruncToInt,
+    Where,
 )
 
 
@@ -37,6 +40,18 @@ from torch.utils._sympy.functions import (
 # NB: For magic methods this needs to use normal magic methods
 # so that test_magic_methods works
 class ReferenceAnalysis:
+    @staticmethod
+    def elementwise_output_stride(*args):
+        return ElementwiseOutputStride(*args)
+
+    @staticmethod
+    def is_non_overlapping_and_dense_indicator(*args):
+        return IsNonOverlappingAndDenseIndicator(*args)
+
+    @staticmethod
+    def where(a, b, c):
+        return Where(a, b, c)
+
     @staticmethod
     def constant(c, dtype):
         return sympy.sympify(c)
@@ -217,6 +232,51 @@ class ReferenceAnalysis:
 # Python types and is FX traceable.  Inheritance here is purely for code
 # sharing (TODO: considering splitting out a BaseReferenceAnalysis).
 class PythonReferenceAnalysis(ReferenceAnalysis):
+    @staticmethod
+    def elementwise_output_stride(*args):
+        from torch.fx.experimental.sym_node import elementwise_output_stride
+
+        for arg in args:
+            if isinstance(arg, torch.fx.Proxy):
+                tracer = arg.tracer
+                values = []
+                for value in args:
+                    if isinstance(value, torch.SymInt):
+                        node = tracer.graph.materialize_symints((value,))[0]
+                        value = (
+                            torch.fx.Proxy(node, tracer)
+                            if isinstance(node, torch.fx.Node)
+                            else node
+                        )
+                    values.append(value)
+                args = tuple(values)
+                return tracer.create_proxy(
+                    "call_function", elementwise_output_stride, args, {}
+                )
+        return elementwise_output_stride(*args)
+
+    @staticmethod
+    def is_non_overlapping_and_dense_indicator(*args):
+        from torch.fx.experimental.sym_node import (
+            is_non_overlapping_and_dense_indicator,
+        )
+
+        dim = len(args) // 2
+        sizes, strides = list(args[:dim]), list(args[dim:])
+        for arg in args:
+            if isinstance(arg, torch.fx.Proxy):
+                return arg.tracer.create_proxy(
+                    "call_function",
+                    is_non_overlapping_and_dense_indicator,
+                    (sizes, strides),
+                    {},
+                )
+        return is_non_overlapping_and_dense_indicator(sizes, strides)
+
+    @staticmethod
+    def where(a, b, c):
+        return torch.sym_ite(a, b, c)
+
     @staticmethod
     def constant(c, dtype):
         if dtype is torch.int64:

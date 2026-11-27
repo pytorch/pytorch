@@ -141,6 +141,16 @@ class ExprPrinter(StrPrinter):
 
 
 class PythonPrinter(ExprPrinter):
+    def _print_ElementwiseOutputStride(self, expr: sympy.Expr) -> str:
+        args = ", ".join(self.doprint(arg) for arg in expr.args)
+        return f"torch.fx.experimental.sym_node.elementwise_output_stride({args})"
+
+    def _print_IsNonOverlappingAndDenseIndicator(self, expr: sympy.Expr) -> str:
+        dim = len(expr.args) // 2
+        sizes = ", ".join(self.doprint(arg) for arg in expr.args[:dim])
+        strides = ", ".join(self.doprint(arg) for arg in expr.args[dim:])
+        return f"torch.fx.experimental.sym_node.is_non_overlapping_and_dense_indicator([{sizes}], [{strides}])"
+
     def _print_Where(self, expr: sympy.Expr) -> str:
         condition, positive, negative = (self.doprint(arg) for arg in expr.args)
         return f"({positive} if {condition} else {negative})"
@@ -373,6 +383,107 @@ class PythonPrinter(ExprPrinter):
 
 
 class CppPrinter(ExprPrinter):
+    def _print_ElementwiseOutputStride(self, expr: sympy.Expr) -> str:
+        dim, rank = (int(arg) for arg in expr.args[:2])
+        allow_fast, preserve_dense = (self.doprint(arg) for arg in expr.args[2:4])
+        values = [self.doprint(arg) for arg in expr.args[4:]]
+        sizes = ", ".join(values[:rank])
+        strides = ", ".join(
+            "{" + ", ".join(values[i : i + rank]) + "}"
+            for i in range(rank, len(values), rank)
+        )
+        inputs = len(values) // rank - 1
+        return f"""([&]() -> int64_t {{
+            int64_t sizes[{rank}] = {{{sizes}}};
+            int64_t strides[{inputs}][{rank}] = {{{strides}}};
+            int permutation[{rank}];
+            int64_t contiguous[{rank}];
+            int64_t expected = 1;
+            bool all_contiguous = true, empty = false, same_dense = true, same_layout = true;
+            for (int i = {rank} - 1; i >= 0; --i) {{
+                permutation[{rank} - i - 1] = i;
+                contiguous[i] = expected;
+                for (int t = 0; t < {inputs}; ++t)
+                    all_contiguous &= sizes[i] == 1 || strides[t][i] == expected;
+                empty |= sizes[i] == 0;
+                expected *= sizes[i] > 1 ? sizes[i] : 1;
+            }}
+            for (int t = 0; t < {inputs}; ++t) {{
+                for (int i = 0; i < {rank}; ++i) {{
+                    same_layout &= strides[t][i] == strides[{inputs} - 1][i];
+                    int64_t step = 1;
+                    for (int j = 0; j < {rank}; ++j)
+                        if (i != j && sizes[j] >= 2 && (strides[t][j] < strides[t][i] ||
+                            (strides[t][j] == strides[t][i] && j < i))) step *= sizes[j];
+                    same_dense &= sizes[i] < 2 || strides[t][i] == step;
+                }}
+            }}
+            same_dense = same_layout && (empty || same_dense);
+            if ({preserve_dense} && same_dense) return strides[{inputs} - 1][{dim}];
+            if ({allow_fast} && !({preserve_dense}) && (empty || all_contiguous)) return contiguous[{dim}];
+            if ({allow_fast} && !({preserve_dense}) && {rank} == 4) {{
+                int order[4] = {{1, 3, 2, 0}};
+                int64_t channel_stride = 1;
+                expected = 1;
+                bool channels = true;
+                for (int j = 0; j < 4; ++j) {{
+                    int i = order[j];
+                    if (i == {dim}) channel_stride = expected;
+                    for (int t = 0; t < {inputs}; ++t)
+                        channels &= sizes[i] == 1 || strides[t][i] == expected;
+                    expected *= sizes[i];
+                }}
+                if (channels) return channel_stride;
+            }}
+            if ({allow_fast} && !({preserve_dense}) && same_dense) return strides[{inputs} - 1][{dim}];
+            for (int i = 1; i < {rank}; ++i) {{
+                int right = i;
+                for (int left = i - 1; left >= 0; --left) {{
+                    int d0 = permutation[left], d1 = permutation[right], comparison = 0;
+                    for (int t = 0; t < {inputs}; ++t) {{
+                        int64_t s0 = strides[t][d0], s1 = strides[t][d1];
+                        if (!s0 || !s1) continue;
+                        if (s0 > s1 || (s0 == s1 && sizes[d0] > sizes[d1])) {{ comparison = 1; break; }}
+                        if (s0 < s1) {{ comparison = -1; break; }}
+                    }}
+                    if (comparison > 0) {{
+                        permutation[left] = d1; permutation[right] = d0; right = left;
+                    }} else if (comparison < 0) break;
+                }}
+            }}
+            bool inverted = true;
+            for (int i = 0; i < {rank}; ++i) inverted &= permutation[i] == {rank} - i - 1;
+            if (inverted) return contiguous[{dim}];
+            expected = 1;
+            for (int i = 0; i < {rank}; ++i) {{
+                if (permutation[i] == {dim}) return expected;
+                expected *= {preserve_dense} && sizes[permutation[i]] < 1 ? 1 : sizes[permutation[i]];
+            }}
+            return int64_t(0);
+        }}())"""
+
+    def _print_IsNonOverlappingAndDenseIndicator(self, expr: sympy.Expr) -> str:
+        dim = len(expr.args) // 2
+        sizes = [self.doprint(arg) for arg in expr.args[:dim]]
+        strides = [self.doprint(arg) for arg in expr.args[dim:]]
+        if dim == 1:
+            return f"static_cast<int64_t>(({strides[0]}) == 1 || ({sizes[0]}) < 2)"
+        checks = []
+        for i, (size, stride) in enumerate(zip(sizes, strides)):
+            factors = []
+            for j, (other_size, other_stride) in enumerate(zip(sizes, strides)):
+                if i == j:
+                    continue
+                before = f"({other_stride}) < ({stride})"
+                if j < i:
+                    before = f"({before} || ({other_stride}) == ({stride}))"
+                factors.append(
+                    f"((({other_size}) != 1 && {before}) ? ({other_size}) : 1L)"
+                )
+            expected = " * ".join(factors) or "1L"
+            checks.append(f"(({size}) == 1 || ({stride}) == ({expected}))")
+        return f"static_cast<int64_t>({' && '.join(checks) or 'true'})"
+
     def _print_Integer(self, expr: sympy.Expr) -> str:
         suffix = "LL" if sys.platform in ["darwin", "win32"] else "L"
         i = int(expr)

@@ -79,6 +79,13 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
 
 #undef TORCH_SYMNODE_SIZES_STRIDES
 
+  c10::SymNode elementwise_output_stride(
+      c10::ArrayRef<c10::SymNode> args) override {
+    py::gil_scoped_acquire acquire;
+    auto result = getPyObj().attr("elementwise_output_stride")(args);
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(result));
+  }
+
   bool bool_() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("bool_")().is(py::handle(Py_True));

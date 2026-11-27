@@ -560,6 +560,7 @@ def _make_elementwise_unary_reference(
         @out_wrapper(exact_dtype=exact_dtype)
         @elementwise_unary_scalar_wrapper
         @elementwise_type_promotion_wrapper(
+            output_stride_args=("a",),
             type_promoting_args=("a",),
             type_promotion_kind=type_promotion_kind,
         )
@@ -1022,6 +1023,7 @@ def reciprocal(a):
 @register_decomposition(aten.round)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
+    output_stride_args=("a",),
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1167,6 +1169,8 @@ def _make_elementwise_binary_reference(
     supports_rhs_python_scalar=True,
     supports_two_python_scalars=False,
     should_register_decomposition=True,
+    scalar_uses_tensor_iterator=True,
+    output_stride_requires_tensor=(),
 ) -> Callable:
     def inner(prim: Callable):
         nonlocal aten_op, name
@@ -1175,6 +1179,11 @@ def _make_elementwise_binary_reference(
 
         @wraps(prim)
         @elementwise_type_promotion_wrapper(
+            output_stride_args=("a", "b"),
+            output_stride_requires_tensor=output_stride_requires_tensor,
+            tensor_iterator_scalar_args=("a", "b")
+            if scalar_uses_tensor_iterator
+            else (),
             type_promoting_args=("a", "b"),
             type_promotion_kind=type_promotion_kind,
         )
@@ -1229,6 +1238,8 @@ def _binary_op_dtype(
 @register_decomposition(aten.add)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
+    output_stride_args=("a", "b"),
+    tensor_iterator_scalar_args=("a", "b"),
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1355,6 +1366,8 @@ def eq(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    scalar_uses_tensor_iterator=False,
+    output_stride_requires_tensor=("a",),
 )
 def pow(
     a: TensorLikeType | NumberType,
@@ -1877,6 +1890,8 @@ def rsub(
 @register_decomposition(aten.sub)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
+    output_stride_args=("a", "b"),
+    tensor_iterator_scalar_args=("a", "b"),
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1932,6 +1947,8 @@ def true_divide(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.xlogy)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
+    output_stride_args=("a", "b"),
+    tensor_iterator_scalar_args=("a", "b"),
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
@@ -1979,6 +1996,7 @@ def trunc_divide(a: TensorLikeType | NumberType, b: TensorLikeType | NumberType)
 @register_decomposition(aten.addcdiv)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
+    output_stride_args=("self", "tensor1", "tensor2"),
     type_promoting_args=("self", "tensor1", "tensor2"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
@@ -2006,6 +2024,7 @@ def addcdiv(
 @register_decomposition(aten.addcmul)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
+    output_stride_args=("self", "tensor1", "tensor2"),
     type_promoting_args=("self", "tensor1", "tensor2"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -2033,6 +2052,7 @@ def addcmul(
 @register_decomposition(aten.clamp)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
+    output_stride_args=("a", "min", "max"),
     type_promoting_args=("a", "min", "max"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -2122,6 +2142,10 @@ def _where_default(pred: Tensor) -> tuple[Tensor, ...]:
 @register_decomposition(aten.where.self_out)
 @out_wrapper(exact_dtype=True)
 @elementwise_type_promotion_wrapper(
+    output_stride_args=("pred", "a", "b"),
+    tensor_iterator_scalar_args=("a", "b"),
+    promote_stride_args_on_all_devices=True,
+    output_stride_fixed_dtypes={"pred": torch.bool},
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
@@ -5722,6 +5746,7 @@ def arange(
 @register_decomposition(aten.lerp)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
+    output_stride_args=("start", "end", "weight"),
     type_promoting_args=("start", "end", "weight"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )

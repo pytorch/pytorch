@@ -332,6 +332,76 @@ std::optional<int64_t> guarding_hint(const c10::SymInt& s) {
   return s.is_heap_allocated() ? s.toSymNodeImplUnowned()->guarding_hint() : s.as_int_unchecked();
 }
 
+bool preserve_symbolic_elementwise_strides(
+    MetaDesc& out,
+    ArrayRef<MetaDesc> args,
+    c10::SymBool allow_fast = c10::SymBool(true),
+    bool preserve_dense = false) {
+  const auto unbacked = [](const c10::SymInt& value) {
+    return value.is_heap_allocated() && !is_nested_int(value) && !guarding_hint(value).has_value();
+  };
+  c10::SymNode base;
+  for (const auto& value : out.sizes) {
+    if (unbacked(value)) {
+      base = value.toSymNode();
+      break;
+    }
+  }
+  if (!base) {
+    for (const auto& arg : args) {
+      for (const auto& value : arg.strides) {
+        if (unbacked(value)) {
+          base = value.toSymNode();
+          break;
+        }
+      }
+      if (base) {
+        break;
+      }
+    }
+  }
+  if (!base || out.dim() == 0) {
+    return false;
+  }
+  std::vector<c10::SymInt> values{
+      c10::SymInt(0), c10::SymInt(out.dim()), c10::SymInt(0), c10::SymInt(preserve_dense)};
+  values.insert(values.end(), out.sizes.begin(), out.sizes.end());
+  for (const auto& arg : args) {
+    if (arg.is_number || arg.is_cpu_scalar_tensor) {
+      allow_fast = c10::SymBool(false);
+      continue;
+    }
+    const auto offset = out.dim() - arg.dim();
+    TORCH_INTERNAL_ASSERT(offset >= 0);
+    if (offset != 0) {
+      allow_fast = c10::SymBool(false);
+    }
+    for (const auto dim : c10::irange(out.dim())) {
+      if (dim < offset) {
+        values.emplace_back(0);
+      } else {
+        const auto input_dim = dim - offset;
+        allow_fast = allow_fast.sym_and(sym_eq_folded(arg.sizes[input_dim], out.sizes[dim]));
+        const auto broadcast = arg.sizes[input_dim].sym_eq(1).sym_and(out.sizes[dim].sym_ne(1)).toSymInt();
+        values.push_back(arg.strides[input_dim] * (c10::SymInt(1) - broadcast));
+      }
+    }
+  }
+  values[2] = allow_fast.toSymInt();
+  std::vector<c10::SymNode> nodes;
+  nodes.reserve(values.size());
+  for (const auto& value : values) {
+    nodes.push_back(value.wrap_node(base));
+  }
+  out.strides.clear();
+  for (const auto dim : c10::irange(out.dim())) {
+    nodes[0] = base->wrap_int(dim);
+    out.strides.emplace_back(base->elementwise_output_stride(nodes));
+  }
+  out.has_symbolic_sizes_strides = desc_is_symbolic(out);
+  return true;
+}
+
 bool backed_size_oblivious() {
   return (*c10::impl::getGlobalPyInterpreter())->backed_size_oblivious();
 }
@@ -631,6 +701,9 @@ ScalarType get_higher_dtype(std::optional<ScalarType> a, ScalarType b) {
 MetaDesc _convert_element_type_meta(const MetaDesc& a, ScalarType dtype) {
   MetaDesc out = a;
   out.dtype = dtype;
+  if (preserve_symbolic_elementwise_strides(out, {a}, c10::SymBool(true), true)) {
+    return out;
+  }
   if (!is_non_overlapping_and_dense_or_false(a)) {
     out.strides = a.dim() == 1
         ? c10::SymDimVector{c10::SymInt(1)}
@@ -687,7 +760,6 @@ MetaDesc _maybe_convert_to_dtype(
 MetaDesc _prim_elementwise_meta(ArrayRef<MetaDesc> args, ScalarType dtype) {
   check_same_device(args);
   check_same_shape(args);
-  const auto perm = compute_elementwise_output_logical_to_physical_perm(filter_tensors(args));
 
   // utils.extract_shape, whose mismatch case check_same_shape has ruled out.
   const MetaDesc* shape = nullptr;
@@ -710,7 +782,13 @@ MetaDesc _prim_elementwise_meta(ArrayRef<MetaDesc> args, ScalarType dtype) {
     return out;
   }
   const auto& like = shape != nullptr ? *shape : *scalar_shape;
-  auto out = empty_permuted(like.sizes, perm, dtype);
+  MetaDesc out = like;
+  out.dtype = dtype;
+  if (preserve_symbolic_elementwise_strides(out, args)) {
+    return out;
+  }
+  const auto perm = compute_elementwise_output_logical_to_physical_perm(filter_tensors(args));
+  out = empty_permuted(like.sizes, perm, dtype);
   out.device = like.device;
   out.is_cpu_scalar_tensor = shape == nullptr;
   return out;
@@ -779,6 +857,19 @@ Tensor binary_ref_meta_impl(
     }
   }
   auto out = _prim_elementwise_meta(args, kind == ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL ? kBool : compute_dtype);
+  if (is_noncontiguous_supported(self, other)) {
+    std::array<MetaDesc, 2> stride_args = {meta_desc(self, fake_devices), meta_desc(other, fake_devices)};
+    if (out.device.is_cpu()) {
+      const auto stride_kind = kind == ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL
+          ? ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT : kind;
+      const auto stride_dtype = elementwise_dtypes(self, other, stride_kind).second;
+      for (auto& arg : stride_args) {
+        arg = _maybe_convert_to_dtype(arg, stride_dtype);
+      }
+    }
+    preserve_symbolic_elementwise_strides(
+        out, stride_args);
+  }
   if (!is_noncontiguous_supported(self, other) && !is_contiguous_or_false(out)) {
     DimVector identity(out.dim());
     std::iota(identity.begin(), identity.end(), 0);
@@ -1002,9 +1093,16 @@ Tensor fast_binary_impl(const Tensor& self, const Tensor& other, ELEMENTWISE_TYP
   if (!contiguous && !channels_last) {
     return {};
   }
-  return at::native::empty_meta_symint(
+  auto result = at::native::empty_meta_symint(
       final_shape, dtype, std::nullopt, kMeta, std::nullopt,
       contiguous ? MemoryFormat::Contiguous : MemoryFormat::ChannelsLast);
+  auto output = meta_desc(result, /*fake_devices=*/false);
+  if (common_device.type() != kHPU) {
+    preserve_symbolic_elementwise_strides(
+        output, {meta_desc(self, /*fake_devices=*/true), meta_desc(other, /*fake_devices=*/true)});
+  }
+  result.unsafeGetTensorImpl()->set_sizes_and_strides(output.sizes, output.strides);
+  return result;
 }
 
 } // namespace at::native

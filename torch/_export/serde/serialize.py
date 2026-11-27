@@ -2968,6 +2968,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 "FloorDiv": torch.utils._sympy.functions.FloorDiv,
                 "ModularIndexing": torch.utils._sympy.functions.ModularIndexing,
                 "Where": torch.utils._sympy.functions.Where,
+                "ElementwiseOutputStride": torch.utils._sympy.functions.ElementwiseOutputStride,
                 "PythonMod": torch.utils._sympy.functions.PythonMod,
                 "Mod": torch.utils._sympy.functions.Mod,
                 "CleanDiv": torch.utils._sympy.functions.CleanDiv,

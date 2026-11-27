@@ -21,7 +21,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Any, overload, TYPE_CHECKING
+from typing import Any, cast, overload, TYPE_CHECKING
 
 import torch
 import torch._logging.structured as structured
@@ -499,6 +499,11 @@ class SymNode:
         self, sizes: list[SymNode], strides: list[SymNode]
     ) -> SymNode:
         return self._is_non_overlapping_and_dense_indicator(sizes, strides)  # type: ignore[attr-defined]
+
+    def elementwise_output_stride(self, args: list[SymNode]) -> SymNode:
+        return to_node(
+            self, elementwise_output_stride(*(wrap_node(arg) for arg in args))
+        )
 
     # Make C++ happy
     def sym_or(self, other: SymNode) -> SymNode:
@@ -1182,9 +1187,19 @@ def _sympy_max(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
 
 
 def _sympy_ite(a: sympy.Basic, t: sympy.Basic, f: sympy.Basic) -> sympy.Basic:
-    import sympy
+    from sympy import And, Expr, Not, Or
+    from sympy.logic.boolalg import Boolean
 
-    return sympy.Piecewise((t, a), (f, True))
+    from torch.utils._sympy.functions import Where
+
+    if (
+        isinstance(t, Boolean)
+        and not isinstance(t, Expr)
+        and isinstance(f, Boolean)
+        and not isinstance(f, Expr)
+    ):
+        return Or(And(a, t), And(Not(a), f))
+    return Where(a, t, f)
 
 
 current_module = sys.modules[__name__]
@@ -1379,6 +1394,47 @@ def _sympy_is_non_overlapping_and_dense_indicator(
     return IsNonOverlappingAndDenseIndicator(*sizes, *strides)
 
 
+def elementwise_output_stride(*args: Any) -> int | SymInt:
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode, handle_sym_dispatch
+    from torch.utils._sympy.functions import (
+        _eval_elementwise_output_stride,
+        ElementwiseOutputStride,
+    )
+
+    for arg in args:
+        if isinstance(arg, SymInt):
+            node = arg.node
+            if get_proxy_mode():
+                return cast(
+                    int | SymInt,
+                    wrap_node(
+                        to_node(
+                            node,
+                            handle_sym_dispatch(elementwise_output_stride, args, {}),
+                        )
+                    ),
+                )
+            nodes = [to_node(node, value) for value in args]
+            hints = [value.hint for value in nodes]
+            hint = (
+                _eval_elementwise_output_stride(*cast(list[int], hints))
+                if all(value is not None for value in hints)
+                else None
+            )
+            return cast(
+                int | SymInt,
+                wrap_node(
+                    SymNode(
+                        ElementwiseOutputStride(*(value.expr for value in nodes)),
+                        node.shape_env,
+                        int,
+                        hint,
+                    )
+                ),
+            )
+    return _eval_elementwise_output_stride(*args)
+
+
 sizes_strides_methods = {
     # TODO: These could also be done with indicators, maybe it is better
     # for reasoning to do it that way
@@ -1389,6 +1445,12 @@ sizes_strides_methods = {
     "is_channels_last_strides_3d": sympy_is_channels_last_strides_3d,
     "is_non_overlapping_and_dense_indicator": _sympy_is_non_overlapping_and_dense_indicator,
 }
+
+if TYPE_CHECKING:
+
+    def is_non_overlapping_and_dense_indicator(
+        sizes: list[int | SymInt], strides: list[int | SymInt]
+    ) -> int | SymInt: ...
 
 
 def to_node(self: SymNode, num: object) -> SymNode:

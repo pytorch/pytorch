@@ -2643,6 +2643,47 @@ def make_fast_binary_impl(
                         op, memory_format=torch.channels_last
                     )
                 )
+        if (
+            definitely_contiguous or definitely_channels_last
+        ) and is_noncontiguous_supported(common_device):
+            from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+            if free_unbacked_symbols(
+                (
+                    final_shape,
+                    *(op.stride() for op in operands if isinstance(op, torch.Tensor)),
+                )
+            ):
+                layout_inputs = operands
+                if common_device.type == "cpu" and has_different_input_dtypes:
+                    _, stride_dtype = elementwise_dtypes(
+                        *operands,
+                        type_promotion_kind=(
+                            ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+                            if type_promotion_kind
+                            == ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+                            else type_promotion_kind
+                        ),
+                    )
+                    with mode:
+                        layout_inputs = tuple(
+                            op.to(stride_dtype)
+                            if isinstance(op, torch.Tensor) and op.dtype != stride_dtype
+                            else op
+                            for op in operands
+                        )
+                strides = torch._prims_common.compute_elementwise_output_strides(
+                    *layout_inputs, broadcast_shape=final_shape
+                )
+                out = torch.empty_strided(
+                    final_shape, strides, dtype=common_dtype, device="meta"
+                )
+                count_label(
+                    "fast is_contiguous"
+                    if definitely_contiguous
+                    else "fast channels_last"
+                )
+                return mode._make_fake_tensor(out, common_device)
         if definitely_contiguous:
             # do contiguous
             count_label("fast is_contiguous")
@@ -2713,6 +2754,16 @@ def get_fast_op_impls() -> dict[OpOverload, Callable[..., Any]]:
             type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         )
     )
+    for name, overload, kind in (
+        ("bitwise_and", "Tensor", ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT),
+        ("le", "Tensor", ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL),
+        ("le", "Scalar", ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL),
+        ("eq", "Tensor", ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL),
+        ("ne", "Scalar", ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL),
+    ):
+        register_fast_op_impl(getattr(getattr(torch.ops.aten, name), overload))(
+            make_fast_binary_impl(getattr(torch._refs, name), type_promotion_kind=kind)
+        )
     register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
     register_fast_op_impl(torch.ops.aten.alias.default)(fast_alias)
     return FAST_OP_IMPLEMENTATIONS
