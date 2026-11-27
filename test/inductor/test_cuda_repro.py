@@ -199,7 +199,7 @@ class CudaReproTests(TestCase):
         torch.compile(fn, backend="inductor", fullgraph=True)(compiled_acc, a, b)
         self.assertEqual(compiled_acc, expected)
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA/XPU")
     def test_frexp_non_finite(self):
         def fn(x):
             return torch.frexp(x)
@@ -215,7 +215,8 @@ class CudaReproTests(TestCase):
         self.assertEqual(actual_mantissa, expected_mantissa, equal_nan=True)
         self.assertEqual(actual_exponent, expected_exponent)
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6008")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA/XPU")
     def test_frexp_subnormal(self):
         # https://github.com/pytorch/pytorch/issues/195007
         def fn(x):
@@ -2170,7 +2171,11 @@ class CudaReproTests(TestCase):
 
         out = run(f, True)
         eager_out = run(f, False)
-        self.assertEqual(out, eager_out, atol=1e-3, rtol=1e-3)
+        # oneDNN fuses the bias into the conv on XPU, so the peeled-add rounding
+        # differs by a few ulps; loosen the tolerance there.
+        # https://github.com/intel/torch-xpu-ops/issues/6024
+        tol = 1e-2 if TEST_XPU else 1e-3
+        self.assertEqual(out, eager_out, atol=tol, rtol=tol)
 
         lowp_name = str(lowp_dtype).removeprefix("torch.")
         _, codes = run_and_get_code(
@@ -2290,7 +2295,8 @@ class CudaReproTests(TestCase):
         actual = opt_fn(x)
         self.assertEqual(expected, actual)
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6008")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA/XPU")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_promoted_lowp_cuda(self):
         def fn(x):
@@ -2328,7 +2334,7 @@ class CudaReproTests(TestCase):
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_min_pow_chain(self):
         torch.manual_seed(0)
-        torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
+        torch.get_device_module(device_type).manual_seed_all(0)
 
         with dynamo_config.patch(
             capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -2803,8 +2809,10 @@ class CudaReproTests(TestCase):
         self.assertEqual(out1, out2)
 
     def test_associative_scan_dynamic_ndim(self):
-        if device_type != "cuda":
-            raise unittest.SkipTest("associative_scan pointwise lowering requires CUDA")
+        if device_type not in ["cuda", "xpu"]:
+            raise unittest.SkipTest(
+                "associative_scan pointwise lowering requires CUDA/XPU"
+            )
 
         from torch._higher_order_ops.associative_scan import associative_scan
 
@@ -2869,8 +2877,8 @@ class CudaReproTests(TestCase):
         }
     )
     def test_persistent_reduction_selection_uses_tiling_scores(self):
-        if device_type != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if device_type not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/XPU")
 
         def fn(x):
             hidden = x.shape[1] // 2
@@ -2910,8 +2918,8 @@ class CudaReproTests(TestCase):
     def test_persistent_reduction_cse_reindexed_epilogue(
         self, use_block_ptr, dynamic_batch
     ):
-        if device_type != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if device_type not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/XPU")
 
         out_dtype = torch.float16
         fp8_min = -448.0
@@ -3909,7 +3917,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
                 self.assertEqual(eager_div, compiled_div)
 
-    @skipIfXpu(msg="triton dependency - torch-xpu-ops: 2554")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6040")
     @config.patch({"eager_numerics.division_rounding": False})
     @xfailIfROCm
     def test_truediv_base_not_bitwise_equivalent(self):

@@ -333,7 +333,10 @@ class TestPartitionedScatterOpt(TestCase):
         )
         self.assertGreaterEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
 
-    @skipIfXpu(msg="embedding_dense_backward is not decomposed on XPU")
+    @skipIfXpu(
+        msg="embedding_dense_backward is not decomposed on XPU, "
+        "https://github.com/intel/torch-xpu-ops/issues/6061"
+    )
     def test_embedding_dense_backward(self):
         """Reaches the pass as _unsafe_masked_index_put_accumulate, not index_put."""
         torch.manual_seed(42)
@@ -352,7 +355,10 @@ class TestPartitionedScatterOpt(TestCase):
         self._check_accuracy(f, (grad, idx))
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
 
-    @skipIfXpu(msg="embedding_dense_backward is not decomposed on XPU")
+    @skipIfXpu(
+        msg="embedding_dense_backward is not decomposed on XPU, "
+        "https://github.com/intel/torch-xpu-ops/issues/6061"
+    )
     def test_embedding_dense_backward_scale_grad_by_freq(self):
         torch.manual_seed(42)
         B, T, num_weights, dim, padding_idx = 64, 128, 24, 16, 3
