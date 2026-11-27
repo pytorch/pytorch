@@ -21,10 +21,11 @@ Invariants:
   it as outdated. Minimizing alone leaves the inline comments listed on the
   Files tab and in GitHub Mobile, hence the deleting. A change request is
   hidden only once it no longer stands.
-- A blocking finding next to an earlier inline comment someone replied to
-  goes in the body with a link to that thread, not on the line again. The
-  match is by position only, so the link says where, not that it is the same
-  finding.
+- Every finding goes on its line: a blocking one expanded, a non-blocking one
+  collapsed under its first sentence, so each can be replied to and reacted
+  to. A finding next to an earlier inline comment someone replied to goes in
+  the body with a link to that thread, not on the line again. The match is by
+  position only, so the link says where, not that it is the same finding.
 - A newer REQUEST_CHANGES replaces an older one in the review decision. A
   COMMENT does not, so after a clean verdict earlier requests are dismissed.
   The only other dismissals are a run retracting its own review because the
@@ -58,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import http.client
 import json
 import os
@@ -314,10 +316,76 @@ def report_url(
     return f"{REPORT_ISSUE_URL}?{urllib.parse.urlencode(params)}"
 
 
-def comment_body(finding: dict, report: str = "") -> str:
-    # Not contained like the body: that would break every closed code block to
-    # save the link from a rare unclosed one, where it just shows as text.
-    lines = marked(BLOCKING_MARK, finding["message"].split("\n"))
+NON_BLOCKING = "Non-blocking"
+MAX_HEADLINE = 150
+# A sentence ends before a capital, so "e.g. `x`" does not end one.
+_SENTENCE_END = re.compile(r"[.!?](?=\s+[A-Z]|\s*$)")
+# The markdown escapes `neutralize` adds: on the summary line they would show
+# as typed, since an HTML block's lines are not markdown. Removing them keeps
+# every defused mention and reference defused (`@ x`, `# 12`). Nothing else is
+# removed: `@**x**` passes `neutralize`, and stripping `**` would make it live.
+_MD_ESCAPE = re.compile(r"\\([\[\]#])")
+_CODE_SPAN = re.compile(r"`([^`\n]+)`")
+# The message already carries the label, at its start or as "(non-blocking)",
+# "non-blocking:". A sentence about a non-blocking copy does not.
+_LABELLED = re.compile(r"^\W*non-blocking\b|non-blocking\s*[:)\]]", re.IGNORECASE)
+_LAST_WORD = re.compile(r"(?<!\S)\S+\Z")
+
+
+def split_headline(message: str) -> tuple[str, str]:
+    """`message` split into its first sentence and the rest. A first line with
+    no sentence end is all headline."""
+    first, _, after = message.strip().partition("\n")
+    end = _SENTENCE_END.search(first)
+    head, rest = (first[: end.end()], first[end.end() :]) if end else (first, "")
+    return head, "\n".join(part for part in (rest.strip(), after.strip()) if part)
+
+
+def summary_line(head: str) -> tuple[str, bool]:
+    """The collapsed finding's summary as HTML, and whether it was cut.
+
+    Messages arrive neutralized, already HTML-escaped and with markdown escapes,
+    so the text is unescaped to what a reader should see, labelled, cut to
+    MAX_HEADLINE at a word, and escaped once. Code spans become `<code>`.
+    """
+    text = html.unescape(_MD_ESCAPE.sub(r"\1", head))
+    if not _LABELLED.search(text):
+        text = f"{NON_BLOCKING}: {text}"
+    cut = len(text) > MAX_HEADLINE
+    if cut:
+        kept = text[: MAX_HEADLINE - 1]
+        if not text[len(kept)].isspace():  # the cut split a word: drop it
+            kept = _LAST_WORD.sub("", kept) or kept
+        text = kept.rstrip() + "…"
+    escaped = html.escape(text, quote=False)
+    return _CODE_SPAN.sub(lambda m: f"<code>{m.group(1)}</code>", escaped), cut
+
+
+def comment_body(finding: dict, report: str = "", blocking: bool = True) -> str:
+    """A blocking finding in full; a non-blocking one collapsed under its first
+    sentence, which is all of it a reader sees until they open it. The report
+    link stays visible below either."""
+    if blocking:
+        # Not contained like the body: that would break every closed code block
+        # to save the link from a rare unclosed one, where it just shows as text.
+        lines = marked(BLOCKING_MARK, finding["message"].split("\n"))
+    else:
+        head, rest = split_headline(finding["message"])
+        summary, cut = summary_line(head)
+        if cut:
+            rest = finding["message"].strip()
+        if rest:
+            # Contained: an unclosed fence would swallow the closing tag.
+            lines = [
+                "<details>",
+                f"<summary>{FOLDED_MARK} {summary}</summary>",
+                "",
+                *contained(rest),
+                "",
+                "</details>",
+            ]
+        else:  # one sentence: nothing to open
+            lines = [f"<p>{FOLDED_MARK} {summary}</p>"]
     if report:
         lines += ["", f"<sub>[Report this finding]({report})</sub>"]
     return defuse_bot_commands("\n".join(lines))
@@ -393,12 +461,21 @@ def review_body(
     repo: str,
     inline: bool,
     report: str = "",
+    inline_non_blocking: bool = True,
 ) -> str:
     """Verdict, summary, and the findings not posted inline (non-blocking ones
-    folded). Over MAX_BODY, findings are dropped from the end and counted."""
+    folded). With `inline`, blocking findings are inline, and non-blocking ones
+    too unless `inline_non_blocking` is false. Over MAX_BODY, findings are
+    dropped from the end and counted."""
     blocking = blocking_findings(verdict, findings)
-    in_body = [f for f in blocking if f.get("discussion")] if inline else blocking
-    folded = [f for f in findings if f not in blocking]
+    non_blocking = [f for f in findings if f not in blocking]
+    if inline:
+        in_body = [f for f in blocking if f.get("discussion")]
+        folded = [
+            f for f in non_blocking if f.get("discussion") or not inline_non_blocking
+        ]
+    else:
+        in_body, folded = blocking, non_blocking
     keep_body, keep_folded = len(in_body), len(folded)
     while True:
         body = _compose(
@@ -411,6 +488,7 @@ def review_body(
             folded[:keep_folded],
             len(in_body) - keep_body + len(folded) - keep_folded,
             report,
+            len(non_blocking) - len(folded) if inline else 0,
         )
         if len(body) <= MAX_BODY or keep_body + keep_folded == 0:
             return body
@@ -421,7 +499,16 @@ def review_body(
 
 
 def _compose(
-    verdict, summary, sha, repo, n_inline, in_body, folded, omitted, report=""
+    verdict,
+    summary,
+    sha,
+    repo,
+    n_inline,
+    in_body,
+    folded,
+    omitted,
+    report="",
+    n_inline_folded=0,
 ) -> str:
     lines = [
         MARKER,
@@ -434,6 +521,13 @@ def _compose(
         lines += [
             f"{BLOCKING_MARK} {count(n_inline, 'blocking finding')} "
             f"{'is' if n_inline == 1 else 'are'} attached to the code below.",
+            "",
+        ]
+    if n_inline_folded:
+        lines += [
+            f"{FOLDED_MARK} {count(n_inline_folded, 'non-blocking finding')} "
+            f"{'is' if n_inline_folded == 1 else 'are'} attached to the code "
+            "below, collapsed.",
             "",
         ]
     lines += finding_blocks(repo, sha, in_body, BLOCKING_MARK)
@@ -472,36 +566,61 @@ def _compose(
 def post(
     gh: GitHub, pr: int, sha: str, verdict, summary, findings, run_link: str = ""
 ) -> dict:
-    """Create the review. If GitHub refuses the inline comments (422), they go
-    into the body; if it refuses REQUEST_CHANGES, the review is a COMMENT."""
+    """Create the review. GitHub refuses all inline comments if it refuses one
+    (422): then only the blocking ones are tried inline, and then none, with the
+    rest in the body. If it refuses REQUEST_CHANGES, the review is a COMMENT."""
     path = f"/repos/{gh.repo}/pulls/{pr}/reviews"
     report = report_url(gh.repo, pr, sha, run_link)
     event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
     base = {"commit_id": sha, "event": event}
-    comments = [
-        {
-            "path": unescape_path(f["path"]),
-            "line": f["line"],
-            "side": "LEFT" if f.get("removed") else "RIGHT",
-            "body": comment_body(f, report_url(gh.repo, pr, sha, run_link, f)),
-        }
-        for f in blocking_findings(verdict, findings)
-        if not f.get("discussion")
-    ]
-    if comments:
+    blocking = blocking_findings(verdict, findings)
+
+    def inline_comments(fs: list[dict]) -> list[dict]:
+        return [
+            {
+                "path": unescape_path(f["path"]),
+                "line": f["line"],
+                "side": "LEFT" if f.get("removed") else "RIGHT",
+                "body": comment_body(
+                    f, report_url(gh.repo, pr, sha, run_link, f), f in blocking
+                ),
+            }
+            for f in fs
+            if not f.get("discussion")
+        ]
+
+    every, blocking_only = inline_comments(findings), inline_comments(blocking)
+    attempts = [(every, True)] if every else []
+    if blocking_only and len(blocking_only) < len(every):
+        attempts.append((blocking_only, False))
+    for comments, with_non_blocking in attempts:
         body = review_body(
-            verdict, summary, findings, sha, gh.repo, inline=True, report=report
+            verdict,
+            summary,
+            findings,
+            sha,
+            gh.repo,
+            inline=True,
+            report=report,
+            inline_non_blocking=with_non_blocking,
         )
         try:
-            return gh.request(
+            review = gh.request(
                 "POST", path, {**base, "body": body, "comments": comments}
             )
         except GitHubError as exc:
             if exc.status != 422:
                 raise
+            warn(f"GitHub refused {count(len(comments), 'inline comment')} ({exc})")
+            continue
+        if not with_non_blocking:
             warn(
-                f"GitHub refused the inline comments ({exc}); posting them in the body"
+                "posted the blocking findings inline and the non-blocking ones "
+                "in the body"
             )
+        return review
+    if attempts:
+        warn("posting the findings in the body")
     body = review_body(
         verdict, summary, findings, sha, gh.repo, inline=False, report=report
     )
@@ -617,7 +736,8 @@ def with_removed(gh: GitHub, pr: int, findings: list[dict]) -> list[dict]:
     its diff line. The sanitizer anchors those on the deleted file's own lines,
     which GitHub takes on the diff's LEFT side. Unchanged if the files could not
     be listed: GitHub then refuses the inline comments (all of them, with the 422
-    the review falls back on) and they go into the body."""
+    `post` falls back on), and those findings end up in the body: only the
+    non-blocking ones if the deleted file holds none of the blocking ones."""
     if not findings:
         return findings
     try:
@@ -708,7 +828,7 @@ def take_down(
     fold(gh, pr, review, reason)
     if comments is None:
         comments = pr_comments(gh, pr)
-    kept = delete_unreplied(gh, pr, rid, comments)
+    kept = delete_unreplied(gh, pr, rid, comments, Budget(pause=BACKFILL_PAUSE))
     try:
         resolved = kept is not None and resolve_threads(gh, pr, kept)
     except GitHubError as exc:
@@ -972,6 +1092,8 @@ def delete_unreplied(
 # the clock, which every call (and its retry waits) honours.
 MAX_BACKFILL = 50
 BACKFILL_SECONDS = 90
+# Also the pause between the deletes of a review `take_down` hides: most
+# findings are inline, so one can cost a delete per finding.
 BACKFILL_PAUSE = 1.0
 
 
