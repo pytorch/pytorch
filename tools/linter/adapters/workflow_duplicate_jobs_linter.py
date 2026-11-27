@@ -7,12 +7,11 @@
 """Flags test configs that run in more than one workflow against main.
 
 Workflows that run on a push to main or on a schedule all test main. A test
-config with the same build-environment, config name, runner and fake tensor
-mode in two of them, including in the reusable workflows they call, runs twice
-for the same commit. The runner is part of the key so that the same config on
-different hardware, like trunk's Graviton3 and pull's Graviton4 aarch64 jobs, is
-not a duplicate. The fake tensor mode is part of it because fake_tensor: "cpp"
-sets CPP_FAKETENSOR=1, so cpp-faketensor-weekly.yml tests a different code path.
+config with the same build-environment, config name and runner in two of them,
+including in the reusable workflows they call, runs twice for the same commit.
+The runner is part of the key so that the same config on different hardware,
+like trunk's Graviton3 and pull's Graviton4 aarch64 jobs, is not a duplicate.
+So is the fake tensor mode, since fake_tensor: "cpp" tests a different code path.
 """
 
 from __future__ import annotations
@@ -44,7 +43,10 @@ ALLOWLIST = {
     ("linux-jammy-cuda13.2-py3.11-gcc11", "distributed"),
 }
 
-MATRIX_REF = re.compile(r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}")
+# ${{ matrix.x }} or ${{ inputs.x }}, optionally with a || 'default'
+EXPR_REF = re.compile(
+    r"\$\{\{\s*(matrix|inputs)\.([\w-]+)(?:\s*\|\|\s*'([^']*)')?\s*\}\}"
+)
 # One test-matrix entry per line, e.g.
 # { config: "default", shard: 1, num_shards: 5, runner: "${{ ... }}l-x86iavx512-8-64" },
 ENTRY = re.compile(r'config:\s*"([^"]+)".*runner:\s*"(?:\$\{\{.*?\}\})?([^"]+)"')
@@ -103,11 +105,33 @@ def matrix_combos(job: dict[str, Any]) -> list[dict[str, Any]]:
         for k, v in matrix.items()
         if isinstance(v, list) and k not in ("include", "exclude")
     ]
-    return [dict(zip(keys, v)) for v in itertools.product(*(matrix[k] for k in keys))]
+    base = (
+        [dict(zip(keys, v)) for v in itertools.product(*(matrix[k] for k in keys))]
+        if keys
+        else []
+    )
+    added = []
+    include = matrix.get("include")
+    # An include entry extends the base combos it matches, or else adds a new one
+    for extra in include if isinstance(include, list) else []:
+        matches = [
+            c for c in base if all(c[k] == v for k, v in extra.items() if k in keys)
+        ]
+        for combo in matches:
+            combo.update(extra)
+        if not matches:
+            added.append(dict(extra))
+    return base + added or [{}]
 
 
-def substitute(text: str, combo: dict[str, Any]) -> str:
-    return MATRIX_REF.sub(lambda m: str(combo.get(m[1], m[0])), text)
+def substitute(text: str, context: dict[str, dict[str, Any]]) -> str:
+    def value(m: re.Match[str]) -> str:
+        v = context[m[1]].get(m[2])
+        if m[3] is not None and not v:
+            return m[3]
+        return m[0] if v is None else str(v)
+
+    return EXPR_REF.sub(value, text)
 
 
 def test_configs(
@@ -115,6 +139,7 @@ def test_configs(
     root: Path,
     path: Path,
     seen: tuple[Path, ...] = (),
+    caller_inputs: dict[str, str] | None = None,
 ) -> list[tuple[TestConfig, Occurrence]]:
     """Test configs that a workflow and the reusable workflows it calls run.
 
@@ -128,20 +153,28 @@ def test_configs(
     found = []
     for job_id, job in jobs.items():
         uses = job.get("uses", "")
-        called = Path(uses)
-        if uses.startswith("./") and not called.name.startswith("_"):
-            found += test_configs(workflows, root, called, seen + (path,))
-            continue
         inputs = job.get("with") or {}
         test_matrix = inputs.get("test-matrix")
+        # Follow the call chain until a job passes a test-matrix
+        if uses.startswith("./") and test_matrix is None:
+            for combo in matrix_combos(job):
+                context = {"matrix": combo, "inputs": caller_inputs or {}}
+                called_inputs = {
+                    k: substitute(str(v), context) for k, v in inputs.items()
+                }
+                found += test_configs(
+                    workflows, root, Path(uses), seen + (path,), called_inputs
+                )
+            continue
         build_environment = inputs.get("build-environment")
         if not isinstance(test_matrix, str) or not isinstance(build_environment, str):
             continue
         if f"needs.{job_id}.outputs.test-matrix" not in jobs_text:
             continue
         for combo in matrix_combos(job):
-            env = substitute(build_environment, combo)
-            for line in substitute(test_matrix, combo).splitlines():
+            context = {"matrix": combo, "inputs": caller_inputs or {}}
+            env = substitute(build_environment, context)
+            for line in substitute(test_matrix, context).splitlines():
                 if m := ENTRY.search(line):
                     fake = f[1] if (f := FAKE_TENSOR.search(line)) else ""
                     occurrence = Occurrence(root, path, job_id)
@@ -194,9 +227,8 @@ def lint(
             if o.path not in linted:
                 continue
             others = ", ".join(sorted(str(r) for r in roots - {o.root}))
-            fake = f' with fake_tensor "{key.fake_tensor}"' if key.fake_tensor else ""
             description = (
-                f'{key.build_environment} config "{key.config}" on {key.runner}{fake} also runs from '
+                f'{key.build_environment} config "{key.config}" on {key.runner} also runs from '
                 f"{others}, so it runs twice for the same commit on main. Remove one, or add "
                 "it to ALLOWLIST in tools/linter/adapters/workflow_duplicate_jobs_linter.py "
                 "with the reason."

@@ -84,6 +84,45 @@ class TestWorkflowDuplicateJobsLinter(unittest.TestCase):
         }
         self.assertEqual(duplicated(workflows), {("linux-py3.13", "dynamo_wrapped")})
 
+    def test_follows_inputs_into_underscore_workflow(self) -> None:
+        # dynamo-unittest.yml passes each Python version and its runner to
+        # _dynamo-unittest-python.yml, which defines the build and test jobs.
+        python_jobs = build_and_test(
+            "linux-py${{ inputs.python-version }}",
+            "dynamo_wrapped",
+            runner="${{ inputs.label-type }}${{ inputs.runner }}",
+        )
+        dynamo = {
+            "uses": "./_dynamo-python.yml",
+            "strategy": {
+                "matrix": {
+                    "python-version": ["3.11", "3.14t"],
+                    "include": [{"python-version": "3.14t", "runner": "l-big"}],
+                }
+            },
+            "with": {
+                "python-version": "${{ matrix.python-version }}",
+                "runner": "${{ matrix.runner || 'l-x86iavx512-8-64' }}",
+                "label-type": "${{ needs.get-label-type.outputs.label-type }}",
+            },
+        }
+        pull_jobs = build_and_test("linux-py3.11", "dynamo_wrapped")
+        # Same Python version, but trunk runs it on the include's bigger runner
+        pull_jobs |= {
+            f"{k}-3.14t": v
+            for k, v in build_and_test("linux-py3.14t", "dynamo_wrapped").items()
+        }
+        pull_jobs["test-3.14t"]["with"]["test-matrix"] = (
+            "${{ needs.build-3.14t.outputs.test-matrix }}"
+        )
+        workflows = {
+            "pull": workflow(ON_MAIN, pull_jobs),
+            "trunk": workflow(ON_MAIN, {"dynamo": {"uses": "./dynamo.yml"}}),
+            "dynamo": workflow(ON_CALL, {"dynamo": dynamo}),
+            "_dynamo-python": workflow(ON_CALL, python_jobs),
+        }
+        self.assertEqual(duplicated(workflows), {("linux-py3.11", "dynamo_wrapped")})
+
     def test_schedule_counts_as_testing_main(self) -> None:
         workflows = {
             "trunk": workflow(ON_MAIN, build_and_test("linux-cuda", "default")),
