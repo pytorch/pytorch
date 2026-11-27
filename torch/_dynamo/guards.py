@@ -4118,8 +4118,8 @@ class GuardBuilder(GuardBuilderBase):
     ) -> None:
         """Guard flag membership by hook storage position. OrderedDict iteration
         also needs ORDERED_DICT_ORDER_MATCH. For empty flags, the runtime guard
-        checks only that they stay empty. Nested region reuse also compares the
-        membership tuple, preserving the number of hooks and requiring exact integer keys.
+        checks only that they stay empty. Nested reuse requires both registries to be
+        dictionaries with exact integer keys and the same membership tuple.
         """
         hooks_source = AttrSource(guard.originating_source, hooks_name)
         flags = self.get(flags_source)
@@ -5278,6 +5278,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._instance_policies: dict[int, _PickleState] = {}
         self._pruned_dictionary_ids: set[int] = set()
         self._dict_snapshots: dict[int, _DictionaryItemsSnapshot | dict[Any, Any]] = {}
+        self._module_dependencies: dict[int, Any] = {}
         self._dropped_state: dict[int, object] = {}
         self._proxy_dependencies: dict[int, tuple[object, object]] = {}
         self._scopes: dict[str, dict[str, Any]] = {}
@@ -5364,13 +5365,13 @@ class GuardsStatePickler(FunctionPicklerBase):
         if dependency := self._proxy_dependencies.get(id(value)):
             path = ""
             for prefix, scope in self._scopes.items():
-                for name, obj in scope.items():
-                    if obj is dependency[1]:
-                        path = f" at {prefix}[{name!r}]"
-                        break
+                names = (name for name, obj in scope.items() if obj is dependency[1])
+                if (name := next(names, None)) is not None:
+                    path = f" at {prefix}[{name!r}]"
+                    break
             raise torch._dynamo.exc.PackageError(
                 f"The mapping proxy{path} needs pruned {type(value).__qualname__} state "
-                "in its copy. Expose the dependency as a guarded input"
+                "in its copy. Expose the dependency as a guarded input."
             )
 
     def _retain_required_state(
@@ -5637,10 +5638,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         modes: collections.abc.Sequence[torch.overrides.TorchFunctionMode] = (),
         annotation: dict[str, Any] | None = None,
     ) -> None:
-        """Retain constructor and guard dependencies before pruning leaves and dictionary slots."""
+        """Prepare scope, mode and FX annotation state once, before dumping the guard graph."""
         self._scopes = {"L": local_scope, "G": global_scope}
         value: Any
-        for value in itertools.chain(self.guard_tree_values.values(), dictionaries):
+        tracked = self.guard_tree_values.values()
+        for value in itertools.chain(tracked, dictionaries):
             if issubclass(type(value), dict):
                 keys = dict.keys(value)
                 self._retain_required_state(k for k in keys if type(k) is not str)
@@ -5650,7 +5652,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         if annotation:
             self._retain_required_state((annotation,))
         self._prune_local_scope(local_scope)
-        if dictionaries or self.missing_values or self.empty_values:
+        has_module = any(issubclass(type(v), torch.nn.Module) for v in tracked)
+        if dictionaries or self.missing_values or self.empty_values or has_module:
             self._retain_dict_aliases(
                 itertools.chain(local_scope.values(), global_scope.values(), modes)
             )
@@ -5668,13 +5671,16 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Protect state that survives through a saved constructor from pruning by identity."""
         opaque: list[Any] = []
         for whole, pending in ((False, list(roots)), (True, opaque)):
-            seen: set[int] = set()
+            # A module schedules unguarded attributes for pruning while dumping. Keep
+            # references reached through an opaque constructor before either alias is saved.
+            retain = whole and proxy is None
+            seen: dict[int, Any] = self._module_dependencies if retain else {}
             while pending:
                 value = pending.pop()
                 typ = type(value)
                 if typ is int or typ is str or (obj_id := id(value)) in seen:
                     continue
-                seen.add(obj_id)
+                seen[obj_id] = value
                 if obj_id in self._whole_compared_values:
                     continue
                 pruned = obj_id in self.missing_values or obj_id in self.empty_values
@@ -6455,8 +6461,10 @@ class GuardsStatePickler(FunctionPicklerBase):
 
     def _prune_unguarded_attributes(self, obj: Any) -> None:
         for attr in self._unguarded_attributes(obj).values():
-            self._record_dropped(attr)
-            self.missing_values[id(attr)] = attr
+            key = id(attr)
+            if key in self._module_dependencies or key in self._proxy_dependencies:
+                continue
+            self.missing_values[key] = attr
 
     def _unguarded_attributes(self, obj: Any) -> dict[str, Any]:
         """The ``__dict__`` values nothing guards, which are prunable.
