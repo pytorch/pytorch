@@ -6,7 +6,6 @@ for making VariableTracker instances usable as dictionary keys and set elements
 during symbolic execution. Used by both ConstDictVariable and SetVariable.
 """
 
-import types
 from typing import TYPE_CHECKING
 
 import torch
@@ -14,7 +13,6 @@ from torch._subclasses.fake_tensor import maybe_get_fake_constant
 
 from .. import variables
 from ..exc import raise_observed_exception
-from ..guards import _method_identity_guards_filtered, install_builtin_method_guard
 from ..source import ConstDictKeySource
 from ..utils import guard_if_dyn, specialize_symnode
 from .base import VariableTracker
@@ -76,24 +74,6 @@ def is_hashable(x: VariableTracker) -> bool:
     return x.is_hashable()
 
 
-def _guard_lazy_key(vt: "variables.LazyVariableTracker") -> bool:
-    if isinstance(vt.source, ConstDictKeySource):
-        return True
-    from ..symbolic_convert import InstructionTranslator
-    from .builder import bound_builtin_method_descriptor
-
-    value = vt.original_value()
-    if vt.source is None or type(value) is not types.BuiltinMethodType:
-        return False
-    if bound_builtin_method_descriptor(value) is None:
-        return False
-    tx = InstructionTranslator.current_tx()
-    if _method_identity_guards_filtered(tx):
-        return False
-    install_builtin_method_guard(tx, vt.source, value)
-    return True
-
-
 class RawHash:
     """Wraps a pre-computed hash value to bypass int.__hash__'s modular reduction.
 
@@ -134,7 +114,7 @@ class HashableTracker:
             isinstance(vt, variables.LazyVariableTracker)
             and not vt.is_realized()
             and vt.is_hashable_lazy()
-            and _guard_lazy_key(vt)
+            and isinstance(vt.source, ConstDictKeySource)
         ):
             self._hash = hash(vt.original_value())
             self._hash_is_identity = False
