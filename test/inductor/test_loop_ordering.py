@@ -36,9 +36,7 @@ from torch.testing._internal.common_device_type import (
     Capability,
     instantiate_device_type_tests,
     requires_capabilities,
-    skipHPUIf,
     skipIf,
-    skipPRIVATEUSE1If,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -1278,10 +1276,6 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
         torch._dynamo.reset()
 
-    @skipPRIVATEUSE1If(
-        True, "the privateuse1 test base does not declare the fp8 capability"
-    )
-    @skipHPUIf(True, "the hpu test base does not declare the fp8 capability")
     @requires_triton
     @requires_capabilities(Capability.dtype.fp8)
     @skipIf(not SM90OrLater, "sm89 errors out on this test", device_type="cuda")
@@ -1306,10 +1300,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, scale)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    @skipPRIVATEUSE1If(
-        True, "the privateuse1 test base does not declare the fp8 capability"
-    )
-    @skipHPUIf(True, "the hpu test base does not declare the fp8 capability")
     @requires_triton
     @requires_capabilities(Capability.dtype.fp8)
     def test_fp8_pattern_2(self, device):
