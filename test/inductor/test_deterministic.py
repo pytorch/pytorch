@@ -98,7 +98,7 @@ class DeterministicTestRun2Run(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180681")
-    @unittest.skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
+    @skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
     @parametrize("training_or_inference", ["training", "inference"])
     @parametrize("precision", ["float32", "bfloat16", "float16", "amp"])
@@ -192,7 +192,7 @@ class DeterministicTestAccelerator(TestCase):
     @requires_triton
     @parametrize("deterministic", [False, True])
     @inductor_config.patch(max_autotune=True)
-    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
+    @skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_max_autotune(self, device, deterministic):
         with inductor_config.patch(deterministic=deterministic):
 
