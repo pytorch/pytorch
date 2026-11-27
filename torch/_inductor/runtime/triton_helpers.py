@@ -632,10 +632,12 @@ def aten_hypot(x, y):
 
 @triton.jit
 def aten_log_ndtr(x):
-    t = x * 0.707106781186547524400844362104849039
-    log_term = libdevice.log(libdevice.erfcx(-t) * 0.5)
+    sqrt_half = tl.full(x.shape, 0.707106781186547524400844362104849039, x.dtype)
+    half = tl.full(x.shape, 0.5, x.dtype)
+    t = x * sqrt_half
+    log_term = libdevice.log(libdevice.erfcx(-t) * half)
     left = tl.fma(-t, t, log_term)
-    right = libdevice.log1p(-libdevice.erfc(t) * 0.5)
+    right = libdevice.log1p(-libdevice.erfc(t) * half)
     result = tl.where(x < -1.0, left, right)
     negative = tl.full(x.shape, -1.0, x.dtype)
     return tl.where(libdevice.isnan(x), result, libdevice.copysign(result, negative))
@@ -1563,7 +1565,7 @@ def _aten_erfcx_y100(y100):
         c5 = tl.where(match, tl.full(y100.shape, coefficients[i][5], tl.float64), c5)
         c6 = tl.where(match, tl.full(y100.shape, coefficients[i][6], tl.float64), c6)
 
-    offset = (2 * segment + 1).to(tl.float32)
+    offset = (2 * segment + 1).to(y100.dtype)
     t = tl.fma(y100, 2.0, -offset).to(tl.float64)
     result = tl.fma(c6, t, c5)
     result = tl.fma(result, t, c4)
@@ -1571,20 +1573,22 @@ def _aten_erfcx_y100(y100):
     result = tl.fma(result, t, c2)
     result = tl.fma(result, t, c1)
     result = tl.fma(result, t, c0)
-    return tl.where(y100 == 100.0, 1.0, result.to(tl.float32))
+    return tl.where(y100 == 100.0, 1.0, result.to(y100.dtype))
 
 
 @triton.jit
 def aten_erfcx(x):
-    zero = tl.full(x.shape, 0.0, tl.float32)
-    four = tl.full(x.shape, 4.0, tl.float32)
-    four_hundred = tl.full(x.shape, 400.0, tl.float32)
+    zero = tl.full(x.shape, 0.0, x.dtype)
+    four = tl.full(x.shape, 4.0, x.dtype)
+    four_hundred = tl.full(x.shape, 400.0, x.dtype)
+    negative_cutoff = tl.full(x.shape, -6.1, x.dtype)
+    overflow_cutoff = tl.full(x.shape, -26.7, x.dtype)
     positive_polynomial = (x >= 0.0) & (x <= 50.0)
-    negative_polynomial = (x < 0.0) & (x >= -6.1)
+    negative_polynomial = (x < 0.0) & (x >= negative_cutoff)
     positive_x = tl.where(positive_polynomial, x, zero)
     negative_x = tl.where(negative_polynomial, x, zero)
-    positive_y100 = tl.div_rn(four_hundred, four + positive_x)
-    negative_y100 = tl.div_rn(four_hundred, four - negative_x)
+    positive_y100 = libdevice.div_rn(four_hundred, four + positive_x)
+    negative_y100 = libdevice.div_rn(four_hundred, four - negative_x)
     # Only one side is ever kept, and the two differ solely in their argument, so
     # select the argument rather than the result: one pass over the 100-segment
     # table instead of two.
@@ -1593,17 +1597,17 @@ def aten_erfcx(x):
     x2 = x * x
     numerator_inner = tl.fma(x2, x2 + 4.5, 2.0)
     denominator_inner = tl.fma(x2, x2 + 5.0, 3.75)
-    ispi = tl.full(x.shape, 0.56418958354775628694807945156, tl.float32)
-    continued_fraction = tl.div_rn(ispi * numerator_inner, x * denominator_inner)
-    positive_large = tl.where(x > 5e7, tl.div_rn(ispi, x), continued_fraction)
+    ispi = tl.full(x.shape, 0.56418958354775628694807945156, x.dtype)
+    continued_fraction = libdevice.div_rn(ispi * numerator_inner, x * denominator_inner)
+    positive_large = tl.where(x > 5e7, libdevice.div_rn(ispi, x), continued_fraction)
     positive = tl.where(x > 50.0, positive_large, poly)
 
     exp_x2 = libdevice.exp(x2)
     doubled_exp = exp_x2 + exp_x2
     negative = tl.where(
-        x < -26.7,
+        x < overflow_cutoff,
         float("inf"),
-        tl.where(x < -6.1, doubled_exp, doubled_exp - poly),
+        tl.where(x < negative_cutoff, doubled_exp, doubled_exp - poly),
     )
     result = tl.where(x >= 0.0, positive, negative)
     return tl.where(x != x, x, result)
