@@ -2,6 +2,7 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 import typing
 from collections import Counter
@@ -20,7 +21,12 @@ from torch._inductor.fx_utils import (
     rank_agnostic_device,
     rank_agnostic_passes,
 )
-from torch._inductor.utils import _device_is_available, get_gpu_type, GPU_TYPES
+from torch._inductor.utils import (
+    _device_is_available,
+    get_gpu_type,
+    GPU_TYPES,
+    is_strict_cuda_triton,
+)
 from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
@@ -661,6 +667,14 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
             fake_tensor = node.meta["val"]
             if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
+                continue
+
+            # Preserve NaN bit patterns; codegen canonicalizes floating NaN constants.
+            if (
+                is_strict_cuda_triton(fake_tensor.device)
+                and isinstance(value, float)
+                and math.isnan(value)
+            ):
                 continue
 
             # TODO - not sure about lossy uint->python value->uint conversions
