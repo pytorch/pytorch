@@ -2249,7 +2249,8 @@ class TestFakeTensorUpdater(TestCase):
         gm.graph.lint()
 
     @parametrize("targeted", [False, True])
-    def test_metadata_refresh_sparse_output(self, targeted):
+    @parametrize("native_mutation", [False, True])
+    def test_metadata_refresh_sparse_output(self, targeted, native_mutation):
         def f(values, sparse_indices, indices, updates):
             base = values + 1
             result = base.index_put((indices,), updates)
@@ -2274,6 +2275,12 @@ class TestFakeTensorUpdater(TestCase):
         original_sparse = sparse.meta["val"]
         self.assertFalse(torch._C._has_storage(sparse.meta["val"]))
         root.target = aten.index_put_.default
+        if native_mutation:
+            root.meta["original_aten"] = aten.index_put_.default
+            root.meta["original_aten_mutation"] = (
+                root.args[0].meta["val"],
+                root.meta["val"],
+            )
         with V.set_fake_mode(self._get_faketensormode(gm)):
             if targeted:
                 updater.incremental_update_from_nodes([root])
