@@ -6567,7 +6567,8 @@ scaled_dot_product_attention = _add_docstr(
 
         Despite their ``torch.backends.cuda`` namespace, these global toggles also affect CPU, XPU and MPS.
         CPU only implements FlashAttention and the C++ implementation, and MPS only Memory-Efficient Attention
-        and the C++ implementation, so the other toggles have no effect there.
+        (which also serves FlashAttention requests) and the C++ implementation, so the other toggles have no
+        effect there.
 
         Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
         disable the PyTorch C++ implementation using :func:`torch.nn.attention.sdpa_kernel`.

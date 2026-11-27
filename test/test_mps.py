@@ -12773,6 +12773,24 @@ class TestSDPA(TestCaseMPS):
         for order in ([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION], [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
             with sdpa_kernel(order, set_priority=True):
                 self.assertEqual(torch._fused_sdp_choice(q, q, q), order[0].value)
+        for order in ([SDPBackend.MATH, SDPBackend.FLASH_ATTENTION], [SDPBackend.FLASH_ATTENTION, SDPBackend.MATH]):
+            expected = SDPBackend.MATH if order[0] == SDPBackend.MATH else SDPBackend.EFFICIENT_ATTENTION
+            with sdpa_kernel(order, set_priority=True):
+                self.assertEqual(torch._fused_sdp_choice(q, q, q), expected.value)
+
+    def test_flash_attention_runs_efficient_kernels(self):
+        # MPS has no flash attention kernels, so sdpa_kernel(FLASH_ATTENTION) runs the Metal ones
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+        q = torch.randn(1, 4, 8, 16, device="mps", requires_grad=True)
+        with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+            self.assertEqual(torch._fused_sdp_choice(q, q, q), SDPBackend.EFFICIENT_ATTENTION.value)
+            with _RecordOpsMode() as ops:
+                y = F.scaled_dot_product_attention(q, q, q)
+        self.assertIn(torch.ops.aten._scaled_dot_product_efficient_attention.default, ops.ops)
+        with sdpa_kernel([SDPBackend.MATH]):
+            y_ref = F.scaled_dot_product_attention(q, q, q)
+        self.assertEqual(y, y_ref)
+        self.assertEqual(torch.autograd.grad(y.sum(), q), torch.autograd.grad(y_ref.sum(), q))
 
     def test_efficient_attention_unsupported_shapes(self):
         from torch.nn.attention import sdpa_kernel, SDPBackend

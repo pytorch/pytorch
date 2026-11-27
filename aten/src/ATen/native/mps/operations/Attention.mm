@@ -545,7 +545,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 
 // The Metal kernels above are exposed as the memory efficient attention backend
 // (arbitrary masks and their gradients, dv != d); anything they can not handle
-// (dropout) goes to the math backend.
+// (dropout) goes to the math backend. MPS has no separate flash attention kernels,
+// so requests for flash attention also run them.
 int64_t _fused_sdp_choice_mps(const Tensor& query,
                               const Tensor& key,
                               const Tensor& value,
@@ -555,8 +556,10 @@ int64_t _fused_sdp_choice_mps(const Tensor& query,
                               std::optional<double> /*scale*/,
                               bool enable_gqa) {
   auto& ctx = at::globalContext();
+  const bool mem_eff_enabled = ctx.userEnabledMemEfficientSDP();
+  const bool flash_enabled = ctx.userEnabledFlashSDP();
   std::string_view reason;
-  if (!ctx.userEnabledMemEfficientSDP()) {
+  if (!mem_eff_enabled && !flash_enabled) {
     reason = "it is disabled";
   } else if (dropout_p > 0.0) {
     reason = "it does not support dropout";
@@ -572,7 +575,12 @@ int64_t _fused_sdp_choice_mps(const Tensor& query,
   } else {
     const auto order = ctx.sDPPriorityOrder();
     const auto pos = [&](sdp::SDPBackend b) { return std::find(order.begin(), order.end(), b); };
-    if (!ctx.userEnabledMathSDP() || pos(sdp::SDPBackend::efficient_attention) < pos(sdp::SDPBackend::math)) {
+    const auto metal_pos = std::min(mem_eff_enabled ? pos(sdp::SDPBackend::efficient_attention) : order.end(),
+                                    flash_enabled ? pos(sdp::SDPBackend::flash_attention) : order.end());
+    if (!ctx.userEnabledMathSDP() || metal_pos < pos(sdp::SDPBackend::math)) {
+      if (!mem_eff_enabled) {
+        TORCH_WARN_ONCE("MPS does not implement FLASH_ATTENTION, running EFFICIENT_ATTENTION instead");
+      }
       return static_cast<int64_t>(sdp::SDPBackend::efficient_attention);
     }
   }
