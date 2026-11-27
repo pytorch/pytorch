@@ -4,14 +4,12 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/detail/XPUHooksInterface.h>
 
 #include <structmember.h>
-#include <mutex>
 #include <utility>
 
 using namespace at;
@@ -19,22 +17,6 @@ using namespace torch;
 
 PyObject* THPGeneratorClass = nullptr;
 static bool generatorMetaclassSet = false;
-
-// Note [Generator PyObject cache]
-// GeneratorImpl::pyobj_ is a non-owning cache of the wrapper returned by
-// THPGenerator_Wrap, so that wrapping the same GeneratorImpl again returns the
-// same Python object. All accesses hold generator_pyobj_mutex, and nothing
-// that can run Python code (allocation, decref, weakref callbacks) happens
-// while it is held. Following the PyUnstable_TryIncRef protocol:
-// - A cached wrapper is only returned if PyUnstable_TryIncRef succeeds. In
-//   free-threaded Python its refcount can drop to zero on another thread
-//   before its dealloc reaches the mutex; such a dying wrapper may be
-//   replaced in the cache.
-// - A wrapper's dealloc removes it from the cache, if still cached, before
-//   it is freed and before weakref callbacks run. A callback that rewraps
-//   the generator therefore caches a new wrapper instead of resurrecting the
-//   dying one, and that new wrapper stays cached.
-static std::mutex generator_pyobj_mutex;
 
 PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
   auto type = reinterpret_cast<PyTypeObject*>(THPGeneratorClass);
@@ -48,15 +30,9 @@ PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
 
 static void THPGenerator_dealloc(PyObject* _self) {
   auto self = reinterpret_cast<THPGenerator*>(_self);
-  if (self->cdata.defined()) {
-    // See Note [Generator PyObject cache]
-    std::scoped_lock<std::mutex> lock(generator_pyobj_mutex);
-    if (self->cdata.pyobj() == _self) {
-      self->cdata.set_pyobj(nullptr);
-    }
-  }
   PyObject_ClearWeakRefs(_self);
   if (self->cdata.defined()) {
+    self->cdata.set_pyobj(nullptr);
     self->cdata.~Generator();
   }
   Py_TYPE(_self)->tp_free(_self);
@@ -463,13 +439,8 @@ PyObject* THPGenerator_Wrap(const Generator& gen) {
     Py_RETURN_NONE;
   }
 
-  {
-    // See Note [Generator PyObject cache]
-    std::scoped_lock<std::mutex> lock(generator_pyobj_mutex);
-    auto obj = pyobj(gen);
-    if (obj && PyUnstable_TryIncRef(obj)) {
-      return obj;
-    }
+  if (auto obj = pyobj(gen)) {
+    return Py_NewRef(obj);
   }
 
   return THPGenerator_NewWithVar(
@@ -486,27 +457,14 @@ at::Generator THPGenerator_Unwrap(PyObject* state) {
   return reinterpret_cast<THPGenerator*>(state)->cdata;
 }
 
-// Creates a new Python object for a Generator and caches it, unless a live
-// wrapper was cached concurrently, in which case that one is returned instead.
-// See Note [Generator PyObject cache]
+// Creates a new Python object for a Generator. The Generator must not already
+// have a PyObject* associated with it.
 PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
-  THPObjectPtr obj(type->tp_alloc(type, 0));
-  if (!obj) {
-    return nullptr;
+  PyObject* obj = type->tp_alloc(type, 0);
+  if (obj) {
+    auto g = reinterpret_cast<THPGenerator*>(obj);
+    new (&g->cdata) Generator(std::move(gen));
+    set_pyobj(g->cdata, obj);
   }
-  auto g = reinterpret_cast<THPGenerator*>(obj.get());
-  new (&g->cdata) Generator(std::move(gen));
-  PyUnstable_EnableTryIncRef(obj.get());
-  PyObject* cached = nullptr;
-  {
-    std::scoped_lock<std::mutex> lock(generator_pyobj_mutex);
-    cached = pyobj(g->cdata);
-    if (!cached || !PyUnstable_TryIncRef(cached)) {
-      set_pyobj(g->cdata, obj.get());
-      return obj.release();
-    }
-  }
-  // Return cached and let the unused obj be destroyed after the mutex is
-  // released, since obj's deallocator acquires the same mutex.
-  return cached;
+  return obj;
 }

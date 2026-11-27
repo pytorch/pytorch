@@ -324,7 +324,9 @@ class autocast:
         # for preserving autocast in torch.export.export.
         if torch._C._is_torch_function_mode_enabled():
             stacks = torch.overrides._get_current_function_mode_stack()
-            for mode in stacks:
+            # Innermost first, so a make_fx(pre_dispatch=True) nested in another
+            # pre-dispatch trace records the block in its own graph.
+            for mode in reversed(stacks):
                 if isinstance(
                     mode,
                     torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode,
@@ -356,7 +358,8 @@ class autocast:
         # for preserving autocast in torch.export.export.
         if torch._C._is_torch_function_mode_enabled():
             stacks = torch.overrides._get_current_function_mode_stack()
-            for mode in stacks:
+            # Must find the same mode as __enter__, so this exit pairs with its enter.
+            for mode in reversed(stacks):
                 if isinstance(
                     mode,
                     torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode,

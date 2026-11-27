@@ -22,6 +22,18 @@ def my_add(self, other, alpha=1.0) -> torch.Tensor:
     return torch.ops.libtorch_agn_2_16.my_add.default(self, other, alpha)
 
 
+def my_cpu_capability_int(key: str) -> int | None:
+    return torch.ops.libtorch_agn_2_16.my_cpu_capability_int.default(key)
+
+
+def my_cpu_capability_bool(key: str) -> bool | None:
+    return torch.ops.libtorch_agn_2_16.my_cpu_capability_bool.default(key)
+
+
+def my_cpu_capability_string(key: str) -> str | None:
+    return torch.ops.libtorch_agn_2_16.my_cpu_capability_string.default(key)
+
+
 def my_is_conj(t: torch.Tensor) -> bool:
     return torch.ops.libtorch_agn_2_16.my_is_conj.default(t)
 
@@ -32,6 +44,18 @@ def my_is_neg(t: torch.Tensor) -> bool:
 
 def my_is_inference(t: torch.Tensor) -> bool:
     return torch.ops.libtorch_agn_2_16.my_is_inference.default(t)
+
+
+def my_inference_mode_guard(enabled: bool) -> bool:
+    return torch.ops.libtorch_agn_2_16.my_inference_mode_guard.default(enabled)
+
+
+def my_default_inference_mode_guard() -> bool:
+    return torch.ops.libtorch_agn_2_16.my_default_inference_mode_guard.default()
+
+
+def my_is_inference_mode_enabled() -> bool:
+    return torch.ops.libtorch_agn_2_16.my_is_inference_mode_enabled.default()
 
 
 def my_is_warn_always_enabled() -> bool:
@@ -65,6 +89,13 @@ def my_cpublas_brgemm_release() -> None:
     torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_release.default()
 
 
+def my_get_curr_cuda_blas_handle_stream(setup: bool) -> tuple[int, int]:
+    """Return the BLAS handle and its bound stream as integer pointer values."""
+    return torch.ops.libtorch_agn_2_16.my_get_curr_cuda_blas_handle_stream.default(
+        setup
+    )
+
+
 def test_stable_torch_warn_once(value) -> None:
     """
     Tests STABLE_TORCH_WARN_ONCE with one call site for negative values and one
@@ -74,6 +105,23 @@ def test_stable_torch_warn_once(value) -> None:
         value: int - selects the call site
     """
     torch.ops.libtorch_agn_2_16.test_stable_torch_warn_once.default(value)
+
+
+def my_index_fill_scalar_(self, dim, index, value) -> torch.Tensor:
+    """
+    Fill indexed positions in place with a scalar.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to fill
+        index: Tensor - indices to fill
+        value: float - fill value
+
+    Returns: Tensor - the modified input tensor
+    """
+    return torch.ops.libtorch_agn_2_16.my_index_fill_scalar_.default(
+        self, dim, index, value
+    )
 
 
 def __getattr__(name):
