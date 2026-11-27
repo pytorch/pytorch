@@ -54,6 +54,14 @@ parametrize_pytree_module = parametrize(
 GlobalPoint = namedtuple("GlobalPoint", ["x", "y"])
 
 
+class GlobalPair(tuple):
+    # Not a namedtuple class, but _register_namedtuple accepts it.
+    __slots__ = ()
+
+    def __new__(cls, a, b):
+        return super().__new__(cls, (a, b))
+
+
 class GlobalDummyType:
     def __init__(self, x, y):
         self.x = x
@@ -1189,6 +1197,47 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
             NotImplementedError, "Please register using `_register_namedtuple`"
         ):
             python_pytree.treespec_dumps(spec)
+
+    @parametrize(
+        "tree",
+        [
+            subtest(namedtuple("Empty", [])(), name="empty_namedtuple"),
+            subtest(GlobalPair(1, 2), name="tuple_subclass"),
+        ],
+    )
+    def test_pytree_serialize_registered_namedtuple(self, tree):
+        cls = type(tree)
+        python_pytree._register_namedtuple(
+            cls, serialized_type_name=f"test_pytree.{cls.__name__}"
+        )
+        self.addCleanup(python_pytree._deregister_pytree_node, cls)
+        self.addCleanup(python_pytree.treespec_loads.cache_clear)
+        spec = python_pytree.tree_structure(tree)
+        self.assertEqual(
+            python_pytree.treespec_loads(python_pytree.treespec_dumps(spec)), spec
+        )
+
+    @parametrize(
+        "name,hint",
+        [
+            subtest(("builtins.tuple", "edited or is corrupt"), name="tuple"),
+            subtest(("torch.Size", "edited or is corrupt"), name="torch_size"),
+            subtest(("collections.namedtuple", "edited or is corrupt"), name="factory"),
+            subtest(("test_pytree.Data", "_register_namedtuple"), name="dataclass"),
+        ],
+    )
+    def test_pytree_deserialize_namedtuple_class_check(self, name, hint):
+        import json
+
+        @dataclass
+        class Data:
+            x: int
+
+        python_pytree.register_dataclass(Data, serialized_type_name="test_pytree.Data")
+        self.addCleanup(python_pytree._deregister_pytree_node, Data)
+        node = {"type": "collections.namedtuple", "context": name, "children_spec": []}
+        with self.assertRaisesRegex(TypeError, f"not a namedtuple class.*{hint}"):
+            python_pytree.treespec_loads(json.dumps([1, node]))
 
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:

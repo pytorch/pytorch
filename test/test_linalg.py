@@ -3028,6 +3028,23 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
+    @dtypes(*floating_and_complex_types())
+    def test_eig_does_not_modify_input(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/202629
+        shapes = ((0, 0), (5, 5), (0, 5, 5), (2, 0, 0), (2, 5, 5))
+        for shape, fn in itertools.product(shapes, (torch.linalg.eig, torch.linalg.eigvals)):
+            column_major = make_tensor(shape, device=device, dtype=dtype).mT
+            noncontiguous = make_tensor(shape, device=device, dtype=dtype, noncontiguous=True)
+            for a in (column_major, noncontiguous):
+                a_orig = a.clone()
+                fn(a)
+                self.assertEqual(a, a_orig)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)
@@ -6775,7 +6792,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                 self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
         # NOTE: We're just exercising terrible failures here.
-        version = _get_torch_cuda_version()
         SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
         SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
         SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
@@ -6784,8 +6800,8 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             _test(17, k, n, use_transpose_a, use_transpose_b, True)
         else:
             if not use_transpose_a and use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
-                    _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
+                if SM80OrLater or SM70 or SM75:
+                    _test(17, k, n, use_transpose_a, use_transpose_b, True)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
                                                 "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
@@ -6802,7 +6818,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
+                if SM80OrLater or SM70 or SM75:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
@@ -9411,6 +9427,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
         finally:
             # disables TunableOp
             torch.cuda.tunable.enable(False)
+            torch.cuda.tunable.record_untuned_enable(False)
             if prev_cublaslt_count is not None:
                 torch.cuda.tunable.set_cublaslt_requested_algo_count(
                     prev_cublaslt_count
@@ -9426,8 +9443,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
             for file in files:
                 try:
                     os.remove(file)
-                # NB: The file is locked on Windows
-                except (FileNotFoundError, PermissionError):
+                except FileNotFoundError:
                     pass
 
             # undo all the environment variables set
@@ -10246,6 +10262,42 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
             # this test. There should be no change in the number of results
             # since tuning is disable.
             self.assertEqual((total_num_results - ref_num_results), 0)
+
+    @dtypes(torch.float)
+    @parametrize("trigger", ["tuning_enable", "enable", "record_untuned_enable", "set_filename"])
+    def test_results_file_closed_when_writes_stop_tunableop(self, device, dtype, trigger):
+        import os
+
+        def tune(n):
+            A = torch.randn(n, n + 1, device=device, dtype=dtype)
+            B = torch.randn(n + 1, n + 2, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            filename = torch.cuda.tunable.get_filename()
+            other_filename = filename.replace(".csv", "_other.csv")
+            setter, stop_arg, resume_arg = {
+                "tuning_enable": (torch.cuda.tunable.tuning_enable, False, True),
+                "enable": (torch.cuda.tunable.enable, False, True),
+                "record_untuned_enable": (torch.cuda.tunable.record_untuned_enable, True, False),
+                "set_filename": (torch.cuda.tunable.set_filename, other_filename, filename),
+            }[trigger]
+
+            tune(19)
+            self.assertTrue(os.path.exists(filename))
+
+            setter(stop_arg)
+            os.remove(filename)
+            setter(resume_arg)
+            tune(23)
+
+            self.assertTrue(os.path.exists(filename))
+            with open(filename) as f:
+                lines = [line for line in f.read().splitlines() if line]
+            validators = [line for line in lines if line.startswith("Validator,")]
+            self.assertEqual(len(validators), len(get_tunableop_validators()))
+            self.assertEqual(len(lines) - len(validators), 1)
 
     @dtypes(torch.float)
     def test_dump_results_on_exit_tunableop(self, device, dtype):
@@ -12897,6 +12949,8 @@ class TestGroupedMM(TestCase):
     @parametrize("b_row_major", [False, True])
     @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES)
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    # same as test_grouped_gemm_rocm_backend: ck_tile, on by default on ROCm, sums K in one fp32 accumulator
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)} if TEST_WITH_ROCM else {})
     @decorateIf(
         unittest.skip('Unaligned cases require the CUDA float32 fallback'),
         lambda p: torch.device(p["device"]).type == "cuda" and not torch.version.hip and p["dtype"] != torch.float32 and any(size % (16 // p["dtype"].itemsize) for size in p["a_shape"][-2:] + p["b_shape"][-2:] + tuple(p["offsets"] or ())),
@@ -12914,7 +12968,7 @@ class TestGroupedMM(TestCase):
         offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=backward)
 
-    # The ROCm grouped gemm backends are opt-in via env var, which CI never sets.
+    # ROCM_ALLOW_GROUP_GEMM_CK_TILE=1 forces ck_tile; unset, a heuristic picks ck_tile or hipBLASLt per call.
     @onlyCUDA
     @skipCUDAIfNotRocm
     @parametrize("backend", ["ck_tile"])

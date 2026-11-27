@@ -26,6 +26,7 @@ from torch._inductor.codegen.triton import (
     FixedTritonConfig,
     get_triton_reduction_function,
     IndexingOptions,
+    texpr,
     TMACompatibilityChecker,
     TritonCSEVariable,
     TritonKernel,
@@ -61,7 +62,14 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     TRITON_HAS_CPU,
 )
-from torch.utils._sympy.functions import FloorDiv, Identity, TruncToFloat, TruncToInt
+from torch.utils._sympy.functions import (
+    CeilToInt,
+    FloorDiv,
+    FloorToInt,
+    Identity,
+    TruncToFloat,
+    TruncToInt,
+)
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
@@ -1419,6 +1427,28 @@ def helper(x):
             _materialize_trunc_to_float_expr(float_expr, torch.float64),
             sympy.Float(0.5) + TruncToFloat(s0),
         )
+
+    def test_rounding_to_int_printer_dispatches_sympy_composite(self):
+        x = sympy.Symbol("x")
+        expr = CeilToInt(2 * FloorToInt(x))
+        self.assertIs(expr.func, CeilToInt)
+
+        with V.set_kernel_handler(SimpleNamespace(index_dtype="tl.int32")):
+            self.assertEqual(
+                texpr(expr),
+                "triton_helpers.rounding_to_int(2*triton_helpers.rounding_to_int(x, tl.int32, 'floor'), tl.int32, 'ceil')",
+            )
+
+    def test_trunc_to_float_printer_uses_helper(self):
+        expr = TruncToFloat(sympy.Symbol("x", integer=True))
+        with patch(
+            "torch._inductor.codegen.triton.TritonPrinter._get_scalar_float_type",
+            return_value="tl.float64",
+        ):
+            self.assertEqual(
+                texpr(expr),
+                "triton_helpers.trunc_to_float(x, tl.float64)",
+            )
 
     @parametrize("scheduled", [False, True])
     @parametrize(

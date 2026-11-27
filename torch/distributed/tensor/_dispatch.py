@@ -15,7 +15,10 @@ from torch._prims.rng_prims import run_dtensor_rng_op
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._nonlinear_redux import argminmax_handler
+from torch.distributed.tensor._nonlinear_redux import (
+    argminmax_handler,
+    bool_reduction_handler,
+)
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -237,6 +240,12 @@ class OpDispatcher:
             aten.as_strided.default: as_strided_handler,
             aten.argmin.default: argminmax_handler,
             aten.argmax.default: argminmax_handler,
+            aten.any.default: bool_reduction_handler,
+            aten.any.dim: bool_reduction_handler,
+            aten.any.dims: bool_reduction_handler,
+            aten.all.default: bool_reduction_handler,
+            aten.all.dim: bool_reduction_handler,
+            aten.all.dims: bool_reduction_handler,
         }
 
     # ********************************************************************************************
@@ -287,8 +296,8 @@ class OpDispatcher:
         try_cache: bool,
     ) -> object:
         # NOTE: schema should always be populated when calling this function,
-        # as it's only called from C++ after unwrap_to_op_info (create_schema=True).
-        # See dispatchDTensorOp in python_variable.cpp line 1453-1460.
+        # as it's only called after unwrap_to_op_info (create_schema=True): from
+        # C++ (dispatchDTensorOp in python_variable.cpp) or from a custom op handler.
         if op_info.schema is None:
             raise AssertionError(
                 "op_info.schema should not be None in sharding propagation. "

@@ -9,8 +9,6 @@
 
 namespace at::xpu {
 
-#if SYCL_COMPILER_VERSION >= 20260101
-
 using namespace sycl::ext::oneapi::experimental;
 
 #define XPU_GRAPH_IS_PVC_ARCHITECTURE(device_architecture) \
@@ -294,82 +292,6 @@ MempoolId_t XPUGraphImpl::pool() const {
 XPUGraphImpl::~XPUGraphImpl() {
   reset();
 }
-
-#else
-
-[[noreturn]] static void graph_compiler_version_error() {
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "XPUGraph requires PyTorch to be compiled with oneAPI 2026.1.1 or newer. ",
-      "Please rebuild PyTorch with a supported SYCL compiler.");
-}
-
-XPUGraphImpl* get_graph_from_capture_id(size_t) {
-  graph_compiler_version_error();
-}
-
-MempoolId_t graph_pool_handle() {
-  graph_compiler_version_error();
-}
-
-XPUGraphImpl::XPUGraphImpl(const GraphImplArgs& args)
-    : capture_stream_(at::xpu::getCurrentXPUStream()),
-      keep_graph_(args.keep_graph) {
-  graph_compiler_version_error();
-}
-
-XPUGraphImpl::~XPUGraphImpl() = default;
-
-void XPUGraphImpl::register_generator_state(
-    c10::intrusive_ptr<at::XPUGeneratorState>) {
-  graph_compiler_version_error();
-}
-
-void XPUGraphImpl::register_generator_state(const at::Generator&) {
-  graph_compiler_version_error();
-}
-
-void XPUGraphImpl::capture_begin(MempoolId_t, GraphCaptureMode) {
-  graph_compiler_version_error();
-}
-
-void XPUGraphImpl::capture_end() {
-  graph_compiler_version_error();
-}
-
-void XPUGraphImpl::instantiate() {
-  graph_compiler_version_error();
-}
-
-void XPUGraphImpl::replay() {
-  graph_compiler_version_error();
-}
-
-void XPUGraphImpl::reset() {
-  graph_compiler_version_error();
-}
-
-MempoolId_t XPUGraphImpl::pool() const {
-  graph_compiler_version_error();
-}
-
-void XPUGraphImpl::enable_debug_mode() {
-  graph_compiler_version_error();
-}
-
-void XPUGraphImpl::debug_dump(const std::string&) {
-  graph_compiler_version_error();
-}
-
-xpuGraph_t* XPUGraphImpl::raw_xpu_graph() {
-  graph_compiler_version_error();
-}
-
-xpuGraphExec_t* XPUGraphImpl::raw_xpu_graph_exec() {
-  graph_compiler_version_error();
-}
-
-#endif
 
 REGISTER_GRAPH_IMPL(XPU, XPUGraphImpl)
 

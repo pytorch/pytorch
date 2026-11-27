@@ -218,6 +218,30 @@ def forward(self, a_1):
         out2.sum().backward()
         self.assertEqual(a1.grad, a2.grad)
 
+    def test_pre_dispatch_autocast_in_nested_make_fx(self):
+        def g(x):
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                return x.mm(x)
+
+        inner = []
+
+        def f(x):
+            inner.append(make_fx(g, pre_dispatch=True)(x))
+            return x + 1
+
+        outer = make_fx(f, pre_dispatch=True, tracing_mode=self.tracing_mode)(
+            torch.randn(2, 2)
+        )
+        self.assertExpectedInline(inner[0].code.strip(), """\
+def forward(self, x_1):
+    _enter_autocast = torch.amp.autocast_mode._enter_autocast('cpu', torch.bfloat16, True, False)
+    mm = torch.ops.aten.mm.default(x_1, x_1);  x_1 = None
+    _exit_autocast = torch.amp.autocast_mode._exit_autocast(_enter_autocast);  _enter_autocast = _exit_autocast = None
+    return mm""")
+        self.assertEqual(inner[0](torch.randn(2, 2)).dtype, torch.bfloat16)
+        autocast_fns = (torch.amp._enter_autocast, torch.amp._exit_autocast)
+        self.assertFalse(any(n.target in autocast_fns for n in outer.graph.nodes))
+
     def test_make_fx_simple(self):
         def f(x):
             return torch.sin(x)
@@ -2205,7 +2229,6 @@ fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
-    xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
 }
 symbolic_tensor_segfaults = {
@@ -2319,6 +2342,24 @@ class TestProxyTensorOpInfo(TestCase):
     @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
+
+    def test_histogram_dynamic_symbolic_shape(self, device):
+        def fn(value):
+            return torch.histogram(value, 4)
+
+        traced = make_fx(fn, tracing_mode="symbolic")(torch.randn(5, device=device))
+        for size in (3, 11):
+            value = torch.randn(size, device=device)
+            self.assertEqual(traced(value), fn(value))
+
+    def test_histogram_symbolic_weight_shape_error(self, device):
+        def fn(value, weight):
+            return torch.histogram(value, 4, weight=weight)
+
+        with self.assertRaisesRegex(RuntimeError, "same shape as the input tensor"):
+            make_fx(fn, tracing_mode="symbolic")(
+                torch.randn(5, device=device), torch.randn(4, device=device)
+            )
 
     @ops([op for op in op_db + custom_op_db if op.get_inplace()], allowed_dtypes=(torch.float,))
     @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
