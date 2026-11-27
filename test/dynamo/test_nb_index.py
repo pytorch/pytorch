@@ -373,5 +373,29 @@ class NbIndexTests(TestCase):
         self.assertEqual(result, 30)
 
 
+    def test_tensor_subscript_with_tensor_list_and_slice(self):
+        # a list of 0-dim tensors next to other index elements is converted
+        # into an index tensor; reading the element values fails under fake
+        # tracing, so the conversion must stay inside the dispatcher
+        def fn(x, t0, t1):
+            return x[[t0, t1], :]
+
+        X = torch.randn(3, 4)
+        args = (X, torch.tensor(0), torch.tensor(2))
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(*args), fn(*args)
+        )
+
+    def test_tensor_subscript_with_single_tensor_list_and_slice(self):
+        def fn(x, t0):
+            return x[[t0], :]
+
+        X = torch.randn(3, 4)
+        args = (X, torch.tensor(1))
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(*args), fn(*args)
+        )
+
+
 if __name__ == "__main__":
     run_tests()

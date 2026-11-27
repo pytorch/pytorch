@@ -1937,6 +1937,12 @@ class BuiltinVariable(TypeVariable):
                         args[1],
                     ]  # type: ignore[assignment]
 
+                from .tensor import stack_tensor_list_index
+
+                stacked_key = stack_tensor_list_index(tx, args[1])
+                if stacked_key is not None:
+                    args = [args[0], stacked_key]  # type: ignore[list-item]
+
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
             # NB: Use exact type check here - NumpyNdarrayVariable is a TensorVariable

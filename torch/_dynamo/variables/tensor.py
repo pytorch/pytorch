@@ -384,6 +384,69 @@ class CurrentDeviceVariable(VariableTracker):
         )
 
 
+_INTEGER_INDEX_DTYPES = (
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
+
+
+def stack_tensor_list_index(
+    tx: "InstructionTranslatorBase",
+    key_var: "VariableTracker",
+) -> "VariableTracker | None":
+    """Stack a python list of 0-dim integer tensors inside an index tuple.
+
+    Eager getitem converts such a list into an int64 index tensor by
+    reading the element values, and the tensor constructor excludes the
+    Fake dispatch key on purpose, so that conversion dereferences fake
+    storage and fails while tracing. torch.stack produces the same index
+    tensor through the dispatcher, so do the conversion up front.
+    """
+    if not isinstance(key_var, variables.TupleVariable):
+        return None
+
+    target = None
+    for i, item in enumerate(key_var.items):
+        if isinstance(item, variables.ListVariable):
+            # more than one list element is not a valid advanced index
+            if target is not None or not item.items:
+                return None
+            target = i
+
+    if target is None:
+        return None
+
+    dtype = None
+    proxies = []
+    for elem in key_var.items[target].items:
+        if (
+            not isinstance(elem, TensorVariable)
+            or elem.ndim != 0
+            or elem.dtype not in _INTEGER_INDEX_DTYPES
+            or (dtype is not None and elem.dtype != dtype)
+        ):
+            return None
+        dtype = elem.dtype
+        proxies.append(elem.as_proxy())
+
+    from .builder import wrap_fx_proxy
+
+    stacked = wrap_fx_proxy(
+        tx,
+        tx.output.create_proxy("call_function", torch.stack, (proxies,), {}),
+    )
+    new_items = list(key_var.items)
+    new_items[target] = stacked
+    return variables.TupleVariable(
+        new_items,
+        source=key_var.source,
+        mutation_type=ValueMutationNew(),
+    )
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -2125,6 +2188,9 @@ class TensorVariable(VariableTracker):
                 ],
             )
         else:
+            stacked_key = stack_tensor_list_index(tx, args[0])
+            if stacked_key is not None:
+                args = (stacked_key,) + args[1:]
             fn = operator.getitem
 
         proxy = tx.output.create_proxy(
