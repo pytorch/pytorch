@@ -60,7 +60,6 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyOn,
     onlyCPU,
-    onlyOn,
     preserves_device_selection,
     dtypes, dtypesIfCUDA, dtypesIfCPU, dtypesIfXPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,

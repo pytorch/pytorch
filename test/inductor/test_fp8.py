@@ -58,8 +58,8 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
-    HAS_XPU_AND_TRITON,
     HAS_GPU_AND_TRITON,
+    HAS_XPU_AND_TRITON,
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
@@ -334,9 +334,7 @@ class TestFP8Types(TestCase):
         not (HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON), "Requires CUDA/XPU + Triton"
     )
     @skipIfRocm
-    @skipXPUIf(
-        True, "https://github.com/intel/torch-xpu-ops/issues/6328"
-    )
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6328")
     @onlyOn(("cuda", "xpu"))
     def test_cuda_fp8_cast_fallback_for_unsupported_triton_dtype(self, device):
         def fp8_cast(x, dtype):

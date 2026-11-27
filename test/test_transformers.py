@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     NOTEST_CPU,
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
+    skipIfXpu,
     xfailIfNoAcceleratorTriton,
     xfailIf,
     setSdpaBackendsToDefaultFinally,

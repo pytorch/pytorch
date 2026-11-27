@@ -322,6 +322,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "cuda or xpu needed")
     def test_assume_32_bit_indexing(self):
         device = torch.accelerator.current_accelerator().type
+
         @torch.compile(backend="inductor")
         def func(a, b):
             # Multiple concat operations

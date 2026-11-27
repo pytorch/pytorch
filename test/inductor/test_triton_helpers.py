@@ -661,7 +661,9 @@ if HAS_GPU:
     instantiate_device_type_tests(
         OnlineSoftmaxCombineTest, globals(), only_for=GPU_TYPE, allow_xpu=True
     )
-    instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE, allow_xpu=True)
+    instantiate_device_type_tests(
+        MinimumMaximumTest, globals(), only_for=GPU_TYPE, allow_xpu=True
+    )
     instantiate_device_type_tests(
         RoundingToIntTest,
         globals(),

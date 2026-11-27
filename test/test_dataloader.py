@@ -48,7 +48,6 @@ from torch.testing._internal.common_utils import (
     TEST_NUMPY,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
-    TEST_XPU,
     TestCase,
 )
 from torch.utils.data import (
