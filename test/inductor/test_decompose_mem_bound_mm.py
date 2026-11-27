@@ -15,8 +15,6 @@ from torch._inductor.utils import run_and_get_code
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.testing import FileCheck
-from torch.utils._triton import has_triton
-
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
@@ -30,6 +28,7 @@ from torch.testing._internal.common_utils import (
     preserves_unittest_skip_marks,
     subtest,
 )
+from torch.utils._triton import has_triton
 
 
 class MyModule(torch.nn.Module):
