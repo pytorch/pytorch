@@ -562,16 +562,16 @@ class TestAutoWrap(TestCase):
         kwargs).
         """
         for use_uniform_kwargs in [False, True]:
-            self._test_custom_policy(use_uniform_kwargs)
+            self._test_custom_policy(use_uniform_kwargs, device)
 
-    def _test_custom_policy(self, use_uniform_kwargs: bool):
+    def _test_custom_policy(self, use_uniform_kwargs: bool, device):
         print(f"use_uniform_kwargs={use_uniform_kwargs}")
         model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            DEVICEInitMode.DEVICE_BEFORE,
+            DEVICEInitMode.DEVICE_NEVER,
             {},
-        )
+        ).to(device)
 
         if use_uniform_kwargs:
 
