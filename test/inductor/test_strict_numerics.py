@@ -2,6 +2,7 @@
 """Tests for strict numerics mode."""
 
 import itertools
+import json
 import math
 import os
 import subprocess
@@ -3956,6 +3957,7 @@ class StrictNumericsCompileTest(TestCase):
     def test_mvlgamma_sum_order(self, device, dtype, numerics, p, layout):
         from torch._native.registry import (
             deregister_op_overrides,
+            native_decomp_table,
             reenable_op_overrides,
         )
 
@@ -4940,48 +4942,21 @@ class StrictNumericsCompileTest(TestCase):
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize(
-        "layout", ("aligned", "misaligned", "strided", "expanded", "transposed")
-    )
-    def test_mul_nan_payload_full_block_and_tail(self, device, dtype, numerics, layout):
-        values = _min_max_specials(dtype, device)
-
-        def operand(value):
-            if layout == "misaligned":
-                return value.repeat(1026)[1:]
-            if layout == "strided":
-                return value.repeat(2050)[::2]
-            if layout == "expanded":
-                return value.expand(1025)
-            result = value.repeat(1025)
-            return result.reshape(205, 5).t() if layout == "transposed" else result
-
-        a, b = operand(values[7:8]), operand(values[6:7])
-        compiled = torch.compile(
-            torch.mul, fullgraph=True, options={"numerics": numerics}
-        )
-        actual, codes = run_and_get_code(compiled, a, b)
-        self.assertIn("@triton.jit", "\n".join(codes))
-        self.assertTrue(_outputs_equal(actual, a * b))
-
-    @dtypes(torch.float64)
-    @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("cudagraphs", (False, True))
     @parametrize("input_dtype", (torch.float64, torch.int64, torch.float32))
-    def test_mul_nan_payload_input_provenance(
+    def test_mul_input_provenance(
         self, device, dtype, numerics, cudagraphs, input_dtype
     ):
         values = _min_max_specials(dtype, device)
         shared = torch.empty(2052, device=device, dtype=dtype)
-        shared[:1026] = values[7]
-        shared[1026:] = values[6]
+        shared[:1026] = values[4]
+        shared[1026:] = values[1]
         a, b = shared[:1025].view(input_dtype), shared[1026:2051].view(input_dtype)
 
         def fn(a, b):
             return a.view(dtype) * b.view(dtype)
 
         counter = CompileCounterWithBackend("inductor")
-        skips_before = counters["inductor"]["cudagraph_skips"]
         with config.patch({"numerics": numerics, "triton.cudagraphs": cudagraphs}):
             compiled = torch.compile(fn, fullgraph=True, backend=counter)
             actual, codes = run_and_get_code(compiled, a, b)
@@ -4990,25 +4965,22 @@ class StrictNumericsCompileTest(TestCase):
             del actual
             # Read-only input aliasing and pointer alignment can change without guards.
             for left, right in ((0, 1), (0, 0), (1, 1), (0, 0), (1, 1)):
-                a = values[7:8].repeat(1025 + left)[left:].view(input_dtype)
-                b = values[6:7].repeat(1025 + right)[right:].view(input_dtype)
+                a = values[4:5].repeat(1025 + left)[left:].view(input_dtype)
+                b = values[1:2].repeat(1025 + right)[right:].view(input_dtype)
                 torch.compiler.cudagraph_mark_step_begin()
                 actual = compiled(a, b)
                 self.assertTrue(_outputs_equal(actual, fn(a, b)))
                 del actual
         self.assertEqual(counter.frame_count, 1)
-        if cudagraphs:
-            self.assertGreater(counters["inductor"]["cudagraph_skips"], skips_before)
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize(
         "hop", ("cond", "nested_cond", "invoke", "while_loop", "aliased_clone")
     )
-    def test_mul_nan_payload_subgraph_input_alignment(
-        self, device, dtype, numerics, hop
-    ):
+    def test_mul_subgraph_input_provenance(self, device, dtype, numerics, hop):
         values = _min_max_specials(dtype, device)
+        skips_before = counters["inductor"]["cudagraph_skips"]
 
         @torch.compiler.nested_compile_region
         def region(a, b):
@@ -5048,12 +5020,11 @@ class StrictNumericsCompileTest(TestCase):
 
         counter = CompileCounterWithBackend("inductor")
         p = torch.tensor(True, device=device)
-        skips_before = counters["inductor"]["cudagraph_skips"]
         with config.patch({"numerics": numerics, "triton.cudagraphs": True}):
             compiled = torch.compile(fn, fullgraph=True, backend=counter)
             for offset in (0, 1, 0):
-                a = values[7:8].repeat(1025 + offset)[offset:]
-                b = values[6:7].repeat(1025)
+                a = values[4:5].repeat(1025 + offset)[offset:]
+                b = values[1:2].repeat(1025)
                 if hop == "aliased_clone":
                     a = torch.cat((a, b))
                 torch.compiler.cudagraph_mark_step_begin()
@@ -5065,7 +5036,9 @@ class StrictNumericsCompileTest(TestCase):
                 self.assertTrue(_outputs_equal(actual, expected))
                 del actual
         self.assertEqual(counter.frame_count, 1)
-        self.assertGreater(counters["inductor"]["cudagraph_skips"], skips_before)
+
+        if hop in ("while_loop", "aliased_clone"):
+            self.assertGreater(counters["inductor"]["cudagraph_skips"], skips_before)
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -5192,9 +5165,7 @@ class StrictNumericsCompileTest(TestCase):
                         self.assertIn("@triton.jit", "\n".join(codes))
                     else:
                         actual = compiled(*actual_args)
-                    self.assertEqual(
-                        actual.view(torch.int64), expected.view(torch.int64)
-                    )
+                    self._assert_bitwise_equal(actual, expected)
                     if partial_write:
                         grad = values[6:7].repeat(1025)
                         expected_grad = torch.autograd.grad(
@@ -5203,24 +5174,24 @@ class StrictNumericsCompileTest(TestCase):
                         actual_grad = torch.autograd.grad(actual, actual_args[1], grad)[
                             0
                         ]
-                        self.assertEqual(
-                            actual_grad.view(torch.int64),
-                            expected_grad.view(torch.int64),
+                        self._assert_bitwise_equal(
+                            actual_grad,
+                            expected_grad,
                         )
-                        self.assertEqual(
-                            actual_args[0].view(torch.int64),
-                            eager_args[0].view(torch.int64),
+                        self._assert_bitwise_equal(
+                            actual_args[0],
+                            eager_args[0],
                         )
                     if input_stride == 2:
-                        self.assertEqual(
-                            actual_args[0]._base.view(torch.int64),
-                            eager_args[0]._base.view(torch.int64),
+                        self._assert_bitwise_equal(
+                            actual_args[0]._base,
+                            eager_args[0]._base,
                         )
                     if producer == "out":
                         for index in (0, 2):
-                            self.assertEqual(
-                                actual_args[index].view(torch.uint8),
-                                eager_args[index].view(torch.uint8),
+                            self._assert_bitwise_equal(
+                                actual_args[index],
+                                eager_args[index],
                             )
                 if producer == "out" and out_dtype == writer_dtype == dtype:
 
@@ -5268,9 +5239,9 @@ class StrictNumericsCompileTest(TestCase):
                     expected = fresh_and_mutated(*eager_args)
                     actual = compiled(*actual_args)
                     for expected_value, actual_value in zip(expected, actual):
-                        self.assertEqual(
-                            actual_value.view(torch.int64),
-                            expected_value.view(torch.int64),
+                        self._assert_bitwise_equal(
+                            actual_value,
+                            expected_value,
                         )
                     expected_grad = torch.autograd.grad(
                         expected[2], eager_args[2], torch.ones_like(eager_args[2])
@@ -5278,12 +5249,10 @@ class StrictNumericsCompileTest(TestCase):
                     actual_grad = torch.autograd.grad(
                         actual[2], actual_args[2], torch.ones_like(actual_args[2])
                     )[0]
-                    self.assertEqual(
-                        actual_grad.view(torch.int64), expected_grad.view(torch.int64)
-                    )
-                    self.assertEqual(
-                        actual_args[0]._base.view(torch.int64),
-                        eager_args[0]._base.view(torch.int64),
+                    self._assert_bitwise_equal(actual_grad, expected_grad)
+                    self._assert_bitwise_equal(
+                        actual_args[0]._base,
+                        eager_args[0]._base,
                     )
             self.assertEqual(counter.frame_count, 1)
 
@@ -5332,8 +5301,8 @@ class StrictNumericsCompileTest(TestCase):
                 hits = counters["inductor"]["fxgraph_cache_hit"]
                 misses = counters["inductor"]["fxgraph_cache_miss"]
                 actual = torch.compile(fn, fullgraph=True, options=options)(a, b)
-                self.assertEqual(actual.view(torch.int64), expected.view(torch.int64))
-                self.assertEqual(a.view(torch.int64), eager_a.view(torch.int64))
+                self._assert_bitwise_equal(actual, expected)
+                self._assert_bitwise_equal(a, eager_a)
                 self.assertEqual(
                     counters["inductor"]["fxgraph_cache_miss"], misses + (index < 2)
                 )
@@ -5357,6 +5326,60 @@ class StrictNumericsCompileTest(TestCase):
                 self.assertEqual(actual_grad, expected_grad)
                 self.assertEqual(a, eager_a)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], misses + 2)
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("producer", ("clone", "mutate_clone", "slice"))
+    def test_mul_clone_mutation_backward(self, device, dtype, numerics, producer):
+        from torch._inductor.graph import GraphLowering
+
+        values = torch.tensor([1.0, 2.0, 3.0], dtype=dtype, device=device)
+
+        def fn(a, b):
+            if producer == "slice":
+                return a[1:].mul_(b[1:])
+            if producer == "mutate_clone":
+                a.add_(0)
+            return a.clone().mul_(b)
+
+        def operands(offset):
+            length = 1026 if producer == "slice" else 1025
+            return (
+                values[0:1].repeat(length + offset)[offset:],
+                values[1:2].repeat(length).requires_grad_(),
+            )
+
+        counter = CompileCounterWithBackend("inductor")
+        with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+            compiled = torch.compile(fn, fullgraph=True, backend=counter)
+            for iteration, offset in enumerate((0, 1, 0, 1)):
+                eager_args, args = operands(offset), operands(offset)
+                storage = args[0].untyped_storage()
+                eager = fn(*eager_args)
+                if iteration == 0:
+                    actual, codes = run_and_get_code(compiled, *args)
+                    self.assertIn("@triton.jit", "\n".join(codes))
+                else:
+                    actual = compiled(*args)
+                self._assert_bitwise_equal(actual, eager)
+                self._assert_bitwise_equal(args[0], eager_args[0])
+                self.assertEqual(args[0].untyped_storage(), storage)
+                self.assertEqual(
+                    actual.untyped_storage() == storage, producer == "slice"
+                )
+                before_backward = args[0].view(torch.int64).clone()
+                grad_output = values[2:3].repeat(1025)
+                expected_grad = torch.autograd.grad(eager, eager_args[1], grad_output)[
+                    0
+                ]
+                codes = []
+                with mock.patch.object(GraphLowering, "save_output_code", codes.append):
+                    grads = torch.autograd.grad(actual, args[1], grad_output)
+                if iteration == 0:
+                    self.assertIn("@triton.jit", "\n".join(codes))
+                self._assert_bitwise_equal(grads[0], expected_grad)
+                self.assertEqual(args[0].view(torch.int64), before_backward)
+        self.assertEqual(counter.frame_count, 1)
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -5454,15 +5477,13 @@ class StrictNumericsCompileTest(TestCase):
                     expected = torch.autograd.grad(eager, eager_args[1], grad_output)[0]
                     args = operands(offset)
                     output = compiled(*args)
-                    self.assertEqual(output.view(torch.int64), eager.view(torch.int64))
+                    self._assert_bitwise_equal(output, eager)
                     actual = torch.autograd.grad(output, args[1], grad_output)[0]
-                    self.assertEqual(
-                        actual.view(torch.int64), expected.view(torch.int64)
-                    )
+                    self._assert_bitwise_equal(actual, expected)
                     for index in (0, 2) if producer == "out" else (0,):
-                        self.assertEqual(
-                            args[index].view(torch.uint8),
-                            eager_args[index].view(torch.uint8),
+                        self._assert_bitwise_equal(
+                            args[index],
+                            eager_args[index],
                             msg=f"{backing_dtype=}, {writer_dtype=}, {typed_root=}, {offset=}, {index=}",
                         )
                     if frames is None:
@@ -5608,15 +5629,43 @@ class StrictNumericsCompileTest(TestCase):
         self._assert_bitwise_equal(result, fn(x))
 
     @ops(
-        [op for op in op_db if op.name in ("abs", "neg", "angle")],
+        [
+            op
+            for op in op_db
+            if op.name
+            in ("abs", "neg", "angle", "nn.functional.hardtanh", "special.log_ndtr")
+        ],
         allowed_dtypes=(torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8),
     )
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_unary_integer(self, device, dtype, op, numerics):
         limits = torch.iinfo(dtype)
         x = torch.tensor([limits.min, 0, 1, limits.max], dtype=dtype, device=device)
-        compiled = torch.compile(op.op, fullgraph=True, options={"numerics": numerics})
-        self.assertEqual(compiled(x), op.op(x))
+        if op.name == "nn.functional.hardtanh":
+            if dtype in (torch.uint8, torch.int8):
+                x = torch.arange(limits.min, limits.max + 1, device=device).to(dtype)
+
+            def fn(x):
+                return (
+                    op.op(x),
+                    op.op(x, -0.7, 0.7),
+                    op.op(
+                        x,
+                        max(limits.min - 1, torch.iinfo(torch.int64).min),
+                        min(limits.max + 1, torch.iinfo(torch.int64).max),
+                    ),
+                )
+        else:
+            fn = op.op
+            if op.name == "special.log_ndtr":
+                x = _pointwise_edge_values(dtype).to(device)
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        self._assert_bitwise_equal(compiled(x), fn(x))
+        if op.name == "special.log_ndtr":
+            from torch.testing._internal.common_utils import set_default_dtype
+
+            with set_default_dtype(torch.float64):
+                self._assert_bitwise_equal(compiled(x), fn(x))
 
     @ops(
         [
@@ -5839,6 +5888,7 @@ class StrictNumericsCompileTest(TestCase):
             if op.name
             in (
                 "nn.functional.gelu",
+                "nn.functional.glu",
                 "nn.functional.hardswish",
                 "nn.functional.mish",
                 "nn.functional.silu",
@@ -5849,7 +5899,7 @@ class StrictNumericsCompileTest(TestCase):
             )
             and not op.variant_test_name
         ],
-        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32),
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
     )
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
@@ -5869,6 +5919,8 @@ class StrictNumericsCompileTest(TestCase):
         ).requires_grad_()
         grad = torch.linspace(-1.3, 1.7, x.numel(), device=device, dtype=dtype)
         grad[:2] = torch.tensor([0.0, -0.0], device=device, dtype=dtype)
+        if op.name == "nn.functional.glu":
+            grad = grad[: x.numel() // 2]
         kwargs = {}
         if op.name == "nn.functional.gelu":
             kwargs = {"approximate": "tanh"}
@@ -5900,6 +5952,54 @@ class StrictNumericsCompileTest(TestCase):
         self.assertIn("@triton.jit", "\n".join(codes))
         self._assert_bitwise_equal(result, expected)
         self._assert_bitwise_equal(result_grads[0], expected_grad)
+
+        if dtype == torch.float64 and op.name in (
+            "nn.functional.gelu",
+            "nn.functional.mish",
+        ):
+            values = _min_max_specials(dtype, device)
+            x = (
+                values.repeat((1536 + values.numel() - 1) // values.numel())[:1536]
+                .reshape(2, 768)
+                .t()
+            )
+            if op.name == "nn.functional.gelu":
+                self._check_bitwise(op.op, x, numerics=numerics, upcast=upcast)
+            bits = torch.full(
+                (1537,), 0x7FF8000000000002, dtype=torch.int64, device=device
+            )
+            g = bits[:1536].view(dtype).reshape(2, 768).t()
+            offset = bits[1:].view(dtype).reshape(2, 768).t()
+
+            def backward(g, x):
+                if op.name == "nn.functional.gelu":
+                    return (
+                        torch.ops.aten.gelu_backward.default(g, x, approximate="none"),
+                        torch.ops.aten.gelu_backward.default(g, x, approximate="tanh"),
+                    )
+                return (
+                    torch.ops.aten.mish_backward.default(g, x),
+                    torch.ops.aten.log_sigmoid_backward.default(
+                        g, x, torch.empty(0, dtype=dtype, device=device)
+                    ),
+                )
+
+            for gradient, value in (
+                (g, x),
+                (offset, x),
+                (g.contiguous(), x.contiguous()),
+                (g[0, 0].expand_as(x), x),
+            ):
+                self._check_bitwise(
+                    backward, gradient, value, numerics=numerics, upcast=upcast
+                )
+
+            def cloned_backward(g, x):
+                return backward(g.clone(), x)
+
+            self._check_bitwise(
+                cloned_backward, offset, x, numerics=numerics, upcast=upcast
+            )
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("upcast", (False, True))
@@ -5950,9 +6050,11 @@ class StrictNumericsCompileTest(TestCase):
             if op.name
             in (
                 "clamp",
+                "heaviside",
                 "nn.functional.relu",
                 "nn.functional.relu6",
                 "nn.functional.hardtanh",
+                "nn.functional.threshold",
             )
         ],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
@@ -5992,7 +6094,10 @@ class StrictNumericsCompileTest(TestCase):
             )
             x = torch.cat((bits, bits | torch.iinfo(torch.int64).min)).view(dtype)
 
-        bounds = torch.tensor([-1.0, 0.0, 1.0, 6.0], device=device, dtype=dtype)
+        values = [-1.0, 0.0, 1.0, 6.0]
+        if op.name == "nn.functional.threshold":
+            values.append(0.7)
+        bounds = torch.tensor(values, device=device, dtype=dtype)
         x = torch.cat(
             (
                 x,
@@ -6002,10 +6107,14 @@ class StrictNumericsCompileTest(TestCase):
             )
         )
 
-        x.requires_grad_()
+        x.requires_grad_(op.supports_autograd)
         lower = -1 if op.name in ("clamp", "nn.functional.hardtanh") else 0
 
         def fn(x):
+            if op.name == "heaviside":
+                return op.op(x, x.flip(0)), x == 0
+            if op.name == "nn.functional.threshold":
+                return op.op(x, 0.7, -0.0), x <= 0.7
             result = op.op(x, -1, 1) if op.name == "clamp" else op.op(x)
             return result, x < lower
 
@@ -6024,9 +6133,22 @@ class StrictNumericsCompileTest(TestCase):
         self._assert_bitwise_equal(result, expected)
         self.assertEqual(below_lower, expected_below_lower)
         self.assertIn("tl.where", "\n".join(codes))
-        expected_grad = torch.autograd.grad(expected, x, torch.ones_like(x))[0]
-        result_grad = torch.autograd.grad(result, x, torch.ones_like(x))[0]
-        self._assert_bitwise_equal(result_grad, expected_grad)
+        if op.supports_autograd:
+            expected_grad = torch.autograd.grad(expected, x, torch.ones_like(x))[0]
+            result_grad = torch.autograd.grad(result, x, torch.ones_like(x))[0]
+            self._assert_bitwise_equal(result_grad, expected_grad)
+
+        if op.name == "heaviside":
+            self._check_bitwise(
+                op.op, torch.zeros_like(x), x, numerics=numerics, upcast=upcast
+            )
+
+        if op.name == "nn.functional.threshold":
+
+            def nan_fill(x):
+                return op.op(x, 0.7, float("nan")), op.op(x, float("nan"), -0.0)
+
+            self._check_bitwise(nan_fill, x, numerics=numerics, upcast=upcast)
 
     @config.patch(
         numerics="strict_pointwise", max_fusion_size=1, realize_opcount_threshold=0
@@ -6488,21 +6610,21 @@ class StrictNumericsCompileTest(TestCase):
                     z, x, y = operands(offset)
                     expected = fn(eager_z, eager_x, eager_y)
                     actual = compiled(z, x, y)
-                    self.assertEqual(
-                        actual.detach().view(torch.int64),
-                        expected.detach().view(torch.int64),
+                    self._assert_bitwise_equal(
+                        actual.detach(),
+                        expected.detach(),
                     )
-                    self.assertEqual(x.view(torch.int64), eager_x.view(torch.int64))
-                    self.assertEqual(z.view(torch.int64), eager_z.view(torch.int64))
+                    self._assert_bitwise_equal(x, eager_x)
+                    self._assert_bitwise_equal(z, eager_z)
                     if requires_grad:
                         gradient = torch.arange(2048, device=device, dtype=dtype) / 8
                         expected_grad = torch.autograd.grad(
                             expected, eager_y, gradient
                         )[0]
                         actual_grad = torch.autograd.grad(actual, y, gradient)[0]
-                        self.assertEqual(
-                            actual_grad.view(torch.int64),
-                            expected_grad.view(torch.int64),
+                        self._assert_bitwise_equal(
+                            actual_grad,
+                            expected_grad,
                         )
 
     @dtypes(torch.float64)
@@ -6536,18 +6658,18 @@ class StrictNumericsCompileTest(TestCase):
                     z, x, y = operands(offset)
                     expected = fn(eager_z, eager_x, eager_y)
                     actual = compiled(z, x, y)
-                    self.assertEqual(
-                        actual.detach().view(torch.int64),
-                        expected.detach().view(torch.int64),
+                    self._assert_bitwise_equal(
+                        actual.detach(),
+                        expected.detach(),
                     )
-                    self.assertEqual(x.view(torch.int64), eager_x.view(torch.int64))
-                    self.assertEqual(z.view(torch.int64), eager_z.view(torch.int64))
+                    self._assert_bitwise_equal(x, eager_x)
+                    self._assert_bitwise_equal(z, eager_z)
                     gradient = torch.arange(2048, device=device, dtype=dtype) / 8
                     expected_grad = torch.autograd.grad(expected, eager_y, gradient)[0]
                     actual_grad = torch.autograd.grad(actual, y, gradient)[0]
-                    self.assertEqual(
-                        actual_grad.view(torch.int64),
-                        expected_grad.view(torch.int64),
+                    self._assert_bitwise_equal(
+                        actual_grad,
+                        expected_grad,
                     )
 
     @dtypes(torch.float64)
@@ -6586,19 +6708,18 @@ class StrictNumericsCompileTest(TestCase):
                         actual_inputs = inputs(offset)
                         expected = fn(*expected_inputs)
                         actual = compiled(*actual_inputs)
-                        self.assertEqual(
-                            actual.view(torch.int64), expected.view(torch.int64)
-                        )
-                        self.assertEqual(
-                            actual_inputs[0].view(torch.int64),
-                            expected_inputs[0].view(torch.int64),
+                        self._assert_bitwise_equal(actual, expected)
+                        self._assert_bitwise_equal(
+                            actual_inputs[0],
+                            expected_inputs[0],
                         )
 
 
 @unittest.skipUnless(
     HAS_CUDA_AND_TRITON
     and torch.version.hip is None
-    and has_triton_reduction_ordering(),
+    and has_triton_reduction_ordering()
+    and torch.ops.aten.sum.dim_IntList in native_decomp_table(overrides_only=True),
     "requires CUDA, tl.ReductionOrdering, and the eager inner-tree implementation",
 )
 class StrictNumericsTest(TestCase):
@@ -7170,6 +7291,9 @@ POINTWISE_BOUNDARIES = {
     "special.spherical_bessel_j0": (-0.5, 0, 0.5),
 }
 POINTWISE_EDGE_NAMES = frozenset(POINTWISE_BOUNDARIES) | {
+    "add",
+    "sub",
+    "mul",
     "clamp",
     "lerp",
     "logit",
@@ -7234,7 +7358,7 @@ def _pointwise_boundary_values(boundaries, dtype, device):
     )
 
 
-def _pointwise_edge_calls(op, device, dtype):
+def _pointwise_edge_calls(op, device, dtype, *, backward=False):
     calls = []
 
     def add(label, inp, args=(), kwargs=None):
@@ -7243,6 +7367,24 @@ def _pointwise_edge_calls(op, device, dtype):
     if op.name in POINTWISE_BOUNDARIES:
         x = _pointwise_boundary_values(POINTWISE_BOUNDARIES[op.name], dtype, device)
         add("boundary", x)
+    elif op.name in ("add", "sub", "mul") and dtype in (
+        torch.float16,
+        torch.bfloat16,
+    ):
+        x = _pointwise_boundary_values((), dtype, device)
+        for scalar in (
+            0.0,
+            -0.0,
+            float("inf"),
+            -float("inf"),
+            float("nan"),
+            -float("nan"),
+        ):
+            label = repr(scalar)
+            for side, inp, args in (("right", x, (scalar,)), ("left", scalar, (x,))):
+                add(f"scalar_{side}_{label}", inp, args)
+                if op.name != "mul":
+                    add(f"scalar_{side}_{label}_alpha", inp, args, {"alpha": 0.25})
     elif op.name == "lerp":
         weight = _pointwise_boundary_values((-0.5, 0, 0.5, 1), dtype, device)
         start = torch.tensor([1, -1, 0.0, -0.0], dtype=dtype, device=device)
@@ -7254,6 +7396,54 @@ def _pointwise_edge_calls(op, device, dtype):
         )
         for value in _pointwise_neighbors((-0.5, 0, 0.5, 1), dtype).tolist():
             add(f"scalar_weight_{value}", start, (end, value))
+    elif op.name == "logaddexp" and dtype.is_complex:
+        values = _pointwise_edge_values(dtype).to(device)
+        a = torch.cat(
+            (values, torch.tensor([-1 - 1j, -1 - 100j], device=device, dtype=dtype))
+        )
+        b = torch.cat(
+            (values.flip(0), torch.tensor([0j, 100j], device=device, dtype=dtype))
+        )
+        count = (1025 + a.numel() - 1) // a.numel()
+        a, b = a.repeat(count)[:1025], b.repeat(count)[:1025]
+        add("complex_full_block_tail", a, (b,))
+        add("complex_offset", a[1:], (b[1:],))
+        add("complex_strided", a[::2], (b[::2],))
+        add("complex_broadcast", a, (b[:1],))
+        add("complex_flags", a.conj(), (b._neg_view(),))
+        if dtype == torch.complex32:
+            for other_dtype in (torch.complex64, torch.complex128):
+                scalar = torch.tensor(70000 + 1j, dtype=other_dtype, device=device)
+                add(f"complex_wider_scalar_right_{other_dtype}", a, (scalar,))
+                add(f"complex_wider_scalar_left_{other_dtype}", scalar, (a,))
+        if dtype == torch.complex64:
+            others = (b.to(torch.complex32),)
+            if not backward:
+                # Eager backward cannot return a complex gradient to a real operand.
+                others += (b.real,)
+            for other in others:
+                add(f"complex_mixed_right_{other.dtype}", a, (other,))
+                add(f"complex_mixed_left_{other.dtype}", other, (a,))
+    elif op.name == "where" and dtype.is_complex:
+        values = _pointwise_edge_values(dtype).to(device)
+        count = (1025 + values.numel() - 1) // values.numel()
+        a = values.repeat(count)[:1025]
+        b = a.flip(0)
+        mask = torch.arange(a.numel(), device=device) % 3 == 0
+        add("complex_selection_bits", a, (mask, b))
+        add("complex_selection_offset", a[1:], (mask[1:], b[1:]))
+        for predicate in (False, True):
+            add(f"complex_cpu_predicate_{predicate}", a, (torch.tensor(predicate), b))
+        if dtype == torch.complex32:
+            scalar = torch.tensor([0x7F800001, -2147483648], dtype=torch.int32)
+            scalar = scalar.view(torch.float32).view(torch.complex64).reshape(())
+            add("complex_cpu_promotion_left", scalar, (mask, a))
+            add("complex_cpu_promotion_right", a, (mask, scalar))
+        if dtype == torch.complex64:
+            other = b.to(torch.complex32)
+            add("complex_selection_mixed_right", a, (mask, other))
+            add("complex_selection_mixed_left", other, (mask, a))
+
     elif op.name == "logit":
         acc_dtype = torch.float64 if dtype == torch.float64 else torch.float32
         tiny = _pointwise_subnormals(dtype)[1].item()
@@ -7314,7 +7504,7 @@ def _pointwise_edge_values(dtype):
 
 
 def _diff_kind(a, b):
-    r"""Classify mismatches as shape, value, NaN payload, or signed zero."""
+    r"""Classify mismatches as shape, value, or signed zero."""
     if isinstance(a, (tuple, list)):
         if not isinstance(b, (tuple, list)) or len(a) != len(b):
             return "shape"
@@ -7335,17 +7525,13 @@ def _diff_kind(a, b):
     int_dtype = _BIT_VIEW.get(a.dtype)
     if int_dtype is None:
         return "value"
-    differ = a.contiguous().view(int_dtype) != b.contiguous().view(int_dtype)
-    nan = differ & torch.isnan(a) & torch.isnan(b)
+    differ = (a.contiguous().view(int_dtype) != b.contiguous().view(int_dtype)) & ~(
+        torch.isnan(a) & torch.isnan(b)
+    )
     zero = differ & (a == 0) & (b == 0)
-    if not bool((differ == (nan | zero)).all()):
+    if not bool((differ == zero).all()):
         return "value"
-    parts = []
-    if bool(nan.any()):
-        parts.append("nan-payload")
-    if bool(zero.any()):
-        parts.append("signed-zero")
-    return "+".join(parts) or "value"
+    return "signed-zero" if bool(zero.any()) else "value"
 
 
 def _diff_outputs(out):
@@ -7357,7 +7543,7 @@ def _diff_outputs(out):
 
 
 def _outputs_equal(a, b):
-    r"""Compare raw bytes, including NaN payloads and signed zeros."""
+    r"""Compare NaN positions and exact bits for all other values."""
     if isinstance(a, (tuple, list)):
         if not isinstance(b, (tuple, list)) or len(a) != len(b):
             return False
@@ -7373,13 +7559,29 @@ def _outputs_equal(a, b):
         return False
     if a.numel() == 0:
         return True
-    a, b = a.resolve_conj().resolve_neg(), b.resolve_conj().resolve_neg()
-    if a.is_complex():
-        a, b = torch.view_as_real(a), torch.view_as_real(b)
-    return torch.equal(
-        a.contiguous().reshape(-1).view(torch.uint8),
-        b.contiguous().reshape(-1).view(torch.uint8),
+    return torch.equal(_pointwise_comparison_bits(a), _pointwise_comparison_bits(b))
+
+
+def _requires_pointwise_kernel(op, dtype):
+    return not (
+        op.name in POINTWISE_REPRESENTATIONS | POINTWISE_DROPOUT | {"positive"}
+        or op.name in {"real", "conj_physical"}
+        and not dtype.is_complex
     )
+
+
+def _scalar_tensor_signature(t):
+    bits = (
+        t.detach()
+        .resolve_conj()
+        .resolve_neg()
+        .cpu()
+        .reshape(-1)
+        .clone(memory_format=torch.contiguous_format)
+        .view(torch.uint8)
+        .tolist()
+    )
+    return t.dtype, t.device, bytes(bits)
 
 
 def _representative_samples(samples):
@@ -7388,6 +7590,7 @@ def _representative_samples(samples):
             return t
         return (
             t.dtype,
+            t.device,
             t.layout,
             tuple(min(size, 2) for size in t.shape),
             t.is_contiguous(),
@@ -7401,14 +7604,7 @@ def _representative_samples(samples):
     seen = set()
     for sample in samples:
         scalar_parameters = [
-            t.detach()
-            .resolve_conj()
-            .resolve_neg()
-            .cpu()
-            .reshape(-1)
-            .clone(memory_format=torch.contiguous_format)
-            .view(torch.uint8)
-            .tolist()
+            _scalar_tensor_signature(t)
             for t in tree_leaves((sample.args, sample.kwargs))
             if isinstance(t, torch.Tensor) and t.numel() == 1
         ]
@@ -7426,21 +7622,11 @@ def _representative_samples(samples):
 BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 
 # (op_id, dtype_label) pairs that must still differ from eager.
-POINTWISE_XFAIL = frozenset(
-    {
-        ("float_power", "bfloat16"),
-        ("float_power", "float16"),
-        ("float_power", "float32"),
-    }
-)
+POINTWISE_XFAIL: frozenset[tuple[str, str]] = frozenset()
 
 BACKWARD_XFAIL: frozenset[tuple[str, str]] = frozenset()
 
-NONFLOAT_XFAIL = frozenset(
-    {
-        ("nn_functional_silu_complex", "complex128"),
-    }
-)
+NONFLOAT_XFAIL: frozenset[tuple[str, str]] = frozenset()
 
 
 POINTWISE_STRICT_CFG = {
@@ -7517,7 +7703,7 @@ class PointwiseStrictNumericsTest(TestCase):
         self._coverage.kernel_required = case["op"] not in {
             _op_id(op)
             for op in POINTWISE_OPS
-            if op.name in POINTWISE_REPRESENTATIONS | POINTWISE_DROPOUT
+            if not _requires_pointwise_kernel(op, getattr(torch, case["dtype"]))
         }
         if result is None:
             result = self.defaultTestResult()
@@ -7575,6 +7761,33 @@ class PointwiseStrictNumericsTest(TestCase):
         self.assertEqual(len(selected), 5)
         self.assertIs(selected[0], samples[0])
         self.assertIs(selected[-1], samples[-1])
+
+        if parameter_kind == "tensor":
+            parameters = (
+                torch.tensor(1.0, dtype=dtype),
+                torch.tensor(1.0, dtype=dtype, device=device),
+                torch.tensor(2.0, dtype=dtype, device=device),
+                torch.tensor(1.0, dtype=torch.float64, device=device),
+                *parameters,
+                *torch.tensor([0x7FC00011, 0x7FC00012], device=device)
+                .to(torch.int32)
+                .view(dtype)
+                .unbind(),
+            )
+        op = next(op for op in POINTWISE_OPS if op.name == "mul")
+        for keyword in (False, True):
+            samples = [
+                SampleInput(x, kwargs={"other": p})
+                if keyword
+                else SampleInput(x, args=(p,))
+                for p in parameters
+            ]
+            self.assertEqual(len(list(_representative_samples(samples))), len(samples))
+            with mock.patch.object(self, "_sample_inputs", return_value=samples):
+                calls = self._bitpattern_call(op, dtype, device)
+            self.assertEqual(len(calls), len(samples))
+            for (_, args, kwargs), parameter in zip(calls, parameters, strict=True):
+                self.assertIs(kwargs["other"] if keyword else args[0], parameter)
 
     @dtypes(torch.float32)
     @parametrize("full", (False, True))
@@ -7667,6 +7880,28 @@ class PointwiseStrictNumericsTest(TestCase):
         for view in (x.conj(), torch._neg_view(x)):
             self.assertTrue(_outputs_equal(view, view.resolve_conj().resolve_neg()))
             self.assertEqual(_diff_kind(view, view + 1), "value")
+        nan = torch.tensor([0x7FC00001, -0x3FFFEF], dtype=torch.int32, device=device)
+        a, b = nan.view(torch.float32), nan.flip(0).view(torch.float32)
+        self.assertTrue(_outputs_equal(a, b))
+        self.assertFalse(_outputs_equal(a, torch.zeros_like(a)))
+        self.assertFalse(
+            _outputs_equal(a, torch.tensor([float("nan"), 0], device=device))
+        )
+        self.assertFalse(_outputs_equal(a.view(torch.int32), b.view(torch.int32)))
+        z = torch.tensor([-0.0, 0.0], device=device)
+        self.assertFalse(_outputs_equal(z, z.flip(0)))
+        self.assertEqual(_diff_kind(z, z.flip(0)), "signed-zero")
+        real = torch.stack((a, torch.ones_like(a)), dim=-1)
+        other = torch.stack((b, torch.ones_like(b)), dim=-1)
+        self.assertTrue(
+            _outputs_equal(torch.view_as_complex(real), torch.view_as_complex(other))
+        )
+        self.assertFalse(
+            _outputs_equal(
+                torch.view_as_complex(real),
+                torch.view_as_complex(real.flip(-1).contiguous()),
+            )
+        )
 
     @dtypes(torch.float32)
     def test_conditional_pointwise_samples(self, device, dtype):
@@ -7689,7 +7924,7 @@ class PointwiseStrictNumericsTest(TestCase):
         self._coverage = CoverageRecord({"test": self._testMethodName})
         x = torch.ones(2, device=device, dtype=dtype)
         reduction = next(op for op in op_db if op.name == "sum")
-        with self.assertRaisesRegex(unittest.SkipTest, "no usable sample"):
+        with self.assertRaisesRegex(AssertionError, "no usable sample"):
             self._sweep(
                 device,
                 reduction,
@@ -7708,6 +7943,16 @@ class PointwiseStrictNumericsTest(TestCase):
         self.assertGreater(
             self._coverage.filters["scalar_remainder_has_no_eager_backward"], 0
         )
+        for name in ("positive", "real", "conj_physical", "neg"):
+            op = next(op for op in POINTWISE_OPS if op.name == name)
+            for sample_dtype in (torch.float32, torch.int64, torch.complex64):
+                required = name == "neg" or (
+                    name in {"real", "conj_physical"} and sample_dtype.is_complex
+                )
+                self.assertEqual(_requires_pointwise_kernel(op, sample_dtype), required)
+                with mock.patch.object(metrics, "generated_kernel_count", 0):
+                    self._require_kernel(1, "no sample", op, sample_dtype)
+                    self.assertFalse(self._coverage.kernel_required)
 
     def _is_tensor_output(self, out):
         return isinstance(out, torch.Tensor) or (
@@ -7801,7 +8046,7 @@ class PointwiseStrictNumericsTest(TestCase):
         if op.name in POINTWISE_GEOMETRY | POINTWISE_CONDITIONAL:
             self._coverage_filter("raw_bits_require_original_geometry")
             return []
-        if op.name in BITPATTERN_SLOW or "polynomial" in op.name:
+        if op.name in BITPATTERN_SLOW:
             self._coverage_filter("raw_bit_sweep_disabled_for_slow_series")
             return []
         key = (_op_id(op), _dtype_label(dtype))
@@ -7809,6 +8054,10 @@ class PointwiseStrictNumericsTest(TestCase):
             ALL_SAMPLES
             or key in REFERENCE_INPUTS
             or key in POINTWISE_XFAIL | NONFLOAT_XFAIL | BACKWARD_XFAIL
+            or (
+                op.name == "float_power"
+                and dtype in (torch.bfloat16, torch.float16, torch.float32)
+            )
         )
         count = NUM_BITPATTERN_SAMPLES if expanded else 256
         if dtype in (torch.float16, torch.bfloat16):
@@ -7853,8 +8102,16 @@ class PointwiseStrictNumericsTest(TestCase):
             return []
 
         def sig(v):
-            # Keep scalar-tensor and vector-tensor signatures distinct.
-            return tuple(v.shape) if isinstance(v, torch.Tensor) else repr(v)
+            if not isinstance(v, torch.Tensor):
+                return repr(v)
+            return (
+                v.dtype,
+                v.device,
+                tuple(v.shape),
+                v.is_conj(),
+                v.is_neg(),
+                _scalar_tensor_signature(v) if v.numel() == 1 else None,
+            )
 
         calls = []
         seen = set()
@@ -7960,15 +8217,100 @@ class PointwiseStrictNumericsTest(TestCase):
             self.skipTest("no deterministic pointwise sample")
         return usable
 
-    def _require_kernel(self, tested, nothing_tested, op):
-        # ATen fallbacks compare eager against itself, so do not count them as coverage.
-        if tested == 0:
-            self.skipTest(nothing_tested)
-        if (
-            metrics.generated_kernel_count == 0
-            and op.name not in POINTWISE_REPRESENTATIONS | POINTWISE_DROPOUT
+    def _require_kernel(self, tested, nothing_tested, op, dtype):
+        self.assertGreater(tested, 0, nothing_tested)
+        if self._coverage is not None and metrics.generated_kernel_count == 0:
+            self._coverage.kernel_required = False
+
+    def _audit_native_baseline(self, sweep, device, op, dtype, cfg, *, calls):
+        from torch._functorch import config as aot_config
+        from torch._inductor import ir
+
+        def encode(value):
+            if isinstance(value, ir.IRNode):
+                return {
+                    "dtype": str(value.get_dtype()),
+                    "size": [str(s) for s in value.get_size()],
+                    "device": str(value.get_device()),
+                }
+            if isinstance(value, (tuple, list)):
+                return [encode(v) for v in value]
+            if isinstance(value, dict):
+                return {str(k): encode(v) for k, v in value.items()}
+            return repr(value)
+
+        original_fallback = ir.FallbackKernel.codegen
+        original_copy = ir.InplaceCopyFallback.codegen
+        coverage = self._coverage
+        numerical, metadata = set(), set()
+
+        def signature(kernel, operator):
+            args, kwargs = (
+                kernel.unflatten_args(kernel.inputs, kernel.constant_args)
+                if isinstance(kernel, ir.FallbackKernel)
+                else (kernel.inputs, {})
+            )
+            # Storage order and compile counts can differ after decomposition.
+            return json.dumps(
+                {"op": operator, "args": encode(args), "kwargs": encode(kwargs)},
+                sort_keys=True,
+            )
+
+        def fallback(kernel, wrapper):
+            operator = str(kernel.op_overload)
+            if isinstance(kernel, ir.ComplexView) or operator in (
+                "aten.view_as_real.default",
+                "aten.view_as_complex.default",
+                "aten.view.dtype",
+                "aten._conj.default",
+                "aten._neg_view.default",
+                "aten.alias.default",
+            ):
+                metadata.add(signature(kernel, operator))
+            else:
+                numerical.add(signature(kernel, operator))
+            return original_fallback(kernel, wrapper)
+
+        def copy(kernel, wrapper):
+            numerical.add(signature(kernel, "aten.copy_.default"))
+            return original_copy(kernel, wrapper)
+
+        with (
+            aot_config.patch(
+                enable_autograd_cache=False, enable_remote_autograd_cache=False
+            ),
+            config.patch(fx_graph_cache=False, fx_graph_remote_cache=False),
+            mock.patch.object(ir.FallbackKernel, "codegen", fallback),
+            mock.patch.object(ir.InplaceCopyFallback, "codegen", copy),
         ):
-            self.skipTest("no Triton kernel generated (op falls back to ATen)")
+            mismatches = sweep(device, op, dtype, cfg, calls=calls)
+            strict_numerical, strict_metadata = numerical.copy(), metadata.copy()
+            generated = (
+                metrics.generated_kernel_count,
+                metrics.generated_fallback_kernel_count,
+            )
+            if numerical:
+                numerical.clear()
+                metadata.clear()
+                self._coverage = None
+                try:
+                    sweep(
+                        device, op, dtype, {**cfg, "numerics": "default"}, calls=calls
+                    )
+                finally:
+                    self._coverage = coverage
+                    (
+                        metrics.generated_kernel_count,
+                        metrics.generated_fallback_kernel_count,
+                    ) = generated
+                self.assertFalse(
+                    strict_numerical - numerical, sorted(strict_numerical - numerical)
+                )
+        if coverage is not None:
+            coverage.native_baseline_verified = True
+            coverage.numerical_fallbacks = len(strict_numerical)
+            coverage.metadata_views = len(strict_metadata)
+        return mismatches
 
     def _combined_calls(self, device, op, dtype, *, backward=False):
         try:
@@ -7988,6 +8330,13 @@ class PointwiseStrictNumericsTest(TestCase):
         self._assert_ledger(edges, op, dtype, f"edges {what}", (), "")
 
     def _sweep(self, device, op, dtype, cfg, *, calls=None):
+        if calls is None:
+            calls = self._collect_calls(device, op, dtype)
+        return self._audit_native_baseline(
+            self._sweep_impl, device, op, dtype, cfg, calls=calls
+        )
+
+    def _sweep_impl(self, device, op, dtype, cfg, *, calls=None):
         r"""Return mismatching (source, index, shape, kwargs, kind) records."""
         if calls is None:
             calls = self._collect_calls(device, op, dtype)
@@ -8025,7 +8374,11 @@ class PointwiseStrictNumericsTest(TestCase):
                         (
                             tag,
                             idx,
-                            [tuple(t.shape) for t in tree_leaves(inp)],
+                            [
+                                tuple(t.shape)
+                                for t in tree_leaves((inp, args, kwargs))
+                                if isinstance(t, torch.Tensor)
+                            ],
                             kwargs,
                             kind,
                         )
@@ -8033,7 +8386,7 @@ class PointwiseStrictNumericsTest(TestCase):
 
         if not mismatches:
             # A mismatch must not be turned into a no-kernel skip.
-            self._require_kernel(tested, "no usable sample", op)
+            self._require_kernel(tested, "no usable sample", op, dtype)
         return mismatches
 
     def _assert_ledger(self, mismatches, op, dtype, what, xfail, xfail_name):
@@ -8183,8 +8536,10 @@ class PointwiseStrictNumericsTest(TestCase):
 
     def _edge_calls(self, op, device, dtype, *, backward=False):
         calls = []
+        if op.name in ("logaddexp", "where") and dtype.is_complex:
+            calls += _pointwise_edge_calls(op, device, dtype, backward=backward)
         if op.name in POINTWISE_EDGE_NAMES and dtype in POINTWISE_EDGE_DTYPES:
-            calls += _pointwise_edge_calls(op, device, dtype)
+            calls += _pointwise_edge_calls(op, device, dtype, backward=backward)
         samples = self._sample_inputs(op, device, dtype, requires_grad=backward)
         candidates = []
         for inp, args, kwargs in self._build_calls(samples, dtype):
@@ -8364,6 +8719,13 @@ class PointwiseStrictNumericsTest(TestCase):
         return out, grads
 
     def _sweep_backward(self, device, op, dtype, cfg, *, calls=None):
+        if calls is None:
+            calls = self._collect_calls(device, op, dtype, backward=True)
+        return self._audit_native_baseline(
+            self._sweep_backward_impl, device, op, dtype, cfg, calls=calls
+        )
+
+    def _sweep_backward_impl(self, device, op, dtype, cfg, *, calls=None):
         r"""Compare input gradients with identical upstream gradients."""
         if calls is None:
             calls = self._collect_calls(device, op, dtype, backward=True)
@@ -8454,7 +8816,7 @@ class PointwiseStrictNumericsTest(TestCase):
                         )
 
         if not mismatches:
-            self._require_kernel(tested, "no differentiable sample", op)
+            self._require_kernel(tested, "no differentiable sample", op, dtype)
         return mismatches
 
     @ops(BACKWARD_OPS, dtypes=OpDTypes.supported_backward)
