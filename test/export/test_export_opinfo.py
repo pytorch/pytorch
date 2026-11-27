@@ -141,7 +141,10 @@ class TestExportOpInfo(TestCase):
     hw_classification = HardwareClassification.CPU
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps(export_failures | fake_export_failures_cuda)
+    @skipOps(
+        (export_failures - {xfail("nn.functional.gaussian_nll_loss")})
+        | fake_export_failures_cuda
+    )
     @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
     def test_fake_export_cuda(self, dtype, op):
         target_device = "cuda:0"
