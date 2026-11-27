@@ -1151,7 +1151,6 @@ class TestPrecompile(TestCase):
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
 
-
     def test_dtensor_subclass(self):
         import torch.distributed as dist
 
@@ -2549,7 +2548,6 @@ class TestPrecompile(TestCase):
         xt = torch.randn(8, 4)
         self.assertEqual(f_c(m, xt), m(xt))
 
-
     @parametrize("backend", ("inductor", "eager"))
     def test_param_shape_mismatch_rejected(self, backend):
         # The headline silent-wrong-result fix: the structural check (invariant 2) now
@@ -3669,7 +3667,6 @@ class TestPrecompileNumericsDevice(TestCase):
                 counters["inductor"]["triton_bundler_load_static_autotuner"], 0
             )
 
-
     def test_plain_function(self, device):
         def f(x, y):
             return (x @ y).sin(), x + y
@@ -3727,7 +3724,6 @@ class TestPrecompileNumericsDevice(TestCase):
         code, cache = _precompile_pair(lambda model, x: model(x), m, x)
         f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
-
 
     def test_training_backward_harvest_matches_eager(self, device):
         # A training step that calls loss.backward(): precompile scatters the
@@ -4321,7 +4317,6 @@ class TestPrecompileFunctionalizedRngCUDA(TestCase):
             out = f_c(x)
         self.assertEqual(out.shape, x.shape)
         self.assertTrue((out == 0).any())
-
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
