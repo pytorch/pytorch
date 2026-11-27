@@ -34,14 +34,12 @@ void isin_sorting(
     const Tensor& test_elements,
     bool invert,
     const Tensor& out) {
-  // Empty test_elements is routed to the brute-force kernel.
-  TORCH_INTERNAL_ASSERT(test_elements.numel() > 0);
   const ScalarType common_dtype = at::result_type(elements, test_elements);
   Tensor elements_flat = elements.to(common_dtype).ravel();
   Tensor test_elements_flat = test_elements.to(common_dtype).ravel();
   // NaNs in the haystack derail searchsorted's binary search, as every
   // comparison against a NaN is false. Overwriting each with an existing
-  // non-NaN element is sound, since a NaN never compares equal to anything.
+  // non-NaN element to bypass that.
   if (isFloatingType(common_dtype)) {
     Tensor nan_mask = test_elements_flat.isnan();
     Tensor replacement_index = nan_mask.to(kByte).argmin();
@@ -63,7 +61,6 @@ void isin_sorting(
 
 REGISTER_CUDA_DISPATCH(isin_default_stub, &isin_default_kernel_gpu)
 
-// assume_unique is unused because neither path relies on uniqueness.
 TORCH_IMPL_FUNC(isin_Tensor_Tensor_out_cuda)
 (const Tensor& elements,
  const Tensor& test_elements,
