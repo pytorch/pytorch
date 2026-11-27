@@ -112,6 +112,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.utils._sympy.numbers import int_oo
 
 
@@ -319,7 +320,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
-    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "cuda or xpu needed")
     def test_assume_32_bit_indexing(self):
         @torch.compile(backend="inductor")
         def func(a, b):
@@ -344,8 +345,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
             return cumsum.sum()
 
-        a = torch.rand(100, 30, device="cuda")
-        b = torch.rand(100, 30, device="cuda")
+        a = torch.rand(100, 30, device=GPU_TYPE)
+        b = torch.rand(100, 30, device=GPU_TYPE)
 
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(a, 1)
@@ -7724,7 +7725,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
 
-    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU"
+    )
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
