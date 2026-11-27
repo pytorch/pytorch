@@ -1165,15 +1165,15 @@ class TestMPS(TestCaseMPS):
             r2 = a2
 
             for _ in range(n):
-                torch._C._mps_setStream(s1)
+                torch.mps.set_stream(s1)
                 r1 = torch.sin(r1)
-                torch._C._mps_setStream(s2)
+                torch.mps.set_stream(s2)
                 r2 = torch.sin(r2)
 
             return r1, r2
 
         try:
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
             a1 = torch.randn(100, device='mps')
             a2 = torch.randn(100, device='mps')
             torch.mps.synchronize()
@@ -1181,7 +1181,7 @@ class TestMPS(TestCaseMPS):
             r1, r2 = concurrent_sine_loop(a1, a2, s1, s2)
             s1.synchronize()
             s2.synchronize()
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
             r1_check, r2_check = concurrent_sine_loop(a1, a2, s1=None, s2=None)
             torch.mps.synchronize()
 
@@ -1189,7 +1189,7 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(r2, r2_check)
 
         finally:
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
             torch.mps.synchronize()
             s1.synchronize()
             s2.synchronize()
@@ -1197,7 +1197,7 @@ class TestMPS(TestCaseMPS):
 
     def test_buffer_reuse_per_stream(self):
         def make_and_free_get_ptr(stream):
-            torch._C._mps_setStream(stream)
+            torch.mps.set_stream(stream)
             t = torch.randn(1 << 16, device='mps')
             stream.synchronize()
             ptr = t.data_ptr()
@@ -1217,13 +1217,13 @@ class TestMPS(TestCaseMPS):
             # Different stream: s1's cached buffer is never handed over as is, a new
             # buffer is placed over its range instead. data_ptr() can't tell the two
             # apart, since Metal reuses the released buffer's address for the new one.
-            torch._C._mps_setStream(s2)
+            torch.mps.set_stream(s2)
             t_s2 = torch.full((1 << 16,), 3.0, device='mps')
             s2.synchronize()
             self.assertEqual(t_s2, torch.full((1 << 16,), 3.0))
 
         finally:
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
             torch.mps.synchronize()
             s1.synchronize()
             s2.synchronize()
@@ -1253,19 +1253,19 @@ class TestMPS(TestCaseMPS):
 
         # Create `t` on `s1`
         try:
-            torch._C._mps_setStream(s1)
+            torch.mps.set_stream(s1)
             t = torch.full((1_000_000,), 3.0, device="mps")
         finally:
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
         s1.synchronize()
 
         # Use `t` as an input to an operation run on `s2`, and record `t` onto
         # `s2`, but don't commit the work yet.
         try:
-            torch._C._mps_setStream(s2)
+            torch.mps.set_stream(s2)
             out = t + 1
         finally:
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
         t.record_stream(s2)
 
         # Drop the only reference to `t`. And create a new tensor on `s1` filled
@@ -1275,10 +1275,10 @@ class TestMPS(TestCaseMPS):
         # uncommitted work depends on.
         del t
         try:
-            torch._C._mps_setStream(s1)
+            torch.mps.set_stream(s1)
             filler = torch.full((1_000_000,), 5.0, device="mps")
         finally:
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
         s1.synchronize()
 
         # Finally commit `s2` and check that the results are correct.
@@ -1308,10 +1308,10 @@ class TestMPS(TestCaseMPS):
         s_init = s1 if init_on_stream1 else torch._C._MPSStreamBase()
 
         try:
-            torch._C._mps_setStream(s_init)
+            torch.mps.set_stream(s_init)
             t = torch.zeros(500, device="mps")
         finally:
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
         s_init.synchronize()
         s1.synchronize()
         s2.synchronize()
@@ -1326,19 +1326,19 @@ class TestMPS(TestCaseMPS):
         # yet, to prevent its completion until later. It won't actually get
         # committed until we sync the stream.
         try:
-            torch._C._mps_setStream(s1)
+            torch.mps.set_stream(s1)
             tmp1 = t + 0
         finally:
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
         t.record_stream(s1)
 
         # Create a workload on `s2` and record it on `t`, then commit and wait
         # for it.
         try:
-            torch._C._mps_setStream(s2)
+            torch.mps.set_stream(s2)
             tmp2 = t + 0
         finally:
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
         t.record_stream(s2)
         s2.synchronize()
 
@@ -16036,13 +16036,13 @@ class TestMetalLibrary(TestCaseMPS):
         stream = torch._C._MPSStreamBase()
         try:
             with torch.mps.profiler.metal_capture(capture_name):
-                torch._C._mps_setStream(stream)
+                torch.mps.set_stream(stream)
                 mps_tensor = torch.zeros(32, device="mps")
                 mps_tensor += 1
             self.assertFalse(torch.mps.profiler.is_capturing_metal())
             self.assertEqual(mps_tensor.sum().item(), mps_tensor.numel())
         finally:
-            torch._C._mps_setStream(None)
+            torch.mps.set_stream(None)
         capture_dirnames = glob.glob(f"*-{capture_name}.gputrace")
         for dirname in capture_dirnames:
             shutil.rmtree(dirname)
