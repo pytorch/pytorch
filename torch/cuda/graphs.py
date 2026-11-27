@@ -28,7 +28,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
-    from torch.cuda import _POOL_HANDLE, MemPool
+    from torch.cuda import _POOL_HANDLE, HostMemPool, MemPool
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
     from torch.utils.hooks import RemovableHandle
 
@@ -70,6 +70,8 @@ def _get_pool_id(pool: _GraphPool | None) -> _POOL_HANDLE | None:
         return None
     if _is_mem_pool(pool):
         return typing.cast("_POOL_HANDLE", pool.id)
+    if isinstance(pool, torch.cuda.HostMemPool):
+        raise TypeError("A HostMemPool cannot be used as a graph capture pool")
     return typing.cast("_POOL_HANDLE", pool)
 
 
@@ -632,6 +634,8 @@ class CUDAGraph(_CUDAGraph):
         if self._tracker is not None:
             self._tracker.stop()
             self._tracker = None
+        if _is_mem_pool(pool):
+            torch.cuda.memory._check_mem_pool_device(pool, torch.cuda.current_device())
         super().capture_begin(
             pool=_get_pool_id(pool), capture_error_mode=capture_error_mode
         )
@@ -699,6 +703,32 @@ class CUDAGraph(_CUDAGraph):
         by ``raw_cuda_graph``.
         """
         super().instantiate()
+        self._post_instantiate()
+
+    def set_raw_cuda_graph_exec(self, graph_exec: int) -> None:
+        r"""Adopt an externally instantiated executable for this CUDA graph.
+
+        Requires ``keep_graph=True`` and a completed capture. ``graph_exec`` must
+        be a live executable created from this instance's ``raw_cuda_graph()``.
+        To match PyTorch's CUDA instantiation, create it with
+        ``cudaGraphInstantiateFlagAutoFreeOnLaunch`` and
+        ``cudaGraphInstantiateFlagUseNodePriority``.
+        This object owns the installed executable and destroys it on reset or
+        collection. The replaced executable is not destroyed: save its handle
+        before this call and manage its lifetime in caller code. Finish outstanding
+        work and destroy detached executables before resetting or collecting this
+        object, since they still reference its captured resources.
+
+        Passing ``0`` clears the installed executable without destroying it;
+        a subsequent ``replay()`` uses the usual on-demand instantiation.
+        Nonzero handles run annotation remapping and instantiate hooks.
+        Ownership transfers before hooks run, even if a hook raises.
+        """
+        super().set_raw_cuda_graph_exec(graph_exec)
+        if graph_exec:
+            self._post_instantiate()
+
+    def _post_instantiate(self) -> None:
         self._maybe_remap_annotations()
         # Fire registered instantiate hooks (e.g. a profiler observer inspecting the freshly
         # instantiated graph). Registering a hook is the opt-in; no consumer -> a no-op.
@@ -779,7 +809,11 @@ class CUDAGraph(_CUDAGraph):
         r"""Return opaque tokens for all memory pools retained by this graph."""
         return [torch.cuda._POOL_HANDLE(pool) for pool in super().pools()]
 
-    def _retain_pool(self, pool: _GraphPool) -> None:
+    def _retain_pool(self, pool: _GraphPool | HostMemPool) -> None:
+        # A HostMemPool cannot be a graph's pool, but a graph that routes to it
+        # during capture keeps it.
+        if isinstance(pool, torch.cuda.HostMemPool):
+            return super()._retain_pool(typing.cast("_POOL_HANDLE", pool.id))
         pool_id = _get_pool_id(pool)
         if pool_id is None:
             raise RuntimeError("CUDAGraph._retain_pool expected a memory pool")
@@ -817,7 +851,12 @@ class CUDAGraph(_CUDAGraph):
         return super().raw_cuda_graph()
 
     def raw_cuda_graph_exec(self) -> int:
-        r"""Returns the underlying cudaGraphExec_t. ``instantiate`` must have been called if ``keep_graph`` is True, or ``capture_end`` must have been called if ``keep_graph`` is False. If you call ``instantiate()`` after ``raw_cuda_graph_exec()``, the previously returned cudaGraphExec_t will be destroyed. It is your responsibility not to use this object after destruction.
+        r"""Return the currently installed cudaGraphExec_t.
+
+        An executable must have been instantiated or installed through
+        :meth:`set_raw_cuda_graph_exec`. Calling ``instantiate()`` afterwards
+        destroys the previously returned executable; do not use it after
+        destruction.
 
         See the following for APIs for how to manipulate this object: `Graph Execution <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH__EXEC.html>`_ and `cuda-python Graph Execution bindings <https://nvidia.github.io/cuda-python/cuda-bindings/latest/module/runtime.html#graph-execution>`_
         """
@@ -826,8 +865,8 @@ class CUDAGraph(_CUDAGraph):
     def get_graph_data(self) -> dict:
         r"""Return a dictionary describing the graph's topology and node metadata.
 
-        ``keep_graph`` must be True.  The graph must have been instantiated
-        (via :meth:`instantiate`) before calling this method.
+        ``keep_graph`` must be True. An executable must be available through
+        :meth:`instantiate` or :meth:`set_raw_cuda_graph_exec` before this call.
         Requires the ``cuda.bindings`` package.
 
         Returns a dictionary with structure::
@@ -1313,10 +1352,10 @@ class graph:
         if stream is None and self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.cuda.Stream()
 
-        pool_id = _get_pool_id(pool)
-        self.pool: tuple[()] | tuple[_POOL_HANDLE] = (
-            () if pool_id is None else (pool_id,)
-        )
+        # Keep a MemPool object so that capture_begin can check its device.
+        if not _is_mem_pool(pool):
+            pool = _get_pool_id(pool)
+        self.pool: tuple[()] | tuple[_GraphPool] = () if pool is None else (pool,)
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
@@ -1711,7 +1750,7 @@ def make_graphed_callables(
         for _ in range(len(callables))
     ]
 
-    mempool = graph_pool_handle() if pool is None else _get_pool_id(pool)
+    mempool = graph_pool_handle() if pool is None else pool
 
     # Warmup
     # Hopefully prevents cudnn benchmarking and other lazy-initialization cuda work
