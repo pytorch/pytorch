@@ -5,10 +5,7 @@ import sys
 import torch
 import torch.distributed as dist
 from torch.distributed import _functional_collectives as fcols
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
@@ -1091,7 +1088,6 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
     def world_size(self) -> int:
         return 2
 
-    @onlyAccelerator
     @with_comms
     def test_all_reduce_compile(self, device):
         """Test that all_reduce backward works with torch.compile."""
@@ -1144,7 +1140,6 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
                     )
                 self.assertEqual(input_tensor.grad, expected_grad)
 
-    @onlyAccelerator
     @with_comms
     def test_all_reduce_coalesced_compile(self, device):
         """Test that all_reduce_coalesced backward works with torch.compile.
@@ -1174,7 +1169,6 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
                 self.assertEqual(a.grad, expected_grad)
                 self.assertEqual(b.grad, expected_grad)
 
-    @onlyAccelerator
     @with_comms
     def test_all_reduce_min_max_ties_compile(self, device):
         """min/max backward splits grad evenly across tied holders under compile.
@@ -1210,7 +1204,6 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
                 self.assertIsNotNone(input_tensor.grad)
                 self.assertEqual(input_tensor.grad, expected_grad)
 
-    @onlyAccelerator
     @with_comms
     def test_all_reduce_coalesced_min_max_ties_compile(self, device):
         """coalesced min/max backward splits grad evenly across ties under compile."""
@@ -1245,7 +1238,6 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
                 self.assertEqual(a.grad, expected_grad)
                 self.assertEqual(b.grad, expected_grad)
 
-    @onlyAccelerator
     @with_comms
     def test_all_gather_tensor_compile(self, device):
         """Test that all_gather_tensor backward works with torch.compile."""
@@ -1266,7 +1258,6 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
         expected_grad = torch.full((3, 3, 3), fill_value=float(self.world_size))
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @onlyAccelerator
     @with_comms
     def test_reduce_scatter_tensor_compile(self, device):
         """Test that reduce_scatter_tensor backward works with torch.compile."""
@@ -1292,7 +1283,6 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
         expected_grad = torch.ones_like(input_tensor)
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @onlyAccelerator
     @with_comms
     def test_all_to_all_single_compile(self, device):
         """Test that all_to_all_single backward works with torch.compile."""
@@ -1325,7 +1315,6 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
     # _c10d_functional_autograd torch.compile Integration Tests
     # ============================================================
 
-    @onlyAccelerator
     @with_comms
     def test_all_gather_into_tensor_autograd_compile(self, device):
         """Test that _c10d_functional_autograd.all_gather_into_tensor works with torch.compile."""
@@ -1349,7 +1338,6 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
         expected_grad = torch.full((3, 3), fill_value=float(self.world_size))
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @onlyAccelerator
     @with_comms
     def test_reduce_scatter_tensor_autograd_compile(self, device):
         """Test that _c10d_functional_autograd.reduce_scatter_tensor works with torch.compile."""
@@ -1375,7 +1363,6 @@ class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
         expected_grad = torch.ones_like(input_tensor)
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @onlyAccelerator
     @with_comms
     def test_all_to_all_single_autograd_compile(self, device):
         """Test that _c10d_functional_autograd.all_to_all_single works with torch.compile."""
@@ -1416,6 +1403,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestFunctionalDifferentialsWithCompileDevice,
     globals(),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
