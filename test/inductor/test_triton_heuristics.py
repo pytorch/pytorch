@@ -1021,6 +1021,7 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(configs[0].kwargs, expected_kwargs)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 class TestTritonHeuristicsRuntime(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -1165,6 +1166,7 @@ class TestTritonHeuristicsRuntime(TestCase):
             self.assertEqual(len(benchmark_calls), 1)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @instantiate_parametrized_tests
 class TestTritonHeuristicsBackendConfig(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1203,6 +1205,7 @@ class TestTritonHeuristicsBackendConfig(TestCase):
             self.assertEqual(len(configs), expected_count)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @instantiate_parametrized_tests
 class TestTritonHeuristicsROCm(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -1370,6 +1373,7 @@ class TestTritonHeuristicsROCm(TestCase):
             self.assertEqual([c.kwargs["kpack"] for c in configs], [int8_kpack] * 2)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 class TestROCmExhaustiveConfigs(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -1400,6 +1404,7 @@ _PLUGIN_FACTORY_PATH = (
 )
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 class TestCachingAutotunerPrecompileDriverSetup(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -1429,6 +1434,7 @@ class TestCachingAutotunerPrecompileDriverSetup(TestCase):
         self.assertEqual(len(autotuner.compile_results), num_configs)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCachingAutotunerPlugin(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1601,6 +1607,7 @@ class TestCachingAutotunerPlugin(TestCase):
         self.assertEqual(revived._plugins, [])
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 class TestArgumentCloneAndRestore(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -1684,6 +1691,7 @@ class TestArgumentCloneAndRestore(TestCase):
         self._do_test(arg)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 class TestDumpLaunchTensors(TestCase):
     """Test the _dump_launch_tensors functionality"""
 
@@ -1796,6 +1804,7 @@ class TestDumpLaunchTensors(TestCase):
                 os.environ["TORCHINDUCTOR_DUMP_LAUNCH_TENSORS"] = old_dump_env
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @instantiate_parametrized_tests
 class TestRecheckAutotuneCache(TestCase):
     """Tests for CachingAutotuner.recheck_autotune_cache"""
@@ -2036,6 +2045,7 @@ def get_hip_autotune_kernel_with_invalid_config():
     )(hip_autotune_kernel)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 class TestHIPInvalidConfigHandling(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -2600,6 +2610,7 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertGreaterEqual(y * z, 131070)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 class TestDynamicScaleRblockCacheInteraction(TestCase):
     """Tests for _dynamic_scale_rblock + autotune cache interaction.
 
@@ -2833,6 +2844,7 @@ class TestDynamicScaleRblockCacheLoading(TestCase):
         self.assertIsNone(result)
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCheckLauncherCallArgs(TestCase):
     """Unit tests for CachingAutotuner._check_launcher_call_args.
@@ -2956,6 +2968,7 @@ class TestWarpSizeUnification(TestCase):
         self.assertEqual(cfg64.kwargs["XBLOCK"], 2 * cfg32.kwargs["XBLOCK"])
 
 
+@unittest.skipUnless(IS_LINUX, "Triton runtime tests require Linux")
 class TestBackendGridLimits(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -3055,5 +3068,4 @@ class TestMakeLaunchersMemory(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX:
-        run_tests()
+    run_tests()
