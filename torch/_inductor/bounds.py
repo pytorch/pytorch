@@ -157,6 +157,8 @@ class BoundVars:
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
+    """Infer value ranges for the Inductor ops interface."""
+
     def __init__(self) -> None:
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
@@ -179,6 +181,16 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
         # many ops are unlikely to show up in optimizable indexing compute,
         # so we don't have full coverage
         return ValueRanges.unknown()
+
+    @classmethod
+    def mul(
+        cls,
+        a: AllIn | ValueRanges[Any],
+        b: AllIn | ValueRanges[Any],
+        *,
+        native_cuda_execution=None,
+    ) -> ValueRanges[Any]:
+        return super().mul(a, b)
 
     def load(self, name: str, index: sympy.Expr) -> ValueRanges[Any]:
         return ValueRanges.unknown()
