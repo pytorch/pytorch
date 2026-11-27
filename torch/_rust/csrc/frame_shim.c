@@ -214,16 +214,34 @@ int tr_traceback_here(_PyInterpreterFrame* f) {
   return PyTraceBack_Here(frame_obj);
 }
 
-// sys.settrace / sys.setprofile / sys.monitoring: the executor emits no
-// events, so it refuses to run while any are active.
-int tr_tracing_active(PyThreadState* tstate) {
+// sys.settrace / sys.setprofile / sys.monitoring: whether a tool is to be
+// told of what frame `f` does on this thread. The executor emits no events,
+// so such a frame is CPython's.
+//   - A trace or profile function is a thread's own: this thread has one.
+//     (Setting one turns on the interpreter's events for the two tool ids
+//     sys.settrace and sys.setprofile use, for every thread, and a thread
+//     that ends with its function set leaves them on for good: those two
+//     ids say nothing about this thread, so they are not asked.)
+//   - Another tool of sys.monitoring has events set for the interpreter, or
+//     for the frame's code object (sys.monitoring.set_local_events).
+#define TR_OTHER_TOOLS \
+  ((uint8_t)~((1 << PY_MONITORING_SYS_PROFILE_ID) | (1 << PY_MONITORING_SYS_TRACE_ID)))
+int tr_tracing_active(PyThreadState* tstate, _PyInterpreterFrame* f) {
   if (tstate->c_tracefunc != NULL || tstate->c_profilefunc != NULL) {
     return 1;
   }
   _Py_GlobalMonitors* m = &tstate->interp->monitors;
   for (int i = 0; i < _PY_MONITORING_UNGROUPED_EVENTS; i++) {
-    if (m->tools[i]) {
+    if (m->tools[i] & TR_OTHER_TOOLS) {
       return 1;
+    }
+  }
+  _PyCoMonitoringData* local = f->f_code->_co_monitoring;
+  if (local != NULL) {
+    for (int i = 0; i < _PY_MONITORING_LOCAL_EVENTS; i++) {
+      if (local->local_monitors.tools[i] & TR_OTHER_TOOLS) {
+        return 1;
+      }
     }
   }
   return 0;

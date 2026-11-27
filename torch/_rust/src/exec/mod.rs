@@ -19,6 +19,7 @@ pub mod graph;
 pub mod hist;
 pub mod joint;
 mod kinds;
+pub mod left;
 mod live;
 mod made;
 pub mod overlap;
@@ -587,6 +588,7 @@ impl Compiled {
         let info = crate::cfg::python::code_info(code)?;
         let outline = *OUTLINE.lock().unwrap();
         let cfg = crate::cfg::build(info, true, outline).map_err(crate::cfg::python::to_pyerr)?;
+        left::asked_to_fail(true, || code.getattr("co_qualname")?.extract::<String>())?;
         let consts = code.getattr("co_consts")?.cast_into::<PyTuple>()?.unbind();
         let names = code.getattr("co_names")?.cast_into::<PyTuple>()?.unbind();
         let mut plan = Box::new(Plan::new(cfg, None, true, vec![], &consts, &names)?);
@@ -689,7 +691,7 @@ pub fn _set_cfg_record(on: bool) {
 }
 
 unsafe extern "C" fn free_compiled(p: *mut c_void) {
-    if !p.is_null() && p != trampoline::mark() && p != compilers::mark() {
+    if !p.is_null() && p != trampoline::mark() && p != compilers::mark() && p != left::mark() {
         drop(Arc::from_raw(p as *const Compiled));
     }
 }
@@ -712,8 +714,19 @@ enum Lookup<'a> {
     // A compiler's code (see compilers.rs), run by CPython's evaluator with
     // every frame it enters.
     Outside,
-    // A Python exception is set.
+    // No plan could be made for it (see left.rs), or none can be kept: run
+    // by CPython's evaluator. Nothing is pending.
+    Left,
+    // An error that says nothing of the code (see left::of_the_code) came
+    // while its first plan was made: a Python exception is set.
     Error,
+}
+
+// The row of a code the executor has no plan for (see left.rs).
+fn left_row(code: &Bound<'_, PyAny>, making: bool, why: String) {
+    let name = code.getattr("co_qualname").and_then(|n| n.extract::<String>()).unwrap_or_else(|_| "?".into());
+    let line = code.getattr("co_firstlineno").and_then(|n| n.extract::<i32>()).unwrap_or(0);
+    left::code(name, line, making, why);
 }
 
 // The cached Compiled for `code`, converting it on first use. The result lives
@@ -722,7 +735,16 @@ unsafe fn compiled<'a>(code: *mut pyo3::ffi::PyObject) -> Lookup<'a> {
     let index = extra_index();
     let mut p: *mut c_void = std::ptr::null_mut();
     if index < 0 || PyUnstable_Code_GetExtra(code, index, &mut p) < 0 {
-        return Lookup::Error;
+        // Nowhere to keep a plan with the code (the interpreter gave out
+        // no slot, or does not hand out what is in it).
+        return Python::attach(|py| {
+            let why = PyErr::take(py).map_or("the interpreter has no slot left to keep a plan in".to_string(), |e| e.to_string());
+            left_row(&Bound::from_borrowed_ptr(py, code), false, why);
+            Lookup::Left
+        });
+    }
+    if p == left::mark() {
+        return Lookup::Left;
     }
     if p == trampoline::mark() {
         return Lookup::Trampoline;
@@ -737,7 +759,10 @@ unsafe fn compiled<'a>(code: *mut pyo3::ffi::PyObject) -> Lookup<'a> {
         let code_obj = Bound::from_borrowed_ptr(py, code);
         // Decided before anything is made for the code.
         if compilers::is(&code_obj) {
-            return if PyUnstable_Code_SetExtra(code, index, compilers::mark()) < 0 { Lookup::Error } else { Lookup::Outside };
+            if PyUnstable_Code_SetExtra(code, index, compilers::mark()) < 0 {
+                pyo3::ffi::PyErr_Clear();
+            }
+            return Lookup::Outside;
         }
         match Compiled::new(&code_obj) {
             Ok(c) => {
@@ -746,13 +771,28 @@ unsafe fn compiled<'a>(code: *mut pyo3::ffi::PyObject) -> Lookup<'a> {
                 let p = Arc::into_raw(c);
                 if PyUnstable_Code_SetExtra(code, index, p as *mut c_void) < 0 {
                     drop(Arc::from_raw(p));
-                    return Lookup::Error;
+                    let e = PyErr::fetch(py);
+                    if !left::of_the_code(py, &e) {
+                        e.restore(py);
+                        return Lookup::Error;
+                    }
+                    left_row(&code_obj, false, e.to_string());
+                    return Lookup::Left;
                 }
                 Lookup::Compiled(&*p)
             }
-            Err(e) => {
+            Err(e) if !left::of_the_code(py, &e) => {
                 e.restore(py);
                 Lookup::Error
+            }
+            Err(e) => {
+                // Said once, and not tried again for this code (if the mark
+                // cannot be kept, it is tried at every entry: the row is one).
+                left_row(&code_obj, true, e.to_string());
+                if PyUnstable_Code_SetExtra(code, index, left::mark()) < 0 {
+                    pyo3::ffi::PyErr_Clear();
+                }
+                Lookup::Left
             }
         }
     })
@@ -858,7 +898,8 @@ enum Runs<'a> {
     // frame it enters (outside the executor), else those are the
     // executor's again.
     CPython { deep: bool },
-    // No plan could be made for its code: an exception is set.
+    // An exception is set that came while its code's first plan was made
+    // and says nothing of the code (Lookup::Error): the frame raises it.
     Failed,
     Executor { c: &'a Compiled, plan: &'a Plan, start: run::Start, observed: bool },
 }
@@ -969,6 +1010,17 @@ unsafe fn who_runs<'a>(tstate: *mut pyo3::ffi::PyThreadState, frame: *mut Frame,
         }
         return Runs::CPython { deep };
     }
+    // A tool set through sys.settrace, sys.setprofile or sys.monitoring is
+    // told of what CPython's evaluator runs, and the executor emits no
+    // events: a frame that arrives while one is set is CPython's, so the
+    // tool is told of it as in eager. (A frame the executor is running when
+    // a tool is set runs on to its end; the frames it enters come here.)
+    if tr_tracing_active(tstate, frame) != 0 {
+        left::tool();
+        // The instr that entered it did enter a frame.
+        effects::frame_entered(frame, gen_frame);
+        return cpython("while a tool is set through sys.settrace, sys.setprofile or sys.monitoring");
+    }
     // See own.rs: a generator's frame is the executor's to start with a
     // value sent, and to resume only where the executor itself suspended
     // it. Every other is CPython's, as it arrived.
@@ -983,11 +1035,11 @@ unsafe fn who_runs<'a>(tstate: *mut pyo3::ffi::PyThreadState, frame: *mut Frame,
     if cloned {
         NEXT_CLONE.set((0, 0, 0));
     }
-    let compiled = if cloned && !plain {
-        Some(&*(pending.2 as *const Compiled))
+    let c = if cloned && !plain {
+        &*(pending.2 as *const Compiled)
     } else {
         match compiled(code) {
-            Lookup::Compiled(c) => Some(c),
+            Lookup::Compiled(c) => c,
             Lookup::Trampoline => {
                 if shadow {
                     calls::record::frame(frame, false);
@@ -1008,25 +1060,28 @@ unsafe fn who_runs<'a>(tstate: *mut pyo3::ffi::PyThreadState, frame: *mut Frame,
                 effects::frame_entered(frame, gen_frame);
                 return Runs::CPython { deep: true };
             }
-            Lookup::Error => None,
+            Lookup::Left => {
+                // The instr that entered it did enter a frame.
+                effects::frame_entered(frame, gen_frame);
+                return cpython("code the executor has no plan for");
+            }
+            Lookup::Error => {
+                effects::frame_entered(frame, gen_frame);
+                return Runs::Failed;
+            }
         }
     };
     // A cold generator's frame resumes on CPython too (the executor suspends
     // frames as CPython does).
-    if let Some(c) = compiled {
-        // Once cold code is bypassed, code first run after (a bypassed
-        // frame's callee, run by its own Compiled) is cold too.
-        if !c.cold.load(Ordering::Relaxed) && BYPASSED.load(Ordering::Relaxed) && !c.auto_optimized.load(Ordering::Relaxed) {
-            c.cold.store(true, Ordering::Relaxed);
-        }
-        if c.cold.load(Ordering::Relaxed) && !tracing && !shadow && !(!gen_frame && covered::observes(c)) {
-            return Runs::CPython { deep: c.deep.load(Ordering::Relaxed) };
-        }
+    // Once cold code is bypassed, code first run after (a bypassed
+    // frame's callee, run by its own Compiled) is cold too.
+    if !c.cold.load(Ordering::Relaxed) && BYPASSED.load(Ordering::Relaxed) && !c.auto_optimized.load(Ordering::Relaxed) {
+        c.cold.store(true, Ordering::Relaxed);
+    }
+    if c.cold.load(Ordering::Relaxed) && !tracing && !shadow && !(!gen_frame && covered::observes(c)) {
+        return Runs::CPython { deep: c.deep.load(Ordering::Relaxed) };
     }
     effects::frame_entered(frame, gen_frame);
-    let Some(c) = compiled else {
-        return Runs::Failed;
-    };
     if !gen_frame && c.flags & GENERATOR_FLAGS != 0 {
         // Calling a generator function runs only its prologue, up to
         // RETURN_GENERATOR, which creates the generator object (from
@@ -1066,13 +1121,6 @@ unsafe fn run_frame(
     if tr_frame_enter(tstate, frame) < 0 {
         return leave(tstate, frame, gen_frame, run::Outcome::Error);
     }
-    if tr_tracing_active(tstate) != 0 {
-        fail(
-            "CFG executor: sys.settrace/setprofile/monitoring are not supported",
-            pyo3::ffi::PyExc_RuntimeError,
-        );
-        return leave(tstate, frame, gen_frame, run::Outcome::Error);
-    }
     let in_instr = tracing && reads::in_instr();
     let outcome = {
         let _using = Using::new(plan);
@@ -1087,7 +1135,7 @@ unsafe fn run_frame(
     if matches!(outcome, run::Outcome::Return(_)) && OPTIMIZE.load(Ordering::Relaxed) && !OPTIMIZING.get() && !tracing && !shadow {
         let py = Python::assume_attached();
         if !c.auto_optimized.swap(true, Ordering::Relaxed) {
-            if let Err(e) = optimize(py, c, None) {
+            if let Some(e) = optimize(py, c, None).err().and_then(|e| left::compiled(py, c, e)) {
                 e.write_unraisable(py, None);
             }
             c.sweep();
@@ -1097,14 +1145,14 @@ unsafe fn run_frame(
         {
             // By now its clones (and theirs) have been optimized and have
             // observed: optimize again, eliding what they allow.
-            if let Err(e) = outside_executor(|| optimize_now(py, c, None, true)) {
+            if let Some(e) = outside_executor(|| optimize_now(py, c, None, true)).err().and_then(|e| left::compiled(py, c, e)) {
                 e.write_unraisable(py, None);
             }
             c.sweep();
         } else if value_reads::again(c) {
             // A trace of its code was given up for a value the run read
             // from a tensor: planned again, its regions end at that read.
-            if let Err(e) = outside_executor(|| optimize_now(py, c, None, true)) {
+            if let Some(e) = outside_executor(|| optimize_now(py, c, None, true)).err().and_then(|e| left::compiled(py, c, e)) {
                 e.write_unraisable(py, None);
             }
             c.sweep();
@@ -1367,7 +1415,9 @@ pub fn _reoptimize_all(py: Python<'_>) -> usize {
         match outside_executor(|| optimize_now(py, &c, None, true)) {
             Ok(()) => n += 1,
             Err(e) => {
-                if std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some() {
+                if let Some(e) = left::compiled(py, &c, e)
+                    && std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some()
+                {
                     eprintln!("reoptimize {}: {e}", c.qualname);
                 }
             }
@@ -1557,6 +1607,7 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
     }
     pins.extend(pinned.iter().map(|v| objects[v].clone_ref(py)));
     crate::cfg::verify::verify(&cfg).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("CFG verification failed: {e}")))?;
+    left::asked_to_fail(false, || Ok(c.qualname.clone()))?;
     let record = block.is_some() && plan.prep.record;
     let clones = new_clones(py, c, plan, current);
     swap_plan(c, current, plan, cfg, record, pins, clones, |p| unsafe { &mut *p.effects.get() }.renumber_blocks(&renumbered))
@@ -2013,8 +2064,29 @@ pub(crate) fn place_of(cfg: &Cfg, b: BlockId) -> Option<&Arc<crate::cfg::ir::Pla
 // derives from it by adding regions. The block's first region comes with a
 // region version in front of its others, with the guard of the version the
 // trace was made from; later ones are added to that version's place, which
-// changes no Cfg. Ok(false): the Cfg is another (trace it again).
+// changes no Cfg. Ok(false): the Cfg is another. Then, and with an error,
+// the trace is told that it is no region (its row says why); the caller
+// switches the block off for an error and not for Ok(false), so a later
+// arrival of the block is traced against the plan there is then.
 pub(crate) fn add_region(c: &Compiled, prep: usize, b: BlockId, traced: region::Traced) -> PyResult<bool> {
+    let func = Python::attach(|py| traced.variant.spec.func.clone_ref(py));
+    let added = add_region_to(c, prep, b, traced);
+    // A region the plan could not take is none: its trace says so, with
+    // why (torch.vm.regions), and lets go of what it read.
+    let why = match &added {
+        Ok(true) => return added,
+        Ok(false) => "the plan changed while the region was traced".to_string(),
+        Err(e) => e.to_string(),
+    };
+    Python::attach(|py| {
+        if let Err(e) = outside_executor(|| py.import("torch._rust_inductor").and_then(|m| m.call_method1("_not_added", (func, why)))) {
+            e.write_unraisable(py, None);
+        }
+    });
+    added
+}
+
+fn add_region_to(c: &Compiled, prep: usize, b: BlockId, traced: region::Traced) -> PyResult<bool> {
     let plan = c.plan();
     let here = &plan.prep as *const Prepared as usize;
     let lineage = unsafe { &*plan.prep.region_lineage.get() };
@@ -3726,6 +3798,9 @@ unsafe fn lookup<'a>(code: &Bound<'_, PyAny>) -> PyResult<&'a Compiled> {
     }
     if p == compilers::mark() {
         return Err(pyo3::exceptions::PyValueError::new_err("it is code of a compiler or of a function transform, which runs on CPython"));
+    }
+    if p == left::mark() {
+        return Err(pyo3::exceptions::PyValueError::new_err("no plan could be made for its code, which runs on CPython"));
     }
     if p.is_null() || p == trampoline::mark() {
         return Err(pyo3::exceptions::PyValueError::new_err("the CFG executor hasn't run this code"));

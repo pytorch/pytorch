@@ -2836,6 +2836,17 @@ def _unmade(func, why: str) -> None:
     stats["refused"] += 1
 
 
+def _not_added(func, why: str) -> None:
+    """The region whose function is ``func`` was traced and the plan of its
+    code could not take it (exec/mod.rs's add_region): its trace is no
+    region, and what the trace read is let go."""
+    record = func.record
+    record.state = "refused"
+    record.why = f"the plan of its code could not take the region: {why}"
+    record.reads = None
+    stats["refused"] += 1
+
+
 def _span_holds(checks, args) -> bool:
     same = _rust()._same
     for kind, i, want in checks:

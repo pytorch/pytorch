@@ -30,7 +30,7 @@ unsafe extern "C" {
     pub fn tr_frame_clear_and_pop(t: *mut PyThreadState, f: *mut Frame);
     pub fn tr_traceback_here(f: *mut Frame) -> c_int;
     pub fn tr_current_frame(t: *mut PyThreadState) -> *mut Frame;
-    pub fn tr_tracing_active(t: *mut PyThreadState) -> c_int;
+    pub fn tr_tracing_active(t: *mut PyThreadState, f: *mut Frame) -> c_int;
     pub fn tr_frame_push(f: *mut Frame, obj: *mut PyObject);
     pub fn tr_frame_globals(f: *mut Frame) -> *mut PyObject;
     pub fn tr_frame_builtins(f: *mut Frame) -> *mut PyObject;

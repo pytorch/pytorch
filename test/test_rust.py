@@ -3436,17 +3436,25 @@ bb4(%14 s0, %15 lasti, %16 exc):
         with self.assertRaises(UnboundLocalError):
             torch._rust.call_with_cfg_execution(f, [4], False)
 
-    def test_tracing_is_refused(self):
+    def test_a_frame_entered_while_tracing_runs_on_cpython(self):
+        seen = []
+
         def f():
-            sys.settrace(lambda *a: None)
+            sys.settrace(
+                lambda frame, event, arg: seen.append((frame.f_code.co_name, event))
+            )
             try:
                 return (lambda: 1)()  # noqa: PLC3002
             finally:
                 sys.settrace(None)
 
-        with self.assertRaisesRegex(RuntimeError, "settrace"):
-            torch._rust.call_with_cfg_execution(f)
-        sys.settrace(None)
+        try:
+            self.assertEqual(torch._rust.call_with_cfg_execution(f), 1)
+        finally:
+            sys.settrace(None)
+        # As in eager: the trace function is told of the frame entered
+        # after it was set.
+        self.assertEqual(seen, [("<lambda>", "call")])
 
 
 if __name__ == "__main__":

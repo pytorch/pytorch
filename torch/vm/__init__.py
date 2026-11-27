@@ -554,6 +554,15 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
     ``function``, ``lines`` and ``why`` (``"... called <built-in function
     print>"``, ``"... ran aten::item"``, ``"... writes"``).
 
+    A function the executor leaves to CPython because no plan could be made
+    for its code has ``state`` ``"on CPython"``, ``kind`` ``"function"``,
+    ``where`` (``"QUALNAME line N"``, its first line), ``function``,
+    ``lines`` and ``why``. It runs as it is written, and has no region.
+    While a tool is set through ``sys.settrace``, ``sys.setprofile`` or
+    ``sys.monitoring`` (a profiler, a debugger, a coverage tool) every frame
+    that is entered runs on CPython, so that the tool is told of it: one row
+    with ``where`` ``"every function"`` says how many frames that were.
+
     The executor's switches are process-wide (one function on the VM per
     process), and so is this report: it covers every function the VM ran.
     """
@@ -661,6 +670,19 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
                 "kind": "call",
                 "lines": (line, line),
                 "state": "not movable",
+                "why": why,
+            }
+        )
+    for function, line, why in rust._cfg_left():
+        out.append(
+            {
+                "where": "every function"
+                if function == "*"
+                else f"{function} line {line}",
+                "function": function,
+                "kind": "function",
+                "lines": (line, line),
+                "state": "on CPython",
                 "why": why,
             }
         )

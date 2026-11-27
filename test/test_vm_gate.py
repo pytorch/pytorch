@@ -10437,5 +10437,769 @@ class TestVmAmbientFloat32(TestCase):
         return ran, raised, unseen
 
 
+# A local that is bound and not read again, in front of a call that can
+# raise: by name, what the report has to show. "region": a region of the
+# function runs; "on CPython": the plan the optimizer makes of the function
+# does not verify, so its frames run on CPython and a row says so; None:
+# only that the function computes what eager does and that nothing is
+# printed.
+EDGE_DEAD_STORES = {
+    "none_last": "on CPython",
+    "const_int": "on CPython",
+    "const_str": "on CPython",
+    "const_bool": "on CPython",
+    "const_tuple": "on CPython",
+    "is_none": "on CPython",
+    "built_tuple": "on CPython",
+    "empty_dict": "on CPython",
+    "empty_list": "on CPython",
+    "a_lambda": "on CPython",
+    "deleted": "region",
+    "in_branch": "region",
+    "in_loop": "region",
+    "rebound_type": "on CPython",
+    "cell": "on CPython",
+    "in_try": "on CPython",
+    "in_finally": "on CPython",
+    "in_with_class": "on CPython",
+    "in_with_generator": None,
+    "cell_read": None,
+    "raises_after": None,
+}
+
+EDGE_PLANS_PROGRAM = r"""
+import contextlib, io, json, sys
+import torch
+from torch import vm
+
+EARLY = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+
+
+def work(x):
+    return ((x.sin() * 2).cos() + 1).tanh().exp()
+
+
+@contextlib.contextmanager
+def managed():
+    yield 2.0
+
+
+class Managed:
+    def __enter__(self):
+        return 2.0
+
+    def __exit__(self, *exc):
+        return False
+
+
+def none_last(x):
+    y = work(x)
+    t = y + 1
+    t = None
+    return work(y * 2.0)
+
+
+def const_int(x):
+    y = work(x)
+    n = 3
+    return work(y * 2.0)
+
+
+def const_str(x):
+    y = work(x)
+    s = "name"
+    return work(y * 2.0)
+
+
+def const_bool(x):
+    y = work(x)
+    done = False
+    return work(y * 2.0)
+
+
+def const_tuple(x):
+    y = work(x)
+    pair = (1, 2)
+    return work(y * 2.0)
+
+
+def is_none(x):
+    y = work(x)
+    b = y is None
+    return work(y * 2.0)
+
+
+def built_tuple(x):
+    y = work(x)
+    pair = (y, x)
+    return work(y * 2.0)
+
+
+def empty_dict(x):
+    y = work(x)
+    d = {}
+    return work(y * 2.0)
+
+
+def empty_list(x):
+    y = work(x)
+    d = []
+    return work(y * 2.0)
+
+
+def a_lambda(x):
+    y = work(x)
+    f = lambda: 1
+    return work(y * 2.0)
+
+
+def deleted(x):
+    y = work(x)
+    t = y + 1
+    del t
+    return work(y * 2.0)
+
+
+def in_branch(x):
+    y = work(x)
+    t = y + 1
+    if x.shape[0] == 4:
+        t = None
+    return work(y * 2.0)
+
+
+def in_loop(x):
+    y = work(x)
+    for i in range(2):
+        t = y + i
+        t = None
+        y = work(y * 2.0)
+    return y
+
+
+def rebound_type(x):
+    y = work(x)
+    t = y + 1
+    t = "text"
+    t = 2.0
+    return work(y * 2.0)
+
+
+def cell(x):
+    y = work(x)
+    t = y + 1
+    t = None
+
+    def inner():
+        return t
+
+    return work(y * 2.0)
+
+
+def in_try(x):
+    y = work(x)
+    try:
+        t = y + 1
+        t = None
+        y = work(y * 2.0)
+    except ValueError:
+        y = y + 1
+    return y
+
+
+def in_finally(x):
+    y = work(x)
+    try:
+        t = y + 1
+    finally:
+        t = None
+    return work(y * 2.0)
+
+
+def in_with_class(x):
+    y = work(x)
+    with Managed() as k:
+        t = None
+        y = work(y * k)
+    return y
+
+
+def in_with_generator(x):
+    y = work(x)
+    with managed() as k:
+        t = None
+        y = work(y * k)
+    return y
+
+
+def cell_read(x):
+    y = work(x)
+    t = None
+
+    def inner():
+        return t
+
+    return work(y * 2.0), inner()
+
+
+def raises_after(x):
+    # The store is pending when the call raises: the handler reads the local.
+    y = work(x)
+    t = None
+    try:
+        y = work(y @ y)
+    except RuntimeError:
+        return work(y * 2.0), t
+    return y
+
+
+def callee(x):
+    return work(x * 3.0) + 1
+
+
+def caller(x):
+    y = work(x)
+    return callee(y * 2.0)
+
+
+def same(a, b):
+    if isinstance(a, torch.Tensor):
+        return isinstance(b, torch.Tensor) and torch.equal(a, b)
+    if isinstance(a, (tuple, list)):
+        return len(a) == len(b) and all(same(p, q) for p, q in zip(a, b))
+    return a == b
+
+
+def run(fn, asked_until=None):
+    compiled = vm(fn, passes=EARLY)
+    err, verdicts = io.StringIO(), []
+    with contextlib.redirect_stderr(err):
+        for call in range(8):
+            if call == asked_until:
+                torch._rust._cfg_fail_plans(None)
+            x = torch.full((4, 8), call + 1.0)
+            try:
+                got = compiled(x)
+            except BaseException as e:
+                got = f"raised {type(e).__name__}: {e}"
+            verdicts.append("same" if same(got, fn(x)) else str(got)[:200])
+    rows = [
+        {"function": r["function"], "state": r["state"], "runs": r.get("runs") or 0, "why": r.get("why") or "", "kind": r["kind"]}
+        for r in vm.regions(compiled)
+    ]
+    explained = [line.strip() for line in vm.explain(compiled).splitlines() if ": on CPython: " in line]
+    return {"verdicts": verdicts, "printed": err.getvalue()[-1500:], "rows": rows, "explained": explained}
+
+
+if sys.argv[1] == "family":
+    print(json.dumps({name: run(globals()[name]) for name in json.loads(sys.argv[2])}))
+elif sys.argv[1] == "first interrupted":
+    # The first plan of `callee` meets a KeyboardInterrupt, in calls 0 and 1.
+    torch._rust._cfg_fail_plans("callee", True, True)
+    print(json.dumps(run(caller, 2)))
+elif sys.argv[1] == "later interrupted":
+    torch._rust._cfg_fail_plans("callee", False, True)
+    print(json.dumps(run(caller)))
+else:
+    # No plan for `callee`: its first ("first") or every later one ("later").
+    if sys.argv[1] != "none":
+        torch._rust._cfg_fail_plans("callee", sys.argv[1] == "first")
+    print(json.dumps(run(caller)))
+"""
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+class TestVmEdgePlans(TestCase):
+    """What the program sees where the executor cannot make a plan for a
+    code: the code runs on CPython, as written, and ``torch.vm.regions`` and
+    ``torch.vm.explain`` say why. Nothing is raised into the program and
+    nothing is printed. The one family of programs known to meet it: a local
+    that is bound and not read again, in front of a call, in the last block
+    of a function (the plan the optimizer makes of it does not verify). An
+    error that says nothing of the code (an interrupt) makes no row and
+    leaves the code with the executor.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def program(self, *args):
+        command = [sys.executable, "-c", EDGE_PLANS_PROGRAM, *args]
+        ran = subprocess.run(command, capture_output=True, text=True, timeout=900)
+        self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+        return json.loads(ran.stdout.splitlines()[-1])
+
+    def test_a_local_bound_and_not_read_again(self):
+        found = self.program("family", json.dumps(list(EDGE_DEAD_STORES)))
+        self.assertEqual(list(found), list(EDGE_DEAD_STORES))
+        for name, want in EDGE_DEAD_STORES.items():
+            got = found[name]
+            self.assertEqual(got["verdicts"], ["same"] * 8, msg=name)
+            self.assertNotIn("Error", got["printed"], msg=name)
+            self.assertNotIn("Traceback", got["printed"], msg=name)
+            own = [r for r in got["rows"] if r["function"] == name]
+            left = [r for r in own if r["state"] == "on CPython"]
+            ran = sum(r["runs"] for r in own if r["state"] == "region")
+            if want == "on CPython":
+                self.assertEqual(len(left), 1, msg=f"{name}: {own}")
+                self.assertEqual(left[0]["kind"], "function", msg=name)
+                self.assertIn("its code could not be planned again", left[0]["why"])
+                self.assertIn("CFG verification failed", left[0]["why"])
+                # No row says "region" of a region that never runs.
+                self.assertEqual(ran, 0, msg=f"{name}: {own}")
+                self.assertEqual(
+                    [r for r in own if r["state"] == "region"], [], msg=name
+                )
+                continue
+            self.assertEqual(left, [], msg=name)
+            if want == "region":
+                self.assertGreater(ran, 0, msg=f"{name}: {own}")
+
+    def test_a_code_with_no_plan_runs_on_cpython_and_the_report_says_why(self):
+        reasons = {
+            "first": "no plan could be made for its code",
+            "later": "its code could not be planned again",
+        }
+        for which, reason in reasons.items():
+            got = self.program(which)
+            self.assertEqual(got["verdicts"], ["same"] * 8, msg=which)
+            self.assertEqual(got["printed"], "", msg=which)
+            left = [r for r in got["rows"] if r["state"] == "on CPython"]
+            self.assertEqual(len(left), 1, msg=f"{which}: {got['rows']}")
+            self.assertEqual(
+                (left[0]["function"], left[0]["kind"]), ("callee", "function")
+            )
+            self.assertIn(reason, left[0]["why"])
+            self.assertIn("CFG verification failed", left[0]["why"])
+            self.assertEqual(len(got["explained"]), 1, msg=which)
+            self.assertIn(reason, got["explained"][0])
+            # The frames it enters are the executor's again, and the code
+            # around it keeps its regions.
+            for function in ("work", "caller") if which == "first" else ("caller",):
+                ran = sum(
+                    r["runs"]
+                    for r in got["rows"]
+                    if r["function"] == function and r["state"] == "region"
+                )
+                self.assertGreater(ran, 0, msg=f"{which} {function}: {got['rows']}")
+        got = self.program("none")
+        self.assertEqual(got["verdicts"], ["same"] * 8)
+        self.assertEqual([r for r in got["rows"] if r["state"] == "on CPython"], [])
+
+    def test_an_interrupt_while_a_plan_is_made_is_no_row(self):
+        # While the first plan of the callee is made: the interrupt is
+        # raised into the program, as it was, and the code is planned at
+        # its next call.
+        got = self.program("first interrupted")
+        for verdict in got["verdicts"][:2]:
+            self.assertIn("raised KeyboardInterrupt", verdict)
+        self.assertEqual(got["verdicts"][2:], ["same"] * 6)
+        self.assertEqual([r for r in got["rows"] if r["state"] == "on CPython"], [])
+        self.assertEqual(got["explained"], [])
+        ran = sum(r["runs"] for r in got["rows"] if r["state"] == "region")
+        self.assertGreater(ran, 0, msg=str(got["rows"]))
+        # While a later plan is made, after a frame of the code returned:
+        # the frame's value is the program's, the interrupt goes to
+        # sys.unraisablehook, as it did, and the code stays the executor's.
+        got = self.program("later interrupted")
+        self.assertEqual(got["verdicts"], ["same"] * 8)
+        self.assertIn("KeyboardInterrupt", got["printed"])
+        self.assertEqual([r for r in got["rows"] if r["state"] == "on CPython"], [])
+        ran = sum(
+            r["runs"]
+            for r in got["rows"]
+            if r["function"] == "caller" and r["state"] == "region"
+        )
+        self.assertGreater(ran, 0, msg=str(got["rows"]))
+
+
+# What sets a tool that is told of the frames CPython runs.
+EDGE_TOOLS = ("setprofile", "settrace", "monitoring", "monitoring local", "cProfile")
+# When it is set: around calls 0 and 1; around calls 6 and 7 (regions run
+# before and after); by the body itself in calls 6 and 7, before its last
+# call; on another thread, which makes calls 6 and 7.
+EDGE_TOOL_WHEN = ("before", "between", "inside", "thread")
+
+EDGE_TOOLS_PROGRAM = r"""
+import cProfile, json, sys, threading
+import torch
+from torch import vm
+
+EARLY = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+tool, when = sys.argv[1], sys.argv[2]
+ON = {"before": (0, 1), "between": (6, 7), "inside": (6, 7), "thread": (6, 7)}[when]
+# Of what a tool is told, the part compared: the frames entered while it is
+# set and the C calls they make. (A body that sets the tool itself is a
+# frame in flight, and unsets it before it returns: see the test.) For the
+# trace function a debugger puts on the frame in flight, that frame too.
+WANTED = {"work", "sin", "cos", "tanh", "exp"} | (set() if when == "inside" and tool != "debugger" else {"body"})
+STATE = {"inside": False}
+MON = sys.monitoring
+TOOL_ID = 3
+
+
+def work(x):
+    return ((x.sin() * 2).cos() + 1).tanh().exp()
+
+
+class Tool:
+    def __init__(self):
+        self.seen = {}
+        self.profile = None
+
+    def count(self, kind, name):
+        if name in WANTED:
+            self.seen[f"{kind} {name}"] = self.seen.get(f"{kind} {name}", 0) + 1
+
+    def profiled(self, frame, event, arg):
+        self.count(event, getattr(arg, "__name__", "") if event.startswith("c_") else frame.f_code.co_name)
+
+    def traced(self, frame, event, arg):
+        self.count(event, frame.f_code.co_name)
+        return self.traced
+
+    def on(self):
+        if tool == "setprofile":
+            threading.setprofile(self.profiled) if when == "thread" else sys.setprofile(self.profiled)
+        elif tool == "settrace":
+            threading.settrace(self.traced) if when == "thread" else sys.settrace(self.traced)
+        elif tool == "debugger":
+            # What pdb.set_trace() and breakpoint() do: the frame in flight
+            # (the caller's) gets the trace function, then sys.settrace.
+            sys._getframe(1).f_trace = self.traced
+            sys.settrace(self.traced)
+        elif tool == "cProfile":
+            self.profile = cProfile.Profile()
+            self.profile.enable()
+        else:
+            MON.use_tool_id(TOOL_ID, "edge")
+            MON.register_callback(TOOL_ID, MON.events.PY_START, lambda code, at: self.count("start", code.co_name))
+            if tool == "monitoring":
+                MON.register_callback(TOOL_ID, MON.events.PY_RETURN, lambda code, at, value: self.count("return", code.co_name))
+                # A call is an event of the frame that makes it.
+                called = lambda code, at, f, arg: code.co_name in WANTED and self.count("c_call", getattr(f, "__name__", ""))
+                MON.register_callback(TOOL_ID, MON.events.CALL, called)
+                MON.set_events(TOOL_ID, MON.events.PY_START | MON.events.PY_RETURN | MON.events.CALL)
+            else:
+                MON.set_local_events(TOOL_ID, work.__code__, MON.events.PY_START)
+
+    def off(self):
+        if tool == "setprofile":
+            threading.setprofile(None) if when == "thread" else sys.setprofile(None)
+        elif tool == "settrace":
+            threading.settrace(None) if when == "thread" else sys.settrace(None)
+        elif tool == "debugger":
+            sys.settrace(None)
+        elif tool == "cProfile":
+            self.profile.disable()
+            for entry in self.profile.getstats():
+                name = entry.code if isinstance(entry.code, str) else entry.code.co_name
+                for wanted in WANTED:
+                    if name == wanted or (isinstance(entry.code, str) and f"'{wanted}'" in name):
+                        self.seen[f"calls {wanted}"] = self.seen.get(f"calls {wanted}", 0) + entry.callcount
+        else:
+            if tool == "monitoring":
+                MON.set_events(TOOL_ID, 0)
+            else:
+                MON.set_local_events(TOOL_ID, work.__code__, 0)
+            MON.free_tool_id(TOOL_ID)
+
+
+def body(x, t):
+    y = work(x)
+    if t is not None and when == "inside":
+        t.on()
+    z = work(y * 2.0)
+    if t is not None and when == "inside":
+        t.off()
+    return z
+
+
+def call(fn, x, on):
+    # (the value, what the tool was told)
+    t = Tool() if on else None
+    if t is None or when == "inside":
+        return fn(x, t), (t.seen if t else None)
+    t.on()
+    try:
+        if when == "thread":
+            out = []
+            thread = threading.Thread(target=lambda: out.append(fn(x, t)))
+            thread.start()
+            thread.join()
+            return out[0], t.seen
+        return fn(x, t), t.seen
+    finally:
+        t.off()
+
+
+def runs(compiled):
+    return sum(r["runs"] for r in vm.regions(compiled) if r["state"] == "region")
+
+
+compiled = vm(body, passes=EARLY)
+rows = []
+for i in range(12):
+    x = torch.full((4, 8), i + 1.0)
+    before = runs(compiled)
+    got, told = call(compiled, x, i in ON)
+    ran = runs(compiled) - before
+    want, told_eager = call(body, x, i in ON)
+    rows.append({"same": torch.equal(got, want), "told": told, "eager": told_eager, "ran": ran})
+left = [r["why"] for r in vm.regions(compiled) if r["state"] == "on CPython"]
+explained = [line.strip() for line in vm.explain(compiled).splitlines() if ": on CPython: " in line]
+print(json.dumps({"rows": rows, "left": left, "explained": explained, "on": ON}))
+"""
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+@instantiate_parametrized_tests
+class TestVmEdgeTools(TestCase):
+    """While a tool is set through ``sys.settrace``, ``sys.setprofile`` or
+    ``sys.monitoring`` (a profiler, a debugger, a coverage tool), a frame
+    that is entered runs on CPython, as written: the program computes what
+    eager computes and raises nothing, the tool is told of the frame what it
+    is told in eager, ``torch.vm.regions`` and ``torch.vm.explain`` say that
+    frames ran on CPython for it, and regions run again once it is unset.
+    A frame that is running on the executor when the tool is set (the body
+    sets it itself) runs on to its end there: the tool is told of the frames
+    it enters from then on, and nothing more of the frame itself.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("tool", EDGE_TOOLS)
+    def test_a_tool_set(self, tool):
+        def member(when):
+            command = [sys.executable, "-c", EDGE_TOOLS_PROGRAM, tool, when]
+            ran = subprocess.run(command, capture_output=True, text=True, timeout=600)
+            return when, ran
+
+        with concurrent.futures.ThreadPoolExecutor(len(EDGE_TOOL_WHEN)) as pool:
+            members = list(pool.map(member, EDGE_TOOL_WHEN))
+        self.assertEqual([when for when, _ in members], list(EDGE_TOOL_WHEN))
+        for when, ran in members:
+            self.assertEqual(ran.returncode, 0, msg=f"{when}: {ran.stderr[-2000:]}")
+            found = json.loads(ran.stdout.splitlines()[-1])
+            rows, on = found["rows"], found["on"]
+            self.assertEqual([r["same"] for r in rows], [True] * 12, msg=when)
+            for i in on:
+                told, eager = rows[i]["told"], rows[i]["eager"]
+                self.assertTrue(eager, msg=f"{when}: the tool was told nothing")
+                if when == "inside" and i == on[0]:
+                    # The first call that takes the body's new way: the
+                    # frame in flight is the executor's, and what the
+                    # executor does for it on that call (a trace of the new
+                    # way) is told to the tool as well. Of the frames the
+                    # body enters the tool is told all that eager tells.
+                    more = {k: told.get(k, 0) - n for k, n in eager.items()}
+                    self.assertGreaterEqual(
+                        min(more.values()), 0, msg=f"{when}: {told}"
+                    )
+                else:
+                    self.assertEqual(told, eager, msg=f"{when} call {i}")
+                # No region runs for a frame the tool is to be told of.
+                self.assertEqual(rows[i]["ran"], 0, msg=f"{when} call {i}")
+            # Regions run again once the tool is unset.
+            self.assertGreater(rows[-1]["ran"], 0, msg=when)
+            if when != "before":
+                self.assertGreater(rows[5]["ran"], 0, msg=when)
+            self.assertEqual(len(found["left"]), 1, msg=when)
+            self.assertIn("while a tool was set through sys.settrace", found["left"][0])
+            self.assertEqual(len(found["explained"]), 1, msg=when)
+            self.assertIn("every function", found["explained"][0])
+
+    def test_a_trace_function_put_on_the_frame_in_flight(self):
+        # A KNOWN DIFFERENCE, recorded: what pdb.set_trace() and breakpoint()
+        # do in a function the body calls. They give the frame in flight a
+        # trace function (f_trace) and then call sys.settrace: eager tells
+        # that function the lines the frame in flight goes on to run. The
+        # executor is running that frame and runs it on to its end, so
+        # nothing more of it is told; the frames it enters from then on are
+        # told as in eager. A correction changes what this test records.
+        command = [sys.executable, "-c", EDGE_TOOLS_PROGRAM, "debugger", "inside"]
+        ran = subprocess.run(command, capture_output=True, text=True, timeout=600)
+        self.assertEqual(ran.returncode, 0, msg=ran.stderr[-2000:])
+        found = json.loads(ran.stdout.splitlines()[-1])
+        rows, (first, later) = found["rows"], found["on"]
+        self.assertEqual([r["same"] for r in rows], [True] * 12)
+        told, eager = rows[later]["told"], rows[later]["eager"]
+        self.assertEqual(eager.get("line body"), 3, msg=str(eager))
+        self.assertEqual(
+            told, {k: n for k, n in eager.items() if k != "line body"}, msg=str(told)
+        )
+        # The first call that takes the body's new way: see test_a_tool_set.
+        told, eager = rows[first]["told"], rows[first]["eager"]
+        more = {k: told.get(k, 0) - n for k, n in eager.items()}
+        self.assertGreaterEqual(min(more.values()), 0, msg=str(told))
+        for i in (first, later):
+            self.assertEqual(rows[i]["ran"], 0, msg=f"call {i}")
+        self.assertGreater(rows[5]["ran"], 0)
+        self.assertGreater(rows[-1]["ran"], 0)
+
+
+# The calls of torch._C that tell of the dispatcher's thread-local state (or
+# set it), by the start of their names, and the functorch getters of the
+# same kind: what they return is no function of their operands.
+EDGE_ASKER_PREFIXES = (
+    "_dispatch_tls",
+    "_dispatch_key",
+    "_dispatch_has",
+    "_dispatch_is",
+)
+EDGE_ASKER_NAMES = (
+    "_dispatch_get_backend_keyset_from_autograd",
+    "_dispatch_keys",
+    "_dispatch_tls_is_dispatch_key_excluded",
+    "_dispatch_tls_is_dispatch_key_included",
+    "_dispatch_tls_local_exclude_set",
+    "_dispatch_tls_local_include_set",
+    "_dispatch_tls_set_dispatch_key_excluded",
+    "_dispatch_tls_set_dispatch_key_included",
+    "_dispatch_key_set",
+)
+EDGE_FUNCTORCH_PREFIXES = (
+    "current_level",
+    "get_",
+    "peek_",
+    "is_",
+    "maybe_get_",
+    "count_",
+)
+
+EDGE_ASKERS_PROGRAM = r"""
+import json, sys
+import torch
+from torch import vm
+
+C = torch._C
+PD = C.DispatchKey.PreDispatch
+
+
+def included(x):
+    y = torch.relu(x)
+    k = C._dispatch_tls_is_dispatch_key_included(PD)
+    return y + 1, k
+
+
+def excluded(x):
+    y = torch.relu(x)
+    k = C._dispatch_tls_is_dispatch_key_excluded(PD)
+    return y + 1, k
+
+
+def include_set(x):
+    y = torch.relu(x)
+    k = str(C._dispatch_tls_local_include_set())
+    return y + 1, k
+
+
+def exclude_set(x):
+    y = torch.relu(x)
+    k = str(C._dispatch_tls_local_exclude_set())
+    return y + 1, k
+
+
+def keys(x):
+    y = torch.relu(x)
+    k = str(C._dispatch_keys(y))
+    return y + 1, k
+
+
+def key_set(x):
+    y = torch.relu(x)
+    k = str(C._dispatch_key_set(y))
+    return y + 1, k
+
+
+body = globals()[sys.argv[1]]
+xs = [torch.randn(8, 8) for _ in range(7)]
+want = [body(x)[1] for x in xs]
+passes = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+compiled = vm(body, passes=passes)
+got = [compiled(x)[1] for x in xs]
+shadow = [s for s in torch._rust._calls_shadow() if s["place"].startswith(sys.argv[1] + ":")]
+print(json.dumps({"same": [a == b for a, b in zip(want, got)], "shadow": shadow}))
+"""
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+@instantiate_parametrized_tests
+class TestVmEdgeAskers(TestCase):
+    """A call that tells of the dispatcher's thread-local state reads what
+    the engine itself put there for a recording (the PreDispatch key), so
+    no list of calls may go on over one: none has a row in the rule table,
+    and the recorder of call lists ends its recording in front of one, so
+    that on a recorded run the call reads what eager reads.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_no_asker_of_the_dispatch_state_has_a_row(self):
+        askers = {
+            f"torch._C.{n}"
+            for n in dir(torch._C)
+            if n.startswith(EDGE_ASKER_PREFIXES) or n in EDGE_ASKER_NAMES
+        }
+        askers |= {
+            f"torch._C._functorch.{n}"
+            for n in dir(torch._C._functorch)
+            if n.startswith(EDGE_FUNCTORCH_PREFIXES)
+        }
+        # The walk found the family: the ones the finding names are there.
+        named = {f"torch._C.{n}" for n in EDGE_ASKER_NAMES}
+        self.assertEqual(named - askers, set())
+        self.assertGreater(len(askers), 30)
+        rows = [line.split("\t") for line in torch._rust._rules_dump().splitlines()]
+        self.assertGreater(len([r for r in rows if r[:2] == ["row", "torch"]]), 100)
+        # A member is named as it is found from torch (torch._C.NAME) or by
+        # its own name (NAME, or MODULE.NAME).
+        short = {a.rsplit(".", 1)[1] for a in askers}
+        licensed = [
+            r[:3]
+            for r in rows
+            if r[0] in ("row", "as")
+            and (r[2] in askers or r[2].rsplit(".", 1)[-1] in short)
+            and r[1] == "torch"
+        ]
+        self.assertEqual(licensed, [])
+
+    @parametrize(
+        "name",
+        ["included", "excluded", "include_set", "exclude_set", "keys", "key_set"],
+    )
+    def test_a_recording_does_not_go_on_over_an_asker(self, name):
+        env = {**os.environ, "TORCH_RUST_CALLS": "shadow"}
+        command = [sys.executable, "-c", EDGE_ASKERS_PROGRAM, name]
+        ran = subprocess.run(
+            command, env=env, capture_output=True, text=True, timeout=600
+        )
+        self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+        found = json.loads(ran.stdout.splitlines()[-1])
+        # The fourth call is the recorded run: the asker reads what eager
+        # reads there, and on every call behind it.
+        self.assertEqual(found["same"][3:], [True] * 4)
+        self.assertTrue(found["shadow"])
+        asker = {
+            "included": "_dispatch_tls_is_dispatch_key_included",
+            "excluded": "_dispatch_tls_is_dispatch_key_excluded",
+            "include_set": "_dispatch_tls_local_include_set",
+            "exclude_set": "_dispatch_tls_local_exclude_set",
+            "keys": "_dispatch_keys",
+            "key_set": "_dispatch_key_set",
+        }[name]
+        for record in found["shadow"]:
+            # No list has the asker for an entry; a recording that met it
+            # stopped there.
+            self.assertNotIn(asker, record.get("text") or "", msg=str(record))
+            if record["stop"] and asker in record["stop"][0]:
+                self.assertEqual(record["status"], "stopped", msg=str(record))
+
+
 if __name__ == "__main__":
     run_tests()
