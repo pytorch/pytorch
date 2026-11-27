@@ -32,6 +32,16 @@ if not TEST_WITH_DEV_DBG_ASAN:
     class TestDistributedNNFunctionsUcc(TestDistributedNNFunctions):
         hw_classification = HardwareClassification.ACCELERATOR
 
+        def setUp(self):
+            if self.device_type not in c10d.Backend.backend_capability["ucc"]:
+                self.skipTest(f"UCC does not support {self.device_type}")
+            if (
+                self.device_type != "cpu"
+                and len(self.get_all_devices()) < self.world_size
+            ):
+                self.skipTest(f"test requires {self.world_size}+ devices")
+            super().setUp()
+
         def _test_broadcast(self, backend, device):
             store = c10d.FileStore(self.file_name, self.world_size)
             c10d.init_process_group(
@@ -149,19 +159,11 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self.assertEqual(x.grad, x_s)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.is_available() and torch.accelerator.device_count() < 2,
-            "test requires 2+ accelerators",
-        )
-        @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_broadcast(self, device):
             self._test_broadcast("ucc", device)
 
-        @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.is_available() and torch.accelerator.device_count() < 2,
-            "test requires 2+ accelerators",
-        )
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
@@ -169,19 +171,11 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self._test_reduce("ucc", device)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.is_available() and torch.accelerator.device_count() < 2,
-            "test requires 2+ accelerators",
-        )
-        @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_allreduce(self, device):
             self._test_allreduce("ucc", device)
 
-        @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.is_available() and torch.accelerator.device_count() < 2,
-            "test requires 2+ accelerators",
-        )
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
@@ -192,25 +186,16 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self._test_all_gather("ucc", device)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.is_available() and torch.accelerator.device_count() < 2,
-            "test requires 2+ accelerators",
-        )
-        @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_all_to_all(self, device):
             self._test_all_to_all("ucc", device)
 
         @skip_but_pass_in_sandcastle_if(
-            torch.accelerator.is_available() and torch.accelerator.device_count() < 2,
-            "test requires 2+ accelerators",
-        )
-        @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_all_to_all_single(self, device):
             self._test_all_to_all_single("ucc", device)
-
 
     instantiate_device_type_tests(
         TestDistributedNNFunctionsUcc,
