@@ -1127,6 +1127,9 @@ void initJITBindings(PyObject* module) {
       SYMNODE_SIZES_STRIDES(is_channels_last_strides_2d)
       SYMNODE_SIZES_STRIDES(is_channels_last_strides_3d)
       SYMNODE_SIZES_STRIDES(is_non_overlapping_and_dense)
+      .def("elementwise_output_stride", [](const c10::SymNode& node, c10::ArrayRef<c10::SymNode> args) {
+        return node->elementwise_output_stride(args);
+      })
       .def(
           "guard_int",
           [](const c10::SymNode& a, const char* file, int64_t line) {

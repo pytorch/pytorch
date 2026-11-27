@@ -3,7 +3,7 @@ import inspect
 import types
 import typing
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
 from types import GenericAlias
 from typing import NamedTuple, overload, TypeVar
@@ -116,9 +116,19 @@ class elementwise_type_promotion_wrapper:
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
         type_promoting_args: Sequence[str] | None = None,
+        output_stride_args: Sequence[str] | None = None,
+        output_stride_requires_tensor: Sequence[str] = (),
+        tensor_iterator_scalar_args: Sequence[str] = (),
+        promote_stride_args_on_all_devices: bool = False,
+        output_stride_fixed_dtypes: Mapping[str, torch.dtype] | None = None,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
+        self.output_stride_arg_names = output_stride_args
+        self.output_stride_requires_tensor = output_stride_requires_tensor
+        self.tensor_iterator_scalar_arg_names = tensor_iterator_scalar_args
+        self.promote_stride_args_on_all_devices = promote_stride_args_on_all_devices
+        self.output_stride_fixed_dtypes = dict(output_stride_fixed_dtypes or {})
 
     def __call__(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
@@ -134,6 +144,36 @@ class elementwise_type_promotion_wrapper:
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
                 if x in bound.arguments
             )
+
+            stride_args = tuple(
+                (name, value)
+                for name in self.output_stride_arg_names or ()
+                if name in bound.arguments
+                for value in pytree.arg_tree_leaves(bound.arguments[name])
+                if isinstance(value, TensorLike)
+            )
+            if not all(
+                isinstance(bound.arguments.get(name), TensorLike)
+                for name in self.output_stride_requires_tensor
+            ):
+                stride_args = ()
+            stride_inputs = tuple(value for _, value in stride_args)
+
+            stride_fast_path = True
+            if stride_inputs:
+                first = stride_inputs[0]
+                for tensor in stride_inputs[1:]:
+                    if tensor.ndim != first.ndim:
+                        stride_fast_path = False
+                    else:
+                        for size, other_size in zip(first.shape, tensor.shape):
+                            stride_fast_path = stride_fast_path & (size == other_size)
+                if first.ndim != 0:
+                    for name in self.tensor_iterator_scalar_arg_names:
+                        if name in bound.arguments and isinstance(
+                            bound.arguments[name], Number
+                        ):
+                            stride_fast_path = False
 
             flattened_type_promoting_args = pytree.arg_tree_leaves(*type_promoting_args)
             compute_dtype, result_dtype = utils.elementwise_dtypes(
@@ -157,7 +197,52 @@ class elementwise_type_promotion_wrapper:
                     result_dtype = maybe_dtype
 
             if isinstance(result, TensorLike):
-                return _maybe_convert_to_dtype(result, result_dtype)
+                result = _maybe_convert_to_dtype(result, result_dtype)
+                if stride_inputs:
+                    from torch.fx.experimental.symbolic_shapes import (
+                        free_unbacked_symbols,
+                    )
+
+                    if free_unbacked_symbols(
+                        tuple((a.shape, a.stride()) for a in stride_inputs)
+                    ):
+                        # CPU TensorIterator converts inputs to its common dtype before sorting strides.
+                        stride_dtype = utils.elementwise_dtypes(
+                            *flattened_type_promoting_args,
+                            type_promotion_kind=(
+                                ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+                                if self.type_promotion_kind
+                                == ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+                                else self.type_promotion_kind
+                            ),
+                        )[1]
+                        layout_inputs = []
+                        for name, value in stride_args:
+                            dtype = self.output_stride_fixed_dtypes.get(name)
+                            if (
+                                dtype is None
+                                and name in (self.type_promoting_arg_names or ())
+                                and (
+                                    value.device.type == "cpu"
+                                    or self.promote_stride_args_on_all_devices
+                                )
+                            ):
+                                dtype = stride_dtype
+                            layout_inputs.append(
+                                _maybe_convert_to_dtype(value, dtype)
+                                if dtype is not None
+                                else value
+                            )
+                        stride = utils.compute_elementwise_output_strides(
+                            *layout_inputs,
+                            allow_fast_path=stride_fast_path,
+                            broadcast_shape=result.shape,
+                        )
+                        result = torch._prims.copy_strided(result, stride)
+                        result = torch._refs.handle_noncontiguous_outputs(
+                            layout_inputs, result
+                        )
+                return result
             if isinstance(result, Sequence):
                 return tuple(_maybe_convert_to_dtype(x, result_dtype) for x in result)
             raise AssertionError(f"Unhandled result type: {type(result)}")

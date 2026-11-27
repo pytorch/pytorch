@@ -963,6 +963,44 @@ def fake_tensor_prop(
 
     The created fake mode will be returned.
     """
+    import sympy
+
+    from torch.fx.experimental.sym_node import SymNode, wrap_node
+
+    # Recorded output strides must follow input specialization across fake propagation.
+    bindings = {}
+    for node, arg in zip(gm.graph.find_nodes(op="placeholder"), example_inputs):
+        old = node.meta.get("val")
+        if isinstance(old, torch.Tensor) and isinstance(arg, torch.Tensor):
+            old = (*old.size(), *old.stride(), old.storage_offset())
+            arg = (*arg.size(), *arg.stride(), arg.storage_offset())
+        for previous, current in zip(pytree.tree_leaves(old), pytree.tree_leaves(arg)):
+            if isinstance(previous, torch.SymInt) and isinstance(current, int):
+                expr = previous.node.expr
+                if isinstance(expr, sympy.Symbol):
+                    bindings[expr] = sympy.Integer(current)
+    if bindings:
+        for output in gm.graph.find_nodes(op="output"):
+            if "original_output_strides" in output.meta:
+                output.meta["original_output_strides"] = [
+                    tuple(
+                        wrap_node(
+                            SymNode(
+                                stride.node.expr.xreplace(bindings),
+                                stride.node.shape_env,
+                                int,
+                                hint=None,
+                            )
+                        )
+                        if isinstance(stride, torch.SymInt)
+                        else stride
+                        for stride in strides
+                    )
+                    if strides is not None
+                    else None
+                    for strides in output.meta["original_output_strides"]
+                ]
+
     # Ensure that decomps that support symbolic shapes are used
     with enable_python_dispatcher():
         fake_mode = detect_fake_mode(example_inputs)

@@ -1424,7 +1424,9 @@ def sym_ite(b: "BoolLikeType", t: _SymIteT, f: _SymIteT) -> _SymIteT:
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
     if not isinstance(b, (SymBool, builtins.bool)):
         raise AssertionError(f"expected SymBool or bool, got {type(b)}")
-    if type(t) is not type(f):
+    t_type = t.node.pytype if isinstance(t, (SymInt, SymFloat, SymBool)) else type(t)
+    f_type = f.node.pytype if isinstance(f, (SymInt, SymFloat, SymBool)) else type(f)
+    if t_type is not f_type:
         raise AssertionError(f"type mismatch: {type(t)} vs {type(f)}")
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)

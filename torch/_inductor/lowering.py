@@ -49,7 +49,12 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
-from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.sym_node import (
+    elementwise_output_stride,
+    is_non_overlapping_and_dense_indicator,
+    magic_methods,
+    method_to_operator,
+)
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_unbacked_symbols,
@@ -61,6 +66,7 @@ from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
     Identity,
+    IsNonOverlappingAndDenseIndicator,
     Max,
     Min,
     Mod,
@@ -3231,7 +3237,7 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 
         storage_names = []
         for arg in pytree.tree_leaves((args, kwargs)):
-            if _is_tensor_irnode(arg) and is_triton(arg):
+            if _is_tensor_irnode(arg) and is_strict_cuda_triton(arg.get_device()):
                 arg.realize()
                 storage_names.append(arg.get_name())
         if storage_names:
@@ -3680,6 +3686,12 @@ def randn(*args, **kwargs):
 
 @register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
 def inductor_force_stride_order(input_tensor, stride):
+    if free_unbacked_symbols(stride) and is_strict_cuda_triton(
+        input_tensor.get_device()
+    ):
+        return ir.ExternKernel.require_exact_strides(
+            input_tensor, stride, allow_padding=False
+        )
     stride_order = ir.get_stride_order(stride, V.graph.sizevars.shape_env)
     if input_tensor.get_dtype().is_complex and is_strict_cuda_triton(
         input_tensor.get_device()
@@ -5756,6 +5768,8 @@ def new_empty_strided(
 
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
+    if free_unbacked_symbols(stride):
+        return ir.ExternKernel.require_exact_strides(x, stride, allow_padding=False)
     stride = V.graph.sizevars.guarding_hints_or_throw(stride)
     stride_order = sorted(range(len(stride)), key=stride.__getitem__)
     return ir.ExternKernel.require_stride_order(x, stride_order)
@@ -11661,6 +11675,18 @@ def sym_sum(*args):
     if len(args) == 1 and isinstance(args[0], (list, tuple)):
         args = args[0]
     return sympy.Add(*args)
+
+
+@register_lowering(elementwise_output_stride, type_promotion_kind=None)
+def symbolic_elementwise_stride(*args):
+    from torch.utils._sympy.functions import ElementwiseOutputStride
+
+    return ElementwiseOutputStride(*args)
+
+
+@register_lowering(is_non_overlapping_and_dense_indicator, type_promotion_kind=None)
+def symbolic_density_indicator(sizes, strides):
+    return IsNonOverlappingAndDenseIndicator(*sizes, *strides)
 
 
 @register_lowering(aten._foobar)

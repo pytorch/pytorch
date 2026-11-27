@@ -1291,6 +1291,7 @@ def _is_contiguous_or_false(
     sizes: Sequence[_int | SymInt],
     strides: Sequence[_int | SymInt],
 ) -> _bool: ...
+def _is_alias_of(tensor: Tensor, other: Tensor) -> _bool: ...
 def _is_channels_last_contiguous_2d_or_false(
     sizes: Sequence[_int | SymInt],
     strides: Sequence[_int | SymInt],

@@ -70,6 +70,14 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   c10::SymNode mul(const c10::SymNode& other) override;
   c10::SymNode sym_and(const c10::SymNode& other) override;
   c10::SymNode sym_or(const c10::SymNode& other) override;
+  c10::SymNode elementwise_output_stride(ArrayRef<SymNode> args) override {
+    for (const auto& arg : args) {
+      if (!arg->is_constant()) {
+        return arg->elementwise_output_stride(args);
+      }
+    }
+    return SymNodeImpl::elementwise_output_stride(args);
+  }
   ::std::string str() override {
     if constexpr (is_int_()) {
       return ::std::to_string(::std::get<int64_t>(value_));

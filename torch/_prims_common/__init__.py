@@ -587,19 +587,64 @@ def compute_elementwise_output_logical_to_physical_perm(
 
 
 def compute_elementwise_output_strides(
-    *tensors, allow_fast_path=True
-) -> tuple[int, ...]:
+    *tensors, allow_fast_path=True, preserve_dense=False, broadcast_shape=None
+) -> tuple[int | torch.SymInt, ...]:
     """
-    Computes the output strides for elementwise operations. Disabling fast paths
-    preserves symbolic rank-two TensorIterator ordering; differently ranked inputs
-    broadcast to the first tensor's shape.
+    Computes output strides using TensorIterator ordering. ``broadcast_shape``
+    supplies the output shape when inputs have different shapes or ranks.
     """
     if len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
 
-    if not allow_fast_path and tensors[0].ndim == 2:
+    from torch.fx.experimental.sym_node import elementwise_output_stride
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    if broadcast_shape is not None:
+        ndim = len(broadcast_shape)
+        strides = []
+        for tensor in tensors:
+            if not isinstance(tensor, TensorLike) or is_cpu_scalar_tensor(tensor):
+                if ndim != 0:
+                    allow_fast_path = False
+                continue
+            offset = ndim - tensor.ndim
+            if offset != 0:
+                allow_fast_path = False
+            padded = [0] * offset + list(tensor.stride())
+            for dim, size in enumerate(tensor.shape, start=offset):
+                allow_fast_path = allow_fast_path & (size == broadcast_shape[dim])
+                padded[dim] = torch.sym_ite(
+                    (size == 1) & (broadcast_shape[dim] != 1), 0, padded[dim]
+                )
+            strides.extend(padded)
+        return tuple(
+            elementwise_output_stride(
+                dim,
+                ndim,
+                torch.sym_ite(allow_fast_path, 1, 0),
+                int(preserve_dense),
+                *broadcast_shape,
+                *strides,
+            )
+            for dim in range(ndim)
+        )
+
+    if allow_fast_path is False and tensors[0].ndim == 2:
         shape = tensors[0].shape
+        if free_unbacked_symbols((shape, *(tensor.stride() for tensor in tensors))):
+            strides = []
+            for tensor in tensors:
+                padded = [0] * (2 - tensor.ndim) + list(tensor.stride())
+                for i, size in enumerate(tensor.shape, start=2 - tensor.ndim):
+                    padded[i] = torch.sym_ite(
+                        (size == 1) & (shape[i] != 1), 0, padded[i]
+                    )
+                strides.extend(padded)
+            return tuple(
+                elementwise_output_stride(i, 2, 0, 0, *shape, *strides)
+                for i in range(2)
+            )
         transpose = False
         for tensor in reversed(tensors):
             strides = [0] * (2 - tensor.ndim) + list(tensor.stride())
@@ -634,25 +679,41 @@ def compute_elementwise_output_strides(
 
     if ndim == 0:
         return ()
-    if ndim == 1:
+    if ndim == 1 and not preserve_dense:
         return (1,)
+
+    if free_unbacked_symbols((shape, *(tensor.stride() for tensor in tensors))):
+        strides = tuple(stride for tensor in tensors for stride in tensor.stride())
+        return tuple(
+            elementwise_output_stride(
+                i,
+                ndim,
+                torch.sym_ite(allow_fast_path, 1, 0),
+                int(preserve_dense),
+                *shape,
+                *strides,
+            )
+            for i in range(ndim)
+        )
 
     if len(tensors) == 1:
         if torch._prims_common.is_non_overlapping_and_dense_or_false(tensors[0]):
-            return tensors[0].stride()
+            permuted_strides = tensors[0].stride()
         else:
             empty_like_tensor = torch.empty_like(tensors[0])
-            return empty_like_tensor.stride()
+            permuted_strides = empty_like_tensor.stride()
+    else:
+        logical_to_physical_perm, _ = (
+            compute_elementwise_output_logical_to_physical_perm(
+                *tensors, _skip_checks=True
+            )
+        )
+        permuted_shape = apply_perm(shape, logical_to_physical_perm)  # to physical
 
-    logical_to_physical_perm, _ = compute_elementwise_output_logical_to_physical_perm(
-        *tensors, _skip_checks=True
-    )
-    permuted_shape = apply_perm(shape, logical_to_physical_perm)  # to physical
-
-    new_strides = make_contiguous_strides_for(permuted_shape)
-    permuted_strides = apply_perm(
-        new_strides, invert_perm(logical_to_physical_perm)
-    )  # to logical
+        new_strides = make_contiguous_strides_for(permuted_shape)
+        permuted_strides = apply_perm(
+            new_strides, invert_perm(logical_to_physical_perm)
+        )  # to logical
 
     return tuple(permuted_strides)
 

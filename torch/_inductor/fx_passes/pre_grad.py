@@ -335,6 +335,46 @@ def _resolve_pre_grad_fusion_options(
 
 def _preserve_symbolic_strides(gm: torch.fx.GraphModule) -> None:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+    from torch.utils._pytree import tree_leaves
+
+    from .. import inductor_prims
+
+    output = gm.graph.find_nodes(op="output")[0]
+    tensors: dict[torch.fx.Node, torch.Tensor] = {}
+    for node in gm.graph.nodes:
+        value = node.meta.get("example_value", node.meta.get("val"))
+        if isinstance(value, torch.Tensor):
+            tensors[node] = value
+    inputs = [value for node, value in tensors.items() if node.op == "placeholder"]
+    outputs = [
+        tensors[node]
+        for node in tree_leaves(output.args)
+        if isinstance(node, torch.fx.Node) and node in tensors
+    ]
+    owners: list[torch.Tensor] = []
+    for node, value in tensors.items():
+        if node.op in ("placeholder", "output"):
+            continue
+        if (
+            value._is_view()
+            or not is_strict_cuda_triton(value.device)
+            or not free_unbacked_symbols(value.stride())
+        ):
+            continue
+        if not any(torch._C._is_alias_of(value, other) for other in outputs):
+            continue
+        if any(torch._C._is_alias_of(value, other) for other in (*inputs, *owners)):
+            continue
+        with gm.graph.inserting_before(node.next):
+            strides = gm.graph.materialize_symints(tuple(value.stride()))
+            replacement = gm.graph.call_function(
+                inductor_prims.force_stride_order, (node, strides)
+            )
+            replacement.meta["example_value"] = value
+        node.replace_all_uses_with(
+            replacement, delete_user_cb=lambda user: user is not replacement
+        )
+        owners.append(value)
 
     for node in list(gm.graph.nodes):
         if not (

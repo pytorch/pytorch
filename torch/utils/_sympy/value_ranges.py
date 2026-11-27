@@ -802,8 +802,12 @@ class SymPyValueRangeAnalysis:
         return cls.mod(cls.floordiv(a, b), c)
 
     @classmethod
+    def elementwise_output_stride(cls, *args):
+        return ValueRanges(sympy.S.Zero, int_oo)
+
+    @classmethod
     def is_non_overlapping_and_dense_indicator(cls, *args):
-        return ValueRanges.unknown_int()
+        return ValueRanges(sympy.S.Zero, sympy.S.One)
 
     @classmethod
     def pow_by_natural(cls, a, b):
