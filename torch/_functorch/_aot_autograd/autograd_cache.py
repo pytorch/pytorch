@@ -618,6 +618,26 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         # FxGraphHashDetails contains all the keys related to inductor. Also
         # includes some system info.
         self.aot_config = aot_config
+        self.input_view_metadata = (
+            tuple(
+                (
+                    i,
+                    arg.is_leaf,
+                    arg.storage_offset(),
+                    (
+                        arg._base.is_leaf,
+                        arg._base.storage_offset(),
+                        extract_tensor_metadata_for_cache_key(arg._base),
+                    )
+                    if arg._base is not None
+                    else None,
+                )
+                for i, arg in enumerate(example_inputs)
+                if isinstance(arg, torch.Tensor)
+            )
+            if aot_config.preserve_tangent_layout
+            else ()
+        )
         self.act_input_paths = tuple(act_input_paths)
         self._record_runtime_state(gm)
         self.saved_tensors_hooks_fx_wrap_cache_hashes = (

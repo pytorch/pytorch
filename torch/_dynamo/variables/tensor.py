@@ -1478,6 +1478,18 @@ class TensorVariable(VariableTracker):
             return VariableTracker.build(tx, self.dtype.is_complex)
         return None
 
+    def method_is_conj(
+        self, tx: "InstructionTranslatorBase"
+    ) -> ConstantVariable | None:
+        if (fake := self.proxy.node.meta.get("example_value")) is not None:
+            return VariableTracker.build(tx, fake.is_conj())
+        return None
+
+    def method_is_neg(self, tx: "InstructionTranslatorBase") -> ConstantVariable | None:
+        if (fake := self.proxy.node.meta.get("example_value")) is not None:
+            return VariableTracker.build(tx, fake.is_neg())
+        return None
+
     def method_is_contiguous(
         self,
         tx: "InstructionTranslatorBase",
@@ -2903,6 +2915,8 @@ class TensorVariable(VariableTracker):
         "is_floating_point": Method(method_is_floating_point),
         "is_inference": Method(method_is_inference),
         "is_complex": Method(method_is_complex),
+        "is_conj": Method(method_is_conj),
+        "is_neg": Method(method_is_neg),
         "is_pinned": Method(method_is_pinned),
         "is_contiguous": Method(method_is_contiguous),
         "type": Method(method_type),

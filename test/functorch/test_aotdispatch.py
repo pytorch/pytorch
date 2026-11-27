@@ -1781,6 +1781,144 @@ def forward(self, primals_1):
     return (add,)""",
         )
 
+        def view_mutation(x, tracked):
+            if tracked:
+                x.mul_(2)
+            else:
+                with torch.no_grad():
+                    x.fill_(1)
+            return x * 3
+
+        def input_view(shape, strides, offset, base_offset):
+            storage = torch.arange(10.0)
+            if base_offset:
+                leaf = storage[base_offset : base_offset + 4].detach().requires_grad_()
+                base = leaf
+            else:
+                leaf = storage.requires_grad_()
+                base = leaf * 1
+                storage = base
+            return leaf, base, base.as_strided(shape, strides, offset), storage
+
+        for numerics in ("strict_pointwise", "strict"):
+            compiled = torch.compile(
+                view_mutation, fullgraph=True, options={"numerics": numerics}
+            )
+            for tracked, shape, strides, offset, base_offset in (
+                (True, (2,), (1,), 1, 0),
+                (False, (2, 2), (1, 1), 0, 0),
+                (False, (4,), (1,), 3, 3),
+                (False, (4,), (1,), 2, 3),
+                (False, (5,), (1,), 3, 3),
+            ):
+                torch._dynamo.reset()
+                args = (shape, strides, offset, base_offset)
+                leaf, base, view, storage = input_view(*args)
+                ref_leaf, ref_base, ref_view, ref_storage = input_view(*args)
+                expected = view_mutation(ref_view, tracked)
+                actual = compiled(view, tracked)
+                self.assertEqual(actual, expected)
+                self.assertEqual(storage, ref_storage)
+                self.assertEqual(
+                    torch.autograd.grad(base.sum(), leaf, retain_graph=True)[0],
+                    torch.autograd.grad(ref_base.sum(), ref_leaf, retain_graph=True)[0],
+                )
+                self.assertEqual(
+                    torch.autograd.grad(actual.sum(), leaf)[0],
+                    torch.autograd.grad(expected.sum(), ref_leaf)[0],
+                )
+
+        def unused_mutated_view(x, y):
+            with torch.no_grad():
+                x.add_(1)
+            return y * 3
+
+        from torch._dynamo import compiled_autograd
+
+        compile_backward = torch.compile(backend="eager", fullgraph=True)
+        for numerics in ("strict_pointwise", "strict"):
+            torch._dynamo.reset()
+            for cached in (False, True):
+                if cached:
+                    torch._dynamo.reset()
+                leaf = torch.arange(6.0, requires_grad=True)
+                base = leaf * 2
+                view = base[1:3]
+                y = torch.tensor([2.0], requires_grad=True)
+                hits = counters["aot_autograd"]["autograd_cache_hit"]
+                out = torch.compile(
+                    unused_mutated_view, fullgraph=True, options={"numerics": numerics}
+                )(view, y)
+                self.assertEqual(out, torch.tensor([6.0]))
+                self.assertEqual(base, torch.tensor([0.0, 3.0, 5.0, 6.0, 8.0, 10.0]))
+                with (
+                    compiled_autograd._enable(compile_backward)
+                    if cached
+                    else nullcontext()
+                ):
+                    grads = torch.autograd.grad(out.sum(), (leaf, y), allow_unused=True)
+                self.assertEqual(grads, (None, torch.tensor([3.0])))
+                if cached:
+                    self.assertEqual(
+                        counters["aot_autograd"]["autograd_cache_hit"], hits + 1
+                    )
+
+        def mutated_view_with_subclass(x, y):
+            with torch.no_grad():
+                x.add_(1)
+            return x * 2, y * 3
+
+        def mutated_view_with_unused_gradient(x, y):
+            with torch.no_grad():
+                x.add_(1)
+            return x * 2 + y.detach()
+
+        for numerics in ("strict_pointwise", "strict"):
+            torch._dynamo.reset()
+            leaf = torch.arange(6.0, requires_grad=True)
+            view = (leaf * 1).view(2, 3)
+            subclass = TwoTensor(torch.ones(2, 3), torch.ones(2, 3))
+            out, subclass_out = torch.compile(
+                mutated_view_with_subclass,
+                fullgraph=True,
+                options={"numerics": numerics},
+            )(view, subclass)
+            self.assertEqual(out, torch.arange(1.0, 7.0).view(2, 3) * 2)
+            self.assertEqual(subclass_out, subclass * 3)
+            self.assertEqual(
+                torch.autograd.grad(out.sum(), leaf)[0], torch.full((6,), 2.0)
+            )
+
+            torch._dynamo.reset()
+            for cached in (False, True):
+                if cached:
+                    torch._dynamo.reset()
+                leaf = torch.arange(6.0, requires_grad=True)
+                view = (leaf * 1).view(2, 3)
+                unused = torch.ones(2, 3, requires_grad=True)
+                hits = counters["aot_autograd"]["autograd_cache_hit"]
+                out = torch.compile(
+                    mutated_view_with_unused_gradient,
+                    fullgraph=True,
+                    options={"numerics": numerics},
+                )(view, unused)
+                if cached:
+                    unused.register_post_accumulate_grad_hook(
+                        lambda tensor: tensor.grad.zero_()
+                    )
+                with (
+                    compiled_autograd._enable(compile_backward)
+                    if cached
+                    else nullcontext()
+                ):
+                    out.sum().backward()
+                self.assertEqual(leaf.grad, torch.full((6,), 2.0))
+                self.assertIsNone(unused.grad)
+                if cached:
+                    self.assertEqual(
+                        counters["aot_autograd"]["autograd_cache_hit"], hits + 1
+                    )
+
     def test_input_mutation_requires_grad_no_grad_inference_graph(self):
         def f(a):
             with torch.no_grad():
@@ -2634,6 +2772,14 @@ def forward(self, primals_1):
     view_1 = torch.ops.aten.view.default(t_6, [3, 3]);  t_6 = None
     return (t_4, view_1)""",
         )
+
+        # A singleton differentiable view must keep the metadata-mutation
+        # calling convention; merging its base changes the tangent shape.
+        def view_input():
+            base = torch.arange(6.0, requires_grad=True)
+            return [base], [(base * 1).view(2, 3)]
+
+        self.verify_aot_autograd(f, view_input, test_mutation=True)
 
     def test_view_and_inplace_view(self):
         def f(a, b):
@@ -3716,6 +3862,20 @@ def forward(self, primals_1, primals_2, primals_3):
             f, partial(inp_callable, req_grad=True), test_mutation=True
         )
 
+        def returned_input(a):
+            with torch.no_grad():
+                a.add_(1)
+            return a * 2, a
+
+        base = torch.arange(6.0, requires_grad=True)
+        view = (base * 1).view(2, 3)
+        actual = aot_function(returned_input, nop)(view)
+        self.assertIs(actual[1], view)
+        self.assertEqual(actual[0], view * 2)
+        self.assertEqual(
+            torch.autograd.grad(actual[0].sum(), base)[0], base.new_full((6,), 2)
+        )
+
     def test_input_mutation_alias_everything(self):
         # Mondo test that tests a combination of:
         # input is mutated, that aliases another input (so we make a synthetic base)
@@ -4676,6 +4836,158 @@ def forward(self, tangents_1):
         self.assertExpectedInline(
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
+
+        # Direct AOT inputs can expose a shared-view dimension whose source
+        # disappears during merging, or a compound dimension without a source
+        # for its constituent symbol. Both must use the original input metadata.
+        from torch._dynamo.source import LocalSource
+
+        def mutated_alias(v, left, right):
+            with torch.no_grad():
+                v.add_(1)
+                left.add_(1)
+            alias = v._neg_view().reshape(-1)
+            return (
+                v * 2 + left.sum() + right.sum(),
+                alias[: right.shape[0]],
+                alias[: right.shape[0] // 2],
+            )
+
+        gm = torch.fx.symbolic_trace(mutated_alias)
+        mutations = [node for node in gm.graph.nodes if node.target == "add_"]
+        # symbolic_trace does not record the grad-mode context.
+        with gm.graph.inserting_before(mutations[0]):
+            gm.graph.call_function(torch._C._set_grad_enabled, (False,))
+        with gm.graph.inserting_after(mutations[-1]):
+            gm.graph.call_function(torch._C._set_grad_enabled, (True,))
+        gm.recompile()
+        gm.meta["dynamo_compile_id"] = torch._guards.CompileId(
+            frame_id=0, frame_compile_id=0
+        )
+        gm._param_name_to_source = {}
+        for node, name in zip(
+            gm.graph.find_nodes(op="placeholder"), ("v", "left", "right")
+        ):
+            node._dynamo_source = LocalSource(name)
+
+        def inputs(size, step):
+            leaf = torch.arange(12.0, requires_grad=True)
+            view = (leaf * 1).view(2, 6)._neg_view()
+            base = torch.ones(2 * size, 4)
+            return leaf, (view, base[::step, :3], base[::step, 1:])
+
+        for step in (2, 1):
+            with self.subTest(step=step):
+                _, args = inputs(3, step)
+                fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+                fake_view = fake_mode.from_tensor(args[0], static_shapes=True)
+                seed = fake_mode.from_tensor(
+                    torch.empty(3, 3),
+                    source=LocalSource("left" if step == 2 else "not_an_input"),
+                    static_shapes=False,
+                )
+                with fake_mode:
+                    fake_base = torch.empty_strided((2 * seed.shape[0], 4), (4, 1))
+                    fake_args = (
+                        fake_view,
+                        fake_base[::step, :3],
+                        fake_base[::step, 1:],
+                    )
+                compiled = aot_module_simplified(
+                    gm, fake_args, nop, bw_compiler=nop, preserve_tangent_layout=True
+                )
+                for size in (3, 5):
+                    leaf, args = inputs(size, step)
+                    ref_leaf, ref_args = inputs(size, step)
+                    actual, expected = compiled(*args), mutated_alias(*ref_args)
+                    self.assertEqual(actual, expected)
+                    for got, want in zip(actual[1:], expected[1:]):
+                        self.assertTrue(torch._C._is_alias_of(got, args[0]))
+                        self.assertEqual(got.is_neg(), want.is_neg())
+                    self.assertEqual(args, ref_args)
+                    upstream = tuple(
+                        torch.arange(2 * size // step // divisor, dtype=leaf.dtype) - 2
+                        for divisor in (1, 2)
+                    )
+                    self.assertEqual(
+                        torch.autograd.grad(actual[1:], leaf, upstream),
+                        torch.autograd.grad(expected[1:], ref_leaf, upstream),
+                    )
+
+        # Lengths computed during forward are not available to outer replay.
+        # Keep the existing alias epilogue for both scalar and dynamic outputs.
+        import pickle
+
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+
+        captured_wrappers = []
+        original_pre_compile = AOTSyntheticBaseWrapper.pre_compile
+
+        def capture_wrapper(wrapper, *args, **kwargs):
+            result = original_pre_compile(wrapper, *args, **kwargs)
+            captured_wrappers.append(wrapper)
+            return result
+
+        with (
+            patch.object(AOTSyntheticBaseWrapper, "pre_compile", capture_wrapper),
+            torch._dynamo.config.patch(
+                capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+            ),
+        ):
+            for kind in ("item", "nonzero"):
+                with self.subTest(kind=kind):
+
+                    def forward_produced_alias(v, lengths):
+                        with torch.no_grad():
+                            v.add_(1)
+                        length = (
+                            lengths.item()
+                            if kind == "item"
+                            else lengths.nonzero().shape[0]
+                        )
+                        torch._check(length >= 0)
+                        torch._check(length <= 8)
+                        return v * 2, v.reshape(-1)[:length]
+
+                    compiled = torch.compile(
+                        forward_produced_alias,
+                        backend=aot_autograd(
+                            fw_compiler=nop,
+                            bw_compiler=nop,
+                            preserve_tangent_layout=True,
+                        ),
+                        fullgraph=True,
+                        dynamic=True,
+                    )
+                    for size in (3, 5):
+                        leaf = torch.arange(8.0, requires_grad=True)
+                        ref_leaf = torch.arange(8.0, requires_grad=True)
+                        view, ref_view = (
+                            (leaf * 1).view(2, 4),
+                            (ref_leaf * 1).view(2, 4),
+                        )
+                        lengths = (
+                            torch.tensor(size)
+                            if kind == "item"
+                            else torch.cat([torch.ones(size), torch.zeros(8 - size)])
+                        )
+                        actual = compiled(view, lengths)
+                        expected = forward_produced_alias(ref_view, lengths)
+                        self.assertEqual(actual, expected)
+                        self.assertEqual(view, ref_view)
+                        self.assertTrue(torch._C._is_alias_of(actual[1], view))
+                        upstream = tuple(torch.ones_like(value) for value in expected)
+                        self.assertEqual(
+                            torch.autograd.grad(actual, leaf, upstream),
+                            torch.autograd.grad(expected, ref_leaf, upstream),
+                        )
+
+        self.assertTrue(captured_wrappers)
+        for wrapper in captured_wrappers:
+            pickle.loads(pickle.dumps(wrapper))
 
     def test_duplicated_arguments_on_tensor_overlap(self):
         # Test whether we correctly handle duplicated arguments when changing the
@@ -10259,6 +10571,40 @@ def forward(self, primals_1, tangents_1):
         out2.sum().backward()
         self.assertEqual(x2.grad, eager_grad)
 
+        def mutated_view(x):
+            old = x * 2
+            with torch.no_grad():
+                x.add_(1)
+            return old
+
+        leaf = torch.arange(6.0, requires_grad=True)
+        view = (leaf * 1).view(2, 3)
+        hooks = []
+        view.register_hook(lambda grad: hooks.append("tensor") or grad * 0)
+        view.grad_fn.register_hook(lambda *args: hooks.append("node"))
+        out = aot_function(mutated_view, nop)(view)
+        out.sum().backward()
+        self.assertEqual(leaf.grad, torch.zeros_like(leaf))
+        self.assertEqual(hooks, ["tensor", "node"])
+
+        def post_mutated_view(x, alias):
+            with torch.no_grad():
+                x.add_(1)
+            return x.view(-1) if alias else x * 2
+
+        opt_fn = torch.compile(post_mutated_view, fullgraph=True)
+        for alias in (False, True):
+            leaf = torch.arange(6.0, requires_grad=True)
+            view = (leaf * 1).view(2, 3)
+            with torch._inductor.config.patch(numerics="strict_pointwise"):
+                out = opt_fn(view, alias)
+            hooks.clear()
+            view.register_hook(lambda grad: hooks.append("tensor") or grad * 0)
+            view.grad_fn.register_hook(lambda *args: hooks.append("node"))
+            out.sum().backward()
+            self.assertEqual(leaf.grad, torch.zeros_like(leaf))
+            self.assertEqual(hooks, ["tensor", "node"])
+
     def test_size_of_void_returning_nodes(self):
         # Void-returning ops have no `val` metadata. _size_of must return 0
         # for them instead of raising RuntimeError.
@@ -11698,6 +12044,27 @@ class TestAOTModuleSimplified(AOTTestCase):
         if not torch.allclose(inputs[1].grad, cloned_inputs[1].grad):
             raise AssertionError(
                 "inputs[1].grad and cloned_inputs[1].grad not allclose"
+            )
+
+        class MutatedInput(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    x.add_(1)
+                return (x * 2,)
+
+        leaf = torch.arange(6.0, requires_grad=True)
+        view = (leaf * 1).view(2, 3)
+        compiled = aot_module_simplified(
+            MutatedInput(), [view], nop, preserve_tangent_layout=True
+        )
+        # This API has no Dynamo guards and must permit a view or plain tensor.
+        for is_view in (True, False):
+            leaf = torch.arange(6.0, requires_grad=True)
+            x = (leaf * 1).view(2, 3) if is_view else leaf.view(2, 3).clone()
+            out = compiled(x)[0]
+            self.assertEqual(out, (torch.arange(6.0).view(2, 3) + 1) * 2)
+            self.assertEqual(
+                torch.autograd.grad(out.sum(), leaf)[0], torch.full_like(leaf, 2)
             )
 
     def test_aot_module_simplified_dynamic(self):
