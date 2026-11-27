@@ -82,10 +82,14 @@ class StableLibrary final {
   //    [stable_arg1, stable_arg2, stable_arg3, stable_arg4]
   // to end, fn should fill the stack with 2 StableIValues representing outputs:
   //    [stable_ret1, stable_ret2, -, -]
+  // Select the C registration API by the minimum runtime target.
   StableLibrary& impl(
       const char* name,
       void (*fn)(StableIValue*, uint64_t, uint64_t)) {
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_library_impl_v2(
+        lib_, name, fn, TORCH_ABI_VERSION, TORCH_FEATURE_VERSION));
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
     STABLE_TORCH_ERROR_CODE_CHECK(
         torch_library_impl(lib_, name, fn, TORCH_ABI_VERSION));
 #else

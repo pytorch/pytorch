@@ -1511,6 +1511,15 @@ for warning in w:
         shape = libtorch_agnostic.ops.my_shape(t)
         self.assertEqual(shape, expected)
 
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_dispatcher_v2_inherited_sum(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        t = torch.randn(3, 4, 5, device=device)
+        result = libtorch_agnostic.ops.my_sum(t, [0, 2], True, torch.float64)
+        expected = torch.sum(t, dim=[0, 2], keepdim=True, dtype=torch.float64)
+        self.assertEqual(result, expected)
+
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_sum(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic

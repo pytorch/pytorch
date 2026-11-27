@@ -38,7 +38,7 @@ For complete API documentation of the stable operators, see the [Torch Stable AP
 
 (shim-overhead)=
 ```{note}
-Calling into libtorch through the stable wrappers and C shims comes with slight overhead compared to calling the equivalent `at::`/`c10::` APIs directly. Some ops in `torch/csrc/stable/ops.h` (e.g. `torch::stable::matmul`) go through [`torch_call_dispatcher`](stack-based-apis) internally, which adds extra overhead to each call from looking up the op by name and boxing and unboxing arguments and returns into their stable counterparts.
+Calling into libtorch through the stable wrappers and C shims comes with slight overhead compared to calling the equivalent `at::`/`c10::` APIs directly. Some ops in `torch/csrc/stable/ops.h` (e.g. `torch::stable::matmul`) go through [`torch::stable::call_dispatcher`](stack-based-apis) internally, while others use direct C shims. Dispatcher-backed calls add overhead from looking up the op by name and boxing and unboxing arguments and returns into their stable counterparts.
 ```
 
 ### Stable C headers
@@ -260,16 +260,42 @@ The above is relevant in two places:
     }
     ```
 
-2. `torch_call_dispatcher`
-    This API allows you to call the PyTorch dispatcher from C/C++ code. It has the following signature:
+2. Calling the dispatcher
+    From C++, you may call the PyTorch dispatcher with `torch::stable::call_dispatcher` from `torch/csrc/stable/ops.h`:
 
     ```cpp
-    torch_call_dispatcher(const char* opName, const char* overloadName, StableIValue* stack, uint64_t extension_build_version);
+    STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(opName, overloadName, stack));
     ```
 
-    `torch_call_dispatcher` will call the op overload defined by a given `opName`, `overloadName`, a stack of
-    StableIValues and the `TORCH_ABI_VERSION` of the user extension. This call will populate any return values of the
-    op into the stack in their StableIValue form, with `ret0` at index 0, `ret1` at index 1, and so on.
+    It returns `AOTITorchError` and will select one of the following C implementations depending
+    on your extension's minimum runtime target version (`TORCH_TARGET_VERSION`).
+
+    The C entrypoints are:
+
+    ```cpp
+    AOTITorchError torch_call_dispatcher_v2(
+        const char* opName, const char* overloadName, StableIValue* stack,
+        uint64_t extension_build_version, uint64_t extension_target_version);
+    AOTITorchError torch_call_dispatcher(
+        const char* opName, const char* overloadName, StableIValue* stack,
+        uint64_t extension_build_version);
+    AOTITorchError aoti_torch_call_dispatcher(
+        const char* opName, const char* overloadName, StableIValue* stack);
+    ```
+
+    `torch_call_dispatcher_v2` calls the op overload identified by `opName` and
+    `overloadName` with boxed arguments in schema order. It consumes owning input
+    values in `stack` and writes boxed returns starting at index 0; the caller
+    retains the stack allocation and owns the returned values. Consumed inputs
+    must not be unboxed or reused, even if the call fails after consuming them.
+
+    `torch_call_dispatcher_v2` is the recommended C entrypoint (available when
+    targeting >= 2.16). `torch_call_dispatcher` and `aoti_torch_call_dispatcher`
+    remain available for older targets with the same stack ownership contract.
+    V2 adds `extension_target_version` after `extension_build_version`.
+    Pass `TORCH_ABI_VERSION` for build. When `TORCH_TARGET_VERSION` is defined,
+    pass it for target; otherwise pass `TORCH_ABI_VERSION` as the effective target.
+    Target version must be nonzero and <= build version.
 
     We caution against using this API to call functions that have been registered to the dispatcher by other extensions
     unless the caller can guarantee that the signature they expect matches that which the custom extension has

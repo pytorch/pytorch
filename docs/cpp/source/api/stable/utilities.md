@@ -10,6 +10,11 @@ myst:
 The stable API provides various utility functions and types for working with
 tensors and CUDA operations.
 
+## Dispatcher
+
+```{doxygenfunction} torch::stable::call_dispatcher
+```
+
 ## DeviceGuard Class
 
 ```{doxygenclass} torch::stable::accelerator::DeviceGuard
