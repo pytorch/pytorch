@@ -112,38 +112,6 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(x)
         torch.testing.assert_close(actual, expected)
 
-    def test_remove_no_ops_unbacked_shape_dde(self, device):
-        # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
-        # which raises GuardOnDataDependentSymNode when the tuples contain
-        # two different unbacked SymInts (u0 vs u1).
-        from torch._inductor.fx_passes.joint_graph import remove_no_ops
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        shape_env = ShapeEnv()
-        with FakeTensorMode(shape_env=shape_env):
-            u0 = shape_env.create_unbacked_symint()
-            u1 = shape_env.create_unbacked_symint()
-            ones_val = torch.empty((u0, 128), device=device)
-            x_val = torch.empty((u1, 128), device=device)
-
-        graph = torch.fx.Graph()
-        ones_node = graph.placeholder("ones")
-        x_node = graph.placeholder("x")
-        ones_node.meta["val"] = ones_val
-        x_node.meta["val"] = x_val
-        mul = graph.call_function(torch.ops.aten.mul.Tensor, (ones_node, x_node))
-        mul.meta["val"] = ones_val
-        graph.output(mul)
-        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
-
-        # Must not raise. Shapes are not provably equal, so mul must stay.
-        remove_no_ops(gm, OrderedSet(), OrderedSet([ones_node]))
-        self.assertEqual(
-            sum(1 for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor),
-            1,
-        )
-
     @decorateIf(
         unittest.skip("requires triton"),
         lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
@@ -1326,6 +1294,38 @@ class TestUnbackedSymints(InductorTestCase):
 
 class TestUnbackedSymintsGeneric(InductorTestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_remove_no_ops_unbacked_shape_dde(self):
+        # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
+        # which raises GuardOnDataDependentSymNode when the tuples contain
+        # two different unbacked SymInts (u0 vs u1).
+        from torch._inductor.fx_passes.joint_graph import remove_no_ops
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+            ones_val = torch.empty((u0, 128), device="cpu")
+            x_val = torch.empty((u1, 128), device="cpu")
+
+        graph = torch.fx.Graph()
+        ones_node = graph.placeholder("ones")
+        x_node = graph.placeholder("x")
+        ones_node.meta["val"] = ones_val
+        x_node.meta["val"] = x_val
+        mul = graph.call_function(torch.ops.aten.mul.Tensor, (ones_node, x_node))
+        mul.meta["val"] = ones_val
+        graph.output(mul)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        # Must not raise. Shapes are not provably equal, so mul must stay.
+        remove_no_ops(gm, OrderedSet(), OrderedSet([ones_node]))
+        self.assertEqual(
+            sum(1 for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor),
+            1,
+        )
 
     def test_stride_ordered_uses_symbolic_divisibility(self):
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
