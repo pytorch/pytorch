@@ -105,6 +105,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::left::_cfg_left, m)?)?;
     m.add_function(wrap_pyfunction!(exec::order::_cfg_releases, m)?)?;
     m.add_function(wrap_pyfunction!(exec::left::_cfg_fail_plans, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::live::_cfg_takes_all, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_impure, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_set_cfg_pass_hook, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_opaque, m)?)?;

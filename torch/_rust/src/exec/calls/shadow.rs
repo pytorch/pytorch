@@ -194,7 +194,10 @@ extern "C" fn dump() {
 
 /// What the call-list recorder found on this thread
 /// (``TORCH_RUST_CALLS=shadow``; empty without it): a dict per place, the
-/// recorded run of it. ``status``: "replayable" (``text`` is the list and the
+/// recorded run of it. (``TORCH_RUST_CALLS=1`` is a measuring mode, not for
+/// a program whose results matter: under 1 an armed list keeps what its
+/// reads count for as long as it is armed, so an object's finalizer can run
+/// later than in plain Python.) ``status``: "replayable" (``text`` is the list and the
 /// recorder met nothing the list does not say), "partial: <first reason>"
 /// (``text`` is a list that is not the body; ``reasons``: every reason with
 /// its count), "stopped" (``stop`` = (instruction, why)) or "refused" (the

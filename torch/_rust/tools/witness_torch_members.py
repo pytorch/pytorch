@@ -33,22 +33,27 @@ The table of the members is then made again with it:
 """
 
 import glob
+import importlib
 import json
 import os
 import signal
 import subprocess
 import sys
 import traceback
+from typing import Any
 
 
 def one(sweep_dir, device, out_dir, members):
     sys.path.insert(0, sweep_dir)
     os.chdir(sweep_dir)
-    import measure
-    import sweep
+    # The two modules of the sweep are found on the path given at run time.
+    measure = importlib.import_module("measure")
+    sweep = importlib.import_module("sweep")
 
     import torch
 
+    # The extension has no stubs.
+    rust: Any = torch._rust
     torch.set_num_threads(1)
     for member in members:
         path = os.path.join(out_dir, f"{member}.{device}.jsonl")
@@ -72,7 +77,7 @@ def one(sweep_dir, device, out_dir, members):
                     with measure.setting(operands):
                         torch.manual_seed(measure.SEED)
                         try:
-                            _, seen = torch._rust._witness(callee, *args, **kwargs)
+                            _, seen = rust._witness(callee, *args, **kwargs)
                             record["returned"] = True
                         except Exception as e:
                             record["returned"] = False

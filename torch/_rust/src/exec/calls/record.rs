@@ -7,6 +7,10 @@
 //   1       the run today's engine would trace (replaces()): the recorder is
 //           in its place, no trace of today's engine begins, and nothing is
 //           formed of what was recorded: the block runs as written after.
+//           A MEASURING MODE, not for a program whose results matter: under
+//           1 an armed list keeps what its reads count for as long as it is
+//           armed, so an object's finalizer can run later than in plain
+//           Python. (Under shadow no such list is armed: finish.rs.)
 // It changes nothing a program computes: no instruction runs differently,
 // nothing of the program is called, no tensor is held (origins.rs), nothing
 // it finds is used by the engine. What the recorded run reads is recorded

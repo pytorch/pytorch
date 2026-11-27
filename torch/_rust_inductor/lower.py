@@ -333,7 +333,7 @@ class _Read:
         kind = t[0]
         if kind in ("in", "pin"):
             return fakes[t[1] + (self.ninputs if kind == "pin" else 0)]
-        x = results.get(t[1]) if kind in ("res", "move", "part") else None
+        x: Any = results.get(t[1]) if kind in ("res", "move", "part") else None
         for i in t[2] if kind == "part" else ():
             x = tuple.__getitem__(x, i)
         return x
@@ -455,6 +455,8 @@ def _modes():
 def lower(call_list, spec, input_keys, pins, facts):
     """The graph of ``call_list`` (made from ``spec``), or why it has none.
     ``input_keys``: a Key or the traced float; ``pins``: Keys; ``facts``: Traced."""
+    # The extension has no stubs.
+    # pyrefly: ignore [missing-module-attribute]
     from torch._rust import _calls_make, _calls_run, _calls_text
 
     def no(why, entry=None, have=()):
@@ -493,7 +495,9 @@ def lower(call_list, spec, input_keys, pins, facts):
         return at[0] if at is not None and at[0] < len(read.entries) else None
 
     def replay(*given):
-        tracers.append(get_proxy_mode().tracer)
+        # make_fx runs replay under its proxy mode.
+        proxy_mode: Any = get_proxy_mode()
+        tracers.append(proxy_mode.tracer)
         if any(a is not b for a, b in zip(given, fakes, strict=True)):
             raise _Differs("the data-free run was not handed the tensors of the keys")
         try:

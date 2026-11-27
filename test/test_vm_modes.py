@@ -2654,7 +2654,7 @@ def modes_loop_worklist(x):
     y = ((x.sin() * 2).cos() + 1).tanh()
     for v in MODES_HELD:
         if len(MODES_HELD) < 4:
-            MODES_HELD.append(v * 0.5)
+            MODES_HELD.append(v * 0.5)  # noqa: B909  # the test: a loop that grows the list it walks
         y = y * v
     return ((y * 3).cos() + 1).tanh().exp()
 
@@ -2746,7 +2746,7 @@ def modes_loop_made_and_kept(x):
     for v in ys:
         MODES_MARKS.append(1)
         if len(ys) < 4:
-            ys.append(v * 0.5)
+            ys.append(v * 0.5)  # noqa: B909  # the test: a loop that grows the list it walks
         y = y + v
     return ((y * 3).cos() + 1).tanh().exp(), ys
 

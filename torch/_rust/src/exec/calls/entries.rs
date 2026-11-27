@@ -193,4 +193,3 @@ pub fn moves(t: &mut Tmpl, j: u32) -> bool {
         _ => false,
     }
 }
-

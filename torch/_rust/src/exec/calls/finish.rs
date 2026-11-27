@@ -177,6 +177,23 @@ impl Rec {
             // (The reads that lead to a pin are the list's checks: again.rs.)
             self.shadow.specialized = self.origins.exact.len() as u32;
             self.shadow.pins = self.origins.pins.len() as u32;
+            if self.origins.unrooted {
+                self.reasons.add("an object the run began on had died where its reads were asked what they lead to: the reads through it cannot be compared".into());
+            }
+            // Beside today's engine (shadow) the recorder changes no
+            // result, so a list keeps nothing of the program's alive there:
+            // its checks may count values of the closed immutable list and
+            // nothing else (a dict that is a namespace, a cell, a container
+            // found as a value, what a class has under a name take no weak
+            // reference and would live as long as the list, and a finalizer
+            // would run later than the program lets it). Such checks are
+            // let go of here, and the list is never run again. In place of
+            // the trace (1) the list is armed with them: see record.rs.
+            let keeps = if super::record::replaces() { None } else { self.checks.as_ref().and_then(|reads| reads.get().counts_other_than(&|o| super::immutable(o, 0))) };
+            if let Some(class) = keeps {
+                self.reasons.add(format!("its checks would keep alive a {class}"));
+                drop(self.checks.take());
+            }
             // A list has no entry that changes the thread's state.
             if self.word.is_none_or(|word| crate::exec::ambient::state() != Ok(word)) {
                 self.reasons.add("the thread's state where the body ends is not the one the run began under".into());

@@ -20,7 +20,7 @@ pub mod hist;
 pub mod joint;
 mod kinds;
 pub mod left;
-mod live;
+pub mod live;
 mod made;
 pub mod order;
 pub mod overlap;
@@ -279,7 +279,8 @@ impl Prepared {
                     ..
                 } => run::FLAG_CALL_EX,
                 _ => 0,
-            } | if ins.op.can_raise() { run::FLAG_RAISE } else { 0 };
+            } | if ins.op.can_raise() { run::FLAG_RAISE } else { 0 }
+                | if order::owns(&ins.op) { run::FLAG_OWNS } else { 0 };
         }
         // A multi-output instr's values are its Projects'.
         for v in body() {
@@ -309,6 +310,13 @@ impl Prepared {
         if let Some(v) = live.no_order {
             return Err(pyo3::exceptions::PyNotImplementedError::new_err(format!(
                 "CFG executor: no order in which the instruction at offset {} lets go of its operands ({:?})",
+                cfg[v].origin * 2,
+                cfg[v].op
+            )));
+        }
+        if let Some(v) = live.takes_read {
+            return Err(pyo3::exceptions::PyNotImplementedError::new_err(format!(
+                "CFG executor: the instruction at offset {} would take with it an operand that is read behind it ({:?})",
                 cfg[v].origin * 2,
                 cfg[v].op
             )));

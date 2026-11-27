@@ -65,6 +65,7 @@ import json
 import os
 import re
 import sys
+from typing import Any
 
 
 KINDS = (
@@ -396,12 +397,12 @@ def form_lines(member, kind, path, valued):
     operands has the form `?`."""
     with open(path) as f:
         devices = json.load(f)["devices"]
-    declared = {}
+    said: dict[str, set[str]] = {}
     for of_device in devices.values():
         for k, w in of_device["summary"]["W"].get("writes", {}).items():
-            declared.setdefault(k, set()).update(w["declared"])
-    declared = {k: "/".join(sorted(v)) for k, v in declared.items()}
-    forms = {}
+            said.setdefault(k, set()).update(w["declared"])
+    declared = {k: "/".join(sorted(v)) for k, v in said.items()}
+    forms: dict[Any, list[Any]] = {}
     for device, of_device in devices.items():
         for sample in of_device["samples"]:
             found = places(sample) or {}
@@ -413,7 +414,7 @@ def form_lines(member, kind, path, valued):
     # A bool leaves the form where two forms differ in its value alone and
     # the calls of both do the same.
     for place in sorted({p for key in forms if key for p, _ in key[1]}):
-        pairs = {}
+        pairs: dict[Any, list[Any]] = {}
         for key in [key for key in forms if key]:
             if place in dict(key[1]):
                 merged = (key[0], tuple(b for b in key[1] if b[0] != place))
@@ -426,7 +427,7 @@ def form_lines(member, kind, path, valued):
     # some of its calls stands against, where they tell the calls that read
     # from those that do not: the samples of each set of keywords agree.
     for key in [key for key in forms if key]:
-        sets = {}
+        sets: dict[Any, list[Any]] = {}
         for device, sample in forms[key]:
             sets.setdefault(keywords(sample), []).append((device, sample))
         only_reads = len(reading(member, forms[key])) == 2 and not any(

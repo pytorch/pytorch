@@ -3409,3 +3409,20 @@ impl Reads {
         Err(self.last())
     }
 }
+
+impl Reads {
+    // What the entries COUNT (see weaken: an object whose class takes no weak
+    // reference and that no owner leads to stays counted for as long as the
+    // entries live) and that `plain` does not take: the class of the first
+    // such object. For a holder of these entries that must keep nothing of
+    // the program's alive (the call-list recorder's lists).
+    pub unsafe fn counts_other_than(&self, plain: &dyn Fn(*mut PyObject) -> bool) -> Option<String> {
+        let mut found = None;
+        held(&*self.entries.get(), &mut |o: &Py<PyAny>| {
+            if found.is_none() && !plain(o.as_ptr()) {
+                found = Some(type_name(o.as_ptr()).to_string());
+            }
+        });
+        found
+    }
+}

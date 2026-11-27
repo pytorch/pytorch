@@ -155,13 +155,14 @@ class Pipeline:
             name = f"{name} #{sum(1 for k in self.reports if k.startswith(name))}"
         report = Report(name, input_types)
         self.reports[name] = report
-        weights = frozenset(
-            i
+        consts = [
+            (i, t)
             for i, t in enumerate(input_types)
             if isinstance(t, TensorType) and t.is_const
-        )
-        for i in weights:
-            input_types[i]._on_const = report.weight_read
+        ]
+        weights = frozenset(i for i, _ in consts)
+        for _, const_type in consts:
+            const_type._on_const = report.weight_read
         # The traced run's tensors, for the passes: every graph a pass is
         # given, and what it makes of it, refers to this one object. A pass
         # that takes a weight out of it has read the weight's value.

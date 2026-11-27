@@ -173,7 +173,10 @@ class Written:
             # run left it, if it is handed on at all.
             if made(target):
                 continue
-            inside = isinstance(target, (list, dict, set)) and type(old.get(id(target))) is tuple
+            inside = (
+                isinstance(target, (list, dict, set))
+                and type(old.get(id(target))) is tuple
+            )
             if inside or any(target is a for a in args):
                 where = describe(target)
             else:

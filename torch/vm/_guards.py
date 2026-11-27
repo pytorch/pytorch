@@ -281,7 +281,9 @@ def address(t: torch.Tensor) -> int:
     """Where ``t``'s first element is, as ``t.data_ptr()`` gives it, read
     without asking PyTorch for a writable pointer: ``data_ptr()`` hands the
     memory out, which ends a ``vm.Unwritten`` on ``t``."""
-    return torch._C._data_address(t) + t.storage_offset() * t.element_size()
+    # A tensor that has memory has a plain int for its offset.
+    offset: Any = t.storage_offset()
+    return torch._C._data_address(t) + offset * t.element_size()
 
 
 @dataclasses.dataclass(frozen=True)

@@ -2662,14 +2662,14 @@ class TestVmCallLists(TestCase):
         def temporary(src, log):
             u = src.pop() * 2.0
             log.append("multiplied")
-            v = u - 1.0
+            v = u - 1.0  # noqa: F841  # the program binds v: when t dies is the test
             log.append("subtracted")
 
         def local(src, log):
             t = src.pop()
             u = t * 2.0
             log.append("multiplied")
-            v = u - 1.0
+            v = u - 1.0  # noqa: F841  # the program binds v: when t dies is the test
             del t
             log.append("subtracted")
 
@@ -2722,7 +2722,7 @@ class TestVmCallLists(TestCase):
         def body(src, log):
             a = src.pop()
             log.append("popped")
-            a = src.pop()
+            a = src.pop()  # noqa: F841  # the test: a local that is bound again
             log.append("rebound")
 
         def pop(k):
@@ -2814,8 +2814,8 @@ class TestVmCallLists(TestCase):
         x, F = torch.ones(2), _ClFinal
 
         def body(src):
-            a = src.pop()
-            b = src.pop()
+            a = src.pop()  # noqa: F841  # the test: the frame keeps a and b
+            b = src.pop()  # noqa: F841  # the test: the frame keeps a and b
             torch.add(x, "bad")
 
         def pop(k):
@@ -5295,7 +5295,7 @@ def pin_from_a_dict(x):
 
 
 def pin_from_a_global(x):
-    return ((x.sin() * PIN_GLOBAL.k).cos() + 1).tanh().exp()
+    return ((x.sin() * PIN_GLOBAL.k).cos() + 1).tanh().exp()  # noqa: F821  # set by pin_as_global
 
 
 def pin_from_an_attribute(x):
@@ -5307,31 +5307,31 @@ def pin_from_a_list(x):
 
 
 def pin_called_from_a_global(x):
-    return (PIN_CALLED(x.sin()).cos() + 1).tanh().exp()
+    return (PIN_CALLED(x.sin()).cos() + 1).tanh().exp()  # noqa: F821  # set by pin_as_global
 
 
 def pin_tensor_from_a_global(x):
-    return ((x.sin() * PIN_TENSOR).cos() + 1).tanh().exp()
+    return ((x.sin() * PIN_TENSOR).cos() + 1).tanh().exp()  # noqa: F821  # set by pin_as_global
 
 
 def pin_tensor_also_handed(x, t):
-    return ((x.sin() * t + PIN_TENSOR).cos() + 1).tanh().exp()
+    return ((x.sin() * t + PIN_TENSOR).cos() + 1).tanh().exp()  # noqa: F821  # set by pin_as_global_and_argument
 
 
 def pin_dict_from_a_global(x):
-    return ((x.sin() * PIN_DICT["k"]).cos() + 1).tanh().exp()
+    return ((x.sin() * PIN_DICT["k"]).cos() + 1).tanh().exp()  # noqa: F821  # set by pin_as_global
 
 
 def pin_tuple_from_a_global(x):
-    return ((x.sin() * PIN_TUPLE[0]).cos() + 1).tanh().exp()
+    return ((x.sin() * PIN_TUPLE[0]).cos() + 1).tanh().exp()  # noqa: F821  # set by pin_as_global
 
 
 def pin_set_from_a_global(x):
-    return ((x.sin() * len(PIN_SET)).cos() + 1).tanh().exp()
+    return ((x.sin() * len(PIN_SET)).cos() + 1).tanh().exp()  # noqa: F821  # set by pin_as_global
 
 
 def pin_class_from_a_global(x):
-    return ((x.sin() * PIN_CLASS.k).cos() + 1).tanh().exp()
+    return ((x.sin() * PIN_CLASS.k).cos() + 1).tanh().exp()  # noqa: F821  # set by pin_as_global
 
 
 def pin_cell():
@@ -10050,6 +10050,49 @@ MOD = Holder(3)
 OTHER_W = torch.full((8,), 7.0)
 OWN_W = [torch.full((8,), float(k)) for k in range(6)]
 
+# What a list keeps alive: the body reads an object that takes no weak
+# reference and has a finalizer; the program lets go of it before its fifth
+# call. MOMENTS: where each finalizer ran (the call, before it or in it).
+class Final:
+    __slots__ = ("k",)
+
+    def __del__(self):
+        MOMENTS.append(tuple(CALL))
+        if KEPT_ITEM:
+            KEPT_ITEM[0] = torch.zeros(8)
+
+class Bare:
+    pass
+
+KEPT_ITEM, BARE, MOMENTS, CALL = [], [], [], [0, "before"]
+
+def moment(x, items, bare):
+    thing = bare.thing
+    return x * 2 + items[0]
+
+def twin_of(holder):
+    twin = Holder(0)
+    twin.w = holder.w
+    return twin
+
+TWIN = twin_of(HOLDERS[0])
+HELD = HOLDERS[0]
+DYING = {}
+
+# The tensor is found by two reads: which of them the list's operand came
+# by is not known, so the list is held to both.
+def chk_two_roots(x, a, b):
+    c = a.w
+    return x * 2 + b.w
+
+def chk_two_roots_dead(x, a, b):
+    c = a.w
+    return x * 2 + b.w
+
+def chk_two_ways(x, h):
+    a = HELD.w
+    return x * 2 + h.w
+
 def chk_shadowed_builtin(x):
     y = torch.relu(x) * 2
     return y + max(1, 2)
@@ -10058,13 +10101,32 @@ def chk_deleted_global(x):
     y = torch.relu(x) * 2
     return y + max(1, 2)
 
+# (Operators only: a list whose run read nothing is one that is armed.)
 def chk_grad_mode(x):
-    y = torch.relu(x) * 2
+    y = x * 2
     return y + 1
 
 def chk_anomaly(x):
-    y = torch.relu(x) * 2
+    y = x * 2
     return y + 1
+
+def chk_input_key(x, w):
+    y = x * 2
+    return y + w
+
+def chk_input_place(x, a, b):
+    y = x * 2
+    return y + a + b
+
+def function_body(x):
+    y = x * 2
+    return y + 1
+
+FUNCTIONS = [function_body, type(function_body)(function_body.__code__, {})]
+
+def chk_function(x, k):
+    # (As in chk_closure: the recording of this block stops first.)
+    return (Stopper(), FUNCTIONS[k](x))[1]
 
 def chk_root(x, holder):
     y = torch.relu(x) * 2
@@ -10113,7 +10175,7 @@ def chk_fresh_code(x, i):
         # The earlier function dies here, with its code and its plan.
         FRESH.clear()
         space = {"torch": torch}
-        exec(f"fresh_body = lambda x: torch.relu(x) * {k + 2} + {k}", space)
+        exec(f"fresh_body = lambda x: x * {k + 2} + {k}", space)
         FRESH[k] = space["fresh_body"]
     # (As in chk_closure: the recording of this block stops first.)
     return (Stopper(), FRESH[k](x))[1]
@@ -10139,12 +10201,19 @@ BETWEEN = {
     "chk_deleted_global": lambda: globals().__delitem__("max"),
     "chk_grad_mode": lambda: torch.set_grad_enabled(False),
     "chk_anomaly": lambda: torch.autograd.set_detect_anomaly(True),
+    "moment": lambda: BARE.__setitem__(0, None),
+    "chk_two_roots_dead": lambda: DYING.clear(),
 }
 # What a program is called with besides (or in place of) the tensor, by call.
 ARGS = {"float_input": lambda i: (1.5,) if i < 4 else (2.5,)}
 ARGS.update({n: (lambda i, v=v, first=first, last=last: first(v) if i < 4 else last(v)) for n, (v, first, last) in TWO_OF.items()})
 ARGS.update(out_input=lambda i: (2.0 + i,), out_coincides=lambda i: (True,), out_tuple_valued=lambda i: (2.0,))
 ARGS.update(chk_root=lambda i: (HOLDERS[i >= 4],), chk_led_output=lambda i: (HOLDERS[i >= 4],), chk_found_too=lambda i: (MOD.w if i < 4 else OTHER_W,))
+ARGS.update(chk_two_roots=lambda i: (HOLDERS[0], TWIN if i < 4 else HOLDERS[1]), chk_two_ways=lambda i: (HOLDERS[i >= 4],))
+ARGS.update(chk_two_roots_dead=lambda i: (HOLDERS[0], DYING.setdefault("twin", twin_of(HOLDERS[0])) if i < 4 else HOLDERS[1]))
+ARGS.update(chk_input_key=lambda i: (OWN_W[0] if i < 4 else OWN_W[0][:1],), chk_function=lambda i: (i % 2,))
+ARGS.update(chk_input_place=lambda i: (OWN_W[0], OWN_W[0] if i < 4 else OWN_W[1]))
+ARGS.update(moment=lambda i: (KEPT_ITEM, BARE[i >= 4]))
 ARGS.update(chk_closure=lambda i: (i % 2,), chk_own_cell=lambda i: (OWN_W[i],), chk_fresh_code=lambda i: (i,))
 KWARGS = ("in_kwargs",)
 # What a program changes before its second call: a way its first call, the
@@ -10169,12 +10238,20 @@ def run(f):
     torch.set_grad_enabled(True)
     torch.autograd.set_detect_anomaly(False)
     globals().pop("max", None)
+    if name == "moment":
+        BARE[:] = [Bare(), Bare()]
+        BARE[0].thing, BARE[1].thing = Final(), None
+        KEPT_ITEM[:] = [torch.arange(8.0)]
+        MOMENTS.clear()
     FRESH.clear()
+    DYING.clear()
     if name in SETUP:
         SETUP[name]()
     GRAD.grad = None
     outs = []
     for i, x in enumerate(inputs):
+        if name == "moment":
+            CALL[0], CALL[1] = i, "before"
         if i == 1 and name in EARLY:
             EARLY[name]()
         if i == 4 and name in BETWEEN:
@@ -10185,13 +10262,18 @@ def run(f):
             gc.disable()
         if name in KWARGS:
             outs.append(flat(f(a=x.clone())))
+        elif name == "moment":
+            args = ARGS[name](i)
+            CALL[1] = "in"
+            outs.append(flat(f(x.clone(), *args)))
+            del args
         else:
             outs.append(flat(f(x.clone(), *ARGS.get(name, lambda i: ())(i))))
     if name in COLLECTS:
         gc.enable()
         gc.collect()
     grad = None if GRAD.grad is None else GRAD.grad.clone()
-    return outs, bn.running_mean.clone(), int(bn.num_batches_tracked), list(STATE["dead"]), M0.clone(), grad
+    return outs, bn.running_mean.clone(), int(bn.num_batches_tracked), list(STATE["dead"]), M0.clone(), grad, list(MOMENTS)
 M0C = M0.clone()
 def equal(a, b):
     if torch.is_tensor(a):
@@ -10362,6 +10444,21 @@ class TestVmCallsShadow(TestCase):
         self.assertNotIn(found["status"], ("stopped", "refused"))
         return found
 
+    def armed(self, found, mode="shadow"):
+        """Whether the list of the recording ``found`` is run on later
+        arrivals: beside today's engine not if its checks would keep an
+        object of the program's alive (CHECKS)."""
+        keeps = any(why.startswith(self.KEEPS) for why, _ in found["reasons"])
+        return mode == "1" or not keeps
+
+    def later(self, found, mode="shadow"):
+        """The later arrivals of ``found``: equal where its list is armed,
+        none where it is not."""
+        if self.armed(found, mode):
+            self.assertRegex(found["again"], r"^equal on [1-9]\d* later arrival")
+        else:
+            self.assertEqual((found["again"], found["missed"]), ("", []))
+
     def test_nothing_runs_without_the_variable(self):
         for name in ("chain", "frame_under", "in_place", "writer", "state", "operators", "flag_under", "reads_value"):  # fmt: skip
             with self.subTest(name=name):
@@ -10476,29 +10573,50 @@ class TestVmCallsShadow(TestCase):
         else:
             self.assertFalse(found["again"].startswith("DIFFERENT"), found)
 
-    # program: (the start of the place its checks are of, the check its
-    # later arrivals miss by, or None; a reason its list has, or None: such
-    # a list is never run on a later arrival). Each program changes, between
-    # two of its calls, the one thing the check is for.
+    # program: (the start of the place its checks are of; the check its
+    # later arrivals miss by where its list is armed, or None; the start of
+    # the reason its list has under shadow if it is not armed there, or
+    # None; the start of a reason for which it is armed in neither mode, or
+    # None). Each program changes, between two of its calls, the one thing
+    # the check is for.
+    # Beside today's engine (shadow) a list is armed only if its checks
+    # keep nothing of the program's alive: a run that loaded a global counts
+    # the namespace, one that read an attribute of an instance counts what
+    # the class has under a name. Such a list is never run again there. In
+    # place of the trace (1) it is armed, and its later arrivals are the
+    # misses.
+    KEEPS = "its checks would keep alive a "
+    OWN_CELL = "the reads of the run are no check of a later arrival: it reads a cell that the body's frame made: every call has its own"
     CHECKS = {
-        "global_number": ("global_number:", "a read: a namespace or a container", None),
-        "none_flag_under": ("none_flag_under:", "a read: a namespace or a container", None),
-        "out_flag": ("out_flag:bb1", "a read: a namespace or a container", None),
-        "chk_shadowed_builtin": ("chk_shadowed_builtin:", "a read: a namespace or a container", None),
-        "chk_deleted_global": ("chk_deleted_global:", "a read: a namespace or a container", None),
-        "chk_grad_mode": ("chk_grad_mode:", "thread state", None),
-        "chk_anomaly": ("chk_anomaly:", "thread state: not neutral: anomaly mode is on", None),
-        "chk_root": ("chk_root:", "a root the reads start from", None),
-        "chk_led_output": ("chk_led_output:bb1", "a root the reads start from", None),
-        "chk_found_too": ("chk_found_too:", "an input a read of the run also found", None),
-        "chk_closure": ("make_closure.<locals>.closure_body:", "the function of the body's frame", None),
-        "chk_own_cell": ("chk_own_cell:bb4", None, "the reads of the run are no check of a later arrival: it reads a cell that the body's frame made: every call has its own"),
-        "chk_fresh_code": ("<lambda>:", None, None),
-        "float_input": ("float_input:", "input value", None),
-        "flag_under": ("flag_under:", "a read: a namespace or a container", None),
-        "flag_operand": ("flag_operand:", "a read: a namespace or a container", None),
-        "default_operand": ("default_operand:", "a read: the code or the defaults of a function", None),
+        "chk_grad_mode": ("chk_grad_mode:", "thread state", None, None),
+        "chk_anomaly": ("chk_anomaly:", "thread state: not neutral: anomaly mode is on", None, None),
+        "chk_input_key": ("chk_input_key:", "the key of an input", None, None),
+        "chk_input_place": ("chk_input_place:", "where the inputs are found", None, None),
+        "chk_function": ("function_body:", "the function of the body's frame", None, None),
+        "float_input": ("float_input:", "input value", None, None),
+        "chk_fresh_code": ("<lambda>:", None, None, None),
+        "chk_own_cell": ("chk_own_cell:", None, None, OWN_CELL),
+        "global_number": ("global_number:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "none_flag_under": ("none_flag_under:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "out_flag": ("out_flag:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "chk_shadowed_builtin": ("chk_shadowed_builtin:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "chk_deleted_global": ("chk_deleted_global:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "flag_under": ("flag_under:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "flag_operand": ("flag_operand:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "default_operand": ("default_operand:", "a read: the code or the defaults of a function", KEEPS + "dict", None),
+        "chk_root": ("chk_root:", "a root the reads start from", KEEPS, None),
+        "chk_led_output": ("chk_led_output:", "a root the reads start from", KEEPS, None),
+        "chk_found_too": ("chk_found_too:", "an input a read of the run also found", KEEPS, None),
+        "chk_two_roots": ("chk_two_roots:", "a root the reads start from", KEEPS, None),
+        "chk_two_roots_dead": ("chk_two_roots_dead:", "a root the reads start from", KEEPS, None),
+        "chk_two_ways": ("chk_two_ways:", "a root the reads start from", KEEPS, None),
+        "chk_closure": ("make_closure.<locals>.closure_body:", "the function of the body's frame", KEEPS, None),
     }  # fmt: skip
+    # With 1 a block that today's engine finds too small is never due:
+    # nothing is recorded of these programs' places.
+    NOT_DUE_WITH_1 = ("global_number",)
+    # With 1 the recorded run of these is the last arrival at the place.
+    NO_ARRIVAL_WITH_1 = ("chk_function",)
 
     @parametrize("name", list(CHECKS))
     def test_a_list_runs_again_only_where_its_checks_hold(self, name):
@@ -10506,25 +10624,14 @@ class TestVmCallsShadow(TestCase):
         # run read is as it was, the thread is neutral and in the state the
         # run was in, the frame is of the recorded function, the inputs are
         # found where they were with the keys and the values the list is for,
-        # a root its reads start from and an input a read also found are the
-        # recorded objects. An arrival that fails one is a miss, counted by
-        # the check, and the block runs as written: no such arrival is one
+        # every root its reads start from and an input a read also found are
+        # the recorded objects. An arrival that fails one is a miss, counted
+        # by the check, and the block runs as written: no such arrival is one
         # where the list and the block differ.
-        place, check, reason = self.CHECKS[name]
+        place, check, keeps, never = self.CHECKS[name]
         for mode in ("shadow", "1"):
             out = self.program(name, mode)
             found = [s for s in out["shadow"] if s["place"].startswith(place)]
-            if mode == "shadow":
-                self.assertTrue(found, out["shadow"])
-                missed = [c for s in found for c, _ in s["missed"]]
-                if check is not None:
-                    self.assertIn(check, missed)
-                if reason is not None:
-                    listed = [
-                        s for s in found if reason in [w for w, _ in s["reasons"]]
-                    ]
-                    self.assertTrue(listed, found)
-                    self.assertEqual([s["again"] for s in listed], [""] * len(listed))
             for s in found:
                 self.assertFalse(s["again"].startswith("DIFFERENT"), s)
             for s in out["shadow"]:
@@ -10532,6 +10639,44 @@ class TestVmCallsShadow(TestCase):
                     s["status"] == "replayable" and s["again"].startswith("DIFFERENT"),
                     s,
                 )
+            recorded = mode == "shadow" or name not in self.NOT_DUE_WITH_1
+            self.assertEqual(bool(found), recorded, out["shadow"])
+            if not found:
+                continue
+            reason = never if never is not None else keeps if mode == "shadow" else None
+            if reason is not None:
+                listed = [
+                    s
+                    for s in found
+                    if any(w.startswith(reason) for w, _ in s["reasons"])
+                ]
+                self.assertTrue(listed, found)
+                self.assertEqual([s["again"] for s in listed], [""] * len(listed))
+            elif mode == "1" and name in self.NO_ARRIVAL_WITH_1:
+                self.assertEqual([s["again"] for s in found], [""] * len(found))
+            elif check is not None:
+                self.assertIn(check, [c for s in found for c, _ in s["missed"]])
+
+    def test_what_a_list_keeps_alive(self):
+        # The body reads an object that takes no weak reference and has a
+        # finalizer; the program lets go of it before its fifth call, where
+        # plain Python runs the finalizer. Beside today's engine the list is
+        # not armed (its checks would count the object), and the program is
+        # eager's: the finalizer runs where it runs without the recorder.
+        out = self.program("moment", "shadow")
+        found = [s for s in out["shadow"] if s["place"].startswith("moment:")]
+        self.assertTrue(found, out["shadow"])
+        for s in found:
+            self.assertTrue(any(w.startswith(self.KEEPS) for w, _ in s["reasons"]), s)
+            self.assertEqual(s["again"], "")
+        self.assertEqual(out["digest"], self.program("moment", None)["digest"])
+        # THE STATED LIMIT of the measuring mode: with 1 the list is armed
+        # with its checks, which count the object for as long as the list is
+        # armed, and the finalizer runs later than in plain Python.
+        out = self.program("moment", "1", same=False)
+        found = [s for s in out["shadow"] if s["place"].startswith("moment:")]
+        self.assertTrue(found, out["shadow"])
+        self.assertFalse(out["same"])
 
     @parametrize("name", list(SHADOW_STOPS))
     def test_a_stop_ends_the_recording_with_its_reason(self, name):
@@ -10610,11 +10755,11 @@ class TestVmCallsShadow(TestCase):
         # the list has no other reason. One of its entries writes, so it is
         # never run again, and nothing shows that it is the body.
         for mode in ("shadow", "1"):
-            found = [
+            found = next(
                 s
                 for s in self.program("writes_only", mode)["shadow"]
                 if s["place"].startswith("writes_only:")
-            ][0]
+            )
             self.assertEqual(found["stop"], None)
             self.assertEqual(
                 [why for why, _ in found["reasons"]],
@@ -10720,7 +10865,7 @@ class TestVmCallsShadow(TestCase):
         stated, unstated, ran = self.OUTPUTS[name]
         for mode in ("shadow", "1"):
             out = self.program(name, mode)
-            found = [s for s in out["shadow"] if s["place"].startswith(name + ":")][0]
+            found = next(s for s in out["shadow"] if s["place"].startswith(name + ":"))
             self.assertEqual(found["stop"], None, found)
             reasons = [why for why, _ in found["reasons"]]
             without = [why for why in reasons if why.startswith("an output")]
@@ -10740,7 +10885,10 @@ class TestVmCallsShadow(TestCase):
                 self.assertEqual(found["again"], "")
                 continue
             self.assertEqual(found["validated"], "equal")
-            if name == "out_flag":
+            if not self.armed(found, mode):
+                # (Beside the engine: its checks would keep an object alive.)
+                self.assertEqual((found["again"], found["missed"]), ("", []))
+            elif name == "out_flag":
                 # The read of the global is a check of the list: behind the
                 # program's change its arrivals are misses.
                 self.assertTrue(found["again"].startswith("equal on "), found["again"])
@@ -10806,12 +10954,12 @@ class TestVmCallsShadow(TestCase):
         found = self.reached("in_a_tuple")
         self.assertIn("r0 = in0 * 2", found["text"].splitlines()[0])
         self.assertEqual((found["pins"], found["validated"]), (0, "equal"))
-        self.assertRegex(found["again"], r"^equal on [1-9]\d* later arrival")
+        self.later(found)
         # The second item of a list that an earlier block of the frame built.
         found = [s for s in self.places("in_a_list") if "in1 * 2" in s["text"]]
         self.assertTrue(found, self.places("in_a_list"))
         self.assertEqual((found[0]["pins"], found[0]["validated"]), (0, "equal"))
-        self.assertRegex(found[0]["again"], r"^equal on [1-9]\d* later arrival")
+        self.later(found[0])
 
     def test_a_tensor_among_the_values_of_a_dict_of_str_keys_is_an_input(self):
         # The value of a dict that an earlier block of the frame built, and
@@ -10822,11 +10970,11 @@ class TestVmCallsShadow(TestCase):
         self.assertTrue(found, self.places("in_a_dict"))
         self.assertRegex(found[0]["text"], r"r0 = in\d \* 2")
         self.assertEqual((found[0]["pins"], found[0]["validated"]), (0, "equal"))
-        self.assertRegex(found[0]["again"], r"^equal on [1-9]\d* later arrival")
+        self.later(found[0])
         found = self.reached("in_kwargs")
         self.assertIn("r0 = in0 * 2", found["text"].splitlines()[0])
         self.assertEqual((found["pins"], found["validated"]), (0, "equal"))
-        self.assertRegex(found["again"], r"^equal on [1-9]\d* later arrival")
+        self.later(found)
         # A dict with a key that is no str is not walked: the tensor in it
         # is no input, and no read leads to it (SHADOW_STOPS). Nor is a
         # subclass of dict: the tensor in it is found by the read of the
@@ -10865,8 +11013,7 @@ class TestVmCallsShadow(TestCase):
         # load no read without a check; the list rests on that read, which
         # is one of its checks (test_a_list_runs_again_only_where_its_checks_hold).
         found = reasons("global_number")
-        self.assertEqual(found, [])
-        self.assertEqual(self.reached("global_number")["status"], "replayable")
+        self.assertEqual([w for w in found if not w.startswith(self.KEEPS)], [])
         # `is None` of a global, tested by a jump in a frame under the body.
         found = self.reached("none_flag_under")
         self.assertEqual(found["jumps"], [1, 0])
@@ -10952,16 +11099,17 @@ class TestVmCallsShadow(TestCase):
         # by identity; the operator behind it was resolved on the class).
         found = self.reached("patched_behind")
         self.assertIn("r0 = torch.relu(in0)", found["text"].splitlines()[0])
-        self.assertEqual([check for check, _ in found["missed"]], ["class"])
+        if self.armed(found):
+            self.assertEqual([check for check, _ in found["missed"]], ["class"])
+        else:
+            self.assertEqual((found["again"], found["missed"]), ("", []))
         # A list whose run read what the program then changed is not run
-        # there either: a miss by the read, where the list would have given
-        # other values than the block.
+        # there either, where it would have given other values than the
+        # block: beside the engine it is not armed (its checks would count
+        # the namespace); in place of the trace the read is the miss (CHECKS).
         found = self.reached("global_number")
-        self.assertEqual(
-            [check for check, _ in found["missed"]],
-            ["a read: a namespace or a container"],
-        )
-        self.assertFalse(found["again"].startswith("DIFFERENT"))
+        self.assertFalse(self.armed(found))
+        self.assertEqual((found["again"], found["missed"]), ("", []))
         # A list with an entry that writes is never run again.
         found = self.reached("in_place")
         self.assertEqual((found["again"], found["missed"]), ("", []))
@@ -18486,20 +18634,33 @@ class TestVmRulesTorchUndo(TestCase):
         drew = [found for func, found in seen if "mul" not in str(func)]
         self.assertEqual([seeds(found) for found in drew[:4]], [[1234567]] * 4)
         self.assertIs(drew[4][0], torch.default_generator)
-        # Every operator that can be handed a generator is handed it as an
-        # argument of its own (never in a list), and is one whose draws the
-        # record is told of.
-        aten, handed = torch.ops.aten, 0
-        for name in dir(aten):
-            packet = getattr(aten, name)
-            for overload in getattr(packet, "overloads", list)():
-                op = getattr(packet, overload)
-                for argument in op._schema.arguments:
-                    if "Generator" in str(argument.type):
-                        handed += 1
-                        self.assertEqual(str(argument.type), "Optional[Generator]")
-                        self.assertIn(torch.Tag.nondeterministic_seeded, op.tags)
+        # Every operator of the dispatcher that can be handed a generator is
+        # handed it as an argument of its own (never in a list), and is one
+        # whose draws the record is told of. The walk is over the
+        # dispatcher's own list of names: the attributes of torch.ops.aten
+        # are only the operators a process has asked for so far. (Five
+        # builtins of TorchScript also take a generator; they are no
+        # operators of the dispatcher, so no mode is handed a call of one.)
+        names, handed = set(torch._C._dispatch_get_all_op_names()), 0
+        for full in sorted(names):
+            if not full.startswith("aten::"):
+                continue
+            name, _, overload = full[len("aten::") :].partition(".")
+            op = getattr(getattr(torch.ops.aten, name), overload or "default")
+            for argument in op._schema.arguments:
+                if "Generator" in str(argument.type):
+                    handed += 1
+                    self.assertEqual(str(argument.type), "Optional[Generator]", full)
+                    self.assertIn(torch.Tag.nondeterministic_seeded, op.tags, full)
         self.assertGreater(handed, 50)
+        scripted = (
+            "manual_seed.generator",
+            "initial_seed",
+            "seed",
+            "_no_grad_uniform_",
+            "_no_grad_normal_",
+        )
+        self.assertEqual([n for n in scripted if "aten::" + n in names], [])
 
     def beside_eager(self, source, calls=12):
         """Runs the program as written and under vm, each in a module of
@@ -19943,6 +20104,335 @@ class TestVmRulesTorchDraws(TestCase):
         for recording in met:
             self.assertNotEqual(
                 recording["status"], "replayable", msg=json.dumps(recording)
+            )
+
+
+# The functions of TestVmEdgeHanded. Each has an instruction that owns its
+# operands (BUILD_SET, CALL_FUNCTION_EX) inside a `try` (or a `with`) under a
+# loop, and one of its operands is the value the handler is handed: the
+# loop's iterator, or the `with` statement's exit function. No bytecode the
+# compiler makes has an operand at two places of the stack like that: `dup`
+# replaces the LOAD_CONST of the None in the statement by a COPY of the value
+# below, so the BYTECODE IS PATCHED here. name -> (source, the COPY's
+# argument, whether a plan that hands the instruction every operand its step
+# drops is refused: the copied value is read behind the instruction in every
+# function, and it would be taken where its step drops it, too).
+EDGE_HANDED_CASES = {
+    "set_break": (
+        """
+def body(x):
+    log("in")
+    for it in It2("i"):
+        try:
+            {None, [], T("c")}
+            break
+        except TypeError:
+            log("h")
+    log("out")
+""",
+        1,
+        True,
+    ),
+    "set_break_tensors": (
+        """
+def body(x):
+    y = ((x.sin() * 2.0).cos() + 1.0).tanh()
+    for it in It2("i"):
+        try:
+            {None, [], F(y + 1.0, "c")}
+            break
+        except TypeError:
+            log("h")
+    return ((y.sin() * 2.0).cos() + 1.0).tanh()
+""",
+        1,
+        True,
+    ),
+    "set_continue": (
+        """
+def body(x):
+    log("in")
+    for it in It2("i"):
+        try:
+            {None, [], T("c")}
+        except TypeError:
+            log("h")
+    log("out")
+""",
+        1,
+        False,
+    ),
+    "set_built": (
+        """
+def body(x):
+    log("in")
+    for it in It2("i"):
+        try:
+            {None}
+            break
+        except TypeError:
+            log("h")
+    log("out")
+""",
+        1,
+        True,
+    ),
+    "set_with": (
+        """
+def body(x):
+    log("in")
+    try:
+        with CM("m"):
+            {None, [], T("c")}
+            return
+    except TypeError:
+        log("h")
+    log("out")
+""",
+        1,
+        False,
+    ),
+    "star_call": (
+        """
+def body(x):
+    log("in")
+    for it in It2("i"):
+        try:
+            len(*None)
+            break
+        except TypeError:
+            log("h")
+    log("out")
+""",
+        3,
+        True,
+    ),
+    "star_call_keywords": (
+        """
+def body(x):
+    log("in")
+    for it in It2("i"):
+        try:
+            boom(*None, **{"k": T("k")})
+            break
+        except (TypeError, ValueError):
+            log("h")
+    log("out")
+""",
+        3,
+        True,
+    ),
+    "star_call_returns": (
+        """
+def body(x):
+    log("in")
+    for it in It2("i"):
+        try:
+            fs(*None)
+            break
+        except TypeError:
+            log("h")
+    log("out")
+""",
+        3,
+        True,
+    ),
+}
+
+EDGE_HANDED_PROGRAM = r"""
+import dis, gc, importlib, json, sys, weakref
+import torch
+from torch import vm
+
+MODE, CASES, MORE = sys.argv[1], json.loads(sys.argv[2]), int(sys.argv[3])
+EARLY = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+
+DEFS = '''
+import weakref
+
+LOG = []
+REFS = []
+
+
+def log(what):
+    LOG.append(what)
+
+
+class T:
+    def __init__(s, name):
+        s.name = name
+
+    def __del__(s):
+        LOG.append("-" + s.name)
+
+
+class It2(T):
+    n = 0
+
+    def __iter__(s):
+        return s
+
+    def __next__(s):
+        s.n += 1
+        if s.n > 2:
+            raise StopIteration
+        return s.n
+
+
+class CM(T):
+    def __enter__(s):
+        return T("e" + s.name)
+
+    def __exit__(s, *a):
+        LOG.append("exit")
+        return False
+
+
+def F(tensor, name):
+    def died(r):
+        LOG.append("-" + name)
+
+    REFS.append(weakref.ref(tensor, died))
+    return tensor
+
+
+def boom(*a, **k):
+    raise ValueError("boom")
+
+
+def fs(*a, **k):
+    return None
+'''
+
+
+def dup(fn, n):
+    # The function with the LOAD_CONST of its None replaced by COPY n: the
+    # value n below the top is an operand of the instruction too.
+    code = fn.__code__
+    raw = bytearray(code.co_code)
+    loads = [i for i in dis.get_instructions(fn) if i.opname == "LOAD_CONST"]
+    at = [i.offset for i in loads if i.argval is None][0]
+    raw[at], raw[at + 1] = dis.opmap["COPY"], n
+    fn.__code__ = code.replace(co_code=bytes(raw))
+    return fn
+
+
+gc.disable()
+if MODE == "vm takes all":
+    torch._rust._cfg_takes_all(True)
+for name, (source, n, _) in CASES.items():
+    ns = {"__name__": "handed"}
+    # Each function is a code of its own name: the report's rows go by it.
+    exec(compile(DEFS + source.replace("def body(", "def " + name + "("), "<handed>", "exec"), ns)
+    fn = dup(ns[name], n)
+    if MODE == "hooked":
+        # CPython with a frame-evaluation hook that runs nothing itself.
+        fn = importlib.import_module("torch._dynamo").run(fn)
+    else:
+        fn = vm(fn, passes=EARLY)
+    log = ns["LOG"]
+
+    def call(i):
+        log.clear()
+        ns["REFS"].clear()
+        try:
+            fn(torch.full((4,), i + 1.0))
+        except Exception as e:
+            log.append("RAISED:" + type(e).__name__)
+        log.append("RET")
+        return " ".join(log)
+
+    logs = [call(i) for i in range(8)]
+    more = sorted({call(8) for _ in range(MORE)})
+    left = [why for qualname, _, why in torch._rust._cfg_left() if qualname == name]
+    print(json.dumps({name: {"logs": logs, "more": more, "left": left}}), flush=True)
+"""
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+class TestVmEdgeHanded(TestCase):
+    """An instruction that owns its operands takes with it only what nothing
+    reads behind it. BUILD_SET and CALL_FUNCTION_EX get references of their
+    own and let go of them themselves; an operand that the handler of the
+    instruction is handed, or that the bytecode pops behind it, stays the
+    frame's and is shared with the instruction. The functions here have such
+    an operand (their bytecode is patched: see ``EDGE_HANDED_CASES``); each
+    runs 2,008 times under ``torch.vm`` and its marks and deaths are those
+    of CPython under a frame-evaluation hook that runs nothing. A plan that
+    would hand such an operand over all the same is not run: its code is
+    left to CPython and the report says why.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def program(self, mode):
+        command = [
+            sys.executable,
+            "-c",
+            EDGE_HANDED_PROGRAM,
+            mode,
+            json.dumps(EDGE_HANDED_CASES),
+            "2000",
+        ]
+        ran = subprocess.run(command, capture_output=True, text=True, timeout=900)
+        # A crash of the executor is a signal's return code here.
+        self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+        found = {}
+        for line in ran.stdout.splitlines():
+            if line.startswith("{"):
+                found.update(json.loads(line))
+        self.assertEqual(list(found), list(EDGE_HANDED_CASES))
+        return found
+
+    def same_as_hooked(self, found):
+        hooked = self.program("hooked")
+        for name, want in hooked.items():
+            # Every call of the reference is the same call.
+            self.assertEqual(want["logs"], [want["logs"][0]] * 8, msg=name)
+            self.assertEqual(want["more"], [want["logs"][0]], msg=name)
+            self.assertEqual(found[name]["logs"], want["logs"], msg=name)
+            self.assertEqual(found[name]["more"], want["more"], msg=name)
+        return hooked
+
+    def test_an_operand_the_handler_is_handed_is_shared(self):
+        found = self.program("vm")
+        hooked = self.same_as_hooked(found)
+        # Both instructions raised into the handler and returned.
+        logs = {name: got["logs"][0] for name, got in hooked.items()}
+        self.assertEqual(
+            logs,
+            {
+                "set_break": "in -c h -c h -i out RET",
+                "set_break_tensors": "-c h -c h -i RET",
+                "set_continue": "in -c h -c h -i out RET",
+                "set_built": "in -i out RET",
+                "set_with": "in -em -c exit -m h out RET",
+                "star_call": "in h -i out RET",
+                "star_call_keywords": "in h -k -i out RET",
+                "star_call_returns": "in -i out RET",
+            },
+        )
+        # The executor ran every one of them: none was left to CPython.
+        for name, got in found.items():
+            self.assertEqual(got["left"], [], msg=name)
+
+    def test_a_plan_that_would_hand_it_over_is_left_to_cpython(self):
+        # torch._rust._cfg_takes_all: the plans hand an owning instruction
+        # every operand its step drops, as they did. Where that is an
+        # operand read behind the instruction the plan is not run.
+        found = self.program("vm takes all")
+        self.same_as_hooked(found)
+        for name, (_, _, refused) in EDGE_HANDED_CASES.items():
+            left = found[name]["left"]
+            if not refused:
+                self.assertEqual(left, [], msg=name)
+                continue
+            self.assertEqual(len(left), 1, msg=f"{name}: {left}")
+            self.assertIn("no plan could be made for its code", left[0], msg=name)
+            self.assertIn(
+                "would take with it an operand that is read behind it", left[0]
             )
 
 

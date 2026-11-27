@@ -37,7 +37,7 @@ import re
 import types
 import weakref
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeGuard
 
 import torch
 import torch.fx
@@ -257,7 +257,10 @@ def _plain_result(x, depth=0):
             if z is not y:
                 x[k] = z
     elif t is dict:
-        items = [(_plain_result(k, depth + 1), _plain_result(y, depth + 1)) for k, y in x.items()]
+        items = [
+            (_plain_result(k, depth + 1), _plain_result(y, depth + 1))
+            for k, y in x.items()
+        ]
         if any(k is not old for (k, _), old in zip(items, x)):
             # In the order they were put in.
             x.clear()
@@ -312,7 +315,9 @@ def _kept_by(outs) -> str | None:
             return None
         if t in (tuple, list, set, frozenset, dict) and depth < 4:
             inner = [*x.keys(), *x.values()] if t is dict else x
-            return next((k for y in inner if (k := look(y, depth + 1)) is not None), None)
+            return next(
+                (k for y in inner if (k := look(y, depth + 1)) is not None), None
+            )
         if t is _TUPLE_ITERATOR or t is _LIST_ITERATOR:
             return None
         return t.__name__ if any(_holds(y) for y in gc.get_referents(x)) else None
@@ -409,11 +414,39 @@ for _name in (
 # arithmetic on it, by id.
 _FLOAT_MATH = {
     id(getattr(math, n))
-    for n in (
-        "sqrt exp expm1 log log2 log10 log1p sin cos tan asin acos atan atan2 sinh "
-        "cosh tanh asinh acosh atanh pow fabs hypot degrees radians erf erfc gamma "
-        "lgamma copysign fmod"
-    ).split()
+    for n in [
+        "sqrt",
+        "exp",
+        "expm1",
+        "log",
+        "log2",
+        "log10",
+        "log1p",
+        "sin",
+        "cos",
+        "tan",
+        "asin",
+        "acos",
+        "atan",
+        "atan2",
+        "sinh",
+        "cosh",
+        "tanh",
+        "asinh",
+        "acosh",
+        "atanh",
+        "pow",
+        "fabs",
+        "hypot",
+        "degrees",
+        "radians",
+        "erf",
+        "erfc",
+        "gamma",
+        "lgamma",
+        "copysign",
+        "fmod",
+    ]
 }
 # Builtins that take an object as it is, or read a number only through its
 # own methods (which record, or specialize), by id; those of them that call
@@ -421,7 +454,19 @@ _FLOAT_MATH = {
 _OBJECT_BUILTINS = {
     id(f)
     for f in (
-        *(isinstance, issubclass, type, id, callable, abs, pow, round, divmod, min, max),
+        *(
+            isinstance,
+            issubclass,
+            type,
+            id,
+            callable,
+            abs,
+            pow,
+            round,
+            divmod,
+            min,
+            max,
+        ),
         *(sum, sorted, int, bool, str, repr, format, hash, tuple, list, dict, set),
         *(frozenset, zip, enumerate, reversed, iter, next),
     )
@@ -652,7 +697,7 @@ def _scalars_decide_no_size(node: torch.fx.Node, args, kwargs) -> bool:
     return _int_sequence(size) and tuple(size) in ints
 
 
-def _int_sequence(x) -> bool:
+def _int_sequence(x) -> TypeGuard[list[int] | tuple[int, ...]]:
     return isinstance(x, (list, tuple)) and all(type(i) is int for i in x)
 
 
@@ -672,8 +717,10 @@ def _item_node(t: torch.Tensor):
     return value, proxy.node
 
 
-# What a torch function mode is handed for a read of a tensor's ``.data``.
-_DATA_GETTER = torch.Tensor.data.__get__
+# What a torch function mode is handed for a read of a tensor's ``.data``
+# (the stubs give ``data`` as an attribute of an instance: on the class it is
+# the descriptor).
+_DATA_GETTER = torch.Tensor.data.__get__  # pyrefly: ignore [missing-attribute]
 
 
 def _read_data(graph: torch.fx.Graph, t: torch.Tensor) -> torch.Tensor:
@@ -851,7 +898,11 @@ def _arithmetic(steps):
                 done.append(
                     op(
                         *(
-                            floats[x] if kind == "input" else done[x] if kind == "step" else x
+                            floats[x]
+                            if kind == "input"
+                            else done[x]
+                            if kind == "step"
+                            else x
                             for kind, x in args
                         )
                     )
@@ -1392,7 +1443,9 @@ def _data_sized(func, args, kwargs) -> str | None:
     if torch.Tag.dynamic_output_shape not in func.tags:
         return None
     masks = (torch.bool, torch.uint8)
-    if func is torch.ops.aten.index.Tensor and all(t.dtype not in masks for t in tensors[1:]):
+    if func is torch.ops.aten.index.Tensor and all(
+        t.dtype not in masks for t in tensors[1:]
+    ):
         return None
     return "makes a tensor whose size depends on the data"
 
@@ -1437,7 +1490,11 @@ class _RefuseImpure(TorchDispatchMode):
             # depend on the data (an index out of range). No region.
             _refuse(f"{func} raised {type(e).__name__}")
             raise
-        if self.refuse and isinstance(out, torch.Tensor) and out.layout is not torch.strided:
+        if (
+            self.refuse
+            and isinstance(out, torch.Tensor)
+            and out.layout is not torch.strided
+        ):
             raise _refuse(f"it runs {func}, which makes a tensor that is not strided")
         return out
 
@@ -1519,6 +1576,8 @@ class _Pinned:
     of a class with ``__slots__``) is kept."""
 
     __slots__ = ("ref", "kept")
+    ref: weakref.ref[Any] | None
+    kept: Any
 
     def __init__(self, o):
         try:
@@ -1807,7 +1866,9 @@ def _template(o, args, tensor_outs, objects, old):
         node = pytree.SUPPORTED_NODES.get(pytree._get_node_type(o))
         held, context = node.flatten_fn(o) if node is not None else ((), None)
         if node is None or type(node.unflatten_fn(held, context)) is not type(o):
-            raise _Refused(f"an output is a {type(o).__name__}, which a region cannot make again")
+            raise _Refused(
+                f"an output is a {type(o).__name__}, which a region cannot make again"
+            )
         objects.append(functools.partial(_unflatten, node.unflatten_fn, context))
         return (
             "call",
@@ -3244,7 +3305,9 @@ def _trace_region(
 
             try:
                 result["outputs"] = [describe(o) for o in outs]
-                written.plan(outs, call_args, old, objects, describe, _shared_container, made)
+                written.plan(
+                    outs, call_args, old, objects, describe, _shared_container, made
+                )
             except (_Refused, _writes.Unrepeatable) as e:
                 result["refused"] = str(e)
                 return []
@@ -3493,10 +3556,15 @@ def _trace_region(
         inputs = _inputs(region_args, plan, why)
         if inputs is not None and overlap is not None and not overlap.holds(inputs):
             inputs, why = None, ["how its tensors share memory"]
-        if inputs is not None and arithmetic is not None and not arithmetic(inputs[n_tensors:]):
+        if (
+            inputs is not None
+            and arithmetic is not None
+            and not arithmetic(inputs[n_tensors:])
+        ):
             inputs, why = None, ["a number its arithmetic does not take"]
-        for i in unread if inputs is not None else ():
-            inputs[i] = inputs[i].detach()
+        if inputs is not None:
+            for i in unread:
+                inputs[i] = inputs[i].detach()
         if COUNT:
             key = name if inputs is not None else f"{name} MISS"
             counts[key] = counts.get(key, 0) + 1

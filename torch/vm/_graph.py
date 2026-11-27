@@ -385,7 +385,9 @@ def lower_to(
     if fn is None:
         consts = set(gm.meta.get("vm_const_inputs", ()))
         at = [i for i, name in enumerate(names) if name in consts]
-        fn = BoundLowering(bind, at, len(names))
+        # Exactly one of fn and bind is given.
+        make: Any = bind
+        fn = BoundLowering(make, at, len(names))
     g = torch.fx.Graph()
     phs = [g.placeholder(p.name) for p in gm.graph.find_nodes(op="placeholder")]
     for new, old in zip(phs, gm.graph.find_nodes(op="placeholder")):

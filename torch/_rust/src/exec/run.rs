@@ -135,8 +135,8 @@ struct Act<'a> {
     // TORCH_RUST_CALLS=shadow: 1, this activation is the body of a recorded
     // run; 2, a frame under it; else 0 (see calls/record.rs).
     shadow: u8,
-    // What the step that is running drops behind it (slow_step): an
-    // instruction that owns its operands takes these with it (exec).
+    // What the instr of the step that is running takes with it, if it owns
+    // its operands (live.rs THE INVARIANT; slow_step); else nothing.
     dying: *const [ValueId],
 }
 
@@ -306,6 +306,8 @@ pub const FLAG_CALL: u8 = 4;
 // CALL_FUNCTION_EX, whose callable is args[0] (its NULL slot isn't an arg).
 pub const FLAG_CALL_EX: u8 = 8;
 pub const FLAG_YIELD: u8 = 16;
+// It owns its operands (order.rs `owns`).
+pub const FLAG_OWNS: u8 = 32;
 
 // Runs `f` with a recorder for p's table at `site`, or with none on this
 // thread if p doesn't record or recording is off.
@@ -2097,7 +2099,14 @@ impl Act<'_> {
         if let Some(cl) = clone {
             super::NEXT_CLONE.set((cl.code.as_ptr() as usize, self.f as usize, Arc::as_ptr(&cl.compiled) as usize));
         }
-        self.dying = kills;
+        if flags & FLAG_OWNS != 0 {
+            let taken = self.p.live.versions[b.idx()][vi].taken(i);
+            debug_assert!(
+                !taken.iter().any(|x| super::live::handed_at(&self.cfg[b].versions[vi], i).contains(x)),
+                "an instr would take with it what its handler is handed"
+            );
+            self.dying = taken;
+        }
         let done = self.guarded(*v, ins, callee);
         self.dying = &[];
         if clone.is_some() {
@@ -2604,9 +2613,10 @@ impl Act<'_> {
             }
             // The instruction gets references of its own, as CPython's has
             // the stack's, and lets go of them itself (order.rs `owns`):
-            // what the step drops is moved to it, the rest is shared. A
-            // traced or recorded run reads the operands behind the
-            // instruction: it holds them, as every other instruction does.
+            // what nothing reads behind it is moved to it (live.rs THE
+            // INVARIANT), the rest is shared. A traced or recorded run
+            // reads the operands behind the instruction: it holds them, as
+            // every other instruction does.
             Op::Bytecode { opcode, arg } if super::order::owns(&ins.op) && !self.reading && self.shadow == 0 => {
                 let dying = &*self.dying;
                 let mut own: Vec<*mut PyObject> = Vec::with_capacity(ins.args.len());

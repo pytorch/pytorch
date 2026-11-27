@@ -54,10 +54,13 @@
 //     raised, a stop that is not restartable, a refusal to run) is a
 //     difference: the block ran to its end on those operands;
 //   - at most LATER arrivals per place: behind the last, and behind the
-//     first difference, the list leaves the table and what its reads count
-//     (a container that takes no weak reference, as a region's reads count
-//     it) is let go of. Until then such a container lives as long as the
-//     list: under `shadow` that is longer than the program keeps it.
+//     first difference, the list leaves the table. Under `shadow` what its
+//     reads count is of the closed immutable list only (finish.rs arms no
+//     other list there), so no object of the program's lives longer for a
+//     list in the table. Under `1` a list is armed with whatever its reads
+//     count (an object whose class takes no weak reference: a namespace, a
+//     cell, a container found as a value), which then lives as long as the
+//     list is armed: the stated limit of that mode (record.rs).
 // What it may not assume
 //   - that the block's own outputs are eager's: they are what today's engine
 //     made on that arrival (a region of it, or the block as written).
@@ -134,9 +137,14 @@ thread_local! {
 
 pub fn arm(key: (u64, u32), armed: Armed) {
     // The lists that can never pass again leave the table here, with the
-    // one this replaces: all are dropped outside the borrow.
+    // one this replaces and with the lists of an earlier plan of the same
+    // function (a plan made again has a new number; a frame still running
+    // the old one loses a comparison and nothing else): the table holds at
+    // most one list per block of a function that lives. All are dropped
+    // outside the borrow.
+    let func = armed.func.as_ptr();
     let gone: Vec<Armed> = ARMED.with_borrow_mut(|a| {
-        let dead: Vec<(u64, u32)> = a.iter().filter(|(_, x)| x.gone()).map(|(k, _)| *k).collect();
+        let dead: Vec<(u64, u32)> = a.iter().filter(|(k, x)| x.gone() || (k.0 < key.0 && x.func.is(func))).map(|(k, _)| *k).collect();
         let mut gone: Vec<Armed> = dead.into_iter().filter_map(|k| a.remove(&k)).collect();
         gone.extend(a.insert(key, Armed { left: LATER, ..armed }));
         gone

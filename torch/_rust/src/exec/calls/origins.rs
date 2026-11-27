@@ -147,11 +147,18 @@ pub struct Origins {
     // The immutable inputs the list is specialized on: (position, value).
     pub exact: Vec<(u32, Py<PyAny>)>,
     // The input objects a recorded read can start from, held weakly, each
-    // with the path it was found by (walk); and those of them that a pin or
-    // a stated output was led from: what a later arrival must have at that
-    // path, by identity, for the reads that start there to be its checks.
+    // with the path it was found by (walk); and EVERY one of them that the
+    // reads lead from to a pin, to a stated output or to an input: what a
+    // later arrival must have at that path, by identity, for the reads
+    // that start there to be its checks. An origin is by identity, so
+    // which of several reads the run came by an object through is not
+    // known: all of them are held to.
     roots: Vec<(Box<[u32]>, Pin)>,
     rooted: Vec<usize>,
+    // A root had died where the reads were asked what they lead to: the
+    // reads that started from it lead nowhere any more, and whether the run
+    // came by the object through them cannot be said.
+    pub unrooted: bool,
     // The key each pin had where it was first an operand.
     pub pin_keys: Vec<Option<crate::exec::tensor_key::TensorKey>>,
     // Immutable operands taken by value, by class.
@@ -410,8 +417,9 @@ impl Origins {
 
     // Whether the reads recorded so far lead to `o` from what was there
     // before the run (reads.rs leads_to): the namespaces, the cells the run
-    // did not make, the roots that live. A root they lead from is noted
-    // (rooted): where no single root is found to lead there, every root.
+    // did not make, the roots that live. EVERY root they lead from is noted
+    // (rooted), whether or not a namespace or a cell leads there too: each
+    // is asked on its own. A root that has died is noted as that (unrooted).
     pub unsafe fn led(&mut self, o: *mut PyObject) -> bool {
         unsafe {
             let live = |r: &(Box<[u32]>, Pin)| r.1.live().filter(|r| !r.is_null());
@@ -419,11 +427,9 @@ impl Origins {
             if !crate::exec::reads::leads_to(o, &roots) {
                 return false;
             }
-            if !crate::exec::reads::leads_to(o, &[]) {
-                let from = self.roots.iter().position(|r| live(r).is_some_and(|r| crate::exec::reads::leads_to(o, &[r])));
-                let noted: Vec<usize> = from.map_or((0..self.roots.len()).collect(), |i| vec![i]);
-                noted.into_iter().for_each(|i| if !self.rooted.contains(&i) { self.rooted.push(i) });
-            }
+            let from: Vec<usize> = self.roots.iter().enumerate().filter(|(_, r)| live(r).is_some_and(|r| crate::exec::reads::leads_to(o, &[r]))).map(|(i, _)| i).collect();
+            from.into_iter().for_each(|i| if !self.rooted.contains(&i) { self.rooted.push(i) });
+            self.unrooted |= roots.len() != self.roots.len();
             true
         }
     }
