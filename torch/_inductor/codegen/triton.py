@@ -1599,7 +1599,11 @@ class TritonOverrides(OpOverrides):
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
-            out = f"triton.language.div_rn({x}, {y})"
+            out = (
+                f"triton_helpers.eager_div_rn({x}, {y})"
+                if utils.is_strict_cuda_triton()
+                else f"triton.language.div_rn({x}, {y})"
+            )
         else:
             out = f"({x} / {y})"
 
@@ -1620,7 +1624,11 @@ class TritonOverrides(OpOverrides):
         y_dtype = getattr(y, "dtype", None)
 
         if x_dtype == torch.float32 and y_dtype == torch.float32:
-            out = f"triton.language.div_rn({x}, {y})"
+            out = (
+                f"triton_helpers.eager_div_rn({x}, {y})"
+                if utils.is_strict_cuda_triton()
+                else f"triton.language.div_rn({x}, {y})"
+            )
         else:
             # Fall back to regular division for non-float32 types
             out = f"({x} / {y})"
@@ -2423,6 +2431,8 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def fmod(a, b):
+        if utils.is_strict_cuda_triton():
+            return f"triton_helpers.eager_fmod({a}, {b})"
         return f"libdevice.fmod({a}, {b})"
 
     @classmethod
