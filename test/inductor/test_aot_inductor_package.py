@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import gc
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -382,6 +383,57 @@ model(torch.ones(2))
                 actual = loaded(*example_inputs)
 
             self.assertEqual(actual, expected)
+
+    @skipif(
+        lambda device, package_cpp_only: device != "cpu" or package_cpp_only,
+        "Only needs one CPU Python package variant",
+    )
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
+    def test_load_package_removes_extraction_dir(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package_path = str(Path(tmpdir) / "model.pt2")
+            ep = torch.export.export(Model(), (torch.ones(2),), strict=True)
+            torch._inductor.aoti_compile_and_package(ep, package_path=package_path)
+
+            # Load in a fresh process so the loader sees the isolated temp directory.
+            extract_root = str(Path(tmpdir) / "extract")
+            os.mkdir(extract_root)
+            script = f"""
+import json
+import os
+import torch
+
+root = {extract_root!r}
+before = sorted(os.listdir(root))
+model = torch._inductor.aoti_load_package({package_path!r})
+model(torch.ones(2))
+loaded = sorted(os.listdir(root))
+del model
+print(json.dumps([before, loaded, sorted(os.listdir(root))]))
+"""
+            env = os.environ.copy()
+            env.update(TMPDIR=extract_root, TMP=extract_root, TEMP=extract_root)
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        before, loaded, after = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertNotEqual(
+            loaded, before, msg="package was not extracted under the temp directory"
+        )
+        leftover = sorted(set(after) - set(before))
+        self.assertFalse(leftover, msg="extraction directory was not removed")
 
     @skipif(
         lambda device, package_cpp_only: device == "cpu",

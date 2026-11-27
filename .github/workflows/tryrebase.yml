@@ -11,6 +11,7 @@ jobs:
     environment: mergebot
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        GIT_REPO_DIR: ${{ github.workspace }}
     steps:
       - name: Checkout repo
         id: checkout
@@ -18,6 +19,14 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.MERGEBOT_TOKEN }}
+
+      - name: Stage mergebot scripts
+        id: stage
+        # Rebasing or merging changes the files in the workspace, so every
+        # helper runs from this copy of the checked-out scripts instead.
+        run: |
+          mkdir -p "${RUNNER_TEMP}/mergebot/.github"
+          cp -a .github/scripts "${RUNNER_TEMP}/mergebot/.github/scripts"
 
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -41,16 +50,16 @@ jobs:
         run: |
           set -x
           if [ -n "${BRANCH}" ]; then
-            python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${BRANCH}"
+            python3 "${RUNNER_TEMP}/mergebot/.github/scripts/tryrebase.py" "${PR_NUM}" --branch "${BRANCH}"
           else
-            python3 .github/scripts/tryrebase.py "${PR_NUM}"
+            python3 "${RUNNER_TEMP}/mergebot/.github/scripts/tryrebase.py" "${PR_NUM}"
           fi
       - name: Comment on Canceled
-        if: ${{ cancelled() && steps.checkout.outcome == 'success' }}
+        if: ${{ cancelled() && steps.stage.outcome == 'success' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
         run: |
           set -ex
-          python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "rebase"
+          python3 "${RUNNER_TEMP}/mergebot/.github/scripts/comment_on_pr.py" "${PR_NUM}" "rebase"

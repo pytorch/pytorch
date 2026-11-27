@@ -2,6 +2,8 @@
 
 import ntpath
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -455,6 +457,27 @@ class TestCppBuilder(TestCase):
         # Linux only.
         self.assertNotIn("-a=1", other_platform_command)
         self.assertNotIn("-c=3", other_platform_command)
+
+    @unittest.skipUnless(
+        IS_LINUX and all(shutil.which(t) for t in ("ld", "objcopy", "nm")),
+        "requires GNU ld, objcopy and nm",
+    )
+    def test_convert_cubin_to_obj_kernels_sharing_a_cubin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cubin = os.path.join(tmp, "shared.cubin")
+            with open(cubin, "wb") as f:
+                f.write(bytes(range(64)))
+            kernels = ("kernel_a", "kernel_b")
+            objs = [
+                cpp_builder.convert_cubin_to_obj(cubin, k, "ld", "objcopy")
+                for k in kernels
+            ]
+            linked = os.path.join(tmp, "linked.o")
+            subprocess.run(["ld", "-r", "-o", linked, *objs], check=True)
+            symbols = subprocess.check_output(["nm", linked], text=True)
+        for kernel in kernels:
+            for suffix in ("start", "end", "size"):
+                self.assertIn(f"__{kernel}_{suffix}", symbols)
 
 
 if __name__ == "__main__":

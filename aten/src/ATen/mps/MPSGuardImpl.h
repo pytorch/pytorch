@@ -93,10 +93,13 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
     return previous->unwrap();
   }
   DeviceCapability getDeviceCapability(Device /* unused */) const override {
-    constexpr uint64_t kSupportedTypeBits = (1ULL << kIndex_Byte) | (1ULL << kIndex_Char) | (1ULL << kIndex_Short) |
-        (1ULL << kIndex_Int) | (1ULL << kIndex_Long) | (1ULL << kIndex_Half) | (1ULL << kIndex_Float) |
-        (1ULL << kIndex_ComplexHalf) | (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_Bool) |
-        (1ULL << kIndex_BFloat16) | (1ULL << kIndex_Float8_e4m3fn) | (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt16) |
+    constexpr uint64_t kSupportedTypeBits = (1ULL << kIndex_Byte) |
+        (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
+        (1ULL << kIndex_Long) | (1ULL << kIndex_Half) | (1ULL << kIndex_Float) |
+        (1ULL << kIndex_ComplexHalf) | (1ULL << kIndex_ComplexFloat) |
+        (1ULL << kIndex_Bool) | (1ULL << kIndex_BFloat16) |
+        (1ULL << kIndex_Float8_e4m3fn) | (1ULL << kIndex_Float8_e8m0fnu) |
+        (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt16) |
         (1ULL << kIndex_UInt64);
     DeviceCapability cap;
     cap.capability_data.capability_bits = kSupportedTypeBits;
