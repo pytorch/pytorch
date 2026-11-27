@@ -20,7 +20,9 @@ from torch.fx.passes.reinplace import reinplace
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
@@ -30,6 +32,15 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensor
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map_only
+
+
+def data_dependent_destination(a, b=None):
+    dst = a.nonzero().flatten().to(torch.float64)
+    torch.add(a, 1, out=dst)
+    if b is not None:
+        return dst * b
+    torch.add(a, 2, out=dst)
+    return dst
 
 
 def are_aliased(x, y):
@@ -86,6 +97,82 @@ def _functionalize(
 class TestFunctionalization(TestCase):
     hw_classification = HardwareClassification.GENERIC
     crossref = False
+
+    def test_original_aten_mutation_metadata_sparse(self):
+        from torch.fx.experimental.proxy_tensor import ORIGINAL_ATEN
+        from torch.fx.traceback import preserve_node_meta
+
+        def fn(a):
+            a.mul_(2)
+            a.mul_(3)
+            return a
+
+        a = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse()
+        with preserve_node_meta():
+            gm = make_fx(dispatch_functionalize(fn, mode=FunctionalTensorMode()))(
+                a.clone()
+            )
+        self.assertIsNone(ORIGINAL_ATEN.get())
+        self.assertEqual(gm(a).to_dense(), fn(a.clone()).to_dense())
+        self.assertEqual(
+            [node.target for node in gm.graph.nodes if node.op == "call_function"],
+            [torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Tensor],
+        )
+
+    def test_original_aten_mutation_metadata_resize(self):
+        from torch._inductor import config
+        from torch._inductor.decomposition import select_decomp_table
+        from torch.fx.experimental.proxy_tensor import ORIGINAL_ATEN
+        from torch.fx.traceback import preserve_node_meta
+
+        for tracing_mode in ("real", "fake", "symbolic"):
+            for size, capacity, first_size in (
+                (0, 0, 4),
+                (2, 2, 4),
+                (8, 8, 2),
+                (2, 8, 8),
+            ):
+                with self.subTest(
+                    tracing_mode=tracing_mode,
+                    size=size,
+                    capacity=capacity,
+                    first_size=first_size,
+                ):
+
+                    def fn(a, dst):
+                        torch.add(a[:first_size], 1, out=dst)
+                        torch.add(a[:4], 2, out=dst)
+                        return dst
+
+                    a = torch.arange(8.0)
+                    dst = torch.empty(capacity)[:size]
+                    expected = fn(a, dst.clone())
+                    with preserve_node_meta():
+                        gm = make_fx(
+                            dispatch_functionalize(fn, mode=FunctionalTensorMode()),
+                            tracing_mode=tracing_mode,
+                        )(a, dst)
+                    self.assertIsNone(ORIGINAL_ATEN.get())
+                    self.assertEqual(gm(a, torch.empty(capacity)[:size]), expected)
+
+        a = torch.tensor([0.0, 1.0, 2.0, 0.0])
+        expected = data_dependent_destination(a)
+        for numerics in ("default", "strict_pointwise", "strict"):
+            with self.subTest(numerics=numerics), config.patch(numerics=numerics):
+                with preserve_node_meta():
+                    gm = make_fx(
+                        dispatch_functionalize(
+                            data_dependent_destination, mode=FunctionalTensorMode()
+                        ),
+                        decomposition_table=select_decomp_table(),
+                        tracing_mode="symbolic",
+                    )(a)
+                placeholder = next(
+                    node for node in gm.graph.nodes if node.op == "placeholder"
+                )
+                self.assertEqual(placeholder.meta["val"].fake_mode.shape_env.guards, [])
+                self.assertIsNone(ORIGINAL_ATEN.get())
+                self.assertEqual(gm(a), expected)
 
     def get_logs(self, func, *inpts, reapply_views=False, run_reinplace=False):
         inpts_clone = tree_map_only(torch.Tensor, torch.clone, inpts)
@@ -2313,6 +2400,63 @@ def forward(self, arg0_1):
     return add""",
         )
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
+
+
+@instantiate_parametrized_tests
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/81457"
+)
+@unittest.skipIf(
+    torch.version.cuda is None and torch.version.hip is None,
+    "requires a CUDA or ROCm build",
+)
+class TestFunctionalizationCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @parametrize("numerics", ("default", "strict_pointwise", "strict"))
+    def test_original_aten_mutation_metadata_resize(self, numerics):
+        from torch._inductor import config
+        from torch._inductor.decomposition import select_decomp_table
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import ORIGINAL_ATEN
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.fx.traceback import preserve_node_meta
+
+        a = torch.tensor([0.0, 1.0, 2.0, 0.0])
+        with config.patch(numerics=numerics):
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+            with fake_mode:
+                fake_a = torch.empty(4, dtype=torch.float64, device="cuda:0")
+                fake_b = torch.ones_like(fake_a)
+                with preserve_node_meta():
+                    gm = make_fx(
+                        dispatch_functionalize(
+                            data_dependent_destination, mode=FunctionalTensorMode()
+                        ),
+                        decomposition_table=select_decomp_table(),
+                        tracing_mode="symbolic",
+                    )(fake_a, fake_b)
+            gm.graph.eliminate_dead_code()
+            gm.recompile()
+            inputs = [
+                node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder"
+            ]
+            fake_mode = inputs[0].fake_mode
+            graph = GraphLowering(
+                gm,
+                example_inputs=inputs,
+                shape_env=fake_mode.shape_env,
+                is_inference=True,
+            )
+            with fake_mode, V.set_graph_handler(graph):
+                graph.run(*inputs)
+            self.assertEqual(fake_mode.shape_env.guards, [])
+            self.assertIsNone(ORIGINAL_ATEN.get())
+            a_double = a.to(torch.float64)
+            b = torch.ones_like(a_double)
+            self.assertEqual(gm(a_double, b), data_dependent_destination(a_double, b))
 
 
 @xfail_inherited_tests(
