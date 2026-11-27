@@ -1709,26 +1709,23 @@ class CallMethodVariable(VariableTracker):  # noqa: RVT001
     def as_bound_builtin_method(
         self, tx: "InstructionTranslatorBase"
     ) -> "variables.BoundBuiltinMethodVariable | None":
-        from .object_protocol import mro_attr_source, mro_lookup, type_is_immutable
+        from .object_protocol import mro_lookup, type_is_immutable
 
+        obj, name = self.obj, self.method_name
         try:
-            kind = self.obj.python_type()
+            kind = obj.python_type()
         except NotImplementedError:
             return None
-        descriptor = mro_lookup(kind, self.method_name)
+        descriptor = mro_lookup(kind, name)
         if not isinstance(descriptor, types.MethodDescriptorType):
             return None
         if not type_is_immutable(kind):
-            if self.obj.source is None:
+            if obj.source is None:
                 return None
-            source = mro_attr_source(
-                tx, kind, TypeSource(self.obj.source), self.method_name
-            )
+            source = mro_attr_source(tx, kind, TypeSource(obj.source), name)
             if source is not None and not type_is_immutable(descriptor.__objclass__):
                 install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return variables.BoundBuiltinMethodVariable(
-            descriptor, self.obj, source=self.source
-        )
+        return variables.BoundBuiltinMethodVariable(descriptor, obj, source=self.source)
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         if (method := self.as_bound_builtin_method(tx)) is not None:

@@ -2910,17 +2910,13 @@ class SkipFunctionVariable(VariableTracker):
         return self.value
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        if type(self.value) is types.BuiltinFunctionType:
-            receiver = self.value.__self__
-            if (
-                self.source is not None
-                and receiver is not None
-                and not isinstance(receiver, types.ModuleType)
-            ):
-                install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
-            # Identity-dependent hashes are internal across process boundaries.
-            return hash(self.value), True
-        return super().tp_hash_impl(tx)
+        if type(self.value) is not types.BuiltinFunctionType:
+            return super().tp_hash_impl(tx)
+        receiver = self.value.__self__
+        if self.source and receiver is not None and not inspect.ismodule(receiver):
+            install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+        # Identity-dependent hashes are internal across process boundaries.
+        return hash(self.value), True
 
     def get_source(self) -> Source | None:
         return self.source

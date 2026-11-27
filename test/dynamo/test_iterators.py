@@ -316,6 +316,30 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, "changed size"):
             next(values)
 
+    @parametrize("local_owner", [False, True])
+    def test_escape_rebound_namespace_iterator(self, local_owner):
+        class Box:
+            pass
+
+        def fn(x, obj, target):
+            if local_owner:
+                obj = target = Box()
+            namespace = {"a": 1}
+            obj.__dict__ = namespace
+            target.b = 2
+            return x + 1, iter(namespace)
+
+        x = torch.zeros(1)
+        obj, other = Box(), Box()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        if not local_owner:
+            result, keys = compiled(x, obj, other)
+            self.assertEqual((result, list(keys), other.b), (x + 1, ["a"], 2))
+        with self.assertRaisesRegex(Unsupported, "rebound instance namespace"):
+            compiled(x, obj, obj)
+        result, keys = torch.compile(fn, backend="eager")(x, obj, obj)
+        self.assertEqual((result, list(keys)), (x + 1, ["a", "b"]))
+
     @parametrize(
         "kind", ["module", "instance", "ordered_instance", "globals", "mapping_write"]
     )
@@ -408,7 +432,9 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         owner = factory({1: 1, 2: 2})
         result, iterator = compiled(x, owner, owner.copy())
         self.assertEqual((result, list(iterator)), (x + 1, list(owner)))
-        self._assert_iterator_reconstruction_fallback(fn, x, owner, owner)
+        self._assert_iterator_reconstruction_fallback(
+            fn, x, owner, owner, reason=r"pending mutation of L\['target'\]"
+        )
         result, iterator = torch.compile(fn, backend="eager")(x, owner, owner)
         self.assertEqual(result, x + 1)
         self.assertIn(3, owner)
