@@ -467,7 +467,9 @@ False
     ceil_
     clamp
     clamp_
+    clamp_max
     clamp_max_
+    clamp_min
     clamp_min_
     clip
     clip_
