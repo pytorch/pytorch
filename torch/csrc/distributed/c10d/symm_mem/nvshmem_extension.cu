@@ -74,6 +74,18 @@ bool is_nvshmem_available() {
   return is_available == 1;
 }
 
+ShmemOps shmem_ops() {
+  return {
+      static_cast<ShmemSignalOp>(NVSHMEM_SIGNAL_SET),
+      static_cast<ShmemSignalOp>(NVSHMEM_SIGNAL_ADD),
+      static_cast<ShmemCompareOp>(NVSHMEM_CMP_EQ),
+      static_cast<ShmemCompareOp>(NVSHMEM_CMP_NE),
+      static_cast<ShmemCompareOp>(NVSHMEM_CMP_GT),
+      static_cast<ShmemCompareOp>(NVSHMEM_CMP_GE),
+      static_cast<ShmemCompareOp>(NVSHMEM_CMP_LT),
+      static_cast<ShmemCompareOp>(NVSHMEM_CMP_LE)};
+}
+
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 void nvshmemx_cumodule_init(uintptr_t module) {

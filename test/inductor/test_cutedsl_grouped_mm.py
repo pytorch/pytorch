@@ -83,6 +83,74 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
         self.assertEqual(c_compiled.dtype, dtype)
         torch.testing.assert_close(c_eager, c_compiled)
 
+    def _tensor_before_guard_page(self, rows, cols, dtype):
+        # The granule after the tensor stays reserved but unmapped, so any read past its end faults.
+        from torch.cuda._utils import (
+            _check_cuda_bindings as check,
+            _cuda_bindings_driver as cu,
+        )
+
+        nbytes = rows * cols * dtype.itemsize
+        prop = cu.CUmemAllocationProp()
+        prop.type = cu.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
+        prop.location.type = cu.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
+        prop.location.id = torch.cuda.current_device()
+        granularity = check(
+            cu.cuMemGetAllocationGranularity(
+                prop,
+                cu.CUmemAllocationGranularity_flags.CU_MEM_ALLOC_GRANULARITY_MINIMUM,
+            )
+        )
+        self.assertEqual(nbytes % granularity, 0)
+        va = check(cu.cuMemAddressReserve(nbytes + granularity, 0, 0, 0))
+        self.addCleanup(lambda: check(cu.cuMemAddressFree(va, nbytes + granularity)))
+        handle = check(cu.cuMemCreate(nbytes, prop, 0))
+        self.addCleanup(lambda: check(cu.cuMemRelease(handle)))
+        check(cu.cuMemMap(va, nbytes, 0, handle, 0))
+        self.addCleanup(lambda: check(cu.cuMemUnmap(va, nbytes)))
+        self.addCleanup(torch.cuda.synchronize)
+        access = cu.CUmemAccessDesc()
+        access.location = prop.location
+        access.flags = cu.CUmemAccess_flags.CU_MEM_ACCESS_FLAGS_PROT_READWRITE
+        check(cu.cuMemSetAccess(va, nbytes, [access], 1))
+
+        class Mapped:
+            __cuda_array_interface__ = {
+                "shape": (rows, cols),
+                "typestr": "<i2",
+                "data": (int(va), False),
+                "version": 3,
+            }
+
+        return torch.as_tensor(Mapped(), device="cuda").view(dtype)
+
+    @parametrize("b_transposed", (False, True))
+    @parametrize("group_sizes", ((1279, 1), (1272, 8, 0)))
+    def test_grouped_gemm_small_last_group_before_guard_page(
+        self, group_sizes, b_transposed
+    ):
+        # TMA descriptors seeded from packed A made a small last group read past A (#176178).
+        K, N, G = 4096, 1024, len(group_sizes)
+        A = self._tensor_before_guard_page(sum(group_sizes), K, torch.bfloat16)
+        A.copy_(torch.randn_like(A) * 0.1)
+        if b_transposed:
+            B = (torch.randn(G, N, K, dtype=torch.bfloat16, device="cuda") * 0.01).mT
+        else:
+            B = torch.randn(G, K, N, dtype=torch.bfloat16, device="cuda") * 0.01
+        offsets = torch.tensor(group_sizes, device="cuda").cumsum(0, dtype=torch.int32)
+
+        expected = F.grouped_mm(A, B, offs=offsets)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "test_configs.autotune_choice_name_regex": "cutedsl",
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            actual = torch.compile(F.grouped_mm, dynamic=False)(A, B, offs=offsets)
+        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+
     @parametrize("layout_A", ("contiguous", "offset", "padded", "view"))
     @parametrize("layout_B", ("contiguous", "broadcasted"))
     def test_grouped_gemm_assorted_layouts(

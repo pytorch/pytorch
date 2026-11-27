@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import datetime
 import functools
+import time
 import unittest
 from collections import Counter
 from unittest import mock
@@ -1104,10 +1105,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             x = torch.ones(12800, 12800, device=self.device) + self.rank
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
-            # NOTE: We run for 10 iterations each, to ensure that the GPU execution is way behind CPU
-            # and that `y * y` on CPU side will be issued before `all_reduce(y)` on GPU side is done,
-            # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
-            # thus will produce the wrong result that fails the unit test.
+            # NOTE: The cases that use _run_loop_collective_wait run 10 iterations each, so that GPU execution
+            # falls well behind the CPU: if `wait_tensor()` did not wait, `y * y` would run in parallel with
+            # `all_reduce(y)` and the result would not match eager. The failure case at the end orders the ranks
+            # through the store instead and does not depend on this timing.
 
             def _run_loop_collective_wait(x, wait_fn, expected_registry_size):
                 for _ in range(10):
@@ -1153,12 +1154,27 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
             # Failure Case: Issue comm in eager -> wait for comm in compile. Doesn't use the context manager.
-            _, _, out_compiled = _run_loop_collective_wait(
-                x, wait_fn=all_reduce_wait_compiled, expected_registry_size=0
-            )
             # In this case `.wait_tensor(y)` in compiled region will not be able to find the corresponding work object
             # to invoke the wait, thus the result will not match eager.
-            self.assertNotEqual(out_ref, out_compiled)
+            # The other ranks join the all_reduce only after rank 0's `y * y` has executed, so rank 0 reads the
+            # unreduced `y` regardless of CPU/GPU timing.
+            store = dist.distributed_c10d._get_default_store()
+            if self.rank != 0:
+                store.wait(["y_squared"])
+            work, y = all_reduce_non_functional_eager(x)
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+            out_compiled = all_reduce_wait_compiled(work, y)
+            if self.rank == 0:
+                y_squared = torch.Event(device=self.device)
+                y_squared.record()
+                # Bounded so that a wait_tensor() that does wait fails the assert below instead of deadlocking.
+                deadline = time.monotonic() + 30
+                while not y_squared.query() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                store.set("y_squared", "1")
+            work.wait()
+            if self.rank == 0:
+                self.assertNotEqual(out_ref, out_compiled)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -4507,6 +4523,45 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         for n in (7, 11):
             x = torch.randn(n, HIDDEN, device=self.device)
             compiled(x, w, group_size, group_name)
+
+
+@unittest.skipIf(not c10d.is_gloo_available(), "Gloo is not available")
+class TestCollectiveReinplacementCPU(MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self):
+        return 2
+
+    @torch._inductor.config.patch(
+        {"_collective.auto_select": False, "compile_threads": 1}
+    )
+    def test_all_reduce_non_contiguous_intermediate(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            "gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        try:
+
+            def f(a, b):
+                intermediate = torch.mm(a, b).t()
+                return (
+                    _functional_collectives.all_reduce(
+                        intermediate, "sum", c10d.group.WORLD
+                    )
+                    + 1
+                )
+
+            a = torch.arange(16, dtype=torch.float32).reshape(4, 4) + self.rank + 1
+            b = torch.eye(4)
+            expected = f(a.clone(), b.clone())
+            with fresh_inductor_cache():
+                actual = torch.compile(f, fullgraph=True)(a.clone(), b.clone())
+            self.assertEqual(actual, expected)
+        finally:
+            c10d.destroy_process_group()
 
 
 class TestCompileSyncPgCrossRanks(MultiProcessTestCase):

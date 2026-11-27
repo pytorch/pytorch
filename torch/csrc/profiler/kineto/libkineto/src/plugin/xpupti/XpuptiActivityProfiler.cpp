@@ -7,6 +7,7 @@
  */
 
 #include "XpuptiActivityProfiler.h"
+#include "Logger.h"
 #include "MetadataFieldCatalog.h"
 #include "ThrowUtil.h"
 #include "TypedMetadata.h"
@@ -22,6 +23,7 @@
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <pti/pti.h>
 #include <sycl/sycl.hpp>
 
 namespace KINETO_NAMESPACE {
@@ -101,6 +103,19 @@ std::unique_ptr<libkineto::IActivityProfilerSession> XPUActivityProfiler::
     configure(
         const std::set<ActivityType>& activity_types,
         const libkineto::Config& config) {
+  if (!config.deviceTracingEnabled()) {
+    return nullptr;
+  }
+  // Without PTI, the trace goes on without XPU activities, as a CUDA trace
+  // does without CUPTI. Raising here would end the process for an on-demand
+  // trace, which configures on the profiler thread.
+  if (const pti_result result = ptiViewGPULocalAvailable();
+      result != PTI_SUCCESS) {
+    LOG(ERROR) << "Failed to enable Kineto Profiler on XPU: "
+               << ptiResultTypeToString(result) << " ("
+               << static_cast<int>(result) << ")";
+    return nullptr;
+  }
   return std::make_unique<XpuptiScopeProfilerSession>(
       XpuptiActivityApi::singleton(), name(), config, activity_types);
 }

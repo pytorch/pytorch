@@ -1,4 +1,5 @@
 #include <ATen/DLConvertor.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <memory>
 
 using namespace std;
@@ -113,7 +114,8 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
   DLDevice ctx;
 
   ctx.device_id =
-      (device.is_cuda() || device.is_privateuseone() || device.is_mtia())
+      (device.is_cuda() || device.is_xpu() || device.is_privateuseone() ||
+       device.is_mtia())
       ? static_cast<int32_t>(static_cast<unsigned char>(device.index()))
       : 0;
 
@@ -138,12 +140,25 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
       break;
     case DeviceType::XPU:
       ctx.device_type = DLDeviceType::kDLOneAPI;
-      ctx.device_id = at::detail::getXPUHooks().getGlobalIdxFromDevice(device);
       break;
     case DeviceType::MAIA:
       ctx.device_type = DLDeviceType::kDLMAIA;
       break;
     case DeviceType::PrivateUse1:
+      if (isPrivateUse1HooksRegistered()) {
+        const auto& hooks = detail::getPrivateUse1Hooks();
+        ctx.device_type = static_cast<DLDeviceType>(hooks.getDLDeviceType());
+        TORCH_CHECK_BUFFER(
+            ctx.device_type == kDLExtDev || ctx.device_type == kDLVulkan ||
+                ctx.device_type == kDLVPI || ctx.device_type == kDLCUDAManaged ||
+                ctx.device_type == kDLWebGPU || ctx.device_type == kDLHexagon ||
+                ctx.device_type == kDLTrn,
+            "PrivateUse1 getDLDeviceType() returned ",
+            static_cast<int32_t>(ctx.device_type),
+            "; expected kDLExtDev, kDLVulkan, kDLVPI, kDLCUDAManaged, "
+            "kDLWebGPU, kDLHexagon, or kDLTrn");
+        return ctx;
+      }
       ctx.device_type = DLDeviceType::kDLExtDev;
       break;
     case DeviceType::MTIA:
@@ -162,7 +177,7 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
 Device dlDeviceToTorchDevice(
     DLDeviceType type,
     c10::DeviceIndex index,
-    void* data) {
+    void* data [[maybe_unused]]) {
   switch (type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -181,14 +196,25 @@ Device dlDeviceToTorchDevice(
       return at::Device(DeviceType::HIP, index);
 #endif
     case DLDeviceType::kDLOneAPI:
-      TORCH_CHECK(data != nullptr, "Can't get ATen device for XPU without XPU data.");
-      return at::detail::getXPUHooks().getDeviceFromPtr(data);
+      return at::Device(DeviceType::XPU, index);
     case DLDeviceType::kDLMAIA:
       return at::Device(DeviceType::MAIA, index);
     case DLDeviceType::kDLExtDev:
       return at::Device(DeviceType::PrivateUse1, index);
     case DLDeviceType::kDLMetal:
       return at::Device(DeviceType::MPS, index);
+    // These types have no built-in PyTorch mapping and may use PrivateUse1.
+    case DLDeviceType::kDLVulkan:
+    case DLDeviceType::kDLVPI:
+    case DLDeviceType::kDLCUDAManaged:
+    case DLDeviceType::kDLWebGPU:
+    case DLDeviceType::kDLHexagon:
+    case DLDeviceType::kDLTrn:
+      if (isPrivateUse1HooksRegistered() &&
+          detail::getPrivateUse1Hooks().getDLDeviceType() == type) {
+        return Device(kPrivateUse1, index);
+      }
+      [[fallthrough]];
     default:
       TORCH_CHECK_BUFFER(
           false, "Unsupported device_type: ", std::to_string(type));
@@ -545,6 +571,16 @@ Tensor maybeCopyTensor(
         optional_dl_device->device_type,
         static_cast<c10::DeviceIndex>(optional_dl_device->device_id),
         data.data_ptr());
+
+    if (device.is_privateuseone()) {
+      const auto export_type = torchDeviceToDLDevice(device).device_type;
+      TORCH_CHECK_BUFFER(
+          optional_dl_device->device_type == export_type,
+          "Requested DLPack device type ",
+          static_cast<int32_t>(optional_dl_device->device_type),
+          " does not match PrivateUse1 export device type ",
+          static_cast<int32_t>(export_type));
+    }
 
     if (device != data.device()) {
       TORCH_CHECK_VALUE(

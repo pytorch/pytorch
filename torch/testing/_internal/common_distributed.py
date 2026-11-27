@@ -34,7 +34,6 @@ import torch.nn as nn
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch._logging._internal import trace_log
-from torch.distributed.distributed_c10d import _torchcomms_handles_backend
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -57,74 +56,6 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
     _uninstall_threaded_pg,
     ProcessLocalGroup,
 )
-
-
-def setup_torchcomms_pg(
-    backend: str,
-    rank: int,
-    world_size: int,
-    device: torch.device,
-    store_path: str,
-    group_name: str,
-) -> c10d.ProcessGroup:
-    """Build a bare ProcessGroup whose backend is a torchcomms _BackendWrapper.
-
-    Creates a torchcomms comm of the requested ``backend`` (e.g. ``nccl``,
-    ``ncclx``) and wraps it in ``_BackendWrapper``, then registers it as the
-    NCCL backend on a fresh ``ProcessGroup`` and publishes the group into
-    ``c10d._world`` so name-based lookups (e.g. ``symm_mem.rendezvous(...,
-    group=group_name)``) resolve to it.
-
-    Callers are responsible for choosing a ``group_name`` (and matching
-    ``store_path``) that is unique within the process — duplicates trip
-    ``_register_pg_in_world`` and the underlying FileStore.
-    """
-    import torchcomms
-
-    from torch.distributed.distributed_c10d import (
-        _BackendWrapper,
-        _register_pg_in_world,
-    )
-
-    file_store = c10d.FileStore(store_path, world_size)
-
-    os.environ["TORCHCOMM_RANK"] = str(rank)
-    os.environ["TORCHCOMM_SIZE"] = str(world_size)
-
-    tc_comm = torchcomms.new_comm(
-        backend,
-        device,
-        name=f"{group_name}_comm",
-        store=c10d.PrefixStore(f"{group_name}_tc/", file_store),
-        hints={"persistent_store": "true"},
-    )
-
-    pg = c10d.ProcessGroup(
-        c10d.PrefixStore(f"{group_name}_pg/", file_store),
-        tc_comm.get_rank(),
-        tc_comm.get_size(),
-    )
-    pg._register_backend(
-        tc_comm.get_device(),
-        c10d.ProcessGroup.BackendType.NCCL,
-        _BackendWrapper(tc_comm),
-    )
-    # _register_backend only updates the per-device map; backendType_ stays
-    # UNDEFINED. getDefaultBackend()-dependent setters (including
-    # use_pg_for_symm_mem_rendezvous) fail without this.
-    pg._set_default_backend(c10d.ProcessGroup.BackendType.NCCL)
-
-    pg._set_group_name(group_name)
-    _register_pg_in_world(
-        pg,
-        backend_name=backend,
-        store=file_store,
-        group_name=group_name,
-        backend_config=backend,
-        rank_mapping={r: r for r in range(world_size)},
-    )
-
-    return pg
 
 
 logger = logging.getLogger(__name__)
@@ -1865,7 +1796,7 @@ class MultiProcContinuousTest(TestCase):
     _processes_spawned: bool = False
 
     @classmethod
-    def backend_str(cls) -> str | None:
+    def backend_str(cls, device) -> str | None:
         """
         ProcessGroup backend str.
         To be customized by sub test classes, e.g. "nccl".
@@ -1874,8 +1805,8 @@ class MultiProcContinuousTest(TestCase):
         return None
 
     # Please override if you intend to test on specific device type
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         curr_device = torch.accelerator.current_accelerator()
         if curr_device is None:
             return "cpu"
@@ -1900,8 +1831,11 @@ class MultiProcContinuousTest(TestCase):
         os.environ["LOCAL_RANK"] = str(rank)
         store = c10d.FileStore(rdvz_file, world_size)
         # create nccl processgroup with opts
+        device = cls.device_type
+        if isinstance(device, property):
+            device = device.fget(cls)
         c10d.init_process_group(
-            backend=cls.backend_str(),
+            backend=cls.backend_str(device),
             world_size=world_size,
             rank=rank,
             store=store,
@@ -1943,7 +1877,10 @@ class MultiProcContinuousTest(TestCase):
 
         # Initialize the process group
         # Some tests override _init_pg and oversubscribe before per-test skips run.
-        backend = cls.backend_str()
+        device = cls.device_type
+        if isinstance(device, property):
+            device = device.fget(cls)
+        backend = cls.backend_str(device)
         is_nccl = backend in ("nccl", "nccl2", "nccl-lazy")
         if is_nccl and world_size > torch.accelerator.device_count():
             os.environ["NCCL_MULTI_RANK_GPU_ENABLE"] = "1"
@@ -2103,28 +2040,23 @@ class MultiProcContinuousTest(TestCase):
         if cls.__dict__.get("_processes_spawned", False):
             return
 
-        # Handle method, property, and string attribute for device_type
-        # (instantiate_device_type_tests sets device_type as a string attribute,
-        # making this compatible as a drop-in replacement for MultiProcessTestCase)
-        device_type_attr = cls.__dict__.get("device_type", cls.device_type)
-        if isinstance(device_type_attr, classmethod):
-            device_type = device_type_attr.__func__(cls)
-        elif isinstance(device_type_attr, property):
+        # device_type is a string attribute on instantiated classes and a
+        # property on legacy test bases (instantiate_device_type_tests sets
+        # it as a class attribute, making this a drop-in replacement for
+        # MultiProcessTestCase).
+        device_type = cls.device_type
+        if isinstance(device_type, property):
             # Note: fget expects an instance but we pass cls since no instance
-            # exists yet. This works because DTensorTestMixin.device_type only
-            # accesses class-level attributes (world_size, module constants).
-            device_type = device_type_attr.fget(cls)
-        elif callable(device_type_attr):
-            device_type = device_type_attr()
-        else:
-            device_type = device_type_attr
+            # exists yet. This works because device_type properties only
+            # access class-level attributes.
+            device_type = device_type.fget(cls)
 
         # Get world_size (handles both class variable and property)
         cls.world_size = cls._get_world_size(device_type)
 
         # Check if the specified backend is available before spawning processes.
         # is_backend_available covers OOT/third-party backends too.
-        backend = cls.backend_str() if callable(cls.backend_str) else cls.backend_str
+        backend = cls.backend_str(device_type)
         if backend is not None and not c10d.is_backend_available(backend):
             raise unittest.SkipTest(f"Backend '{backend}' is not available")
 
@@ -2190,8 +2122,11 @@ class MultiProcContinuousTest(TestCase):
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK
 
-        # If this test class hits an exception in one test, skip the rest of tests
-        if self.__class__.poison_pill:
+        # If this test class hits an exception in one test, skip the rest of tests.
+        # Check the class's own dict: a subclass must not inherit the pill from a
+        # base test class that already ran, else one failure in the base class
+        # skips every test in the subclass (see _ensure_processes_spawned).
+        if self.__class__.__dict__.get("poison_pill", False):
             raise unittest.SkipTest(f"Previous test failed, skipping {self.id()}")
 
         # Enqueue "current test" to all workers
@@ -2268,66 +2203,3 @@ class MultiProcContinuousTest(TestCase):
                 raise ValueError(
                     f"no such test method in {self.__class__}: {methodName}"
                 ) from e
-
-
-class C10dTorchCommsTestBase(MultiProcContinuousTest):
-    world_size: int = DEFAULT_WORLD_SIZE
-
-    @staticmethod
-    def backend(device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
-            return "gloo"
-
-    @classmethod
-    def backend_str(cls) -> str:
-        device_type = cls.device_type
-        if callable(device_type):
-            device_type = device_type()
-        return cls.backend(device_type)
-
-    def _skip_if_backend_unavailable(self, device: str) -> None:
-        backend_name = self.backend(device)
-        if TEST_WITH_ROCM and backend_name == "nccl":
-            backend_name = "rccl"
-        if not _torchcomms_handles_backend(backend_name):
-            self.skipTest(f"torchcomms {backend_name} backend is not available")
-
-    @classmethod
-    def _init_pg(cls, rank, world_size, rdvz_file):
-        torch.distributed.config.use_torchcomms = True
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = str(find_free_port())
-        os.environ["TORCHCOMM_RANK"] = str(rank)
-        os.environ["TORCHCOMM_SIZE"] = str(world_size)
-        os.environ["TORCHCOMM_STORE_PATH"] = rdvz_file
-        super()._init_pg(rank, world_size, rdvz_file)
-        # Set up accelerator device if using nccl/xccl backend
-        backend = cls.backend_str()
-        if "nccl" in backend or "xccl" in backend:
-            accelerator = torch.accelerator.current_accelerator()
-            if accelerator:
-                device = torch.device(f"{accelerator.type}:{rank}")
-                torch.set_default_device(device)
-                torch.accelerator.set_device_index(device)
-            else:
-                raise RuntimeError(
-                    f"Expected to find an accelerator when initializing process group with {backend} backend, but got None"
-                )
-
-    def setUp(self) -> None:
-        device_type = self.__class__.device_type
-        logger.debug("Setting up test: %s on device type: %s", self.id(), device_type)
-        if callable(device_type):
-            device_type = device_type()
-        self._skip_if_backend_unavailable(str(device_type))
-        super().setUp()
-
-    def rank_to_device(self, device):
-        num_visible_devices = torch.get_device_module(device).device_count()
-        return {i: [i % num_visible_devices] for i in range(self.world_size)}
