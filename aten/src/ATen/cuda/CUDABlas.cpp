@@ -1632,8 +1632,8 @@ bool gemm_and_bias(
   if constexpr (std::is_same_v<Dtype, at::Half>) {
 #ifndef USE_ROCM
     if (computeType == CUBLAS_COMPUTE_16F) {
-      halpha_val = static_cast<at::Half>(alpha_val);
-      hbeta_val = static_cast<at::Half>(beta_val);
+      halpha_val = alpha_val;
+      hbeta_val = beta_val;
       alpha_ptr = &halpha_val;
       beta_ptr = &hbeta_val;
     }
@@ -1644,12 +1644,12 @@ bool gemm_and_bias(
     auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
     if (fp16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
-      uint32_t mask = static_cast<uint32_t>(
+      uint32_t mask =
           fp16_reduction ==
                   at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
               ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
                  CUBLASLT_REDUCTION_SCHEME_NONE)
-              : CUBLASLT_REDUCTION_SCHEME_NONE);
+              : CUBLASLT_REDUCTION_SCHEME_NONE;
       preference.setAttribute(
           CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, mask);
     }
@@ -1657,12 +1657,12 @@ bool gemm_and_bias(
     auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
     if (bf16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
-      uint32_t mask = static_cast<uint32_t>(
+      uint32_t mask =
           bf16_reduction ==
                   at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
               ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
                  CUBLASLT_REDUCTION_SCHEME_NONE)
-              : CUBLASLT_REDUCTION_SCHEME_NONE);
+              : CUBLASLT_REDUCTION_SCHEME_NONE;
       preference.setAttribute(
           CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, mask);
     }
@@ -1697,18 +1697,15 @@ bool gemm_and_bias(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }
 
-  const auto m_u = static_cast<uint64_t>(m);
-  const auto n_u = static_cast<uint64_t>(n);
-  const auto k_u = static_cast<uint64_t>(k);
-  CuBlasLtMatrixLayout Adesc(abType, m_u, k_u, mat1_ld, transpose_mat1);
-  CuBlasLtMatrixLayout Bdesc(abType, k_u, n_u, mat2_ld, transpose_mat2);
-  CuBlasLtMatrixLayout Cdesc(cType, m_u, n_u, c_ptr ? c_ld : result_ld);
+  CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
+  CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, c_ptr ? c_ld : result_ld);
   // When c_ptr is null, C aliases D and the layouts are identical, so reuse
   // Cdesc rather than paying for a second cublasLtMatrixLayoutCreate on what is
   // the hot nn.Linear path.
   std::optional<CuBlasLtMatrixLayout> Ddesc;
   if (c_ptr) {
-    Ddesc.emplace(cType, m_u, n_u, result_ld);
+    Ddesc.emplace(cType, m, n, result_ld);
   }
   const auto Ddesc_raw = c_ptr ? Ddesc->descriptor() : Cdesc.descriptor();
 
@@ -1779,12 +1776,11 @@ bool gemm_and_bias(
     };
     // The bias is added unscaled by the epilogue and as beta * C otherwise, so
     // the two are equivalent only for beta == 1. The algo is queried last.
-    if (found_algo && bias != nullptr && beta == static_cast<opmath_t>(1) &&
+    if (found_algo && bias != nullptr && beta == opmath_t(1) &&
         computeType != CUBLAS_COMPUTE_16F && is_splitk_algo()) {
-      computeDesc.setAttribute(
-          CUBLASLT_MATMUL_DESC_EPILOGUE, detail::cublasLtEpilogue(activation, static_cast<const Dtype*>(nullptr)));
-      computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, static_cast<const Dtype*>(nullptr));
-      BiasCdesc.emplace(abType, m_u, n_u, static_cast<int64_t>(0));
+      computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, detail::cublasLtEpilogue(activation, nullptr));
+      computeDesc.setAttribute<const Dtype*>(CUBLASLT_MATMUL_DESC_BIAS_POINTER, nullptr);
+      BiasCdesc.emplace(abType, m, n, 0);
       Cdesc_raw = BiasCdesc->descriptor();
       c_operand = bias;
       beta_val = beta;
