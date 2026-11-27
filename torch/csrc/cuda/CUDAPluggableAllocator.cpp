@@ -399,6 +399,9 @@ void changeCurrentAllocator(
       !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
       "Can't swap an already initialized allocator");
   c10::cuda::CUDACachingAllocator::allocator.store(allocator.get());
+  // Use priority >= 1 to override the native allocator registered at priority 1
+  // by BackendStaticInitializer in c10/cuda/CUDACachingAllocator.cpp.
+  c10::SetAllocator(c10::kCUDA, allocator.get(), /*priority=*/1);
   current_custom_allocator = allocator;
 }
 

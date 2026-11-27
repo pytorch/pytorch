@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
@@ -32,6 +33,8 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
         "Cannot query detailed XPU version without ATen_xpu library.");
   }
 
+  C10_DEPRECATED_MESSAGE(
+      "XPUHooksInterface::getGlobalIdxFromDevice() is deprecated since 2.16 and will be removed in 2.18. The SYCL index within the platform equals the torch device index, so use the torch device index instead. See https://github.com/pytorch/pytorch/issues/204019")
   virtual int32_t getGlobalIdxFromDevice(const Device& /*device*/) const {
     TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }

@@ -15,6 +15,7 @@ from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
+    slowTest,
     xfailIfTorchDynamo,
 )
 
@@ -1453,6 +1454,7 @@ class ExceptionTests(__TestCase):
         self.assertIn("maximum recursion depth exceeded", str(exc))
 
 
+    @slowTest
     @cpython_only
     @support.requires_resource('cpu')
     def test_trashcan_recursion(self):
