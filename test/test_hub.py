@@ -158,6 +158,39 @@ class TestHub(TestCase):
         )
         self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
 
+        def test_load_state_dict_from_url_file_name_cannot_escape_model_dir(self):
+        # file_name is caller-supplied: a value that resolves outside of
+        # model_dir must be rejected instead of writing the checkpoint there.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model_dir = os.path.join(tmp_dir, "checkpoints")
+            src = os.path.join(tmp_dir, "src.pth")
+            torch.save({"w": torch.ones(2)}, src)
+            url = "file://" + src
+
+            with self.assertRaisesRegex(ValueError, "outside of model_dir"):
+                torch.hub.load_state_dict_from_url(
+                    url,
+                    model_dir=model_dir,
+                    file_name="../escaped.pth",
+                    progress=False,
+                )
+            self.assertFalse(os.path.exists(os.path.join(tmp_dir, "escaped.pth")))
+
+            with self.assertRaisesRegex(ValueError, "outside of model_dir"):
+                torch.hub.load_state_dict_from_url(
+                    url,
+                    model_dir=model_dir,
+                    file_name=os.path.join(tmp_dir, "abs.pth"),
+                    progress=False,
+                )
+            self.assertFalse(os.path.exists(os.path.join(tmp_dir, "abs.pth")))
+
+            # A plain file name inside model_dir still works.
+            state_dict = torch.hub.load_state_dict_from_url(
+                url, model_dir=model_dir, file_name="model.pth", progress=False
+            )
+            self.assertEqual(state_dict["w"], torch.ones(2))
+
     @retry(Exception, tries=3)
     def test_load_legacy_zip_checkpoint(self):
         with warnings.catch_warnings(record=True) as ws:
