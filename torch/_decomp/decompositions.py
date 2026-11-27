@@ -2609,6 +2609,36 @@ def cudnn_batch_norm(
     exponential_average_factor: float,
     epsilon: float,
 ):
+    from torch._inductor import config, inductor_prims
+    from torch._inductor.utils import is_strict_cuda_triton
+
+    if config.strict_reduction and is_strict_cuda_triton(input.device):
+        if torch.is_grad_enabled():
+            for name, stat in (
+                ("running_mean", running_mean),
+                ("running_var", running_var),
+            ):
+                if stat is not None and stat.requires_grad:
+                    raise RuntimeError(
+                        f"The function 'cudnn_batch_norm' is not differentiable with respect to argument '{name}'. "
+                        "This input cannot have requires_grad True."
+                    )
+        output, save_mean, invstd, reserve, mean, var = inductor_prims.cudnn_batch_norm(
+            input,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            training,
+            exponential_average_factor,
+            epsilon,
+        )
+        if training:
+            if running_mean is not None:
+                running_mean.copy_(mean)
+            if running_var is not None:
+                running_var.copy_(var)
+        return output, save_mean, invstd, reserve
     a, b, c = aten.native_batch_norm(
         input,
         weight,

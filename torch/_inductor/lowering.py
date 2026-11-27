@@ -4246,6 +4246,13 @@ fallback_batch_norm_update_stats = fallback_handler(
 )
 
 
+@register_lowering(inductor_prims.cudnn_batch_norm_statistics, type_promotion_kind=None)
+def cudnn_batch_norm_statistics(input, running_mean, running_var, momentum, eps):
+    from .kernel.cuda_cudnn_batch_norm import cudnn_bn_statistics
+
+    return cudnn_bn_statistics(input, running_mean, running_var, momentum, eps)
+
+
 @register_lowering(aten.batch_norm_update_stats.default, type_promotion_kind=None)
 def batch_norm_update_stats(input, running_mean, running_var, momentum):
     if (
@@ -4433,6 +4440,39 @@ def batch_norm_backward(
     reserve,
 ):
     if config.strict_reduction and is_strict_cuda_triton(input.get_device()):
+        node = V.graph.current_node
+        input_node = node.args[1]
+        if not isinstance(input_node, torch.fx.Node):
+            raise AssertionError(f"Expected torch.fx.Node, got {type(input_node)!r}")
+        input_value = input_node.meta["val"]
+        weight_value = (
+            node.args[2].meta["val"]
+            if isinstance(node.args[2], torch.fx.Node)
+            else None
+        )
+        running_mean_value = (
+            node.args[3].meta["val"]
+            if isinstance(node.args[3], torch.fx.Node)
+            else None
+        )
+        running_var_value = (
+            node.args[4].meta["val"]
+            if isinstance(node.args[4], torch.fx.Node)
+            else None
+        )
+        backend = torch._C._select_batch_norm_backend(
+            input_value,
+            weight_value,
+            torch.empty(1, device="cpu"),
+            running_mean_value,
+            running_var_value,
+            True,
+            eps,
+        )
+        if backend == torch._C._BatchNormBackend.Cudnn:
+            from .kernel.cuda_cudnn_batch_norm import cudnn_bn_backward
+
+            return cudnn_bn_backward(grad_out, input, weight, save_mean, save_invstd)
         return native_batch_norm_backward(
             grad_out,
             input,

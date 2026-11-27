@@ -963,6 +963,249 @@ class StrictNumericsCompileTest(TestCase):
         self._assert_bitwise_equal(actual, expected)
         self.assertEqual(metrics.generated_fallback_kernel_count, 0)
 
+    @skipCUDAIfNoCudnn
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    @parametrize(
+        "shape",
+        (
+            (2, 3, 4, 4),
+            (3, 17, 8, 9),
+            (2, 3, 128, 129),
+            (16, 32, 64, 64),
+            (2, 3, 4, 4, 5),
+            (2, 3, 1024, 1),
+        ),
+    )
+    @parametrize("channels_last", (False, True))
+    @parametrize("momentum", (0.1, 1.0))
+    @parametrize("track_running_stats", (False, True))
+    def test_generated_cudnn_batch_norm_statistics(
+        self, device, dtype, shape, channels_last, momentum, track_running_stats
+    ):
+        from torch._inductor.inductor_prims import cudnn_batch_norm_statistics
+
+        torch.manual_seed(277)
+        x = torch.randn(shape, device=device, dtype=dtype)
+        if channels_last:
+            x = x.contiguous(
+                memory_format=torch.channels_last
+                if x.ndim == 4
+                else torch.channels_last_3d
+            )
+        stat_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        mean = (
+            torch.randn(shape[1], device=device, dtype=stat_dtype)
+            if track_running_stats
+            else None
+        )
+        var = torch.rand_like(mean) + 0.5 if mean is not None else None
+        original = (None, None) if mean is None else (mean.clone(), var.clone())
+
+        def fn(x, mean, var):
+            return cudnn_batch_norm_statistics(x, mean, var, momentum, 1e-5)
+
+        expected = fn(x, mean, var)
+        metrics.reset()
+        with config.patch(numerics="strict", fx_graph_cache=False):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x, mean, var
+            )
+        self._assert_bitwise_equal(actual, expected)
+        self.assertEqual((mean, var), original)
+        self.assertEqual(metrics.generated_fallback_kernel_count, 0)
+        self.assertGreater(metrics.generated_kernel_count, 0)
+        source = "\n".join(code)
+        self.assertIn("triton_helpers.cuda_cudnn_bn_", source)
+        self.assertNotIn("aten.cudnn_batch_norm", source)
+        for first, second in itertools.combinations(actual, 2):
+            self.assertFalse(torch._C._is_alias_of(first, second))
+
+    @skipCUDAIfNoCudnn
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    @parametrize(
+        "shape",
+        (
+            (2, 3, 4, 4),
+            (3, 17, 8, 9),
+            (2, 3, 33, 17),
+            (2, 3, 128, 129),
+            (16, 32, 64, 64),
+            (2, 3, 4, 4, 5),
+            (2, 3, 1024, 1),
+            (8, 17, 128, 129),
+            (16, 4, 64, 65),
+        ),
+    )
+    @parametrize("channels_last", (False, True))
+    def test_generated_cudnn_batch_norm_backward(
+        self, device, dtype, shape, channels_last
+    ):
+        torch.manual_seed(7)
+        x = torch.randn(shape, device=device, dtype=dtype)
+        if channels_last:
+            x = x.contiguous(
+                memory_format=torch.channels_last
+                if x.ndim == 4
+                else torch.channels_last_3d
+            )
+        stat_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        weight = torch.randn(shape[1], device=device, dtype=stat_dtype)
+        bias = torch.randn_like(weight)
+        mean = torch.randn_like(weight)
+        var = torch.rand_like(weight) + 0.5
+        output, save_mean, invstd, reserve = torch.ops.aten.cudnn_batch_norm.default(
+            x, weight, bias, mean, var, True, 0.1, 1e-5
+        )
+        grad = torch.randn_like(output)
+
+        def fn(grad, x, weight, mean, var, save_mean, invstd, reserve):
+            return torch.ops.aten.batch_norm_backward.default(
+                grad,
+                x,
+                weight,
+                mean,
+                var,
+                save_mean,
+                invstd,
+                True,
+                1e-5,
+                [True, True, True],
+                reserve,
+            )
+
+        args = (grad, x, weight, mean, var, save_mean, invstd, reserve)
+        expected = fn(*args)
+        metrics.reset()
+        with config.patch(numerics="strict", fx_graph_cache=False):
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        self._assert_bitwise_equal(actual, expected)
+        self.assertEqual(metrics.generated_fallback_kernel_count, 0)
+        self.assertIn("triton_helpers.cuda_cudnn_bn_", "\n".join(code))
+        self.assertNotIn("aten.cudnn_batch_norm_backward", "\n".join(code))
+
+    @skipCUDAIfNoCudnn
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    @parametrize(
+        "shape", ((2, 3, 4, 4), (3, 17, 8, 9), (2, 3, 128, 129), (16, 32, 64, 64))
+    )
+    @parametrize("channels_last", (False, True))
+    def test_generated_cudnn_batch_norm_pair(self, device, dtype, shape, channels_last):
+        torch.manual_seed(7)
+        x = torch.randn(shape, device=device, dtype=dtype)
+        if channels_last:
+            x = x.contiguous(memory_format=torch.channels_last)
+        x.requires_grad_()
+        stat_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        weight = torch.randn(
+            shape[1], device=device, dtype=stat_dtype, requires_grad=True
+        )
+        bias = torch.randn_like(weight, requires_grad=True)
+        mean = torch.randn_like(weight, requires_grad=False)
+        var = torch.rand_like(weight, requires_grad=False) + 0.5
+
+        def fn(x, weight, bias, mean, var):
+            mean, var = mean.clone(), var.clone()
+            output, save_mean, invstd, _ = (
+                torch.ops.aten._batch_norm_with_update.default(
+                    x, weight, bias, mean, var, 0.1, 1e-5
+                )
+            )
+            return output, save_mean, invstd, mean, var
+
+        expected = fn(x, weight, bias, mean, var)
+        grad = torch.randn_like(expected[0])
+        expected_grads = torch.autograd.grad(expected[0], (x, weight, bias), grad)
+        inputs = tuple(
+            value.detach().clone().requires_grad_() for value in (x, weight, bias)
+        )
+        metrics.reset()
+        with config.patch(numerics="strict", fx_graph_cache=False):
+            actual = torch.compile(fn, fullgraph=True)(*inputs, mean, var)
+            actual_grads, code = run_and_get_code(
+                lambda: torch.autograd.grad(actual[0], inputs, grad)
+            )
+        self._assert_bitwise_equal(actual, expected)
+        self._assert_bitwise_equal(actual_grads, expected_grads)
+        self.assertEqual(metrics.generated_fallback_kernel_count, 0)
+        self.assertIn("triton_helpers.cuda_cudnn_bn_", "\n".join(code))
+        self.assertNotIn("aten.cudnn_batch_norm_backward", "\n".join(code))
+
+    @skipCUDAIfNoCudnn
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    @parametrize(
+        "shape", ((2, 3, 4, 4), (3, 17, 8, 9), (2, 3, 128, 129), (16, 32, 64, 64))
+    )
+    @parametrize("channels_last", (False, True))
+    @parametrize("training", (False, True))
+    def test_generated_cudnn_functional_batch_norm_pair(
+        self, device, dtype, shape, channels_last, training
+    ):
+        torch.manual_seed(7)
+        x = torch.randn(shape, device=device, dtype=dtype)
+        if channels_last:
+            x = x.contiguous(memory_format=torch.channels_last)
+        x.requires_grad_()
+        stat_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        weight = torch.randn(
+            shape[1], device=device, dtype=stat_dtype, requires_grad=True
+        )
+        bias = torch.randn_like(weight, requires_grad=True)
+        mean = torch.randn_like(weight, requires_grad=False)
+        var = torch.rand_like(weight, requires_grad=False) + 0.5
+
+        def fn(x, weight, bias, mean, var):
+            mean, var = mean.clone(), var.clone()
+            output = torch.nn.functional.batch_norm(
+                x, mean, var, weight, bias, training, 0.1, 1e-5
+            )
+            return output, mean, var
+
+        expected = fn(x, weight, bias, mean, var)
+        grad = torch.randn_like(expected[0])
+        expected_grads = torch.autograd.grad(expected[0], (x, weight, bias), grad)
+        inputs = tuple(
+            value.detach().clone().requires_grad_() for value in (x, weight, bias)
+        )
+        metrics.reset()
+        with config.patch(numerics="strict", fx_graph_cache=False):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), *inputs, mean, var
+            )
+            actual_grads, back_code = run_and_get_code(
+                lambda: torch.autograd.grad(actual[0], inputs, grad)
+            )
+        self._assert_bitwise_equal(actual, expected)
+        self._assert_bitwise_equal(actual_grads, expected_grads)
+        self.assertEqual(metrics.generated_fallback_kernel_count, 0)
+        generated = "\n".join(code + back_code)
+        if training:
+            self.assertIn("triton_helpers.cuda_cudnn_bn_", generated)
+        self.assertNotIn("aten.cudnn_batch_norm", generated)
+
+    @skipCUDAIfNoCudnn
+    @parametrize("training", (False, True))
+    @parametrize("stat", ("running_mean", "running_var"))
+    def test_generated_cudnn_batch_norm_running_stats_not_differentiable(
+        self, device, training, stat
+    ):
+        x = torch.randn(2, 3, 4, 4, device=device, requires_grad=True)
+        weight = torch.ones(3, device=device, requires_grad=True)
+        bias = torch.zeros_like(weight, requires_grad=True)
+        mean = torch.zeros_like(weight, requires_grad=stat == "running_mean")
+        var = torch.ones_like(weight, requires_grad=stat == "running_var")
+
+        def fn(x, weight, bias, mean, var):
+            return torch.nn.functional.batch_norm(
+                x, mean, var, weight, bias, training, 0.1, 1e-5
+            )
+
+        error = f"not differentiable with respect to argument '{stat}'"
+        with self.assertRaisesRegex(RuntimeError, error):
+            fn(x, weight, bias, mean, var)
+        with config.patch(numerics="strict"):
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.compile(fn, fullgraph=True)(x, weight, bias, mean, var)
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize(
         "shape", ((8, 16, 33), (4, 16, 80), (1, 3, 1), (33, 3, 16), (8, 3, 1025))
