@@ -4082,7 +4082,7 @@ class CommonTemplate:
         def fn(a):
             return torch.relu(a)
 
-        x = torch.tensor([False, True])
+        x = torch.tensor([False, True], device=self.device)
         with self.assertRaisesRegex(
             NotImplementedError, "Boolean inputs not supported for relu"
         ):
