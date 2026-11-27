@@ -2077,6 +2077,13 @@ optim_db: list[OptimizerInfo] = [
                 "CompiledOptimizerParityTests",
                 "test_correctness",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
