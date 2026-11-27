@@ -7853,6 +7853,121 @@ def modes_view_length(x):
     return modes_work(y * float(len(MODES_VIEW)))
 
 
+def modes_slot_or(o, default):
+    try:
+        return o.k
+    except AttributeError:
+        return default
+
+
+# Whether a slot holds something, every way a call can ask: by name, what
+# the call computes its factor from, with O an object whose slot `k` is
+# empty or holds a float.
+MODES_SLOT_ASKED = {
+    "hasattr": "2.0 + float(hasattr(O, 'k'))",
+    "getattr_with_a_default": "getattr(O, 'k', 3.0)",
+    "hasattr_then_the_value": "O.k if hasattr(O, 'k') else 3.0",
+    "the_value_then_hasattr": "(O.k if SET[0] else 3.0) + float(hasattr(O, 'k'))",
+    "load_that_raises": "modes_slot_or(O, 3.0)",
+}
+# By name: what the slot holds from which call on (None: nothing), and
+# whether the answer to "does it hold something" changes on the way.
+MODES_SLOT_SCHEDULES = {
+    "empty_when_traced": ({0: None, 5: 2.0, 9: None}, True),
+    "set_when_traced": ({0: 2.0, 5: None, 9: 2.0}, True),
+    "another_value": ({0: 2.0, 5: 4.0, 9: 2.0}, False),
+}
+MODES_SLOT_PROGRAM = """
+class Slotted:
+    __slots__ = ("k",)
+
+
+O = Slotted()
+SET = [False]
+
+
+def {name}(x):
+    y = modes_work(x)
+    k = {asked}
+    return modes_work(y * k)
+"""
+
+# What is there, by how it is made: an instance that takes a weak reference,
+# one that takes none (its death is seen by its finalizer alone), a tensor.
+MODES_PRESENCE_HELD = {
+    "instance": "Seen()",
+    "slotted_instance": "SeenSlotted()",
+    "tensor": "torch.ones(3)",
+}
+# A call that asks only whether something is there: by name, the class of
+# the holder O, what the call computes its factor from, how the test puts
+# an object there, how it takes it out, and which objects it is tried with.
+# (`hasattr` of an attribute in an instance's __dict__ is recorded as a read
+# of the VALUE, and a value of a class that takes no weak reference is
+# counted for as long as the region lives: no member here.)
+MODES_PRESENCE = {
+    "slot": (
+        "class Holder:\n    __slots__ = ('k',)",
+        "2.0 + float(hasattr(O, 'k'))",
+        lambda o, v: setattr(o, "k", v),
+        lambda o: delattr(o, "k"),
+        ("instance", "slotted_instance", "tensor"),
+    ),
+    "attribute": (
+        "class Holder:\n    pass",
+        "2.0 + float(hasattr(O, 'k'))",
+        lambda o, v: setattr(o, "k", v),
+        lambda o: delattr(o, "k"),
+        ("instance", "tensor"),
+    ),
+    "item": (
+        "Holder = dict",
+        "2.0 + float('k' in O)",
+        lambda o, v: o.__setitem__("k", v),
+        lambda o: o.__delitem__("k"),
+        ("instance", "slotted_instance", "tensor"),
+    ),
+}
+MODES_PRESENCE_CASES = {
+    f"{where}_holding_a_{held}": (where, held)
+    for where, row in MODES_PRESENCE.items()
+    for held in row[4]
+}
+# What the test does before the sixth call.
+MODES_PRESENCE_SCHEDULES = ("replaced", "deleted")
+MODES_PRESENCE_PROGRAM = """
+DIED = []
+
+
+class Seen:
+    def __del__(self):
+        DIED.append(1)
+
+
+class SeenSlotted:
+    __slots__ = ()
+
+    def __del__(self):
+        DIED.append(1)
+
+
+{holder}
+
+
+O = Holder()
+
+
+def make():
+    return {made}
+
+
+def {name}(x):
+    y = modes_work(x)
+    k = {asked}
+    return modes_work(y * k)
+"""
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmStaleReads(TestCase):
     """What a traced call read and something else then changed, inside the
@@ -7951,6 +8066,88 @@ class TestVmStaleReads(TestCase):
         self.assertEqual(log(compiled), want, atol=0, rtol=0)
         self.assertGreater(region_runs(compiled), 0)
         self.assertGreater(torch._rust._region_read_misses(), 0)
+
+    @parametrize("how", list(MODES_SLOT_ASKED))
+    @parametrize("schedule", list(MODES_SLOT_SCHEDULES))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_whether_a_slot_is_set_follows_the_slot(
+        self, device, how, schedule, passes
+    ):
+        # The slot changes between calls: a region with the answer of the
+        # traced call is not entered then, and is again once the slot is as
+        # it was.
+        name = f"slot_{how}_{schedule}"
+        source = MODES_SLOT_PROGRAM.format(name=name, asked=MODES_SLOT_ASKED[how])
+        names = {"modes_work": modes_work, "modes_slot_or": modes_slot_or}
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES[passes])
+        holds, answer_changes = MODES_SLOT_SCHEDULES[schedule]
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results = []
+            for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                if call in holds:
+                    held = holds[call]
+                    if held is not None:
+                        space["O"].k = held
+                    elif hasattr(space["O"], "k"):
+                        del space["O"].k
+                    space["SET"][0] = held is not None
+                results.append(fn(x))
+            self.assertEqual(*results, atol=0, rtol=0, msg=f"call {call}\n{source}")
+        self.assertGreater(region_runs(compiled), 0, msg=source)
+        if answer_changes:
+            self.assertGreater(torch._rust._region_read_misses(), 0, msg=source)
+
+    @parametrize("case", list(MODES_PRESENCE_CASES))
+    @parametrize("schedule", MODES_PRESENCE_SCHEDULES)
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_asking_whether_something_is_there_keeps_nothing_alive(
+        self, device, case, schedule, passes
+    ):
+        # The region's check is that something is there, not what: the
+        # object that was there when the call was traced dies when the
+        # program lets go of it, as the interpreter's does, call by call.
+        where, held = MODES_PRESENCE_CASES[case]
+        holder, asked, put, take_out, _ = MODES_PRESENCE[where]
+        name = f"presence_{case}_{schedule}"
+        source = MODES_PRESENCE_PROGRAM.format(
+            name=name, holder=holder, asked=asked, made=MODES_PRESENCE_HELD[held]
+        )
+        names = {"modes_work": modes_work, "torch": torch}
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES[passes])
+        alive = {id(mine): [], id(theirs): []}
+
+        def place(space):
+            made = space["make"]()
+            if held != "slotted_instance":
+                alive[id(space)].append(weakref.ref(made))
+            put(space["O"], made)
+
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results, lives = [], []
+            for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                if call == 0 or (call == 5 and schedule == "replaced"):
+                    place(space)
+                elif call == 5:
+                    take_out(space["O"])
+                results.append(fn(x))
+                lives.append(
+                    ([w() is not None for w in alive[id(space)]], len(space["DIED"]))
+                )
+            self.assertEqual(*results, atol=0, rtol=0, msg=f"call {call}\n{source}")
+            self.assertEqual(lives[0], lives[1], msg=f"call {call}\n{source}")
+        self.assertGreater(region_runs(compiled), 0, msg=source)
 
 
 instantiate_device_type_tests(TestVmStaleReads, globals())

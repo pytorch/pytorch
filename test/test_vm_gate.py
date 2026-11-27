@@ -10394,17 +10394,23 @@ class TestVmEdgeGenerators(TestCase):
                     "exit", json.dumps(member), how, timeout=300
                 )
                 log = [line for line in out.splitlines() if line.startswith("LOG")]
-                both.append((status, log))
+                # What a child that did not end with 0 wrote before it died.
+                said = "" if status == 0 else err[-1500:]
+                both.append(((status, log), said))
             return both
 
         with concurrent.futures.ThreadPoolExecutor(8) as pool:
             found = dict(zip(members, pool.map(ends, members)))
-        differ = [f"{m}: {both}" for m, both in found.items() if both[0] != both[1]]
-        self.assertEqual(differ, [])
+        differ = [
+            f"{m}: (status, log) of eager {eager}, of torch.vm {got}; stderr: {said or told}"
+            for m, ((eager, said), (got, told)) in found.items()
+            if eager != got
+        ]
+        self.assertEqual(differ, [], msg="\n".join(differ))
         # Every member ran to the interpreter's end, and its frame was started.
-        self.assertEqual({both[0][0] for both in found.values()}, {0})
+        self.assertEqual({both[0][0][0] for both in found.values()}, {0})
         started = [m for m in members if not m[1].startswith("new")]
-        self.assertTrue(all(found[m][0][1] for m in started))
+        self.assertTrue(all(found[m][0][0][1] for m in started))
 
     def test_the_mark_is_on_what_the_executor_suspended_and_nothing_else(self):
         command = [sys.executable, "-c", EDGE_OWN_PROGRAM]
@@ -10441,6 +10447,165 @@ class TestVmEdgeGenerators(TestCase):
                 msg=str(call),
             )
         self.assertGreater(rows[-1]["runs"], rows[3]["runs"])
+
+
+# A thread that is inside a torch.vm function when the interpreter ends
+# (TestVmEdgeThreadEnds). Where the thread is when it gives up the GIL: in
+# the function's own frame, in the frame of a function it calls, in a frame
+# under the executor's hook that CPython runs (a generator that plain code
+# started).
+EDGE_ENDS_WHERE = ("body", "callee", "generator")
+# How it gives the GIL up: a C call that releases it; a loop from which the
+# interpreter takes it.
+EDGE_ENDS_HOW = ("sleeps", "spins")
+# The thread's call is the function's first; the one in which regions are
+# traced; one in which regions run.
+EDGE_ENDS_CALLS = (0, 3, 5)
+
+EDGE_ENDS_PROGRAM = r"""
+import sys, threading, time
+import torch
+from torch import vm
+
+EARLY = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+where, how, calls, way = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+parked = threading.Event()
+
+
+def work(x):
+    return ((x.sin() * 2).cos() + 1).tanh().exp()
+
+
+def callee(last):
+    if last:
+        parked.set()
+        if how == "sleeps":
+            time.sleep(0.5)
+        else:
+            n = 0
+            while True:
+                n += 1
+    return 2.0
+
+
+def generator():
+    while True:
+        last = yield 2.0
+        if last:
+            parked.set()
+            if how == "sleeps":
+                time.sleep(0.5)
+            else:
+                n = 0
+                while True:
+                    n += 1
+
+
+STARTED = generator()
+next(STARTED)
+
+
+def body(x, last):
+    y = work(x)
+    if where == "callee":
+        k = callee(last)
+    elif where == "generator":
+        k = STARTED.send(last)
+    else:
+        k = 2.0
+        if last:
+            parked.set()
+            if how == "sleeps":
+                time.sleep(0.5)
+            else:
+                n = 0
+                while True:
+                    n += 1
+    return work(y * k)
+
+
+class Slow:
+    # The interpreter is ending for as long as this takes: the thread comes
+    # back for the GIL meanwhile, and CPython ends the thread there.
+    def __del__(self, sleep=time.sleep, print=print):
+        print("LOG the interpreter is ending", flush=True)
+        sleep(1.5)
+        print("LOG the interpreter ends", flush=True)
+
+
+f = vm(body, passes=EARLY) if way == "vm" else body
+for call in range(calls):
+    f(torch.full((4, 8), call + 1.0), False)
+threading.Thread(target=f, args=(torch.full((4, 8), 9.0), True), daemon=True).start()
+parked.wait()
+KEPT = Slow()
+print("LOG the main thread leaves", flush=True)
+"""
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+class TestVmEdgeThreadEnds(TestCase):
+    """CPython 3.12 ends a thread that comes back for the GIL after the
+    interpreter began to end (a daemon thread that slept, waited or was
+    switched out): the thread goes, the process ends as it would have. A
+    thread that is inside a ``torch.vm`` function then, or in any frame
+    entered while the executor's hook is installed, ends no more than that:
+    the process ends with the status and the output of plain Python.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_a_thread_inside_the_executor_when_the_interpreter_ends(self):
+        members = [
+            (where, how, calls)
+            for where in EDGE_ENDS_WHERE
+            for how in EDGE_ENDS_HOW
+            for calls in EDGE_ENDS_CALLS
+        ]
+
+        def ends(member):
+            both = []
+            for way in ("eager", "vm"):
+                where, how, calls = member
+                command = [
+                    sys.executable,
+                    "-c",
+                    EDGE_ENDS_PROGRAM,
+                    where,
+                    how,
+                    str(calls),
+                    way,
+                ]
+                ran = subprocess.run(
+                    command, capture_output=True, text=True, timeout=300
+                )
+                log = [
+                    line for line in ran.stdout.splitlines() if line.startswith("LOG")
+                ]
+                said = "" if ran.returncode == 0 else ran.stderr[-1500:]
+                both.append(((ran.returncode, log), said))
+            return both
+
+        with concurrent.futures.ThreadPoolExecutor(6) as pool:
+            found = dict(zip(members, pool.map(ends, members)))
+        differ = [
+            f"{m}: (status, log) of eager {eager}, of torch.vm {got}; stderr: {said or told}"
+            for m, ((eager, said), (got, told)) in found.items()
+            if eager != got
+        ]
+        self.assertEqual(differ, [], msg="\n".join(differ))
+        self.assertEqual(len(found), 18)
+        want = [
+            "LOG the main thread leaves",
+            "LOG the interpreter is ending",
+            "LOG the interpreter ends",
+        ]
+        self.assertEqual(
+            {tuple(both[0][0][1]) for both in found.values()}, {tuple(want)}
+        )
+        self.assertEqual({both[0][0][0] for both in found.values()}, {0})
 
 
 # The bridge between the executor (Rust) and torch (C++): the rule is at the
@@ -13739,13 +13904,19 @@ def region_runs(fn):
     return sum(r["runs"] for r in vm.regions(fn) if r["state"] == "region")
 
 
-def run(text, passes):
+def run(text, way):
     # The logs of CALLS calls of the member's function: as plain Python
-    # (passes None), or on torch.vm.
+    # ("eager"); as plain Python while a frame-evaluation hook that runs
+    # nothing itself is installed ("hooked": torch._dynamo.run sets dynamo's
+    # hook in its run-only mode around each call); on torch.vm ("vm").
     ns = {"__name__": "member", "VIEW": True}
     exec(compile(text, "<member>", "exec"), ns)
     ns["VIEW"] = True
-    fn = ns["body"] if passes is None else vm(ns["body"], passes=passes)
+    fn = ns["body"]
+    if way == "hooked":
+        fn = importlib.import_module("torch._dynamo").run(fn)
+    elif way == "vm":
+        fn = vm(fn, passes=EARLY)
     log, logs, views, runs = ns["LOG"], [], [], []
     for i in range(CALLS):
         x = torch.full((4,), i + 1.0)
@@ -13754,7 +13925,7 @@ def run(text, passes):
         ns["VIEWS"].clear()
         ns["REFS"].clear()
         ns["KEEP"].clear()
-        before = 0 if passes is None else region_runs(fn)
+        before = region_runs(fn) if way == "vm" else 0
         try:
             r = fn(x)
         except Exception as e:
@@ -13766,28 +13937,67 @@ def run(text, passes):
         gc.collect()
         log.append("GC")
         logs.append(" ".join(log))
-        views.append(" ".join(ns["VIEWS"]))
-        runs.append(0 if passes is None else region_runs(fn) - before)
+        # The instrument's own frame stands where this function's does.
+        views.append(" ".join(ns["VIEWS"]).replace("@compile_wrapper", "@run"))
+        runs.append(region_runs(fn) - before if way == "vm" else 0)
     return logs, views, runs
 
 
-def member(table, name, form):
+def member(table, name, form, hooked):
     gc.disable()
     # What exists now is no garbage of the member's: a collection looks only
     # at what is made from here on.
     gc.freeze()
     text = source(table[name], form)
+    if hooked:
+        logs, views, _ = run(text, "hooked")
+        return {"hooked": logs, "hooked_views": views}
     # Eager first: no executor has run in this process.
-    eager, eager_views, _ = run(text, None)
-    got, got_views, runs = run(text, EARLY)
+    eager, eager_views, _ = run(text, "eager")
+    got, got_views, runs = run(text, "vm")
     return {"name": name, "form": form, "eager": eager, "vm": got, "eager_views": eager_views, "vm_views": got_views, "runs": runs}
 
 
+def forked(table, name, form, hooked):
+    # What member() answers in a process of its own; None if it died.
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(r)
+        try:
+            os.write(w, json.dumps(member(table, name, form, hooked)).encode())
+        finally:
+            os._exit(0)
+    os.close(w)
+    os.set_blocking(r, False)
+    start, data = time.time(), b""
+    while True:
+        try:
+            chunk = os.read(r, 1 << 16)
+        except BlockingIOError:
+            if time.time() - start > 120:
+                os.kill(pid, signal.SIGKILL)
+                break
+            time.sleep(0.01)
+            continue
+        if not chunk:
+            break
+        data += chunk
+    os.close(r)
+    status = os.waitpid(pid, 0)[1]
+    try:
+        return json.loads(data.decode()), status
+    except ValueError:
+        return None, status
+
+
 def main():
-    # Each member x form runs in a process of its own, forked from this one,
-    # which has imported everything and has run nothing (no tensor
+    # Each member x form runs in two processes of its own, forked from this
+    # one, which has imported everything and has run nothing (no tensor
     # operation, no torch.vm call): the executor's switches and plans are
-    # process-wide, and a child starts as a new process does.
+    # process-wide, and a child starts as a new process does. One child runs
+    # eager and then torch.vm, the other one runs under the hook: no executor
+    # has run where a CPython is measured.
     group, forms = sys.argv[1], sys.argv[2].split(",")
     table = members(sys.stdin.read())
     for m in PRELOAD:
@@ -13799,49 +14009,40 @@ def main():
         if name.split(":")[0] != group:
             continue
         for form in forms:
-            r, w = os.pipe()
-            pid = os.fork()
-            if pid == 0:
-                os.close(r)
-                try:
-                    os.write(w, json.dumps(member(table, name, form)).encode())
-                finally:
-                    os._exit(0)
-            os.close(w)
-            os.set_blocking(r, False)
-            start, data = time.time(), b""
-            while True:
-                try:
-                    chunk = os.read(r, 1 << 16)
-                except BlockingIOError:
-                    if time.time() - start > 120:
-                        os.kill(pid, signal.SIGKILL)
-                        break
-                    time.sleep(0.01)
-                    continue
-                if not chunk:
-                    break
-                data += chunk
-            os.close(r)
-            status = os.waitpid(pid, 0)[1]
-            try:
-                found = json.loads(data.decode())
-            except ValueError:
-                found = {"name": name, "form": form, "died": status}
+            found, status = forked(table, name, form, False)
+            hooked, hooked_status = forked(table, name, form, True)
+            if found is None or hooked is None:
+                found = {"name": name, "form": form, "died": status if found is None else hooked_status}
+            else:
+                found.update(hooked)
             print(json.dumps(found), flush=True)
 
 
 main()
 """
 
-# What torch.vm does today where it is not what eager does: the record. Under
-# "== name", one line per form and kind that differs: the form; "deaths" (the
-# log of the deaths and marks of a call) or "views" (what the finalizers saw
-# of the frame they interrupted, in a call whose deaths are eager's); the ways
-# that differ (RELEASE_WAYS, "." for one that is equal); eager's and
-# torch.vm's of the first call that differs (of the views: the first entry
-# that differs). A member that is not here is equal in every form and way. A
-# correction takes lines out of here.
+# The record. The reference is CPython with a frame-evaluation hook installed
+# that runs nothing itself: torch.vm is such a hook, and with any hook
+# installed CPython's own CALL keeps the arguments of a Python call until the
+# call returns (without one, the callee's frame owns them). Under "== name",
+# one line per form and kind:
+#   deaths    torch.vm's log of the deaths and marks of a call is not the
+#             reference's: the reference's | torch.vm's;
+#   views     what the finalizers saw of the frame they interrupted is not
+#             what they saw in the reference, in a call whose deaths are the
+#             reference's: the first entry that differs, of both;
+#   cpythons  CPython without a hook is not the reference (nothing of
+#             torch.vm's): hook-less | under the hook;
+#   calls     the reference's calls differ among themselves (an instruction
+#             CPython specialized after the first call lets go in another
+#             order): the first call's | a later one's.
+# Then the ways that differ (RELEASE_WAYS, "." for one that is equal) and the
+# two logs of the first call that differs. A member that is not here is equal
+# in every form and way, and its deaths are those of both CPythons. A
+# correction takes "deaths" and "views" lines out of here. What a region's
+# run lost (the finalizer of an object made and dropped inside a traced
+# stretch never ran) is in no line: a trace under which code ran that no
+# instruction of the body called is no region.
 RELEASE_KNOWN = r"""
 == operator: binary
 alone views ..T. a@body:2{x=tensor} | a@body
@@ -13965,120 +14166,123 @@ inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == C method: of a temporary container
 alone deaths .LTR in -b -a out RET DROP GC | in -a -b out RET DROP GC
+alone calls .LTR in -a -b out RET DROP GC | in -b -a out RET DROP GC
 between deaths .LTR in -b -a out RET DROP GC | in -a -b out RET DROP GC
+between calls .LTR in -a -b out RET DROP GC | in -b -a out RET DROP GC
 inside deaths .LTR -b -a RET DROP GC | -a -b RET DROP GC
+inside calls .LTR -a -b RET DROP GC | -b -a RET DROP GC
 == call: positional, deleted in the callee
-alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+alone cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside cpythons FLTR -a after del RET DROP GC | after del -a RET DROP GC
 == call: positional, rebound in the callee
-alone deaths FLTR in -a after rebind out RET DROP GC | in after rebind -a out RET DROP GC
-between deaths FLTR in -a after rebind out RET DROP GC | in after rebind -a out RET DROP GC
-inside deaths FLTR -a after rebind RET DROP GC | after rebind -a RET DROP GC
+alone cpythons FLTR in -a after rebind out RET DROP GC | in after rebind -a out RET DROP GC
+between cpythons FLTR in -a after rebind out RET DROP GC | in after rebind -a out RET DROP GC
+inside cpythons FLTR -a after rebind RET DROP GC | after rebind -a RET DROP GC
 == call: positional, returned and dropped
 alone views ..T. a@body:2{x=tensor} | a@body
 between views ..TR a@body:3{x=tensor,y=tensor} | a@body
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == call: the callee raises after it deleted the argument
-alone deaths FLTR in -a after del caught out RET DROP GC | in after del -a caught out RET DROP GC
-between deaths FLTR in -a after del caught out RET DROP GC | in after del -a caught out RET DROP GC
-inside deaths FLTR -a after del caught RET DROP GC | after del -a caught RET DROP GC
+alone cpythons FLTR in -a after del caught out RET DROP GC | in after del -a caught out RET DROP GC
+between cpythons FLTR in -a after del caught out RET DROP GC | in after del -a caught out RET DROP GC
+inside cpythons FLTR -a after del caught RET DROP GC | after del -a caught RET DROP GC
 == call: two positional, deleted in the other order
-alone deaths FLTR in -b after b -a after a out RET DROP GC | in after b after a -a -b out RET DROP GC
-between deaths FLTR in -b after b -a after a out RET DROP GC | in after b after a -a -b out RET DROP GC
-inside deaths FLTR -b after b -a after a RET DROP GC | after b after a -a -b RET DROP GC
+alone cpythons FLTR in -b after b -a after a out RET DROP GC | in after b after a -a -b out RET DROP GC
+between cpythons FLTR in -b after b -a after a out RET DROP GC | in after b after a -a -b out RET DROP GC
+inside cpythons FLTR -b after b -a after a RET DROP GC | after b after a -a -b RET DROP GC
 == call: keyword, deleted in the callee
-alone deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
-between deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
-inside deaths FLTR -a after a -b RET DROP GC | after a -b -a RET DROP GC
+alone cpythons FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+between cpythons FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+inside cpythons FLTR -a after a -b RET DROP GC | after a -b -a RET DROP GC
 == call: keyword, unused
-alone deaths FLTR in inside -a -b out RET DROP GC | in inside -b -a out RET DROP GC
-between deaths FLTR in inside -a -b out RET DROP GC | in inside -b -a out RET DROP GC
-inside deaths FLTR inside -a -b RET DROP GC | inside -b -a RET DROP GC
+alone cpythons FLTR in inside -a -b out RET DROP GC | in inside -b -a out RET DROP GC
+between cpythons FLTR in inside -a -b out RET DROP GC | in inside -b -a out RET DROP GC
+inside cpythons FLTR inside -a -b RET DROP GC | inside -b -a RET DROP GC
 == call: positional and keyword
-alone deaths FLTR in -b after b -a out RET DROP GC | in after b -a -b out RET DROP GC
-between deaths FLTR in -b after b -a out RET DROP GC | in after b -a -b out RET DROP GC
-inside deaths FLTR -b after b -a RET DROP GC | after b -a -b RET DROP GC
+alone cpythons FLTR in -b after b -a out RET DROP GC | in after b -a -b out RET DROP GC
+between cpythons FLTR in -b after b -a out RET DROP GC | in after b -a -b out RET DROP GC
+inside cpythons FLTR -b after b -a RET DROP GC | after b -a -b RET DROP GC
 == call: a default is used
-alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+alone cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside cpythons FLTR -a after del RET DROP GC | after del -a RET DROP GC
 == call: starred list
-alone deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
-between deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
-inside deaths FLTR -a after a -b RET DROP GC | after a -b -a RET DROP GC
+alone cpythons FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+between cpythons FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+inside cpythons FLTR -a after a -b RET DROP GC | after a -b -a RET DROP GC
 == call: starred tuple
-alone deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
-between deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
-inside deaths FLTR -a after a -b RET DROP GC | after a -b -a RET DROP GC
+alone cpythons FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+between cpythons FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+inside cpythons FLTR -a after a -b RET DROP GC | after a -b -a RET DROP GC
 == call: positional and starred
-alone deaths FLTR in -a after a -c after c -b out RET DROP GC | in after a after c -c -b -a out RET DROP GC
-between deaths FLTR in -a after a -c after c -b out RET DROP GC | in after a after c -c -b -a out RET DROP GC
-inside deaths FLTR -a after a -c after c -b RET DROP GC | after a after c -c -b -a RET DROP GC
+alone cpythons FLTR in -a after a -c after c -b out RET DROP GC | in after a after c -c -b -a out RET DROP GC
+between cpythons FLTR in -a after a -c after c -b out RET DROP GC | in after a after c -c -b -a out RET DROP GC
+inside cpythons FLTR -a after a -c after c -b RET DROP GC | after a after c -c -b -a RET DROP GC
 == call: * parameter, deleted
-alone deaths FLTR in -b -a after del out RET DROP GC | in after del -a -b out RET DROP GC
-between deaths FLTR in -b -a after del out RET DROP GC | in after del -a -b out RET DROP GC
-inside deaths FLTR -b -a after del RET DROP GC | after del -a -b RET DROP GC
+alone cpythons FLTR in -b -a after del out RET DROP GC | in after del -a -b out RET DROP GC
+between cpythons FLTR in -b -a after del out RET DROP GC | in after del -a -b out RET DROP GC
+inside cpythons FLTR -b -a after del RET DROP GC | after del -a -b RET DROP GC
 == call: * parameter, unused
-alone deaths FLTR in inside -b -a out RET DROP GC | in inside -a -b out RET DROP GC
-between deaths FLTR in inside -b -a out RET DROP GC | in inside -a -b out RET DROP GC
-inside deaths FLTR inside -b -a RET DROP GC | inside -a -b RET DROP GC
+alone cpythons FLTR in inside -b -a out RET DROP GC | in inside -a -b out RET DROP GC
+between cpythons FLTR in inside -b -a out RET DROP GC | in inside -a -b out RET DROP GC
+inside cpythons FLTR inside -b -a RET DROP GC | inside -a -b RET DROP GC
 == call: ** parameter, deleted
-alone deaths FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
-between deaths FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
-inside deaths FLTR -a -b after del RET DROP GC | after del -a -b RET DROP GC
+alone cpythons FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
+between cpythons FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
+inside cpythons FLTR -a -b after del RET DROP GC | after del -a -b RET DROP GC
 == call: ** dict operand
-alone deaths FLTR in -a after a -b out RET DROP GC | in after a -a -b out RET DROP GC
-between deaths FLTR in -a after a -b out RET DROP GC | in after a -a -b out RET DROP GC
-inside deaths FLTR -a after a -b RET DROP GC | after a -a -b RET DROP GC
+alone cpythons FLTR in -a after a -b out RET DROP GC | in after a -a -b out RET DROP GC
+between cpythons FLTR in -a after a -b out RET DROP GC | in after a -a -b out RET DROP GC
+inside cpythons FLTR -a after a -b RET DROP GC | after a -a -b RET DROP GC
 == call: ** dict operand into a ** parameter
-alone deaths FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
-between deaths FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
-inside deaths FLTR -a -b after del RET DROP GC | after del -a -b RET DROP GC
+alone cpythons FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
+between cpythons FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
+inside cpythons FLTR -a -b after del RET DROP GC | after del -a -b RET DROP GC
 == call: keyword-only
-alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+alone cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside cpythons FLTR -a after del RET DROP GC | after del -a RET DROP GC
 == call: positional-only
-alone deaths FLTR in -a after a -b after b out RET DROP GC | in after a after b -a -b out RET DROP GC
-between deaths FLTR in -a after a -b after b out RET DROP GC | in after a after b -a -b out RET DROP GC
-inside deaths FLTR -a after a -b after b RET DROP GC | after a after b -a -b RET DROP GC
+alone cpythons FLTR in -a after a -b after b out RET DROP GC | in after a after b -a -b out RET DROP GC
+between cpythons FLTR in -a after a -b after b out RET DROP GC | in after a after b -a -b out RET DROP GC
+inside cpythons FLTR -a after a -b after b RET DROP GC | after a after b -a -b RET DROP GC
 == call: wrong number of arguments
-alone deaths FLTR in -b -a caught out RET DROP GC | in -a -b caught out RET DROP GC
-between deaths FLTR in -b -a caught out RET DROP GC | in -a -b caught out RET DROP GC
-inside deaths FLTR -b -a caught RET DROP GC | -a -b caught RET DROP GC
+alone cpythons FLTR in -b -a caught out RET DROP GC | in -a -b caught out RET DROP GC
+between cpythons FLTR in -b -a caught out RET DROP GC | in -a -b caught out RET DROP GC
+inside cpythons FLTR -b -a caught RET DROP GC | -a -b caught RET DROP GC
 == call: nested, handed on from a deleted local
-alone deaths FLTR in -a inner after del outer after inner out RET DROP GC | in inner after del outer after inner -a out RET DROP GC
-between deaths FLTR in -a inner after del outer after inner out RET DROP GC | in inner after del outer after inner -a out RET DROP GC
-inside deaths FLTR -a inner after del outer after inner RET DROP GC | inner after del outer after inner -a RET DROP GC
+alone cpythons FLTR in -a inner after del outer after inner out RET DROP GC | in inner after del outer after inner -a out RET DROP GC
+between cpythons FLTR in -a inner after del outer after inner out RET DROP GC | in inner after del outer after inner -a out RET DROP GC
+inside cpythons FLTR -a inner after del outer after inner RET DROP GC | inner after del outer after inner -a RET DROP GC
 == call: the argument is a call's result
-alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+alone cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside cpythons FLTR -a after del RET DROP GC | after del -a RET DROP GC
 == call: a closure
-alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+alone cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside cpythons FLTR -a after del RET DROP GC | after del -a RET DROP GC
 == method: receiver deleted
-alone deaths FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
-between deaths FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
-inside deaths FLTR -r after del RET DROP GC | after del -r RET DROP GC
+alone cpythons FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
+between cpythons FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
+inside cpythons FLTR -r after del RET DROP GC | after del -r RET DROP GC
 == method: receiver and argument
-alone deaths FLTR in -a after a -r after self out RET DROP GC | in after a after self -r -a out RET DROP GC
-between deaths FLTR in -a after a -r after self out RET DROP GC | in after a after self -r -a out RET DROP GC
-inside deaths FLTR -a after a -r after self RET DROP GC | after a after self -r -a RET DROP GC
+alone cpythons FLTR in -a after a -r after self out RET DROP GC | in after a after self -r -a out RET DROP GC
+between cpythons FLTR in -a after a -r after self out RET DROP GC | in after a after self -r -a out RET DROP GC
+inside cpythons FLTR -a after a -r after self RET DROP GC | after a after self -r -a RET DROP GC
 == method: a bound method of a temporary, called at once
-alone deaths FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
-between deaths FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
-inside deaths FLTR -r after del RET DROP GC | after del -r RET DROP GC
+alone cpythons FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
+between cpythons FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
+inside cpythons FLTR -r after del RET DROP GC | after del -r RET DROP GC
 == method: classmethod
-alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+alone cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside cpythons FLTR -a after del RET DROP GC | after del -a RET DROP GC
 == method: staticmethod
-alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
-inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+alone cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside cpythons FLTR -a after del RET DROP GC | after del -a RET DROP GC
 == class: __init__ keeps the argument
 alone views ..T. a@body:2{x=tensor} | a@body
 between views ..TR a@body:3{x=tensor,y=tensor} | a@body
@@ -14092,9 +14296,9 @@ alone views ..T. a@body:2{x=tensor} | a@body
 between views ..TR a@body:3{x=tensor,y=tensor} | a@body
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == frame: parameters and locals at exit
-alone deaths FLTR in made -p -q -r out RET DROP GC | in made -r -p -q out RET DROP GC
-between deaths FLTR in made -p -q -r out RET DROP GC | in made -r -p -q out RET DROP GC
-inside deaths FLTR made -p -q -r RET DROP GC | made -r -p -q RET DROP GC
+alone cpythons FLTR in made -p -q -r out RET DROP GC | in made -r -p -q out RET DROP GC
+between cpythons FLTR in made -p -q -r out RET DROP GC | in made -r -p -q out RET DROP GC
+inside cpythons FLTR made -p -q -r RET DROP GC | made -r -p -q RET DROP GC
 == frame: the body's own locals
 inside views .LTR a@run | a@body:4{x=tensor}
 == frame: the body's own locals, made in another order
@@ -14230,9 +14434,9 @@ alone views ..T. b@body:2{x=tensor} | b@body:3{x=tensor}
 between views ..TR b@body:3{x=tensor,y=tensor} | b@body:4{x=tensor,y=tensor}
 inside views ..TR b@body:2{x=tensor,y=tensor} | b@body:3{x=tensor,y=tensor}
 == tensor: handed to a function that deletes it
-alone deaths FLTR in -a after del mid out RET DROP GC | in after del -a mid out RET DROP GC
-between deaths FLTR in -a after del mid out RET DROP GC | in after del -a mid out RET DROP GC
-inside deaths FLTR -a after del mid RET DROP GC | after del -a mid RET DROP GC
+alone cpythons FLTR in -a after del mid out RET DROP GC | in after del -a mid out RET DROP GC
+between cpythons FLTR in -a after del mid out RET DROP GC | in after del -a mid out RET DROP GC
+inside cpythons FLTR -a after del mid RET DROP GC | after del -a mid RET DROP GC
 == tensor: a callee's locals
 alone deaths .LTR in -a -b mid out RET DROP GC | in -b -a mid out RET DROP GC
 between deaths .LTR in -a -b mid out RET DROP GC | in -b -a mid out RET DROP GC
@@ -14305,23 +14509,36 @@ def release_found(result):
     form, lines = result["form"], []
     if "died" in result:
         return [f"{form} died {result['died']}"]
-    eager, got = result["eager"], result["vm"]
-    seen, saw = result["eager_views"], result["vm_views"]
-    deaths = [i for i in range(len(eager)) if eager[i] != got[i]]
-    views = [i for i in range(len(eager)) if eager[i] == got[i] and seen[i] != saw[i]]
-    for kind, calls in (("deaths", deaths), ("views", views)):
-        if not calls:
+    eager, want, got = result["eager"], result["hooked"], result["vm"]
+    seen, saw = result["hooked_views"], result["vm_views"]
+    calls = range(len(want))
+    kinds = (
+        ("deaths", [i for i in calls if want[i] != got[i]], want, got),
+        (
+            "views",
+            [i for i in calls if want[i] == got[i] and seen[i] != saw[i]],
+            seen,
+            saw,
+        ),
+        ("cpythons", [i for i in calls if eager[i] != want[i]], eager, want),
+        (
+            "calls",
+            [i for i in calls if want[i] != want[0]],
+            [want[0]] * len(want),
+            want,
+        ),
+    )
+    for kind, differ, left, right in kinds:
+        if not differ:
             continue
         ways = "".join(
-            way if any(i in calls for i in of) else "." for way, of in RELEASE_WAYS
+            way if any(i in differ for i in of) else "." for way, of in RELEASE_WAYS
         )
-        first = calls[0]
-        if kind == "deaths":
-            pair = (eager[first], got[first])
-        else:
-            a, b = seen[first].split(), saw[first].split()
+        pair = (left[differ[0]], right[differ[0]])
+        if kind == "views":
+            a, b = pair[0].split(), pair[1].split()
             at = next((k for k in range(min(len(a), len(b))) if a[k] != b[k]), None)
-            pair = (seen[first], saw[first]) if at is None else (a[at], b[at])
+            pair = pair if at is None else (a[at], b[at])
         lines.append(f"{form} {kind} {ways} {pair[0]} | {pair[1]}")
     return lines
 
@@ -14353,12 +14570,16 @@ class TestVmReleaseOrder(TestCase):
     order of two deaths) and what the frame it interrupts looks like then
     (the function, the line, the locals that are bound). The table has a
     statement for every kind of instruction that lets go of a reference;
-    each runs as plain Python and as a ``torch.vm`` function, eight calls
+    each runs as plain Python, as plain Python under a frame-evaluation
+    hook that runs nothing, and as a ``torch.vm`` function, eight calls
     each, alone, between two tensor computations and inside a stretch that
-    is traced as one region, and the two logs are compared call by call.
-    Where they differ today is recorded (``RELEASE_KNOWN``): the test fails
-    for a difference that is not recorded and for a recorded one that is
-    gone, so a correction has to take its lines out of the record.
+    is traced as one region. The contract: under ``torch.vm`` an object
+    dies where CPython lets it die when a frame-evaluation hook is
+    installed, so torch.vm's log is compared with the hooked one, call by
+    call, and where the two CPythons differ that is recorded as theirs.
+    Where torch.vm differs today is recorded (``RELEASE_KNOWN``): the test
+    fails for a difference that is not recorded and for a recorded one that
+    is gone, so a correction has to take its lines out of the record.
     """
 
     hw_classification = HardwareClassification.GENERIC
@@ -14402,8 +14623,29 @@ class TestVmReleaseOrder(TestCase):
             for line in lines:
                 form, kind, ways = line.split(" ", 3)[:3]
                 self.assertIn(form, RELEASE_FORMS, msg=line)
-                self.assertIn(kind, ("deaths", "views"), msg=line)
+                self.assertIn(kind, ("deaths", "views", "cpythons", "calls"), msg=line)
                 self.assertRegex(ways, "^[F.][L.][T.][R.]$", msg=line)
+
+    def test_where_the_two_cpythons_differ_torch_vm_is_the_hooked_one(self):
+        # A member in which a hook alone moves a death: torch.vm lets go
+        # where the hooked CPython does, in every form and way.
+        marked = {}
+        for name, lines in release_table(RELEASE_KNOWN).items():
+            kinds = [line.split(" ", 2)[1] for line in lines]
+            if "cpythons" in kinds:
+                marked[name] = kinds
+        self.assertEqual(len(marked), 29)
+        for name, kinds in marked.items():
+            self.assertNotIn("deaths", kinds, msg=name)
+        # One member's own calls differ in both CPythons alike: a method
+        # call CPython specializes after the first call.
+        own = [
+            name
+            for name, lines in release_table(RELEASE_KNOWN).items()
+            if any(line.split(" ", 2)[1] == "calls" for line in lines)
+        ]
+        self.assertEqual(own, ["C method: of a temporary container"])
+        self.assertNotIn(own[0], marked)
 
 
 if __name__ == "__main__":

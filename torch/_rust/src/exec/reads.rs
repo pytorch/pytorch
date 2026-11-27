@@ -525,6 +525,29 @@ unsafe fn counted(o: *mut PyObject) -> Pin {
     Pin::counted(o)
 }
 
+// What an entry keeps of what a read found (`value`, NULL: nothing), for
+// what the run asked: the object where it asked for the value (Is, Equal),
+// and NOTHING where it asked only whether something is there. A Present
+// entry compares that something is there and never what (see same), so it
+// holds no reference: one that counted what was there would keep it alive
+// for as long as the region lives. The one answer for an item of a
+// container (`key in d`) and for an attribute a descriptor of C gives
+// (`hasattr(obj, name)` of a slot).
+unsafe fn kept(want: Want, value: *mut PyObject) -> Option<Pin> {
+    (!value.is_null() && matches!(want, Want::Is | Want::Equal)).then(|| counted(value))
+}
+
+// The first read (`first`: what its entry wants, holds, and when it was
+// made) asked only whether something is there, and a later one asks what:
+// from here on the value is what the entry checks. The one answer for an
+// item (`key in d`, then `d[key]`) and for an attribute (`hasattr(obj,
+// name)`, then `obj.name`).
+fn valued(first: (&mut Want, &mut Option<Pin>, &mut usize), want: Want, value: Option<Pin>, after: usize) {
+    if *first.0 == Want::Present && value.is_some() {
+        (*first.0, *first.1, *first.2) = (want, value, after);
+    }
+}
+
 // Whether `now` (borrowed, NULL: nothing there) is what was read. What is
 // wanted Equal is an exact int, float or str (want_of): the one value it is
 // to every reader (exec/exact.rs).
@@ -896,7 +919,7 @@ impl Trace {
                 }
             }
         }
-        let value = (!value.is_null() && matches!(want, Want::Is | Want::Equal)).then(|| counted(value));
+        let value = kept(want, value);
         let after = self.wrote.len();
         // (Seen and no item of the holder: the pair is another kind of read
         // of an object that is also a dict. Then this is the first.)
@@ -905,12 +928,7 @@ impl Trace {
             if !noted && !i.settled(&self.wrote, holder, kind) {
                 self.stale.push((Stale::Group, holder as usize, format!("{} when the run reads it again", i.differs(&self.wrote, holder, kind))));
             }
-            // `key in d` and then `d[key]`: the value is what is checked.
-            if value.is_some() && i.want == Want::Present {
-                i.want = want;
-                i.value = value;
-                i.after = after;
-            }
+            valued((&mut i.want, &mut i.value, &mut i.after), want, value, after);
             return;
         }
         self.count += 1;
@@ -1369,12 +1387,13 @@ impl Trace {
         }
     }
 
-    // A descriptor of C (a slot, a getset) gave `value` for obj.name. The
-    // first read is the one recorded. What the run reads of a slot it wrote
-    // is what its last store put there, and no entry; a later read is to
-    // find what the first found, or what the run's own last store since
-    // put there (see item).
-    unsafe fn given(&mut self, obj: *mut PyObject, name: *mut PyObject, value: *mut PyObject) {
+    // A descriptor of C (a slot, a getset) gave `value` for obj.name (NULL:
+    // nothing), and the run asked for `want`: the value, or only whether
+    // there is one. The first read is the one recorded. What the run reads
+    // of a slot it wrote is what its last store put there, and no entry; a
+    // later read is to find what the first found, or what the run's own
+    // last store since put there (see item).
+    unsafe fn given(&mut self, obj: *mut PyObject, name: *mut PyObject, value: *mut PyObject, want: Want) {
         let at = (obj as usize, name as usize);
         let note = |t: &mut Trace, how: &str| {
             if !t.stale.iter().any(|(kind, a, _)| matches!(kind, Stale::Slot) && *a == obj as usize) {
@@ -1389,13 +1408,16 @@ impl Trace {
                 _ => return note(self, "the run wrote"),
             }
         }
+        let held = kept(want, value);
+        let after = self.wrote.len();
         if self.seen.insert(at) {
             self.count += 1;
             self.read_at.insert(at, self.entries.reads.len());
-            self.entries.reads.push(Read { obj: counted(obj), name: Some(own(name)), want: want_of(value), value: Some(counted(value)), at: place(), after: self.wrote.len() });
-        } else if let Some(r) = self.read_at.get(&at).and_then(|i| self.entries.reads.get(*i)).filter(|r| r.obj.as_ptr() == obj && r.name.as_ref().is_some_and(|n| n.as_ptr() == name)) {
-            if !r.settled(&self.wrote, value) {
-                let was = format!("was {}", shown(r.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr())));
+            self.entries.reads.push(Read { obj: counted(obj), name: Some(own(name)), want, value: held, at: place(), after });
+        } else if let Some(r) = self.read_at.get(&at).and_then(|i| self.entries.reads.get_mut(*i)).filter(|r| r.obj.as_ptr() == obj && r.name.as_ref().is_some_and(|n| n.as_ptr() == name)) {
+            let stale = (!r.settled(&self.wrote, value)).then(|| format!("was {}", shown(r.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr()))));
+            valued((&mut r.want, &mut r.value, &mut r.after), want, held, after);
+            if let Some(was) = stale {
                 note(self, &was);
             }
         } else {
@@ -1473,11 +1495,39 @@ impl Trace {
             3 => {
                 self.typed(obj, name);
                 self.resolves(obj);
-                let n = text(name);
                 // `__dict__` too: the items read from the dict it gave are
                 // obj's for as long as obj has that dict.
-                if !ran && !value.is_null() && n != "__class__" {
-                    self.given(obj, name, value);
+                if ran || text(name) == "__class__" {
+                    // (Code of the class answered; which class: typed.)
+                } else if tr_store_attr_kind(ffi::Py_TYPE(obj), name, 1, 0) != 3 {
+                    // A descriptor of C that is no slot (a getset, a member
+                    // of a C type): the value it gave. A load that it gave
+                    // none (it raised, or hasattr asked) records nothing
+                    // more than the class: whether the descriptor answers
+                    // is taken to follow from the class of the object,
+                    // which it does not for every one (a getset may raise
+                    // by what the object holds).
+                    if !value.is_null() {
+                        self.given(obj, name, value, want_of(value));
+                    }
+                } else {
+                    // A slot: what it holds, whatever the load answered
+                    // (hasattr hands no value, a load of an empty slot
+                    // raises, getattr hands its default for one). (NULL
+                    // from tr_slot_get is "empty" and any error of the
+                    // descriptor alike: both are recorded as nothing.)
+                    let held = tr_slot_get(obj, name);
+                    if held.is_null() {
+                        self.given(obj, name, held, Want::Absent);
+                    } else if value.is_null() {
+                        self.given(obj, name, held, Want::Present);
+                    } else if held == value {
+                        self.given(obj, name, value, want_of(value));
+                    } else {
+                        self.refused = Some(format!("it reads .{} of a {}, and the load gave something the slot does not hold", text(name), type_name(obj)));
+                    }
+                    // (The slot holds it.)
+                    ffi::Py_XDECREF(held);
                 }
             }
             4 => {
@@ -2519,7 +2569,11 @@ impl Reads {
         out.extend(e.dicted.iter().map(|d| format!("{}.__dict__ is {}", show(&d.obj), show(&d.dict))));
         out.extend(e.reads.iter().map(|r| match &r.name {
             None => format!("{} holds {}", show(&r.obj), r.value.as_ref().map_or("?".into(), &show)),
-            Some(n) => format!("{}.{} {} {}{}", show(&r.obj), n.bind(py), if r.want == Want::Is { "is" } else { "==" }, r.value.as_ref().map_or("?".into(), &show), r.at),
+            Some(n) => match r.want {
+                Want::Absent => format!("{} has no .{}{}", show(&r.obj), n.bind(py), r.at),
+                Want::Present => format!("{} has .{}{}", show(&r.obj), n.bind(py), r.at),
+                _ => format!("{}.{} {} {}{}", show(&r.obj), n.bind(py), if r.want == Want::Is { "is" } else { "==" }, r.value.as_ref().map_or("?".into(), &show), r.at),
+            },
         }));
         out
     }

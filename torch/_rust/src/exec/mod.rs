@@ -904,11 +904,42 @@ enum Runs<'a> {
     Executor { c: &'a Compiled, plan: &'a Plan, start: run::Start, observed: bool },
 }
 
+// Lives while a frame is under the hook; forgotten when the hook returns.
+// CPython 3.12 ends a thread that comes back for the GIL after the
+// interpreter's finalization began (a daemon thread that slept, waited or
+// was switched out under this frame) with pthread_exit, which unwinds the
+// thread's stack. An unwind that left the hook would end the whole process
+// ("panic in a function that cannot unwind"), where plain CPython ends the
+// thread alone. The thread stays here for good instead, as every such thread
+// does from CPython 3.14 on: it holds nothing of the interpreter (take_gil
+// gives the GIL back before it ends the thread) and touches nothing of it
+// again, and the process ends without it. A panic of this crate is no such
+// unwind: it goes on and ends the process as before.
+struct ThreadEnds;
+
+impl Drop for ThreadEnds {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            loop {
+                std::thread::park();
+            }
+        }
+    }
+}
+
 unsafe extern "C" fn eval_frame(
     tstate: *mut pyo3::ffi::PyThreadState,
     frame: *mut Frame,
     throwflag: c_int,
 ) -> *mut pyo3::ffi::PyObject {
+    let ends = ThreadEnds;
+    let result = enter(tstate, frame, throwflag);
+    std::mem::forget(ends);
+    result
+}
+
+#[inline]
+unsafe fn enter(tstate: *mut pyo3::ffi::PyThreadState, frame: *mut Frame, throwflag: c_int) -> *mut pyo3::ffi::PyObject {
     let prev: EvalFrameFn = std::mem::transmute(PREV_EVAL_FRAME.load(Ordering::Acquire));
     calls::witness::frame_entered();
     // A generator's frame, resumed. The executor's mark on it (see own.rs)
