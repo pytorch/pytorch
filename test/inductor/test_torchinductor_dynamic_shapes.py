@@ -984,6 +984,21 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(orig_w, w.grad)
 
     @onlyAccelerator
+    @parametrize("mode", ["avoid_32bit_indexing_guards"])
+    def test_split_scan_int64_index(self, device, mode):
+        """A split scan (cumsum over a long row) compiled with int64 indexing."""
+
+        def fn(x):
+            return torch.cumsum(x, -1)
+
+        x = torch.rand(10 * 3 * 352 * 352, device=device)
+        with config.patch({mode: True}):
+            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x), rtol=1e-4, atol=1e-5)
+        self.assertIn("exclusive_scan_decoupled_lookback", code)
+        self.assertIn("numel': 'i64'", code)
+
+    @onlyAccelerator
     @skipPRIVATEUSE1
     @parametrize("avoid_guards", [False, True])
     def test_avoid_32bit_indexing_guards(self, device, avoid_guards):
