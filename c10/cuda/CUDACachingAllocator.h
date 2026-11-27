@@ -3,6 +3,7 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDAGraphMemory.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -158,13 +159,15 @@ class CUDAAllocator : public DeviceAllocator {
   // ended. Distinct from begin/endAllocateToPool, which only routes
   // allocations into a private mempool and can be invoked without an active
   // cudaStreamBeginCapture (e.g. from torch.cuda.use_mem_pool, NCCL
-  // registration, or inductor cudagraph_trees warmup).
+  // registration, or inductor cudagraph_trees warmup). CUDA graphs reach
+  // these only through the defaults of markCaptureBeginWithRegistration and
+  // markCaptureEndWithCaptureId.
   virtual void markCaptureBegin(c10::DeviceIndex /*device*/) {}
   virtual void markCaptureEnd(c10::DeviceIndex /*device*/) {}
   // Whether the current stream on `device` is inside a CUDA graph capture.
-  // The native allocator answers from the capture count kept by
-  // markCaptureBegin/markCaptureEnd and only queries the driver while a
-  // capture is active on that device, so eager callers pay no driver call.
+  // The native allocator answers from the capture count kept by its capture
+  // hooks and only queries the driver while a capture is active on that
+  // device, so eager callers pay no driver call.
   // Allocators that do not track captures fall back to the driver query.
   // The default stream's handle is nullptr, which the driver resolves
   // against the current device, so `device` is selected for the query.
@@ -348,6 +351,24 @@ class CUDAAllocator : public DeviceAllocator {
     size_t total = 0;
     C10_CUDA_CHECK(cudaMemGetInfo(&free, &total));
     return {free, total};
+  }
+  // CUDA graphs call these when each capture, including a conditional body,
+  // begins and ends. Override both or neither: a capture begun through one
+  // must end through the other. The defaults call markCaptureBegin and
+  // markCaptureEnd. End returns the number of invalid conditional-scope
+  // frees observed during the capture (see CUDAGraphMemory::CaptureTracker).
+  // A nonzero count fails CUDAGraph's end of that capture, whether it is a
+  // root or a conditional body, so return 0 if they are not tracked.
+  virtual void markCaptureBeginWithRegistration(
+      c10::DeviceIndex device,
+      const CUDAGraphMemory::CaptureRegistration& /*registration*/) {
+    markCaptureBegin(device);
+  }
+  virtual size_t markCaptureEndWithCaptureId(
+      c10::DeviceIndex device,
+      CaptureId_t /*capture_id*/) {
+    markCaptureEnd(device);
+    return 0;
   }
 };
 
