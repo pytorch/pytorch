@@ -4814,7 +4814,8 @@ class TestBinaryUfuncsDevice(TestCase):
             torch.tensor(threshold, device=device, dtype=dtype), zero
         )
         result = torch.special.zeta(below, torch.full_like(below, -0.5))
-        self.assertTrue(result.isnan().item())
+        self.assertEqual(result, torch.zeros_like(result))
+        self.assertFalse(result.signbit().item())
 
     @dtypes(
         *product(

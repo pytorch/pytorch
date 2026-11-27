@@ -297,8 +297,8 @@ const auto digamma_string = jiterator_stringify(
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 const auto zeta_string = jiterator_stringify(
-  template <typename T>
-  T zeta(T x, T q) {
+  template <typename T, bool normalized = false>
+  T zeta_series(T x, T q) {
     const T MACHEP{1.11022302462515654042E-16};
     constexpr T zero{0};
     constexpr T half{0.5};
@@ -321,42 +321,14 @@ const auto zeta_string = jiterator_stringify(
     int i = 0;
     T a, b, k, s, t, w;
 
-    // Short-circuits x -> +infty
-    if (x == one) {
-      return POS_INFINITY;
-    }
-
-    // Short-circuits x < 1 -> NaN
-    if (x < one) {
-      return NAN;
-    }
-
-    // Short-circuits negative q integers map to +infty,
-    //   negative q non-integers map to NaN
-    if (q <= zero) {
-      if (q == floor(q)) {
-        return POS_INFINITY;
-      }
-      if (x != floor(x)) {
-        return NAN;
-      }
-      const T even_threshold = sizeof(T) == sizeof(float)
-          ? T{16777216.0}
-          : T{9007199254740992.0};
-      // Even exponents give positive terms, and a near-zero term overflows.
-      if (isfinite(x) && x >= even_threshold) {
-        return POS_INFINITY;
-      }
-    }
-
-    s = pow(q, -x);
+    s = normalized ? one : pow(q, -x);
     a = q;
     i = 0;
     b = zero;
     while ((i < 9) || (a <= T{9.0})) {
       i += 1;
-      a += one;
-      b = pow(a, -x);
+      a = normalized ? q + i : a + one;
+      b = normalized ? exp(-x * log1p(static_cast<T>(i) / q)) : pow(a, -x);
       s += b;
       if ((-MACHEP * s < b) && (b < MACHEP * s)) {
         return s;
@@ -366,12 +338,17 @@ const auto zeta_string = jiterator_stringify(
     w = a;
     s += b * w / (x - one);
     s -= half * b;
-    a = one;
+    a = normalized ? b : one;
     k = zero;
     for (int i = 0; i < 12; i++) {
-      a *= x + k;
-      b /= w;
-      t = a * b / A[i];
+      if constexpr (normalized) {
+        a *= (x + k) / w;
+        t = a / A[i];
+      } else {
+        a *= x + k;
+        b /= w;
+        t = a * b / A[i];
+      }
       s = s + t;
       t = fabs(t / s);
 
@@ -380,13 +357,121 @@ const auto zeta_string = jiterator_stringify(
       }
 
       k += one;
-      a *= x + k;
-      b /= w;
+      if constexpr (normalized) {
+        a *= (x + k) / w;
+      } else {
+        a *= x + k;
+        b /= w;
+      }
       k += one;
     }
 
     return s;
   }
+
+template <typename T>
+T zeta_tail(T x, T q) {
+    T normalized = zeta_series<T, true>(x, q);
+    T power = pow(q, -x);
+    const T min_normal = sizeof(T) == sizeof(float)
+        ? T(1.1754943508222875e-38) : T(2.2250738585072014e-308);
+    if (power >= min_normal) {
+        return power * normalized;
+    }
+    return exp(-x * log(q) + log(normalized));
+}
+
+template <typename T>
+T zeta_paired_power_difference(T base, T gap, T exponent) {
+    T factor = -expm1(-exponent * log1p(gap / base));
+    T power = pow(base, -exponent);
+    if (isinf(power)) {
+        return exp(-exponent * log(base) + log(factor));
+    }
+    return power * factor;
+}
+
+template <typename T>
+T zeta_paired_difference(T x, T q) {
+    T lo = floor(q);
+    T hi = ceil(q);
+    T lower = q - lo;
+    T upper = hi - q;
+    // Retain the distance from the half-integer before rounding either fraction.
+    T delta = (lo + hi) - (q + q);
+    T gap = abs(delta);
+    if (gap == T(0)) {
+        return T(0);
+    }
+    T sign = delta > T(0) ? T(1) : T(-1);
+    T base = lower < upper ? lower : upper;
+    T result = T(0);
+    for (int k = 0; k < 9; k++) {
+        result += zeta_paired_power_difference(base + T(k), gap, x);
+    }
+    if (isinf(result)) {
+        return sign * result;
+    }
+    T w = base + T(9);
+    result += zeta_paired_power_difference(w, gap, x - T(1)) / (x - T(1));
+    result += T(0.5) * zeta_paired_power_difference(w, gap, x);
+    static const T A[] = {
+        12., -720., 30240., -1209600., 47900160., -1.8924375803183791606e9,
+        7.47242496e10, -2.950130727918164224e12, 1.1646782814350067249e14,
+        -4.5979787224074726105e15, 1.8152105401943546773e17, -7.1661652561756670113e18
+    };
+    T log_rising = log(x);
+    for (int j = 0; j < 12; j++) {
+        if (j) {
+            log_rising += log(x + T(2 * j - 1)) + log(x + T(2 * j));
+        }
+        T exponent = x + T(2 * j + 1);
+        T log_difference = -exponent * log(w) + log(-expm1(-exponent * log1p(gap / w)));
+        T term = exp(log_rising - log(abs(A[j])) + log_difference);
+        result += A[j] > T(0) ? term : -term;
+    }
+    return sign * result;
+}
+
+template <typename T>
+T zeta(T x, T q) {
+    if (x == T(1)) {
+        return POS_INFINITY;
+    }
+    if (x < T(1)) {
+        return NAN;
+    }
+    if (!(q <= T(0))) {
+        return zeta_series(x, q);
+    }
+    if (q == floor(q)) {
+        return POS_INFINITY;
+    }
+    if (x != floor(x)) {
+        return NAN;
+    }
+    if (isinf(x)) {
+        return POS_INFINITY;
+    }
+    const T even_threshold = sizeof(T) == sizeof(float) ? T(16777216.) : T(9007199254740992.);
+    if (x >= even_threshold) {
+        return POS_INFINITY;
+    }
+    T lower = q - floor(q);
+    T upper = ceil(q) - q;
+    if (fmod(x, T(2)) == T(0)) {
+        T sum = zeta_series(x, lower) + zeta_series(x, upper);
+        if (isinf(sum)) {
+            return sum;
+        }
+        return sum - zeta_tail(x, T(1) - q);
+    }
+    T difference = zeta_paired_difference(x, q);
+    if (isinf(difference)) {
+        return difference;
+    }
+    return difference + zeta_tail(x, T(1) - q);
+}
 ); // zeta_string
 
 const auto trigamma_string = jiterator_stringify(
@@ -423,12 +508,63 @@ const auto lgamma_string = jiterator_stringify(
 ); // lgamma_string
 
 const auto polygamma_string = zeta_string + jiterator_stringify(
+  double polygamma_log_scale(int64_t order, double q, double q_low) {
+    const auto integer = static_cast<uint64_t>(order);
+    const double high = static_cast<double>(integer >> 32) * 4294967296.0;
+    const double low = static_cast<double>(integer & 0xffffffff);
+    const double n = high + low;
+    const double n_low = (high - n) + low;
+    if (n >= 32.0 && q >= n * 0.25 && q <= n * 0.5) {
+      // Combine Stirling's scale without subtracting large logarithms.
+      const double e_hi = 2.718281828459045;
+      const double e_lo = 1.4456468917292502e-16;
+      double residual = fma(-e_hi, q, n);
+      residual += n_low;
+      residual = fma(-e_lo, q, residual);
+      residual = fma(-e_hi, q_low, residual);
+      residual = fma(-e_lo, q_low, residual);
+      double delta = residual / (e_hi * q);
+      double inverse = 1.0 / n;
+      double square = inverse * inverse;
+      double correction = inverse * (1.0 / 12.0 - square *
+          (1.0 / 360.0 - square * (1.0 / 1260.0 - square / 1680.0)));
+      return n * log1p(delta) + n_low * log1p(delta) + 0.5 * log(n) - log(q) + 0.91893853320467274178 + correction;
+    }
+    return lgamma(n + 1.0) - (n + 1.0) * log(q);
+  }
+
   template <typename T>
-  T polygamma(T x, int n) {
+  T polygamma(T x, int64_t n) {
     // already blocked if n <= 1
     const auto one = T{1};
-    return ((n % 2) ? one : -one) * exp(lgamma(static_cast<T>(n) + one)) *
-        zeta<T>(static_cast<T>(n + 1), x);
+    const T log_gamma = lgamma(static_cast<T>(n) + one);
+    const T gamma = exp(log_gamma);
+    const T exponent = static_cast<T>(static_cast<double>(n) + 1.0);
+    const T sign = (n % 2) ? one : -one;
+    if (isfinite(x) && x < T(0) && x != floor(x) && isinf(gamma)) {
+        double fraction = static_cast<double>(x) - floor(x);
+        if (n % 2 || fraction != 0.5) {
+            return n % 2 || fraction > 0.5 ? T(INFINITY) : -T(INFINITY);
+        }
+    }
+    const T value = zeta<T>(exponent, x);
+    const T min_normal = sizeof(T) == sizeof(float)
+        ? T(1.1754943508222875e-38) : T(2.2250738585072014e-308);
+    if (isfinite(x)) {
+        double coordinate = static_cast<double>(x);
+        double coordinate_low = 0.0;
+        if (x < T(0) && x != floor(x) && n % 2 == 0 && (floor(x) + ceil(x)) == (x + x)) {
+            coordinate = 1.0 - static_cast<double>(x);
+            coordinate_low = (1.0 - coordinate) - static_cast<double>(x);
+        }
+        if (coordinate > 0.0 && (isinf(gamma) || value < min_normal || isnan(value))) {
+            double power = static_cast<double>(n) + 1.0;
+            double normalized = zeta_series<double, true>(power, coordinate);
+            double log_scale = polygamma_log_scale(n, coordinate, coordinate_low);
+            return sign * static_cast<T>(exp(log_scale + log(normalized)));
+        }
+    }
+    return sign * gamma * value;
   }
 ); // polygamma_string
 
