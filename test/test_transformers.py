@@ -5831,7 +5831,6 @@ class TestSDPAAccelerator(NNTestCase):
         lambda p: p["type"] == "nested",
     )
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Platform does not support fused SDPA")
-    @skipIfXpu(msg="XPU backend choice / NestedTensorXPU dispatch not aligned; tracked in torch-xpu-ops")
     @parametrize("type", ["dense", "nested"])
     def test_fused_sdp_choice(self, device, type: str):
         batch_size, seq_len, num_heads, head_dim = 2, 128, 8, 64
@@ -5854,9 +5853,15 @@ class TestSDPAAccelerator(NNTestCase):
         is_hopper_or_newer = device_capability and (device_capability[0] == 9 or device_capability[0] == 10)
         prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version > 91500
 
+        # XPU prefers OVERRIDEABLE (oneDNN), which rejects nested inputs, and maps EFFICIENT_ATTENTION to MATH
+        xpu_expected = SDPBackend.MATH if type == "nested" else SDPBackend.OVERRIDEABLE
+        is_xpu = torch.device(device).type == "xpu"
+
         # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN > 9.15.0 (per #169849)
         # For older cuDNN versions or other architectures, Flash Attention is preferred
-        if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
+        if is_xpu:
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), xpu_expected.value)
+        elif type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
@@ -5877,8 +5882,8 @@ class TestSDPAAccelerator(NNTestCase):
         value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        if torch._fused_sdp_choice(query, key, value) != SDPBackend.EFFICIENT_ATTENTION.value:
-            raise AssertionError("expected EFFICIENT_ATTENTION backend")
+        expected = xpu_expected if is_xpu else SDPBackend.EFFICIENT_ATTENTION
+        self.assertEqual(torch._fused_sdp_choice(query, key, value), expected.value)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @skipIfXpu(msg="XPU backend selection priority differs; tracked in torch-xpu-ops")
@@ -7351,7 +7356,7 @@ class TestSDPAXpuOnly(NNTestCase):
     """
     hw_classification = HardwareClassification.XPU
 
-    @parametrize("type", ["dense"])
+    @parametrize("type", ["dense", "nested"])
     @parametrize("dropout", [0.0, 0.7])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.half])
     @skipIfTorchDynamo()
@@ -7360,7 +7365,7 @@ class TestSDPAXpuOnly(NNTestCase):
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
         size = SdpaShape(2, 8, 128, 64)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-        if dropout > 0.0 or dtype not in [torch.float32, torch.bfloat16, torch.float16]:
+        if type == "nested" or dropout > 0.0 or dtype not in [torch.float32, torch.bfloat16, torch.float16]:
             if torch._fused_sdp_choice(q, k, v, dropout_p=dropout) != SDPBackend.MATH.value:
                 raise AssertionError("expected MATH backend")
         else:
