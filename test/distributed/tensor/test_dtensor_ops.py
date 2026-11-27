@@ -6,6 +6,7 @@ import random
 import re
 import threading
 import warnings
+from functools import partial
 
 import torch
 import torch._dynamo
@@ -416,6 +417,33 @@ OP_DB_WORLD_SIZE = 4
 DEVICE_TYPE = "cpu"
 
 
+def _generate_samples_under_lock(lock, make_samples):
+    """Generate OpInfo samples in one rank thread at a time, then sync all ranks.
+
+    Rank threads share the process-global torch, Python and NumPy RNGs, so rank
+    threads generating samples concurrently interleave their draws and get different
+    non-tensor args (e.g. a random scalar). ``lock`` must be shared by all ranks.
+    The fixed seed covers draws a sample function makes before returning its
+    iterator; the caller's RNG state is restored afterwards.
+    """
+    with lock:
+        python_rng_state = random.getstate()
+        numpy_rng_state = np.random.get_state() if TEST_NUMPY else None
+        try:
+            with freeze_rng_state():
+                torch.manual_seed(SEED)
+                random.seed(SEED)
+                if TEST_NUMPY:
+                    np.random.seed(SEED)
+                samples = list(make_samples())
+        finally:
+            random.setstate(python_rng_state)
+            if numpy_rng_state is not None:
+                np.random.set_state(numpy_rng_state)
+    dist.barrier()
+    return samples
+
+
 class DTensorOpsMixin:
     @property
     def world_size(self) -> int:
@@ -475,25 +503,7 @@ class DTensorOpsMixin:
                 yield from valid_samples()
                 return
 
-            # Threaded ranks share process-global RNG state. Materialize samples
-            # with a fixed RNG state so non-tensor args match across ranks.
-            with sample_lock:
-                python_rng_state = random.getstate()
-                numpy_rng_state = np.random.get_state() if TEST_NUMPY else None
-                try:
-                    with freeze_rng_state():
-                        torch.manual_seed(SEED)
-                        random.seed(SEED)
-                        if TEST_NUMPY:
-                            np.random.seed(SEED)
-                        samples = list(valid_samples())
-                finally:
-                    random.setstate(python_rng_state)
-                    if numpy_rng_state is not None:
-                        np.random.set_state(numpy_rng_state)
-
-            dist.barrier()
-            yield from samples
+            yield from _generate_samples_under_lock(sample_lock, valid_samples)
 
         def test():
             for args, kwargs in iter_samples():
@@ -985,6 +995,8 @@ class TestUnbackedDTensorOps(DTensorOpsMixin, TestCase):
 
 
 class TestSingleDimStrategies(DTensorOpTestBase):
+    _sample_lock = threading.Lock()
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1017,12 +1029,13 @@ class TestSingleDimStrategies(DTensorOpTestBase):
         },
     )
     def test_single_dim_strategy(self, dtype, op):
-        torch.manual_seed(42)
         mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
         sharding_prop = DTensor._op_dispatcher.sharding_propagator
 
         try:
-            samples = list(op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=False))
+            lock = self.__class__._sample_lock
+            make_samples = partial(op.sample_inputs, DEVICE_TYPE, dtype)
+            samples = _generate_samples_under_lock(lock, make_samples)
         except Exception:
             self.skipTest(f"Failed to get sample inputs for {op.name}")
         if not samples:
