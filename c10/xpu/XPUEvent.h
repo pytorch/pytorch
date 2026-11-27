@@ -160,13 +160,13 @@ struct XPUEvent {
   }
 
   double elapsed_time(const XPUEvent& other) const {
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         isCreated() && other.isCreated(),
         "Both events must be recorded before calculating elapsed time.");
     TORCH_CHECK(
         query() && other.query(),
         "Both events must be completed before calculating elapsed time.");
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         enable_timing_ && other.enable_timing_,
         "Both events must be created with argument 'enable_timing=True'.");
     TORCH_CHECK(
