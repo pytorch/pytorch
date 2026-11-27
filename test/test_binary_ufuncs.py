@@ -282,6 +282,58 @@ class TestBinaryUfuncs(TestCase):
                 self.assertTrue(result_nc.isnan().all())
 
 
+class TestNativePolynomialNumerics(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("op_name", ("laguerre_polynomial_l", "legendre_polynomial_p"))
+    @parametrize("layout", ("contiguous", "strided", "broadcast"))
+    def test_polynomial_nan_recurrence(self, device, dtype, op_name, layout):
+        degree = torch.tensor(
+            [-1, 0, 1, 2, 3, 256, 2147483648], device=device, dtype=dtype
+        )[:, None]
+        x = torch.full((7, 3), math.nan, device=device, dtype=dtype)
+        if layout == "strided":
+            x = torch.full((7, 6), math.nan, device=device, dtype=dtype)[:, ::2]
+        elif layout == "broadcast":
+            x = x[:1]
+        else:
+            degree = degree.expand(7, 3).contiguous()
+        expected = torch.tensor(
+            [0, 1, math.nan, math.nan, math.nan, math.nan, math.nan],
+            device=device,
+            dtype=dtype,
+        )[:, None].expand(7, 3)
+        self.assertEqual(getattr(torch.special, op_name)(x, degree), expected)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("op_name", ("laguerre_polynomial_l", "legendre_polynomial_p"))
+    @parametrize("layout", ("contiguous", "strided", "broadcast"))
+    def test_polynomial_degree_conversion(self, device, dtype, op_name, layout):
+        degree = torch.tensor(
+            [math.nan, math.inf, -math.inf, 1e20, -1e20, 2**63, -(2**63), 2**63 - 1024],
+            device=device,
+            dtype=dtype,
+        )
+        x = torch.full_like(degree, -math.inf)
+        if layout == "strided":
+            base = torch.empty((8, 2), device=device, dtype=dtype)
+            base[:, 0] = degree
+            degree = base[:, 0]
+            x = torch.full((8, 2), -math.inf, device=device, dtype=dtype)[:, 0]
+        elif layout == "broadcast":
+            x = x[:1]
+        values = (
+            [0, math.nan, 0, math.nan, 0, math.nan, 0, math.nan]
+            if x.is_cuda
+            else [0] * 8
+        )
+        if not x.is_cuda and dtype == torch.float64:
+            values[-1] = math.nan
+        expected = torch.tensor(values, device=device, dtype=dtype)
+        self.assertEqual(getattr(torch.special, op_name)(x, degree), expected)
+
+
 class TestBinaryUfuncsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -5056,6 +5108,9 @@ instantiate_device_type_tests(
     TestChebyshevNanPropagationDevice, globals(), allow_xpu=True
 )
 instantiate_device_type_tests(TestBinaryUfuncsDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestNativePolynomialNumerics, globals(), except_for=("mps", "xpu")
+)
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":

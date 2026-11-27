@@ -1406,11 +1406,33 @@ def register_pointwise(
         round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
         preserve_cuda_scalar_precision=preserve_cuda_scalar_precision,
     )
+    native_fallback = bool(getattr(triton_fallback, "_is_fallback_handler", False))
+    if native_fallback:
+        pointwise_fn = fn
+        native_handler = cast(Callable[..., Any], triton_fallback)
+
+        @functools.wraps(pointwise_fn)
+        def native_pointwise(*args, **kwargs):
+            if any(isinstance(arg, IRNode) and is_triton(arg) for arg in args):
+                if allow_alpha:
+                    raise AssertionError("expected: not allow_alpha")
+                return native_handler(*args, **kwargs)
+            args, kwargs = transform_args(
+                list(args),
+                dict(kwargs),
+                broadcast,
+                type_promotion_kind,
+                convert_input_to_bool,
+            )
+            return pointwise_fn(*args, **kwargs)
+
+        fn = native_pointwise
+
     fn = register_lowering(
         aten_fn,
-        broadcast=broadcast,
-        type_promotion_kind=type_promotion_kind,
-        convert_input_to_bool=convert_input_to_bool,
+        broadcast=broadcast and not native_fallback,
+        type_promotion_kind=None if native_fallback else type_promotion_kind,
+        convert_input_to_bool=convert_input_to_bool and not native_fallback,
     )(fn)
 
     if hasattr(prims, name):
@@ -3207,6 +3229,16 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         def wrap_tensors(x):
             return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
 
+        storage_names = []
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if _is_tensor_irnode(arg) and is_triton(arg):
+                arg.realize()
+                storage_names.append(arg.get_name())
+        if storage_names:
+            V.graph.preserve_input_alignment(
+                storage_names,
+                "native kernels require original input pointer alignment",
+            )
         out = ir.FallbackKernel.create(kernel, *args, **kwargs)
         # The reinplace pass replaces the out-of-place overload with its
         # in-place equivalent, which returns () but retains the original
