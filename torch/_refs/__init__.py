@@ -4527,6 +4527,14 @@ def _index_fill(
             lambda: "Only supports 0-dimensional value tensor. "  # type: ignore[union-attr]
             f"Got a tensor with {value.ndim} dimensions.",
         )  # type: ignore[arg-type]
+        # eager routes the 0-d value through source.item() into the Scalar
+        # overload, which rejects a complex value for a non-complex self;
+        # a plain cast would instead drop the imaginary part with a warning
+        torch._check(
+            x.dtype.is_complex or not value.dtype.is_complex,
+            lambda: "index_fill_(): Converting complex Scalar to "
+            "non-complex type is not supported",
+        )  # type: ignore[union-attr]
     else:
         value = torch.scalar_tensor(
             value,
@@ -4541,10 +4549,11 @@ def _index_fill(
     # index_copy does not broadcast on value so we have to do it manually
     shape = list(y.shape)
     shape[dim] = index.numel()
-    # eager index_fill_.int_Tensor casts the 0-d value to the self dtype
-    # (source.to(self.scalar_type()).item()); mirror that so a mismatched
-    # dtype keeps working here and never reaches index_copy's own checks
-    value = value.to(x.dtype).expand(shape)
+    # eager takes source.item() and runs the Scalar overload, landing the
+    # value on the self dtype through a checked conversion; do the same by
+    # moving it onto self's dtype and device before the broadcast so the
+    # fill path does not trip index_copy's operand checks
+    value = value.to(device=x.device, dtype=x.dtype).expand(shape)
     index_copy = Tensor.index_copy_ if inplace else torch.index_copy
     out = index_copy(y, dim, index, value)  # type: ignore[operator]
     if inplace:

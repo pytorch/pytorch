@@ -823,11 +823,12 @@ class TestDecomp(TestCase):
         def copy(x=x0, src=s):
             return x.index_copy(0, idx, src)
 
-        for fn in (add, copy):
-            with self.assertRaisesRegex(RuntimeError, "same"):
+        for fn, msg in ((add, "same scalar type"), (copy, "same dtype")):
+            with self.assertRaisesRegex(RuntimeError, msg):
                 fn()
-            compiled = torch.compile(fn)
-            with self.assertRaisesRegex(Exception, "same"):
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend="aot_eager_decomp_partition")
+            with self.assertRaisesRegex(Exception, msg):
                 compiled()
 
         # index_fill takes a 0-d tensor value of another dtype and casts it,
@@ -837,9 +838,26 @@ class TestDecomp(TestCase):
             torch.tensor(3.7, dtype=torch.float64, device=device),
             torch.tensor(2, dtype=torch.int64, device=device),
         ):
-            ref = torch.zeros(2, dtype=torch.int32, device=device).index_fill(0, idx, value)
-            got = torch.compile(lambda x=x0i, v=value: x.index_fill(0, idx, v))()
+            ref = torch.zeros(2, dtype=torch.int32, device=device).index_fill(
+                0, idx, value
+            )
+            torch._dynamo.reset()
+            got = torch.compile(
+                lambda x=x0i, v=value: x.index_fill(0, idx, v),
+                backend="aot_eager_decomp_partition",
+            )()
             self.assertEqual(ref, got)
+
+        # a complex 0-d value into a real tensor is rejected eagerly, and the
+        # compiled path must agree rather than silently drop the imaginary part
+        def fill_complex(x=x0i, v=torch.tensor(1 + 2j, device=device)):
+            return x.index_fill(0, idx, v)
+
+        with self.assertRaisesRegex(RuntimeError, "Converting complex"):
+            fill_complex()
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Exception, "Converting complex"):
+            torch.compile(fill_complex, backend="aot_eager_decomp_partition")()
 
     def test_broadcasting_index_copy(self, device):
         x = torch.zeros([1, 10], device=device)
