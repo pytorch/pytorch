@@ -109,6 +109,7 @@ class TritonBundler:
     _entries: list[TritonBundleEntry] | None = None
     _static_autotuners: list[StaticallyLaunchedAutotuner] | None = None
     _winners: OrderedSet[str] | None = None
+    _seen: OrderedSet[tuple[str, int]] | None = None
 
     # __grp__kernel_name.json contains metadata with source code paths
     # we use this as sentinel value for search and replace
@@ -148,6 +149,7 @@ class TritonBundler:
         cls._entries = []
         cls._static_autotuners = []
         cls._winners = OrderedSet()
+        cls._seen = OrderedSet()
 
     @classmethod
     def end_compile(cls) -> None:
@@ -159,6 +161,7 @@ class TritonBundler:
         cls._entries = None
         cls._static_autotuners = None
         cls._winners = None
+        cls._seen = None
 
     @classmethod
     def put(cls, kernel_hash: str, device: int) -> None:
@@ -167,6 +170,15 @@ class TritonBundler:
         it for when collect is later called.
         """
         if (entries := cls._entries) is not None:
+            # The same artifact can be registered twice per bundle: thread
+            # compile workers register what they compiled, and the parent
+            # registers the same results again when finalizing the tuner.
+            # One copy per (kernel_hash, device) is enough.
+            if cls._seen is None:
+                cls._seen = OrderedSet()
+            if (kernel_hash, device) in cls._seen:
+                return
+            cls._seen.add((kernel_hash, device))
             entries.append(
                 TritonBundleEntry(kernel_hash, device, triton_cache_dir(device))
             )
