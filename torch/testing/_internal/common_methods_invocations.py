@@ -793,6 +793,14 @@ def sample_inputs_pow(op, device, dtype, requires_grad, **kwargs):
     if dtype.is_complex and not requires_grad:
         yield SampleInput(torch.zeros(2, device=device, dtype=dtype), torch.tensor([1j, 2], device=device, dtype=dtype))
 
+
+def reference_inputs_rpow(op, device, dtype, requires_grad, **kwargs):
+    for sample in reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+        # Integer tensor exponents may be negative; Python integer exponents may not.
+        if isinstance(sample.input, int) and sample.input < 0:
+            sample.input = -sample.input
+        yield sample
+
 def sample_inputs_nextafter(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
 
@@ -8910,8 +8918,11 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
 
     # Python scalars type promotion
     for scalar in (0, 0.0, 2j, False):
-        yield SampleInput(scalar, args=(c, b))
-        yield SampleInput(a, args=(c, scalar))
+        # Eager broadcast backward requires sum, which does not support BComplex32.
+        grad_supported = dtype is not torch.bfloat16 or not isinstance(scalar, complex)
+        scalar_a, scalar_b = (a, b) if grad_supported else (a.detach(), b.detach())
+        yield SampleInput(scalar, args=(c, scalar_b))
+        yield SampleInput(scalar_a, args=(c, scalar))
 
 
 def error_inputs_where(op_info, device, **kwargs):
@@ -18937,6 +18948,7 @@ op_db: list[OpInfo] = [
                     autodiff_nonfusible_nodes=['aten::remainder'],),
     BinaryUfuncInfo('__rpow__',
                     op=torch.Tensor.__rpow__,
+                    reference_inputs_func=reference_inputs_rpow,
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
                     dtypesIfMPS=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
                     # Reference: https://github.com/pytorch/pytorch/issues/54774
