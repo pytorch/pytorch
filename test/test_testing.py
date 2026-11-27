@@ -4665,6 +4665,22 @@ class TestOpInfos(TestCase):
 # Tests that validate the various sample generating functions on each OpInfo.
 class TestOpInfoSampleFunctions(TestCase):
 
+    @parametrize("requires_grad", [False, True])
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_binary_reference_input_gradients(self, device, dtype, requires_grad):
+        from torch.testing._internal.opinfo.core import generate_elementwise_binary_noncontiguous_tensors
+
+        op = next(op for op in op_db if op.name == "add" and not op.variant_test_name)
+        with torch.no_grad():
+            samples = list(generate_elementwise_binary_noncontiguous_tensors(
+                op, device=device, dtype=dtype, requires_grad=requires_grad))
+        self.assertTrue(samples)
+        self.assertTrue(any(not sample.input.is_contiguous() for sample in samples))
+        for sample in samples:
+            for tensor in (sample.input, *sample.args):
+                self.assertEqual(tensor.requires_grad, requires_grad)
+
+
     @parametrize("op_name", ["addcmul", "addcdiv", "clamp"])
     @parametrize("requires_grad", [False, True])
     @dtypes(torch.float32, torch.float64)
