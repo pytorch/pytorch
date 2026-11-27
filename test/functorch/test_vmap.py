@@ -60,6 +60,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     OpDTypes,
     ops,
+    skipMPS,
     skipOps,
     tol,
     toleranceOverride,
@@ -4182,6 +4183,9 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
 
         self._vmap_test(fn, inputs, in_dims=in_dims)
 
+    # MPS runs the Metal kernels for no-grad SDPA even under sdpa_kernel(MATH), and they
+    # reject dropout (#202724, fixed by #202957)
+    @skipMPS
     @onlyAccelerator
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     @parametrize("randomness", ["error", "same", "different"])
