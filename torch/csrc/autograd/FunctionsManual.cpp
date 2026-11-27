@@ -1219,11 +1219,14 @@ Tensor logcumsumexp_jvp(
     auto log_t_neg = at::where(self_t >= 0, t_min, log_abs_t);
     auto pos = (at::logcumsumexp(self_p + log_t_pos, dim) - result).exp();
     auto neg = (at::logcumsumexp(self_p + log_t_neg, dim) - result).exp();
-    return pos - neg;
+    // All -inf prefixes yield result=-inf and exp((-inf)-(-inf))=NaN; JVP is 0.
+    auto out = pos - neg;
+    return at::where(result.isneginf(), at::zeros_like(out), out);
   } else {
     // Centered on the forward result so prefixes do not depend on a global max.
     auto log_t = self_t.log();
-    return (at::logcumsumexp(self_p + log_t, dim) - result).exp();
+    auto out = (at::logcumsumexp(self_p + log_t, dim) - result).exp();
+    return at::where(result.isneginf(), at::zeros_like(out), out);
   }
 }
 
