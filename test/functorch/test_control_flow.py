@@ -45,7 +45,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     decorateIf,
-    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -3053,25 +3052,31 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         self.assertEqual(result, result_exp)
 
     @parametrize("output", ["tensor", "none"])
-    def test_scan_xs_none_length_zero(self, output):
+    @parametrize("tracing_mode", [None, "fake", "symbolic"])
+    def test_scan_xs_none_length_zero(self, output, tracing_mode):
         if output == "tensor":
 
             def body(c, x):
                 return c, (c * 2).clone()
 
             init = torch.tensor([1.0, 2.0, 3.0])
-            carry, ys = scan(body, init, None, length=0)
-            self.assertEqual(carry, init)
-            self.assertEqual(ys.shape, torch.Size([0, 3]))
-            self.assertEqual(ys.dtype, init.dtype)
         else:
 
             def body(c, x):  # noqa: E306
                 return c + 1.0, None
 
             init = torch.tensor(0.0)
-            carry, ys = scan(body, init, None, length=0)
-            self.assertEqual(carry, init)
+
+        def fn(init):
+            return scan(body, init, None, length=0)
+
+        traced = make_fx(fn, tracing_mode=tracing_mode)(init) if tracing_mode else fn
+        carry, ys = traced(init)
+        self.assertEqual(carry, init)
+        if output == "tensor":
+            self.assertEqual(ys.shape, torch.Size([0, 3]))
+            self.assertEqual(ys.dtype, init.dtype)
+        else:
             self.assertIsNone(ys)
         expected = _fake_scan(body, init, None, length=0)
         self.assertEqual((carry, ys), expected)
@@ -7559,6 +7564,58 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
+    @parametrize(
+        "hop",
+        ["cond", "while_loop", "switch", "scan", "associative_scan", "flex_attention"],
+    )
+    def test_graph_module_pickle_roundtrip(self, hop):
+        # Unpickling a GraphModule re-traces it symbolically, replaying each
+        # HOP call with Proxy operands. scan, associative_scan and
+        # flex_attention check only the tensors they lift (w, keep).
+        import pickle
+
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        def f_cond(x, pred):
+            return cond(pred, torch.sin, torch.cos, [x])
+
+        def f_while_loop(i, x):
+            return while_loop(lambda i, x: i < 3, lambda i, x: (i + 1, x.sin()), (i, x))
+
+        def f_switch(index, x):
+            return switch(index, (torch.sin, torch.cos), (x,))
+
+        def f_scan(xs, w):
+            return scan(lambda c, x: (c + x * w, c.clone()), torch.zeros(4), xs)
+
+        def f_associative_scan(xs, w):
+            # The raw HOP: the frontend's generic mode doesn't trace one.
+            return associative_scan_op(lambda a, b, w: [a + b * w], [xs], (w,))
+
+        def f_flex_attention(q, keep):
+            def mask_mod(b, h, q_idx, kv_idx):
+                return keep[kv_idx]
+
+            mask = create_block_mask(mask_mod, 1, 1, 16, 16, "cpu", BLOCK_SIZE=8)
+            return flex_attention(q, q, q, block_mask=mask)
+
+        x, w, xs = torch.randn(4), torch.randn(4), torch.randn(3, 4)
+        f, args = {
+            "cond": (f_cond, (x, torch.tensor(True))),
+            "while_loop": (f_while_loop, (torch.tensor(0), x)),
+            "switch": (f_switch, (torch.tensor(1), x)),
+            "scan": (f_scan, (xs, w)),
+            "associative_scan": (f_associative_scan, (xs, w)),
+            "flex_attention": (
+                f_flex_attention,
+                (torch.randn(1, 1, 16, 8), torch.arange(16) < 8),
+            ),
+        }[hop]
+        gm = pickle.loads(pickle.dumps(make_fx(f)(*args)))
+        target = getattr(torch.ops.higher_order, hop)
+        self.assertEqual(len(gm.graph.find_nodes(op="call_function", target=target)), 1)
+        self.assertEqual(gm(*args), f(*args))
+
     def test_switch_traced_mismatched_output_structure(self):
         from torch._higher_order_ops.switch import switch_op
 
@@ -10977,6 +11034,224 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
         ):
             functional_f(example_init, example_inputs)
 
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_joint_graph_keeps_node_meta(self):
+        # Scan re-traces its body twice to build the joint graph that min-cut
+        # partitions. An annotate() region set in the body must survive both.
+        from torch.fx.traceback import annotate
+
+        def body(carry, x):
+            with annotate({"region": "keep"}):
+                y = carry.sin()
+            return y * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        init = torch.randn(4, requires_grad=True)
+        xs = torch.randn(3, 4, requires_grad=True)
+        backend = AotEagerAndRecordGraphs()
+        out = torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+        self.assertEqual(out, f(init, xs))
+        out.sum().backward()
+
+        # The forward and backward bodies are min-cut's output. The backward
+        # one recomputes the sin, and the copy must keep the region too.
+        for gm in (*backend.fw_graphs, *backend.bw_graphs):
+            (scan_node,) = gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(gm, scan_node.args[0].target)
+            sins = body_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.sin.default
+            )
+            self.assertGreater(len(sins), 0)
+            for sin in sins:
+                self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_hop_joint_graph_keeps_node_meta_of_plain_fn(self):
+        # A plain-function body is re-run, not interpreted, by the first
+        # re-trace. Its annotate() region must still survive functionalization.
+        from torch._higher_order_ops.partitioner import create_hop_joint_graph
+        from torch.fx.traceback import annotate, preserve_node_meta
+
+        def body(carry, x):
+            with annotate({"region": "keep"}):
+                y = carry.sin()
+            return y * x, y.new_zeros(())
+
+        joint = {}
+
+        def f(carry, x):
+            joint["gm"] = create_hop_joint_graph(
+                body, (carry, x), functionalize=True
+            ).joint_gm
+            return carry.clone()
+
+        carry = torch.randn(4, requires_grad=True)
+        x = torch.randn(4, requires_grad=True)
+        with preserve_node_meta():
+            make_fx(f, tracing_mode="fake")(carry, x)
+        (sin,) = joint["gm"].graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sin.default
+        )
+        self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_recompute_tag_steers_partition(self):
+        # A "recompute" tag on a node in the scan body decides whether min-cut
+        # saves it for the backward or recomputes it there.
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def body(carry, x):
+            y = carry.sin()
+            return y.cos() * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        def saved_by_forward_body(policy):
+            torch._dynamo.reset()
+            record = AotEagerAndRecordGraphs()
+
+            def backend(gm, example_inputs):
+                # Tag the sin in Dynamo's body graph, before AOTAutograd runs.
+                for mod in gm.modules():
+                    if mod is not gm and isinstance(mod, torch.fx.GraphModule):
+                        for node in mod.graph.nodes:
+                            if node.target in (torch.sin, "sin"):
+                                node.meta["recompute"] = policy
+                return record(gm, example_inputs)
+
+            init = torch.randn(4, requires_grad=True)
+            xs = torch.randn(3, 4, requires_grad=True)
+            torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+            (fw_gm,) = record.fw_graphs
+            (scan_node,) = fw_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(fw_gm, scan_node.args[0].target)
+            return [n.target for n in body_gm.graph.output_node().args[0]]
+
+        sin = torch.ops.aten.sin.default
+        self.assertIn(sin, saved_by_forward_body(CheckpointPolicy.MUST_SAVE))
+        self.assertNotIn(sin, saved_by_forward_body(CheckpointPolicy.PREFER_RECOMPUTE))
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_recompute_tag_on_complex_symint(self):
+        # Under dynamic shapes, x.shape[0] * x.shape[1] is a complex SymInt
+        # node. Scan can't save it across the forward/backward boundary, so it
+        # overrides the body's tag with MUST_RECOMPUTE, and rejects MUST_SAVE.
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def body(carry, x):
+            y = carry.sin() * (x.shape[0] * x.shape[1])
+            return y.cos() * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        init = torch.randn(4, 5, requires_grad=True)
+        xs = torch.randn(3, 4, 5, requires_grad=True)
+        expected = torch.autograd.grad(f(init, xs).sum(), (init, xs))
+
+        def compile_with_tags(symint_policy, tensor_policy):
+            torch._dynamo.reset()
+            record = AotEagerAndRecordGraphs()
+
+            def backend(gm, example_inputs):
+                # Tag every node in the body, SymInt ops included.
+                for mod in gm.modules():
+                    if mod is not gm and isinstance(mod, torch.fx.GraphModule):
+                        for node in mod.graph.nodes:
+                            if node.op == "call_function":
+                                val = node.meta.get("example_value")
+                                node.meta["recompute"] = (
+                                    symint_policy
+                                    if isinstance(val, torch.SymInt)
+                                    else tensor_policy
+                                )
+                return record(gm, example_inputs)
+
+            out = torch.compile(f, backend=backend, fullgraph=True, dynamic=True)(
+                init, xs
+            )
+            self.assertEqual(torch.autograd.grad(out.sum(), (init, xs)), expected)
+            (fw_gm,) = record.fw_graphs
+            (scan_node,) = fw_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(fw_gm, scan_node.args[0].target)
+            return len(body_gm.graph.output_node().args[0])
+
+        for policy in (
+            CheckpointPolicy.PREFER_SAVE,
+            CheckpointPolicy.PREFER_RECOMPUTE,
+            CheckpointPolicy.MUST_RECOMPUTE,
+        ):
+            compile_with_tags(policy, policy)
+
+        # Tags still steer the tensor nodes: MUST_SAVE on them also saves y.
+        self.assertGreater(
+            compile_with_tags(
+                CheckpointPolicy.PREFER_RECOMPUTE, CheckpointPolicy.MUST_SAVE
+            ),
+            compile_with_tags(None, None),
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Node mul\w* computes the SymInt expression .* is tagged "
+            r"CheckpointPolicy.MUST_SAVE\. .* can't be saved across the "
+            r"forward/backward boundary",
+        ):
+            compile_with_tags(CheckpointPolicy.MUST_SAVE, CheckpointPolicy.MUST_SAVE)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_dropout_in_checkpointed_body(self):
+        # Checkpoint tags dropout for recompute. The backward must still use
+        # the forward's mask, not draw a new one.
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func == torch.ops.aten.sin.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.MUST_RECOMPUTE
+
+        def region(c, w):
+            return torch.nn.functional.dropout(c @ w, 0.5).sin()
+
+        sac = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        cases = [(c, b) for c in (None, sac) for b in ("aot_eager", "inductor")]
+        for context_fn, backend in cases:
+            kwargs = {"context_fn": context_fn} if context_fn else {}
+
+            def body(c, w):
+                y = checkpoint(region, c, w, use_reentrant=False, **kwargs)
+                return y, y.clone()
+
+            with self.subTest(sac=context_fn is not None, backend=backend):
+                torch._dynamo.reset()
+                init = torch.randn(2, 4, requires_grad=True)
+                xs = torch.randn(3, 4, 4, requires_grad=True)
+                f = torch.compile(scan, backend=backend, fullgraph=True)
+                carry, ys = f(body, init, xs)
+                grads = torch.autograd.grad(carry.sum() + ys.sum(), (init, xs))
+
+                # Eager rerun with the masks read back from ys.
+                c, outs = init, []
+                for t in range(3):
+                    c = (c @ xs[t] * (ys[t] != 0) * 2).sin()
+                    outs.append(c)
+                out = c.sum() + torch.stack(outs).sum()
+                expected = torch.autograd.grad(out, (init, xs))
+                self.assertEqual(grads, expected, atol=6e-05, rtol=6e-06)
+
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
             return x, x
@@ -11888,56 +12163,7 @@ class GraphModule(torch.nn.Module):
 
             self.assertExpectedInline(
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                expectedIfCppFakeTensor(
-                    """\
-class GraphModule(torch.nn.Module):
-    def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
-        clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
-        zeros_like: "f32[3]" = torch.ops.aten.zeros_like.default(primals_3, pin_memory = False)
-        zeros_like_1: "f32[3, 3]" = torch.ops.aten.zeros_like.default(primals_2, pin_memory = False)
-        while_loop_cond_graph_1 = self.while_loop_cond_graph_1
-        while_loop_body_graph_1 = self.while_loop_body_graph_1
-        zeros: "i64[]" = torch.ops.aten.zeros.default([], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
-        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (zeros, clone, zeros_like, zeros_like_1), (cat, primals_3, primals_2));  while_loop_cond_graph_1 = while_loop_body_graph_1 = zeros = clone = zeros_like = zeros_like_1 = cat = primals_3 = primals_2 = None
-        getitem_2: "f32[3, 3]" = while_loop[1]
-        getitem_3: "f32[3]" = while_loop[2]
-        getitem_4: "f32[3, 3]" = while_loop[3];  while_loop = None
-        return (getitem_2, getitem_4, getitem_3)
-
-    class while_loop_cond_graph_1(torch.nn.Module):
-        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
-            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0);  arg4_1 = None
-
-            lt: "b8[]" = torch.ops.aten.lt.Scalar(arg0_1, sym_size_int_1);  arg0_1 = sym_size_int_1 = None
-            return lt
-
-    class while_loop_body_graph_1(torch.nn.Module):
-        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
-            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0)
-
-            rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
-            sub: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
-            _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub);  sub = None
-            select: "f32[3, 3]" = torch.ops.aten.select.int(arg4_1, 0, _local_scalar_dense);  arg4_1 = _local_scalar_dense = None
-            t: "f32[3, 3]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
-            t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
-            mm: "f32[3, 3]" = torch.ops.aten.mm.default(arg1_1, t_1);  t_1 = None
-            t_2: "f32[3, 3]" = torch.ops.aten.t.default(arg1_1)
-            mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t_2, select);  t_2 = None
-            t_3: "f32[3, 3]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
-            sum_1: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(arg1_1, [0], True)
-            view: "f32[3]" = torch.ops.aten.view.default(sum_1, [3]);  sum_1 = None
-            t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            mul_3: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
-            mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
-            add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_4);  mm = mul_4 = None
-            add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_6, mul_3);  add_6 = mul_3 = None
-            add_8: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            add_9: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
-            add_10: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
-            return (add_8, add_7, add_9, add_10)
-""",
-                    """\
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
         clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
@@ -11985,7 +12211,6 @@ class GraphModule(torch.nn.Module):
             add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
             return (add_4, add_3, add_5, add_6)
 """,
-                ),
             )
 
     def test_input_output_alias(self):

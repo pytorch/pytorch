@@ -4,6 +4,7 @@
 import torch
 import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
+from torch._library._out_variant import check_out_variant
 from torch._subclasses.fake_tensor import FakeTensorMode
 import numpy as np
 
@@ -47,7 +48,8 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, RDNA3OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
-    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION
+    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION, \
+    PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -2246,6 +2248,57 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out, expected, msg=msg)
 
+    # A running float32 sum stops growing once it reaches 2**24, so a norm that
+    # accumulates linearly drops every small term after a large one (#65815).
+    # At 4 threads only the dim=None cases are split across threads, which checks
+    # how the per-thread sums are combined. The other cases have 2 or 32 outputs,
+    # and each output is still reduced by a single thread. 32 columns are enough
+    # for dim=0 to take the vectorized outer sum.
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_vector_norm_keeps_small_terms(self, device, dtype):
+        norm, powsum = torch.linalg.vector_norm, torch.linalg._powsum
+        n = 2**16
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                for ord, first in ((1, 2.0**24), (2, 2.0**12)):
+                    x = torch.ones(n + 1, dtype=dtype, device=device)
+                    x[0] = first
+                    cols = x.unsqueeze(1).repeat(1, 32)
+                    for (t, dim), fn in product(((x, None), (cols, 0), (cols.t().contiguous(), 1)), (norm, powsum)):
+                        result = fn(t, ord, dim=dim)
+                        expected = 2.0**24 + n
+                        if fn is norm and ord == 2:
+                            expected = math.sqrt(expected)
+                        msg = f"threads={threads}, {fn.__name__}, ord={ord}, dim={dim}"
+                        self.assertEqual(result, torch.full_like(result, expected), atol=0, rtol=1e-5, msg=msg)
+                # ord=0 counts the nonzeros, so it needs more than 2**24 elements.
+                x = torch.ones((), dtype=dtype, device=device).expand(2**24 + n, 2)
+                for t, dim in ((x, 0), (x[:, 0], None)):
+                    result = torch.linalg.vector_norm(t, 0, dim=dim)
+                    msg = f"threads={threads}, dim={dim}"
+                    self.assertEqual(result, torch.full_like(result, 2.0**24 + n), atol=0, rtol=0, msg=msg)
+        finally:
+            torch.set_num_threads(num_threads)
+
+    # Inputs longer than two vectors plus a tail, so ord 0, 1 and 2 run through the
+    # vectorized maps; small integers keep the sums exact.
+    @onlyCPU
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    def test_vector_norm_special_values(self, device, dtype):
+        base = torch.tensor([-3.0, -0.0, 2.0, 0.0, -1.0, 1.0], dtype=torch.double).repeat(12)[:67]
+        for (special, i), ord in product([(None, 0)] + list(product((nan, inf, -inf), (20, 65))), (0, 1, 2)):
+            x = base.clone()
+            if special is not None:
+                x[i] = special
+            for t, dim in ((x, None), (x.unsqueeze(1).repeat(1, 32), 0)):
+                expected = torch.from_numpy(np.array(np.linalg.norm(t.numpy(), ord, axis=dim))).to(dtype)
+                result = torch.linalg.vector_norm(t.to(dtype=dtype, device=device), ord, dim=dim)
+                msg = f"ord={ord}, dim={dim}, x[{i}]={special}"
+                self.assertEqual(result, expected, atol=0, rtol=0, exact_device=False, msg=msg)
+
     # Test that linal.vector_norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
     def test_vector_norm_extreme_values(self, device):
@@ -2299,6 +2352,94 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                     result = torch.linalg._powsum(x, ord, dim=dim, keepdim=keepdim)
                     expected = x.abs().pow(ord).sum(dim=dim, keepdim=keepdim)
                     self.assertEqual(result, expected)
+
+    # The two reduced dims cannot be merged, so the sum is built from 2**14 partial
+    # sums of 2. Adding those in half or bfloat16 would stop at 4096 or 512.
+    @dtypes(torch.half, torch.bfloat16)
+    def test_norm_reduced_precision_accumulates_in_float(self, device, dtype):
+        x = torch.ones(2**14, 3, 2, dtype=dtype, device=device)
+        for fn, ord, expected in (
+            (torch.linalg._powsum, 1, 2.0**15),
+            (torch.linalg._powsum, 2, 2.0**15),
+            (torch.linalg.vector_norm, 0, 2.0**15),
+            (torch.linalg.vector_norm, 1, 2.0**15),
+            (torch.linalg.vector_norm, 2, 2.0**7.5),
+        ):
+            result = fn(x, ord, dim=(0, 2))
+            expected = torch.full((3,), expected, dtype=dtype, device=device)
+            self.assertEqual(result, expected, atol=0, rtol=0, msg=f"{fn.__name__}, ord={ord}")
+
+    # A single-element output goes through the all-reduce branch of the cascade
+    # sum, which adds up each thread's chunk in float. In the sliced x, the dims
+    # can't be merged, so a chunk is summed row by row; doing that in half or
+    # bfloat16 would stall far below the expected values.
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16)
+    def test_norm_reduced_precision_all_reduce(self, device, dtype):
+        x = torch.full((2**16, 3, 2), 2.0**-4, dtype=dtype, device=device)
+        # ord=0 counts the nonzeros; with one row in 8 left, their count (2**15)
+        # stays below float16's max of 65504.
+        sparse = x.clone()
+        sparse[torch.arange(2**16, device=device) % 8 != 0] = 0
+        # x[:, :2] has 2**18 elements of 2**-4.
+        cases = (
+            (x, torch.linalg._powsum, 1, 2.0**14),
+            (x, torch.linalg._powsum, 2, 2.0**10),
+            (sparse, torch.linalg.vector_norm, 0, 2.0**15),
+            (x, torch.linalg.vector_norm, 1, 2.0**14),
+            (x, torch.linalg.vector_norm, 2, 2.0**5),
+        )
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                for (inp, fn, ord, value), contiguous in product(cases, (False, True)):
+                    t = inp[:, :2].contiguous() if contiguous else inp[:, :2]
+                    expected = torch.tensor(value, dtype=dtype, device=device)
+                    msg = f"threads={threads}, contiguous={t.is_contiguous()}, {fn.__name__}, ord={ord}"
+                    self.assertEqual(fn(t, ord), expected, atol=0, rtol=0, msg=msg)
+        finally:
+            torch.set_num_threads(num_threads)
+
+    # Adding the elements one by one in float stops at 2**24 for bfloat16 ones and
+    # at 2**14 for half 2**-10; the cascade sum gets the exact totals. One thread,
+    # because per-thread partial sums would keep a linear sum exact too.
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16)
+    def test_norm_reduced_precision_cascade(self, device, dtype):
+        n = 2**24 + 2**18
+        value = 2.0**-10 if dtype == torch.half else 1.0
+        x = torch.full((), value, dtype=dtype, device=device)
+        num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(1)
+            fns = (torch.linalg._powsum, torch.linalg.vector_norm)
+            for fn, (t, dim) in product(fns, ((x.expand(n), None), (x.expand(n, 2), 0))):
+                expected = torch.full(t.shape[1:], n * value, dtype=dtype, device=device)
+                self.assertEqual(fn(t, 1, dim=dim), expected, atol=0, rtol=0, msg=f"{fn.__name__}, dim={dim}")
+        finally:
+            torch.set_num_threads(num_threads)
+
+    # Reducing over a size-1 dim is no real reduction, so the cascade kernel adds
+    # each mapped element in its elementwise loop. vector_norm handles size-1 dims
+    # before the kernel, so only _powsum gets there; slicing keeps the other dims
+    # from being merged.
+    @onlyCPU
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_powsum_size_one_dim(self, device, dtype):
+        x = torch.randn(4, 1, 6, dtype=dtype, device=device)[..., :3]
+        for ord in (1, 2):
+            expected = x.double().abs().pow(ord).sum(1).to(dtype)
+            self.assertEqual(torch.linalg._powsum(x, ord, dim=1), expected, atol=0, rtol=0, msg=f"ord={ord}")
+
+    # _powsum ord 0 counts every element (0**0 == 1), vector_norm ord 0 only the nonzeros.
+    @onlyCPU
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_powsum_ord_zero_counts_zeros(self, device, dtype):
+        x = torch.tensor([0.0, 1.0, 0.0], dtype=dtype, device=device)
+        for t, dim in ((x, None), (x.unsqueeze(1).repeat(1, 2), 0)):
+            self.assertEqual(torch.linalg._powsum(t, 0, dim=dim), torch.full_like(t.sum(dim), 3), msg=f"dim={dim}")
+            self.assertEqual(torch.linalg.vector_norm(t, 0, dim=dim), torch.full_like(t.sum(dim), 1), msg=f"dim={dim}")
 
     @onlyAccelerator
     def test_powsum_dtype_kwarg(self, device):
@@ -6634,7 +6775,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                 self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
         # NOTE: We're just exercising terrible failures here.
-        version = _get_torch_cuda_version()
         SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
         SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
         SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
@@ -6643,8 +6783,8 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             _test(17, k, n, use_transpose_a, use_transpose_b, True)
         else:
             if not use_transpose_a and use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
-                    _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
+                if SM80OrLater or SM70 or SM75:
+                    _test(17, k, n, use_transpose_a, use_transpose_b, True)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
                                                 "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
@@ -6661,7 +6801,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
+                if SM80OrLater or SM70 or SM75:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
@@ -8586,6 +8726,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @slowTest
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @skipIfRocmVersionInRange([10, 2], [10, 3], "rocSOLVER gesvdj fails for batch > 65536, fixed by rocm-libraries#14170")
     @dtypes(*floating_and_complex_types())
     def test_lu_solve_batched_many_batches(self, device, dtype):
         def run_test(A_dims, b_dims):
@@ -9269,6 +9410,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
         finally:
             # disables TunableOp
             torch.cuda.tunable.enable(False)
+            torch.cuda.tunable.record_untuned_enable(False)
             if prev_cublaslt_count is not None:
                 torch.cuda.tunable.set_cublaslt_requested_algo_count(
                     prev_cublaslt_count
@@ -9284,8 +9426,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
             for file in files:
                 try:
                     os.remove(file)
-                # NB: The file is locked on Windows
-                except (FileNotFoundError, PermissionError):
+                except FileNotFoundError:
                     pass
 
             # undo all the environment variables set
@@ -10104,6 +10245,42 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
             # this test. There should be no change in the number of results
             # since tuning is disable.
             self.assertEqual((total_num_results - ref_num_results), 0)
+
+    @dtypes(torch.float)
+    @parametrize("trigger", ["tuning_enable", "enable", "record_untuned_enable", "set_filename"])
+    def test_results_file_closed_when_writes_stop_tunableop(self, device, dtype, trigger):
+        import os
+
+        def tune(n):
+            A = torch.randn(n, n + 1, device=device, dtype=dtype)
+            B = torch.randn(n + 1, n + 2, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            filename = torch.cuda.tunable.get_filename()
+            other_filename = filename.replace(".csv", "_other.csv")
+            setter, stop_arg, resume_arg = {
+                "tuning_enable": (torch.cuda.tunable.tuning_enable, False, True),
+                "enable": (torch.cuda.tunable.enable, False, True),
+                "record_untuned_enable": (torch.cuda.tunable.record_untuned_enable, True, False),
+                "set_filename": (torch.cuda.tunable.set_filename, other_filename, filename),
+            }[trigger]
+
+            tune(19)
+            self.assertTrue(os.path.exists(filename))
+
+            setter(stop_arg)
+            os.remove(filename)
+            setter(resume_arg)
+            tune(23)
+
+            self.assertTrue(os.path.exists(filename))
+            with open(filename) as f:
+                lines = [line for line in f.read().splitlines() if line]
+            validators = [line for line in lines if line.startswith("Validator,")]
+            self.assertEqual(len(validators), len(get_tunableop_validators()))
+            self.assertEqual(len(lines) - len(validators), 1)
 
     @dtypes(torch.float)
     def test_dump_results_on_exit_tunableop(self, device, dtype):
@@ -12755,6 +12932,8 @@ class TestGroupedMM(TestCase):
     @parametrize("b_row_major", [False, True])
     @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES)
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    # same as test_grouped_gemm_rocm_backend: ck_tile, on by default on ROCm, sums K in one fp32 accumulator
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)} if TEST_WITH_ROCM else {})
     @decorateIf(
         unittest.skip('Unaligned cases require the CUDA float32 fallback'),
         lambda p: torch.device(p["device"]).type == "cuda" and not torch.version.hip and p["dtype"] != torch.float32 and any(size % (16 // p["dtype"].itemsize) for size in p["a_shape"][-2:] + p["b_shape"][-2:] + tuple(p["offsets"] or ())),
@@ -12772,7 +12951,7 @@ class TestGroupedMM(TestCase):
         offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=backward)
 
-    # The ROCm grouped gemm backends are opt-in via env var, which CI never sets.
+    # ROCM_ALLOW_GROUP_GEMM_CK_TILE=1 forces ck_tile; unset, a heuristic picks ck_tile or hipBLASLt per call.
     @onlyCUDA
     @skipCUDAIfNotRocm
     @parametrize("backend", ["ck_tile"])
@@ -12865,7 +13044,7 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor(offsets, device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs)
 
-    @onlyOn(("cuda", "mps"))
+    @onlyOn(["cuda", "mps", "xpu"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @dtypes(torch.bfloat16)
     def test_grouped_mm_large_stride_fallback(self, device, dtype):
@@ -12884,7 +13063,164 @@ class TestGroupedMM(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             F.grouped_mm(a, b, offs=offs)
 
-    @onlyOn(("cuda", "mps"))
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize("a_shape,b_shape,offsets", [
+        subtest(((16, 256), (32, 256), [0, 128, 128, 256]), name="2d_2d_zero_size"),
+        subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64]), name="2d_3d"),
+        subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128]), name="3d_2d"),
+        subtest(((4, 16, 64), (4, 32, 64), None), name="3d_3d"),
+    ])
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_mm_out(self, device, a_shape, b_shape, offsets, dtype):
+        a = self._make_grouped_mm_matrix(a_shape, True, device, dtype)
+        b = self._make_grouped_mm_matrix(b_shape, True, device, dtype).transpose(-2, -1)
+        offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
+        expected = torch._grouped_mm(a, b, offs=offs)
+        out_op = torch.ops.aten._grouped_mm.out
+        mode = FakeTensorMode()
+        fake_args = [mode.from_tensor(t) for t in (a, b, offs) if t is not None]
+        shifted = torch.full((expected.numel() + 1,), math.nan, device=device, dtype=dtype)[1:]
+        outs = {
+            "empty": torch.empty(0, device=device, dtype=dtype),
+            "contiguous": torch.full_like(expected, math.nan, memory_format=torch.contiguous_format),
+            "column_major": torch.full_like(expected.mT, math.nan, memory_format=torch.contiguous_format).mT,
+            "misaligned": shifted.view_as(expected),
+        }
+        for layout, out in outs.items():
+            with self.subTest(layout=layout):
+                fake_out = mode.from_tensor(out)
+                with mode:
+                    self.assertIs(out_op(*fake_args, out=fake_out), fake_out)
+                stride, data_ptr = out.stride(), out.data_ptr()
+                self.assertIs(out_op(a, b, offs, out=out), out)
+                self.assertEqual(out, expected)
+                self.assertEqual((fake_out.shape, fake_out.stride()), (out.shape, out.stride()))
+                if layout != "empty":
+                    self.assertEqual((out.stride(), out.data_ptr()), (stride, data_ptr))
+        binding_out = torch.full_like(expected, math.nan, memory_format=torch.contiguous_format)
+        self.assertIs(torch._grouped_mm(a, b, offs=offs, out=binding_out), binding_out)
+        self.assertEqual(binding_out, expected)
+        wrong_out = torch.empty(0, device=device, dtype=torch.bfloat16 if dtype == torch.float16 else torch.float16)
+        fake_wrong_out = mode.from_tensor(wrong_out)
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            out_op(a, b, offs, out=wrong_out)
+        with mode, self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            out_op(*fake_args, out=fake_wrong_out)
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    def test_grouped_mm_out_unaligned_width(self, device):
+        a = self._make_grouped_mm_matrix((2, 8, 32), True, device, torch.float32)
+        b = self._make_grouped_mm_matrix((2, 17, 32), True, device, torch.float32).transpose(-2, -1)
+        expected = torch._grouped_mm(a, b)
+        # ROCm builds and XPU do not pad the functional result.
+        if not torch.version.hip and torch.device(device).type != "xpu":
+            self.assertFalse(expected.is_contiguous())
+        with FakeTensorMode() as mode:
+            fake = torch._grouped_mm(mode.from_tensor(a), mode.from_tensor(b))
+        self.assertEqual(fake.stride(), expected.stride())
+        out_op = torch.ops.aten._grouped_mm.out
+
+        def flat(a, b, out):
+            out_op(a, b, out=out)
+            return out.view(-1)
+
+        def flat_column_major(a, b, out):
+            out_op(a, b, out=out)
+            return out.mT.view(-1)
+
+        def contiguous():
+            return torch.empty(2, 8, 17, device=device)
+
+        def column_major():
+            return torch.empty(2, 17, 8, device=device).mT
+
+        # The views above only work if out keeps its own strides instead of the padded ones.
+        for fn, make_out in ((flat, contiguous), (flat_column_major, column_major)):
+            with self.subTest(fn=fn.__name__):
+                eager_out = make_out()
+                eager_ret = fn(a, b, eager_out)
+                self.assertEqual(eager_out, expected)
+                out = make_out()
+                self.assertEqual(torch.func.functionalize(fn)(a, b, out), eager_ret)
+                self.assertEqual(out, eager_out)
+        for backend in ("aot_eager", "inductor"):
+            with self.subTest(backend=backend):
+                out = contiguous()
+                ret = torch.compile(flat, backend=backend, fullgraph=True)(a, b, out)
+                self.assertEqual(ret, expected.flatten())
+                self.assertEqual(out, expected)
+
+        def resized(a, b):
+            return out_op(a, b, out=torch.empty(0, device=a.device))
+
+        self.assertEqual(torch.func.functionalize(resized)(a, b).stride(), resized(a, b).stride())
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize("rows,cols", [(0, 16), (8, 0)])
+    def test_grouped_mm_empty_result_strides(self, device, rows, cols):
+        a = self._make_grouped_mm_matrix((2, rows, 32), True, device, torch.float32)
+        b = self._make_grouped_mm_matrix((2, cols, 32), True, device, torch.float32).transpose(-2, -1)
+        expected = torch._grouped_mm(a, b)
+        with FakeTensorMode() as mode:
+            fake = torch._grouped_mm(mode.from_tensor(a), mode.from_tensor(b))
+        self.assertEqual(fake.stride(), expected.stride())
+
+    @onlyCUDA
+    @skipIfRocm(msg="ROCm builds do not pad the functional result")
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_mm_out_writes_in_place(self, device, dtype):
+        # With default settings, fp16 runs the fused cuBLASLt kernel where it is built and supported, bf16 runs the
+        # fused CUTLASS kernel on SM90 and SM100, and the rest runs the fallback.
+        prefer_cublaslt = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = False
+        self.addCleanup(setattr, torch.backends.cuda.matmul, "prefer_cublaslt_grouped_gemm", prefer_cublaslt)
+        if dtype == torch.float16:
+            fused = bool(PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM)
+        else:
+            fused = dtype == torch.bfloat16 and torch.cuda.get_device_capability(device)[0] in (9, 10)
+
+        def run(rows, width, row_width):
+            a = self._make_grouped_mm_matrix((rows, 32), True, device, dtype)
+            b = self._make_grouped_mm_matrix((4, width, 32), True, device, dtype).transpose(-2, -1)
+            offs = torch.tensor([rows * (i + 1) // 4 for i in range(4)], device=device, dtype=torch.int32)
+            expected = torch._grouped_mm(a, b, offs=offs)
+            # Sentinels fill the rest of each row and 8 elements after the last row.
+            buf = torch.full((rows * row_width + 8,), 7.0, device=device, dtype=dtype)
+            rows_view = buf[:rows * row_width].view(rows, row_width)
+            out = rows_view[:, :width]
+            with torch.profiler.profile(record_shapes=True) as prof:
+                torch.ops.aten._grouped_mm.out(a, b, offs, out=out)
+            self.assertEqual(out, expected)
+            # The fused kernels write the row padding, so their direct write into this out would change the sentinel.
+            self.assertEqual(rows_view[:, width:], torch.full_like(rows_view[:, width:], 7))
+            self.assertEqual(buf[-8:], torch.full_like(buf[-8:], 7))
+            return [e for e in prof.events() if e.name == "aten::copy_" and e.input_shapes[0] == [rows, width]]
+
+        # A width that needs no padding is written directly by every kernel.
+        self.assertEqual(run(64, 16, 16), [])
+        # With padding, the fallback still writes directly, while the fused kernel needs a temporary.
+        for rows, row_width in ((64, 17), (64, 24), (1, 24)):
+            full_copies = run(rows, 17, row_width)
+            if fused:
+                self.assertNotEqual(full_copies, [])
+            else:
+                self.assertEqual(full_copies, [])
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    def test_grouped_mm_out_internal_overlap(self, device):
+        a = self._make_grouped_mm_matrix((8, 32), True, device, torch.float32)
+        b = self._make_grouped_mm_matrix((8, 32), True, device, torch.float32).transpose(-2, -1)
+        offs = torch.tensor([16, 32], device=device, dtype=torch.int32)
+        out = torch.empty(8, 8, device=device).expand(2, 8, 8)
+        with self.assertRaisesRegex(RuntimeError, "more than one element of the written-to tensor"):
+            torch.ops.aten._grouped_mm.out(a, b, offs, out=out)
+
+    @onlyCPU
+    def test_grouped_mm_out_variant_lookup(self, device):
+        check_out_variant(torch.ops.aten._grouped_mm.default, torch.ops.aten._grouped_mm.out)
+
+    @onlyOn(["cuda", "mps", "xpu"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @serialTest()
     @largeTensorTest("6GB")
@@ -12910,7 +13246,7 @@ instantiate_device_type_tests(TestLinalgDevice, globals())
 instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestLinalgCpuOnly, globals(), only_for=("cpu",))
-instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
+instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True, allow_xpu=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

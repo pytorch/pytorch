@@ -18,10 +18,10 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
+    skipCUDAIf,
     toleranceOverride,
     tol,
 )
@@ -56,8 +56,9 @@ if torch.get_default_dtype() is not torch.float32:
 class TestScatterGather(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("index_dtype", [torch.int64, torch.int32])
     @parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16, torch.float16])
-    def test_scatter_expanded_index(self, dtype):
+    def test_scatter_expanded_index(self, dtype, index_dtype):
         device = "cpu"
 
         def helper(input_size, idx_size):
@@ -67,7 +68,7 @@ class TestScatterGather(TestCase):
             shape = [1] * len(input_size)
             shape[0] = idx_size
             dim_size = input_size[0]
-            idx = torch.randint(0, dim_size, shape)
+            idx = torch.randint(0, dim_size, shape, dtype=index_dtype)
 
             # The fast path on scatter when index is expanded
             # will depend on sorted index where the collected src indice
@@ -97,8 +98,9 @@ class TestScatterGather(TestCase):
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
+    @parametrize("index_dtype", [torch.int64, torch.int32])
     @parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16])
-    def test_gather_expanded_index(self, dtype):
+    def test_gather_expanded_index(self, dtype, index_dtype):
         device = "cpu"
 
         # Test when index is [N, 1], which would have stride [1, 0]
@@ -119,7 +121,7 @@ class TestScatterGather(TestCase):
             shape = [1] * len(input_size)
             shape[0] = idx_size
             dim_size = input_size[0]
-            idx = torch.randint(0, dim_size, shape)
+            idx = torch.randint(0, dim_size, shape, dtype=index_dtype)
 
             # Test the fast path on gather when index is expanded
             expanded_shape = input_size
@@ -143,7 +145,7 @@ class TestScatterGather(TestCase):
                 else:
                     return unsqueeze_helper(idx, dim - 1).unsqueeze(dim - 1)
 
-            idx = torch.randint(0, dim_size, (input.shape[1],))
+            idx = torch.randint(0, dim_size, (input.shape[1],), dtype=index_dtype)
             idx = unsqueeze_helper(idx, len(input_size))
             expanded_shape[0] = 1
             idx = idx.expand(expanded_shape)
@@ -504,7 +506,7 @@ class TestScatterGatherDevice(TestCase):
         self.assertIs(result, out)
         self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
 
-    @onlyCUDA
+    @onlyAccelerator
     @serialTest()
     @largeTensorTest("5GB")
     def test_scatter_copy_large_slice(self, device):
@@ -675,9 +677,9 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[1] = 0
                 self.assertEqual(input, expected_result)
 
-    @onlyCUDA
-    @unittest.skipUnless(
-        TEST_CUDA and (torch.version.hip is not None or SM80OrLater),
+    @onlyAccelerator
+    @skipCUDAIf(
+        torch.version.hip is None and not SM80OrLater,
         "requires CUDA sm80+; ROCm runs the generic kernel",
     )
     @dtypes(torch.float16, torch.bfloat16)
@@ -809,7 +811,7 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[2] = 0
                 self.assertEqual(input, expected_result)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize(
         "op",

@@ -155,16 +155,6 @@ class Allocation(AllocationTreeNode):
     offset: sympy.Expr | None = None
     earliest_available: float | None = None
 
-    def __post_init__(self) -> None:
-        has_unbacked_sym = False
-        for s in self.node.get_layout().size:
-            if free_unbacked_symbols(s):
-                has_unbacked_sym = True
-                break
-
-        if has_unbacked_sym:
-            self.earliest_available = self.get_live_ranges().begin
-
     @property
     def device(self):
         return self.node.get_device()
@@ -460,7 +450,7 @@ class AllocationPool:
                 )
             else:
                 self.restrict_live_range = LiveRange(
-                    min(self.restrict_live_range.begin, block_earliest_available),
+                    max(self.restrict_live_range.begin, block_earliest_available),
                     self.restrict_live_range.end,
                 )
 
@@ -817,6 +807,7 @@ class MemoryPlanner:
                 outputs.append(group.allocation)
             else:
                 intermediates.append(group.allocation)
+        self.compute_earliest_available(outputs + intermediates)
 
         for block in sorted(
             outputs,
@@ -837,6 +828,28 @@ class MemoryPlanner:
             self.pools.allocate(block)
 
         self.pools.finalize()
+
+    def compute_earliest_available(self, blocks: list[Allocation]):
+        """
+        A block whose layout uses unbacked symbols can only go in a pool created
+        after those symbols are defined. Each symbol is defined before the first
+        block that uses it is allocated, so a block is available from the latest
+        first use among its unbacked symbols.
+        """
+        block_symbols = []
+        first_use: dict[sympy.Symbol, float] = {}
+        for block in blocks:
+            layout = block.node.get_layout()
+            symbols = free_unbacked_symbols(
+                (*layout.size, *layout.stride, block.symbolic_size)
+            )
+            block_symbols.append(symbols)
+            begin = block.live_range.begin
+            for s in symbols:
+                first_use[s] = min(first_use.get(s, begin), begin)
+        for block, symbols in zip(blocks, block_symbols):
+            if symbols:
+                block.earliest_available = max(first_use[s] for s in symbols)
 
     def mark_first_last_usage(self, lines):
         """

@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     MI300_ARCH,
     skipIfRocmArch,
     TEST_XPU,
+    xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -185,6 +186,8 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         self.assertEqual(len({eager, automatic, required, differently_unrolled}), 4)
         self.assertEqual(cpu, eager)
 
+    # cudagraph benchmarking policy is CUDA-only (autotune_process.py)
+    @xfailIf(TEST_XPU)
     def test_benchmark_request_restores_serialized_cudagraph_policy(self):
         import pickle
 
@@ -235,6 +238,8 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
 
         self.assertTrue(request.config_cudagraph_benchmarking)
 
+    # cudagraph benchmarking policy is CUDA-only (autotune_process.py)
+    @xfailIf(TEST_XPU)
     def test_benchmark_request_uses_automatic_cudagraph_policy(self):
         class FakeBenchmarkRequest(BenchmarkRequest):
             def do_bench(self, fn, *input_tensors, out=None):
@@ -1899,6 +1904,139 @@ class TestTemplateRender(TestCase):
             self.assertIn("maximum", code)
             # Verify prologue fusion: sigmoid fused via hook
             self.assertIn("tl.sigmoid", code)
+
+    def _patch_multi_output_external_add(self, boxes):
+        """Lower aten.add.Tensor to an external template with a
+        MultiOutputLayout whose outputs come from build_multi_outputs, as
+        Helion's kernels do under torch.compile. The kernel allocates and
+        returns its output, and the boxes build_multi_outputs returns are
+        appended to ``boxes``."""
+        import torch._inductor.ir as ir
+        from torch._inductor.utils import Placeholder
+
+        source = (
+            "import triton\n"
+            "import triton.language as tl\n"
+            "import torch\n"
+            "\n"
+            "@triton.jit\n"
+            "def _mock_multi_output_add(A, B, OUT, numel, XBLOCK: tl.constexpr):\n"
+            "    xindex = tl.program_id(0) * XBLOCK + tl.arange(0, XBLOCK)\n"
+            "    xmask = xindex < numel\n"
+            "    a = tl.load(A + xindex, mask=xmask)\n"
+            "    b = tl.load(B + xindex, mask=xmask)\n"
+            "    tl.store(OUT + xindex, a + b, mask=xmask)\n"
+            "\n"
+            "def {kernel_name}(A, B):\n"
+            "    out = torch.empty_like(A)\n"
+            "    numel = A.numel()\n"
+            "    grid = (triton.cdiv(numel, 128),)\n"
+            "    _mock_multi_output_add[grid](A, B, out, numel, XBLOCK=128)\n"
+            "    return (out,)\n"
+        )
+
+        def render(tb, kernel):
+            kernel._setup_fusion_hooks()
+            kernel._call_args = [inp.get_name() for inp in tb.inputs]
+            return PartialRender(
+                source.format(kernel_name=str(Placeholder.KERNEL_NAME)),
+                kernel.render_hooks,
+            )
+
+        class MultiOutputTemplateBuffer(MockExternalTemplateBuffer):
+            # The kernel allocates and returns its outputs; the template
+            # buffer itself holds no data.
+            def should_allocate(self):
+                return False
+
+            def get_size(self):
+                return next(iter(self._multi_output_children.values())).get_size()
+
+        def add_override(a, b, alpha=None):
+            a = ir.ExternKernel.require_contiguous(ir.ExternKernel.realize_input(a))
+            b = ir.ExternKernel.require_contiguous(ir.ExternKernel.realize_input(b))
+            tb = MultiOutputTemplateBuffer(
+                ir.MultiOutputLayout(device=a.get_device()), [a, b], render
+            )
+            out = V.graph.current_node.meta["val"]
+            # The same tensor listed twice is one output with one box.
+            first, second = ir.TemplateBuffer.build_multi_outputs(tb, (out, out))
+            boxes.extend((first, second))
+            return first
+
+        return patch_lowering(
+            {
+                torch.ops.aten.add.Tensor: (
+                    add_override,
+                    True,
+                    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+                    False,
+                )
+            }
+        )
+
+    def _check_multi_output_boxes(self, boxes):
+        import torch._inductor.ir as ir
+
+        self.assertEqual(len(boxes), 2)
+        self.assertIs(boxes[0], boxes[1])
+        self.assertIsInstance(boxes[0], ir.TensorBox)
+        self.assertIsInstance(boxes[0].data, ir.StorageBox)
+        self.assertIsInstance(boxes[0].data.data, ir.MultiOutput)
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch(cuda_backend="triton")
+    @unittest.skipIf(TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959")
+    def test_external_multi_output_template_output_returned_and_reused(self):
+        """A multi-output template's output that the graph returns and also
+        uses again lowers. GraphLowering.run_node reads result.data.data for
+        such a node, which failed on a bare TensorBox(MultiOutput) with
+        "'MultiOutput' object has no attribute 'data'"."""
+        boxes = []
+        with self._patch_multi_output_external_add(boxes):
+
+            @torch.compile
+            def f(a, b):
+                out = a + b
+                return out, out * 2
+
+            a = torch.randn(32, device=GPU_TYPE)
+            b = torch.randn(32, device=GPU_TYPE)
+            (out, doubled), (code,) = run_and_get_code(f, a, b)
+
+        torch.testing.assert_close(out, a + b)
+        torch.testing.assert_close(doubled, (a + b) * 2)
+        self.assertIn("_mock_multi_output_add", code)
+        # The template's kernel and Inductor's kernel for out * 2.
+        self.assertEqual(code.count("@triton.jit"), 2)
+        self._check_multi_output_boxes(boxes)
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch(cuda_backend="triton")
+    @unittest.skipIf(TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959")
+    def test_external_multi_output_template_output_returned_directly(self):
+        """A multi-output template's output that the graph returns is the
+        template's own buffer. A bare TensorBox(MultiOutput) was not seen as
+        realized, so ExternKernel.realize_input copied it with an extra
+        pointwise kernel."""
+        boxes = []
+        with self._patch_multi_output_external_add(boxes):
+
+            @torch.compile
+            def f(a, b):
+                return a + b
+
+            a = torch.randn(32, device=GPU_TYPE)
+            b = torch.randn(32, device=GPU_TYPE)
+            out, (code,) = run_and_get_code(f, a, b)
+
+        torch.testing.assert_close(out, a + b)
+        self.assertIn("_mock_multi_output_add", code)
+        # The template's kernel and no copy kernel.
+        self.assertEqual(code.count("@triton.jit"), 1)
+        self._check_multi_output_boxes(boxes)
 
     @inductor_config.patch(
         {

@@ -433,9 +433,9 @@
 - name: MPS
   patterns:
   - test/**
+  - torch/_inductor/codegen/mps.py
   - torch/csrc/inductor/aoti_torch/generated/c_shim_mps.h
-  - torch/testing/_internal/common_mps.py
-  - torch/testing/_internal/common_methods_invocations.py
+  - torch/testing/_internal/common_*.py
   - torch/testing/_internal/opinfo/**
   - aten/src/ATen/native/native_functions.yaml
   - aten/src/ATen/mps/**
@@ -537,11 +537,8 @@
 
 - name: IDEEP
   patterns:
-  - third_party/ideep
-  - caffe2/ideep/**
-  - caffe2/python/ideep/**
+  - third_party/oneDNN
   - cmake/Modules/FindMKLDNN.cmake
-  - third_party/mkl-dnn.BUILD
   approved_by:
   - XiaobingSuper
   - jgong5
@@ -734,6 +731,7 @@
   - dolpm
   - sanrise
   - NicolasHug
+  - thomasywang
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -808,6 +806,7 @@
   - '**sycl**'
   - '**SYCL**'
   - torch/_C/__init__.pyi.in
+  - test/test_transformers.py
   approved_by:
   - EikanWang
   - gujinghui
@@ -902,6 +901,7 @@
   - '*'
   approved_by:
   - aditvenk
+  - aelavender
   - andrewor14
   - angelayi
   - anshul-si
@@ -916,10 +916,8 @@
   - digantdesai
   - dolpm
   - drisspg
-  - dshi7
   - egienvalue
   - fegin
-  - frgossen
   - georgehong
   - htyu
   - huydhn
@@ -933,6 +931,7 @@
   - jdonald
   - jeanschmidt
   - jerryzh168
+  - jhou-jpg
   - jijunyan
   - joshuuuasu
   - kapilsh

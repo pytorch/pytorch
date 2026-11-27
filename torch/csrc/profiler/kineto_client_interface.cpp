@@ -23,9 +23,7 @@ using namespace torch::autograd::profiler;
 
 class LibKinetoClient : public libkineto::ClientInterface {
  public:
-  void init() override {
-    ::torch::mtia::initMemoryProfiler();
-  }
+  void init() override {}
 
   void prepare(
       bool report_input_shapes = false,
@@ -62,6 +60,9 @@ class LibKinetoClient : public libkineto::ClientInterface {
 
   void start_memory_profile() override {
     LOG(INFO) << "Starting on-demand memory profile";
+    // Device availability can load the MTIA runtime, which is unsafe during
+    // static initialization when this client is registered.
+    ::torch::mtia::initMemoryProfiler();
     startMemoryProfile();
   }
 

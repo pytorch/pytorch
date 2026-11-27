@@ -81,6 +81,7 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     set_warn_always_context,
     skipCUDANonDefaultStreamIf,
+    skipIfCppFakeTensor,
     skipIfNoLapack,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
@@ -1308,6 +1309,22 @@ class TestAutograd(TestCase):
         self.assertEqual(metadata_0.shape, (3,))
         self.assertEqual(metadata_1.shape, (3,))
 
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        x = torch.randn(3, 3, requires_grad=True)
+        x = Test.apply(x)
+        metadata = x.grad_fn._input_metadata[0]
+        self.assertEqual(metadata.shape, (3, 3))
+
+    @skipIfCppFakeTensor("no nested tensor support")
+    def test_grad_fn_input_metadata_nested(self):
         # Preserves symints
         nt = torch.nested.nested_tensor(
             [torch.randn(3, 2), torch.randn(2, 2)],
@@ -1322,20 +1339,6 @@ class TestAutograd(TestCase):
         self.assertTrue(nt_metadata.is_nested_tensor)
         self.assertFalse(nt_metadata.is_cpp_nested_tensor)
         self.assertEqual(nt_metadata.dtype, nt.dtype)
-
-        class Test(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                return grad_output
-
-        x = torch.randn(3, 3, requires_grad=True)
-        x = Test.apply(x)
-        metadata = x.grad_fn._input_metadata[0]
-        self.assertEqual(metadata.shape, (3, 3))
 
     def test_gradient_edge_output(self):
         x = torch.tensor([1.0, 2.0], requires_grad=True)
@@ -6342,6 +6345,8 @@ Done""",
         if grad_shape != torch.Size([5, 10]):
             raise AssertionError(f"expected grad_shape == (5, 10), got {grad_shape}")
 
+    @skipIfCppFakeTensor("no nested tensor support")
+    def test_calculate_shape_util_nested(self):
         out = torch.nested.as_nested_tensor(
             [
                 torch.randn(10, 5, requires_grad=True),
@@ -12247,42 +12252,43 @@ get_out().sum().backward()
                 )
                 self.assertTrue(err_msg in e.output.decode("utf-8"))
 
+    def _test_view_func_replay(self, fn, inp, *args, use_unsafe_view_func=False):
+        def _assert_match_metadata(a, b):
+            self.assertEqual(a.size(), b.size())
+            self.assertEqual(a.stride(), b.stride())
+            self.assertEqual(a.storage_offset(), b.storage_offset())
+            self.assertEqual(a.device, b.device)
+            self.assertEqual(a.dtype, b.dtype)
+
+        outs = fn(inp, *args)
+        # handle functions that return multiple views (e.g. split)
+        if isinstance(outs, torch.Tensor):
+            outs = [outs]
+
+        for out in outs:
+            self.assertTrue(out._is_view())
+            self.assertTrue(out._base is inp)
+
+            # forward view_func
+            new_inp = inp.clone()
+            _assert_match_metadata(new_inp, inp)
+            if use_unsafe_view_func:
+                new_out = out._view_func_unsafe(new_inp)
+            else:
+                new_out = out._view_func(new_inp)
+            _assert_match_metadata(new_out, out)
+            self.assertEqual(new_out, out)
+
+            # reverse view_func
+            new_out = out.detach()
+            new_inp = out._rev_view_func_unsafe(new_out)
+            _assert_match_metadata(new_inp, inp)
+            self.assertTrue(new_inp._is_view())
+            self.assertTrue(new_inp._base is new_out)
+
     def test_view_func_replay(self):
         with torch.autograd._force_original_view_tracking(True):
-
-            def _assert_match_metadata(a, b):
-                self.assertEqual(a.size(), b.size())
-                self.assertEqual(a.stride(), b.stride())
-                self.assertEqual(a.storage_offset(), b.storage_offset())
-                self.assertEqual(a.device, b.device)
-                self.assertEqual(a.dtype, b.dtype)
-
-            def _test_fn(fn, inp, *args, use_unsafe_view_func=False):
-                outs = fn(inp, *args)
-                # handle functions that return multiple views (e.g. split)
-                if isinstance(outs, torch.Tensor):
-                    outs = [outs]
-
-                for out in outs:
-                    self.assertTrue(out._is_view())
-                    self.assertTrue(out._base is inp)
-
-                    # forward view_func
-                    new_inp = inp.clone()
-                    _assert_match_metadata(new_inp, inp)
-                    if use_unsafe_view_func:
-                        new_out = out._view_func_unsafe(new_inp)
-                    else:
-                        new_out = out._view_func(new_inp)
-                    _assert_match_metadata(new_out, out)
-                    self.assertEqual(new_out, out)
-
-                    # reverse view_func
-                    new_out = out.detach()
-                    new_inp = out._rev_view_func_unsafe(new_out)
-                    _assert_match_metadata(new_inp, inp)
-                    self.assertTrue(new_inp._is_view())
-                    self.assertTrue(new_inp._base is new_out)
+            _test_fn = self._test_view_func_replay
 
             # test individual view ops
             _test_fn(torch.ops.aten.alias.default, torch.rand(2, 2))
@@ -12345,8 +12351,11 @@ get_out().sum().backward()
 
             _test_fn(chain_with_only_current_view_func, torch.randn(2, 3, 4))
 
-            # TODO: Move this somewhere else
-            # test NT views
+    @skipIfCppFakeTensor("no nested tensor support")
+    def test_view_func_replay_nested(self):
+        with torch.autograd._force_original_view_tracking(True):
+            _test_fn = self._test_view_func_replay
+
             from torch.nested._internal.nested_tensor import (
                 nested_view_from_values_offsets,
             )
@@ -18077,6 +18086,8 @@ class TestAutogradMultipleDispatch(TestCase):
             # bogus gradient registered for AutogradCUDA is grad * 2
             self.assertEqual(t.grad, grad * 2)
 
+    @skipIfCppFakeTensor("no nested tensor support")
+    def test_autograd_multiple_dispatch_registrations_nested(self, device):
         # test registered AutogradNestedTensor formula
         a = (
             torch.arange(6, dtype=torch.float, device=device)
@@ -18111,6 +18122,8 @@ class TestAutogradMultipleDispatch(TestCase):
         # t.grad is just out.grad by composite op since _test_autograd_multiple_dispatch is just a clone
         self.assertEqual(t.grad, grad)
 
+    @skipIfCppFakeTensor("no nested tensor support")
+    def test_autograd_composite_implicit_and_dispatch_registration_nested(self, device):
         # test registered AutogradNestedTensor formula
         a = (
             torch.arange(6, dtype=torch.float, device=device)
@@ -18396,25 +18409,27 @@ class TestAutogradMultipleDispatchGeneric(TestCase):
                     expected[i, i] = 1.0
                 self.assertEqual(x.grad, expected)
 
-    def test_per_dispatch_key_input_saving(self):
-        # Tests that sum.dim_IntList's input is not saved for regular tensors but is saved for nested tensors
-        def foo(x):
-            # Don't modify the input inplace
-            x = x.clone()
-            res = x.sum(-1, keepdim=True)
-            x.add_(x)
-            return res
+    def _test_per_dispatch_key_input_saving(self, x):
+        x = x.clone()
+        res = x.sum(-1, keepdim=True)
+        x.add_(x)
+        return res
 
+    def test_per_dispatch_key_input_saving(self):
         inp = torch.rand(2, requires_grad=True)
         # sum's input is not saved for regular Tensors
-        foo(inp).backward()
+        self._test_per_dispatch_key_input_saving(inp).backward()
 
+    @skipIfCppFakeTensor("no nested tensor support")
+    def test_per_dispatch_key_input_saving_nested(self):
         # sum's input is saved for Nested Tensors
         nt = torch.nested.nested_tensor(
             [torch.rand(2), torch.rand(2)], requires_grad=True
         )
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            foo(nt).backward(torch.nested.nested_tensor([torch.rand(1), torch.rand(1)]))
+            self._test_per_dispatch_key_input_saving(nt).backward(
+                torch.nested.nested_tensor([torch.rand(1), torch.rand(1)])
+            )
 
 
 @skipIfTorchDynamo("tests eager C++ error paths that Dynamo does not reproduce")

@@ -20,6 +20,7 @@ from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
+from .. import config
 from ..codecache import code_hash, get_path
 from ..scheduler import WhyNoFuse
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata, Placeholder
@@ -58,7 +59,17 @@ DTYPE_TO_METAL = {
     torch.float: "float",
     torch.half: "half",
     torch.bfloat16: "bfloat",
+    torch.float8_e4m3fn: "c10::metal::float8_e4m3fn",
+    torch.float8_e8m0fnu: "c10::metal::float8_e8m0fnu",
+    # Two packed e2m1 values that kernels only copy or bitcast, as Triton does
+    torch.float4_e2m1fn_x2: "uchar",
 }
+FP8_METAL_NAMES = {
+    torch.float8_e4m3fn: "fp8e4m3fn",
+    torch.float8_e8m0fnu: "fp8e8m0fnu",
+}
+# Reduced-precision types that are computed in float32
+LOW_PRECISION_TYPES = (torch.float16, torch.bfloat16, *FP8_METAL_NAMES)
 
 
 def value_to_metal(val: float | int | bool | str | CSEVariable) -> str:
@@ -85,6 +96,12 @@ class MetalExprPrinter(ExprPrinter_):
         if expr.is_integer:
             return f"c10::metal::floor_divide({x}, {div})"
         return f"metal::floor({x}) / ({div})"
+
+    def _print_PythonMod(self, expr: sympy.Expr) -> str:
+        x, div = expr.args
+        if x.is_nonnegative and div.is_nonnegative:
+            return f"({self.doprint(x)}) % ({self.doprint(div)})"
+        return f"c10::metal::remainder({self.doprint(x)}, {self.doprint(div)})"
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = expr.args
@@ -218,7 +235,7 @@ class MetalOverrides(OpOverrides):
                 "float64 cast requested, probably from tensorify_python_scalars"
             )
             return f"static_cast<float>({x})"
-        if use_compute_types and dtype in (torch.float16, torch.bfloat16):
+        if use_compute_types and dtype in LOW_PRECISION_TYPES:
             return f"static_cast<float>(static_cast<{DTYPE_TO_METAL[dtype]}>({x}))"
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
@@ -226,7 +243,14 @@ class MetalOverrides(OpOverrides):
     def to_dtype_bitcast(
         x: CSEVariable, dtype: torch.dtype, src_dtype: torch.dtype
     ) -> str:
-        return f"as_type<{DTYPE_TO_METAL[dtype]}>(static_cast<{DTYPE_TO_METAL[src_dtype]}>({x}))"
+        # as_type rejects fp8 structs; fp8 values are held as float, so go through the encoders
+        if src_dtype in FP8_METAL_NAMES:
+            src = f"c10::metal::detail::{FP8_METAL_NAMES[src_dtype]}_from_fp32({x})"
+        else:
+            src = f"static_cast<{DTYPE_TO_METAL[src_dtype]}>({x})"
+        if dtype in FP8_METAL_NAMES:
+            return f"c10::metal::detail::{FP8_METAL_NAMES[dtype]}_to_fp32(as_type<uchar>({src}))"
+        return f"as_type<{DTYPE_TO_METAL[dtype]}>({src})"
 
     @staticmethod
     def constant(val: bool | float | int, dtype: torch.dtype) -> str:
@@ -645,6 +669,11 @@ class MetalKernel(SIMDKernel):
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
     simd_group_size = 32
+    max_buffer_args = 31
+    # thread_position_in_grid is 32-bit per axis; Metal silently truncates larger grids
+    max_grid_size = torch.iinfo(torch.uint32).max
+    # Power-of-two stride of the in-kernel loop over ranges that may not fit the grid
+    grid_stride = 2**31
     # Device that generated kernels are launched on. Subclasses reusing the
     # Metal-style call plumbing for another device can override this instead of
     # copying call_kernel(). A retarget is not usable on its own yet: the
@@ -681,11 +710,13 @@ class MetalKernel(SIMDKernel):
         index = self.prepare_indexing(index)
         dtype = V.graph.get_dtype(name)
         line = f"{var}[{self.index_to_str(index)}]"
-        if dtype in [torch.float16, torch.bfloat16]:
+        if dtype in LOW_PRECISION_TYPES:
             # TODO(NS): Figure out the right balance between optype casts
             # op_math_t for half-precision floats should be float32
             # Otherwise it can lead to a correctness issues with eager
-            line = f"static_cast<float>({line})"
+            # fp8 structs can't be static_cast from the constant address space
+            cast = "c10::metal::cast_to" if dtype in FP8_METAL_NAMES else "static_cast"
+            line = f"{cast}<float>({line})"
             dtype = torch.float32
         return self.cse.generate(self.loads, line, dtype=dtype)
 
@@ -825,9 +856,14 @@ class MetalKernel(SIMDKernel):
         if reduction_type == "any":
             acc = self._new_idxvar(dtype)
             self.indexing_code.writeline(f"{acc} = false;")
-            self.indexing_code.writeline(
-                "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
-            )
+            # Serial reductions keep acc thread-local, so barriers protect nothing here.
+            # They would also be unsafe: a serial threadgroup spans many rows, and under a
+            # grid-stride loop its threads can handle different numbers of rows, while
+            # Metal requires every thread of a threadgroup to reach each barrier.
+            if self.max_threadgroup_size > 1:
+                self.indexing_code.writeline(
+                    "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                )
             self.compute.splice(
                 f"""
                 if ({value}) {{
@@ -835,9 +871,10 @@ class MetalKernel(SIMDKernel):
                 }}
             """
             )
-            self.stores.writeline(
-                "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
-            )
+            if self.max_threadgroup_size > 1:
+                self.stores.writeline(
+                    "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                )
             return acc
 
         self.headers.add("reduction_utils")
@@ -1091,6 +1128,19 @@ class MetalKernel(SIMDKernel):
         self.compute.clear()
         self.stores.clear()
 
+    def grid_stride_prefixes(self) -> OrderedSet[str]:
+        """Prefixes of non-reduction ranges that may exceed the grid. These launch
+        min(numel, grid_stride) threads that each loop over the range in grid_stride steps."""
+        # 32-bit indexing already guards the whole iteration space to fit in int32
+        if self.get_index_dtype_as_torch_dtype() != torch.int64:
+            return OrderedSet()
+        return OrderedSet(
+            t.prefix
+            for t in self.active_range_trees()
+            if not t.is_reduction
+            and not V.graph.sizevars.statically_known_leq(t.numel, self.max_grid_size)
+        )
+
     def codegen_kernel(self, name: str = "generated_kernel") -> str:
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
@@ -1103,6 +1153,7 @@ class MetalKernel(SIMDKernel):
             code.writeline("compile_mps_shader('''")
 
         idx_vars = self.active_range_trees()
+        strided = self.grid_stride_prefixes()
         with code.indent():
             if not V.graph.cpp_wrapper:
                 for header in self.headers:
@@ -1118,6 +1169,7 @@ class MetalKernel(SIMDKernel):
                 )
                 code.writeline(header_contents)
 
+            head = []
             if self.inside_reduction and self.max_threadgroup_size > 1:
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
@@ -1129,16 +1181,17 @@ class MetalKernel(SIMDKernel):
                     if isinstance(total_reduction_size, sympy.Integer)
                     else self.max_threadgroup_size
                 )
-                code.writeline(
+                head.append(
                     f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
                 )
-            code.writeline(f"kernel void {fn_name}(")
+            head.append(f"kernel void {fn_name}(")
             with code.indent():
+                tensors = []
                 for outer, inner in self.args.output_buffers.items():
                     if outer in self.removed_buffers:
                         continue
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
-                    code.writeline(f"device {dtype_str}* {inner},")
+                    tensors.append((f"device {dtype_str}*", inner, False))
                 for outer, inner in self.args.input_buffers.items():
                     dtype = V.graph.get_dtype(outer)
                     # MPS does not support float64, but scalar inputs are fine
@@ -1149,16 +1202,30 @@ class MetalKernel(SIMDKernel):
                         dtype_str = "float"
                     else:
                         dtype_str = self.dtype_to_str(dtype)
-                    code.writeline(f"constant {dtype_str}* {inner},")
-                for inner in self.args.sizevars.values():
-                    code.writeline(f"constant long& {inner},")
+                    on_cpu = V.graph.is_zero_dim_cpu_buffer(outer)
+                    tensors.append((f"constant {dtype_str}*", inner, on_cpu))
+                ints = list(self.args.sizevars.values())
 
                 # Write dynamic values as inputs
                 for idx_var in idx_vars:
                     if isinstance(idx_var.numel, sympy.Integer):
                         pass
                     else:
-                        code.writeline(f"constant long& {idx_var.prefix}numel,")
+                        ints.append(f"{idx_var.prefix}numel")
+                n_args = len(tensors) + len(ints) + ("error" in self.headers)
+                pack_ints = n_args > self.max_buffer_args
+                pack_tensors = pack_ints and not V.graph.cpp_wrapper
+                params = [f"{t} {n}," for t, n, _ in tensors]
+                if pack_tensors:
+                    fields = [f"{'ulong' if c else t} {n};" for t, n, c in tensors]
+                    head = [f"struct {fn_name}_buffers {{", *fields, "};", *head]
+                    params = [f"constant {fn_name}_buffers& buffers,"]
+                int_params = [f"constant long& {n}," for n in ints]
+                if pack_ints and ints:
+                    int_params = ["constant long* int_args,"]
+                with code.indent(-1):
+                    code.writelines(head)
+                code.writelines(params + int_params)
 
                 # Add error buffer parameter if error header is used
                 if "error" in self.headers:
@@ -1170,7 +1237,9 @@ class MetalKernel(SIMDKernel):
                     f"uint{len(idx_vars)}" if len(idx_vars) > 1 else "uint"
                 )
                 thread_pos_var_name = (
-                    idx_vars[0].name if len(idx_vars) == 1 else "thread_pos"
+                    idx_vars[0].name
+                    if len(idx_vars) == 1 and not strided
+                    else "thread_pos"
                 )
                 thread_pos_suffix = "," if self.inside_reduction else ""
                 code.writeline(
@@ -1182,13 +1251,47 @@ class MetalKernel(SIMDKernel):
                     )
             code.writeline(") {")
             with code.indent():
-                if len(idx_vars) > 1:
+                if pack_tensors:
+                    for metal_type, inner, on_cpu in tensors:
+                        cast = f"({metal_type})&" if on_cpu else ""
+                        code.writeline(f"{metal_type} {inner} = {cast}buffers.{inner};")
+                if pack_ints:
+                    for idx, inner in enumerate(ints):
+                        code.writeline(f"const long {inner} = int_args[{idx}];")
+                if len(idx_vars) > 1 or strided:
                     for idx, var in enumerate(idx_vars):
-                        code.writeline(
-                            f"auto {var.name} = thread_pos.{chr(120 + idx)};"
+                        pos = (
+                            f"thread_pos.{chr(120 + idx)}"
+                            if len(idx_vars) > 1
+                            else "thread_pos"
                         )
-                code.splice(self.indexing_code)
-                code.splice(self.body)
+                        if var.prefix not in strided:
+                            code.writeline(f"auto {var.name} = {pos};")
+                            continue
+                        numel = (
+                            self.sexpr(var.numel)
+                            if isinstance(var.numel, sympy.Integer)
+                            else f"{var.prefix}numel"
+                        )
+                        code.writeline(
+                            f"for ({self.index_dtype} {var.name} = {pos}; {var.name} < {numel}; {var.name} += {self.grid_stride}) {{"
+                        )
+                with code.indent(len(strided)):
+                    code.splice(self.indexing_code)
+                    code.splice(self.body)
+                    # Threads of a threadgroup share their non-reduction indices and so
+                    # iterate in lockstep; the next iteration must not overwrite threadgroup
+                    # memory that other threads are still reading.
+                    if (
+                        strided
+                        and self.inside_reduction
+                        and self.max_threadgroup_size > 1
+                    ):
+                        code.writeline(
+                            "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                        )
+                if strided:
+                    code.writeline("}" * len(strided))
             code.writeline("}")
 
         if V.graph.cpp_wrapper:
@@ -1216,6 +1319,7 @@ class MetalKernel(SIMDKernel):
 
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
+        num_tensors = len(args)
         args += [str(v) for v in self.args.sizevars]
         arg_types = [arg_name_to_type[arg] for arg in args]
 
@@ -1233,6 +1337,13 @@ class MetalKernel(SIMDKernel):
                 args.append(str(expr))
                 arg_types.append(int)
 
+        if len(args) + ("error" in self.headers) > self.max_buffer_args:
+            tensors, ints = args[:num_tensors], args[num_tensors:]
+            if not V.graph.cpp_wrapper:
+                args = [f"[{', '.join(a)}]" for a in (tensors, ints) if a]
+            elif ints:
+                args[num_tensors:] = [f"{{{', '.join(ints)}}}"]
+                arg_types[num_tensors:] = [list]
         expr_printer = self.cexpr if V.graph.cpp_wrapper else self.pexpr
 
         def format_threads(threads: list[str], kwarg: str) -> str:
@@ -1245,10 +1356,13 @@ class MetalKernel(SIMDKernel):
         # For reduction kernels, limit the maximum size over reduction dimensions to
         # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
+            strided = self.grid_stride_prefixes()
             threads = [
                 expr_printer(
                     Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
                     if v.is_reduction
+                    else Min(v.numel, self.grid_stride)  # type: ignore[misc]
+                    if v.prefix in strided
                     else v.numel
                 )
                 for v in self.active_range_trees()
@@ -1349,6 +1463,12 @@ class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
 
     def __init__(self, scheduler: Scheduler | None) -> None:
+        max_tiles = config.triton.max_tiles
+        if max_tiles is not None and max_tiles > 3:
+            raise RuntimeError(
+                "MPS requires torch._inductor.config.triton.max_tiles <= 3, "
+                f"got {max_tiles}"
+            )
         super().__init__(scheduler)
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
@@ -1360,6 +1480,10 @@ class MetalScheduling(SIMDScheduling):
         # scheduler fuses those before asking the backend.
         if node1.is_template() or node2.is_template():
             WhyNoFuse(node1, node2)("MPS does not fuse into external templates")
+            return False
+        cap = MetalKernel.max_buffer_args - 1
+        too_many = node1.scheduler.fusion_prevent_too_many_reads_and_writes
+        if V.graph.cpp_wrapper and too_many(node1, node2, cap):
             return False
         return super().can_fuse(node1, node2)
 
@@ -1448,9 +1572,7 @@ class MetalScheduling(SIMDScheduling):
         for line in metal_src.split("\n"):
             if line.strip().startswith("#include"):
                 continue
-            body_lines.append(
-                line.replace("kernel void generated_kernel(", f"kernel void {fn_name}(")
-            )
+            body_lines.append(line.replace("generated_kernel", fn_name))
 
         headers_repr = repr(sorted(kernel.headers))
         wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")

@@ -101,6 +101,7 @@ def _dtype_to_typestr(dtype):
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
     _is_param: bool
+    _fake_pytype: "type[Tensor] | None"
     # pyrefly: ignore [missing-attribute]
     __dlpack_c_exchange_api__: object = torch._C._dlpack_exchange_api()
 
@@ -1750,8 +1751,9 @@ class Tensor(torch._C.TensorBase):
             device_type = DLDeviceType.kDLCPU
         elif torch_device_type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
-        elif self.device.type == "privateuse1":
-            device_type = DLDeviceType.kDLExtDev
+        elif torch_device_type == torch._C._get_privateuse1_backend_name():
+            dl_device_type, idx = torch._C._torchDeviceToDLDevice(device)
+            device_type = DLDeviceType(dl_device_type)
         elif torch_device_type == "xla":
             import torch_xla
 

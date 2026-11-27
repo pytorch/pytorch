@@ -549,6 +549,7 @@ class TestBasicOps(__TestCase):
         self.assertEqual(len(set(map(id, permutations('abcde', 3)))), 1)
         self.assertNotEqual(len(set(map(id, list(permutations('abcde', 3))))), 1)
 
+    @slowTest
     def test_combinatorics(self):
         # Test relationships between product(), permutations(),
         # combinations() and combinations_with_replacement().

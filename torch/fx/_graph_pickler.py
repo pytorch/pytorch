@@ -23,10 +23,12 @@ from torch._guards import TracingContext
 from torch._inductor.standalone_compile import AOTCompiledArtifact
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     is_fake_tensor,
     Tensor,
+    unset_fake_temporarily,
 )
 from torch._subclasses.meta_utils import (
     MetaConverter,
@@ -167,6 +169,8 @@ class GraphPickler(pickle.Pickler):
             return _SymNodePickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, CppFakeTensorMode):
+            return (_unpickle_as_none, ())
         elif isinstance(obj, FakeScriptObject):
             from torch._library.opaque_object import is_opaque_constant_type
 
@@ -217,7 +221,7 @@ class GraphPickler(pickle.Pickler):
             return stream.getvalue()
 
     @staticmethod
-    def loads(data: bytes, fake_mode: FakeTensorMode) -> object:
+    def loads(data: bytes, fake_mode: FakeTensorMode | CppFakeTensorMode) -> object:
         """
         Unpickle an object.
         """
@@ -419,9 +423,9 @@ class GraphPickler(pickle.Pickler):
 
 
 class _UnpickleState:
-    def __init__(self, fake_mode: FakeTensorMode) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
         self.fake_mode = fake_mode
-        self.meta_converter: MetaConverter[FakeTensor] = MetaConverter()
+        self.meta_converter: MetaConverter[Tensor] = MetaConverter()
 
 
 # This token is passed when pickling to indicate that we want to use the
@@ -516,7 +520,7 @@ class _TensorPickleData:
     def reduce_helper(
         cls, pickler: GraphPickler, obj: Tensor
     ) -> tuple[
-        Callable[[Self, _UnpickleState], FakeTensor], tuple[Self, _UnpickleStateToken]
+        Callable[[Self, _UnpickleState], Tensor], tuple[Self, _UnpickleStateToken]
     ]:
         return cls.unpickle, (
             cls(pickler._meta_tensor_describer, obj),
@@ -558,7 +562,7 @@ class _TensorPickleData:
             if getattr(self.metadata, k) is not None:
                 raise AssertionError(f"not None: {k}: {getattr(self.metadata, k)}")
 
-    def unpickle(self, unpickle_state: _UnpickleState) -> FakeTensor:
+    def unpickle(self, unpickle_state: _UnpickleState) -> Tensor:
         # TODO: make common w/ _output_from_cache_entry() in fake_tensor.py?
         metadata = dataclasses.replace(
             self.metadata,
@@ -575,13 +579,14 @@ class _TensorPickleData:
 
         def with_fake(
             make_meta_t: Callable[[], torch.Tensor], device: torch.device | str
-        ) -> FakeTensor:
-            with no_dispatch():
-                return FakeTensor(
-                    unpickle_state.fake_mode,
-                    make_meta_t(),
-                    # pyrefly: ignore [bad-argument-type]
-                    device,
+        ) -> Tensor:
+            with no_dispatch(), unset_fake_temporarily():
+                return (
+                    unpickle_state.fake_mode.fake_tensor_converter.from_meta_and_device(
+                        unpickle_state.fake_mode,
+                        make_meta_t(),
+                        torch.device(device),
+                    )
                 )
 
         return unpickle_state.meta_converter.meta_tensor(
