@@ -913,21 +913,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
 }
 
-meta_dispatch_device_expected_failures['xpu'] = {
-    # The log_sigmoid_forward decomposition picks the buffer shape from
-    # self.is_cuda or self.is_xpu, which are both False for a meta tensor, so the
-    # meta buffer keeps the input shape while the real XPU kernel returns shape (0,),
-    # exactly as on CUDA above. Affects
-    #   test_dispatch_meta_outplace_nn_functional_logsigmoid
-    #   test_dispatch_symbolic_meta_outplace_nn_functional_logsigmoid
-    #   test_dispatch_meta_outplace_nn_functional_multilabel_soft_margin_loss
-    #   test_dispatch_symbolic_meta_outplace_nn_functional_multilabel_soft_margin_loss
-    # (multilabel_soft_margin_loss calls log_sigmoid).
-    # https://github.com/intel/torch-xpu-ops/issues/5020
-    aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},  # https://github.com/intel/torch-xpu-ops/issues/5020
-    aten.log_sigmoid_forward.output: {bf16, f16, f64, f32},  # https://github.com/intel/torch-xpu-ops/issues/5020
-}
-
 meta_dispatch_device_skips['cpu'] = {
     aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
 
@@ -1613,8 +1598,7 @@ class TestMeta(_TestMetaBase):
 
 @unMarkDynamoStrictTest
 class TestMetaDeviceType(_TestMetaBase):
-    # Tests whose reference stride/output comes from the CUDA kernel, so the
-    # whole class is restricted to CUDA via only_for='cuda'.
+    # Tests whose reference stride/output comes from the accelerator kernel.
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfCrossRef
@@ -1738,7 +1722,7 @@ class TestMetaCore(TestCase):
     # Device-agnostic meta tests. Tests here may use the CPU eager kernel as the
     # reference; CPU is treated as the baseline device, not a hardware-specific
     # accelerator, so a CPU reference does not couple these tests to hardware.
-    # CUDA-referenced tests live in TestMetaCudaRef instead.
+    # Accelerator-referenced tests live in TestMetaDeviceType instead.
     hw_classification = HardwareClassification.GENERIC
 
     def test_empty_quantized(self):

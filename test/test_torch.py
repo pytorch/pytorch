@@ -594,7 +594,7 @@ class TestTorchDeviceType(TestCase):
         cow = torch._lazy_clone(torch.arange(4.0, device=device))
         self.assertTrue(torch._C._is_cow_tensor(cow))
         out = torch.zeros(4, device=device)
-        g = torch.accelerator.Graph()
+        g = torch.cuda.CUDAGraph() if self.device_type == "cuda" else torch.accelerator.Graph()
         with torch.get_device_module(device).graph(g):
             with self.assertRaisesRegex(RuntimeError, "Materialize COW graph inputs"):
                 cow.const_data_ptr()
@@ -7991,7 +7991,7 @@ class TestTorchAccelerator(TestCase):
                 if expect.numel() != 0:
                     self.assertFalse(expect.eq(t).all().item())
 
-            g = torch.accelerator.Graph()
+            g = torch.cuda.CUDAGraph() if self.device_type == "cuda" else torch.accelerator.Graph()
             with torch.get_device_module(device).graph(g):
                 torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
 

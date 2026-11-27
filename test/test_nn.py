@@ -51,7 +51,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, dtypesIfXPU,
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, skipXPUIf, largeTensorTest, expectedFailureMeta, \
-    expectedFailureMPS, expectedFailureXPU, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric, toleranceOverride, tol
+    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric, toleranceOverride, tol
 from torch.testing import make_tensor
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
@@ -9923,12 +9923,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("mode", ["bilinear", "bicubic", "lanczos"])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @expectedFailureMPS  # double device type
-    @expectedFailureXPU  # XPU interpolate backward is nondeterministic (atomic add); intel/torch-xpu-ops#6206
     @onlyNativeDeviceTypes
-    @decorateIf(
-        skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6206"),
-        lambda p: torch.device(p['device']).type == 'xpu' and p['mode'] != 'lanczos',
-    )
     @decorateIf(
         unittest.skip('Lanczos mode is only supported on CPU'),
         lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type == 'cuda',
@@ -9980,6 +9975,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertTrue(out.is_contiguous())
 
     @onlyAccelerator
+    @expectedFailureMPS  # double device type
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6318")
     @skipIfRocm
     @parametrize_test("align_corners", [True, False])
@@ -13999,7 +13995,7 @@ class TestNNDeviceType(NNTestCase):
 
         atol = 1e-5
         rtol = 1e-7
-        if device in ("cuda", "xpu"):
+        if torch.device(device).type in ("cuda", "xpu"):
             atol = 1e-3
             rtol = 1e-2
 
@@ -14120,7 +14116,7 @@ class TestNNDeviceType(NNTestCase):
             # NestedTensor is only supported for the fast path
             # currently, which won't be used if training.
             if (batch_first and not training and
-                    (str(device) in ('cuda', 'cpu', 'xpu')) and not TEST_WITH_CROSSREF):
+                    (torch.device(device).type in ('cuda', 'cpu', 'xpu')) and not TEST_WITH_CROSSREF):
                 @skipIfCppFakeTensor("no nested tensor support")
                 def _test_nested():
                     encoder_input[0][-1] = torch.zeros_like(encoder_input[0][1])
