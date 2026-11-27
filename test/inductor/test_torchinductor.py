@@ -16327,6 +16327,52 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(out.stride(), compiled_out.stride())
         self.assertEqual(out, compiled_out)
 
+    def test_like_preserves_dense_size_one_strides(self):
+        # Regression for #197815: preserve_format must keep size-1 dim strides.
+        def f(x):
+            return (
+                torch.full_like(x, 2),
+                torch.ones_like(x),
+                torch.zeros_like(x),
+                torch.empty_like(x),
+            )
+
+        cases = [
+            torch.empty_strided((5, 1), (1, 5), device=self.device),
+            torch.empty_strided((2, 1, 4), (4, 1, 1), device=self.device),
+            torch.empty_strided((1, 4, 5), (5, 5, 1), device=self.device),
+        ]
+        for x in cases:
+            expected = f(x)
+            actual = torch.compile(f, fullgraph=True)(x)
+            for e, a in zip(expected, actual):
+                self.assertEqual(e.stride(), a.stride())
+            self.assertEqual(expected[0], actual[0])
+            self.assertEqual(expected[1], actual[1])
+            self.assertEqual(expected[2], actual[2])
+
+    def test_rand_like_preserves_dense_strides_and_rng_order(self):
+        # Dense preserve_format must keep input strides and match eager RNG
+        # fill order (physical) for channels_last / transposed inputs.
+        def f(x):
+            return torch.rand_like(x), torch.randn_like(x)
+
+        cases = [
+            torch.empty_strided((5, 1), (1, 5), device=self.device),
+            torch.randn(2, 3, 4, 5, device=self.device).to(
+                memory_format=torch.channels_last
+            ),
+            torch.randn(3, 4, device=self.device).t(),
+        ]
+        for x in cases:
+            torch.manual_seed(0)
+            expected = f(x)
+            torch.manual_seed(0)
+            actual = torch.compile(f, fullgraph=True)(x)
+            for e, a in zip(expected, actual):
+                self.assertEqual(e.stride(), a.stride())
+                self.assertEqual(e, a)
+
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
         def fn(x):
