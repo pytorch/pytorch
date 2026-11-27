@@ -97,16 +97,16 @@ b2b_gemm_left_template = TritonTemplate(
     for _ in range(num_o_block):
         c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
         c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
-        c = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_O * BLOCK_SIZE_P
+        c = tl.load(c_ptrs, mask=c_mask, other=0.0)  # BLOCK_SIZE_O * BLOCK_SIZE_P
         acc_ab = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_O), dtype=tl.float32)
         offs_n = tl.arange(0, BLOCK_SIZE_N)
         for __ in range(num_n_block):
             a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
             a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
-            a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+            a = tl.load(a_ptrs, mask=a_mask, other=0.0)  # BLOCK_SIZE_M * BLOCK_SIZE_N
             b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
             b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
-            b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
+            b = tl.load(b_ptrs, mask=b_mask, other=0.0)  # BLOCK_SIZE_N * BLOCK_SIZE_O
             acc_ab += tl.dot(a, b, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_INNER)
             offs_n += BLOCK_SIZE_N
         # apply the subgraph
@@ -115,7 +115,13 @@ b2b_gemm_left_template = TritonTemplate(
             output_name="post_subgraph_acc_ab",
             inner_mm="acc_ab"
         ) | indent_except_first(2) }}
-        acc += tl.dot(post_subgraph_acc_ab, c, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
+        # fp16 keeps native operands so tl.dot can use the matrix units; bf16
+        # and fp32 keep fp32 because casting the intermediate to bf16 loses too
+        # much precision.
+        if c.dtype == tl.float16:
+            acc += tl.dot(post_subgraph_acc_ab.to(tl.float16), c, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
+        else:
+            acc += tl.dot(post_subgraph_acc_ab, c.to(tl.float32), out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
         offs_o += BLOCK_SIZE_O
 
     # store preparation
@@ -176,16 +182,16 @@ b2b_gemm_right_template = TritonTemplate(
     for _ in range(num_n_block):
         a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
         a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
-        a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+        a = tl.load(a_ptrs, mask=a_mask, other=0.0)  # BLOCK_SIZE_M * BLOCK_SIZE_N
         acc_bc = tl.zeros((BLOCK_SIZE_N, BLOCK_SIZE_P), dtype=tl.float32)
         offs_o = tl.arange(0, BLOCK_SIZE_O)
         for __ in range(num_o_block):
             b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
             b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
-            b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
+            b = tl.load(b_ptrs, mask=b_mask, other=0.0)  # BLOCK_SIZE_N * BLOCK_SIZE_O
             c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
             c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
-            c = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_O * BLOCK_SIZE_P
+            c = tl.load(c_ptrs, mask=c_mask, other=0.0)  # BLOCK_SIZE_O * BLOCK_SIZE_P
             acc_bc += tl.dot(b, c, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_INNER)
             offs_o += BLOCK_SIZE_O
         # apply the subgraph
@@ -194,7 +200,11 @@ b2b_gemm_right_template = TritonTemplate(
             output_name="post_subgraph_acc_bc",
             inner_mm="acc_bc"
         ) | indent_except_first(2) }}
-        acc += tl.dot(a, post_subgraph_acc_bc, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
+        # Same fp16 native-operand choice as the left-associative template.
+        if a.dtype == tl.float16:
+            acc += tl.dot(a, post_subgraph_acc_bc.to(tl.float16), out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
+        else:
+            acc += tl.dot(a.to(tl.float32), post_subgraph_acc_bc, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
         offs_n += BLOCK_SIZE_N
 
     # store preparation
