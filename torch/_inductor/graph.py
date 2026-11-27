@@ -129,6 +129,7 @@ from .utils import (
     GraphPartitionMap,
     GraphPartitionPlan,
     is_same_tensor,
+    is_strict_cuda_triton,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
@@ -2354,12 +2355,18 @@ class GraphLowering(torch.fx.Interpreter):
                         strides = ir.FlexibleLayout.stride_ordered_for_memory_format(
                             result.get_size(), torch.channels_last
                         )
-                    if not unbacked_symbols_in_strides and len(strides):
+                    if len(strides) and (
+                        not unbacked_symbols_in_strides
+                        or is_strict_cuda_triton(n.meta["val"].device)
+                    ):
                         is_view = n.meta["val"]._is_view() or isinstance(
                             result.data,  # type: ignore[missing-attribute]
                             ir.BaseView,
                         )
-                        if is_view and not (is_output and config.strict_output_strides):
+                        if is_view and not (
+                            unbacked_symbols_in_strides
+                            or (is_output and config.strict_output_strides)
+                        ):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(strides),

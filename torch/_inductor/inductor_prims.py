@@ -432,6 +432,16 @@ cuda_pointwise_iteration = _prims._make_prim(
 
 
 def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    if free_unbacked_symbols(stride):
+        new_tensor = torch.empty_strided(
+            input_tensor.shape,
+            stride,
+            dtype=input_tensor.dtype,
+            device=input_tensor.device,
+        )
+        return new_tensor.copy_(input_tensor)
     if input_tensor.stride() == stride:
         return input_tensor
     new_tensor = input_tensor.clone().as_strided(
@@ -630,6 +640,7 @@ force_stride_order = make_prim(
     eager_force_stride,
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
 )
+torch.library.register_autograd(force_stride_order, lambda ctx, grad: (grad, None))
 _unsafe_index_put_ = make_prim(
     "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
     lambda self, indices, values, accumulate=False: torch.ops.aten.index_put_(

@@ -755,7 +755,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(type(t), type(r3))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(Piecewise((s97, Eq(s97, 5)), (s26, True)), 5)""",
+            """Eq(Where(Eq(s97, 5), s97, s26), 5)""",
         )
         b4 = f == 5
         r4 = torch.sym_ite(b4, t, f)
@@ -764,8 +764,76 @@ class TestPySymInt(TestCase):
         self.assertEqual(type(f), type(r4))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(Piecewise((s97, Eq(s26, 5)), (s26, True)), 4)""",
+            """Eq(Where(Eq(s26, 5), s97, s26), 4)""",
         )
+
+    @parametrize("kind", ("int", "float", "bool"))
+    def test_nested_unbacked_sym_ite(self, kind):
+        from torch.utils._sympy.interp import sympy_interp
+        from torch.utils._sympy.printers import CppPrinter, PythonPrinter
+        from torch.utils._sympy.reference import PythonReferenceAnalysis
+        from torch.utils._sympy.value_ranges import bound_sympy
+
+        shape_env = ShapeEnv()
+        n = shape_env.create_unbacked_symint()
+        if kind == "bool":
+            selected = torch.sym_ite(n > 0, n == 1, n == 0)
+            result = torch.sym_ite(selected, 1, 0)
+            expected = (1, 1, 0)
+        else:
+            one, zero = (1.0, 0.0) if kind == "float" else (1, 0)
+            selected = torch.sym_ite(n == 0, one, zero)
+            result = torch.sym_ite((selected == zero) & (n < 2), one, zero)
+            expected = (zero, one, zero)
+        self.assertEqual(len(shape_env.guards), 0)
+        bounds = bound_sympy(result.node.expr)
+        python_code = PythonPrinter().doprint(result.node.expr)
+        self.assertNotIn("ITE", CppPrinter().doprint(result.node.expr))
+        for value, expected_value in enumerate(expected):
+            self.assertEqual(result.node.expr.subs(n.node.expr, value), expected_value)
+            self.assertEqual(
+                sympy_interp(
+                    PythonReferenceAnalysis, {n.node.expr: value}, result.node.expr
+                ),
+                expected_value,
+            )
+            self.assertEqual(
+                eval(python_code, {str(n.node.expr): value}), expected_value
+            )
+            self.assertGreaterEqual(expected_value, bounds.lower)
+            self.assertLessEqual(expected_value, bounds.upper)
+
+    def test_elementwise_stride_export_roundtrip(self):
+        from io import BytesIO
+
+        from torch.utils._sympy.functions import ElementwiseOutputStride
+        from torch.utils._sympy.value_ranges import bound_sympy
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                n = torch.nonzero(x).shape[0]
+                return torch.neg(torch.empty_strided((n, 2), (1, n)))
+
+        module = Module()
+        exported = torch.export.export(module, (torch.ones(2),))
+        buffer = BytesIO()
+        torch.export.save(exported, buffer)
+        buffer.seek(0)
+        loaded = torch.export.load(buffer)
+        found_stride = False
+        for node in loaded.graph.nodes:
+            value = node.meta.get("val")
+            if isinstance(value, torch.Tensor):
+                for stride in value.stride():
+                    if isinstance(stride, torch.SymInt) and stride.node.expr.has(
+                        ElementwiseOutputStride
+                    ):
+                        found_stride = True
+                        bound_sympy(stride.node.expr)
+        self.assertTrue(found_stride)
+        for size in (0, 1, 2):
+            x = (torch.arange(2) < size).float()
+            self.assertEqual(loaded.module()(x).stride(), module(x).stride())
 
     def test_tracing_sym_ite(self):
         def f(x):

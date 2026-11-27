@@ -1079,11 +1079,79 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         # without fp64 support. This is scalar shape math, not tensor ops.
         return f"libdevice.pow({base}, {exp})"
 
+    def _print_Piecewise(self, expr: sympy.Expr) -> str:
+        dtype = (
+            V.kernel.index_dtype if expr.is_integer else self._get_scalar_float_type()
+        )
+        result = None
+        for value, condition in reversed(expr.args):
+            branch = f"tl.cast({self.doprint(value)}, {dtype})"
+            if condition == sympy.true or result is None:
+                result = branch
+            else:
+                result = f"({branch} if {self.doprint(condition)} else {result})"
+        return result or "0"
+
     def _print_Where(self, expr: sympy.Expr) -> str:
         c = self.doprint(expr.args[0])
         p = self.doprint(expr.args[1])
         q = self.doprint(expr.args[2])
-        return f"tl.where({c}, {p}, {q})"
+        code = f"tl.where({c}, {p}, {q})"
+        if expr.is_integer and self._is_kernel_size_expr(expr):
+            code = f"tl.cast({code}, {V.kernel.index_dtype})"
+            return str(
+                V.kernel.cse.generate(
+                    V.kernel.body,
+                    code,
+                    dtype=V.kernel.get_index_dtype_as_torch_dtype(),
+                    shape=(),
+                )
+            )
+        return code
+
+    @staticmethod
+    def _is_kernel_size_expr(expr: sympy.Expr) -> bool:
+        from ..utils import FakeIndentedBuffer
+
+        if not hasattr(V.kernel, "body") or isinstance(
+            V.kernel.body, FakeIndentedBuffer
+        ):
+            return False
+        size_names = OrderedSet(V.kernel.args.sizevars.values())
+        return all(
+            str(symbol) in size_names
+            or symbol_is_type(
+                symbol, (SymT.SIZE, SymT.UNBACKED_INT, SymT.PRECOMPUTED_SIZE)
+            )
+            for symbol in expr.free_symbols
+        )
+
+    def _print_ElementwiseOutputStride(self, expr: sympy.Expr) -> str:
+        dim, rank = (int(arg) for arg in expr.args[:2])
+        allow_fast, preserve_dense = (self.doprint(arg) for arg in expr.args[2:4])
+        values = [self.doprint(arg) for arg in expr.args[4:]]
+        sizes = ", ".join(values[:rank])
+        strides = ", ".join(
+            "(" + ", ".join(values[i : i + rank]) + ",)"
+            for i in range(rank, len(values), rank)
+        )
+        code = f"triton_helpers.elementwise_output_stride(({sizes},), ({strides},), {dim}, {allow_fast}, {preserve_dense})"
+        if self._is_kernel_size_expr(expr):
+            return str(
+                V.kernel.cse.generate(V.kernel.body, code, dtype=torch.int64, shape=())
+            )
+        return code
+
+    def _print_IsNonOverlappingAndDenseIndicator(self, expr: sympy.Expr) -> str:
+        dim = len(expr.args) // 2
+        sizes = ", ".join(self.doprint(arg) for arg in expr.args[:dim])
+        strides = ", ".join(self.doprint(arg) for arg in expr.args[dim:])
+        code = f"triton_helpers.is_non_overlapping_and_dense_indicator(({sizes},), ({strides},))"
+        if self._is_kernel_size_expr(expr):
+            return str(
+                V.kernel.cse.generate(V.kernel.body, code, dtype=torch.int64, shape=())
+            )
+        return code
 
     def _print_min_max_helper(self, expr: sympy.Expr, cmp: str) -> str:
         """

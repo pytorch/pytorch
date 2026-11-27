@@ -38,6 +38,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     OpDTypes,
     ops,
+    skipCUDAIf,
     skipCUDAIfNoCudnn,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -152,6 +153,622 @@ def _effective_numerics():
         "eager_numerics.disable_ftz": config.eager_numerics.disable_ftz,
         "emulate_precision_casts": config.emulate_precision_casts,
     }
+
+
+class ElementwiseSymbolicLayoutTest(TestCase):
+    @dtypes(torch.int32, torch.int64)
+    @parametrize("cpp_fake", (False, True))
+    @parametrize("scalar", (False, True))
+    @parametrize("op", ("add", "mul", "div", "le", "eq", "ne", "bitwise_and"))
+    def test_contiguous_broadcast_unbacked_strides(
+        self, device, dtype, cpp_fake, scalar, op
+    ):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        u = shape_env.create_unbacked_symint()
+        mode_cls = CppFakeTensorMode if cpp_fake else FakeTensorMode
+        mode = mode_cls(shape_env=shape_env)
+        if not cpp_fake:
+            mode.cache_enabled = False
+        with mode:
+            x = torch.empty_strided((u, 1), (1, 8), device=device, dtype=dtype)
+            y = (
+                1
+                if scalar
+                else torch.empty_strided(
+                    (1, 1), (2, 1), device=device, dtype=torch.int64
+                )
+            )
+            output = getattr(torch, op)(x, y)
+        for size in (0, 1, 2, 3):
+            x = torch.empty_strided(
+                (size, 1), (1, 8), device=device, dtype=dtype
+            ).fill_(1)
+            y = (
+                1
+                if scalar
+                else torch.empty_strided(
+                    (1, 1), (2, 1), device=device, dtype=torch.int64
+                ).fill_(1)
+            )
+            expected = getattr(torch, op)(x, y)
+            actual = tuple(
+                int(s.node.expr.subs(u.node.expr, size))
+                if isinstance(s, torch.SymInt)
+                else s
+                for s in output.stride()
+            )
+            with self.subTest(size=size):
+                self.assertEqual(actual, expected.stride())
+                self.assertEqual(output.dtype, expected.dtype)
+
+    @dtypes(
+        torch.int32,
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.complex64,
+        torch.complex128,
+    )
+    @parametrize("cpp_fake", (False, True))
+    @parametrize("arguments", ("scalar_base", "scalar_exponent", "tensors"))
+    @parametrize("scalar", (1.0, 2.0, 3.0))
+    def test_pow_unbacked_strides(self, device, dtype, cpp_fake, arguments, scalar):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        u = shape_env.create_unbacked_symint()
+        mode_cls = CppFakeTensorMode if cpp_fake else FakeTensorMode
+        with mode_cls(shape_env=shape_env):
+            x = torch.empty_strided((u, 2), (1, u), device=device, dtype=dtype)
+            y = torch.empty_strided((u, 2), (2, 1), device=device, dtype=dtype)
+            a = scalar if arguments == "scalar_base" else x
+            b = (
+                scalar
+                if arguments == "scalar_exponent"
+                else y
+                if arguments == "tensors"
+                else x
+            )
+            output = torch.pow(a, b)
+        for size in (0, 1, 2, 3):
+            x = torch.empty_strided(
+                (size, 2), (1, size), device=device, dtype=dtype
+            ).fill_(1)
+            y = torch.empty_strided(
+                (size, 2), (2, 1), device=device, dtype=dtype
+            ).fill_(2)
+            a = scalar if arguments == "scalar_base" else x
+            b = (
+                scalar
+                if arguments == "scalar_exponent"
+                else y
+                if arguments == "tensors"
+                else x
+            )
+            actual = tuple(
+                int(s.node.expr.subs(u.node.expr, size))
+                if isinstance(s, torch.SymInt)
+                else s
+                for s in output.stride()
+            )
+            with self.subTest(size=size):
+                self.assertEqual(actual, torch.pow(a, b).stride())
+
+    @parametrize("cpp_fake", (False, True))
+    def test_unbacked_strides_contiguous_device_policy(self, device, cpp_fake):
+        from unittest.mock import patch
+
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        u = shape_env.create_unbacked_symint()
+        mode_cls = CppFakeTensorMode if cpp_fake else FakeTensorMode
+        with (
+            mode_cls(shape_env=shape_env),
+            patch("torch._refs.is_noncontiguous_supported", return_value=False),
+        ):
+            x = torch.empty_strided((u, 2), (1, u), device=device)
+            output = torch._refs.neg(x)
+        self.assertEqual(output.stride(), (2, 1))
+
+    @parametrize("cpp_fake", (False, True))
+    @parametrize(
+        "dtype_pair",
+        (
+            ("float16", "float16"),
+            ("int32", "float32"),
+            ("float16", "float32"),
+            ("float32", "float64"),
+        ),
+    )
+    @parametrize("pred_stride", ((0, 0, 0), (0, 3, 1), (1, 3, 0)))
+    @parametrize("pred_dtype", (torch.bool, torch.uint8))
+    def test_where_unbacked_strides(
+        self, device, cpp_fake, dtype_pair, pred_stride, pred_dtype
+    ):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        u = shape_env.create_unbacked_symint()
+        mode_cls = CppFakeTensorMode if cpp_fake else FakeTensorMode
+        left_dtype, right_dtype = (getattr(torch, name) for name in dtype_pair)
+        with mode_cls(shape_env=shape_env):
+            pred = torch.empty_strided(
+                (u, 2, 2), pred_stride, device=device, dtype=pred_dtype
+            )
+            x = torch.empty_strided(
+                (u, 2, 2), (0, 3, 1), device=device, dtype=left_dtype
+            )
+            y = torch.empty_strided(
+                (u, 2, 2), (1, 3, 0), device=device, dtype=right_dtype
+            )
+            output = torch.where(pred, x, y)
+        for size in (0, 1, 2):
+            pred = torch.empty_strided(
+                (size, 2, 2), pred_stride, device=device, dtype=pred_dtype
+            )
+            x = torch.empty_strided(
+                (size, 2, 2), (0, 3, 1), device=device, dtype=left_dtype
+            )
+            y = torch.empty_strided(
+                (size, 2, 2), (1, 3, 0), device=device, dtype=right_dtype
+            )
+            actual = tuple(
+                int(s.node.expr.subs(u.node.expr, size))
+                if isinstance(s, torch.SymInt)
+                else s
+                for s in output.stride()
+            )
+            with self.subTest(size=size):
+                self.assertEqual(actual, torch.where(pred, x, y).stride())
+
+    @dtypes(torch.int32, torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("cpp_fake", (False, True))
+    @parametrize("op", ("eq", "ne", "lt", "le", "gt", "ge"))
+    def test_scalar_unbacked_strides(self, device, dtype, cpp_fake, op):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        u = shape_env.create_unbacked_symint()
+        mode_cls = CppFakeTensorMode if cpp_fake else FakeTensorMode
+        with mode_cls(shape_env=shape_env):
+            x = torch.empty_strided((u, 2, 2), (0, 3, 1), device=device, dtype=dtype)
+            output = getattr(torch, op)(x, 1.5)
+        for size in (0, 1, 2):
+            x = torch.empty_strided((size, 2, 2), (0, 3, 1), device=device, dtype=dtype)
+            actual = tuple(
+                int(s.node.expr.subs(u.node.expr, size))
+                if isinstance(s, torch.SymInt)
+                else s
+                for s in output.stride()
+            )
+            with self.subTest(size=size):
+                self.assertEqual(actual, getattr(torch, op)(x, 1.5).stride())
+
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    @parametrize("cpp_fake", (False, True))
+    @parametrize("op", ("bitwise_and", "bitwise_or", "bitwise_xor"))
+    def test_bitwise_unbacked_strides(self, device, dtype, cpp_fake, op):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        u = shape_env.create_unbacked_symint()
+        mode_cls = CppFakeTensorMode if cpp_fake else FakeTensorMode
+        with mode_cls(shape_env=shape_env):
+            x = torch.empty_strided((u, 2, 2), (0, 3, 1), device=device, dtype=dtype)
+            y = torch.empty_strided(
+                (u, 2, 2), (1, 3, 0), device=device, dtype=torch.int64
+            )
+            output = getattr(torch, op)(x, y)
+        for size in (0, 1, 2):
+            x = torch.empty_strided((size, 2, 2), (0, 3, 1), device=device, dtype=dtype)
+            y = torch.empty_strided(
+                (size, 2, 2), (1, 3, 0), device=device, dtype=torch.int64
+            )
+            actual = tuple(
+                int(s.node.expr.subs(u.node.expr, size))
+                if isinstance(s, torch.SymInt)
+                else s
+                for s in output.stride()
+            )
+            with self.subTest(size=size):
+                self.assertEqual(actual, getattr(torch, op)(x, y).stride())
+
+    @parametrize("cpp_fake", (False, True))
+    @parametrize(
+        "dtype_pair",
+        (
+            ("int32", "float32"),
+            ("float16", "float32"),
+            ("bfloat16", "float16"),
+            ("float32", "float64"),
+        ),
+    )
+    @parametrize("op", ("add", "mul", "div", "eq", "ne", "lt", "le", "gt", "ge"))
+    def test_mixed_dtype_unbacked_strides(self, device, cpp_fake, dtype_pair, op):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        u = shape_env.create_unbacked_symint()
+        left_dtype, right_dtype = (getattr(torch, name) for name in dtype_pair)
+        mode_cls = CppFakeTensorMode if cpp_fake else FakeTensorMode
+        layouts = (
+            ((0, 3, 1), (1, 3, 0)),
+            ((1, 2 * u, u), (4, 1, 2)),
+            ((u + 1, 3, 1), (1, u + 2, 3)),
+        )
+        for left_stride, right_stride in layouts:
+            with mode_cls(shape_env=shape_env):
+                x = torch.empty_strided(
+                    (u, 2, 2), left_stride, device=device, dtype=left_dtype
+                )
+                y = torch.empty_strided(
+                    (u, 2, 2), right_stride, device=device, dtype=right_dtype
+                )
+                output = getattr(torch, op)(x, y)
+            for size in (0, 1, 2):
+
+                def evaluate(value):
+                    return (
+                        int(value.node.expr.subs(u.node.expr, size))
+                        if isinstance(value, torch.SymInt)
+                        else value
+                    )
+
+                x = torch.empty_strided(
+                    (size, 2, 2),
+                    tuple(map(evaluate, left_stride)),
+                    device=device,
+                    dtype=left_dtype,
+                )
+                y = torch.empty_strided(
+                    (size, 2, 2),
+                    tuple(map(evaluate, right_stride)),
+                    device=device,
+                    dtype=right_dtype,
+                )
+                with self.subTest(
+                    left_stride=left_stride, right_stride=right_stride, size=size
+                ):
+                    self.assertEqual(
+                        tuple(map(evaluate, output.stride())),
+                        getattr(torch, op)(x, y).stride(),
+                    )
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("cpp_fake", (False, True))
+    def test_unbacked_output_strides(self, device, dtype, cpp_fake):
+        from functools import lru_cache
+
+        from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        layouts = {
+            "rank3_holes": lambda m, n: ((m, n, 2), (n + 1, m + 1, 2)),
+            "rank3_stride_order": lambda m, n: ((m, n, 2), (2 * n + 1, 2 * m + 1, 3)),
+            "rank4_holes": lambda m, n: ((2, m, 2, n), (11, 3, n + 1, m + 1)),
+            "transpose": lambda m, n: ((m, n), (1, m)),
+            "prefix": lambda m, n: ((2, 2, m, n), (2 * m * n, m * n, 1, m)),
+            "channels_last": lambda m, n: ((2, m, 2, n), (2 * m * n, 1, m * n, m)),
+            "channels_singleton": lambda m, n: ((2, m, 1, n), (m * n, 1, 9 * m * n, m)),
+            "holes": lambda m, n: ((m, n), (2, 3 * m + 1)),
+            "dynamic_order": lambda m, n: ((m, n), (n + 1, m + 1)),
+        }
+        operations = {
+            "add": lambda x: torch.add(x, x),
+            "mul": lambda x: torch.mul(x, x),
+            "neg": torch.neg,
+            "add_scalar": lambda x: torch.add(x, 1),
+            "mul_scalar": lambda x: torch.mul(x, 2),
+            "sub_scalar": lambda x: torch.sub(x, 1),
+            "div_scalar": lambda x: torch.div(x, 2),
+            "pow_scalar": lambda x: torch.pow(x, 2),
+            "clamp": lambda x: torch.clamp(x, 0, 1),
+            "round": torch.round,
+            "exp": torch.exp,
+            "sqrt": torch.sqrt,
+            "max": lambda x: torch.maximum(x, x),
+            "eq": lambda x: torch.eq(x, x),
+            "addcmul": lambda x: torch.addcmul(x, x, x),
+            "addcdiv": lambda x: torch.addcdiv(x, x, x),
+            "where": lambda x: torch.where(
+                torch.empty_strided(
+                    x.shape, x.stride(), device=x.device, dtype=torch.bool
+                ),
+                x,
+                x,
+            ),
+            "lerp": lambda x: torch.lerp(x, x, 0.5),
+        }
+        mode_cls = CppFakeTensorMode if cpp_fake else FakeTensorMode
+        for layout, geometry in layouts.items():
+            shape_env = ShapeEnv()
+            m, n = (shape_env.create_unbacked_symint() for _ in range(2))
+            shape, stride = geometry(m, n)
+            with mode_cls(shape_env=shape_env):
+                fake = torch.empty_strided(shape, stride, device=device, dtype=dtype)
+                outputs = {name: op(fake) for name, op in operations.items()}
+            for a, b in itertools.product((0, 1, 2), repeat=2):
+                shape, stride = geometry(a, b)
+                x = torch.empty_strided(shape, stride, device=device, dtype=dtype)
+                replacements = {m.node.expr: a, n.node.expr: b}
+
+                @lru_cache(None)
+                def evaluate(expr):
+                    if expr in replacements:
+                        return replacements[expr]
+                    args = tuple(evaluate(arg) for arg in expr.args)
+                    return expr if args == expr.args else expr.func(*args)
+
+                for name, op in operations.items():
+                    with self.subTest(layout=layout, op=name, m=a, n=b):
+                        actual = tuple(
+                            int(evaluate(s.node.expr))
+                            if isinstance(s, torch.SymInt)
+                            else s
+                            for s in outputs[name].stride()
+                        )
+                        self.assertEqual(actual, op(x).stride())
+
+
+instantiate_device_type_tests(ElementwiseSymbolicLayoutTest, globals())
+
+
+class ElementwiseStrideCodegenTest(TestCase):
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @parametrize("rank", (1, 2, 3, 4, 5))
+    @parametrize("mode", ("unary", "binary", "scalar", "cast"))
+    def test_native_strides(self, device, rank, mode):
+        import ctypes
+
+        import sympy
+
+        from torch._inductor.codecache import CppCodeCache
+        from torch.utils._sympy.functions import ElementwiseOutputStride
+        from torch.utils._sympy.printers import CppPrinter
+
+        inputs = 2 if mode == "binary" else 1
+        allow_fast = mode != "scalar"
+        preserve_dense = mode == "cast"
+        cases = []
+        for m, n in itertools.product((0, 1, 2), repeat=2):
+            if rank == 1:
+                cases.append(((m,), (n + 1,), (n + 2,)))
+            else:
+                shape = (*(2,) * (rank - 2), m, n)
+                prefix = tuple(m * n * 2**i for i in reversed(range(rank - 2)))
+                cases.append((shape, (*prefix, n + 1, m + 1), (*prefix, n + 2, m + 2)))
+                cases.append((shape, (*prefix, 1, m), (*prefix, n, 1)))
+        if rank == 4:
+            for m, n in itertools.product((0, 1, 2), repeat=2):
+                shape = (2, m, 2, n)
+                step = (2 * m * n, 1, m * n, m)
+                cases.append((shape, step, step))
+        shape = (1,) * rank
+        step = (1 << 35, *(1,) * (rank - 1))
+        cases.append((shape, step, step))
+        if rank > 1:
+            shape = (0, *(1,) * (rank - 2), 1 << 35)
+            step = tuple(torch.empty(shape, device=device).stride())
+            cases.append((shape, step, step))
+        rows = []
+        expected = []
+        for shape, step, other_step in cases:
+            x = torch.empty_strided(shape, step, device=device, dtype=torch.float32)
+            if mode == "binary":
+                y = torch.empty_strided(
+                    shape, other_step, device=device, dtype=torch.float32
+                )
+                result = torch.add(x, y)
+            elif mode == "scalar":
+                result = torch.add(x, 1)
+            elif mode == "cast":
+                result = x.to(torch.float64)
+            else:
+                result = torch.neg(x)
+            rows.append(
+                [*shape, *step, *other_step, int(allow_fast), int(preserve_dense)]
+                if inputs == 2
+                else [*shape, *step, int(allow_fast), int(preserve_dense)]
+            )
+            expected.append(result.stride())
+        data = torch.tensor(rows, device=device, dtype=torch.int64)
+        output = torch.empty((len(rows), rank), device=device, dtype=torch.int64)
+        if device.startswith("cuda"):
+            import triton
+            import triton.language as tl
+
+            from torch._inductor.runtime.triton_helpers import elementwise_output_stride
+
+            @triton.jit
+            def stride_kernel(data, output, RANK: tl.constexpr, INPUTS: tl.constexpr):
+                row = tl.program_id(0)
+                sizes = ()
+                for i in tl.static_range(RANK):
+                    sizes += (tl.load(data + row * (RANK * (INPUTS + 1) + 2) + i),)
+                strides = ()
+                for t in tl.static_range(INPUTS):
+                    entry = ()
+                    for i in tl.static_range(RANK):
+                        entry += (
+                            tl.load(
+                                data
+                                + row * (RANK * (INPUTS + 1) + 2)
+                                + RANK * (t + 1)
+                                + i
+                            ),
+                        )
+                    strides += (entry,)
+                allow_fast = tl.load(
+                    data + row * (RANK * (INPUTS + 1) + 2) + RANK * (INPUTS + 1)
+                )
+                preserve_dense = tl.load(
+                    data + row * (RANK * (INPUTS + 1) + 2) + RANK * (INPUTS + 1) + 1
+                )
+                for i in tl.static_range(RANK):
+                    value = elementwise_output_stride(
+                        sizes, strides, i, allow_fast, preserve_dense
+                    )
+                    tl.store(output + row * RANK + i, value)
+
+            stride_kernel[(len(rows),)](data, output, rank, inputs)
+        else:
+            width = rank * (inputs + 1) + 2
+            args = tuple(
+                sympy.Symbol(f"data[row * {width} + {i}]", integer=True)
+                for i in range(width)
+            )
+            statements = []
+            for dim in range(rank):
+                expr = ElementwiseOutputStride(
+                    dim, rank, args[-2], args[-1], *args[:-2]
+                )
+                statements.append(
+                    f"output[row * {rank} + {dim}] = {CppPrinter().doprint(expr)};"
+                )
+            code = (
+                '#include <cstdint>\nextern "C" void evaluate(const int64_t* data, int64_t* output, int64_t rows) { for (int64_t row=0; row<rows; ++row) {'
+                + "\n".join(statements)
+                + "}}"
+            )
+            lib = CppCodeCache.load(code)
+            lib.evaluate.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64]
+            lib.evaluate(data.data_ptr(), output.data_ptr(), len(rows))
+        self.assertEqual(
+            output, torch.tensor(expected, device=device, dtype=torch.int64)
+        )
+
+
+instantiate_device_type_tests(
+    ElementwiseStrideCodegenTest, globals(), only_for=("cpu", "cuda")
+)
+
+
+@unittest.skipUnless(
+    HAS_CUDA_AND_TRITON and torch.version.hip is None,
+    "requires NVIDIA CUDA and Triton",
+)
+class CompiledSymbolicLayoutTest(TestCase):
+    @dtypes(
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.complex64,
+        torch.complex128,
+    )
+    @parametrize("views", ("repeated", "distinct", "base", "input"))
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_output_aliases(self, device, dtype, views, numerics):
+        def fn(x, mask):
+            n = torch.nonzero(mask).shape[0]
+            y = x[:n].transpose(0, 1)
+            if views != "input":
+                y = torch.neg(y)
+            if views == "base":
+                return y, y.transpose(0, 1)
+            if views == "distinct":
+                return y.transpose(0, 1), y[:, :1]
+            return y.transpose(0, 1), y.transpose(0, 1)
+
+        counter = CompileCounterWithBackend("inductor")
+        with config.patch(
+            {
+                "numerics": numerics,
+                "force_disable_caches": True,
+                "triton.cudagraphs": False,
+            }
+        ):
+            compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+            for n in (0, 1, 2, 3):
+                x = torch.ones((4, 2), device=device, dtype=dtype)
+                mask = torch.arange(4, device=device) < n
+                expected = fn(x.clone(), mask)
+                actual = compiled(x.clone(), mask)
+                for a, b in zip(actual, expected):
+                    self.assertEqual(
+                        _pointwise_comparison_bits(a), _pointwise_comparison_bits(b)
+                    )
+                    self.assertEqual(a.stride(), b.stride())
+                self.assertTrue(torch._C._is_alias_of(*actual))
+                expected[0].fill_(7)
+                actual[0].fill_(7)
+                self.assertEqual(
+                    _pointwise_comparison_bits(actual[1]),
+                    _pointwise_comparison_bits(expected[1]),
+                )
+        self.assertGreater(counter.frame_count, 0)
+
+    @dtypes(
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.complex64,
+        torch.complex128,
+    )
+    @parametrize("op", ("add", "mul", "neg"))
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_layouts(self, device, dtype, op, numerics):
+        layouts = {
+            "rank3_holes": lambda m, n: ((m, n, 2), (n + 1, m + 1, 2)),
+            "rank3_stride_order": lambda m, n: ((m, n, 2), (2 * n + 1, 2 * m + 1, 3)),
+            "rank4_holes": lambda m, n: ((2, m, 2, n), (11, 3, n + 1, m + 1)),
+            "transpose": lambda m, n: ((m, n), (1, m)),
+            "prefix": lambda m, n: ((2, 2, m, n), (2 * m * n, m * n, 1, m)),
+            "channels_last": lambda m, n: ((2, m, 2, n), (2 * m * n, 1, m * n, m)),
+            "channels_singleton": lambda m, n: ((2, m, 1, n), (m * n, 1, 9 * m * n, m)),
+            "holes": lambda m, n: ((m, n), (2, 3 * m + 1)),
+            "dynamic_order": lambda m, n: ((m, n), (n + 1, m + 1)),
+        }
+        for layout, geometry in layouts.items():
+            torch._dynamo.reset()
+
+            def fn(mask1, mask2):
+                m = torch.nonzero(mask1).shape[0]
+                n = torch.nonzero(mask2).shape[0]
+                size, stride = geometry(m, n)
+                x = torch.empty_strided(size, stride, device=device, dtype=dtype)
+                x.fill_(0.5)
+                out = torch.neg(x) if op == "neg" else getattr(torch, op)(x, x)
+                return out, out + 1, out.stride()
+
+            counter = CompileCounterWithBackend("inductor")
+            metrics.reset()
+            with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+                compiled = torch.compile(
+                    fn, backend=counter, fullgraph=True, dynamic=True
+                )
+                for m, n in itertools.product((0, 1, 2), repeat=2):
+                    with self.subTest(layout=layout, m=m, n=n):
+                        mask1 = torch.arange(4, device=device) < m
+                        mask2 = torch.arange(4, device=device) < n
+                        expected, actual = fn(mask1, mask2), compiled(mask1, mask2)
+                        for a, b in zip(actual[:2], expected[:2]):
+                            self.assertEqual(
+                                _pointwise_comparison_bits(a),
+                                _pointwise_comparison_bits(b),
+                            )
+                            self.assertEqual(a.stride(), b.stride())
+                        self.assertEqual(actual[2], expected[2])
+                        self.assertEqual(actual[2], actual[0].stride())
+            self.assertEqual(counter.frame_count, 1)
+            self.assertGreater(metrics.generated_kernel_count, 0)
+
+
+instantiate_device_type_tests(CompiledSymbolicLayoutTest, globals(), only_for="cuda")
 
 
 @instantiate_parametrized_tests
@@ -965,6 +1582,38 @@ class StrictNumericsCompileTest(TestCase):
         )
         self._assert_bitwise_equal(actual, expected)
         self.assertEqual(metrics.generated_fallback_kernel_count, 0)
+
+    @dtypes(
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.complex64,
+        torch.complex128,
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_pointwise_unbacked_output_strides_backward(self, device, dtype, numerics):
+        def fn(x, mask):
+            n = torch.nonzero(mask).shape[0]
+            return torch.neg(x[:n].transpose(0, 1))
+
+        counter = CompileCounterWithBackend("inductor")
+        with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+            compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+            for n in (0, 1, 2):
+                x = torch.randn(4, 2, device=device, dtype=dtype, requires_grad=True)
+                mask = torch.arange(4, device=device) < n
+                expected = fn(x, mask)
+                expected_grad = torch.autograd.grad(
+                    expected, x, torch.ones_like(expected)
+                )[0]
+                actual = compiled(x, mask)
+                actual_grad = torch.autograd.grad(actual, x, torch.ones_like(actual))[0]
+                self._assert_bitwise_equal(actual, expected)
+                self._assert_bitwise_equal(actual_grad, expected_grad)
+                self.assertEqual(actual.stride(), expected.stride())
+        self.assertEqual(counter.frame_count, 1)
 
     @skipCUDAIfNoCudnn
     @dtypes(torch.float16, torch.float32, torch.float64)
@@ -3711,6 +4360,42 @@ class StrictNumericsCompileTest(TestCase):
                 2 * (stride**2 + known**2) + 3, device=device, dtype=dtype
             ).as_strided((3, 3), (stride, 1))
             self.assertEqual(gm(tensor, known), stride**2 + known**2)
+
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("op", ("add", "mul", "neg"))
+    @parametrize("prefix", (0, 1, 2))
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_pointwise_unbacked_output_strides(
+        self, device, dtype, numerics, op, prefix
+    ):
+        def fn(mask1, mask2):
+            m = torch.nonzero(mask1).shape[0]
+            n = torch.nonzero(mask2).shape[0]
+            size = (*(2,) * prefix, m, n)
+            prefix_stride = tuple(m * n * 2**i for i in reversed(range(prefix)))
+            stride = (*prefix_stride, 1, m)
+            x = torch.empty_strided(size, stride, device=device, dtype=dtype)
+            x.fill_(0.5)
+            out = torch.neg(x) if op == "neg" else getattr(torch, op)(x, x)
+            return out, out + 1, out.stride()
+
+        counter = CompileCounterWithBackend("inductor")
+        metrics.reset()
+        with config.patch({"numerics": numerics, "triton.cudagraphs": False}):
+            compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+            for m, n in itertools.product((0, 1, 2), repeat=2):
+                with self.subTest(m=m, n=n):
+                    mask1 = torch.arange(4, device=device) < m
+                    mask2 = torch.arange(4, device=device) < n
+                    expected = fn(mask1, mask2)
+                    actual = compiled(mask1, mask2)
+                    self._assert_bitwise_equal(actual[:2], expected[:2])
+                    self.assertEqual(actual[0].stride(), expected[0].stride())
+                    self.assertEqual(actual[2], expected[2])
+                    self.assertEqual(actual[2], actual[0].stride())
+        self.assertEqual(counter.frame_count, 1)
+        self.assertGreater(metrics.generated_kernel_count, 0)
 
     @dtypes(torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))

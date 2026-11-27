@@ -2,7 +2,7 @@ import functools
 import math
 import operator
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import SupportsFloat, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
@@ -25,7 +25,7 @@ from .numbers import int_oo, IntInfinity, is_infinite
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Iterable, Iterator
 
 
 _T = TypeVar("_T", bound=SupportsFloat)
@@ -432,6 +432,111 @@ class ModularIndexing(sympy.Function):
     def _eval_is_nonnegative(self) -> bool | None:
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
+
+
+def _eval_elementwise_output_stride(
+    dim: int, rank: int, allow_fast: int, preserve_dense: int, *args: int
+) -> int:
+    sizes = args[:rank]
+    strides = [args[i : i + rank] for i in range(rank, len(args), rank)]
+
+    def dense(stride: Sequence[int]) -> bool:
+        if 0 in sizes:
+            return True
+        if rank == 1:
+            return sizes[0] < 2 or stride[0] == 1
+        expected = 1
+        for size, step in sorted(zip(sizes, stride), key=operator.itemgetter(1)):
+            if size >= 2:
+                if step != expected:
+                    return False
+                expected *= size
+        return True
+
+    same_dense = all(dense(stride) and stride == strides[-1] for stride in strides)
+    if preserve_dense and same_dense:
+        return strides[-1][dim]
+    contiguous = []
+    expected = 1
+    all_contiguous = True
+    for i in reversed(range(rank)):
+        contiguous.insert(0, expected)
+        all_contiguous &= all(
+            sizes[i] == 1 or stride[i] == expected for stride in strides
+        )
+        expected *= max(sizes[i], 1)
+    if allow_fast and not preserve_dense and (0 in sizes or all_contiguous):
+        return contiguous[dim]
+    if allow_fast and not preserve_dense and rank == 4:
+        channels = [0] * rank
+        expected = 1
+        all_channels = True
+        for i in (1, 3, 2, 0):
+            channels[i] = expected
+            all_channels &= all(
+                sizes[i] == 1 or stride[i] == expected for stride in strides
+            )
+            expected *= sizes[i]
+        if all_channels:
+            return channels[dim]
+    if allow_fast and not preserve_dense and same_dense:
+        return strides[-1][dim]
+    permutation = list(reversed(range(rank)))
+    for i in range(1, rank):
+        right = i
+        for left in reversed(range(i)):
+            d0, d1 = permutation[left], permutation[right]
+            comparison = 0
+            for stride in strides:
+                s0, s1 = stride[d0], stride[d1]
+                if s0 == 0 or s1 == 0:
+                    continue
+                if s0 > s1 or (s0 == s1 and sizes[d0] > sizes[d1]):
+                    comparison = 1
+                    break
+                if s0 < s1:
+                    comparison = -1
+                    break
+            if comparison > 0:
+                permutation[left], permutation[right] = (
+                    permutation[right],
+                    permutation[left],
+                )
+                right = left
+            elif comparison < 0:
+                break
+    if permutation == list(reversed(range(rank))):
+        return contiguous[dim]
+    expected = 1
+    for i in permutation:
+        if i == dim:
+            return expected
+        expected *= max(sizes[i], 1) if preserve_dense else sizes[i]
+    raise AssertionError("invalid elementwise output dimension")
+
+
+class ElementwiseOutputStride(sympy.Function):
+    _torch_handler_name = "elementwise_output_stride"
+    is_integer = True
+    is_nonnegative = True
+
+    @functools.cached_property
+    def _cached_free_symbols(self) -> frozenset[sympy.Symbol]:
+        return frozenset(super().free_symbols)
+
+    @property
+    def free_symbols(self) -> set[sympy.Symbol]:
+        return set(self._cached_free_symbols)
+
+    @classmethod
+    def eval(cls, *args: sympy.Basic) -> sympy.Basic | None:
+        if args[1] == 1 and args[3] == 0:
+            return sympy.S.One
+        if all(isinstance(arg, sympy.Integer) for arg in args):
+            return sympy.Integer(
+                _eval_elementwise_output_stride(*(int(arg) for arg in args))
+            )
+        return None
 
 
 class Where(sympy.Function):

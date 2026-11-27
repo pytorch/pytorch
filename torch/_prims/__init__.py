@@ -3,7 +3,7 @@ import operator
 from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import partial, reduce
-from typing import Optional, Union
+from typing import cast, Optional, Union
 
 import torch
 import torch._prims_common as utils
@@ -225,7 +225,7 @@ def TensorMeta(
     tensorlike: NumberType | torch.Tensor | None = None,
     *,
     shape: ShapeType | None = None,
-    strides: StrideType | None = None,
+    strides: Sequence[int | torch.SymInt] | None = None,
     dtype: torch.dtype | None = None,
     device: torch.device | str | None = None,
 ):
@@ -422,7 +422,6 @@ def _prim_elementwise_meta(
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
 
-    l2p_perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
     shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
 
     # Acquires the dtype
@@ -476,6 +475,21 @@ def _prim_elementwise_meta(
 
         if shape is None:
             raise AssertionError("shape must not be None when device is not None")
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+        if free_unbacked_symbols(
+            (shape, *(a.stride() for a in args_ if isinstance(a, TensorLike)))
+        ):
+            return cast(
+                FakeTensor,
+                torch.empty_strided(
+                    shape,
+                    utils.compute_elementwise_output_strides(*args_),
+                    device=device,
+                    dtype=dtype,
+                ),
+            )
+        l2p_perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
         return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
 
     # Number case
@@ -2023,8 +2037,12 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
     utils.check_shell_dtype_cast(a.dtype, dtype)
 
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
     # dtype conversion preserves dense strides
-    if torch._prims_common.is_non_overlapping_and_dense_or_false(a):
+    if free_unbacked_symbols((a.shape, a.stride())):
+        strides = utils.compute_elementwise_output_strides(a, preserve_dense=True)
+    elif torch._prims_common.is_non_overlapping_and_dense_or_false(a):
         strides = a.stride()
     else:
         strides = utils.compute_elementwise_output_strides(a)
