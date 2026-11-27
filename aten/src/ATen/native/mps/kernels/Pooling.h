@@ -5,7 +5,7 @@
 C10_METAL_CONSTEXPR int32_t pool2d_tile_rows = 2;
 C10_METAL_CONSTEXPR int32_t pool2d_s1_tile_cols = 8;
 C10_METAL_CONSTEXPR int32_t pool2d_s1_max_kw = pool2d_s1_tile_cols - 1;
-// grad_input columns computed by each thread of avg_pool2d_backward
+// grad_input columns computed by each thread of pool2d_backward
 C10_METAL_CONSTEXPR int32_t pool2d_backward_tile_cols = 4;
 
 // N is the maximum allowed number of dimensions in the input and outputs. The

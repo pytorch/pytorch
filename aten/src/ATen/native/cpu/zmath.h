@@ -4,6 +4,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/OpMathType.h>
 #include <c10/util/MathConstants.h>
+#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/complex.h>
 
 #include <torch/headeronly/native/cpu/zmath.h>
