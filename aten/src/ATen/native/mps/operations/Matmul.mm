@@ -851,27 +851,28 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
 
   auto stream = getCurrentMPSStream();
 
+  const bool is_beta_non_zero = beta.toDouble() != 0.0;
+  const bool is_beta_not_one = is_beta_non_zero && beta.toDouble() != 1.0;
+  const bool is_alpha_not_one = alpha.toDouble() != 1.0;
+
   struct CachedGraph : public mps::MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
     MPSGraphTensor* batch1Tensor_ = nil;
     MPSGraphTensor* batch2Tensor_ = nil;
+    MPSGraphTensor* alphaTensor_ = nil;
+    MPSGraphTensor* betaTensor_ = nil;
     MPSGraphTensor* outputTensor_ = nil;
   };
 
   @autoreleasepool {
     std::string key = (opType == ADDBMM_OP_TYPE) ? ("addbmm_out_mps_impl") : ("baddbmm_out_mps_impl");
-    key += getTensorsStringKey({batch1, batch2, input}) + ":" + std::to_string(beta.toDouble()) + ":" +
-        std::to_string(alpha.toDouble());
+    key += getTensorsStringKey({batch1, batch2, input}) + ":" + (is_beta_non_zero ? "b1" : "b0") + ":" +
+        (is_beta_not_one ? "bs" : "b1x") + ":" + (is_alpha_not_one ? "as" : "a1x");
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, input);
       MPSGraphTensor* batch1Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch1);
       MPSGraphTensor* batch2Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch2);
-
-      // Intermediate for alpha
-      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
-                                                        dataType:getMPSScalarType(batch1.scalar_type())];
 
       MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1Tensor
                                                                       secondaryTensor:batch2Tensor
@@ -883,20 +884,28 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
       }
 
       // Intermediate for multiplying by alpha
-      MPSGraphTensor* reductionSumTimesAlphaTensor =
-          [mpsGraph multiplicationWithPrimaryTensor:reductionSumTensor
-                                    secondaryTensor:alphaTensor
-                                               name:@"alpha*(batch1@batch2)"];
+      MPSGraphTensor* reductionSumTimesAlphaTensor = reductionSumTensor;
+      MPSGraphTensor* alphaTensor = nil;
+      if (is_alpha_not_one) {
+        alphaTensor = mps::mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType(batch1.scalar_type()));
+        reductionSumTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:reductionSumTensor
+                                                                 secondaryTensor:alphaTensor
+                                                                            name:@"alpha*(batch1@batch2)"];
+      }
 
       // When beta == 0, input is ignored so nan/inf in it are not propagated (matches CPU/CUDA and addmm).
-      const double betaVal = beta.toDouble();
+      MPSGraphTensor* inputTensor = nil;
+      MPSGraphTensor* betaTensor = nil;
       MPSGraphTensor* outputTensor = reductionSumTimesAlphaTensor;
-      if (betaVal != 0.0) {
-        MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:betaVal
-                                                         dataType:getMPSScalarType(input.scalar_type())];
-        MPSGraphTensor* biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
-                                                                        secondaryTensor:betaTensor
-                                                                                   name:@"beta*input"];
+      if (is_beta_non_zero) {
+        inputTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, input);
+        MPSGraphTensor* biasTimesBetaTensor = inputTensor;
+        if (is_beta_not_one) {
+          betaTensor = mps::mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType(input.scalar_type()));
+          biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
+                                                          secondaryTensor:betaTensor
+                                                                     name:@"beta*input"];
+        }
         outputTensor = [mpsGraph additionWithPrimaryTensor:reductionSumTimesAlphaTensor
                                            secondaryTensor:biasTimesBetaTensor
                                                       name:@"beta*input + alpha*(batch1@batch2)"];
@@ -905,15 +914,33 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->batch1Tensor_ = batch1Tensor;
       newCachedGraph->batch2Tensor_ = batch2Tensor;
+      newCachedGraph->alphaTensor_ = alphaTensor;
+      newCachedGraph->betaTensor_ = betaTensor;
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
     Placeholder batch1Placeholder = Placeholder(cachedGraph->batch1Tensor_, batch1);
     Placeholder batch2Placeholder = Placeholder(cachedGraph->batch2Tensor_, batch2);
+    Placeholder inputPlaceholder = is_beta_non_zero ? Placeholder(cachedGraph->inputTensor_, input) : Placeholder();
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, batch1Placeholder, batch2Placeholder);
+    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [NSMutableDictionary dictionary];
+    feeds[batch1Placeholder.getMPSGraphTensor()] = batch1Placeholder.getMPSGraphTensorData();
+    feeds[batch2Placeholder.getMPSGraphTensor()] = batch2Placeholder.getMPSGraphTensorData();
+    if (is_beta_non_zero) {
+      feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
+    }
+    // Keep MPSScalar instances alive across runMPSGraph so their scalar MTLBuffers remain valid.
+    MPSScalar alphaScalar;
+    if (is_alpha_not_one) {
+      alphaScalar = getMPSScalar(alpha, batch1.scalar_type());
+      feeds[cachedGraph->alphaTensor_] = getMPSGraphTensorFromScalar(stream, alphaScalar);
+    }
+    MPSScalar betaScalar;
+    if (is_beta_not_one) {
+      betaScalar = getMPSScalar(beta, input.scalar_type());
+      feeds[cachedGraph->betaTensor_] = getMPSGraphTensorFromScalar(stream, betaScalar);
+    }
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
@@ -974,51 +1001,55 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   }
 
   // Complex addmm must use the Metal kernel (like bmm/baddbmm): the MPSGraph-based fallback
-  // for real types below encodes alpha/beta as real (double) constants via toDouble(), which
-  // throws for a complex scalar and drops its imaginary part.
+  // for real types below inspects alpha/beta via toDouble(), which throws for a complex scalar.
   if (use_metal_mm(self, other, output) || c10::isComplexType(self.scalar_type())) {
     return do_metal_addmm(self, other, output, alpha, beta, *bias_);
   }
 
-  bool is_beta_non_zero = beta.toDouble() != 0.0;
+  const bool is_beta_non_zero = beta.toDouble() != 0.0;
+  const bool is_beta_not_one = is_beta_non_zero && beta.toDouble() != 1.0;
+  const bool is_alpha_not_one = alpha.toDouble() != 1.0;
 
   struct CachedGraph : public mps::MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* selfTensor_ = nil;
     MPSGraphTensor* otherTensor_ = nil;
     MPSGraphTensor* biasTensor_ = nil;
+    MPSGraphTensor* alphaTensor_ = nil;
+    MPSGraphTensor* betaTensor_ = nil;
     MPSGraphTensor* outputTensor_ = nil;
   };
 
   @autoreleasepool {
+    auto stream = getCurrentMPSStream();
     std::string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" +
-        std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
+        (is_beta_non_zero ? "b1" : "b0") + ":" + (is_beta_not_one ? "bs" : "b1x") + ":" +
+        (is_alpha_not_one ? "as" : "a1x");
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
-      auto biasTensor_ = bias_->is_conj() ? [mpsGraph conjugateWithTensor:biasTensor name:nil] : biasTensor;
-
-      // TODO: Use alpha and beta here with fill_.Scalar and mul
       auto [selfTensor, otherTensor, productTensor] = do_mm(mpsGraph, self, other);
 
       auto productTimesAlphaTensor = productTensor;
-      if (alpha.toDouble() != 1.0) {
-        auto alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble() dataType:getMPSScalarType(self.scalar_type())];
-
+      MPSGraphTensor* alphaTensor = nil;
+      if (is_alpha_not_one) {
+        alphaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()));
         productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
                                                             secondaryTensor:alphaTensor
                                                                        name:@"MM/alpha*(mat1@mat2)"];
       }
-      auto biasTimesBetaTensor = biasTensor_;
-      if (is_beta_non_zero && beta.toDouble() != 1.0) {
-        auto betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                              dataType:getMPSScalarType((*bias_).scalar_type())];
-        biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:biasTensor_
-                                                        secondaryTensor:betaTensor
-                                                                   name:@"MM/beta*input"];
-      }
 
+      MPSGraphTensor* biasTensor = nil;
+      MPSGraphTensor* betaTensor = nil;
       MPSGraphTensor* outputTensor = productTimesAlphaTensor;
       if (is_beta_non_zero) {
+        biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
+        auto biasTensor_ = bias_->is_conj() ? [mpsGraph conjugateWithTensor:biasTensor name:nil] : biasTensor;
+        auto biasTimesBetaTensor = biasTensor_;
+        if (is_beta_not_one) {
+          betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType((*bias_).scalar_type()));
+          biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:biasTensor_
+                                                          secondaryTensor:betaTensor
+                                                                     name:@"MM/beta*input"];
+        }
         outputTensor = [mpsGraph additionWithPrimaryTensor:productTimesAlphaTensor
                                            secondaryTensor:biasTimesBetaTensor
                                                       name:@"MM/beta*input + alpha*(mat1@mat2)"];
@@ -1027,17 +1058,36 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
       newCachedGraph->selfTensor_ = selfTensor;
       newCachedGraph->otherTensor_ = otherTensor;
       newCachedGraph->biasTensor_ = biasTensor;
+      newCachedGraph->alphaTensor_ = alphaTensor;
+      newCachedGraph->betaTensor_ = betaTensor;
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
     Placeholder selfPlaceholder = self.numel() != 0 ? Placeholder(cachedGraph->selfTensor_, self) : Placeholder();
     Placeholder otherPlaceholder = other.numel() != 0 ? Placeholder(cachedGraph->otherTensor_, other) : Placeholder();
-    Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, *bias_);
+    Placeholder biasPlaceholder = is_beta_non_zero ? Placeholder(cachedGraph->biasTensor_, *bias_) : Placeholder();
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    auto feeds = self.numel() != 0 ? dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder, biasPlaceholder)
-                                   : dictionaryFromPlaceholders(biasPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [NSMutableDictionary dictionary];
+    if (self.numel() != 0) {
+      feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
+      feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
+    }
+    if (is_beta_non_zero) {
+      feeds[biasPlaceholder.getMPSGraphTensor()] = biasPlaceholder.getMPSGraphTensorData();
+    }
+    // Keep MPSScalar instances alive across runMPSGraph so their scalar MTLBuffers remain valid.
+    MPSScalar alphaScalar;
+    if (is_alpha_not_one) {
+      alphaScalar = getMPSScalar(alpha, self.scalar_type());
+      feeds[cachedGraph->alphaTensor_] = getMPSGraphTensorFromScalar(stream, alphaScalar);
+    }
+    MPSScalar betaScalar;
+    if (is_beta_not_one) {
+      betaScalar = getMPSScalar(beta, (*bias_).scalar_type());
+      feeds[cachedGraph->betaTensor_] = getMPSGraphTensorFromScalar(stream, betaScalar);
+    }
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output;

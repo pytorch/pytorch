@@ -2113,6 +2113,76 @@ class TestMPS(TestCaseMPS):
         out = torch.addmm(bias, a, b, beta=0, alpha=0.125)
         self.assertEqual(out, torch.addmm(bias.cpu(), a.cpu(), b.cpu(), beta=0, alpha=0.125))
 
+    def test_addmm_addbmm_baddbmm_varying_alpha_beta(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/206924:
+        # Runtime alpha/beta scalar feeds must update results accurately when
+        # reusing the same cached MPSGraph across distinct scalar values.
+        scalar_pairs = [
+            (0.0, 1.0),
+            (0.0, 0.25),
+            (0.0, -1.5),
+            (1.0, 1.0),
+            (1.0, 0.5),
+            (1.0, -0.75),
+            (0.25, 1.0),
+            (0.25, 0.5),
+            (-1.25, 0.75),
+            (2.5, -0.125),
+            (0.5, 0.0),
+        ]
+        for dtype, atol, rtol in [
+            (torch.float32, 1e-4, 1e-4),
+            (torch.float16, 5e-2, 2e-2),
+            (torch.bfloat16, 2e-1, 5e-2),
+        ]:
+            a_cpu = torch.randn(32, 48, dtype=dtype)
+            b_cpu = torch.randn(48, 40, dtype=dtype)
+            m_cpu = torch.randn(32, 40, dtype=dtype)
+            a_mps, b_mps, m_mps = a_cpu.to("mps"), b_cpu.to("mps"), m_cpu.to("mps")
+
+            ab_cpu = torch.randn(4, 32, 48, dtype=dtype)
+            bb_cpu = torch.randn(4, 48, 40, dtype=dtype)
+            mb_cpu = torch.randn(4, 32, 40, dtype=dtype)
+            ab_mps, bb_mps, mb_mps = ab_cpu.to("mps"), bb_cpu.to("mps"), mb_cpu.to("mps")
+
+            for beta, alpha in scalar_pairs:
+                self.assertEqual(
+                    torch.addmm(m_mps, a_mps, b_mps, beta=beta, alpha=alpha),
+                    torch.addmm(m_cpu, a_cpu, b_cpu, beta=beta, alpha=alpha),
+                    atol=atol,
+                    rtol=rtol,
+                )
+                self.assertEqual(
+                    m_mps.clone().addmm_(a_mps, b_mps, beta=beta, alpha=alpha),
+                    m_cpu.clone().addmm_(a_cpu, b_cpu, beta=beta, alpha=alpha),
+                    atol=atol,
+                    rtol=rtol,
+                )
+                self.assertEqual(
+                    torch.baddbmm(mb_mps, ab_mps, bb_mps, beta=beta, alpha=alpha),
+                    torch.baddbmm(mb_cpu, ab_cpu, bb_cpu, beta=beta, alpha=alpha),
+                    atol=atol,
+                    rtol=rtol,
+                )
+                self.assertEqual(
+                    mb_mps.clone().baddbmm_(ab_mps, bb_mps, beta=beta, alpha=alpha),
+                    mb_cpu.clone().baddbmm_(ab_cpu, bb_cpu, beta=beta, alpha=alpha),
+                    atol=atol,
+                    rtol=rtol,
+                )
+                self.assertEqual(
+                    torch.addbmm(m_mps, ab_mps, bb_mps, beta=beta, alpha=alpha),
+                    torch.addbmm(m_cpu, ab_cpu, bb_cpu, beta=beta, alpha=alpha),
+                    atol=atol,
+                    rtol=rtol,
+                )
+                self.assertEqual(
+                    m_mps.clone().addbmm_(ab_mps, bb_mps, beta=beta, alpha=alpha),
+                    m_cpu.clone().addbmm_(ab_cpu, bb_cpu, beta=beta, alpha=alpha),
+                    atol=atol,
+                    rtol=rtol,
+                )
+
     def test_local_scalar_dense_mps(self):
         x_cpu = torch.randn(1)
         y_mps = x_cpu.to("mps")
