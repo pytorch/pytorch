@@ -82,27 +82,14 @@ def install_libuv(workdir: Path, python_prefix: Path) -> Path:
     return libuv_root
 
 
-def preinstall_cp315_build_deps() -> list[str]:
-    """Pin Cython < 3.3.0 for cp315 sdist builds. See pytorch/pytorch#194618."""
-    if sys.version_info[:2] != (3, 15):
-        return []
-    pip_install("-q", "cython<3.3.0", "setuptools", "wheel")
-    return ["--no-build-isolation"]
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-out", type=Path)
     args = parser.parse_args()
 
-    # cp315 has no pyyaml wheel, so PIP_PACKAGES still builds an sdist here and
-    # needs the Cython pin to reach it. numpy resolves to a wheel at the current
-    # pin, which makes the flags inert for that install rather than unnecessary
-    # -- pass them anyway so a pin without a cp315 wheel stays guarded.
-    build_flags = preinstall_cp315_build_deps()
-    install_numpy(*build_flags)
+    install_numpy()
     xpu_packages = XPU_PIP_PACKAGES if os.environ.get("GPU_ARCH_TYPE") == "xpu" else []
-    pip_install("-q", *build_flags, *PIP_PACKAGES, *xpu_packages)
+    pip_install("-q", *PIP_PACKAGES, *xpu_packages)
 
     if not os.environ.get("SKIP_SETUP_CLEAN"):
         subprocess.run(
