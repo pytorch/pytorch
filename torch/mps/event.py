@@ -1,6 +1,12 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import torch
 
-from .streams import Stream
+
+if TYPE_CHECKING:
+    from .streams import Stream
 
 
 __all__ = [
@@ -61,7 +67,7 @@ class Event:
         """
         torch._C._mps_synchronizeEvent(self.__eventId)
 
-    def elapsed_time(self, end_event: "Event") -> float:
+    def elapsed_time(self, end_event: Event) -> float:
         r"""Returns the time elapsed in milliseconds after the event was
         recorded and before the end_event was recorded.
         """

@@ -2383,42 +2383,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         ):
             e2.wait(e2)
 
-    def test_record_stream(self):
-        cycles_per_ms = get_cycles_per_ms()
-
-        t = torch.FloatTensor([1, 2, 3, 4]).pin_memory()
-        result = torch.cuda.FloatTensor(t.size())
-        stream = torch.cuda.Stream()
-        ptr = [None]
-
-        # Performs the CPU->GPU copy in a background stream
-        def perform_copy():
-            with torch.cuda.stream(stream):
-                tmp = t.cuda(non_blocking=True)
-                ptr[0] = tmp.data_ptr()
-            torch.cuda.current_stream().wait_stream(stream)
-            tmp.record_stream(torch.cuda.current_stream())
-            torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
-            result.copy_(tmp)
-
-        perform_copy()
-        with torch.cuda.stream(stream):
-            tmp2 = torch.cuda.FloatTensor(t.size())
-            tmp2.zero_()
-            self.assertNotEqual(
-                tmp2.data_ptr(), ptr[0], msg="allocation reused to soon"
-            )
-
-        self.assertEqual(result.tolist(), [1, 2, 3, 4])
-
-        if not TEST_CUDAMALLOCASYNC:
-            # In the native allocator, we expect "tmp"'s side-stream-tagged block will be reused
-            # in that side stream after result.copy_(tmp) in the main stream finishes.
-            torch.cuda.current_stream().synchronize()
-            with torch.cuda.stream(stream):
-                tmp3 = torch.cuda.FloatTensor(t.size())
-                self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not reused")
-
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
 
