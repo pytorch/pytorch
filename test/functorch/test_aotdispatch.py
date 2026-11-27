@@ -485,7 +485,7 @@ def skipIfDynamoInput(reason):
     def decorator(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
-            if isinstance(self, TestAOTAutogradWithDynamo):
+            if isinstance(self, _AOTAutogradDynamoMixin):
                 self.skipTest(
                     f"Skipping {self._testMethodName} in TestAOTAutogradWithDynamo because {reason}"
                 )
@@ -494,7 +494,7 @@ def skipIfDynamoInput(reason):
 
         add_skip_condition(
             wrapper,
-            lambda cls: issubclass(cls, TestAOTAutogradWithDynamo),
+            lambda cls: issubclass(cls, _AOTAutogradDynamoMixin),
             f"Skipping in TestAOTAutogradWithDynamo because {reason}",
         )
         return wrapper
@@ -5033,6 +5033,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _compile_autocast(self, device, *, forward_autocast):
+        device_type = torch.device(device).type
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor x) -> Tensor")
             m.impl("foo", torch.clone, "CompositeExplicitAutograd")
@@ -5043,6 +5044,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             m.impl("foo", autocast, "AutocastCPU")
             m.impl("foo", autocast, "AutocastCUDA")
             m.impl("foo", autocast, "AutocastXPU")
+            m.impl("foo", autocast, "AutocastPrivateUse1")
 
             foo = torch.ops.mylib.foo.default
 
@@ -5058,13 +5060,13 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
                     return grad * foo(x)
 
             def fn(x):
-                with torch.amp.autocast(device, enabled=False):
+                with torch.amp.autocast(device_type, enabled=False):
                     return Foo.apply(x)
 
             x = torch.tensor(0.0, device=device, requires_grad=True)
             if forward_autocast:
                 with (
-                    torch.amp.autocast(device),
+                    torch.amp.autocast(device_type),
                     torch._dynamo.config.patch(recompile_limit=999),
                 ):
                     out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
@@ -5073,28 +5075,6 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
                     out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
             (grad,) = torch.autograd.grad(out, x)
             return out, grad
-
-    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
-    def test_backward_pass_autocast_on(self, device):
-        out, grad = self._compile_autocast(device, forward_autocast=True)
-        self.assertEqual(out, torch.zeros_like(out))
-        self.assertEqual(grad, torch.ones_like(grad))
-
-    @torch._functorch.config.patch(backward_pass_autocast="off")
-    def test_backward_pass_autocast_off(self, device):
-        out, grad = self._compile_autocast(device, forward_autocast=True)
-        self.assertEqual(out, torch.zeros_like(out))
-        self.assertEqual(grad, torch.zeros_like(grad))
-
-    @torch._functorch.config.patch(backward_pass_autocast="off")
-    def test_backward_pass_autocast_custom(self, device):
-        device_type = torch.device(device).type
-        with torch._functorch.config.patch(
-            backward_pass_autocast=[{"device_type": device_type}]
-        ):
-            out, grad = self._compile_autocast(device, forward_autocast=False)
-            self.assertEqual(out, torch.zeros_like(out))
-            self.assertEqual(grad, torch.ones_like(grad))
 
     @onlyAccelerator
     def test_mem_leak_from_save_for_bw(self, device):
@@ -10238,27 +10218,6 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
         self.assertEqual(metadata.num_intermediate_bases, 0)
 
-    def test_register_hook_in_checkpoint_accumulated_grad(self):
-        def body(y):
-            y.register_hook(lambda grad: grad * 0.5)
-            return y.clone()
-
-        def fn(x):
-            y = x * 2
-            z = torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False)
-            return z + y
-
-        x = torch.randn(4, requires_grad=True)
-        out = fn(x)
-        out.sum().backward()
-        eager_grad = x.grad.clone()
-
-        x2 = x.detach().clone().requires_grad_(True)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        out2 = opt_fn(x2)
-        out2.sum().backward()
-        self.assertEqual(x2.grad, eager_grad)
-
     def test_size_of_void_returning_nodes(self):
         # Void-returning ops have no `val` metadata. _size_of must return 0
         # for them instead of raising RuntimeError.
@@ -10645,6 +10604,31 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(sg_ops), 1)
 
 
+class TestPartitioningCheckpointHooks(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_register_hook_in_checkpoint_accumulated_grad(self, device):
+        def body(y):
+            y.register_hook(lambda grad: grad * 0.5)
+            return y.clone()
+
+        def fn(x):
+            y = x * 2
+            z = torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False)
+            return z + y
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        out = fn(x)
+        out.sum().backward()
+        eager_grad = x.grad.clone()
+
+        x2 = x.detach().clone().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out2 = opt_fn(x2)
+        out2.sum().backward()
+        self.assertEqual(x2.grad, eager_grad)
+
+
 class TestPartitioningDevice(AOTTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -10707,6 +10691,7 @@ class TestPartitioningDevice(AOTTestCase):
         this. Note the default partitioner config is the one that fails;
         aggressive_recomputation=True happens to route around it.
         """
+        device = torch.device(device).type
         from functorch.compile import min_cut_rematerialization_partition
         from torch._dynamo.backends.common import aot_autograd
 
@@ -10742,6 +10727,7 @@ class TestPartitioningDevice(AOTTestCase):
         test_min_cut_partitions_device_valued_node). A MUST_SAVE node is banned from
         recompute, and a device cannot be saved, so no finite cut existed.
         """
+        device = torch.device(device).type
         from functorch.compile import min_cut_rematerialization_partition
         from torch._dynamo.backends.common import aot_autograd
         from torch.utils.checkpoint import (
@@ -13815,31 +13801,154 @@ class TestAOTAutogradDeviceWithCache(
     hw_classification = HardwareClassification.ACCELERATOR
 
 
+class _AOTAutogradHardwareTestBase(_TestAOTAutogradBase):
+    _compile_autocast = TestAOTAutogradDevice._compile_autocast
+
+
+class TestAOTAutogradAutocast(_AOTAutogradHardwareTestBase):
+    hw_classification = HardwareClassification.CPU
+
+    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
+    def test_backward_pass_autocast_on(self, device):
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.ones_like(grad))
+
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_backward_pass_autocast_off(self, device):
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.zeros_like(grad))
+
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_backward_pass_autocast_custom(self, device):
+        device_type = torch.device(device).type
+        with torch._functorch.config.patch(
+            backward_pass_autocast=[{"device_type": device_type}]
+        ):
+            out, grad = self._compile_autocast(device, forward_autocast=False)
+            self.assertEqual(out, torch.zeros_like(out))
+            self.assertEqual(grad, torch.ones_like(grad))
+
+
+@inherit_device_tests
+class TestAOTAutogradWithDynamoAutocast(
+    _AOTAutogradDynamoMixin, TestAOTAutogradAutocast
+):
+    hw_classification = HardwareClassification.CPU
+
+
+@inherit_device_tests
+class TestAOTAutogradWithCacheAutocast(
+    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoAutocast
+):
+    hw_classification = HardwareClassification.CPU
+
+
+class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
+    def test_backward_pass_autocast_on(self, device):
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.ones_like(grad))
+
+    @onlyAccelerator
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_backward_pass_autocast_off(self, device):
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.zeros_like(grad))
+
+    @onlyAccelerator
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_backward_pass_autocast_custom(self, device):
+        device_type = torch.device(device).type
+        with torch._functorch.config.patch(
+            backward_pass_autocast=[{"device_type": device_type}]
+        ):
+            out, grad = self._compile_autocast(device, forward_autocast=False)
+            self.assertEqual(out, torch.zeros_like(out))
+            self.assertEqual(grad, torch.ones_like(grad))
+
+
+@inherit_device_tests
+class TestAOTAutogradWithDynamoAccelerator(
+    _AOTAutogradDynamoMixin, TestAOTAutogradAccelerator
+):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+@inherit_device_tests
+class TestAOTAutogradWithCacheAccelerator(
+    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoAccelerator
+):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
 instantiate_parametrized_tests(TestAOTAutograd)
-instantiate_device_type_tests(
-    TestAOTAutogradDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
-)
+instantiate_device_type_tests(TestAOTAutogradDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(
     TestAOTAutogradDeviceWithDynamo,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestAOTAutogradDeviceWithCache,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestAOTAutogradAutocast,
+    globals(),
+    only_for=("cpu",),
+)
+
+instantiate_device_type_tests(
+    TestAOTAutogradWithDynamoAutocast,
+    globals(),
+    only_for=("cpu",),
+)
+
+instantiate_device_type_tests(
+    TestAOTAutogradWithCacheAutocast,
+    globals(),
+    only_for=("cpu",),
+)
+
+instantiate_device_type_tests(
+    TestAOTAutogradAccelerator,
+    globals(),
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestAOTAutogradWithDynamoAccelerator,
+    globals(),
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestAOTAutogradWithCacheAccelerator,
+    globals(),
     allow_xpu=True,
 )
 
 instantiate_parametrized_tests(TestPartitioning)
+instantiate_device_type_tests(
+    TestPartitioningCheckpointHooks, globals(), allow_xpu=True
+)
+
 instantiate_device_type_tests(TestPartitioningDevice, globals(), allow_xpu=True)
 
 instantiate_parametrized_tests(TestAOTModuleSimplified)
+
 instantiate_device_type_tests(
     TestAOTModuleSimplifiedDevice,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
 
