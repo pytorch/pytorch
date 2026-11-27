@@ -4752,6 +4752,36 @@ class TestBinaryUfuncsDevice(TestCase):
         _compare_helper(t, zeros, *xlog1py_fns)
         _compare_helper(t, 0.0, *xlog1py_fns)
 
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("layout", ["contiguous", "strided", "broadcast"])
+    def test_zeta_large_even_exponents(self, device, dtype, layout):
+        threshold = float(2 ** (24 if dtype == torch.float32 else 53))
+        values = [threshold, threshold * 2, torch.finfo(dtype).max]
+        x = torch.tensor(values, device=device, dtype=dtype)
+        zero = torch.zeros((), device=device, dtype=dtype)
+        smallest = torch.nextafter(zero, torch.ones_like(zero))
+        large_q = -(2**21 + 0.5) if dtype == torch.float32 else -3113147295978520.5
+        values = [-0.25, -0.5, -0.75, -31.5, -1024.5, large_q]
+        q = torch.tensor(values, device=device, dtype=dtype)
+        q = torch.cat((q, -smallest.unsqueeze(0)))
+        x, q = x[:, None], q[None, :]
+        if layout != "broadcast":
+            x, q = torch.broadcast_tensors(x, q)
+            if layout == "contiguous":
+                x, q = x.contiguous(), q.contiguous()
+            else:
+                x = torch.stack((x, x), dim=-1)[..., 0]
+                q = torch.stack((q, q), dim=-1)[..., 0]
+        result = torch.special.zeta(x, q)
+        expected = torch.full((3, 7), float("inf"), device=device, dtype=dtype)
+        self.assertEqual(result, expected)
+
+        below = torch.nextafter(
+            torch.tensor(threshold, device=device, dtype=dtype), zero
+        )
+        result = torch.special.zeta(below, torch.full_like(below, -0.5))
+        self.assertTrue(result.isnan().item())
+
     @dtypes(
         *product(
             all_types_and(torch.bool, *_unsigned_int_types),
