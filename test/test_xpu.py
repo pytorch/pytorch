@@ -1716,15 +1716,13 @@ print(torch.xpu.is_initialized())
         with self.assertRaises(RuntimeError):
             torch.xpu.memory.change_current_allocator(allocator)
 
-        def check_output(script: str, *args: str) -> str:
+        def check_output(script: str, library_path: str) -> str:
             return (
-                subprocess.check_output([sys.executable, "-c", script, *args])
+                subprocess.check_output([sys.executable, "-c", script, library_path])
                 .decode("ascii")
                 .strip()
             )
 
-        # The subprocess loads the library the parent already built: rebuilding it
-        # would overwrite a DLL the parent holds, which Windows forbids.
         test_script = """\
 import ctypes
 import sys
