@@ -42,7 +42,7 @@ _MIN_GRAM_MMS = 2
 def _get_fake_mode(node: fx.Node) -> FakeTensorMode | CppFakeTensorMode:
     """Get FakeTensorMode: V.fake_mode during compilation, from node meta in tests."""
     mode = V.fake_mode
-    if isinstance(mode, FakeTensorMode):
+    if isinstance(mode, (FakeTensorMode, CppFakeTensorMode)):
         return mode
     # Standalone call (tests) -- extract from node metadata
     for inp in node.all_input_nodes:

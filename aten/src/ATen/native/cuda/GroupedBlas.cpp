@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -29,6 +30,7 @@
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_group_gemm.h>
 #include <ATen/native/hip/ck_tile_group_gemm.h>
+#include <ATen/native/hip/ck_tile_group_gemm/device_info.h>
 #endif
 #include <ATen/ceil_div.h>
 
@@ -1094,6 +1096,35 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
   const int64_t vector_elems = 16 / mat_a.element_size();
   return (a_row_major ? K : M) % vector_elems == 0 && (b_row_major ? N : K) % vector_elems == 0;
 }
+
+// hipBLASLt runs one GEMM per expert, each with a fixed cost, but beats ck_tile's single persistent kernel once each
+// expert is large: per-expert M * N * sqrt(K) of the forward GEMM above 3.165e-13 * (FLOP/s * bytes/s)^0.75, from the
+// GPU's datasheet TFLOPS for the dtype and DRAM bandwidth. Every call evaluates the forward GEMM's dims, so with the
+// op benchmark's layout (2D x 3D forward with a transposed-view weight) a layer's forward, dX and dW pick the same
+// backend; other layouts may not. Fitted on the op benchmark's MoE shapes on MI300X and MI355X; device_info.h picks
+// the datasheet entry by architecture and CU count.
+static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  // In the 2D cases one of M, N and K is the jagged total over all groups.
+  const int64_t groups = a_is_2d && b_is_2d ? offs->size(0) : (a_is_2d ? mat_b.size(0) : (b_is_2d ? mat_a.size(0) : 1));
+  const double experts = groups > 0 ? groups : 1;
+  const double m = mat_a.size(-2) / (a_is_2d && !b_is_2d ? experts : 1);
+  const double n = mat_b.size(-1) / (b_is_2d && !a_is_2d ? experts : 1);
+  const double k = mat_a.size(-1) / (a_is_2d && b_is_2d ? experts : 1);
+  // The forward GEMM's K is this call's k in forward and its n in dX (row-major A and B) and dW (2D x 2D), matching
+  // group_gemm_ck_tile's layout canonicalization.
+  const bool b_row_major = !check_valid_strides_and_return_transposed(mat_b);
+  const bool grad = (a_is_2d && b_is_2d) || (!b_is_2d && b_row_major && (a_is_2d || !check_valid_strides_and_return_transposed(mat_a)));
+  const double forward_mn_sqrt_k = m * n * k / std::sqrt(grad ? n : k);
+  const auto dtype = mat_a.scalar_type();
+  const auto* props = at::cuda::getCurrentDeviceProperties();
+  return at::hip::detail::ck_tile_group_gemm::with_device_info(props->gcnArchName, props->multiProcessorCount, [&](auto info) {
+    using Info = decltype(info);
+    const double tflops = dtype == at::kFloat ? Info::fp32_tflops : (dtype == at::kHalf ? Info::fp16_tflops : Info::bf16_tflops);
+    return forward_mn_sqrt_k <= 3.165e-13 * std::pow(tflops * 1e12 * Info::dram_bw_gbs * 1e9, 0.75);
+  }).value_or(false);
+}
 #endif
 
 // Size and strides of the output that the grouped GEMM kernels write. ROCm
@@ -1131,11 +1162,13 @@ std::optional<c10::ScalarType> out_dtype) {
   }
 #elif defined(USE_ROCM_CK_GEMM)
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
-  // To enable CK-tile path, use env variable ROCM_ALLOW_GROUP_GEMM_CK_TILE=1.
-  // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
+  // ROCM_ALLOW_GROUP_GEMM_CK_TILE=1 forces CK-tile, =0 disables it, unset lets should_use_ck_tile_group_gemm pick.
+  // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1, plus ROCM_ALLOW_GROUP_GEMM_CK_TILE=0 since
+  // CK-tile is tried first.
   const bool supported_ck_tile_arch = at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"});
-  if (at::globalContext().rocmAllowGroupGemmCkTile() && supported_ck_tile_arch &&
-      ck_tile_group_gemm_supported(mat_a, mat_b, offs)) {
+  const std::optional<bool> ck_tile_env = at::globalContext().rocmAllowGroupGemmCkTile();
+  if (ck_tile_env != false && supported_ck_tile_arch && ck_tile_group_gemm_supported(mat_a, mat_b, offs) &&
+      (ck_tile_env == true || should_use_ck_tile_group_gemm(mat_a, mat_b, offs))) {
     return GroupedMMKernel::CkTile;
   }
   if (at::globalContext().rocmAllowGroupGemmCk() && (supported_ck_tile_arch || at::detail::getCUDAHooks().isGPUArch({"gfx90a"}))) {
