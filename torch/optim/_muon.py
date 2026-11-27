@@ -47,7 +47,7 @@ def _newtonschulz_iterations(
     return ortho_update.T if tall else ortho_update
 
 
-def _single_tensor_zeropower_via_newtonschulz(
+def _zeropower_via_newtonschulz(
     update: Tensor,
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
@@ -78,7 +78,7 @@ def _multi_tensor_zeropower_via_newtonschulz(
     eps: float,
 ) -> list[Tensor]:
     """
-    Multi-tensor version of :func:`_single_tensor_zeropower_via_newtonschulz`.
+    Multi-tensor version of :func:`_zeropower_via_newtonschulz`.
 
     Some operations (e.g. the norm computation) are fused across tensors, but the
     Newton-Schulz iterations run in a for loop: they are built on matmuls
@@ -384,9 +384,7 @@ def _single_tensor_muon(
         if update.ndim != 2:
             raise ValueError("Muon update must be a 2D matrix")
 
-        update = _single_tensor_zeropower_via_newtonschulz(
-            update, ns_coefficients, ns_steps, eps
-        )
+        update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
 
         adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
 
