@@ -77,9 +77,6 @@ test_config = {
 class _FxirTestConfigMixin:
     def setUp(self):
         super().setUp()
-        # config.patch cannot be a class decorator here: it returns a subclass
-        # whose __dict__ holds no test methods, so instantiate_device_type_tests
-        # (which scans __dict__.keys()) would not inject the device argument.
         ctx = config.patch(test_config)
         ctx.__enter__()
         self.addCleanup(ctx.__exit__, None, None, None)
