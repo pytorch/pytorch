@@ -294,6 +294,7 @@ class TestNCCL(TestCase):
 # Every NCCL-backend op that synchronizes ranks through PyTorch's signal pad or
 # an NCCL device communicator, with all_to_all_nd once per guarded path.
 # put_wait_signal cannot run eagerly: nccl_wait_for_signal never clears the pad.
+
 _NCCL_EAGER_PAD_OPS = (
     "barrier",
     "reduce_scatter_offset",
@@ -1569,11 +1570,11 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         else:
             self.assertEqual(handle.multicast_ptr, 0)
 
-    def _symm_mem_pool_group(self, backend: str, cta_policy: int | None = None):
+    def _symm_mem_pool_group(self, cta_policy: int | None = None):
         opts = c10d.ProcessGroupNCCL.Options()
         if cta_policy is not None:
             opts.config.cta_policy = cta_policy
-        pg = c10d.new_group(backend=backend, pg_options=opts)
+        pg = c10d.new_group(backend="nccl", pg_options=opts)
         # register_mem_pool needs a live communicator.
         c10d.all_reduce(torch.ones(1, device=self.device), group=pg)
         nccl_backend = c10d.get_backend_impl(pg, self.device)
@@ -1596,9 +1597,8 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 28), "NCCL symmetric kernels need nccl 2.28")
     @skip_if_lt_x_gpu(2)
-    @parametrize("backend", ["nccl", "nccl-legacy"])
-    def test_nccl_symmem_mem_pool_all_reduce_symk(self, backend: str):
-        pg, nccl_backend, pool = self._symm_mem_pool_group(backend)
+    def test_nccl_symmem_mem_pool_all_reduce_symk(self):
+        pg, nccl_backend, pool = self._symm_mem_pool_group()
         try:
             with torch.cuda.use_mem_pool(pool):
                 t = torch.full(
@@ -1614,10 +1614,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 28), "NCCL copy-engine collectives need nccl 2.28")
     @skip_if_lt_x_gpu(2)
-    @parametrize("backend", ["nccl", "nccl-legacy"])
-    def test_nccl_symmem_mem_pool_all_gather_copy_engine(self, backend: str):
+    def test_nccl_symmem_mem_pool_all_gather_copy_engine(self):
         pg, nccl_backend, pool = self._symm_mem_pool_group(
-            backend, c10d.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
+            c10d.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
         )
         numel = 1024 * 1024
         try:
@@ -1903,7 +1902,6 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
             hdl.get_multimem_cft_handle()
 
 
-@instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific symmetric-memory lifecycle test"
@@ -1933,14 +1931,12 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    def _init_process_group(
-        self, backend_name: str, store_suffix: str, **kwargs
-    ) -> None:
+    def _init_process_group(self, store_suffix: str, **kwargs) -> None:
         if not PLATFORM_SUPPORTS_SYMM_MEM:
             raise SkipTest("Test requires SymmMem support")
         torch.cuda.set_device(self.device)
         c10d.init_process_group(
-            backend=backend_name,
+            backend="nccl",
             world_size=self.world_size,
             rank=self.rank,
             store=c10d.FileStore(self.file_name + store_suffix, self.world_size),
@@ -1968,19 +1964,13 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         ):
             _ = handle.buffer_ptrs
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_stale_handle_rejected_across_same_name_restart(
-        self, backend_name: str
-    ) -> None:
+    def test_stale_handle_rejected_across_same_name_restart(self) -> None:
         symm_mem.set_backend("NCCL")
-        self._init_process_group(backend_name, "")
+        self._init_process_group("")
         old_pg = c10d.distributed_c10d._get_default_group()
         pg_backend = old_pg._get_backend(self.device)
-        expected_backend_type = (
-            c10d.ProcessGroupNCCL2 if backend_name == "nccl" else c10d.ProcessGroupNCCL
-        )
-        self.assertIsInstance(pg_backend, expected_backend_type)
+        self.assertIsInstance(pg_backend, c10d.ProcessGroupNCCL2)
         old_group_name = old_pg.group_name
 
         c10d.all_reduce(torch.ones(1, device=self.device))
@@ -1991,7 +1981,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         self._assert_stale(old_handle)
 
         try:
-            self._init_process_group(backend_name, "_successor")
+            self._init_process_group("_successor")
             new_pg = c10d.distributed_c10d._get_default_group()
             self.assertEqual(new_pg.group_name, old_group_name)
             c10d.all_reduce(torch.ones(1, device=self.device))
@@ -2035,23 +2025,16 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             if c10d.is_initialized():
                 c10d.destroy_process_group()
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_retained_handle_rejected_after_abort(self, backend_name: str) -> None:
+    def test_retained_handle_rejected_after_abort(self) -> None:
         # Aborting invalidates the comm through NCCLComm::abort() rather than
-        # destroy(). Both backends are covered because only "nccl-legacy"
-        # resolves to stock ProcessGroupNCCL, which retires the registration
-        # from the comm's pre-invalidate hook; "nccl" resolves to
-        # ProcessGroupNCCL2 and retires through its own path.
+        # destroy().
         patch_env(self, TORCH_NCCL_ASYNC_ERROR_HANDLING="0")
 
         symm_mem.set_backend("NCCL")
-        self._init_process_group(backend_name, "_abort")
+        self._init_process_group("_abort")
         pg = c10d.distributed_c10d._get_default_group()
-        expected_backend_type = (
-            c10d.ProcessGroupNCCL2 if backend_name == "nccl" else c10d.ProcessGroupNCCL
-        )
-        self.assertIsInstance(pg._get_backend(self.device), expected_backend_type)
+        self.assertIsInstance(pg._get_backend(self.device), c10d.ProcessGroupNCCL2)
         group_name = pg.group_name
         c10d.all_reduce(torch.ones(1, device=self.device))
         tensor = symm_mem.empty(4096, dtype=torch.float32, device=self.device).fill_(
@@ -2072,11 +2055,8 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         ):
             symm_mem.rendezvous(tensor, group=group_name)
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_retained_handle_stale_after_wait_timeout_abort(
-        self, backend_name: str
-    ) -> None:
+    def test_retained_handle_stale_after_wait_timeout_abort(self) -> None:
         # A timed-out blocking wait aborts the comm from the work object, before
         # any process-group teardown runs.
         patch_env(
@@ -2086,7 +2066,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             TORCH_NCCL_DUMP_ON_TIMEOUT="0",
         )
         symm_mem.set_backend("NCCL")
-        self._init_process_group(backend_name, "_wait_abort")
+        self._init_process_group("_wait_abort")
         _tensor, handle = self._retained_handle()
         side_store = c10d.FileStore(self.file_name + "_wait_side", self.world_size)
         if self.rank == 0:
@@ -2105,11 +2085,8 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         finally:
             side_store.set("peer_done", "1")
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_retained_handle_stale_after_watchdog_abort(
-        self, backend_name: str
-    ) -> None:
+    def test_retained_handle_stale_after_watchdog_abort(self) -> None:
         # With cleanup enabled, the watchdog aborts the timed-out work's comm
         # before it aborts the process group's comms.
         patch_env(
@@ -2122,7 +2099,6 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         # Only the peer's watchdog may time out: the holding rank's abort waits
         # for its held-back work, which a short timeout would cut off.
         self._init_process_group(
-            backend_name,
             "_watchdog_abort",
             timeout=timedelta(seconds=2) if self.rank == 1 else None,
         )

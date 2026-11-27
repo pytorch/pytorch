@@ -437,12 +437,16 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertTrue(store2.libuvBackend)
 
     def test_repr(self) -> None:
+        # Once a getnameinfo call fails (e.g. a DNS timeout), c10d prints
+        # numeric addresses for the rest of the process.
+        loopback = r"\[?(?:localhost|(?:::ffff:)?127\.0\.0\.1|::1)\]?:\d+"
+
         # server
         store1 = self._create_store()
         self.assertRegex(
             repr(store1),
             r"TCPStore\("
-            r"client=TCPClient\(SocketImpl\(fd=\d+, addr=\[?localhost\]?:\d+, remote=\[?localhost\]?:\d+\)\), "
+            rf"client=TCPClient\(SocketImpl\(fd=\d+, addr={loopback}, remote={loopback}\)\), "
             r"server=TCPServer\(port=\d+\)\)",
         )
 
@@ -456,7 +460,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertRegex(
             repr(store2),
             r"TCPStore\("
-            r"client=TCPClient\(SocketImpl\(fd=\d+, addr=\[?localhost\]?:\d+, remote=\[?localhost\]?:\d+\)\), "
+            rf"client=TCPClient\(SocketImpl\(fd=\d+, addr={loopback}, remote={loopback}\)\), "
             r"server=<nullptr>\)",
         )
 
@@ -1766,15 +1770,20 @@ class RendezvousTCPTest(TestCase):
         # address it was handed, so a private store on a caller-chosen port
         # became client-only on every rank, nobody ever started a server and
         # every rank blocked in connect-retry until the store timeout.
-        url = self.create_tcp_url()
+        # Keep the agent port bound and let rendezvous allocate the private port.
+        agent_store = dist.TCPStore(
+            DEFAULT_HOSTNAME, 0, 1, True, timeout=timedelta(seconds=10)
+        )
+        url = f"tcp://{DEFAULT_HOSTNAME}:0?world_size=1"
         env = {
             "TORCHELASTIC_USE_AGENT_STORE": "True",
             "MASTER_ADDR": DEFAULT_HOSTNAME,
-            "MASTER_PORT": str(common.find_free_port()),
+            "MASTER_PORT": str(agent_store.port),
         }
         with mock.patch.dict(os.environ, env):
             gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
             store0, _, _ = next(gen0)
+        self.assertNotEqual(store0.port, agent_store.port)
         store0.set("key0", "value0")
         self.assertEqual(b"value0", store0.get("key0"))
 

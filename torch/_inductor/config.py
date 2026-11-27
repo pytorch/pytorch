@@ -8,8 +8,8 @@ import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
 from torch.utils._config_module import (
     Config,
+    deprecated_alias_fields_from,
     get_tristate_env,
-    inherit_fields_from,
     install_config_module,
 )
 from torch.utils._triton import triton_compile_iq_enabled
@@ -590,8 +590,20 @@ use_torch_profiler_benchmarker: bool = Config(
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
-# enable slow autotuning passes to select pointwise/reductions algorithms
+# enable slow autotuning passes to select pointwise algorithms. Until
+# max_autotune_reduction stops defaulting to None, this also covers reductions.
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
+
+# Widen the configs tried for reduction, persistent reduction and split
+# reduction kernels. None follows max_autotune_pointwise. max_autotune=True
+# enables both regardless.
+# TODO: once no callers rely on max_autotune_pointwise also covering reductions
+# (they set max_autotune_reduction=True instead), default this to False and
+# remove the None fallback, so that max_autotune_pointwise covers only pointwise
+# kernels.
+max_autotune_reduction: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_REDUCTION"
+)
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
@@ -614,6 +626,9 @@ max_autotune_gemm_min_sms: int | None = (
 incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
 )
+# Extend the default kernel allowlist when incremental autotuning is enabled.
+# An explicit TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_INCLUDE still takes precedence.
+incremental_autotune_reduction = False
 # Per-state dispatch budget for incremental autotuning; 0 disables the cap.
 # A torch.compile option overrides this default for every generated kernel.
 incremental_autotune_max_dispatches = int(
@@ -891,6 +906,26 @@ max_autotune_subproc_terminate_timeout_seconds = 0.0
 
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
+
+# should_reinplace_scatter() controls whether a chain of scatter ops in the fxgraph is
+# functionalized (scatter chain) or mutate in-place (mutation).
+# Functionalized scatter usually can be fused into a single kernel, but each threadblock
+# must bear of cost of wastefully loading all the input pointers for each scatter dim, while
+# mutate in-place usually results in many smaller inductor kernels, but does not have the
+# loading issue.
+# Therefore, when you have a long chain of scatter ops, it is usually beneficial to use the
+# mutate in-place form as the increased kernel launch cost is lower than wasted memory load
+# cost. When you have a short chain of scatter ops, it is usually beneficial to use the
+# functionalized form.
+#
+# This configuration value changes the chain length threshold. At a scatter chain length larger
+# than TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD, inductor will actively switches to
+# mutate in-place (non-fused) form to avoid wastefully loading kernel inputs.
+# At a scatter chain length lower than TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD or when
+# TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD < 0, the original form is used.
+reinplace_scatter_chain_threshold = int(
+    os.environ.get("TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD", "-1")
+)
 
 # Number of benchmark runs for collective operations
 collective_benchmark_nruns = int(
@@ -1230,7 +1265,8 @@ conv_1x1_as_mm = False
 split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 
 # A deterministic mode that skips any on device benchmarking in Inductor
-# if we know they affect numerics.  WARNING: Expect perf hit in this mode.
+# if we know they affect numerics, and turns off Triton's FMA contraction
+# (see triton.enable_fp_fusion).  WARNING: Expect perf hit in this mode.
 deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
@@ -2084,6 +2120,17 @@ class cpp:
     # uses the platform default. Set to "" to suppress the architecture flag.
     march: str | None = os.environ.get("TORCHINDUCTOR_CPP_MARCH")
 
+    # Linux only, ignored on other platforms: extra flags passed verbatim to
+    # every C++ compiler command, e.g. ["-mllvm", "-enable-misched=false"].
+    extra_cflags: list[str] = []
+
+    # Linux only, ignored on other platforms: extra flags passed verbatim to the
+    # C++ compiler commands that link. These go to the compiler, which runs the
+    # linker, so linker options need the -Wl, prefix. With
+    # aot_inductor.enable_lto, machine code is generated at link time, so code
+    # generation flags go here, e.g. ["-Wl,-mllvm,-enable-misched=false"].
+    extra_ldflags: list[str] = []
+
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
@@ -2428,8 +2475,7 @@ class triton:
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
     #   - max_tiles=2
-    #   - max_tiles=3 is experimental and may have bugs
-    # higher values are unsupported
+    #   - max_tiles > 3 is experimental and may have bugs
 
     #  We use a max of 3 if coalesce_tiling_analysis is True, and 2 otherwise.
     #  Note - coalesce_tiling_analysis does not yet apply to dynamic shapes.
@@ -2446,7 +2492,8 @@ class triton:
     # Let Triton contract multiply-adds in Inductor's generated kernels into FMAs.
     # Which multiply-adds become FMAs can depend on the block size, so disable this
     # for results that do not depend on the configs autotuning picks.
-    # emulate_precision_casts also disables it.
+    # Deterministic mode and emulate_precision_casts also disable it. Explicit FMAs
+    # (tl.fma, e.g. in triton_helpers) are kept either way.
     enable_fp_fusion = os.environ.get("TORCHINDUCTOR_ENABLE_FP_FUSION", "1") == "1"
 
     # max autotune gemm with cublasLt
@@ -2533,6 +2580,15 @@ class triton:
 
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
     force_cooperative_reductions = False
+
+    # Lower a split reduction as an extra grid dim rather than reshaping the
+    # reduction axis, so stage-1 loads stay block_ptr-eligible. Requires
+    # split_reductions. Applies only to reductions with a single non-unit reduction
+    # dim that are not strict; Welford, online softmax and other multi-output
+    # reductions, and reductions taking the aligned split, keep the classic lowering.
+    split_reductions_as_grid = (
+        os.environ.get("TORCHINDUCTOR_SPLIT_REDUCTIONS_AS_GRID", "0") == "1"
+    )
 
     # Lower/upper bounds between two-step variance and Welford variance for
     # non-split CUDA Triton half/bfloat16 reductions. Mid-sized reductions use
@@ -2636,6 +2692,8 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Intel XPU mm templates (mm_xpu_persistent, mm_xpu_non_persistent) for BF16/FP16.
+    enable_xpu_mm_templates = os.environ.get("ENABLE_XPU_MM_TEMPLATES", "1") == "1"
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
@@ -2682,6 +2740,13 @@ class triton:
     # it as an autotuning choice for all matmuls
     decompose_k_threshold = int(
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
+    )
+
+    # Skip decompose_k splits whose chunk (K // split) exceeds this: fp32 accumulation
+    # error in each partial grows with the chunk length. 0 disables. Not applied when
+    # K is symbolic.
+    decompose_k_max_k_per_split = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_MAX_K_PER_SPLIT", "16384")
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
@@ -3011,14 +3076,15 @@ class cutlass:
     # Whether to use fast math.
     use_fast_math = False
 
-    # Path to the CUTLASS repo root directory.
+    # Path to the CUTLASS repo root directory (SYCL-TLA on XPU).
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.path.realpath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
             os.path.join(
                 os.path.dirname(torch.__file__),
-                "../third_party/cutlass/",
+                "../third_party",
+                "sycl-tla" if torch.xpu._is_compiled() else "cutlass",
             ),
         )
     )
@@ -3128,7 +3194,7 @@ class cutlass:
     enable_caching_codegen: bool = True
 
 
-@inherit_fields_from(cutlass)
+@deprecated_alias_fields_from(cutlass)
 class cuda(cutlass):
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
@@ -3161,7 +3227,7 @@ class cuda(cutlass):
     autotune_tunableop_dynamic_dims_wildcard: bool = False
 
 
-@inherit_fields_from(cutlass)
+@deprecated_alias_fields_from(cutlass)
 class xpu(cutlass):
     # Xe arch to use for SYCL kernel compilation.
     # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
@@ -3172,8 +3238,6 @@ class xpu(cutlass):
 
     # Path to Intel OneAPI.
     oneapi_root: str | None = None
-
-    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
 
 
 class rocm:
@@ -3497,9 +3561,7 @@ _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
     # uses absolute path
-    "cuda.cutlass_dir",
     "cutlass.cutlass_dir",
-    "xpu.cutlass_dir",
     # not relevant
     "worker_start_method",
     "compile_threads",

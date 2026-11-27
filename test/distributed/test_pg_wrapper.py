@@ -289,12 +289,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
                         self.world_size,
                     )
                 else:
-                    _pg = c10d.ProcessGroupNCCL(
-                        store,
-                        self.rank,
-                        self.world_size,
-                        timeout=timedelta(seconds=timeout),
-                    )
+                    opts = c10d.ProcessGroupNCCL.Options()
+                    opts._timeout = timedelta(seconds=timeout)
+                    _pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, opts)
                 pg = c10d._create_process_group_wrapper(
                     _pg,
                     "unused",
