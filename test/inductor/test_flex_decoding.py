@@ -1824,13 +1824,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             ).mean()
             out_mixed.backward()
 
+    @skipCUDAIf(True, "Not supported on CUDA")
+    @skipXPUIf(True, "Not supported on XPU")
     @requires_capabilities(Capability.attention.flex_attention)
     @parametrize_device_dtype("dtypes")
     @common_utils.parametrize("partition_size", [64, 128, 256, 1024])
     def test_flash_decoding_partition_size(self, device, dtype, partition_size):
-        if self.device_type != "cpu":
-            self.skipTest("flash decoding partition size is a CPU-only path")
-
         def score_mod(score, b, h, m, n):
             return score * 2
 
