@@ -1,10 +1,15 @@
+import warnings
+
 import torch
 
 from .._core import ComplexTensor
 from .common import (
+    _get_func_name,
     complex_to_real_dtype,
     register_complex,
     register_force_test,
+    register_inductor,
+    register_simple,
     split_complex_tensor,
 )
 
@@ -15,9 +20,17 @@ aten = torch.ops.aten
 
 # TODO (hameerabbasi): Not being tested
 @register_force_test(prims.convert_element_type)
-def convert_element_type_impl(x: ComplexTensor, dtype: torch.dtype) -> ComplexTensor:
-    dtype = complex_to_real_dtype(dtype)
+def convert_element_type_impl(
+    x: ComplexTensor, dtype: torch.dtype
+) -> ComplexTensor | torch.Tensor:
     u, v = split_complex_tensor(x)
+    if not dtype.is_complex:
+        warnings.warn(
+            "Casting complex values to real discards the imaginary part", UserWarning
+        )
+        return prims.convert_element_type(u, dtype)
+
+    dtype = complex_to_real_dtype(dtype)
     u_out = prims.convert_element_type(u, dtype)
     v_out = prims.convert_element_type(v, dtype)
 
@@ -32,3 +45,24 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(prims.conj)
 def conj_impl(self: ComplexTensor) -> ComplexTensor:
     return aten._conj(self)
+
+
+@register_complex(prims.item)
+def item_impl(self: ComplexTensor) -> complex:
+    re, im = split_complex_tensor(self)
+    return complex(prims.item(re), prims.item(im))
+
+
+rev_impl = register_simple(prims.rev)
+
+
+INDUCTOR_OPS = [
+    prims.fft_r2c,
+    prims.fft_c2c,
+    prims.fft_c2r,
+]
+
+for inductor_op in INDUCTOR_OPS:
+    globals()[_get_func_name(inductor_op)] = register_inductor(inductor_op)
+
+del inductor_op
