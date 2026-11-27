@@ -14,7 +14,6 @@ from torch.ao.quantization._learnable_fake_quantize import _LearnableFakeQuantiz
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCPU,
     skipCPUIf,
 )
 from torch.testing._internal.common_quantized import (
@@ -39,9 +38,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     TestCase,
-    parametrize,
     skipIfTorchDynamo,
-    subtest,
 )
 
 # Reference method for fake quantize
@@ -367,7 +364,18 @@ class _LearnableFakeQuantizeTestMixin:
                 zero_point.grad.data.zero_()
 
 
-class TestFakeQuantizeOps(TestCase):
+class TestFakeQuantizeOps(_LearnableFakeQuantizeTestMixin, TestCase):
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_learnable_backward_per_tensor_cpu(self, X):
+        torch.random.manual_seed(NP_RANDOM_SEED)
+        X, (_, _, _) = X
+        scale_base = torch.normal(mean=0, std=1, size=(1,)).clamp(1e-4, 100)
+        zero_point_base = torch.normal(mean=0, std=128, size=(1,))
+        self._test_learnable_backward_per_tensor(
+            X, 'cpu', scale_base, zero_point_base)
+
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -1059,37 +1067,16 @@ class TestFakeQuantizeOpsLearnablePerTensor(_LearnableFakeQuantizeTestMixin, Tes
         self._test_learnable_forward_per_tensor(
             X, device, scale_base, zero_point_base)
 
-    @parametrize(
-        "input_shape, seed, dtype_order",
-        [
-            subtest(
-                (None, NP_RANDOM_SEED, (torch.float32,)),
-                name="generated_input",
-                decorators=[onlyCPU],
-            ),
-            subtest(
-                ((2, 1), 12, (torch.bfloat16, torch.float32)),
-                name="fixed_shape",
-                decorators=[onlyAccelerator],
-            ),
-        ],
-    )
-    @given(data=st.data())
-    def test_learnable_backward_per_tensor(self, device, input_shape, seed, dtype_order, data):
-        generated_input = None
-        if input_shape is None:
-            generated_input, _ = data.draw(hu.tensor(
-                shapes=hu.array_shapes(1, 5,),
-                elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
-                qparams=hu.qparams(dtypes=torch.quint8)))
+    @onlyAccelerator
+    def test_learnable_backward_per_tensor(self, device):
+        # setting seed to avoid increasing tolerance due to cases where
+        # difference in Python vs CPP downcasting causes tensor mismatches
+        # e.g. 27.87704 vs  27.8408 before downcasting, 27.7500 vs 27.8750 after downcasting for Python vs CPP op
+        torch.random.manual_seed(12)
+        x_shape = (2, 1)
 
-        # Preserve the fixed-shape case's seed and dtype order for downcasting.
-        torch.random.manual_seed(seed)
-        for dtype in dtype_order:
-            X_base = (
-                generated_input if input_shape is None
-                else torch.randn(input_shape, dtype=dtype, device=device)
-            )
+        for dtype in [torch.bfloat16, torch.float32]:
+            X_base = torch.randn(x_shape, dtype=dtype, device=device)
             scale_base = torch.normal(mean=0, std=1, size=(1,)).clamp(1e-4, 100).to(dtype=dtype)
             zero_point_base = torch.normal(mean=0, std=128, size=(1,)).to(dtype=dtype)
             self._test_learnable_backward_per_tensor(
