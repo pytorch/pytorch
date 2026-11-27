@@ -5570,14 +5570,12 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 torch.compile(fn, backend="eager", fullgraph=True)(x, inp)
         counter = CompileCounter()
         compiled = torch.compile(fn, backend=counter)
-        result, od, copied = compiled(x, inp)
-        self.assertEqual(result, x + 1)
-        self.assertEqual(copied.tag, [42])
-        self.assertEqual(copied.tag is od.tag, copier is copy.copy)
-        self.assertIs(od.tag, value)
-        self.assertEqual(od is inp, not local)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            compiled(x, collections.OrderedDict(a=1))
+        for original in (inp, collections.OrderedDict(a=1)):
+            result, od, copied = compiled(x, original)
+            self.assertEqual((result, copied, copied.tag), (x + 1, od, value))
+            self.assertEqual(copied.tag is od.tag, copier is copy.copy)
+            self.assertIs(od.tag, value)
+            self.assertEqual((od is copied, od is original), (False, not local))
         self.assertEqual(counter.frame_count, 1)
 
     def test_return_ordered_dict_with_instance_state(self):
