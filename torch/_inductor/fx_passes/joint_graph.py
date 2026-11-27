@@ -71,6 +71,68 @@ pass_patterns = [
 ]
 
 
+def restore_masked_fill_backward(gm, num_fwd_outputs):
+    if not config.strict_pointwise:
+        return
+    graph = gm.graph
+    output = next(node for node in graph.nodes if node.op == "output")
+    outputs = output.args[0]
+
+    def ancestors(nodes):
+        seen = OrderedSet()
+        pending = list(nodes)
+        while pending:
+            node = pending.pop()
+            if not isinstance(node, torch.fx.Node) or node in seen:
+                continue
+            seen.add(node)
+            pending.extend(node.all_input_nodes)
+        return seen
+
+    forward = ancestors(outputs[:num_fwd_outputs])
+    backward = ancestors(outputs[num_fwd_outputs:]) - forward
+    changed = False
+    for node in list(graph.nodes):
+        if (
+            node not in backward
+            # Match the native autograd node, not a forward opcode or sequence.
+            or node.meta.get("grad_fn_names", (None,))[-1] != "MaskedFillBackward1"
+            or node.target != aten.sum.default
+            or len(node.args) != 1
+        ):
+            continue
+        where_node = node.args[0]
+        if where_node.target != aten.where.self or len(where_node.args) != 3:
+            continue
+        mask, grad, zero = where_node.args
+        # Eager uses where.sum for an actual subclass dispatch, not its ancestry.
+        if where_node.meta.get("tensor_subclass_dispatch", False):
+            continue
+        value = node.meta.get("val")
+        if (
+            not isinstance(zero, torch.fx.Node)
+            or zero.target != aten.full.default
+            or zero.args[:2] != ([], 0.0)
+            or not isinstance(value, torch.Tensor)
+            or not is_strict_cuda_triton(value.device)
+        ):
+            continue
+        from .. import inductor_prims
+
+        # Ordinary eager autograd compacts the mask; transformed autograd uses where.
+        with graph.inserting_before(node):
+            replacement = graph.call_function(inductor_prims.masked_sum, (grad, mask))
+            replacement.meta = node.meta.copy()
+        node.replace_all_uses_with(replacement)
+        graph.erase_node(node)
+        if not where_node.users:
+            graph.erase_node(where_node)
+        changed = True
+    if changed:
+        graph.lint()
+        gm.recompile()
+
+
 def _is_lossless_fp_widening_cast(
     src_dtype: torch.dtype, dst_dtype: torch.dtype
 ) -> bool:
@@ -930,7 +992,14 @@ def joint_graph_passes(
         graph.recompile()
 
     if config.strict_pointwise:
-        from torch.fx.experimental.proxy_tensor import _original_mutation_destination
+        from torch._functorch.partitioners import (
+            _has_tag_is_backward,
+            _has_tag_must_be_in_backward,
+        )
+        from torch.fx.experimental.proxy_tensor import (
+            _original_aten_mutation_storages,
+            _original_mutation_destination,
+        )
         from torch.utils.checkpoint import CheckpointPolicy
 
         from ..fx_utils import get_node_storage, get_storage
@@ -952,6 +1021,42 @@ def joint_graph_passes(
             if node in native_mutation_storage:
                 node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
                 native_storages.add(get_storage(node.meta["original_aten_mutation"][1]))
+
+        # Snapshots before a later native write cannot be rematerialized in backward.
+        mutated_native_storages = _original_aten_mutation_storages(graph.graph)
+        nodes = list(graph.graph.nodes)
+        last_native_write: dict[int, int] = {}
+        for index, node in enumerate(nodes):
+            mutation = node.meta.get("original_aten_mutation")
+            if (
+                isinstance(mutation, tuple)
+                and isinstance(mutation[0], torch.Tensor)
+                and get_storage(mutation[0]) in mutated_native_storages
+            ):
+                last_native_write[get_storage(mutation[0])] = index
+        for index, node in enumerate(nodes):
+            value = node.meta.get("val")
+            if (
+                node.op != "call_function"
+                or not isinstance(value, torch.Tensor)
+                or _has_tag_is_backward(node)
+                or _has_tag_must_be_in_backward(node)
+            ):
+                continue
+            for source in node.all_input_nodes:
+                source_value = source.meta.get("val")
+                if not isinstance(source_value, torch.Tensor) or get_storage(
+                    value
+                ) == get_storage(source_value):
+                    continue
+                native_source = _original_mutation_destination(
+                    source_value, node=source
+                )
+                if isinstance(
+                    native_source, torch.Tensor
+                ) and index < last_native_write.get(get_storage(native_source), -1):
+                    node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+                    break
 
         # Saved aliases must retain caller ownership even when a view was
         # taken outside the original native mutation's tracing context.

@@ -198,7 +198,7 @@ def _decompose_scatter_mutating(
         raise AssertionError(f"expected no kwargs, got {node.kwargs}")
 
     if node.target is _generalized_scatter:
-        inp = graph_call_function(graph, aten.clone, inp)
+        inp = graph_call_function(graph, aten.clone.default, inp)
 
     tmp = inp
     for view in view_ops:  # type: ignore[union-attr]

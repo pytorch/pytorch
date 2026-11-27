@@ -1587,6 +1587,17 @@ class CachingAutotuner(KernelInterface):
             )
             if compile_meta.get("disable_ftz", False):
                 options["enable_reflect_ftz"] = False
+            if compile_meta.get("strict_pointwise", False):
+                from triton.backends.nvidia.compiler import CUDAOptions
+
+                if not hasattr(CUDAOptions, "libdevice_fp64_fusion_roots"):
+                    raise RuntimeError(
+                        "strict pointwise numerics requires Triton support for "
+                        "libdevice_fp64_fusion_roots"
+                    )
+                options["enable_precise_libdevice"] = True
+                options["enable_libdevice_fp64_fusion"] = True
+                options["libdevice_fp64_fusion_roots"] = ("__nv_pow",)
             for k in forwarded_cuda_compile_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
@@ -1859,6 +1870,8 @@ class CachingAutotuner(KernelInterface):
                 )
                 size = required_storage_length * arg.element_size()
                 if size > budget:
+                    if arg.is_neg():
+                        arg = arg._neg_view()
                     cpu_arg = torch.empty_strided(
                         (required_storage_length,),
                         (1,),
@@ -1930,7 +1943,7 @@ class CachingAutotuner(KernelInterface):
                     raise AssertionError(
                         f"Expected torch.Tensor for mutated arg '{name}', got {type(arg)}"
                     )
-                return clone_preserve_strides(arg)
+                return clone_preserve_strides(arg._neg_view() if arg.is_neg() else arg)
             else:
                 return arg
 

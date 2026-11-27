@@ -16336,6 +16336,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn,
             (torch.tensor([[True]]), torch.rand(13, 7, 3), torch.rand(1, 1)),
         )
+        self.common(
+            fn,
+            (
+                torch.tensor([[0], [2], [255]], dtype=torch.uint8),
+                torch.rand(3, 5),
+                torch.rand(1, 5),
+            ),
+        )
 
         args = [
             torch.randn(1, 4, 64, 64),
