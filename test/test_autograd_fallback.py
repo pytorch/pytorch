@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from torch.library import _scoped_library
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -26,6 +27,8 @@ def autograd_fallback_mode(mode):
 
 
 class TestAutogradFallback(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     test_ns = "_test_autograd_fallback"
 
     def setUp(self):

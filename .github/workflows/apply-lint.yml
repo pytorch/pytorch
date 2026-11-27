@@ -97,8 +97,31 @@ jobs:
           PR_NUM: ${{ github.event.client_payload.pr_num }}
         run: |
           git push
-          gh pr comment "$PR_NUM" --body \
-            "Successfully applied lint patches in ${GH_RUN_URL}. Please pull locally before pushing more changes."
+          MSG="Successfully applied lint patches in ${GH_RUN_URL}. Please pull locally before pushing more changes."
+          # shellcheck disable=SC2016
+          if ! ABOVE=$(gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" \
+              -F name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUM" -f query='
+                query ($owner: String!, $name: String!, $number: Int!) {
+                  repository(owner: $owner, name: $name) {
+                    pullRequest(number: $number) {
+                      stackEntry { position }
+                      stack { entries(first: 100) { nodes { position pullRequest { number closed } } } }
+                    }
+                  }
+                }' \
+              -q '.data.repository.pullRequest | .stackEntry.position as $pos
+                | [(.stack.entries.nodes // [])[]
+                   | select($pos != null and .pullRequest != null and .position > $pos
+                     and (.pullRequest.closed | not))
+                   | "#\(.pullRequest.number)"]
+                | join(", ")'); then
+            echo "::warning::Could not read the GitHub stack of PR #${PR_NUM}"
+            ABOVE=""
+          fi
+          if [ -n "$ABOVE" ]; then
+            MSG+=$'\n\n'"This PR is in a GitHub stack, and the open PRs above it (${ABOVE}) no longer include this commit, so they cannot merge until the stack is updated. With \`gh stack\`, run \`gh stack sync\` before you push again (\`gh stack push\` alone overwrites this commit; if this branch has new local commits, \`git pull --rebase\` it first). Or comment \`@pytorchbot rebase -b main\` on the top PR of the stack."
+          fi
+          gh pr comment "$PR_NUM" --body "$MSG"
 
       - name: Push lint changes (ghstack)
         if: env.HAS_LINT_CHANGES == 'true' && env.IS_GHSTACK == 'true'

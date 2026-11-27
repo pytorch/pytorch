@@ -376,14 +376,6 @@ op_db: list[OpInfo] = [
     ),
     UnaryUfuncInfo(
         "special.airy_ai",
-        decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
-            ),
-        ),
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=(lambda x: scipy.special.airy(x)[0]) if TEST_SCIPY else None,
@@ -399,12 +391,11 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo(
         "special.bessel_j0",
         decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                    torch.bfloat16: 1e-04,
-                },
+            precisionOverride({torch.bfloat16: 1e-04}),
+            DecorateInfo(
+                precisionOverride({torch.float32: 1e-04, torch.bfloat16: 1e-04}),
+                "TestUnaryUfuncs",
+                "test_reference_numerics_large",
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
             DecorateInfo(
@@ -441,12 +432,11 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo(
         "special.bessel_j1",
         decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                    torch.bfloat16: 1e-04,
-                },
+            precisionOverride({torch.bfloat16: 1e-04}),
+            DecorateInfo(
+                precisionOverride({torch.float32: 1e-04, torch.bfloat16: 1e-04}),
+                "TestUnaryUfuncs",
+                "test_reference_numerics_large",
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
             DecorateInfo(
@@ -478,12 +468,11 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo(
         "special.bessel_y0",
         decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                    torch.bfloat16: 1e-04,
-                },
+            precisionOverride({torch.bfloat16: 1e-04}),
+            DecorateInfo(
+                precisionOverride({torch.float32: 1e-04, torch.bfloat16: 1e-04}),
+                "TestUnaryUfuncs",
+                "test_reference_numerics_large",
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
             DecorateInfo(
@@ -510,12 +499,11 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo(
         "special.bessel_y1",
         decorators=(
-            precisionOverride(
-                {
-                    torch.float32: 1e-04,
-                    torch.float64: 1e-05,
-                    torch.bfloat16: 1e-04,
-                },
+            precisionOverride({torch.bfloat16: 1e-04}),
+            DecorateInfo(
+                precisionOverride({torch.float32: 1e-04, torch.bfloat16: 1e-04}),
+                "TestUnaryUfuncs",
+                "test_reference_numerics_large",
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
             DecorateInfo(

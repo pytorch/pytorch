@@ -1,5 +1,5 @@
 # Owner(s): ["module: cuda"]
-# run time cuda tests, but with the allocator using expandable segments
+# run time accelerator tests, but with the allocator using expandable segments
 
 import os
 import pathlib
@@ -13,7 +13,10 @@ from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from dynamo.test_cudagraphs import TestAotCudagraphs  # noqa: F401
+if torch.cuda.is_available():
+    from dynamo.test_cudagraphs import TestAotCudagraphsCUDA  # noqa: F401
+elif torch.xpu.is_available():
+    from dynamo.test_cudagraphs import TestAotCudagraphsXPU  # noqa: F401
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -26,9 +29,11 @@ from tools.stats.import_test_stats import get_disabled_tests
 sys.path.remove(str(REPO_ROOT))
 
 if __name__ == "__main__":
-    if torch.cuda.is_available() and not IS_JETSON and not IS_WINDOWS:
+    if not IS_WINDOWS and (
+        (torch.cuda.is_available() and not IS_JETSON) or torch.xpu.is_available()
+    ):
         get_disabled_tests(".")
 
-        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+        torch._C._accelerator_setAllocatorSettings("expandable_segments:True")
 
         run_tests()

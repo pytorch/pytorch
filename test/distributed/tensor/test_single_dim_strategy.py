@@ -23,6 +23,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._matrix_ops import (
+    _valid_grouped_mm_strides,
     mm_single_dim_strategy,
     scaled_dot_product_efficient_attention_single_dim_strategy,
 )
@@ -157,8 +158,8 @@ class TestExpandPlaceholder(TestCase):
                 # so there should be exactly 1 strategy (the input placement)
                 self.assertEqual(len(strategy.children[0].strategies), 1)
             elif linearity == 1:
-                # See test_expand_foreach_add_to_3d_mesh for derivation of 634.
-                self.assertEqual(len(strategy.children[0].strategies), 634)
+                # See test_expand_foreach_add_to_3d_mesh for derivation of 512.
+                self.assertEqual(len(strategy.children[0].strategies), 512)
             else:
                 self.assertGreaterAlmostEqual(
                     len(strategy.children[0].strategies), 64
@@ -275,19 +276,17 @@ class TestExpandPlaceholder(TestCase):
             return strategy
 
         # Sizes are multiples of mesh dims so every shard option is valid.
-        # Per mesh dim: 4 non-partial (S0,S1,S2,R) + 6 partial rules
-        # (1 Psum, 3 Pavg, 1 Pmax, 1 Pmin). Mixed-partial filter allows
-        # Psum+Pavg to coexist but rejects other mixes. By inclusion-exclusion
-        # on a 3D mesh (n=4 non-partial, partial rule counts by type):
+        # Per mesh dim: 4 non-partial (S0,S1,S2,R) + 4 partial rules
+        # (1 Psum, 3 Pavg). Mixed-partial filter allows Psum+Pavg to coexist.
+        # By inclusion-exclusion on a 3D mesh (n=4 non-partial, partial rule
+        # counts by type):
         #   no partials:    4^3                                    =  64
         #   Psum only:      (4+1)^3 - 4^3                         =  61
         #   Pavg only:      (4+3)^3 - 4^3                         = 279
-        #   Pmax only:      (4+1)^3 - 4^3                         =  61
-        #   Pmin only:      (4+1)^3 - 4^3                         =  61
         #   Psum+Pavg mix:  (4+1+3)^3 - (4+3)^3 - (4+1)^3 + 4^3  = 108
-        #   total: 634
-        # For scalars (no Shard), n=1 (R only): same formula gives 139.
-        expected_num_strategies = (634, 139)
+        #   total: 512
+        # For scalars (no Shard), n=1 (R only): same formula gives 125.
+        expected_num_strategies = (512, 125)
         # Test Replicate + Shard gives Shard
         inputs_a = [torch.empty((8, 8, 8))] * 2
         placements_a = [
@@ -2058,8 +2057,6 @@ class TestCommonPointwiseSingleDimStrategy(TestCase):
             (Partial("sum"), Partial("sum"), Partial("sum")),
             (Partial("avg"), Partial("avg"), Partial("avg")),
             (Partial("avg"), Partial("avg"), Replicate()),
-            (Partial("max"), Partial("max"), Replicate()),
-            (Partial("min"), Partial("min"), Replicate()),
             (Partial("avg"), Replicate(), Partial("avg")),
         ]
         self.assertEqual(rules, expected)
@@ -2136,6 +2133,23 @@ class TestSingleDimStrategyRegistration(TestCase):
 
         # Verify the result is None (no tensor output)
         self.assertIsNone(result, "No-output op should return None")
+
+    def test_grouped_mm_out_keeps_stride_filter(self):
+        registry = (
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs
+        )
+        aten = torch.ops.aten
+        self.assertIs(
+            registry[aten._grouped_mm.out].full_mesh_strategy_filter,
+            _valid_grouped_mm_strides,
+        )
+
+        # Only grouped_mm.out gets its base filter. argmax.out has no filter, so x
+        # can be redistributed to Shard(1) to match out.
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        x = distribute_tensor(torch.randn(8, 16), mesh, [Shard(0)])
+        out = distribute_tensor(torch.empty(16, dtype=torch.long), mesh, [Shard(0)])
+        self.assertIs(torch.argmax(x, 0, out=out), out)
 
 
 if __name__ == "__main__":

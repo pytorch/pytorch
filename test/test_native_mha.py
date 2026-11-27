@@ -12,9 +12,11 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     parametrize,
     run_tests,
+    skipIfCppFakeTensor,
     TestCase,
 )
 from torch.nn.attention import SDPBackend
@@ -108,6 +110,7 @@ class TestMHADevice(TestCase):
                     device, dtype, use_nt=False, use_padding=use_padding
                 )
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @dtypesIfCUDA(torch.float)
     @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
@@ -275,6 +278,10 @@ class TestMHADevice(TestCase):
         else:
             self.assertEqual(weight_pt, weight_npt)
 
+    @decorateIf(
+        skipIfCppFakeTensor("no nested tensor support"),
+        lambda p: p["use_nt"],
+    )
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
