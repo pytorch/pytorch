@@ -12,6 +12,7 @@ import pytest
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -474,6 +475,12 @@ class TestIndexing(TestCase):
     @parametrize("index", [True, False, np.array([0])])
     @parametrize("num", [32, 40])
     @parametrize("original_ndim", [1, 32])
+    @decorateIf(
+        skip(reason="torch does not limit dims to 32"),
+        lambda p: not (
+            isinstance(p["index"], np.ndarray) and p["original_ndim"] < p["num"]
+        ),
+    )
     def test_too_many_advanced_indices(self, index, num, original_ndim):
         # These are limitations based on the number of arguments we can process.
         # For `num=32` (and all boolean cases), the result is actually define;

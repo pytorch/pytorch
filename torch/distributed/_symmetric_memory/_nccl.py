@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from typing_extensions import Self
+from typing import Self, TYPE_CHECKING
 
 import torch
 
@@ -77,8 +76,8 @@ def register_external_nccl_comm(
     Publish an externally-owned ``ncclComm_t`` into PyTorch's symmetric memory
     registry under ``group_name``.
 
-    This lets producers that are not a ``ProcessGroupNCCL`` (e.g. torchcomms
-    backends) supply the host NCCL communicator that
+    This lets producers that are not a ``ProcessGroupNCCL`` (e.g. external
+    communicator libraries) supply the host NCCL communicator that
     :func:`rendezvous` needs, without symmetric memory having to
     ``dynamic_cast`` to a specific process-group implementation. After this
     call, ``rendezvous(tensor, group=group_name)`` on a tensor in a process
@@ -87,7 +86,7 @@ def register_external_nccl_comm(
     Args:
         group_name (str): the process-group name to register the comm under.
         comm_ptr (int): the host ``ncclComm_t`` as an opaque integer pointer
-            (e.g. from ``torchcomms`` ``get_nccl_comm_ptr()``).
+            (e.g. from the producing library).
         device (`torch.device` or str): the CUDA device the comm belongs to.
         comm (object, optional): the source comm object. When provided, a
             strong reference is held by the returned registration so the comm

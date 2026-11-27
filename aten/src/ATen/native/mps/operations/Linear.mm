@@ -27,7 +27,7 @@ static bool needs_nd_workaround(const Tensor& input) {
 // corruption is allocator/session-state dependent and hits contiguous and transposed
 // operands alike. Apple9+ is fine. mm/addmm already divert such shapes to the
 // stride-aware metal kernels, but linear builds its own graph, so it has to test the
-// GEMM it would form and delegate instead. Mirrors use_metal_mm in LinearAlgebra.mm.
+// GEMM it would form and delegate instead. Mirrors use_metal_mm in Matmul.mm.
 static bool needs_mm_overflow_fallback(int64_t m, int64_t k, int64_t n) {
   static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
   constexpr int64_t max_mpsgraph_dim = 32768;
@@ -99,12 +99,22 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   TORCH_CHECK(input.is_mps(), "Tensor for argument input is on ", input.device(), " but expected on mps");
   TORCH_CHECK(supportedFloatingOrComplexType(weight_arg), "MPS device does not support linear for non-float weights");
   TORCH_CHECK(weight_arg.is_mps(), "Tensor for argument weight is on ", weight_arg.device(), " but expected on mps");
+  TORCH_CHECK(input.scalar_type() == weight_arg.scalar_type(),
+              "input and weight must have the same dtype, but got ",
+              input.scalar_type(),
+              " and ",
+              weight_arg.scalar_type());
 
   const Tensor& bias = *(at::borrow_from_optional_tensor(bias_opt));
   const bool is_bias_defined = bias.defined();
   if (is_bias_defined) {
     TORCH_CHECK(bias.is_mps(), "Tensor for argument bias is on ", bias.device(), " but expected on mps");
     TORCH_CHECK(supportedFloatingOrComplexType(bias), "MPS device does not support linear for non-float bias");
+    TORCH_CHECK(input.scalar_type() == bias.scalar_type(),
+                "input and bias must have the same dtype, but got ",
+                input.scalar_type(),
+                " and ",
+                bias.scalar_type());
   }
 
   auto weight = (weight_arg.dim() == 1) ? weight_arg.unsqueeze(0) : weight_arg;

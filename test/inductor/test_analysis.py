@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch._inductor.analysis.device_info import (
     _device_mapping,
+    datasheet_dram_bw_gbs,
     datasheet_tops,
     DeviceInfo,
     lookup_device_info,
@@ -289,6 +290,12 @@ class TestUtils(TestCase):
         self.assertEqual(lookup_device_info("AMD Instinct MI300X"), upper)
         self.assertEqual(lookup_device_info("amd instinct mi300x"), upper)
 
+    def test_datasheet_info_for_intel_data_center_gpu_max_1550(self):
+        device_name = "Intel(R) Data Center GPU Max 1550"
+        self.assertEqual(datasheet_tops(torch.float16, device_name=device_name), 419.43)
+        self.assertEqual(datasheet_tops(torch.float32, device_name=device_name), 26.2)
+        self.assertEqual(datasheet_dram_bw_gbs(device_name=device_name), 1638.4)
+
     def test_register_device_info_normalizes_name(self):
         info = DeviceInfo(tops={}, dram_bw_gbs=123.0, dram_gb=1.0)
         with patch.dict(_device_mapping):
@@ -308,6 +315,7 @@ class TestUtils(TestCase):
             "AMD Radeon RX 7900 XT": "AMD RADEON RX 7900 XT",
             "Radeon RX 7900 XT": "AMD RADEON RX 7900 XT",
             "AMD Radeon Pro W7800 48GB": "AMD RADEON PRO W7800 48GB",
+            "AMD Radeon Pro W7900": "AMD RADEON PRO W7900",
         }
         for reported, entry in cases.items():
             expected = _device_mapping[entry.upper()]
@@ -324,6 +332,7 @@ class TestUtils(TestCase):
         expected = {
             "AMD MI250X": (47.85, 191.5, 1600.0, 64.0),
             "AMD RADEON PRO W7800 48GB": (45.2, 90.4, 864.0, 48.0),
+            "AMD RADEON PRO W7900": (61.3, 123.0, 864.0, 48.0),
             "AMD RADEON RX 7900 XT": (51.6, 103.0, 800.0, 20.0),
         }
         for name, (fp32, fp16, dram_bw_gbs, dram_gb) in expected.items():
@@ -342,6 +351,7 @@ class TestUtils(TestCase):
         for name in (
             "AMD MI250X",
             "AMD RADEON PRO W7800 48GB",
+            "AMD RADEON PRO W7900",
             "AMD RADEON RX 7900 XT",
         ):
             info = lookup_device_info(name)
@@ -387,7 +397,11 @@ class TestUtils(TestCase):
     def test_rdna3_fp64_is_not_half_of_fp32(self):
         # RDNA3 runs fp64 at 1/32 of the fp32 rate these entries quote. A "half of
         # fp32" estimate would overstate it by 16x and mislead the roofline.
-        for name in ("AMD RADEON PRO W7800 48GB", "AMD RADEON RX 7900 XT"):
+        for name in (
+            "AMD RADEON PRO W7800 48GB",
+            "AMD RADEON PRO W7900",
+            "AMD RADEON RX 7900 XT",
+        ):
             info = lookup_device_info(name)
             self.assertIsNotNone(info)
             with self.subTest(name=name):

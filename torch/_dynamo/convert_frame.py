@@ -87,7 +87,7 @@ from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
 from . import config, decorators, exc, graph_break_hints, trace_rules
 from .backends.registry import _is_registered_backend
-from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
+from .bytecode_analysis import remove_dead_code
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
     Instruction,
@@ -218,7 +218,9 @@ class TODO_UNKNOWN:
 
 
 def _clear_fake_mode_weakrefs(
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode | None,
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    | torch._subclasses.fake_tensor.CppFakeTensorMode
+    | None,
 ) -> None:
     """Clear WeakIdRef entries from a FakeTensorMode's describer."""
     if fake_mode is None:
@@ -350,6 +352,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+            import torch._inductor.config as inductor_config
+
+            prior_inductor_deterministic = inductor_config.deterministic
             prior_mobile_allocator_state = (
                 torch._C._is_default_mobile_cpu_allocator_set()
             )
@@ -359,8 +364,8 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             if torch.cuda.is_available():
                 with torch._C.DisableTorchFunction():
                     cuda_rng_state = torch.cuda.get_rng_state()
-            cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
-                "cuda", "matmul"
+            cuda_matmul_fp32_prec = torch.backends._get_fp32_precision_state(
+                "cuda.matmul"
             )
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
@@ -377,9 +382,15 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
-                torch.use_deterministic_algorithms(
+                torch._C._set_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
+                # Not torch.use_deterministic_algorithms(prior_deterministic): it
+                # would also set Inductor's flag to prior_deterministic, turning
+                # off deterministic mode set through Inductor alone. Restore the
+                # flag to its own prior value instead.
+                if inductor_config.deterministic != prior_inductor_deterministic:
+                    inductor_config.deterministic = prior_inductor_deterministic
                 torch.random.set_rng_state(torch_rng_state)
                 torch.set_default_dtype(prior_dtype)
                 curr_mobile_allocator_state = (
@@ -390,9 +401,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 if cuda_rng_state is not None:
                     with torch._C.DisableTorchFunction():
                         torch.cuda.set_rng_state(cuda_rng_state)
-                torch._C._set_fp32_precision_setter(
-                    "cuda", "matmul", cuda_matmul_fp32_prec
-                )
+                torch.backends._set_fp32_precision_state(cuda_matmul_fp32_prec)
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
                 if not guards.check():
                     raise AssertionError(
@@ -401,6 +410,23 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 
     _fn._torchdynamo_orig_backend = fn  # type: ignore[attr-defined]
     return _fn
+
+
+def nonrecursive_disable_skip(
+    caller: types.FrameType | None,
+) -> ConvertFrameReturn | None:
+    """How to skip a frame whose caller is a disable(recursive=False) wrapper.
+
+    Only that frame is skipped; its callees are still offered to the callback.
+    """
+    if caller is not None and (
+        caller.f_code is decorators._nonrecursive_disable_wrapper_code
+    ):
+        return ConvertFrameReturn(
+            apply_to_code=False,
+            skip_reason="tracing is non-recursively disabled for this frame",
+        )
+    return None
 
 
 @TorchPatcher.suppress_torch_distributed_warnings
@@ -727,19 +753,10 @@ class ConvertFrameAssert:
         # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
         prev_frame = sys._getframe()
         # pyrefly: ignore [bad-assignment]
-        while (
-            prev_frame
-            and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
-        ):
+        while prev_frame and prev_frame.f_code.co_filename == __file__:
             prev_frame = prev_frame.f_back  # type: ignore[assignment]
-        if (
-            prev_frame
-            and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
-        ):
-            return ConvertFrameReturn(
-                apply_to_code=False,
-                skip_reason="tracing is non-recursively disabled for this frame",
-            )
+        if (disabled := nonrecursive_disable_skip(prev_frame)) is not None:
+            return disabled
 
         global initial_global_state
         # Save the previous initial_global_state to handle nested compilations
@@ -912,16 +929,16 @@ def trace_frame(
 ) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
     if (
-        torch.cuda.is_available()
-        and hasattr(torch._C, "_cuda_isCurrentStreamCapturing")
-        and not isinstance(torch._C._cuda_isCurrentStreamCapturing, type)
-        and torch.cuda.is_current_stream_capturing()
+        accelerator is not None
+        and torch.accelerator.current_stream().is_capturing()
         and not _in_hop_compile()
     ):
+        device_type = accelerator.type.upper()
         raise exc.TorchRuntimeError(
-            "torch.compile cannot JIT compile during CUDA graph capture. "
-            "Execute warmup iterations outside of CUDA graph capture to trigger "
+            f"torch.compile cannot JIT compile during {device_type} graph capture. "
+            f"Execute warmup iterations outside of {device_type} graph capture to trigger "
             "compilation, then capture the graph after compilation has completed."
         )
 
@@ -994,7 +1011,7 @@ def trace_frame(
         code_options.update(output.code_options)
         propagate_inst_exn_table_entries(instructions)
         check_inst_exn_tab_entries_valid(instructions)
-        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+        instructions[:] = remove_dead_code(instructions)
     except Exception as e:
         e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
         raise
@@ -1119,7 +1136,10 @@ class BackendInput:
     backend_id: str
     graph_module: torch.fx.GraphModule
     example_inputs: Any
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    fake_mode: (
+        torch._subclasses.fake_tensor.FakeTensorMode
+        | torch._subclasses.fake_tensor.CppFakeTensorMode
+    )
     tensor_to_context: WeakIdKeyDictionary
 
 
@@ -1725,17 +1745,13 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: ConvertFrameBox | None = None,
 ) -> ConvertFrameReturn:
+    from torch.compiler._no_compile import check_compilation_allowed
     from torch.fx.experimental.validator import (
         BisectValidationException,
         ValidationException,
     )
 
-    if isinstance(innermost_backend(compiler_fn), torch._TorchCompileInductorWrapper):
-        # Overlap the one-time source hashing for Inductor's cache keys with
-        # Dynamo and AOTAutograd tracing.
-        from torch._inductor.codecache import prefetch_cache_keys
-
-        prefetch_cache_keys()
+    check_compilation_allowed("Dynamo graph compilation")
 
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
@@ -1747,12 +1763,13 @@ def _compile(
         code: CodeType, one_graph: bool, hooks: Hooks
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput | None]:
         with contextlib.ExitStack() as stack:
-            # Hold _is_compiling_flag True for the duration of compilation so
-            # torch.compiler.is_compiling() is observable in code that runs
-            # during the compile session but is not directly Dynamo-traced
-            # (wrapper-subclass __torch_dispatch__ invoked by AOTAutograd,
-            # make_fx invoked from a custom backend, etc.). Export sets the
-            # flag itself via _compiling_state_context, so skip there.
+            # Hold the current thread's is_compiling flag True for the
+            # duration of compilation so torch.compiler.is_compiling() is
+            # observable in code that runs during the compile session in this
+            # thread but is not directly Dynamo-traced (wrapper-subclass
+            # __torch_dispatch__ invoked by AOTAutograd, make_fx invoked from
+            # a custom backend, etc.). Export sets the flag itself via
+            # _compiling_state_context, so skip there.
             if not export:
                 stack.enter_context(torch.compiler._compile_session_context())
             stack.enter_context(deferred_full_gc())
@@ -1839,6 +1856,9 @@ def _compile(
                     package=package,
                 )
         except exc.SkipFrame as e:
+            if package is not None:
+                # Dynamo runs this frame eagerly from now on, so a load does too.
+                package.record_eager_fallback(code)
             if one_graph:
                 log.debug("No graph captured with export/fullgraph=True")
             if e._torch_dynamo_tracer_output is None:
@@ -2022,7 +2042,9 @@ def _compile(
 
     metrics_context = get_metrics_context()
     package_code_context = (
-        package.code_context(code) if package is not None else contextlib.nullcontext()
+        package.code_context(code, globals)
+        if package is not None
+        else contextlib.nullcontext()
     )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
@@ -2272,11 +2294,6 @@ def _compile(
             # dynamo_compile table, and we will not have telemetry.
             # Be extra careful when making changes here!
 
-            if torch._dynamo.config.run_gc_after_compile:
-                with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
-                    log.info("run_gc_after_compile: running gc")
-                    gc.collect(1)
-
             output = None
             if tracer_output:
                 output = tracer_output.output_graph
@@ -2375,6 +2392,17 @@ def _compile(
 
             clear_compile_context_weakrefs(tracer_output, compiler_fn)
 
+            # Collect only after dropping this frame's references to the tracing state.
+            # Collected while still referenced, the OutputGraph / SideEffects cycle (which
+            # holds the frame's real inputs via local_scope and LazyCache.value) survives
+            # into the oldest generation, which gc.collect(1) never scans again, so it
+            # pins those tensors until a full collection.
+            if torch._dynamo.config.run_gc_after_compile:
+                tracer_output = output = output_graph = tracer = None
+                with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
+                    log.info("run_gc_after_compile: running gc")
+                    gc.collect(1)
+
 
 class ConvertFrame:
     def __init__(
@@ -2435,6 +2463,15 @@ class ConvertFrame:
                 # eval_frame.py. But re-raising seems to work for now because exceptions from tracing
                 # a nested call that results in a top-level frame compile will be handled by the caller
                 # as an observed exception - we don't expect that exception to be suppressed.
+                raise
+
+            from torch._precompile import PrecompileError
+
+            # no_compilation() violations must surface even under
+            # suppress_errors, including one Inductor raised inside a backend.
+            if isinstance(e, PrecompileError) or isinstance(
+                getattr(e, "inner_exception", None), PrecompileError
+            ):
                 raise
 
             # These two exception types are "soft" failure, in the sense that
@@ -2498,6 +2535,19 @@ class ConvertFrame:
 
             if not config.suppress_errors and not soft_fail:
                 raise
+
+            package = self._inner_convert._package
+            if (
+                package is not None
+                and isinstance(e, (Unsupported, UserError))
+                and e.frame_exec_strategy is None
+                and e.apply_to_code
+            ):
+                # Dynamo gave up on the frame and skips it from now on, so a load
+                # runs it eagerly too. A recompile limit hit sets RUN_ONLY instead
+                # and stays a coverage gap. These are exactly the soft failures
+                # Dynamo skips the frame for whatever suppress_errors says.
+                package.record_eager_fallback(code)
 
             # Suppress the error.  NB: It's very important to do the
             # suppression logging HERE, where the actual suppression
@@ -2579,8 +2629,6 @@ def replay(filename: str) -> None:
 
 
 def first_real_inst_idx(code: CodeType) -> int:
-    if sys.version_info < (3, 11):
-        return 0
     for inst in dis.get_instructions(code):
         if inst.opname == "RESUME":
             return inst.offset // 2

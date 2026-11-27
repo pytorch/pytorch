@@ -60,4 +60,4 @@ If performance is not your main concern and you would like to enable coverage th
 ##  Best Practices
 
 ## Testing
-Unit tests for NestedTensors can be found at [test/test_nestedtensor.py](../../../../../test/test_nestedtensor.py). If a new operator is added to NestedTensors it is important to add a unit test for it. The unit tests are run on the CI and if they fail the PR will not be merged.
+Unit tests for NestedTensors can be found at [test/test_nestedtensor.py](../../../../../test/test_nestedtensor.py). If a new operator is added to NestedTensors it is important to add a unit test for it. The unit tests are run on the CI and if they fail the PR will not be merged. The exception is `TestNestedTensorOpInfo`, which only runs in the `periodic-strict` workflow; PRs touching nested tensor code get the `ciflow/periodic-strict` label automatically to run it.

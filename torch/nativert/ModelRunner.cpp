@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <c10/util/irange.h>
 #include <caffe2/serialize/file_adapter.h>
 #include <torch/csrc/export/pt2_archive_constants.h>
 #include <torch/nativert/executor/Placement.h>
@@ -67,7 +68,7 @@ ModelRunner::ModelRunner(
 
   const auto& userOutputs = graph_->userOutputs();
   std::vector<const Value*> updatedUserOutput(userOutputs.size(), nullptr);
-  for (size_t i = 0; i < userOutputs.size(); ++i) {
+  for (const auto i : c10::irange(userOutputs.size())) {
     if (const auto* valuePtr = std::get_if<Value*>(&userOutputs[i])) {
       updatedUserOutput[i] = *valuePtr;
     }

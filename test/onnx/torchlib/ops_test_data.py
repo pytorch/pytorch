@@ -38,13 +38,11 @@ from __future__ import annotations
 import copy
 import dataclasses
 import functools
-from typing import Any, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, Self, TYPE_CHECKING
 
 import numpy as np
 import ops_test_common
 
-import torch
 from torch.onnx._internal.exporter._torchlib.ops import core as core_ops, nn as nn_ops
 from torch.testing._internal import common_methods_invocations
 from torch.testing._internal.opinfo import definitions as opinfo_definitions
@@ -52,6 +50,8 @@ from torch.testing._internal.opinfo import definitions as opinfo_definitions
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection
+
+    import torch
 
 
 # Create a copy of the op_db to modify
@@ -454,8 +454,6 @@ def _where_input_wrangler(
 TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo("abs", core_ops.aten_abs),
     TorchLibOpInfo("abs", core_ops.aten_abs_complex, complex=True),
-    TorchLibOpInfo("add", core_ops.aten_add, tolerance={torch.float16: (1e-3, 1e-3)}),
-    TorchLibOpInfo("add", core_ops.aten_add_complex, complex=True),
     TorchLibOpInfo("gelu_op20", nn_ops.aten_gelu_opset20, opset_introduced=20),
     TorchLibOpInfo(
         "nn.functional.group_norm", nn_ops.aten_group_norm, opset_introduced=21

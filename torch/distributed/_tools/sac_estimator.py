@@ -3,13 +3,11 @@ import os
 import sys
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, NamedTuple
-from typing_extensions import Self
+from typing import Any, NamedTuple, Self
 
 import torch
 from torch import nan, nn, UntypedStorage
 from torch._guards import active_fake_mode
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.common_utils import get_untyped_storages
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
@@ -955,7 +953,7 @@ class SACEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
         fake_mode = active_fake_mode()
-        if not isinstance(fake_mode, FakeTensorMode):
+        if fake_mode is None:
             raise AssertionError("SAC Estimator should be called in FakeTensorMode")
         RuntimeEstimator.fake_mode = fake_mode
         RuntimeEstimator.gpu_type = self._gpu_type

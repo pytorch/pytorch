@@ -10216,6 +10216,8 @@ add_docstr(
 sigmoid(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.expit`.
+
+See :class:`torch.nn.Sigmoid` for a plot of the function and related APIs.
 """,
 )
 
@@ -14376,6 +14378,11 @@ Arguments:
 
 Returns:
     Generator: An torch.Generator object.
+
+.. seealso::
+    :class:`torch.Generator` is stateful. For a stateless, key-based PRNG API
+    (``key``, ``split``, ``fold_in``, ``uniform``, ``normal``, ``randint``,
+    ``bits``), see the experimental :mod:`torch.func._random` module.
 
 Example::
 

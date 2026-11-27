@@ -181,15 +181,25 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
       value_type // data type of values
       ));
 
+  descriptor_.reset(raw_descriptor);
+
   if (ndim == 3 && batch_offset == -1) {
     int batch_count =
         at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
     if (crow_indices.dim() >= 2 || values.dim() >= 2 ||
         col_indices.dim() >= 2) {
-      // cuSPARSE ignores the strides and uses only the first batch
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Support for batched CSR indices and values is not implemented.");
+      TORCH_CHECK(
+          crow_indices.dim() >= 2 && col_indices.dim() >= 2 &&
+              values.dim() >= 2,
+          "Expected crow_indices, col_indices and values of a batched CSR "
+          "tensor to be batched, got dimensionalities ",
+          crow_indices.dim(), ", ", col_indices.dim(), " and ", values.dim());
+      // cuSPARSE uses a single batch stride for column indices and values.
+      TORCH_CHECK(
+          col_indices.stride(-2) == values_->stride(-2),
+          "Expected col_indices and values of a batched CSR tensor to have "
+          "equal batch strides, got ",
+          col_indices.stride(-2), " and ", values_->stride(-2));
       TORCH_CUDASPARSE_CHECK(cusparseCsrSetStridedBatch(
           raw_descriptor,
           batch_count,
@@ -202,8 +212,6 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
           cusparseCsrSetStridedBatch(raw_descriptor, batch_count, 0, 0));
     }
   }
-
-  descriptor_.reset(raw_descriptor);
 }
 
 } // namespace at::cuda::sparse

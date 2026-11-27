@@ -1,13 +1,12 @@
 # Owner(s): ["module: unknown"]
 
 import platform
-from functools import partial
+import unittest
 from unittest import skipIf as skipif
 
 import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    OpDTypes,
     ops,
     skip,
     skipOps,
@@ -15,6 +14,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    decorateIf,
+    HardwareClassification,
     IS_MACOS,
     run_tests,
     skipIfTorchInductor,
@@ -30,10 +31,16 @@ from torch.testing._internal.common_utils import (
 if IS_MACOS:
     torch.set_num_threads(1)
 
-# gradcheck requires double precision
-_gradcheck_ops = partial(
-    ops, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble]
-)
+
+def _gradcheck_ops(op_list):
+    def decorator(test):
+        test = ops(op_list, allowed_dtypes=[torch.double, torch.cdouble])(test)
+        return decorateIf(
+            unittest.skip("Skipped! Op doesn't support autograd for this dtype."),
+            lambda p: p["dtype"] not in p["op"].supported_backward_dtypes(p["device"]),
+        )(test)
+
+    return decorator
 
 
 # Device-agnostic skips migrated from OpInfo definitions (see #177259).
@@ -60,6 +67,8 @@ _fwd_grad_all = {
 
 @unMarkDynamoStrictTest
 class TestFwdGradients(TestGradients):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Test that forward-over-reverse gradgrad is computed correctly
     @skipOps(
         _fwd_grad_all
@@ -73,7 +82,6 @@ class TestFwdGradients(TestGradients):
                 dtypes=(torch.complex64, torch.complex128),
             ),
             skip("as_strided_scatter"),
-            xfail("triangular_solve"),
             skip("svd_lowrank", dtypes=(torch.complex128,)),
             skip("pca_lowrank", dtypes=(torch.complex128,)),
             xfail("polar"),
@@ -167,7 +175,9 @@ class TestFwdGradients(TestGradients):
             xfail("scatter_reduce", variant_name="prod"),
         }
     )
-    @_gradcheck_ops(op_db)
+    @_gradcheck_ops(
+        [op for op in op_db if op.inplace_variant and op.supports_inplace_autograd]
+    )
     def test_inplace_forward_mode_AD(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
 

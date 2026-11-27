@@ -71,7 +71,12 @@ template <
         ck::tensor_operation::device::GemmSpecialization::MNPadding,
     bool TRANSA = false,
     bool TRANSB = false>
-void bgemm_kernel_impl(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
+bool bgemm_kernel_impl(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
+  // The PassThrough epilogue computes A * B only, and the block transfers below
+  // load vectors along K, which is contiguous only for transa = 't', transb = 'n'.
+  if (alpha != 1 || beta != 0 || !TRANSA || TRANSB) {
+    return false;
+  }
 
   using ADataType = typename CkMathType<A_DATA_TYPE>::dtype;
   using BDataType = typename CkMathType<B_DATA_TYPE>::dtype;
@@ -143,17 +148,20 @@ void bgemm_kernel_impl(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
     lda,
     {},
     ldc,
-    n * k,  // batch_stride_a
-    m * k,  // batch_stride_b
+    strideb,  // batch_stride_a
+    stridea,  // batch_stride_b
     {},
-    m * n,  // batch_stride_c
+    stridec,  // batch_stride_c
     a_element_op,
     b_element_op,
     cde_element_op
   );
-  TORCH_CHECK(gemm.IsSupportedArgument(argument), "wrong! device_gemm with the specified compilation parameters does not support this GEMM problem");
+  if (!gemm.IsSupportedArgument(argument)) {
+    return false;
+  }
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   invoker.Run(argument, StreamConfig{stream, false});
+  return true;
 }
 
 }; // namespace at::native

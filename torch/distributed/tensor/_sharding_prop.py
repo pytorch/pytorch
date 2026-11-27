@@ -11,7 +11,7 @@ import torch
 from torch._guards import detect_fake_mode
 from torch._logging import LazyString
 from torch._ops import OpOverload
-from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._decompositions import DecompShardingStrategy
@@ -743,6 +743,13 @@ class ShardingPropagator:
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
+            return OutputSharding(None, op_schema)
+
+        # assert ops produce no output, so there is nothing to propagate. They
+        # can show up inside other ops' decompositions, which we trace to derive
+        # a strategy, so raising here would make the enclosing op look like it
+        # has no strategy either.
+        if op_schema.op is aten._assert_async.msg:
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)

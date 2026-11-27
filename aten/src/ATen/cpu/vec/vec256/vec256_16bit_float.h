@@ -69,6 +69,29 @@ static inline __m128i cvtfp32_bf16(const __m256& src) {
   return _mm256_castsi256_si128(t_value);
 }
 
+// Converts doubles to floats rounding to odd (truncate, then set the last bit
+// if inexact), so that converting the result to Half or BFloat16 rounds the
+// doubles once: float has enough extra precision and range.
+static inline __m128 cvtpd_ps_round_to_odd(const __m256d& x) {
+  const __m128 f = _mm256_cvtpd_ps(x);
+  const __m256d back = _mm256_cvtps_pd(f);
+  const __m256d sign = _mm256_set1_pd(-0.0);
+  // Ordered comparisons, so NaN lanes are left alone. Where rounding to
+  // nearest went away from zero, f is one ulp too large in magnitude.
+  const __m256d away = _mm256_cmp_pd(
+      _mm256_andnot_pd(sign, back), _mm256_andnot_pd(sign, x), _CMP_GT_OQ);
+  const __m256d inexact = _mm256_cmp_pd(back, x, _CMP_NEQ_OQ);
+  // Narrows 64-bit lane masks to the 32-bit lanes of f.
+  const __m256i idx = _mm256_setr_epi32(0, 2, 4, 6, 0, 2, 4, 6);
+  const auto narrow = [&](__m256d mask) {
+    return _mm256_castsi256_si128(
+        _mm256_permutevar8x32_epi32(_mm256_castpd_si256(mask), idx));
+  };
+  const __m128i bits = _mm_add_epi32(_mm_castps_si128(f), narrow(away));
+  return _mm_castsi128_ps(
+      _mm_or_si128(bits, _mm_and_si128(narrow(inexact), _mm_set1_epi32(1))));
+}
+
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
   __m256i hi = _mm256_castps_si256(b);
@@ -247,7 +270,9 @@ class Vectorized16 {
     // returns an integer mask where all zero elements are translated to 1-bit
     // and others are translated to 0-bit
     __m256i cmp = _mm256_cmpeq_epi16(values, _mm256_set1_epi16(0));
-    return _mm256_movemask_epi8(cmp);
+    __m128i packed = _mm_packs_epi16(
+        _mm256_castsi256_si128(cmp), _mm256_extracti128_si256(cmp, 1));
+    return _mm_movemask_epi8(packed);
   }
   static Vectorized<T> loadu(const void* ptr, int16_t count = size()) {
     if (count == size())
@@ -414,8 +439,7 @@ class Vectorized16 {
       const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
       const auto pi = _mm256_set1_ps(c10::pi<float>);
 
-      const auto neg_mask = _mm256_cmp_ps(values_2, zero_vec, _CMP_LT_OQ);
-      auto angle = _mm256_blendv_ps(zero_vec, pi, neg_mask);
+      auto angle = _mm256_blendv_ps(zero_vec, pi, values_2);
       angle = _mm256_blendv_ps(angle, nan_vec, nan_mask);
       return angle;
     };

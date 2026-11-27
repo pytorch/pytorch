@@ -1,13 +1,12 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 
 #define Py_BUILD_CORE
 #include <internal/pycore_code.h>
 #undef Py_BUILD_CORE
-
-#if IS_PYTHON_3_11_PLUS
 
 // Our own version of PyFrame_GetLocals.
 // Also combines functionality from frame_init_get_vars and frame_get_var.
@@ -65,12 +64,12 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 #if IS_PYTHON_3_16_PLUS
   TORCH_CHECK(false, "Python 3.16+");
 #elif IS_PYTHON_3_14_PLUS
-  for (int i = 0; i < offset; i++) {
+  for (const auto i : c10::irange(offset)) {
     update_framelocals(
         i, THP_PyStackRef_AsPyObjectBorrow(&frame->localsplus[i]));
   }
 #else
-  for (int i = 0; i < offset; i++) {
+  for (const auto i : c10::irange(offset)) {
     update_framelocals(i, frame->localsplus[i]);
   }
 #endif
@@ -82,7 +81,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 #else
   PyObject* closure = FUNC(frame)->func_closure;
 #endif
-  for (int i = 0; i < co->co_nfreevars; i++) {
+  for (const auto i : c10::irange(co->co_nfreevars)) {
     update_framelocals(offset + i, PyTuple_GET_ITEM(closure, i));
   }
 
@@ -97,7 +96,7 @@ void FrameLocalsMapping::_realize_dict() {
 
   auto nlocalsplus = ((PyCodeObject*)_code_obj.ptr())->co_nlocalsplus;
   DEBUG_CHECK(nlocalsplus == _framelocals.size());
-  for (int i = 0; i < nlocalsplus; i++) {
+  for (const auto i : c10::irange(nlocalsplus)) {
     if (_framelocals[i]) {
       _dict[framelocals_names[i]] = _framelocals[i];
     }
@@ -108,103 +107,6 @@ py::tuple code_framelocals_names(py::handle code) {
   CHECK(PyCode_Check(code.ptr()));
   return py::cast<py::tuple>(((PyCodeObject*)code.ptr())->co_localsplusnames);
 }
-
-#else
-
-// Based on
-// https://github.com/python/cpython/blob/5f24da9d75bb0150781b17ee4706e93e6bb364ea/Objects/frameobject.c#L1016
-FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
-    : _code_obj(py::cast<py::object>((PyObject*)F_CODE(frame))) {
-  PyCodeObject* co = (PyCodeObject*)_code_obj.ptr();
-  auto nlocals =
-      std::min<int>(co->co_nlocals, (int)PyTuple_GET_SIZE(co->co_varnames));
-  auto ncells = PyCode_GetNCellvars(co);
-  auto nfree = PyCode_GetNFreevars(co);
-
-  _framelocals.resize(co->co_nlocals + ncells + nfree, nullptr);
-
-  auto update_framelocals = [&](int i, bool deref) {
-    DEBUG_CHECK(0 <= i && i < _framelocals.size());
-    PyObject* value = frame->f_localsplus[i];
-    if (deref) {
-      CHECK(value != nullptr && PyCell_Check(value));
-      value = PyCell_GET(value);
-    }
-    _framelocals[i] = value;
-  };
-
-  // locals
-  for (int i = 0; i < nlocals; i++) {
-    update_framelocals(i, false);
-  }
-
-  // cellvars
-  for (int i = 0; i < ncells; i++) {
-    update_framelocals(co->co_nlocals + i, true);
-  }
-
-  // freevars
-  if (co->co_flags & CO_OPTIMIZED) {
-    for (int i = 0; i < nfree; i++) {
-      update_framelocals(co->co_nlocals + ncells + i, true);
-    }
-  }
-}
-
-void FrameLocalsMapping::_realize_dict() {
-  _dict = py::dict();
-  py::tuple framelocals_names = code_framelocals_names(_code_obj);
-  PyCodeObject* co = (PyCodeObject*)_code_obj.ptr();
-
-  auto update_mapping = [&](int i) {
-    DEBUG_CHECK(0 <= i && i < _framelocals.size());
-    PyObject* value = _framelocals[i].ptr();
-    // NOTE: CPython's PyFrame_FastToLocalsWithError/map_to_dict
-    // removes the local name from the locals dict if the value is NULL.
-    // This is likely so that if a local variable is deleted in the fastlocals,
-    // PyFrame_FastToLocalsWithError will also remove it from frame->f_locals.
-    // Since we create the locals dict from scratch every time (and only
-    // before a frame is run), we probably don't need to account for this
-    // codepath, saving us from unnecessarily calling _dict.pop().
-    // It is unexpected that multiple fastlocal values corresponding to
-    // the same variable name have both a null and non-null value.
-    if (value != nullptr) {
-      _dict[framelocals_names[i]] = value;
-    }
-  };
-
-  // locals
-  py::tuple varnames = _code_obj.attr("co_varnames");
-  auto nlocals = std::min(co->co_nlocals, (int)varnames.size());
-  for (int i = 0; i < nlocals; i++) {
-    update_mapping(i);
-  }
-
-  // cellvars
-  auto ncells = PyCode_GetNCellvars(co);
-  for (int i = 0; i < ncells; i++) {
-    update_mapping(co->co_nlocals + i);
-  }
-
-  // freevars
-  if (co->co_flags & CO_OPTIMIZED) {
-    auto nfree = PyCode_GetNFreevars(co);
-    for (int i = 0; i < nfree; i++) {
-      update_mapping(co->co_nlocals + ncells + i);
-    }
-  }
-}
-
-py::tuple code_framelocals_names(py::handle code) {
-  CHECK(PyCode_Check(code.ptr()));
-  py::tuple names = code.attr("co_varnames") + code.attr("co_cellvars");
-  if (((PyCodeObject*)code.ptr())->co_flags & CO_OPTIMIZED) {
-    names += code.attr("co_freevars");
-  }
-  return names;
-}
-
-#endif
 
 PyObject* FrameLocalsMapping::get(int idx) {
   DEBUG_CHECK(0 <= idx && idx < _framelocals.size());

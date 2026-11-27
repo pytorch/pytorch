@@ -7,6 +7,8 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <c10/util/irange.h>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 
 // Permute-free all-to-all for Ulysses-style sequence parallelism.
 //
@@ -43,12 +45,12 @@ __device__ inline void copy_bytes_vec16_aligned(
        vec_idx += static_cast<size_t>(kUnroll) * stride) {
     at::native::memory::Vec<16> chunk[kUnroll];
 #pragma unroll 4
-    for (int u = 0; u < kUnroll; ++u) {
+    for (const auto u : c10::irange(kUnroll)) {
       const size_t i = vec_idx + static_cast<size_t>(u) * stride;
       chunk[u] = at::native::memory::ld_vec<16>(src + i * 16);
     }
 #pragma unroll 4
-    for (int u = 0; u < kUnroll; ++u) {
+    for (const auto u : c10::irange(kUnroll)) {
       const size_t i = vec_idx + static_cast<size_t>(u) * stride;
       at::native::memory::st_vec<16>(dst + i * 16, chunk[u]);
     }
@@ -180,7 +182,7 @@ void nccl_all_to_all_nd(
         "ncclDevCommCreate failed in nccl_all_to_all_nd");
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
-  ncclDevComm& devcomm = devcomm_opt->get();
+  ncclDevComm devcomm = devcomm_opt->get();
 
   const int my_rank = devcomm.rank;
   const int p = devcomm.nRanks;
@@ -283,6 +285,11 @@ void nccl_all_to_all_nd(
     const size_t dst_row_stride_bytes =
         static_cast<size_t>(local_cols) * esz_u;
 
+    // The LSA barriers belong to the group's device communicator, shared by
+    // every call of this op on the group: calls on different streams must run
+    // in issue order, or ranks pair one call's barrier with another's. Taken
+    // after validation so a rejected call leaves the group's ordering alone.
+    GroupStreamGuard stream_guard(group_name);
     all_to_all_lsa_kernel<<<dim3(p, ctas_per_slot), A2A_THREADS_PER_CTA, 0, stream>>>(
         window,
         base_src_byte_offset,
@@ -357,6 +364,7 @@ void nccl_all_to_all_nd(
     const size_t dst_row_stride_bytes =
         static_cast<size_t>(p) * cols_u * esz_u;
 
+    GroupStreamGuard stream_guard(group_name);
     all_to_all_lsa_kernel<<<dim3(p, ctas_per_slot), A2A_THREADS_PER_CTA, 0, stream>>>(
         window,
         base_src_byte_offset,

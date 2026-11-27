@@ -41,7 +41,7 @@ Before reading implementation code, determine the compilation mode. These share 
 
 Many PT2 bugs come from confusing these two:
 - **Trace-time**: Inside Dynamo's symbolic interpreter. Dynamo intercepts function calls and may constant-fold them (e.g., `is_exporting()` → `ConstantVariable(True)`).
-- **Runtime**: Real tensors, real Python calls, module-level flags like `torch.compiler._is_exporting_flag`.
+- **Runtime**: Real tensors, real Python calls, per-thread TLS session flags (presence = True), like `torch.compiler.is_exporting()`.
 
 When debugging, add temporary `print()` statements directly in the source file rather than monkey-patching from outside — dispatch chains make monkey-patching unreliable.
 

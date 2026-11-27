@@ -44,6 +44,19 @@ template <typename scalar_t>
 constexpr bool use_vectorized_clamp = true;
 #endif
 
+// std::min and std::max return their first argument when the two compare equal,
+// so they keep the sign of a zero; a hardware min/max does not. Restore `a`
+// where both operands are zeros -- their bitwise or is +-0, which still
+// compares equal to zero.
+template <typename scalar_t>
+Vectorized<scalar_t> keep_zero_sign(
+    const Vectorized<scalar_t>& res,
+    const Vectorized<scalar_t>& a,
+    const Vectorized<scalar_t>& b) {
+  const auto both_zero = (a | b) == Vectorized<scalar_t>(scalar_t(0));
+  return Vectorized<scalar_t>::blendv(res, a, both_zero);
+}
+
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 inline void compare_base_kernel_core(
     const Tensor& result1,
@@ -367,7 +380,8 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
     if constexpr (use_vectorized_clamp<scalar_t>) {
       cpu_kernel_vec(iter, clamp_op,
         [](Vectorized<scalar_t> a, Vectorized<scalar_t> min, Vectorized<scalar_t> max) {
-          return vec::minimum(vec::maximum(a, min), max);
+          const auto lo = keep_zero_sign(vec::maximum(a, min), a, min);
+          return keep_zero_sign(vec::minimum(lo, max), lo, max);
         });
     } else {
       cpu_kernel(iter, clamp_op);
@@ -388,7 +402,8 @@ void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, cons
       const Vectorized<scalar_t> max_vec(max);
       cpu_kernel_vec(iter, clamp_op,
         [=](Vectorized<scalar_t> a) {
-          return vec::clamp(a, min_vec, max_vec);
+          const auto lo = keep_zero_sign(vec::clamp_min(a, min_vec), a, min_vec);
+          return keep_zero_sign(vec::clamp_max(lo, max_vec), lo, max_vec);
         });
     } else {
       cpu_kernel(iter, clamp_op);
@@ -407,7 +422,7 @@ void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
       const Vectorized<scalar_t> max_vec(max);
       cpu_kernel_vec(iter, clamp_max_op,
         [=](Vectorized<scalar_t> a) {
-          return vec::clamp_max(a, max_vec);
+          return keep_zero_sign(vec::clamp_max(a, max_vec), a, max_vec);
         });
     } else {
       cpu_kernel(iter, clamp_max_op);
@@ -426,7 +441,7 @@ void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
       const Vectorized<scalar_t> min_vec(min);
       cpu_kernel_vec(iter, clamp_min_op,
         [=](Vectorized<scalar_t> a) {
-          return vec::clamp_min(a, min_vec);
+          return keep_zero_sign(vec::clamp_min(a, min_vec), a, min_vec);
         });
     } else {
       cpu_kernel(iter, clamp_min_op);

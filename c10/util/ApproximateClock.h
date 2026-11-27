@@ -11,10 +11,6 @@
 #include <functional>
 #include <type_traits>
 
-#if defined(C10_IOS) && defined(C10_MOBILE)
-#include <sys/time.h> // for gettimeofday()
-#endif
-
 #if defined(__i386__) || defined(__x86_64__) || defined(__amd64__)
 #define C10_RDTSC
 #if defined(_MSC_VER)
@@ -50,15 +46,7 @@ inline time_t getTimeSinceEpoch() {
 }
 
 inline time_t getTime(bool allow_monotonic = false) {
-#if defined(C10_IOS) && defined(C10_MOBILE)
-  // clock_gettime is only available on iOS 10.0 or newer. Unlike OS X, iOS
-  // can't rely on CLOCK_REALTIME, as it is defined no matter if clock_gettime
-  // is implemented or not
-  struct timeval now;
-  gettimeofday(&now, NULL);
-  return static_cast<time_t>(now.tv_sec) * 1000000000 +
-      static_cast<time_t>(now.tv_usec) * 1000;
-#elif defined(_WIN32) || defined(__MACH__)
+#if defined(_WIN32) || defined(__MACH__)
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
              steady_clock_t::now().time_since_epoch())
       .count();

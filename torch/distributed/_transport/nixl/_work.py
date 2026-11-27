@@ -120,6 +120,8 @@ class _NIXLWork(_PollingWork):
         self._done = False
 
     def _poll(self) -> bool:
+        if self._done:
+            return True
         transport = self._transport
         if not transport._operation_lock.acquire(blocking=False):
             return False
@@ -148,9 +150,10 @@ class _NIXLWork(_PollingWork):
                 transport._closing = True
                 if self._error is None:
                     self._error = error
-            # Each Work represents one request; completed Works are never reset.
-            self._done = True
             transport._pending.pop(id(self))
+            # Lock-free readers use the recorded error and finalized bookkeeping.
+            # Publish completion last; completed Works are never reset.
+            self._done = True
             # Completion ends this Work, not the lifetime of exposed registrations.
             # unregister_memory()/close() remove the transport's retention root.
             return True

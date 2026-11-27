@@ -87,11 +87,11 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
       [[maybe_unused]] const char* what = "") const override {
     // Clamp pos/n against size_ to prevent OOB reads from crafted zip
     // metadata. Mirrors FileAdapter::read (file_adapter.cc).
-    if (C10_UNLIKELY(pos >= static_cast<uint64_t>(size_))) {
+    if (pos >= static_cast<uint64_t>(size_)) [[unlikely]] {
       return 0;
     }
     const uint64_t remaining = static_cast<uint64_t>(size_) - pos;
-    if (C10_UNLIKELY(n > remaining)) {
+    if (n > remaining) [[unlikely]] {
       n = static_cast<size_t>(remaining);
     }
     memcpy(buf, (int8_t*)(data_) + pos, n);

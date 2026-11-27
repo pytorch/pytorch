@@ -28,6 +28,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model,
     check_model_gpu,
     copy_tests,
+    skip_if_device,
 )
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
@@ -281,10 +282,8 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertTrue(preserved)
         self.assertEqual(preserved[0], [2])
 
+    @skip_if_device(lambda device: device == "cpu", "MLKDNN Bug")
     def test_autocast(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("MLKDNN Bug")
-
         mod = torch.nn.Linear(10, 10).to(self.device).eval()
         inp = torch.rand([10, 10]).to(self.device).to(torch.half)
 
@@ -728,12 +727,10 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = foo_c(mod, x)
             self.assertEqual(out_eager, out_compiled)
 
+    # TODO: cpu path keeps an extra copy of graph around somewhere,
+    # memory not as important for cpu
+    @skip_if_device(lambda device: device == "cpu", "NYI CPU")
     def test_param_deallocated(self):
-        # TODO: cpu path keeps an extra copy of graph around somewhere,
-        # memory not as important for cpu
-        if self.device == "cpu":
-            raise unittest.SkipTest("NYI CPU")
-
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()

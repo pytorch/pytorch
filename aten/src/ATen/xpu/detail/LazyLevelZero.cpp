@@ -7,7 +7,7 @@
 namespace at::xpu::detail {
 namespace _stubs {
 
-at::DynamicLibrary& getZELibrary() {
+static at::DynamicLibrary& getZELibrary() {
 #if defined(_WIN32)
   static at::DynamicLibrary lib("ze_loader.dll");
 #else
@@ -44,7 +44,7 @@ at::DynamicLibrary& getZELibrary() {
   _STUB_DISPATCH(_STUB_ARGS_, _STUB_NARGS(__VA_ARGS__), __VA_ARGS__)
 
 #define _STUB(LIB, NAME, RETTYPE, ...)                                        \
-  RETTYPE NAME(_STUB_PARAMS(__VA_ARGS__)) {                                   \
+  static RETTYPE NAME(_STUB_PARAMS(__VA_ARGS__)) {                            \
     auto fn =                                                                 \
         reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
     TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
@@ -63,11 +63,13 @@ ZE_STUB(
     const ze_module_desc_t*,
     ze_module_handle_t*,
     ze_module_build_log_handle_t*)
+ZE_STUB(zeModuleDestroy, ze_module_handle_t)
 ZE_STUB(
     zeKernelCreate,
     ze_module_handle_t,
     const ze_kernel_desc_t*,
     ze_kernel_handle_t*)
+ZE_STUB(zeKernelDestroy, ze_kernel_handle_t)
 ZE_STUB(zeKernelGetProperties, ze_kernel_handle_t, ze_kernel_properties_t*)
 ZE_STUB(
     zeMemGetAllocProperties,

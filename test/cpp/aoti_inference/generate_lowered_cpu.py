@@ -35,7 +35,7 @@ def main(
     with torch.no_grad():
         example_inputs = ep.example_inputs[0]
         # Get scripted original module.
-        module = torch.jit.trace(copy.deepcopy(ep.module()), example_inputs)
+        module = torch.jit._trace.trace(copy.deepcopy(ep.module()), example_inputs)
 
         # Get aot compiled module.
         so_path = torch._inductor.aot_compile(ep.module(), example_inputs)
@@ -55,7 +55,7 @@ def main(
             }
         )
 
-    torch.jit.script(Serializer(data)).save(output_path)
+    torch.jit._script.script(Serializer(data)).save(output_path)
 
 
 if __name__ == "__main__":

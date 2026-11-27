@@ -66,7 +66,7 @@ struct LineNumberProgram {
         directory_members.push_back({L.readULEB128(), L.readULEB128()});
       }
       uint64_t directories_count = L.readULEB128();
-      for (size_t i = 0; i < directories_count; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(directories_count)) {
         for (auto& member : directory_members) {
           switch (member.content_type) {
             case DW_LNCT_path: {
@@ -91,7 +91,7 @@ struct LineNumberProgram {
         file_members.push_back({L.readULEB128(), L.readULEB128()});
       }
       auto files_count = L.readULEB128();
-      for (size_t i = 0; i < files_count; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(files_count)) {
         for (auto& member : file_members) {
           switch (member.content_type) {
             case DW_LNCT_path: {

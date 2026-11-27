@@ -3215,9 +3215,19 @@ class TestPercentile(TestCase):
         assert_raises(ValueError, np.percentile, d, axis=(-1, -1), q=25)
         assert_raises(ValueError, np.percentile, d, axis=(3, -1), q=25)
 
-    def test_keepdims(self):
-        d = np.ones((3, 5, 7, 11))
-        assert_equal(np.percentile(d, 7, axis=None, keepdims=True).shape, (1, 1, 1, 1))
+    @parametrize("q", [7, [7], [1, 7], [[1, 7]]])
+    def test_keepdims(self, q):
+        d = np.arange(3 * 5 * 7 * 11).reshape(3, 5, 7, 11)
+        q = np.array(q)
+        shape = q.shape + (1,) * d.ndim
+        expected = (d.size - 1) * q / 100
+        result = np.percentile(d, q, axis=None, keepdims=np.bool_(True))
+        assert_equal(result.shape, shape)
+        assert_allclose(result, expected.reshape(shape))
+        if q.ndim:
+            result = np.percentile(d, q, axis=None, keepdims=np.bool_(False))
+            assert_equal(result.shape, q.shape)
+            assert_allclose(result, expected)
 
     @xfail  # (reason="pytorch percentile does not support tuple axes.")
     def test_keepdims_2(self):
@@ -3244,18 +3254,7 @@ class TestPercentile(TestCase):
         )
 
     @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-    @parametrize(
-        "q",
-        [
-            7,
-            subtest(
-                [1, 7],
-                decorators=[
-                    skip(reason="Keepdims wrapper incorrect for multiple q"),
-                ],
-            ),
-        ],
-    )
+    @parametrize("q", [7, [1, 7]])
     @parametrize(
         "axis",
         [
@@ -3277,14 +3276,17 @@ class TestPercentile(TestCase):
         ],
     )
     def test_keepdims_out(self, q, axis):
-        d = np.ones((3, 5, 7, 11))
+        d = np.arange(3 * 5 * 7 * 11).reshape(3, 5, 7, 11)
+        fractions = np.array(q).reshape(np.shape(q) + (1,) * d.ndim) / 100
         if axis is None:
             shape_out = (1,) * d.ndim
+            expected = (d.size - 1) * fractions
         else:
             axis_norm = normalize_axis_tuple(axis, d.ndim)
             shape_out = tuple(
                 1 if i in axis_norm else d.shape[i] for i in range(d.ndim)
             )
+            expected = d[:, :1] + 4 * 7 * 11 * fractions
         shape_out = np.shape(q) + shape_out
 
         out = np.empty(shape_out)
@@ -3292,6 +3294,7 @@ class TestPercentile(TestCase):
         if result is not out:
             raise AssertionError("result is not out")
         assert_equal(result.shape, shape_out)
+        assert_allclose(result, expected)
 
     @skip(reason="NP_VER: fails on CI; no method=")
     def test_out(self):
