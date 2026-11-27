@@ -1,6 +1,7 @@
 # Owner(s): ["module: random"]
 
 import contextlib
+import functools
 
 import torch
 import torch.func._random as random
@@ -39,6 +40,33 @@ all_int_dtypes = [
 ]
 int_limits = {dt: (torch.iinfo(dt).min, torch.iinfo(dt).max) for dt in all_int_dtypes}
 int_bits = {dt: torch.iinfo(dt).bits for dt in all_int_dtypes}
+
+
+def elems_per_call(dtype):
+    # Values derived from each 128-bit Philox call (see the note in random.key()).
+    return 2 if dtype.itemsize == 8 else 4
+
+
+def check_offset_shift(test, gen, device, dtype):
+    # Shifting a key's offset by k skips the first k * E elements, both for an
+    # unbatched key and for each slice of a batched key.
+    seed, n, E = 42, 100, elems_per_call(dtype)
+    offsets = range(4)
+    keys = torch.tensor([[seed, k] for k in offsets], dtype=torch.uint64, device=device)
+    batched = gen(keys.unsqueeze(-2), (len(offsets), n))
+    ref = gen(keys[0], (n,))
+    for k in offsets:
+        shifted = gen(keys[k], (n,))
+        test.assertEqual(ref[k * E :], shifted[: n - k * E])
+        test.assertEqual(batched[k], shifted)
+
+
+def check_offset_overflow(test, gen, device, dtype):
+    # The offset wraps from 2**64 - 1 around to 0 after the first Philox call.
+    seed, n, E = 42, 100, elems_per_call(dtype)
+    key = torch.tensor([seed, (1 << 64) - 1], dtype=torch.uint64, device=device)
+    key0 = random.key(seed, device=device)
+    test.assertEqual(gen(key, (n,))[E:], gen(key0, (n,))[:-E])
 
 
 class TestStatelessRNGKey(TestCase):
@@ -508,36 +536,14 @@ class TestStatelessRNGDistribution(TestCase):
     @parametrize("gen_fn_name", ["normal", "uniform"])
     @dtypes(*all_floating_dtypes)
     def test_offset_shift_consistency(self, device, dtype, gen_fn_name):
-        seed = 42
-        n = 100
-        key0 = random.key(seed, device=device)
-        ref = self._gen(gen_fn_name, key0, (n,), dtype=dtype)
-
-        # as a key's offset shifts, we expect the stream to shift by
-        # the number of elements per philox call (2 for double; 4 otherwise)
-        for offset in range(1, 4):
-            key = torch.tensor([seed, offset], dtype=torch.uint64, device=device)
-            elems_per_call = 2 if dtype == torch.float64 else 4
-            expected_shift = offset * elems_per_call
-            result = self._gen(gen_fn_name, key, (n,), dtype=dtype)
-            self.assertEqual(ref[expected_shift:], result[:-expected_shift])
+        gen = functools.partial(self._gen, gen_fn_name, dtype=dtype)
+        check_offset_shift(self, gen, device, dtype)
 
     @parametrize("gen_fn_name", ["normal", "uniform"])
     @dtypes(*all_floating_dtypes)
     def test_offset_overflow(self, device, dtype, gen_fn_name):
-        seed = 42
-        n = 100
-        last_offset_before_wrap = (1 << 64) - 1
-        key = torch.tensor(
-            [seed, last_offset_before_wrap], dtype=torch.uint64, device=device
-        )
-        result = self._gen(gen_fn_name, key, (n,), dtype=dtype)
-
-        # ensure offset wraps around to 0 by comparing with 0-offset key results
-        key0 = random.key(seed, device=device)
-        result0 = self._gen(gen_fn_name, key0, (n,), dtype=dtype)
-        elems_per_call = 2 if dtype == torch.float64 else 4
-        self.assertEqual(result[elems_per_call:], result0[:-elems_per_call])
+        gen = functools.partial(self._gen, gen_fn_name, dtype=dtype)
+        check_offset_overflow(self, gen, device, dtype)
 
     @parametrize("gen_fn_name", ["normal", "uniform"])
     @dtypes(*all_floating_dtypes)
@@ -1302,6 +1308,20 @@ class TestStatelessRNGInteger(TestCase):
             self.assertEqual(
                 result[i], random.randint(keys[i], (7,), high=100, dtype=dtype)
             )
+
+    @parametrize("dtype", all_int_dtypes)
+    @parametrize("full_range", [False, True])
+    def test_offset_shift_consistency(self, device, dtype, full_range):
+        bounds = {"low": None, "high": None} if full_range else {"high": 100}
+        gen = functools.partial(random.randint, dtype=dtype, **bounds)
+        check_offset_shift(self, gen, device, dtype)
+
+    @parametrize("dtype", all_int_dtypes)
+    @parametrize("full_range", [False, True])
+    def test_offset_overflow(self, device, dtype, full_range):
+        bounds = {"low": None, "high": None} if full_range else {"high": 100}
+        gen = functools.partial(random.randint, dtype=dtype, **bounds)
+        check_offset_overflow(self, gen, device, dtype)
 
     @parametrize("dtype", all_int_dtypes)
     def test_different_keys_produce_different_values(self, device, dtype):

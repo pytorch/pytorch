@@ -7,8 +7,6 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from collections.abc import Iterator
-from fnmatch import fnmatchcase
-from pathlib import Path
 from types import MethodType
 from typing import Any, TYPE_CHECKING, TypeGuard
 
@@ -71,7 +69,6 @@ _RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "
 
 
 def pytest_addoption(parser: Parser) -> None:
-    parser.addoption("--cpp-faketensor-tests")
     group = parser.getgroup("general")
     group.addoption("--scs", action="store", default=None, dest="stepcurrent_skip")
     group.addoption("--sc", action="store", default=None, dest="stepcurrent")
@@ -182,60 +179,6 @@ class NodeidFilePlugin:
         items[:] = selected
 
 
-class CppFakeTensorTestSelection:
-    def __init__(self, path: str) -> None:
-        with open(path) as f:
-            self.selectors = json.load(f)["tests"]
-        self.selected_count = 0
-
-    def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
-        if exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED:
-            pruned = session.config.pluginmanager.get_plugin("prune_skips_plugin")
-            if (
-                pruned is not None
-                and self.selected_count
-                and sum(pruned.reasons.values()) == self.selected_count
-            ):
-                return
-            stepcurrent = session.config.pluginmanager.get_plugin("stepcurrentplugin")
-            if stepcurrent is None or not stepcurrent.exhausted:
-                session.exitstatus = pytest.ExitCode.TESTS_FAILED
-
-    @pytest.hookimpl(tryfirst=True)
-    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
-        nodeids = {
-            item: "::".join(
-                (
-                    item.path.relative_to(Path(__file__).parent).as_posix(),
-                    *item.nodeid.split("::")[1:],
-                )
-            )
-            for item in items
-        }
-        files = {nodeid.split("::")[0] for nodeid in nodeids.values()}
-        selected = set()
-        for selector in self.selectors:
-            if selector.split("::")[0] not in files:
-                continue
-            matches = {
-                item
-                for item in items
-                if nodeids[item] == selector
-                or fnmatchcase(nodeids[item], selector)
-                or nodeids[item].startswith(selector + "::")
-            }
-            if not matches:
-                raise pytest.UsageError(
-                    f"C++ FakeTensor selector matched no tests: {selector}"
-                )
-            selected.update(matches)
-        self.selected_count = len(selected)
-        config.hook.pytest_deselected(
-            items=[item for item in items if item not in selected]
-        )
-        items[:] = [item for item in items if item in selected]
-
-
 class SerialReportPlugin:
     """Counts the @serialTest tests of this shard that `-m "not serial"` left out
     (see --serial-report-file). run_test.py runs a file's serial pass only when its
@@ -300,8 +243,6 @@ class HardwareClassificationPytestPlugin:
 
 def pytest_configure(config: Config) -> None:
     parse_cmd_line_args()
-    if selection := config.getoption("cpp_faketensor_tests"):
-        config.pluginmanager.register(CppFakeTensorTestSelection(selection))
 
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
@@ -726,7 +667,6 @@ class StepcurrentPlugin:
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
-        self.exhausted = False
 
         self.made_failing_xml_location = f"{self.directory}/made_failing_xml"
         self.cache.set(self.made_failing_xml_location, False)
@@ -760,8 +700,6 @@ class StepcurrentPlugin:
             self.report_status = f"skipping {failed_index} already run items."
             deselected = items[:failed_index]
             del items[:failed_index]
-            # Only a matched --scs resume point can exhaust a selected collection.
-            self.exhausted = bool(self.skip) and not items
             if self.run_single:
                 self.report_status += f" Running only {items[0].nodeid}"
                 deselected += items[1:]

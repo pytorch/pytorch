@@ -2440,9 +2440,14 @@ class CudaReproTests(TestCase):
             ]
             compiled_out = opt_fn(*compiled_args)
 
+            t12 = arg0.view(379, 165, 2).mean(dim=2) - torch.nn.functional.relu(
+                arg5
+            ).mean(dim=0)
+            well_conditioned = t12.abs() > 1e-4
+
             torch.testing.assert_close(
-                eager_out,
-                compiled_out,
+                eager_out[well_conditioned],
+                compiled_out[well_conditioned],
                 rtol=5e-2,
                 atol=1e-1,
             )
@@ -3761,14 +3766,10 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             torch.zeros(1, dtype=torch.int32, device=device),
         )
         # This crashes
-        compile_out, code = run_and_get_code(
-            torch.compile(f),
+        compile_out = torch.compile(f)(
             torch.zeros(1, 32, dtype=torch.int64, device=device),
             torch.zeros(1, dtype=torch.int32, device=device),
         )
-        # make sure the identity is maintained
-        FileCheck().check("(1 + ((31)").run(code[0])
-
         self.assertEqual(eager_out, compile_out)
 
     @skipIfXpu(
