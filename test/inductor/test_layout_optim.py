@@ -10,9 +10,12 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import requires_triton
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
@@ -142,14 +145,14 @@ class TestLayoutOptim(TestCase):
     def verify_accuracy_for_train(self, model_class, device, **kwargs):
         self.verify_accuracy(model_class, device, is_train=True, **kwargs)
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_2conv_with_graph_break(self, device):
         """
         Make sure graph break does not cause any accuracy issue.
         """
         self.verify_accuracy_for_infer(Model2Conv, device)
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_3conv_with_graph_break(self, device):
         class Model(nn.Module):
             def __init__(
@@ -209,11 +212,11 @@ class TestLayoutOptim(TestCase):
         # Note that if the output is channels last, the view op will fail.
         opt_out.view(5, -1)
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_keep_output_layout_infer(self, device):
         self._run_keep_output_layout_infer(device)
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_keep_output_layout_with_freezing(self, device):
         with config.patch(
             {
@@ -222,11 +225,11 @@ class TestLayoutOptim(TestCase):
         ):
             self._run_keep_output_layout_infer(device)
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_training_acc(self, device):
         self.verify_accuracy_for_train(Model2Conv, device)
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_mutate_view(self, device):
         """
         The GraphModule passed to GraphLowering init method is like:
@@ -245,7 +248,7 @@ class TestLayoutOptim(TestCase):
         f(x)
         self.assertTrue(torch.equal(x, torch.ones(2, 3).to(device) * 2))
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_mutate_base(self, device):
         """
         The GraphModule passed to GraphLowering init method is like:
@@ -265,7 +268,7 @@ class TestLayoutOptim(TestCase):
         y = f(x)
         self.assertTrue(torch.equal(y, torch.ones(3, 2).to(device) * 2))
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     @tf32_off()
     def test_mutate_base_for_conv_output(self, device):
         class Model(nn.Module):
@@ -284,7 +287,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model, device)
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     @tf32_off()
     def test_mutate_view_for_conv_output(self, device):
         class Model(nn.Module):
@@ -303,7 +306,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model, device)
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_dynamic_shape_specialization(self, device):
         """
         Previously in aot_autograd.py we compare strides of FakeTensor
@@ -326,7 +329,7 @@ class TestLayoutOptim(TestCase):
             # Trigger the compiling of the backward graph
             actual.sum().backward()
 
-    @requires_triton()
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_nll_loss_backward(self, device):
         """
         Repro for issue https://github.com/pytorch/pytorch/issues/120759
