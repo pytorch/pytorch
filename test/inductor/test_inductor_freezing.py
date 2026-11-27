@@ -17,7 +17,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCUDAIf,
     skipIf,
 )
 from torch.testing._internal.common_utils import (
@@ -1037,7 +1036,7 @@ class OptimizeForInferenceCudaTemplate(TestCase):
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
 
-    @skipCUDAIf(not HAS_TRITON, "requires triton")
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_static_indices_cudagraph(self, device):
         mod1 = torch.nn.Sequential(
             torch.nn.Linear(2, 2).to(device), torch.nn.Linear(2, 2).to(device)
