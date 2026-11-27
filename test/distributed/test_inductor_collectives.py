@@ -1480,7 +1480,7 @@ class TestCollectivesMultiProcAccelerator(_CollectivesMultiProcBase):
 
         # simple mode to track how many collective ops we saw in the backward
         class TrackingMode(TorchDispatchMode):
-            def __init__(self, device):
+            def __init__(self):
                 super().__init__()
                 self.ops_counter = Counter()
 
