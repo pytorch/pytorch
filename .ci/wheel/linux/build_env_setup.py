@@ -12,7 +12,7 @@ cuSPARSELt, MKL, plus the standard OS package set). This script:
     remains usable on a lean manylinux base.
   * Wires the symlinks/env to target the requested CUDA version.
 
-Build-flag exports (USE_CUDA, TH_BINARY_BUILD, ...) are written to the file
+Build-flag exports (USE_CUDA, USE_MAGMA, ...) are written to the file
 given by --env-out; the caller (build.sh) sources it so the values reach
 the wheel build subprocess. Without that handoff exports made here die
 with this process.
@@ -49,7 +49,6 @@ CUDA_BUILD_ENV_STATIC: dict[str, str] = {
     "USE_CUDA": "1",
     "NCCL_ROOT_DIR": "/usr/local/cuda",
     "CUDNN_ROOT_DIR": "/usr/local/cuda",
-    "TH_BINARY_BUILD": "1",
     "INSTALL_TEST": "0",
     "USE_STATIC_CUDNN": "0",
     "USE_STATIC_NCCL": "0",
@@ -87,6 +86,10 @@ TORCH_CUDA_ARCH_LIST_TABLE: dict[str, dict[str, set[int]]] = {
         "aarch64": {80, 90, 100, 110, 120},
     },
     "13.4": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.5": {
         "x86_64": {75, 80, 86, 90, 100, 120},
         "aarch64": {80, 90, 100, 110, 120},
     },
@@ -157,13 +160,11 @@ def cuda_build_env(cuda_version: str, arch: str) -> dict[str, str]:
 
 
 CPU_BUILD_ENV: dict[str, str] = {
-    "TH_BINARY_BUILD": "1",
     "USE_CUDA": "0",
 }
 
 # XPU builds source the oneAPI environment and enable SYCL/MKL/XCCL.
 XPU_BUILD_ENV: dict[str, str] = {
-    "TH_BINARY_BUILD": "1",
     "USE_CUDA": "0",
     "USE_STATIC_MKL": "1",
     "USE_ONEMKL": "1",
@@ -176,7 +177,6 @@ XPU_BUILD_ENV: dict[str, str] = {
 # build_rocm.sh. ROCM_HOME is also read by repair_wheel.py to configure RPATHs.
 ROCM_BUILD_ENV_STATIC: dict[str, str] = {
     "BUILD_DEBUG_INFO": "0",
-    "TH_BINARY_BUILD": "1",
     "USE_STATIC_CUDNN": "1",
     "USE_STATIC_NCCL": "1",
     "ATEN_STATIC_CUDA": "1",

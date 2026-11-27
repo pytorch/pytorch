@@ -103,18 +103,22 @@ class GraphTransformObserver:
                 return pass_fn(self.gm.graph)
 
     def _check_disable_pass(self) -> bool:
+        return self.is_pass_disabled(self.passname, self.subsystem)
+
+    @staticmethod
+    def is_pass_disabled(passname: str, subsystem: str | None = None) -> bool:
         from torch._inductor import config as inductor_config
 
-        if self.passname.upper() in inductor_config.disabled_passes.upper():
+        if passname.upper() in inductor_config.disabled_passes.upper():
             return True
 
-        if self.subsystem is None:
+        if subsystem is None:
             return False
 
         from torch._inductor.compiler_bisector import CompilerBisector
 
         return CompilerBisector.disable_subsystem(
-            "inductor", self.subsystem, lambda: self.passname
+            "inductor", subsystem, lambda: passname
         )
 
     def __enter__(self) -> "GraphTransformObserver":

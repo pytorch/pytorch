@@ -21,8 +21,8 @@ from torch.testing._internal.common_cuda import \
     (ROCM_VERSION, SM80OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, dtypesIfXPU, onlyCPU, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, expectedFailureXPU,
-     onlyAccelerator, largeTensorTest)
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
+     onlyAccelerator, largeTensorTest, onlyCUDA, skipCUDAIfRocm)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -57,6 +57,40 @@ binary_ufuncs_with_sparse_support = [
     not isinstance(op, ElementwiseBinaryPythonRefInfo)]
 
 like_fns_with_sparse_support = [op for op in op_db if _op_supports_any_sparse(op) and '_like' in op.name]
+
+
+def hub_sparse_mm_inputs(device, dtype, n=10000, k=64, nnz=200000):
+    """n x n sparse COO matrix with nnz random entries plus a fully populated
+    row 0 (a "hub" row, which makes the atomic adds of cuSPARSE's default
+    algorithms visible), and a dense n x k matrix. See gh-202030."""
+    rows = torch.cat([torch.randint(0, n, (nnz,)), torch.zeros(n, dtype=torch.long)])
+    cols = torch.cat([torch.randint(0, n, (nnz,)), torch.arange(n)])
+    values = torch.rand(nnz + n, dtype=dtype)
+    a = torch.sparse_coo_tensor(torch.stack([rows, cols]).to(device), values.to(device), (n, n)).coalesce()
+    b = torch.randn(n, k, dtype=dtype, device=device)
+    return a, b
+
+
+def check_sparse_mm_deterministic(test_case, cases):
+    """Requires each of cases, (name, fn) pairs, to give bit-wise equal
+    results over 10 runs with deterministic algorithms enabled."""
+    with DeterministicGuard(True):
+        for name, fn in cases:
+            first = fn()
+            for _ in range(9):
+                test_case.assertEqual(fn(), first, atol=0, rtol=0, msg=name)
+
+
+def deterministiconoff(f):
+    """Runs the test with deterministic algorithms disabled, then enabled
+    (warn_only, so ops without a deterministic implementation still run)."""
+    @functools.wraps(f)
+    def wrapped(self, *args, **kwargs):
+        for deterministic in (False, True):
+            with DeterministicGuard(deterministic, warn_only=True):
+                f(self, *args, **kwargs)
+    return wrapped
+
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -724,7 +758,6 @@ class TestSparse(TestSparseBase):
         sparse_matrix = sparse_matrix.coalesce()
 
     @onlyAccelerator
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5669
     @dtypes(torch.float32, torch.float16, torch.bool)
     @dtypesIfMPS(torch.float32)
     def test_coalesce_wide_dense_dims(self, device, dtype):
@@ -1802,6 +1835,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
+    @deterministiconoff
     def test_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [di, dj], dtype, device, coalesced)
@@ -1923,6 +1957,29 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 20)
         test_shape(10, 10, 100, 0, 20)
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_mm_deterministic(self, device, dtype):
+        # gh-202030; values in deterministic mode are checked by the @deterministiconoff tests.
+        # The dtypes are all that the CUDA COO kernel (csrmm2) supports.
+        a, b = hub_sparse_mm_inputs(device, dtype)
+        c = torch.randn_like(b)
+        b1 = b[:, :1].contiguous()  # cuSPARSE: "For n == 1, the routine may use cusparseSpMV()"
+
+        def mm_backward():
+            d = b.detach().requires_grad_()
+            torch.sparse.mm(a, d).backward(c)
+            return d.grad
+
+        check_sparse_mm_deterministic(self, [
+            ("mm", lambda: torch.mm(a, b)),
+            ("mm column-major", lambda: torch.mm(a, b.t().contiguous().t())),
+            ("mm n=1", lambda: torch.mm(a, b1)),
+            ("addmm", lambda: torch.addmm(c, a, b, beta=0.5, alpha=2)),
+            ("mm backward", mm_backward),
+        ])
+
     @onlyAccelerator
     def test_bmm_oob(self, device):
         # Targets an out of bounds error when the sparse tensor has no non-zero
@@ -1980,6 +2037,7 @@ class TestSparse(TestSparseBase):
         unittest.skip('addmm_sparse_cuda is not implemented for BFloat16 and Half'),
         lambda p: (p['dtype'] is torch.bfloat16 or p['dtype'] is torch.float16) and p['device'].startswith('cuda'),
     )
+    @deterministiconoff
     def test_sparse_addmm(self, device, dtype, coalesced):
         if (dtype is torch.bfloat16 or dtype is torch.float16) and device.startswith("cuda"):
             self.skipTest('addmm_sparse_cuda is not implemented for BFloat16 and Half')
@@ -2022,6 +2080,7 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
+    @deterministiconoff
     def test_sparse_mm(self, device, dtype, coalesced):
         def test_shape(d1, d2, d3, nnz, transposed):
             if transposed:
@@ -4338,6 +4397,19 @@ class TestSparse(TestSparseBase):
                 check(self, x, y)
                 # TODO: uncomment once supported
                 # check_autograd(x, y)
+                if sparse_dim:
+                    x0 = self._gen_sparse(sparse_dim, 0, (0,) + sub_shape[1:], dtype, device, coalesced)[0]
+                    y0 = self._gen_sparse(sparse_dim, 0, (0,) + new_shape[1:], dtype, device, coalesced)[0]
+                    check(self, x0, y0)
+
+        # prod(sparse sizes) overflows int32
+        i = torch.tensor([[0, 1], [0, 1]], device=device)
+        v = make_tensor((2, 3), dtype=dtype, device=device)
+        x = torch.sparse_coo_tensor(i, v, (2**16, 2**16, 3))
+        y = torch.sparse_coo_tensor(i, v[:, :1], (2**16, 2**16, 1))
+        res = (x * y).coalesce()
+        self.assertEqual(res.indices(), i)
+        self.assertEqual(res.values(), v * v[:, :1])
 
     @coalescedonoff
     @expectedFailureMPS

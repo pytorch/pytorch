@@ -14,7 +14,6 @@ from unittest.mock import patch
 
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
-from optim.test_swa_utils import TestSWAUtils, TestSWAUtilsGeneric  # noqa: F401
 
 import torch
 from torch.nn import Parameter
@@ -850,11 +849,14 @@ class TestOptimRenewed(TestCase):
         flag,
         reduced_precision=False,
         assert_step_dtype=None,
+        grad_scale=None,
     ):
         """
         Given a flag 'fused' or 'foreach', test for parity of optimizer state
         and updated parameters between when the flag is set to True and False
-        for provided optimizer configurations.
+        for provided optimizer configurations. With grad_scale, the flag=True
+        optimizer steps as under a GradScaler: on grads scaled by grad_scale,
+        given grad_scale and found_inf=0.
         """
         if flag not in ("foreach", "fused"):
             raise AssertionError(f"flag must be 'foreach' or 'fused', got {flag!r}")
@@ -893,6 +895,11 @@ class TestOptimRenewed(TestCase):
                 params = list(model.parameters()) + [empty_param]
 
                 optimizer = optim_cls(params, **kwargs)
+                if grad_scale is not None and flag_value:
+                    for p in model.parameters():
+                        p.register_hook(lambda g: g * grad_scale)
+                    optimizer.grad_scale = torch.tensor(grad_scale, device=device)
+                    optimizer.found_inf = torch.zeros((), device=device)
                 models.append(model)
                 optimizers.append(optimizer)
 
@@ -1119,10 +1126,10 @@ class TestOptimRenewed(TestCase):
                 import gc
 
                 gc.collect()
-                torch.cuda.reset_peak_memory_stats()
+                torch.accelerator.reset_peak_memory_stats()
                 optimizer.step()
                 gc.collect()
-                max_mems.append(torch.cuda.max_memory_allocated())
+                max_mems.append(torch.accelerator.max_memory_allocated())
 
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
@@ -1215,6 +1222,9 @@ class TestOptimRenewed(TestCase):
                 "MPS supports only torch.float16, torch.float32 and torch.bfloat16"
             )
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
+        self._test_derived_optimizers(
+            device, dtype, optim_info, "fused", grad_scale=1024.0
+        )
 
     # Test vectorization path splits for fused kernels. Ensure the scalar path
     # and vectorized path compute the same thing.
@@ -1338,7 +1348,6 @@ class TestOptimRenewed(TestCase):
             optim_cls([ref], fused=True, **optim_input.kwargs).step()
             self.assertEqual(params[0][0], ref[0])
 
-    @skipMPS  # MPS fused optimizer does not properly handle found_inf
     @onlyAccelerator
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
@@ -3082,7 +3091,6 @@ class TestOptimizerLoadStateDictContext(TestCase):
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
-instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
 
 
 if __name__ == "__main__":

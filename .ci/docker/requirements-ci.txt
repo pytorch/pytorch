@@ -317,8 +317,9 @@ spin==0.17
 #Pinned versions: 0.17
 #test that import:
 
-redis>=4.0.0
+redis>=4.0.0,<8.2.0
 #Description: redis database
+#Pinned versions: <8.2.0 (8.2.0 raises BytesWarning on import under python -bb).
 #test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
 
 ghstack==0.8.0
@@ -448,7 +449,7 @@ setuptools-git-versioning==2.1.0
 # below, not by PyTorch itself; PyTorch uses scikit-build-core. Keep both
 # pinned independently.
 scikit-build==0.18.1
-scikit-build-core==1.1.1
+scikit-build-core==1.1.2
 pyre-extensions==0.0.32
 tabulate==0.9.0
 #Description: These package are needed to build FBGEMM and torchrec on PyTorch CI

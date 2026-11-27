@@ -141,8 +141,8 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     Enumerates devices from all Level Zero Sysman drivers and counts those
     whose logical index appears in *visible_mask*.  Only devices listed in
     the visible mask participate in counting.
-    The populated ``_cached_zes_device_infos`` list is indexed by PyTorch
-    device ordinal.
+    The populated ``_cached_zes_device_infos`` list is indexed by Level Zero
+    Sysman logical index (dGPU first); callers should match entries by UUID.
 
     Discrete GPUs (dGPUs) take priority: if any visible dGPU is found, only
     dGPUs are counted; integrated GPUs (iGPUs) are counted only when no
@@ -162,8 +162,6 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
         import pyzes  # type: ignore[import]
     except Exception:
         return -1
-
-    global _cached_zes_device_infos
 
     def _zes_check_warn(rc: int, msg: str) -> bool:
         """Return True if the call failed (rc != ZE_RESULT_SUCCESS) after issuing a warning."""
@@ -212,7 +210,7 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     # --- Count visible dGPUs and iGPUs ---
     ZES_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
     expose_subdevices = os.getenv("ZE_FLAT_DEVICE_HIERARCHY") != "COMPOSITE"
-    _cached_zes_device_infos.clear()
+    infos: list[_ZesDeviceInfo] = []
 
     for device in devices:
         props = pyzes.zes_device_properties_t()
@@ -233,7 +231,7 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
         tiled = not is_integrated and props.numSubdevices > 0 and expose_subdevices
 
         if not tiled:
-            _cached_zes_device_infos.append(
+            infos.append(
                 _ZesDeviceInfo(
                     device_handle=device,
                     subdevice_id=None,
@@ -256,7 +254,7 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
                 return -1
 
             for sub_ext_prop in sub_ext_props:
-                _cached_zes_device_infos.append(
+                infos.append(
                     _ZesDeviceInfo(
                         device_handle=device,
                         subdevice_id=sub_ext_prop.subdeviceId,
@@ -266,12 +264,14 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
                 )
 
     # Sort iGPUs to the end, then count only the visible ordinals.
-    _cached_zes_device_infos.sort(key=lambda info: info.is_integrated)
+    infos.sort(key=lambda info: info.is_integrated)
+    # Atomic in-place update; readers never see a partially built list.
+    _cached_zes_device_infos[:] = infos
     visible = set(visible_mask)
     num_igpu = 0
     num_dgpu = 0
 
-    for logical_index, info in enumerate(_cached_zes_device_infos):
+    for logical_index, info in enumerate(infos):
         if logical_index not in visible:
             continue
         if info.is_integrated:
@@ -306,7 +306,11 @@ def device_count() -> int:
     global _cached_device_count
     if _cached_device_count is not None:
         return _cached_device_count
-    if _initialized or hasattr(_tls, "is_initializing"):
+    # Read _initialized once: another thread may finish _lazy_init() while we
+    # are below, and the caching decision has to be made about the source the
+    # count actually came from.
+    initialized = _initialized
+    if initialized or hasattr(_tls, "is_initializing"):
         count = torch._C._xpu_getDeviceCount()
     else:
         zes_count = _device_count_zes()
@@ -314,7 +318,7 @@ def device_count() -> int:
     # Do not cache the device count prior to XPU initialization, because
     # the number of devices can change due to changes to ZE_AFFINITY_MASK
     # setting prior to XPU initialization.
-    if _initialized:
+    if initialized:
         _cached_device_count = count
     return count
 
@@ -866,18 +870,11 @@ def _get_zes_device_info(device: Device = None) -> _ZesDeviceInfo:
 
     device = _get_device_index(device, optional=True)
     uuid = bytes(torch.xpu.get_device_properties(device).uuid.bytes)
-    # Fast path: the device already occupies its ordinal slot.
-    target = _cached_zes_device_infos[device]
-    if target.uuid == uuid:
-        return target
-
-    # Slow path: search for the device by UUID and swap it into the correct slot.
-    for index, info in enumerate(_cached_zes_device_infos):
+    # Match by UUID since Level Zero Sysman and SYCL may enumerate devices in
+    # different orders. Concurrent re-enumeration only replaces entries with
+    # equivalent ones (same UUIDs, same order), so lock-free iteration is safe.
+    for info in _cached_zes_device_infos:
         if info.uuid == uuid:
-            _cached_zes_device_infos[device], _cached_zes_device_infos[index] = (
-                info,
-                target,
-            )
             return info
     raise RuntimeError(
         f"No Level Zero Sysman device matches XPU device {device} (UUID {uuid.hex()})."
