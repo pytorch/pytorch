@@ -109,7 +109,6 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     skipIfCachingAllocatorDisabled,
     skipIfCppFakeTensor,
-    skipIfRocmWindows,
     skipIfWindowsXPU,
     skipIfXpu,
     TEST_MPS,
@@ -8876,9 +8875,7 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(), example_inputs)
 
     @_requires_non_mps_gpu
-    @skipIfRocmWindows(
-        msg="Kineto is not built on Windows ROCm yet; profiler support belongs to future Kineto work"
-    )
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     def test_aoti_user_defined_triton_kernel_profiling(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")

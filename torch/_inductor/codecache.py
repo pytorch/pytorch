@@ -3573,8 +3573,6 @@ end
             fatbin_cmds: list[tuple[str, str, str | None, str | None]] = []
             if not _IS_WINDOWS or torch.version.hip is not None:
                 cubins_to_embed: list[tuple[str, str]] = []
-                if not _IS_WINDOWS:
-                    ld, objcopy = get_ld_and_objcopy(use_relative_path)
                 kernels = getattr(V.graph.wrapper_code, "_kernel_name_to_body", {})
                 for kernel_name, value in CudaKernelParamCache.cache.items():
                     if kernel_name not in kernels:
@@ -3696,6 +3694,7 @@ end
                             "Batched cubin embedding failed, "
                             "falling back to per-cubin objcopy"
                         )
+                        ld, objcopy = get_ld_and_objcopy(use_relative_path)
                         for cubin_file, kernel_name in cubins_to_embed:
                             cubins_o.append(
                                 convert_cubin_to_obj(

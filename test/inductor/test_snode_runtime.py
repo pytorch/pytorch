@@ -6,12 +6,12 @@ from unittest import skipIf, skipUnless
 import torch
 import torch.distributed as dist
 from torch._inductor import config, metrics
-from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
+from torch._inductor.comm_analysis import estimate_nccl_collective_runtime, get_gpu_type
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import requires_triton, RUN_CPU
 
 
@@ -308,7 +308,6 @@ class InputDistanceTests(TestCase):
 
 
 @skipIf(not dist.is_available(), "requires distributed")
-@skipIf(IS_WINDOWS, "torch.distributed is not supported on Windows yet")
 @requires_triton()
 class TestCommAnalysis(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -326,6 +325,9 @@ class TestCommAnalysis(TestCase):
                 f"the c10d fake backend is registered for {fake_devices}, "
                 f"not for {self.device_type}"
             )
+        if get_gpu_type() is None:
+            # RDNA GPUs have no xGMI, so the model estimates 0 for every collective.
+            self.skipTest("the NCCL runtime model has no profile for RDNA GPUs")
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.WORLD_SIZE, store=store
         )

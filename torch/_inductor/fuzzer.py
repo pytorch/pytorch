@@ -718,8 +718,10 @@ class ConfigFuzzer:
         Tests a config by calling the function produced by the factory function.
         """
         has_alarm = hasattr(signal, "SIGALRM")
+        original_handler = (
+            signal.signal(signal.SIGALRM, self.timeout_handler) if has_alarm else None
+        )
         if has_alarm:
-            original_handler = signal.signal(signal.SIGALRM, self.timeout_handler)
             signal.alarm(self.test_timeout)
         print(f"Testing config {config}")
         config_tuple = tuple(config.keys())

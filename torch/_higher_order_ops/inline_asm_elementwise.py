@@ -207,7 +207,9 @@ def _get_jiterator_fn(
 
     constraint_parts = [p.strip() for p in constraints.split(",")]
     output_constraints = [p.lstrip("=") for p in constraint_parts if p.startswith("=")]
-    input_constraints = [p for p in constraint_parts if not p.startswith("=")]
+    input_constraints = [p for p in constraint_parts if not p.startswith(("=", "~"))]
+    # LLVM clobbers "~{reg}" map to "reg" in the asm clobber list.
+    clobbers = [p[1:].strip("{}") for p in constraint_parts if p.startswith("~")]
 
     if input_dtype not in _DTYPE_TO_CUDA_TYPE:
         raise ValueError(f"Unsupported input dtype for inline asm: {input_dtype}")
@@ -225,6 +227,9 @@ def _get_jiterator_fn(
     escaped_asm = (
         cuda_asm.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
     )
+    clobbers_str = (
+        "\n        : " + ", ".join(f'"{c}"' for c in clobbers) if clobbers else ""
+    )
 
     code = f"""
 template <typename T>
@@ -233,7 +238,7 @@ template <typename T>
     asm volatile (
         "{escaped_asm}"
         : {out_constraints_str}
-        : {in_constraints_str}
+        : {in_constraints_str}{clobbers_str}
     );
     return result;
 }}

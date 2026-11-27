@@ -12,10 +12,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    parametrize,
-)
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
 from torch.utils._triton import has_triton
 
 

@@ -125,9 +125,13 @@ class TritonBundler:
         # The runtime-cache import writes group paths without the \\?\ prefix.
         from torch.compiler._triton_runtime_cache import _same_path
 
-        a = json.loads(existing)["child_paths"]
-        b = json.loads(payload)["child_paths"]
-        return a.keys() == b.keys() and all(_same_path(a[k], b[k]) for k in a)
+        try:
+            a = json.loads(existing)["child_paths"]
+            b = json.loads(payload)["child_paths"]
+            return a.keys() == b.keys() and all(_same_path(a[k], b[k]) for k in a)
+        except (ValueError, KeyError, TypeError, AttributeError):
+            # A truncated or malformed group file is a mismatch, not a crash.
+            return False
 
     @staticmethod
     def is_enabled() -> bool:

@@ -12,7 +12,7 @@ import torch._inductor.utils
 from torch import _dynamo as torchdynamo
 from torch._inductor import config
 from torch.profiler import ProfilerActivity, record_function
-from torch.testing._internal.common_utils import skipIfRocmWindows, TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU_AND_TRITON,
@@ -28,9 +28,7 @@ HAS_TRITON = has_triton()
 
 class DynamoProfilerTests(torch._inductor.test_case.TestCase):
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
-    @skipIfRocmWindows(
-        msg="Kineto is not built on Windows ROCm yet; profiler support belongs to future Kineto work"
-    )
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     def test_inductor_profiling_triton_launch(self):
         # Verify that we get some sort of CPU-side indication of triton kernel launches
         # in the profile traces. Currently, those appear as `cuLaunchKernel`. If this
@@ -225,9 +223,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue(hooks_called["exit"])
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
-    @skipIfRocmWindows(
-        msg="Kineto is not built on Windows ROCm yet; profiler support belongs to future Kineto work"
-    )
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     def test_pt2_triton_attributes(self):
         from torch._inductor.codecache import code_hash
 
@@ -318,9 +314,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             check_triton_event(e)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
-    @skipIfRocmWindows(
-        msg="Kineto is not built on Windows ROCm yet; profiler support belongs to future Kineto work"
-    )
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     def test_profiler_uses_cached_launcher(self):
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 

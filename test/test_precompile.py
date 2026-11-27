@@ -9841,6 +9841,13 @@ class TestPrecompileRuntimeCache(TestCase):
                 RuntimeError, "incomplete or incompatible Triton kernel file"
             ):
                 TritonBundler.read_and_emit(bundle)
+            (kernel_dir / "kernel.cubin").write_bytes(b"compiled-kernel")
+            group = kernel_dir / "__grp__kernel.json"
+            group.write_bytes(group.read_bytes()[:10])
+            with self.assertRaisesRegex(
+                RuntimeError, "incomplete or incompatible Triton kernel file"
+            ):
+                TritonBundler.read_and_emit(bundle)
 
     def _capture_and_replay(self, module_source, driver, marker, *extra_args):
         from torch.compiler._runtime_cache import _triton_runtime_cache

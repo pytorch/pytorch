@@ -138,7 +138,6 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocm,
     skipIfRocmArch,
-    skipIfRocmWindows,
     skipIfTorchInductor,
     skipIfXpu,
     subtest,
@@ -20587,9 +20586,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(Model(), inputs)
 
     @requires_gpu_and_triton
-    @skipIfRocmWindows(
-        msg="Kineto is not built on Windows ROCm yet; profiler support belongs to future Kineto work"
-    )
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     @parametrize("use_cat", [True, False])
     def test_copy_non_blocking_is_pinned(self, use_cat):
         def f(a_list):

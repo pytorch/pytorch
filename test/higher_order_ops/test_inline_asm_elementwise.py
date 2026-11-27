@@ -98,6 +98,20 @@ TEST_CASES = [
         torch.float32,
         lambda x, y: x + y,
     ),
+    # AMDGCN routes the sum through physical v0, declared as a clobber.
+    AsmTestCase(
+        "add_f32_clobber",
+        lambda: (
+            torch.randn(100, device="cuda", dtype=torch.float32),
+            torch.randn(100, device="cuda", dtype=torch.float32),
+        ),
+        "v_add_f32 v0, $1, $2\nv_mov_b32 $0, v0"
+        if torch.version.hip
+        else "add.f32 $0, $1, $2;",
+        "=v,v,v,~{v0}" if torch.version.hip else "=f,f,f",
+        torch.float32,
+        lambda x, y: x + y,
+    ),
     AsmTestCase(
         "mul_f32",
         lambda: (

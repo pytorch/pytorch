@@ -12712,6 +12712,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled(5, 7), g(5, 7))
 
 
+@unittest.skipIf(_WINDOWS_WITHOUT_TRITON, "requires Triton on Windows")
 @skipIfNoDynamoSupport
 class TestControlFlowTracedDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR

@@ -59,8 +59,8 @@ from torch._dynamo.exc import (
     TensorifyScalarRestartAnalysis,
 )
 from torch._guards import InlinedCodeCache, tracing, TracingContext
-from torch._utils import _to_posix_separators
 from torch._logging.structured import dump_file
+from torch._utils import _to_posix_separators
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 from torch.utils._pytree import tree_leaves

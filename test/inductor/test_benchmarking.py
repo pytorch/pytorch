@@ -28,7 +28,6 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocmWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
@@ -728,9 +727,7 @@ class TestBenchmarker(TestCase):
         self.assertEqual(callable_calls, [])
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
-    @skipIfRocmWindows(
-        msg="Kineto is not built on Windows ROCm yet; profiler support belongs to future Kineto work"
-    )
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     @parametrize(
         "hip_value, expected_buffer_size_bytes",
         ((None, 1024), ("mock-hip", 256 * 1024 * 1024)),

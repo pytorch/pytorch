@@ -45,7 +45,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
     parametrize,
-    skipIfRocmWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import (
@@ -746,9 +745,7 @@ class TestProvenanceTracingStackTraces(TestCase):
         self.assertTrue(any(n.startswith("## Call CompiledFxGraph ") for n in names))
 
     @requires_cuda_and_triton
-    @skipIfRocmWindows(
-        msg="Kineto is not built on Windows ROCm yet; profiler support belongs to future Kineto work"
-    )
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     @torch._inductor.config.patch(
         {
             "trace.provenance_tracking_level": 2,

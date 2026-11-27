@@ -19,61 +19,63 @@ def popen_pass_fds(fds: Sequence[int]) -> tuple[list[int], dict[str, Any]]:
     it on its command line (see fd_from_parent). Windows has no pass_fds, so the
     child inherits just these OS handles instead.
     """
-    if sys.platform != "win32":
-        return list(fds), {"pass_fds": tuple(fds)}
-    import msvcrt
+    if sys.platform == "win32":
+        import msvcrt
 
-    handles = [msvcrt.get_osfhandle(fd) for fd in fds]
-    for handle in handles:
-        os.set_handle_inheritable(handle, True)
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.lpAttributeList = {"handle_list": handles}
-    return handles, {"startupinfo": startupinfo, "close_fds": True}
+        handles = [msvcrt.get_osfhandle(fd) for fd in fds]
+        for handle in handles:
+            os.set_handle_inheritable(handle, True)
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.lpAttributeList = {"handle_list": handles}
+        return handles, {"startupinfo": startupinfo, "close_fds": True}
+    return list(fds), {"pass_fds": tuple(fds)}
 
 
 def fd_from_parent(value: int) -> int:
-    if sys.platform != "win32":
-        return value
-    import msvcrt
+    if sys.platform == "win32":
+        import msvcrt
 
-    os.set_handle_inheritable(value, False)
-    return msvcrt.open_osfhandle(value, 0)
+        os.set_handle_inheritable(value, False)
+        return msvcrt.open_osfhandle(value, 0)
+    return value
 
 
 def wait_readable_win32(pipe: IO[bytes], timeout: float) -> bool:
     """Wait for data or EOF on a pipe; Windows select() only supports sockets."""
-    import _winapi
-    import msvcrt
+    if sys.platform == "win32":
+        import _winapi
+        import msvcrt
 
-    handle = msvcrt.get_osfhandle(pipe.fileno())
-    deadline = monotonic() + timeout
-    while True:
-        try:
-            available, _ = _winapi.PeekNamedPipe(handle, 0)
-        except OSError:
-            return True  # broken pipe: a read returns EOF
-        if available:
-            return True
-        if monotonic() >= deadline:
-            return False
-        sleep(0.001)
+        handle = msvcrt.get_osfhandle(pipe.fileno())
+        deadline = monotonic() + timeout
+        while True:
+            try:
+                available, _ = _winapi.PeekNamedPipe(handle, 0)
+            except OSError:
+                return True  # broken pipe: a read returns EOF
+            if available:
+                return True
+            if monotonic() >= deadline:
+                return False
+            sleep(0.001)
+    raise NotImplementedError("wait_readable_win32 is only supported on Windows")
 
 
 def parent_process_gone(orig_ppid: int) -> bool:
-    if sys.platform != "win32":
-        return orig_ppid != os.getppid()
-    # Windows does not reparent orphans, and a venv python.exe launcher is the
-    # real parent there, so check whether the original process still runs.
-    import _winapi
+    if sys.platform == "win32":
+        # Windows does not reparent orphans, and a venv python.exe launcher is the
+        # real parent there, so check whether the original process still runs.
+        import _winapi
 
-    try:
-        handle = _winapi.OpenProcess(_winapi.SYNCHRONIZE, False, orig_ppid)
-    except OSError:
-        return True
-    try:
-        return _winapi.WaitForSingleObject(handle, 0) != _winapi.WAIT_TIMEOUT
-    finally:
-        _winapi.CloseHandle(handle)
+        try:
+            handle = _winapi.OpenProcess(_winapi.SYNCHRONIZE, False, orig_ppid)
+        except OSError:
+            return True
+        try:
+            return _winapi.WaitForSingleObject(handle, 0) != _winapi.WAIT_TIMEOUT
+        finally:
+            _winapi.CloseHandle(handle)
+    return orig_ppid != os.getppid()
 
 
 def in_toplevel_process() -> bool:

@@ -37,8 +37,8 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
-    IS_WINDOWS,
     is_iterable_of_tensors,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfCrossRef,

@@ -2,6 +2,7 @@
 
 import functools
 import logging
+import unittest
 from types import SimpleNamespace
 from unittest import mock
 
@@ -22,7 +23,6 @@ from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocmWindows,
 )
 from torch.utils._ordered_set import OrderedSet
 
@@ -116,9 +116,7 @@ class TestBench(TestCase):
         log.warning("do_bench result: %s", res)
         self.assertGreater(res, 0)
 
-    @skipIfRocmWindows(
-        msg="Kineto is not built on Windows ROCm yet; profiler support belongs to future Kineto work"
-    )
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     def test_do_bench_using_profiling(self):
         res = do_bench_using_profiling(self._bench_fn)
         log.warning("do_bench_using_profiling result: %s", res)

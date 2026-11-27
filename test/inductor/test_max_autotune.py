@@ -97,7 +97,6 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     recover_orig_fp32_precision,
     skipIfRocm,
-    skipIfRocmWindows,
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
@@ -5323,9 +5322,6 @@ class TestMaxAutotuneSubproc(TestCase):
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
-    @skipIfRocmWindows(
-        msg="HIP on Windows can report negative GPU event elapsed times"
-    )
     def test_max_autotune_profiler_benchmarker_smoke(self):
         """
         Smoke test that a simple max-autotune matmul runs with profiler

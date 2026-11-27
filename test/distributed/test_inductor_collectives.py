@@ -72,7 +72,6 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_WINDOWS,
     parametrize,
     skipIfXpu,
     TEST_XPU,
@@ -4812,7 +4811,7 @@ def _build_graph_with_duplicate_rs(
     return torch.fx.GraphModule(torch.nn.Module(), graph)
 
 
-@unittest.skipIf(IS_WINDOWS, "torch.distributed is not supported on Windows yet")
+@unittest.skipIf(not hasattr(c10d, "HashStore"), "HashStore is not available")
 class TestDedupReduceScatter(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()

@@ -16,10 +16,7 @@ from torch.testing._internal.common_device_type import (
     skipOps,
     xfail,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-)
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.hop_db import (
     FIXME_hop_that_doesnt_have_opinfo_test_allowlist,
     hop_db,
