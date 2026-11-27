@@ -133,10 +133,9 @@ overridden from Python.
 
 FlightRecorder calls `get_future_result()` once per op as it is issued, so an
 override must be cheap and must not block. FlightRecorder records the op as
-completed when the returned future completes. A `torch.futures.Future()` can't
-report failure: any value, including one set with `set_exception()`, counts as
-success. Ops whose Work doesn't override it, or whose override raises, are
-retired at issue.
+completed when the returned future completes successfully; if it fails (e.g.
+`set_exception()`), the op stays un-retired. Ops whose Work doesn't override
+it, or whose override raises, are retired at issue.
 
 **Capabilities.** Features are opted into with read-only properties, for
 example `supports_splitting`, `supports_coalescing` and `supports_shrinking`,

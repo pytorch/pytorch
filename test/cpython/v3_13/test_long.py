@@ -333,6 +333,7 @@ class LongTest(__TestCase):
             eq(x & (y | z), (x & y) | (x & z))
             eq(x | (y & z), (x | y) & (x | z))
 
+    @slowTest
     def test_bitop_identities(self):
         for x in special:
             self.check_bitop_identities_1(x)

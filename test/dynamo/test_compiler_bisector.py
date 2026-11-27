@@ -2,6 +2,8 @@
 
 from contextlib import contextmanager
 from importlib import import_module
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import torch
 import torch._prims_common as utils
@@ -138,6 +140,29 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.backend, "eager")
         self.assertEqual(out.subsystem, None)
 
+    def test_config_change_only_parses_literals(self):
+        with TemporaryDirectory() as tmpdir:
+            config_path = f"{tmpdir}/inductor/test_config.txt"
+            with patch.object(CompilerBisector, "get_dir", return_value=tmpdir):
+                CompilerBisector.write_lines_to_file(config_path, ["value=True\n"])
+                with (
+                    patch.object(
+                        CompilerBisector, "get_backend", return_value="inductor"
+                    ),
+                    patch.object(
+                        CompilerBisector, "get_subsystem", return_value="test"
+                    ),
+                ):
+                    self.assertEqual(
+                        CompilerBisector.get_config_change("inductor"), {"value": True}
+                    )
+
+                    CompilerBisector.write_lines_to_file(
+                        config_path, ["value=__import__('os').system('false')\n"]
+                    )
+                    with self.assertRaises(ValueError):
+                        CompilerBisector.get_config_change("inductor")
+
 
 class TestCompilerBisectorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -172,6 +197,7 @@ class TestCompilerBisectorDevice(TestCase):
                     "run",
                     "python",
                     str(test_file),
+                    device,
                 ],
                 stdout=subprocess.PIPE,
                 check=True,

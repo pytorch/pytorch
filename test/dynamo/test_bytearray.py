@@ -2,10 +2,9 @@
 """Tests for ByteArrayVariable: bytearray support in Dynamo.
 
 Ported from CPython's Lib/test/test_bytes.py (BaseBytesTest class).
-Only tests covering operations supported in PR 1 (read-only ops + wiring)
-are included; mutation, methods, and conversions will follow in later PRs.
 """
 
+import operator
 import sys
 
 import torch
@@ -18,6 +17,7 @@ from torch.testing._internal.common_utils import (
     make_dynamo_test,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
 )
 
 
@@ -33,6 +33,11 @@ class Indexable:
 
     def __index__(self):
         return self.value
+
+
+class BrokenIterable:
+    def __iter__(self):
+        raise ValueError("iter failed")
 
 
 class ByteArrayTest(torch._dynamo.test_case.TestCase):
@@ -472,6 +477,55 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 self.assertIs(type(part), bytearray)
 
     @make_dynamo_test
+    def test_join(self):
+        sep = bytearray(b",")
+        self.assertEqual(sep.join([]), b"")
+        self.assertEqual(sep.join([b"a", bytearray(b"b")]), b"a,b")
+        self.assertEqual(sep.join((b"a", b"b")), b"a,b")
+        self.assertEqual(sep.join(item for item in (b"a", b"b")), b"a,b")
+
+    @make_dynamo_test
+    def test_join_errors(self):
+        sep = bytearray(b",")
+        with self.assertRaisesRegex(TypeError, "can only join an iterable"):
+            sep.join(0)
+        with self.assertRaisesRegex(
+            TypeError, "sequence item 1: expected a bytes-like object, str found"
+        ):
+            sep.join([b"a", "b"])
+
+        with self.assertRaisesRegex(ValueError, "iter failed"):
+            sep.join(BrokenIterable())
+
+    def test_join_nonconstant_item_graph_break(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(sep, item, x):
+            x = x + 1
+            return sep.join([item, b"c"]), x * 2
+
+        result = f(bytearray(b"-"), memoryview(b"ab"), torch.ones(1))
+        self.assertEqual(result, (b"ab-c", torch.full((1,), 4.0)))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_join_result_mutated_in_graph(self):
+        def f(sep, ba, x):
+            out = sep.join([ba, b"c"])
+            out += b"!"
+            single = sep.join([ba])
+            single.append(ord("?"))
+            return out, single, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        sep, ba = bytearray(b"-"), bytearray(b"ab")
+        self.assertEqual(
+            compiled(sep, ba, torch.ones(1)),
+            f(bytearray(b"-"), bytearray(b"ab"), torch.ones(1)),
+        )
+        self.assertEqual((sep, ba), (b"-", b"ab"))
+
+    @make_dynamo_test
     def test_hex(self):
         b = self.type2test(b"\x01\x02\xff")
         self.assertEqual(b.hex(), "0102ff")
@@ -514,6 +568,42 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b2.title(), self.type2test(b"They'Re Bill'S Friends"))
         self.assertRaises(TypeError, lambda: b.title(1))
 
+    @make_dynamo_test
+    def test_capitalize(self):
+        b = self.type2test(b"hELLO wORLD")
+        self.assertEqual(b.capitalize(), self.type2test(b"Hello world"))
+        # Non-ASCII bytes are unchanged (ASCII-only case mapping)
+        b2 = self.type2test(b"\xffABC")
+        self.assertEqual(b2.capitalize(), self.type2test(b"\xffabc"))
+        self.assertEqual(self.type2test().capitalize(), self.type2test())
+        # The result is a new object and the input is unchanged
+        self.assertIsNot(b.capitalize(), b)
+        self.assertEqual(b, self.type2test(b"hELLO wORLD"))
+        self.assertRaises(TypeError, lambda: b.capitalize(1))
+
+    @make_dynamo_test
+    def test_swapcase(self):
+        b = self.type2test(b"HeLLo cOmpUteRs")
+        self.assertEqual(b.swapcase(), self.type2test(b"hEllO CoMPuTErS"))
+        b2 = self.type2test(b"\xff\xfeAbC")
+        self.assertEqual(b2.swapcase(), self.type2test(b"\xff\xfeaBc"))
+        self.assertEqual(self.type2test().swapcase(), self.type2test())
+        self.assertIsNot(b.swapcase(), b)
+        self.assertEqual(b, self.type2test(b"HeLLo cOmpUteRs"))
+        self.assertRaises(TypeError, lambda: b.swapcase(1))
+
+    def test_input_bytearray_capitalize_swapcase(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.capitalize(), ba.swapcase()
+
+        ba = bytearray(b"hELLO wORLD")
+        self.assertEqual(
+            fn(ba),
+            (bytearray(b"Hello world"), bytearray(b"Hello World")),
+        )
+        self.assertEqual(ba, bytearray(b"hELLO wORLD"))
+
     def test_input_bytearray_upper_lower_title(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
@@ -527,6 +617,138 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 bytearray(b"Hello World"),
             ),
         )
+
+    @make_dynamo_test
+    def test_isalnum(self):
+        self.assertTrue(self.type2test(b"abc123").isalnum())
+        self.assertFalse(self.type2test(b"abc 123").isalnum())
+        self.assertFalse(self.type2test(b"").isalnum())
+        # Classification is ASCII-only
+        self.assertFalse(self.type2test(b"abc\xe9").isalnum())
+        with self.assertRaisesRegex(
+            TypeError, r"isalnum\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"a").isalnum(1)
+        with self.assertRaisesRegex(TypeError, "takes no keyword arguments"):
+            self.type2test(b"a").isalnum(x=1)
+
+    @make_dynamo_test
+    def test_isalpha(self):
+        self.assertTrue(self.type2test(b"abcXYZ").isalpha())
+        self.assertFalse(self.type2test(b"abc1").isalpha())
+        self.assertFalse(self.type2test(b"").isalpha())
+        self.assertFalse(self.type2test(b"\xe9").isalpha())
+        with self.assertRaisesRegex(
+            TypeError, r"isalpha\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"a").isalpha(1)
+
+    @make_dynamo_test
+    def test_isascii(self):
+        self.assertTrue(self.type2test(b"abc \x00\x7f").isascii())
+        self.assertFalse(self.type2test(b"abc\x80").isascii())
+        # Unlike the other predicates, an empty bytearray is ASCII
+        self.assertTrue(self.type2test(b"").isascii())
+        with self.assertRaisesRegex(
+            TypeError, r"isascii\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"a").isascii(1)
+
+    @make_dynamo_test
+    def test_isdigit(self):
+        self.assertTrue(self.type2test(b"0123456789").isdigit())
+        self.assertFalse(self.type2test(b"12a").isdigit())
+        self.assertFalse(self.type2test(b"").isdigit())
+        self.assertFalse(self.type2test(b"\xb2").isdigit())
+        with self.assertRaisesRegex(
+            TypeError, r"isdigit\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"1").isdigit(1)
+
+    @make_dynamo_test
+    def test_islower(self):
+        self.assertTrue(self.type2test(b"abc 1!").islower())
+        self.assertFalse(self.type2test(b"aBc").islower())
+        # Needs at least one cased character
+        self.assertFalse(self.type2test(b"123").islower())
+        self.assertFalse(self.type2test(b"").islower())
+        with self.assertRaisesRegex(
+            TypeError, r"islower\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"a").islower(1)
+
+    @make_dynamo_test
+    def test_isspace(self):
+        self.assertTrue(self.type2test(b" \t\n\r\x0b\x0c").isspace())
+        self.assertFalse(self.type2test(b" a ").isspace())
+        self.assertFalse(self.type2test(b"").isspace())
+        self.assertFalse(self.type2test(b"\xa0").isspace())
+        with self.assertRaisesRegex(
+            TypeError, r"isspace\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b" ").isspace(1)
+
+    @make_dynamo_test
+    def test_istitle(self):
+        self.assertTrue(self.type2test(b"Hello World").istitle())
+        self.assertTrue(self.type2test(b"A1 B2").istitle())
+        self.assertFalse(self.type2test(b"Hello world").istitle())
+        self.assertFalse(self.type2test(b"HEllo").istitle())
+        self.assertFalse(self.type2test(b"").istitle())
+        with self.assertRaisesRegex(
+            TypeError, r"istitle\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"A").istitle(1)
+
+    @make_dynamo_test
+    def test_isupper(self):
+        self.assertTrue(self.type2test(b"ABC 1!").isupper())
+        self.assertFalse(self.type2test(b"AbC").isupper())
+        self.assertFalse(self.type2test(b"123").isupper())
+        self.assertFalse(self.type2test(b"").isupper())
+        with self.assertRaisesRegex(
+            TypeError, r"isupper\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"A").isupper(1)
+
+    def test_input_bytearray_is_methods(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return (
+                ba.isalnum(),
+                ba.isalpha(),
+                ba.isascii(),
+                ba.isdigit(),
+                ba.islower(),
+                ba.isspace(),
+                ba.istitle(),
+                ba.isupper(),
+            )
+
+        for data in (b"Hello", b"abc123", b"   ", b"", b"\xff"):
+            ba = bytearray(data)
+            expected = (
+                ba.isalnum(),
+                ba.isalpha(),
+                ba.isascii(),
+                ba.isdigit(),
+                ba.islower(),
+                ba.isspace(),
+                ba.istitle(),
+                ba.isupper(),
+            )
+            self.assertEqual(fn(ba), expected)
+            self.assertEqual(ba, bytearray(data))
+
+    def test_bytearray_is_methods_after_mutation(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            ba = bytearray(b"abc")
+            before = ba.isdigit()
+            ba[:] = b"123"
+            return before, ba.isdigit()
+
+        self.assertEqual(fn(), (False, True))
 
     def test_find(self):
         b = self.type2test(b"mississippi")
@@ -1028,6 +1250,104 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             b.replace(b"a", b"b", b"0")
 
     @make_dynamo_test
+    def test_removeprefix(self):
+        b = self.type2test(b"spamspamspam")
+        self.assertEqual(b.removeprefix(b"spam"), b"spamspam")
+        self.assertEqual(b.removeprefix(b"spamspamspam"), b"")
+        self.assertEqual(b.removeprefix(b"python"), b"spamspamspam")
+        self.assertEqual(b.removeprefix(b"spider"), b"spamspamspam")
+        self.assertEqual(b.removeprefix(b""), b"spamspamspam")
+        self.assertEqual(b.removeprefix(bytearray(b"spam")), b"spamspam")
+        self.assertEqual(self.type2test(b"").removeprefix(b"a"), b"")
+        # Non-ASCII bytes are matched byte for byte
+        self.assertEqual(self.type2test(b"\xffabc").removeprefix(b"\xff"), b"abc")
+        self.assertEqual(b, b"spamspamspam")
+
+    @make_dynamo_test
+    def test_removesuffix(self):
+        b = self.type2test(b"spamspamspam")
+        self.assertEqual(b.removesuffix(b"spam"), b"spamspam")
+        self.assertEqual(b.removesuffix(b"spamspamspam"), b"")
+        self.assertEqual(b.removesuffix(b"python"), b"spamspamspam")
+        self.assertEqual(b.removesuffix(b"blam"), b"spamspamspam")
+        self.assertEqual(b.removesuffix(b""), b"spamspamspam")
+        self.assertEqual(b.removesuffix(bytearray(b"spam")), b"spamspam")
+        self.assertEqual(self.type2test(b"").removesuffix(b"a"), b"")
+        self.assertEqual(self.type2test(b"abc\xff").removesuffix(b"\xff"), b"abc")
+        self.assertEqual(b, b"spamspamspam")
+
+    @make_dynamo_test
+    def test_removeprefix_removesuffix_new_object(self):
+        # Even when nothing is removed, the result is a new bytearray
+        b = self.type2test(b"abc")
+        for result in (b.removeprefix(b"x"), b.removesuffix(b"x")):
+            self.assertIsInstance(result, self.type2test)
+            self.assertIsNot(result, b)
+            self.assertEqual(result, b"abc")
+
+    @make_dynamo_test
+    def test_removeprefix_removesuffix_errors(self):
+        b = self.type2test(b"hello")
+        for name in ("removeprefix", "removesuffix"):
+            method = getattr(b, name)
+            with self.assertRaisesRegex(
+                TypeError, r"takes exactly one argument \(0 given\)"
+            ):
+                method()
+            with self.assertRaisesRegex(
+                TypeError, r"takes exactly one argument \(2 given\)"
+            ):
+                method(b"he", b"l")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method("he")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method(42)
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method((b"he", b"l"))
+
+    def test_input_bytearray_removeprefix_removesuffix(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.removeprefix(b"he"), ba.removesuffix(b"llo")
+
+        ba = bytearray(b"hello")
+        prefix_result, suffix_result = fn(ba)
+        self.assertIs(type(prefix_result), bytearray)
+        self.assertIs(type(suffix_result), bytearray)
+        self.assertEqual(prefix_result, bytearray(b"llo"))
+        self.assertEqual(suffix_result, bytearray(b"he"))
+        self.assertEqual(ba, bytearray(b"hello"))
+
+    @parametrize("name", ["removeprefix", "removesuffix"])
+    def test_input_bytearray_removeprefix_removesuffix_mutate_result(self, name):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            out = getattr(ba, name)(b"x")
+            out[0] = ord("j")
+            return out
+
+        ba = bytearray(b"hello")
+        out = fn(ba)
+        self.assertIs(type(out), bytearray)
+        self.assertEqual(out, bytearray(b"jello"))
+        self.assertEqual(ba, bytearray(b"hello"))
+
+    @parametrize("buffer_type", [bytes, bytearray])
+    def test_maketrans(self, buffer_type):
+        def f(x, source, target):
+            return x + bytearray.maketrans(source, target)[ord("a")]
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.tensor(1)
+        source, target = buffer_type(b"a"), buffer_type(b"z")
+        self.assertEqual(compiled(x, source, target), f(x, source, target))
+
+    @make_dynamo_test
+    def test_maketrans_invalid_length(self):
+        with self.assertRaises(ValueError):
+            bytearray.maketrans(b"a", b"xy")
+
+    @make_dynamo_test
     def test_translate(self):
         b = self.type2test(b"hello")
         self.assertEqual(b.translate(_rosetta), b"helle")
@@ -1096,6 +1416,243 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             fn(bytearray(b"ab"), bytearray(range(256))),
             (bytearray(b"zb"), bytearray(b"a")),
         )
+
+    @make_dynamo_test
+    def test_center(self):
+        b = self.type2test(b"abc")
+        for fill_type in (bytes, bytearray):
+            self.assertEqual(b.center(7, fill_type(b"-")), b"--abc--")
+        self.assertEqual(b.center(6), b" abc  ")
+        self.assertEqual(b.center(2), b"abc")
+        self.assertEqual(b, b"abc")
+        self.assertIsInstance(b.center(7), self.type2test)
+
+    @make_dynamo_test
+    def test_ljust(self):
+        b = self.type2test(b"abc")
+        for fill_type in (bytes, bytearray):
+            self.assertEqual(b.ljust(7, fill_type(b"-")), b"abc----")
+        self.assertEqual(b.ljust(6), b"abc   ")
+        self.assertEqual(b.ljust(2), b"abc")
+        self.assertEqual(b, b"abc")
+        self.assertIsInstance(b.ljust(7), self.type2test)
+
+    @make_dynamo_test
+    def test_rjust(self):
+        b = self.type2test(b"abc")
+        for fill_type in (bytes, bytearray):
+            self.assertEqual(b.rjust(7, fill_type(b"-")), b"----abc")
+        self.assertEqual(b.rjust(6), b"   abc")
+        self.assertEqual(b.rjust(2), b"abc")
+        self.assertEqual(b, b"abc")
+        self.assertIsInstance(b.rjust(7), self.type2test)
+
+    @make_dynamo_test
+    def test_xjust_errors(self):
+        b = self.type2test(b"abc")
+        with self.assertRaisesRegex(TypeError, "must be a byte string of length 1"):
+            b.center(7, 32)
+        with self.assertRaisesRegex(TypeError, "must be a byte string of length 1"):
+            b.ljust(7, 32)
+        with self.assertRaisesRegex(TypeError, "must be a byte string of length 1"):
+            b.rjust(7, 32)
+        with self.assertRaisesRegex(TypeError, "must be a byte string of length 1"):
+            b.center(7, b"--")
+        with self.assertRaisesRegex(TypeError, "cannot be interpreted as an integer"):
+            b.ljust("7")
+        with self.assertRaisesRegex(TypeError, "expected at least 1 argument, got 0"):
+            b.rjust()
+
+    def test_xjust_returns_new_bytearrays(self):
+        def f(ba, x):
+            return ba.center(2), ba.ljust(2), ba.rjust(2), x + 1
+
+        ba = bytearray(b"abc")
+        result = torch.compile(f, backend="eager", fullgraph=True)(ba, torch.ones(1))
+        self.assertEqual(result, f(bytearray(b"abc"), torch.ones(1)))
+        padded = result[:3]
+        for i, p in enumerate(padded):
+            self.assertIsNot(p, ba)
+            p[0] = ord("x") + i
+        self.assertEqual(padded, (b"xbc", b"ybc", b"zbc"))
+        self.assertEqual(ba, b"abc")
+
+    @parametrize("method", ["center", "ljust", "rjust"])
+    def test_xjust_nonconstant_fill_graph_break(self, method):
+        class BytesSubclass(bytes):
+            pass
+
+        def fn(ba, fill):
+            return getattr(ba, method)(7, fill)
+
+        args = bytearray(b"abc"), BytesSubclass(b"-")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            f"Dynamo does not know how to trace method `{method}` of class `bytearray`",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(torch.compile(fn, backend="eager")(*args), fn(*args))
+
+    def test_input_bytearray_center_ljust_rjust(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba, fill):
+            return ba.center(5, fill), ba.ljust(5, fill), ba.rjust(5, fill)
+
+        self.assertEqual(
+            fn(bytearray(b"abc"), bytearray(b"*")),
+            (bytearray(b"*abc*"), bytearray(b"abc**"), bytearray(b"**abc")),
+        )
+
+    @make_dynamo_test
+    def test_zfill(self):
+        b = self.type2test(b"-12")
+        self.assertEqual(b.zfill(5), b"-0012")
+        self.assertEqual(self.type2test(b"+12").zfill(5), b"+0012")
+        self.assertEqual(self.type2test(b"12").zfill(4), b"0012")
+        self.assertEqual(self.type2test(b"").zfill(3), b"000")
+        self.assertEqual(b.zfill(2), b"-12")
+        self.assertEqual(b, b"-12")
+        self.assertIsInstance(b.zfill(5), self.type2test)
+
+    @make_dynamo_test
+    def test_expandtabs(self):
+        b = self.type2test(b"ab\tc\r\td\n\te")
+        self.assertEqual(b.expandtabs(), b"ab      c\r        d\n        e")
+        self.assertEqual(b.expandtabs(4), b"ab  c\r    d\n    e")
+        self.assertEqual(b.expandtabs(tabsize=1), b"ab c\r d\n e")
+        self.assertEqual(b.expandtabs(0), b"abc\rd\ne")
+        self.assertEqual(b, b"ab\tc\r\td\n\te")
+        self.assertIsInstance(b.expandtabs(), self.type2test)
+
+    @make_dynamo_test
+    def test_zfill_expandtabs_errors(self):
+        b = self.type2test(b"abc")
+        with self.assertRaisesRegex(TypeError, "takes exactly one argument"):
+            b.zfill()
+        with self.assertRaisesRegex(TypeError, "cannot be interpreted as an integer"):
+            b.zfill("7")
+        with self.assertRaisesRegex(TypeError, "takes at most 1 argument"):
+            b.expandtabs(4, 4)
+        with self.assertRaisesRegex(TypeError, "cannot be interpreted as an integer"):
+            b.expandtabs(4.0)
+        with self.assertRaises(OverflowError):
+            b.zfill(2**63)
+
+    @make_dynamo_test
+    def test_strip_whitespace(self):
+        b = self.type2test(b"   hello   ")
+        self.assertEqual(b.strip(), b"hello")
+        self.assertEqual(b.lstrip(), b"hello   ")
+        self.assertEqual(b.rstrip(), b"   hello")
+        self.assertEqual(b, b"   hello   ")
+        # All six ASCII whitespace bytes are stripped
+        ws = self.type2test(b" \t\n\r\x0b\x0cabc \t\n\r\x0b\x0c")
+        self.assertEqual(ws.strip(), b"abc")
+        self.assertEqual(ws.lstrip(), b"abc \t\n\r\x0b\x0c")
+        self.assertEqual(ws.rstrip(), b" \t\n\r\x0b\x0cabc")
+        # None means whitespace, same as no argument
+        self.assertEqual(b.strip(None), b"hello")
+        self.assertEqual(b.lstrip(None), b"hello   ")
+        self.assertEqual(b.rstrip(None), b"   hello")
+        # Non-ASCII bytes such as \xa0 are not whitespace
+        self.assertEqual(self.type2test(b"\xa0a\xa0").strip(), b"\xa0a\xa0")
+        self.assertEqual(self.type2test(b"").strip(), b"")
+
+    @make_dynamo_test
+    def test_strip_chars(self):
+        b = self.type2test(b"xyzzyhelloxyzzy")
+        self.assertEqual(b.strip(b"xyz"), b"hello")
+        self.assertEqual(b.lstrip(b"xyz"), b"helloxyzzy")
+        self.assertEqual(b.rstrip(b"xyz"), b"xyzzyhello")
+        self.assertEqual(b.strip(bytearray(b"xyz")), b"hello")
+        self.assertEqual(self.type2test(b"hello").strip(b"xyz"), b"hello")
+        self.assertEqual(self.type2test(b"mississippi").strip(b"mississippi"), b"")
+        # Only the ends are trimmed, not interior bytes
+        self.assertEqual(self.type2test(b"mississippi").strip(b"i"), b"mississipp")
+        # An empty argument strips nothing
+        self.assertEqual(self.type2test(b" a ").strip(b""), b" a ")
+        self.assertEqual(self.type2test(b"\xffa\xff").strip(b"\xff"), b"a")
+
+    @make_dynamo_test
+    def test_strip_returns_new_bytearray(self):
+        b = self.type2test(b"abc")
+        for result in (b.strip(), b.lstrip(b"x"), b.rstrip(b"x")):
+            self.assertIsInstance(result, self.type2test)
+            self.assertIsNot(result, b)
+            self.assertEqual(result, b"abc")
+
+    @make_dynamo_test
+    def test_strip_errors(self):
+        b = self.type2test(b" abc ")
+        for name in ("strip", "lstrip", "rstrip"):
+            method = getattr(b, name)
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method("ac")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method(32)
+            with self.assertRaisesRegex(
+                TypeError, "expected at most 1 argument, got 2"
+            ):
+                method(b"a", b"b")
+            with self.assertRaisesRegex(TypeError, "takes no keyword arguments"):
+                method(bytes=b"a")
+
+    def test_input_bytearray_strip(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.strip(), ba.lstrip(b" a"), ba.rstrip(None)
+
+        ba = bytearray(b" abc ")
+        results = fn(ba)
+        for result in results:
+            self.assertIs(type(result), bytearray)
+        self.assertEqual(
+            results, (bytearray(b"abc"), bytearray(b"bc "), bytearray(b" abc"))
+        )
+        self.assertEqual(ba, bytearray(b" abc "))
+
+    @parametrize("name", ["strip", "lstrip", "rstrip"])
+    def test_input_bytearray_strip_mutate_result(self, name):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            out = getattr(ba, name)()
+            out[0] = ord("j")
+            return out
+
+        ba = bytearray(b"hello")
+        out = fn(ba)
+        self.assertIs(type(out), bytearray)
+        self.assertEqual(out, bytearray(b"jello"))
+        self.assertEqual(ba, bytearray(b"hello"))
+
+    @parametrize("method", ["strip", "lstrip", "rstrip"])
+    def test_strip_nonconstant_chars_graph_break(self, method):
+        class BytesSubclass(bytes):
+            pass
+
+        def fn(ba, chars):
+            return getattr(ba, method)(chars)
+
+        args = bytearray(b"-abc-"), BytesSubclass(b"-")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            f"Dynamo does not know how to trace method `{method}` of class `bytearray`",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(torch.compile(fn, backend="eager")(*args), fn(*args))
+
+    def test_zfill_expandtabs_returns_new_bytearrays(self):
+        def f(ba, x):
+            return ba.zfill(1), ba.expandtabs(), x + 1
+
+        ba = bytearray(b"abc")
+        result = torch.compile(f, backend="eager", fullgraph=True)(ba, torch.ones(1))
+        self.assertEqual(result, f(bytearray(b"abc"), torch.ones(1)))
+        for i, p in enumerate(result[:2]):
+            self.assertIsNot(p, ba)
+            p[0] = ord("x") + i
+        self.assertEqual(result[:2], (b"xbc", b"ybc"))
+        self.assertEqual(ba, b"abc")
 
     def test_append_extend_arg_mutation(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -1244,6 +1801,197 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             return len(bytearray(n))
 
         self.assertEqual(fn(), n)
+
+    @make_dynamo_test
+    def test_setitem(self):
+        value = bytearray(b"abc")
+        value[0] = 0
+        value[-1] = 255
+        self.assertEqual(value, b"\x00b\xff")
+
+        with self.assertRaises(IndexError):
+            value[3] = 0
+        with self.assertRaises(ValueError):
+            value[0] = 256
+        with self.assertRaises(ValueError):
+            value[0] = -1
+        with self.assertRaises(TypeError):
+            value[0] = b"x"
+        with self.assertRaises(TypeError):
+            value["0"] = 0
+
+    @make_dynamo_test
+    def test_delitem(self):
+        value = bytearray(b"abc")
+        del value[-1]
+        del value[0]
+        self.assertEqual(value, b"b")
+        with self.assertRaises(IndexError):
+            del value[1]
+
+    @make_dynamo_test
+    def test_setslice(self):
+        value = bytearray(b"abcd")
+        value[1:2] = [ord("X"), ord("Y")]
+        self.assertEqual(value, b"aXYcd")
+        value[::2] = bytearray(b"123")
+        self.assertEqual(value, b"1X2c3")
+
+        with self.assertRaises(ValueError):
+            value[::2] = b"x"
+        with self.assertRaises(ValueError):
+            value[::0] = b""
+        with self.assertRaises(TypeError):
+            value[1:2] = "x"
+
+    @make_dynamo_test
+    def test_delslice(self):
+        value = bytearray(b"abcdef")
+        del value[::2]
+        self.assertEqual(value, b"bdf")
+        del value[1:2]
+        self.assertEqual(value, b"bf")
+        with self.assertRaises(ValueError):
+            del value[::0]
+
+    @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
+    def test_store_to_new_bytearray(self):
+        def f(output, x):
+            value = bytearray(b"abc")
+            output.append(value)
+            value[1:2] = b"XY"
+            del value[-1]
+            return value, x + 1
+
+        counter = CompileCounter()
+        compiled = torch.compile(f, backend=counter, fullgraph=True)
+        output = []
+        value, x = compiled(output, torch.ones(1))
+        self.assertEqual(value, b"aXY")
+        self.assertIs(output[0], value)
+        self.assertEqual(x, torch.full((1,), 2.0))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_delete_from_existing_bytearray(self):
+        def f(value, x):
+            del value[::2]
+            return x + 1
+
+        value = bytearray(b"abcd")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "bytearray store to an existing bytearray"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(value, torch.ones(1))
+        self.assertEqual(value, b"abcd")
+        torch.compile(f, backend="eager")(value, torch.ones(1))
+        self.assertEqual(value, b"bd")
+
+    def test_store_to_existing_bytearray_with_export(self):
+        def f(value, tensor, view, x):
+            value[0] = 9
+            try:
+                value[1:2] = b"XY"
+            except BufferError as e:
+                return tensor.sum(), view[0], str(e), x + 1
+            return tensor.sum(), view[0], None, x + 1
+
+        @torch._dynamo.disable(recursive=False)
+        def run(fn):
+            value = bytearray(b"\x01\x02")
+            tensor = torch.frombuffer(value, dtype=torch.uint8)
+            with memoryview(value) as view:
+                return fn(value, tensor, view, torch.ones(1)), value
+
+        self.assertEqual(run(torch.compile(f, backend="eager")), run(f))
+        reasons = [
+            *torch._dynamo.utils.counters["graph_break"],
+            *torch._dynamo.utils.counters["unimplemented"],
+        ]
+        self.assertTrue(
+            any(
+                "bytearray store to an existing bytearray" in reason
+                for reason in reasons
+            ),
+            reasons,
+        )
+
+    def test_iterator_length_hint(self):
+        def f(x):
+            value = bytearray(b"abc")
+            iterator = iter(value)
+            hints = [operator.length_hint(iterator)]
+            next(iterator)
+            hints.append(iterator.__length_hint__())
+            value.append(100)
+            hints.append(operator.length_hint(iterator))
+            del value[:]
+            hints.append(operator.length_hint(iterator))
+            value.extend(b"abc")
+            hints.append(operator.length_hint(iterator))
+            list(iterator)
+            hints.append(operator.length_hint(iterator))
+            value.append(100)
+            hints.append(operator.length_hint(iterator))
+            return hints, x + 1
+
+        @torch._dynamo.disable
+        def eager(x):
+            return f(x)
+
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(1)),
+            eager(torch.ones(1)),
+        )
+
+    @parametrize("data", [b"", b"abc", b"\x00\xff"])
+    def test_reduce(self, data):
+        def f(value, x):
+            return value.__reduce__(), x + 1
+
+        @torch._dynamo.disable
+        def eager(value, x):
+            return f(value, x)
+
+        value = bytearray(data)
+        reduced, result = torch.compile(f, backend="eager", fullgraph=True)(
+            value, torch.ones(1)
+        )
+        self.assertEqual((reduced, result), eager(value, torch.ones(1)))
+        restored = reduced[0](*reduced[1])
+        self.assertEqual(restored, value)
+        self.assertIsNot(restored, value)
+        restored.append(1)
+        self.assertEqual(value, data)
+
+    @parametrize("data", [b"", b"abc"])
+    @parametrize("consumed", [0, 1, 3, 4])
+    def test_iterator_reduce(self, data, consumed):
+        def f(x):
+            value = bytearray(data)
+            iterator = iter(value)
+            for _ in range(consumed):
+                next(iterator, None)
+            return iterator.__reduce__(), value, x + 1
+
+        @torch._dynamo.disable
+        def eager(x):
+            return f(x)
+
+        @torch._dynamo.disable(recursive=False)
+        def check_reduction(reduced, value):
+            restored = reduced[0](*reduced[1])
+            if len(reduced) == 3:
+                self.assertIs(reduced[1][0], value)
+                restored.__setstate__(reduced[2])
+                value.append(100)
+                self.assertEqual(list(restored), list(value[consumed:]))
+            else:
+                value.append(100)
+                self.assertEqual(list(restored), [])
+
+        actual = torch.compile(f, backend="eager", fullgraph=True)(torch.ones(1))
+        self.assertEqual(actual, eager(torch.ones(1)))
+        check_reduction(actual[0], actual[1])
 
     # -- reconstruct: force a graph break with a live bytearray --
 

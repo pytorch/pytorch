@@ -58,7 +58,7 @@ jobs:
 
   linux-jammy-rocm-py3_11-test:
     name: linux-jammy-rocm-py3.11-rx7900
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs:
       - linux-jammy-rocm-py3_11-build
       - target-determination

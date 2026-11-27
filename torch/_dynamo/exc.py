@@ -613,6 +613,22 @@ def raise_value_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
     raise_observed_exception(ValueError, tx, args=[msg])
 
 
+def raise_name_error(tx: InstructionTranslatorBase, name: str) -> NoReturn:
+    """Raise a NameError as an observed exception during tracing.
+
+    `kwargs` keeps the built exception's `.name` set to `name`, matching what
+    CPython sets; test_exceptions.py asserts it.
+    """
+    from .variables import ConstantVariable
+
+    raise_observed_exception(
+        NameError,
+        tx,
+        args=[f"name '{name}' is not defined"],
+        kwargs={"name": ConstantVariable.create(name)},
+    )
+
+
 def handle_observed_exception(tx: Any) -> None:
     # This is essentially exception handling code, equivalent of this pseudo code
     #
@@ -809,8 +825,9 @@ def unimplemented(
         if hasattr(from_exc, "real_stack"):
             past_real_stack = from_exc.real_stack
         options["real_stack"] = past_real_stack
-        if isinstance(from_exc, Unsupported):
+        if isinstance(from_exc, (Unsupported, StepUnsupported)):
             msg = f"{from_exc.msg}\n\n*** While handling this graph break, another graph break occurred: ***\n\n{msg}"
+        if isinstance(from_exc, Unsupported):
             # noqa: GB_REGISTRY
             raise Unsupported(msg, gb_type, skip_frame, **options)
         # noqa: GB_REGISTRY

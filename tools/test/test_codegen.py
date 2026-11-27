@@ -12,11 +12,14 @@ from tools.autograd import gen_autograd_functions, load_derivatives
 from tools.pyi.gen_pyi import generate_type_hints
 from tools.test.codegen_test_utils import gen_register_dispatch_key
 
+# usort: skip
 from torchgen import dest
-from torchgen.api.python import PythonSignatureGroup, signature
-from torchgen.api.types import CppSignatureGroup, DispatcherSignature
+from torchgen.api.lazy import LazyIrSchema
+from torchgen.api.python import argument_type_str, PythonSignatureGroup, signature
+from torchgen.api.types import BaseCppType, CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
 from torchgen.dest import native_functions as native_functions_dest
+from torchgen.dest.lazy_ir import GenLazyIR
 from torchgen.dest.native_functions import (
     dll_export_macro_for_kernel,
     validate_cpu_dll_cuda_kernels,
@@ -29,6 +32,7 @@ from torchgen.gen import (
     parse_native_yaml_struct,
     static_dispatch,
 )
+from torchgen.gen_lazy_tensor import validate_shape_inference_header
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
@@ -37,10 +41,81 @@ from torchgen.model import (
     Location,
     NativeFunction,
     OperatorName,
+    Type,
 )
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.static_runtime.generator import ivalue_type_conversion_method
 from torchgen.utils import Target
+
+
+class TestStringView(unittest.TestCase):
+    def test_signatures(self) -> None:
+        schema = FunctionSchema.parse(
+            "string_args(str value, str? optional=None) -> Tensor"
+        )
+        self.assertEqual(
+            [arg.type for arg in DispatcherSignature.from_schema(schema).arguments()],
+            ["::std::string_view", "::std::optional<::std::string_view>"],
+        )
+        self.assertEqual(argument_type_str(Type.parse("str")), "std::string_view")
+        self.assertEqual(argument_type_str(Type.parse("str?")), "std::string_view?")
+        declaration = (
+            "compute_shape_string_args("
+            + ", ".join(
+                arg.decl()
+                for arg in DispatcherSignature.from_schema(schema).arguments()
+            )
+            + ");"
+        )
+        for spelling in ("::std::string_view", "std::string_view", "c10::string_view"):
+            with (
+                self.subTest(spelling=spelling),
+                unittest.mock.patch(
+                    "builtins.open",
+                    unittest.mock.mock_open(
+                        read_data=declaration.replace("::std::string_view", spelling)
+                    ),
+                ),
+            ):
+                validate_shape_inference_header("shape_inference.h", [declaration])
+                with self.assertRaisesRegex(
+                    Exception, "Missing shape inference function"
+                ):
+                    validate_shape_inference_header(
+                        "shape_inference.h", [declaration.replace("value", "other")]
+                    )
+
+    def test_lazy_nodes_own_strings(self) -> None:
+        schema = FunctionSchema.parse(
+            "string_args(str value, str? optional=None) -> Tensor"
+        )
+        backend_index = BackendIndex(
+            dispatch_key=DispatchKey.Lazy,
+            use_out_as_primary=False,
+            external=True,
+            device_guard=False,
+            index={},
+        )
+        with unittest.mock.patch(
+            "torchgen.api.lazy._valueT", BaseCppType("torch::lazy", "Value")
+        ):
+            generated = "\n".join(
+                GenLazyIR(backend_index, "Lazy", "torch::lazy::Node", False).gen(
+                    LazyIrSchema(schema, symint=False)
+                )
+            )
+        self.assertIn("const ::std::string_view& value", generated)
+        self.assertIn("const ::std::optional<::std::string_view>& optional", generated)
+        self.assertIn("std::string value;", generated)
+        self.assertIn("::std::optional<std::string> optional;", generated)
+        self.assertIn("::std::make_optional(std::string(*optional))", generated)
+
+    def test_static_runtime_optional_string(self) -> None:
+        self.assertEqual(
+            ivalue_type_conversion_method(Type.parse("str?")),
+            (False, "toOptional<::std::string_view>()"),
+        )
 
 
 class TestGenPyi(unittest.TestCase):

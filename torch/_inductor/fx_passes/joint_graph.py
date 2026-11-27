@@ -20,7 +20,7 @@ from torch._inductor.fx_utils import (
     rank_agnostic_device,
     rank_agnostic_passes,
 )
-from torch._inductor.utils import get_gpu_type
+from torch._inductor.utils import _device_is_available, get_gpu_type, GPU_TYPES
 from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
@@ -92,9 +92,17 @@ def lazy_init(input_device: torch.device | None = None):
     from .misc_patterns import _misc_patterns_init
     from .pad_mm import _pad_mm_init
 
-    _pad_mm_init(input_device)
-    _sfdp_init(input_device)
-    _misc_patterns_init(input_device)
+    if input_device:
+        device = str(input_device)
+    elif any(_device_is_available(gpu) for gpu in GPU_TYPES):
+        # get_gpu_type() falls back to "cuda" when no GPU is available.
+        device = get_gpu_type()
+    else:
+        device = "cpu"
+
+    _pad_mm_init(device)
+    _sfdp_init(device)
+    _misc_patterns_init(device)
 
 
 def remove_no_ops(

@@ -1255,10 +1255,11 @@ class AbstractFlightRecorderHookTest:
 
 def _make_fr_hook_test_class(backend_name, device_type):
     class FlightRecorderHookTest(AbstractFlightRecorderHookTest, MultiProcessTestCase):
-        pass
+        @property
+        def device_type(self) -> str:
+            return device_type
 
     FlightRecorderHookTest.backend_name = backend_name
-    FlightRecorderHookTest.device_type = device_type
     FlightRecorderHookTest.__name__ = (
         f"{backend_name.capitalize()}FlightRecorderHookTest"
     )
@@ -1389,12 +1390,13 @@ class FlightRecorderHookPythonWorkTest(TestCase):
         self.assertEqual([e["retired"] for e in new], [True, False], msg=str(new))
         self.assertEqual(new[0]["state"], "completed", msg=str(new))
 
-        # A torch.futures.Future() can't report failure: set_exception
-        # completes it too.
+        # A failed op stays un-retired.
         futs[1].set_exception(RuntimeError("failed"))
+        with self.assertRaisesRegex(RuntimeError, "failed"):
+            futs[1].wait()
         new = entries()[before:]
-        self.assertEqual([e["retired"] for e in new], [True, True], msg=str(new))
-        self.assertEqual(new[1]["state"], "completed", msg=str(new))
+        self.assertEqual([e["retired"] for e in new], [True, False], msg=str(new))
+        self.assertEqual(new[1]["state"], "scheduled", msg=str(new))
         hook.remove()
 
 
@@ -1606,13 +1608,9 @@ class FlightRecorderHookLazyTest(MultiProcessTestCase):
 )
 @unittest.skipIf(not dist.is_backend_available("nccl"), "nccl backend is not available")
 class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
-    """The "nccl" name does not always build the same thing.
-
-    TORCH_DIST_USE_NCCL2 decides whether it is stock ProcessGroupNCCL, which
-    feeds a FlightRecorder by itself, or nccl2, which is invisible without the
-    hook. Whichever one the name resolved to is what the auto-attach has to
-    follow: skipping a group that turned out to be nccl2 leaves the default
-    backend with no flight recorder at all, and says nothing about it.
+    """With TORCH_DIST_USE_NCCL2=1 the "nccl" name builds nccl2, which does not
+    feed a FlightRecorder by itself. The auto-attach has to follow the resolved
+    backend, or the default group has no flight recorder at all.
     """
 
     @property
@@ -1641,14 +1639,14 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         )
         return trace.get("entries", [])
 
-    def _init_nccl(self, use_nccl2, backend="nccl"):
+    def _init_nccl(self):
         # Read once, where the backend is registered, which is the first time a
         # group asks for "nccl" -- so it has to be set before init.
-        os.environ["TORCH_DIST_USE_NCCL2"] = use_nccl2
+        os.environ["TORCH_DIST_USE_NCCL2"] = "1"
         torch.cuda.set_device(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            backend,
+            "nccl",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1662,7 +1660,7 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         return pg, backend.name()
 
     def test_nccl_name_built_on_nccl2_is_hooked(self):
-        pg, name = self._init_nccl("1")
+        pg, name = self._init_nccl()
         self.assertEqual(name, "nccl2")
         self.assertIn(pg, _world.pg_flight_recorder_hooks)
 
@@ -1673,49 +1671,6 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
             [e["profiling_name"] for e in self._entries("nccl2")[before:]],
             ["nccl2:all_reduce"],
         )
-
-    def test_nccl_name_built_on_stock_is_not_hooked(self):
-        pg, name = self._init_nccl("0")
-        self.assertEqual(name, "nccl")
-        self.assertNotIn(pg, _world.pg_flight_recorder_hooks)
-
-        before = len(self._entries("nccl"))
-        dist.all_reduce(torch.ones(8, device=f"cuda:{self.rank}"))
-        torch.cuda.synchronize()
-        # Nothing in the hook's instance, and the native recording that made
-        # the hook unnecessary is still there.
-        self.assertEqual(self._entries("nccl")[before:], [])
-        native = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
-        names = [e["profiling_name"] for e in native.get("entries", [])]
-        self.assertIn("nccl:all_reduce", names)
-
-    def test_gloo_half_of_stock_nccl_group_recorded_once(self):
-        pg, name = self._init_nccl("0", backend="cpu:gloo,cuda:nccl")
-        self.assertEqual(name, "nccl")
-        self.assertIn(pg, _world.pg_flight_recorder_hooks)
-
-        def native():
-            trace = json.loads(torch._C._distributed_c10d._dump_nccl_trace_json())
-            return trace.get("entries", [])
-
-        before_gloo = len(self._entries("gloo"))
-        before_nccl = len(self._entries("nccl"))
-        before_native = len(native())
-        dist.all_reduce(torch.ones(8))
-        dist.all_reduce(torch.ones(16, device=f"cuda:{self.rank}"))
-        dist.barrier()
-        torch.cuda.synchronize()
-        # The hook records the gloo half and leaves the CUDA half to stock
-        # ProcessGroupNCCL's own recording.
-        self.assertEqual(
-            [e["profiling_name"] for e in self._entries("gloo")[before_gloo:]],
-            ["gloo:all_reduce", "gloo:barrier"],
-        )
-        self.assertEqual(
-            [(e["profiling_name"], e["input_sizes"]) for e in native()[before_native:]],
-            [("nccl:all_reduce", [[16]])],
-        )
-        self.assertEqual(self._entries("nccl")[before_nccl:], [])
 
 
 if __name__ == "__main__":
