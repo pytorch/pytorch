@@ -14118,6 +14118,7 @@ op_db: list[OpInfo] = [
                     )),
     BinaryUfuncInfo('remainder',
                     ref=np.remainder,
+                    supports_lhs_python_scalar_autograd=False,
                     dtypes=all_types_and(torch.float16, torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8, torch.bool),
