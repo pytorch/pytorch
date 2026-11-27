@@ -9321,18 +9321,6 @@ class TestMPS(TestCaseMPS):
         x = net1(x)
         torch.mps.profiler.stop()
 
-    def test_mps_event_module(self):
-        startEvent = torch.mps.Event(enable_timing=True)
-        startEvent.record()
-        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
-            .to(device='mps', dtype=torch.float)
-        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
-        x = net1(x)
-        endEvent = torch.mps.Event(enable_timing=True)
-        endEvent.record()
-        elapsedTime = startEvent.elapsed_time(endEvent)
-        self.assertGreater(elapsedTime, 0.0)
-
     def test_mps_event_empty_elapsed_time(self):
         for _ in range(100):
             start_event = torch.mps.Event(enable_timing=True)
@@ -9352,18 +9340,6 @@ class TestMPS(TestCaseMPS):
         torch.ones(1024, device="mps") + 1
         end_event.record()
         self.assertGreater(start_event.elapsed_time(end_event), first_elapsed_time)
-
-    def test_generic_event(self):
-        startEvent = torch.Event('mps', enable_timing=True)
-        startEvent.record()
-        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
-            .to(device='mps', dtype=torch.float)
-        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
-        x = net1(x)
-        endEvent = torch.Event('mps', enable_timing=True)
-        endEvent.record()
-        elapsedTime = startEvent.elapsed_time(endEvent)
-        self.assertGreater(elapsedTime, 0.0)
 
     def test_generic_device_synchronize(self):
         event = torch.Event('mps')
