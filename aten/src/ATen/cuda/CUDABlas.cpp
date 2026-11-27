@@ -1725,21 +1725,91 @@ bool gemm_and_bias(
 #endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
-  int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-      ltHandle,
-      computeDesc.descriptor(),
-      Adesc.descriptor(),
-      Bdesc.descriptor(),
-      Cdesc.descriptor(),
-      Ddesc_raw,
-      preference.descriptor(),
-      1,
-      &heuristicResult,
-      &returnedResult));
+  auto Cdesc_raw = Cdesc.descriptor();
+  const void* c_operand = c_ptr ? c_ptr : result_ptr;
+  std::optional<CuBlasLtMatrixLayout> BiasCdesc;
+
+  const auto query_heuristic = [&]() -> bool {
+    int returnedResult = 0;
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+        ltHandle,
+        computeDesc.descriptor(),
+        Adesc.descriptor(),
+        Bdesc.descriptor(),
+        Cdesc_raw,
+        Ddesc_raw,
+        preference.descriptor(),
+        1,
+        &heuristicResult,
+        &returnedResult));
+    return returnedResult > 0;
+  };
+
+  bool found_algo = query_heuristic();
+#if !defined(USE_ROCM) && CUDA_VERSION < 13040
+  // With Split-K algorithms, the bias epilogue is applied after the reduced
+  // A @ B is rounded to the output dtype. For fp16 (same for bf16) this computes
+  //   f16(f32(f16(A @ B)) + f32(bias)),
+  // so A @ B can overflow or lose bits even when A @ B + bias is well within
+  // range, e.g. when a large bias cancels a large A @ B.
+  // For such algorithms we add the bias as a C operand (beta == 1, ld == 0)
+  // instead, which computes
+  //   f16(f32(A @ B) + f32(bias)),
+  // with a single rounding at the end.
+  // cuBLAS fixed this in 13.6.0.2 (CTK 13.3.1); we gate on CUDA < 13.4 to be safe.
+  // Explicit FP16 accumulation keeps its requested semantics and is excluded.
+  // TODO: the TunableOp cuBLASLt path (tunable/GemmCublaslt.h) can still select
+  // SplitK algorithms with the bias epilogue and is not covered by this workaround.
+  if constexpr (
+      std::is_same_v<Dtype, C_Dtype> &&
+      (std::is_same_v<Dtype, at::Half> || std::is_same_v<Dtype, at::BFloat16>)) {
+    const auto is_splitk_algo = [&]() -> bool {
+      int splitk_num = 0;
+      TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoConfigGetAttribute(
+          &heuristicResult.algo,
+          CUBLASLT_ALGO_CONFIG_SPLITK_NUM,
+          &splitk_num,
+          sizeof(splitk_num),
+          nullptr));
+      return splitk_num > 1;
+    };
+    // The bias is added unscaled by the epilogue and as beta * C otherwise, so
+    // the two are equivalent only for beta == 1. The algo is queried last.
+    if (found_algo && bias != nullptr && beta == opmath_t(1) &&
+        computeType != CUBLAS_COMPUTE_16F && is_splitk_algo()) {
+      computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, detail::cublasLtEpilogue(activation, nullptr));
+      computeDesc.setAttribute<const Dtype*>(CUBLASLT_MATMUL_DESC_BIAS_POINTER, nullptr);
+      BiasCdesc.emplace(abType, m, n, 0);
+      Cdesc_raw = BiasCdesc->descriptor();
+      c_operand = bias;
+      beta_val = beta;
+      preference.setAttribute(
+          CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES,
+          detail::getAlignment(reinterpret_cast<uintptr_t>(bias)));
+
+      // Try to reuse the selected algorithm, and re-query the heuristic if it
+      // cannot be reused or its workspace requirement no longer fits.
+      cublasLtMatmulHeuristicResult_t algoCheckResult = {};
+      const bool reusable =
+          cublasLtMatmulAlgoCheck(
+              ltHandle,
+              computeDesc.descriptor(),
+              Adesc.descriptor(),
+              Bdesc.descriptor(),
+              Cdesc_raw,
+              Ddesc_raw,
+              &heuristicResult.algo,
+              &algoCheckResult) == CUBLAS_STATUS_SUCCESS &&
+          algoCheckResult.workspaceSize <= ltworkspace.size;
+      if (!reusable) {
+        found_algo = query_heuristic();
+      }
+    }
+  }
+#endif
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
-  if (returnedResult == 0) {
+  if (!found_algo) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
   }
   else {
@@ -1752,8 +1822,8 @@ bool gemm_and_bias(
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      c_ptr ? c_ptr : result_ptr,
-      Cdesc.descriptor(),
+      c_operand,
+      Cdesc_raw,
       result_ptr,
       Ddesc_raw,
       &heuristicResult.algo,
