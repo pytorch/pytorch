@@ -13,7 +13,7 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
@@ -53,11 +53,11 @@ RankFixture setUpRank(const std::string& path, int rank, int size) {
   c10::cuda::CUDAGuard guard(device);
 
   auto store = c10::make_intrusive<c10d::FileStore>(path, size);
-  auto opts = c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
+  auto opts = c10::make_intrusive<c10d::NCCLOptions>();
   opts->group_name = kGroupName;
   opts->config.hostCftMode = ncclHostCftFallback;
-  auto backend =
-      c10::make_intrusive<c10d::ProcessGroupNCCL>(store, rank, size, opts);
+  auto backend = c10::make_intrusive<c10d::nccl2::ProcessGroupNCCL>(
+      store, rank, size, opts);
 
   // Symmetric memory resolves rank/world size through the group registry and
   // the communicator through NCCLDevCommManager, so the process group has to

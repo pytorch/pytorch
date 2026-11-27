@@ -46,7 +46,9 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten._embedding_bag.default": {},
     "aten._fft_c2c.default": {},
     "aten._fft_r2c.default": {},
-    "aten._flash_attention_backward.default": {},
+    "aten._flash_attention_backward.default": {
+        "v2": {"new_args": ["grad_logsumexp"], "since": "TORCH_VERSION_2_16_0"}
+    },
     "aten._flash_attention_forward.default": {
         "v2": {
             "new_args": ["block_table", "num_splits"],
@@ -231,4 +233,20 @@ aten_shimified_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten.full.default": {"since": "TORCH_VERSION_2_10_0"},
     "aten.subtract.Tensor": {"since": "TORCH_VERSION_2_10_0"},
     "aten.add.Tensor": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.empty_strided.default": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.slice.Tensor": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.all.default": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.all.dim": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.all.dims": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.equal.default": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.expand.default": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.index_fill_.int_Scalar": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.index_fill_.int_Tensor": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.median.default": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.median.dim": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.nonzero.default": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.repeat_interleave.Tensor": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.repeat_interleave.self_Tensor": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.repeat_interleave.self_int": {"since": "TORCH_VERSION_2_16_0"},
+    "aten.roll.default": {"since": "TORCH_VERSION_2_16_0"},
 }
