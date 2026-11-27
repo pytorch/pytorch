@@ -36,7 +36,6 @@ import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
-
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
