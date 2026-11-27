@@ -333,7 +333,7 @@ def roll(a: torch.Tensor, shifts: DimsType, dims: DimsType = ()) -> torch.Tensor
 
 @register_decomposition([aten.special_log_ndtr])
 def special_log_ndtr(a: torch.Tensor) -> torch.Tensor | NotImplementedType:
-    if is_strict_cuda_triton(a.device) and a.dtype == torch.float32:
+    if is_strict_cuda_triton(a.device) and a.dtype in (torch.float32, torch.float64):
         return NotImplemented
     # Inductor's C++ codegen compiles with -fno-signed-zeros, which causes the
     # compiler to optimize away the -0.0 signbit in log_ndtr results (#187336).
