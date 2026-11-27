@@ -71,6 +71,12 @@ class TestStream(TestCase):
         else:
             return torch.get_device_module(self.device_type).Stream()
 
+    def _get_event(self, generic, **kwargs):
+        if generic:
+            return torch.Event(device=self.device_type, **kwargs)
+        else:
+            return torch.get_device_module(self.device_type).Event(**kwargs)
+
     @parametrize(
         "use_generic_stream",
         # `torch.xpu.Stream` does not support comparison to `torch.Stream`
@@ -355,6 +361,92 @@ class TestStream(TestCase):
             with m.stream(stream):
                 tmp3 = torch.empty(t.size(), dtype=torch.float, device=device)
                 self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not reused")
+
+    @parametrize("generic", [True, False])
+    def test_event(self, device, generic):
+        stream = self._get_user_stream(generic)
+        event = self._get_event(generic)
+        self.assertTrue(event.query())
+        event.synchronize()
+        self.assertTrue(event.query())
+        stream.record_event(event)
+        event.synchronize()
+        self.assertTrue(event.query())
+
+    @parametrize("generic", [True, False])
+    def test_event_elapsed_time(self, device, generic):
+        m = torch.get_device_module(device)
+        stream = self._get_user_stream(generic)
+        start_event = self._get_event(generic, enable_timing=True)
+        end_event = self._get_event(generic, enable_timing=True)
+
+        a_cpu = torch.randn(1000)
+        b_cpu = torch.randn(1000)
+        with m.stream(stream):
+            a = a_cpu.to(device, non_blocking=True)
+            b = b_cpu.to(device, non_blocking=True)
+
+        stream.record_event(start_event)
+        c = a + b
+
+        if device == "xpu" and not Xe2_Or_Later:
+            stream.record_event(end_event)
+        else:
+            with m.stream(stream):
+                m._sleep(int(50 * get_cycles_per_ms(device)))
+            stream.record_event(end_event)
+            self.assertFalse(end_event.query())
+
+        end_event.synchronize()
+        self.assertTrue(end_event.query())
+        self.assertGreater(start_event.elapsed_time(end_event), 0)
+        self.assertEqual(c.cpu(), a_cpu + b_cpu)
+
+    @parametrize("generic", [True, False])
+    @parametrize(
+        "start_timing,end_timing",
+        [(None, None), (False, True), (True, False), (True, True)],
+    )
+    def test_event_elapsed_time_errors(self, device, generic, start_timing, end_timing):
+        def get_event(enable_timing):
+            if enable_timing is None:
+                return self._get_event(generic)
+            else:
+                return self._get_event(generic, enable_timing=enable_timing)
+
+        start_event = get_event(start_timing)
+        end_event = get_event(end_timing)
+
+        if start_timing and end_timing:
+            with self.assertRaisesRegex(
+                ValueError,
+                "Both events must be recorded before calculating elapsed time",
+            ):
+                start_event.elapsed_time(end_event)
+
+            start_event.record()
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Both events must be recorded before calculating elapsed time",
+            ):
+                start_event.elapsed_time(end_event)
+
+        else:
+            start_event.record()
+            end_event.record()
+            with self.assertRaisesRegex(
+                ValueError,
+                "Both events must be created with argument 'enable_timing=True'",
+            ):
+                start_event.elapsed_time(end_event)
+
+    def test_event_inheritance(self, device):
+        m = torch.get_device_module(device)
+        event = m.Event()
+        self.assertIsInstance(event, torch.Event)
+        self.assertTrue(issubclass(type(event), torch.Event))
+        self.assertTrue(torch.Event in type(event).mro())
 
 
 instantiate_device_type_tests(
