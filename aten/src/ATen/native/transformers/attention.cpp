@@ -626,8 +626,12 @@ at::Tensor preprocess_mask(
   if (query.device().type() != DeviceType::MPS && !aligned_tensor<mem_eff_alignment>(mask)) {
     result_mask = pad_bias<mem_eff_alignment>(mask);
   }
-  auto shape = query.sym_sizes().vec();
-  shape.back() = key.sym_size(-2);
+  // Per-dim sizes, as nested tensors have no sym_sizes()
+  c10::SymDimVector shape;
+  for (const auto i : c10::irange(query.dim() - 1)) {
+    shape.push_back(query.sym_size(i));
+  }
+  shape.push_back(key.sym_size(-2));
   return result_mask.expand_symint(shape);
 }
 
@@ -639,6 +643,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> expand_batch_dims(
     const at::Tensor& key,
     const at::Tensor& value,
     const std::optional<at::Tensor>& mask) {
+  // A nested tensor's batch dim is its ragged one, which can not broadcast
+  if (query.is_nested() || key.is_nested() || value.is_nested()) {
+    return {query, key, value};
+  }
   auto batch_dims = [](const at::Tensor& t) {
     return t.sym_sizes().slice(0, std::max<int64_t>(t.dim() - 3, 0));
   };
