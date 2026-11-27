@@ -1790,8 +1790,7 @@ bool gemm_and_bias(
 
       // Try to reuse the selected algorithm, and re-query the heuristic if it
       // cannot be reused or its workspace requirement no longer fits.
-      const auto algo = heuristicResult.algo;
-      cublasLtMatmulHeuristicResult_t checkResult = {};
+      cublasLtMatmulHeuristicResult_t algoCheckResult = {};
       const bool reusable =
           cublasLtMatmulAlgoCheck(
               ltHandle,
@@ -1800,12 +1799,10 @@ bool gemm_and_bias(
               Bdesc.descriptor(),
               Cdesc_raw,
               Ddesc_raw,
-              &algo,
-              &checkResult) == CUBLAS_STATUS_SUCCESS &&
-          checkResult.workspaceSize <= ltworkspace.size;
-      if (reusable) {
-        heuristicResult = checkResult;
-      } else {
+              &heuristicResult.algo,
+              &algoCheckResult) == CUBLAS_STATUS_SUCCESS &&
+          algoCheckResult.workspaceSize <= ltworkspace.size;
+      if (!reusable) {
         found_algo = query_heuristic();
       }
     }
