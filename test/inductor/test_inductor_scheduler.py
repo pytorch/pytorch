@@ -62,7 +62,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCUDA,
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
@@ -931,7 +930,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_fusion_memory_guard_rejects_in_torch_compile(self, device):
         def fn(x, weight):
             early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
@@ -1006,7 +1005,7 @@ class TestScheduler(TestCase):
         self.assertEqual(compile_and_measure(1000.0, 0.0)[0], 2)
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_fusion_memory_guard_foreach(self, device):
         def fn(a, b):
             values = torch._foreach_abs([a, b])
@@ -3157,7 +3156,7 @@ class TestScheduler(TestCase):
             check_realizes()
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     @parametrize("op", ["select_scatter", "index_put"])
     # Both settings are pinned so the test can only pass via graph_fanout:
     # deterministic mode makes expand realize src on its own, and the read
@@ -3178,7 +3177,7 @@ class TestScheduler(TestCase):
                 base.index_put_((index,), src(*args))
                 return base
 
-        device = "cuda"
+        device = GPU_TYPE
         torch.manual_seed(0)
         base_size = (32, 32, 26) if op == "select_scatter" else (26, 32, 32)
         base = torch.rand(base_size, dtype=torch.float32, device=device)

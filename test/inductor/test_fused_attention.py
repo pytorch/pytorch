@@ -2407,7 +2407,9 @@ class TestAttentionFusionDeviceRouting(TestCase):
             matmul.fp32_precision = saved
 
 
-instantiate_device_type_tests(TestAttentionFusionDeviceRouting, globals())
+instantiate_device_type_tests(
+    TestAttentionFusionDeviceRouting, globals(), allow_xpu=True
+)
 
 
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
@@ -2498,7 +2500,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
             test_sdpa_rewriter_16_fp32_mask_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16_fp32_mask
             )
-        elif GPU_TYPE == "cuda":
+        elif GPU_TYPE in ("cuda", "xpu"):
             test_sdpa_rewriter_16_inference_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16,
                 check_train=False,
@@ -2557,7 +2559,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_27
             )
 
-        @skipIfXpu(msg="FIXME: ENable for XPU")
+        @skipIfXpu(msg="Tests CUDA's tf32 fusion gate")
         def test_skip_non_tf32(self):
             try:
                 orig = torch.backends.cuda.matmul.fp32_precision
