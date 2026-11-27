@@ -11,10 +11,11 @@ from torch.distributed.fsdp._flat_param import (
     FlatParamShardMetadata,
     HandleShardingStrategy,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTestContinuous
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import requires_world_size
+from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND, FSDPTestContinuous
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -33,22 +34,57 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestFlattenParams(FSDPTestContinuous):
-    """Tests parameter flattening and shard metadata logic."""
+class FlattenParamsTestBase(FSDPTestContinuous):
+    """Device-agnostic base.
+
+    FSDPTestContinuous inherits the module-level ``DEVICE_TYPE`` /
+    ``DEVICE_COUNT`` / ``DISTRIBUTED_BACKEND`` globals from ``common_fsdp``,
+    which only recognize cuda/hpu/xpu. Override the device-resolution hooks so
+    the test runs on any accelerator (incl. out-of-tree PrivateUse1 backends)
+    once instantiated via ``instantiate_device_type_tests``. Mirrors the
+    ``DTensorPPTestBase`` pattern in PR #192051: the intermediate base holds
+    ``backend_str`` so the device-specific generated class inherits it rather
+    than ports it (a ported classmethod cannot see the variant's device_type).
+
+    World size is clamped to 1 since these unit tests either exercise only
+    the flattening logic or check sharding subroutines directly without
+    requiring multiple ranks.
+    """
+
+    @classmethod
+    def _resolved_device_type(cls) -> str:
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
+
+    @classmethod
+    def backend_str(cls) -> str:
+        try:
+            return dist.get_default_backend_for_device(cls._resolved_device_type())
+        except ValueError:
+            # Devices without a registered default backend (e.g. ``hpu`` unless
+            # the vendor extension registers ``hccl`` via ``register_backend``):
+            # fall back to the historical ``common_fsdp`` ``DISTRIBUTED_BACKEND``
+            # ("hccl" on HPU), preserving the pre-refactor behavior.
+            return DISTRIBUTED_BACKEND
 
     @property
     def world_size(self) -> int:
         # Clamp the world size to 1 since these unit tests either exercise only
         # the flattening logic or check sharding subroutines directly without
-        # requiring multiple ranks
+        # requiring multiple ranks.
         return 1
 
-    def _get_default_config(self):
-        device_type = (
-            acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-        )
+
+class TestFlattenParams(FlattenParamsTestBase):
+    """Tests parameter flattening and shard metadata logic."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _get_default_config(self, device):
         return {
-            "device": torch.device(device_type),
+            "device": torch.device(device),
             "sharding_strategy": HandleShardingStrategy.FULL_SHARD,
             "offload_params": False,
             "mp_param_dtype": None,
@@ -87,15 +123,16 @@ class TestFlattenParams(FSDPTestContinuous):
             dec_layer.linear2.weight = enc_layer.linear2.weight
         return module
 
-    @skip_if_lt_x_gpu(1)
-    def test_partial_flattening(self):
+    @requires_world_size(1)
+    def test_partial_flattening(self, device):
         """Tests flattening some submodules but not others."""
         self.run_subtests(
             {"half": [False, True]},
             self._test_partial_flattening,
+            device=device,
         )
 
-    def _test_partial_flattening(self, half: bool):
+    def _test_partial_flattening(self, half: bool, device):
         module = self._get_transformer()
         if half:
             module = module.half()
@@ -144,7 +181,8 @@ class TestFlattenParams(FSDPTestContinuous):
             all(p.dtype == new_dtype for p in module.encoder.layers[0].parameters())
         )
 
-    def test_flatten_nothing(self):
+    @requires_world_size(1)
+    def test_flatten_nothing(self, device):
         """
         Tests that constructing a ``FlatParamHandle`` with no parameters
         raises an error.
@@ -152,9 +190,10 @@ class TestFlattenParams(FSDPTestContinuous):
         self.run_subtests(
             {"half": [False, True]},
             self._test_flatten_nothing,
+            device=device,
         )
 
-    def _test_flatten_nothing(self, half: bool):
+    def _test_flatten_nothing(self, half: bool, device):
         module = self._get_transformer()
         if half:
             module = module.half()
@@ -165,16 +204,16 @@ class TestFlattenParams(FSDPTestContinuous):
             FlatParamHandle(
                 [],
                 module,
-                **self._get_default_config(),
+                **self._get_default_config(device),
             )
 
-    @skip_if_lt_x_gpu(1)
-    def test_empty_module(self):
+    @requires_world_size(1)
+    def test_empty_module(self, device):
         """
         Tests flattening an empty module (i.e. one without any parameters).
         """
         module = self._get_empty_module()
-        in_data = torch.rand(1)
+        in_data = torch.rand(1, device=torch.device(device).type)
         ref_out = module(in_data)
         fsdp_module = FSDP(module)
         self.assertEqual(len(list(fsdp_module.parameters())), 0)
@@ -196,7 +235,8 @@ class TestFlattenParams(FSDPTestContinuous):
 
         return EmptyModule()
 
-    def test_numel_without_shared_params(self):
+    @requires_world_size(1)
+    def test_numel_without_shared_params(self, device):
         """
         Tests that numel is preserved after flattening when there are no shared
         parameters in the module.
@@ -204,15 +244,17 @@ class TestFlattenParams(FSDPTestContinuous):
         self.run_subtests(
             {"half": [False, True]},
             self._test_numel_without_shared_params,
+            device=device,
         )
 
-    def _test_numel_without_shared_params(self, half: bool):
+    def _test_numel_without_shared_params(self, half: bool, device):
         module = self._get_transformer()
         if half:
             module = module.half()
-        self._test_numel(module)
+        self._test_numel(module, device)
 
-    def test_numel_with_shared_params(self):
+    @requires_world_size(1)
+    def test_numel_with_shared_params(self, device):
         """
         Tests that numel is preserved after flattening when there are shared
         parameters in the module.
@@ -220,26 +262,27 @@ class TestFlattenParams(FSDPTestContinuous):
         self.run_subtests(
             {"half": [False, True]},
             self._test_numel_with_shared_params,
+            device=device,
         )
 
-    def _test_numel_with_shared_params(self, half: bool):
+    def _test_numel_with_shared_params(self, half: bool, device):
         module = self._get_shared_params_transformer()
         if half:
             module = module.half()
-        self._test_numel(module)
+        self._test_numel(module, device)
 
-    def _test_numel(self, module):
+    def _test_numel(self, module, device):
         ref_numel = sum(p.numel() for p in module.parameters())
         params_to_flatten = list(module.parameters())
         flat_param_handle = FlatParamHandle(
             params_to_flatten,
             module,
-            **self._get_default_config(),
+            **self._get_default_config(device),
         )
         self.assertEqual(ref_numel, flat_param_handle.flat_param.numel())
 
-    @skip_if_lt_x_gpu(1)
-    def test_output_without_shared_params(self):
+    @requires_world_size(1)
+    def test_output_without_shared_params(self, device):
         """
         Tests a forward pass after flattening when there are no shared
         parameters in the module.
@@ -247,16 +290,17 @@ class TestFlattenParams(FSDPTestContinuous):
         self.run_subtests(
             {"half": [False, True]},
             self._test_output_without_shared_params,
+            device=device,
         )
 
-    def _test_output_without_shared_params(self, half: bool):
+    def _test_output_without_shared_params(self, half: bool, device):
         module = self._get_transformer()
         if half:
             module = module.half()
-        self._test_output(module)
+        self._test_output(module, device)
 
-    @skip_if_lt_x_gpu(1)
-    def test_output_with_shared_params(self):
+    @requires_world_size(1)
+    def test_output_with_shared_params(self, device):
         """
         Tests a forward pass after flattening when there are shared parameters
         in the module.
@@ -264,16 +308,17 @@ class TestFlattenParams(FSDPTestContinuous):
         self.run_subtests(
             {"half": [False, True]},
             self._test_output_with_shared_params,
+            device=device,
         )
 
-    def _test_output_with_shared_params(self, half: bool):
+    def _test_output_with_shared_params(self, half: bool, device):
         module = self._get_shared_params_transformer()
         if half:
             module = module.half()
-        self._test_output(module)
+        self._test_output(module, device)
 
-    def _test_output(self, module: nn.Module):
-        module = module.to(self.rank)
+    def _test_output(self, module: nn.Module, device):
+        module = module.to(torch.device(device).type)
         ref_output = self._get_output(module)
         fsdp_module = FSDP(module)
         fsdp_output = self._get_output(fsdp_module)
@@ -285,8 +330,8 @@ class TestFlattenParams(FSDPTestContinuous):
         input = module.get_input(device, dtype)
         return module(*input)
 
-    @skip_if_lt_x_gpu(1)
-    def test_pnorm_after_step_with_shared_params(self):
+    @requires_world_size(1)
+    def test_pnorm_after_step_with_shared_params(self, device):
         """
         Tests for parameter Frobenius norm parity after an optimizer step when
         there are shared parameters in the module. If the parameter sharing is
@@ -295,14 +340,17 @@ class TestFlattenParams(FSDPTestContinuous):
         self.run_subtests(
             {"half": [False, True]},
             self._test_pnorm_after_step_with_shared_params,
+            device=device,
         )
 
-    def _test_pnorm_after_step_with_shared_params(self, half: bool):
-        module = self._get_shared_params_transformer().to(self.rank)
+    def _test_pnorm_after_step_with_shared_params(self, half: bool, device):
+        module = self._get_shared_params_transformer().to(torch.device(device).type)
         if half:
             module = module.half()
         ref_pnorm_after_step = self._get_pnorm_after_step(module)
-        module = self._get_shared_params_transformer().to(self.rank)  # recreate
+        module = self._get_shared_params_transformer().to(
+            torch.device(device).type
+        )  # recreate
         if half:
             module = module.half()
         fsdp_module = FSDP(module)
@@ -316,7 +364,8 @@ class TestFlattenParams(FSDPTestContinuous):
         optim.step()
         return torch.norm(torch.stack([p.detach().norm() for p in module.parameters()]))
 
-    def test_flat_param_shard_metadata_unaligned(self):
+    @requires_world_size(1)
+    def test_flat_param_shard_metadata_unaligned(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
         without any explicit alignment padding.
@@ -333,7 +382,7 @@ class TestFlattenParams(FSDPTestContinuous):
         handle = FlatParamHandle(
             params_to_flatten,
             module,
-            **self._get_default_config(),
+            **self._get_default_config(device),
         )
 
         self._test_flat_param_shard_metadata(
@@ -467,7 +516,8 @@ class TestFlattenParams(FSDPTestContinuous):
             ),
         )
 
-    def test_flat_param_shard_metadata_aligned_full_precision(self):
+    @requires_world_size(1)
+    def test_flat_param_shard_metadata_aligned_full_precision(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
         with alignment padding and parameter full precision.
@@ -478,7 +528,7 @@ class TestFlattenParams(FSDPTestContinuous):
             torch.nn.Linear(5, 5, bias=False),  # 2.weight
         )
         params_to_flatten = list(module.parameters())
-        handle_kwargs = self._get_default_config()
+        handle_kwargs = self._get_default_config(device)
         handle_kwargs["use_orig_params"] = True
         handle = FlatParamHandle(params_to_flatten, module, **handle_kwargs)
         # For 32-bit full precision, FSDP pads up to 3 numel after each
@@ -520,7 +570,8 @@ class TestFlattenParams(FSDPTestContinuous):
             ),
         )
 
-    def test_flat_param_shard_metadata_aligned_mixed_precision(self):
+    @requires_world_size(1)
+    def test_flat_param_shard_metadata_aligned_mixed_precision(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
         with alignment padding and parameter mixed precision.
@@ -531,7 +582,7 @@ class TestFlattenParams(FSDPTestContinuous):
             torch.nn.Linear(5, 3, bias=False),  # 2.weight
         )
         params_to_flatten = list(module.parameters())
-        handle_kwargs = self._get_default_config()
+        handle_kwargs = self._get_default_config(device)
         handle_kwargs["use_orig_params"] = True
         handle_kwargs["mp_param_dtype"] = torch.float16
         handle = FlatParamHandle(params_to_flatten, module, **handle_kwargs)
@@ -601,8 +652,9 @@ class TestFlattenParams(FSDPTestContinuous):
             msg=lambda msg: f"{msg}\n{handle.shard_metadata()}, {expected}",
         )
 
+    @requires_world_size(1)
     @parametrize("memory_format", [torch.contiguous_format, torch.channels_last])
-    def test_flat_param_shard_metadata_with_memory_format(self, memory_format):
+    def test_flat_param_shard_metadata_with_memory_format(self, device, memory_format):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
         with alignment padding and parameter full precision.
@@ -613,7 +665,7 @@ class TestFlattenParams(FSDPTestContinuous):
             torch.nn.Conv2d(10, 10, 1, bias=False),  # 2.weight, 100 params
         ).to(memory_format=memory_format)
         params_to_flatten = list(module.parameters())
-        handle_kwargs = self._get_default_config()
+        handle_kwargs = self._get_default_config(device)
         handle_kwargs["use_orig_params"] = True
         handle = FlatParamHandle(params_to_flatten, module, **handle_kwargs)
         contiguous_tensors = memory_format == torch.contiguous_format
@@ -650,8 +702,8 @@ class TestFlattenParams(FSDPTestContinuous):
             ),
         )
 
-    @skip_if_lt_x_gpu(1)
-    def test_writeback_orig_params_no_shard(self):
+    @requires_world_size(1)
+    def test_writeback_orig_params_no_shard(self, device):
         class EmbeddingModel(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -660,7 +712,7 @@ class TestFlattenParams(FSDPTestContinuous):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.emb(x).sum()
 
-        model = EmbeddingModel().half().to(self.rank)
+        model = EmbeddingModel().half().to(torch.device(device).type)
         fsdp_model = FSDP(
             model,
             sharding_strategy=HandleShardingStrategy.NO_SHARD,
@@ -675,13 +727,18 @@ class TestFlattenParams(FSDPTestContinuous):
             param.data = param.data.float()
             fsdp_module._handle._orig_param_dtype = torch.float32
 
-        x = torch.randint(0, 5, (20,), device=self.rank)
+        x = torch.randint(0, 5, (20,), device=torch.device(device).type)
         with torch.no_grad():
             out = fsdp_model(x)
         self.assertEqual(out.shape, torch.Size([]))
 
 
-instantiate_parametrized_tests(TestFlattenParams)
+instantiate_device_type_tests(
+    TestFlattenParams,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
