@@ -48,7 +48,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-  pip_install nccl-extensions==0.1.0
+  # Keep in sync with third_party/nccl_ep/pin.txt.
+  pip_install nccl-extensions==0.2.0
 fi
 
 # Remove onnxruntime if present to avoid interference with non-ONNX tests
