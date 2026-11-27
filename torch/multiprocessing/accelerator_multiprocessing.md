@@ -1,6 +1,6 @@
-# CUDA IPC Refcounting implementation explained
+# Accelerator IPC Refcounting implementation explained
 
-Since shared CUDA memory belongs to the producer process, we need to take special precautions to make sure that it stays allocated for entire shared tensor life-span.
+Since shared accelerator memory belongs to the producer process, we need to take special precautions to make sure that it stays allocated for entire shared tensor life-span.
 
 It could be done manually by syncing on an event:
 
@@ -17,7 +17,7 @@ event.set()
 
 However, this requires blocking producer process (and gets overcomplicated in case of multiple consumers and handling various race-conditions).
 
-Instead, we implement cross-process reference counting for shared CUDA (and HIP) tensors, which will take care of keeping producers memory allocated for entire tensor's life-span.
+Instead, we implement cross-process reference counting for shared accelerator tensors, which will take care of keeping producers memory allocated for entire tensor's life-span.
 
 Details of implementation follow.
 
@@ -27,6 +27,6 @@ Instead of simply removing the allocated block, it checks if there are any activ
 
 Each individual IPCRefCountersFile contains multiple reference counters for multiple tensors. Current implementation sequentially provides next available reference counter by increasing offset.
 
-IPCSentDataLimbo is keeping references to data blocks which are not in use by producer process (i.e., tensor when out of scope), but still in use (or will be in use) by a consumer. It also tries to reduce the number of stored blocks by scanning the limbo list for blocks whose ref count has gone to zero on various events such as CudaCaching allocator haven't found any suitable block for the next allocation, the attempt of any shared block deletion, explicit call of cuda_ipc_collect.
+IPCSentDataLimbo is keeping references to data blocks which are not in use by producer process (i.e., tensor when out of scope), but still in use (or will be in use) by a consumer. It also tries to reduce the number of stored blocks by scanning the limbo list for blocks whose ref count has gone to zero on various events such as device caching allocator haven't found any suitable block for the next allocation, the attempt of any shared block deletion, explicit call of cuda_ipc_collect.
 
 Consumer's side wraps received data into the different structure IPCReceivedData. On destruction, it takes care of decreasing reference count to the received tensor.
