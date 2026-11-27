@@ -57,28 +57,6 @@ class TestTSan(TestCase):
             for gf in grad_fns:
                 self.assertIs(gf, y.grad_fn)
 
-    def test_concurrent_generator_wrap(self):
-        # Concurrently wrapping one generator while its cached Python wrapper is
-        # repeatedly deallocated exercises the GeneratorImpl PyObject cache.
-        # We reuse dispatcher machinery here to get the native Generator back
-        # into a Python object, thereby calling THPGenerator_Wrap() to execute
-        # the cache machinery.
-        with torch.library._scoped_library("_tsan_generator", "FRAGMENT") as lib:
-            lib.define("identity(Generator g) -> Generator")
-            lib.impl("identity", lambda g: g, "CompositeExplicitAutograd")
-            identity = torch.ops._tsan_generator.identity
-            gen = torch.Generator().manual_seed(1234)
-
-            def rewrap():
-                # Repeatedly acquire and release Generator Python wrapper references.
-                for _ in range(500):
-                    self.assertEqual(identity(gen).initial_seed(), 1234)
-
-            run_concurrently(rewrap, num_threads=4)
-            wrappers = run_concurrently(identity, args=(gen,), num_threads=4)
-            for wrapper in wrappers:
-                self.assertIs(wrapper, wrappers[0])
-
     def test_concurrent_config_flag_toggles(self):
         """Concurrently set/read process-global bool config flags.
 

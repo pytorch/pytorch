@@ -6,10 +6,13 @@ This module provides integration with the cutlass.operators library to enable
 high-performance GEMM kernels for NVIDIA GPUs.
 """
 
+import contextlib
 import itertools
 import re
 from enum import auto, Enum
 from typing import Any, Literal
+
+import sympy
 
 import torch
 from torch._inductor import config
@@ -53,9 +56,10 @@ from torch._inductor.ir import (
 )
 from torch._inductor.kernel.gemm_epilogue import GemmEpiloguePlan, GemmReductionPlan
 from torch._inductor.kernel_inputs import MMKernelInputs
-from torch._inductor.utils import ensure_nv_universal_gemm_available
+from torch._inductor.utils import ensure_nv_universal_gemm_available, sympy_product
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
+from torch.utils._sympy.functions import FloorDiv
 
 
 log = getArtifactLogger(__name__, "output_code")
@@ -424,6 +428,48 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         self._workspace = None
 
 
+# Note: [NVGEMM dynamic shapes]
+#
+# A kernel is usable only if its correctness requirements hold: operand
+# contiguity and extent/stride divisibility and, for dense GEMM, the launch
+# requirements (non-empty sizes, aligned pointer offsets, 32-bit indexing and,
+# with symbolic shapes, an audited provider launch contract). Each candidate
+# kernel has its own requirements (from its metadata, tile and cluster shape).
+# They are symbolic predicates, listed once by _guarded_requirements(), and
+# evaluated in two phases. Guards are installed only if an NVGEMM kernel wins
+# autotuning, and only for that kernel's requirements; losing NVGEMM candidates,
+# and NVGEMM entirely when another backend wins, install none:
+#
+# 1. Consider, during lowering, for every candidate:
+#    _check_guarded_requirements(install_guards=False) evaluates each predicate
+#    with guard_or_false under shape_env.suppress_guards(): the same evaluation
+#    as the commit, but nothing is recorded. Backed predicates use their hints;
+#    an unbacked predicate needs a static proof, otherwise the candidate is
+#    declined.
+# 2. Commit, in output_node() of the selected kernel only (during lowering, or
+#    in scheduling for deferred selection):
+#    _check_guarded_requirements(install_guards=True) evaluates each predicate
+#    with guard_or_false, installing guards. A predicate that cannot be
+#    established fails compilation. Speculative benchmark codegen passes
+#    install_guards=False.
+#
+# A frozen ShapeEnv records no new guards; guard_or_false would return the
+# hint-based answer and drop the guard. Dynamo freezes the ShapeEnv only after
+# the backend returns. With dynamic shapes AOTAutograd normally compiles the
+# backward right after the forward, inside the backend, so both graphs use the
+# unfrozen path. The backward is compiled lazily on the frozen ShapeEnv only
+# when it saves no SymInts or its eager compile failed. Both phases then accept
+# only statically known predicates (guards from the forward are facts by then),
+# so a candidate that passes phase 1 always passes phase 2. This assumes the
+# ShapeEnv does not freeze between the two phases; if it ever does, phase 2
+# fails with an error saying so. (freeze_runtime_asserts() after lowering the
+# forward is unrelated: it stops new runtime asserts, not guards.)
+#
+# Optimization hints never establish a requirement. They only drive
+# non-guarding choices among valid candidates: kernel discovery heuristics,
+# ranking, and the inputs autotuning benchmarks.
+
+
 class NVUniversalGemmCaller(ChoiceCaller):
     """
     ChoiceCaller for NVIDIA Universal GEMM kernels.
@@ -432,6 +478,8 @@ class NVUniversalGemmCaller(ChoiceCaller):
     """
 
     index_counter = itertools.count()
+    # Whether the ShapeEnv was frozen when this candidate was last considered.
+    _considered_frozen: bool | None = None
 
     def __init__(
         self,
@@ -504,8 +552,247 @@ class NVUniversalGemmCaller(ChoiceCaller):
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         return self.bmreq.benchmark(*args, out=out)
 
-    def output_node(self) -> TensorBox:
+    @staticmethod
+    def _tensor_constraint_checks(size, stride, constraint):
+        """Yield (predicate, message) for one operand's layout requirements.
+
+        Raises ValueError if the metadata cannot describe this operand's rank.
+        """
+        expected = constraint.stride
+        rank = len(stride)
+        if (
+            expected is None
+            or rank == 0
+            or len(size) != rank
+            or len(expected) not in (rank, rank + 1)
+        ):
+            raise ValueError("NVGEMM operand constraint has incompatible rank")
+        expected = expected[-rank:]
+        if 1 not in expected:
+            raise ValueError("NVGEMM operand constraint has no contiguous mode")
+        major = expected.index(1)
+        # The kernel loads the operand along the mode its metadata marks as
+        # major, so that mode must be contiguous.
+        yield sympy.Eq(stride[major], 1), "NVGEMM operand is not contiguous"
+        # Vectorized/TMA access needs the contiguous extent and every other
+        # stride to be multiples of the kernel's element divisibility.
+        divisor = constraint.divisibility
+        if divisor > 1:
+            yield (
+                sympy.Eq(sympy.Mod(size[major], divisor), 0),
+                "NVGEMM operand extent violates alignment",
+            )
+            for dim, step in enumerate(stride):
+                if dim != major:
+                    yield (
+                        sympy.Eq(sympy.Mod(step, divisor), 0),
+                        "NVGEMM operand stride violates alignment",
+                    )
+
+    def _operand_constraints(self):
+        """Yield (size, stride, constraint) for A, B and the output.
+
+        Sizes and strides are in the kernel's orientation: with swap_ab the
+        inputs are exchanged and their last two dims transposed, since the
+        kernel computes the transposed product. constraint is the kernel
+        metadata's operand requirement: which mode must be contiguous and the
+        element divisibility. Only dense GEMM is described here.
+        """
+        if self.variant != GemmVariant.GEMM:
+            return
+        operands = self.kernel.metadata.operands
+        a_idx, b_idx = (1, 0) if self.swap_ab else (0, 1)
+        for node, constraint in (
+            (self.input_nodes[a_idx], operands.A),
+            (self.input_nodes[b_idx], operands.B),
+        ):
+            size, stride = list(node.get_size()), list(node.get_stride())
+            if self.swap_ab:
+                size[-2:] = reversed(size[-2:])
+                stride[-2:] = reversed(stride[-2:])
+            yield size, stride, constraint
+        yield self._kernel_layout.size, self._kernel_layout.stride, operands.out
+
+    def _kernel_launch_checks(self):
+        """Yield (predicate, message) for what launching a dense GEMM requires.
+
+        These are kernel facts rather than per-operand metadata, so they apply to
+        static and symbolic shapes alike (mm, addmm and bmm).
+        """
+        if self.variant != GemmVariant.GEMM:
+            return
+
+        from cutlass.operators.providers.cutedsl.gemm.sm100_persistent import (
+            PersistentDenseGemmOperator,
+        )
+
+        from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+            VendoredDenseGemmEFCOperator,
+        )
+
+        a, b = self.input_nodes[:2]
+        layouts = (a.get_layout(), b.get_layout(), self.layout)
+        a_layout, b_layout, out_layout = layouts
+        if self.swap_ab:
+            a_layout, b_layout = b_layout, a_layout
+            n, m = out_layout.size[-2:]
+            k = a_layout.size[-2]
+        else:
+            m, n = out_layout.size[-2:]
+            k = a_layout.size[-1]
+        batch = sympy_product(out_layout.size[:-2])
+        # An empty M, N or batch launches no work, and K == 0 never initializes
+        # the accumulator; ATen handles those.
+        yield (
+            sympy.And(*(sympy.Gt(dim, 0) for dim in (*out_layout.size, k))),
+            "NVGEMM requires a nonempty problem",
+        )
+        operands = self.kernel.metadata.operands
+        int32_max = torch.iinfo(torch.int32).max
+        for layout, constraint in zip(
+            (a_layout, b_layout, out_layout),
+            (operands.A, operands.B, operands.out),
+            strict=True,
+        ):
+            # The gate only rejects unaligned base buffers; a view's offset
+            # inside an aligned buffer must keep the data pointer aligned too.
+            alignment = max(16, constraint.ptr_alignment_bytes)
+            yield (
+                sympy.Eq(
+                    sympy.Mod(layout.offset * layout.dtype.itemsize, alignment), 0
+                ),
+                "NVGEMM operand offset violates pointer alignment",
+            )
+            # CuTe's TensorWrapper uses signed 32-bit dimensions. Bound the
+            # addressable element span as well so tile/layout indexing fits.
+            yield (
+                sympy.And(
+                    *(sympy.Le(dim, int32_max) for dim in layout.size),
+                    *(sympy.Ge(step, 0) for step in layout.stride),
+                    sympy.Le(
+                        sum(
+                            (dim - 1) * step
+                            for dim, step in zip(
+                                layout.size, layout.stride, strict=True
+                            )
+                        ),
+                        int32_max,
+                    ),
+                ),
+                "NVGEMM operand geometry exceeds its indexing range",
+            )
+
+        symbolic = any(
+            getattr(value, "free_symbols", ())
+            for layout in layouts
+            for value in (*layout.size, *layout.stride, layout.offset)
+        )
+        audited = type(self.kernel) in (
+            PersistentDenseGemmOperator,
+            VendoredDenseGemmEFCOperator,
+        )
+        clc = audited and getattr(self.kernel.impl, "use_clc_dynamic_scheduler", False)
+        if symbolic:
+            # supports() only saw hinted examples and runtime launches skip it
+            # (assume_supported_args), so only providers whose launch contract is
+            # modeled here are allowed. In particular preferred-cluster can floor
+            # the fallback grid to zero, and a workspace derived from a concrete
+            # example is not a bound.
+            if not audited or self.workspace_size != 0:
+                raise ValueError("NVGEMM provider has no symbolic launch contract")
+        elif not clc:
+            # With static shapes supports() saw the real sizes, and the static
+            # scheduler's grid is capped by occupancy.
+            return
+        design = self.kernel.metadata.design
+        tile_m, tile_n = design.tile_shape[:2]
+        cluster_m, cluster_n = design.cluster_shape[:2]
+        cta_m = tile_m // (2 if design.use_2cta_mma else 1)
+        clusters_m = FloorDiv(m + cta_m * cluster_m - 1, cta_m * cluster_m)
+        clusters_n = FloorDiv(n + tile_n * cluster_n - 1, tile_n * cluster_n)
+        clusters = clusters_m * clusters_n * batch
+        # The CLC scheduler launches the tile grid directly: x = M CTAs and
+        # y = N CTAs, each rounded up to the cluster shape, and z = batch.
+        # supports() does not check this, even for static shapes. Symbolic shapes
+        # apply it to every audited provider, since the grid layout of other
+        # SDK versions is unverified. CUDA allows x < 2**31, y and z <= 65535.
+        yield (
+            sympy.And(
+                sympy.Le(clusters_m * cluster_m, int32_max),
+                sympy.Le(clusters_n * cluster_n, 65535),
+                sympy.Le(batch, 65535),
+            ),
+            "NVGEMM launch grid exceeds CUDA grid limits",
+        )
+        if not symbolic:
+            return
+        # The persistent tile scheduler indexes clusters with signed 32-bit math.
+        yield (
+            sympy.Le(clusters * cluster_m * cluster_n, int32_max),
+            "NVGEMM tiled problem exceeds its indexing range",
+        )
+        if clc:
+            # CLC can flatten the cluster count into CUDA's grid-z dimension.
+            yield (
+                sympy.Le(clusters, 65535),
+                ("NVGEMM CLC problem exceeds grid-z capacity"),
+            )
+
+    def _guarded_requirements(self):
+        """Correctness requirements; the selected kernel installs guards for them.
+
+        Per-operand layout requirements from the kernel metadata come from
+        _tensor_constraint_checks(); dense GEMM launch requirements come from
+        _kernel_launch_checks(). See Note: [NVGEMM dynamic shapes]
+        """
+        for geometry in self._operand_constraints():
+            yield from self._tensor_constraint_checks(*geometry)
+        yield from self._kernel_launch_checks()
+
+    def _check_guarded_requirements(self, *, install_guards: bool) -> bool:
+        """Check correctness requirements with guard_or_false.
+
+        install_guards=False: considering a candidate; guards are suppressed.
+        install_guards=True: the selected kernel; establishes each requirement or
+        fails. A frozen ShapeEnv cannot record guards, so both modes then accept only
+        static proofs. See Note: [NVGEMM dynamic shapes]
+        """
+        sizevars = V.graph.sizevars
+        shape_env = sizevars.shape_env
+        if shape_env.frozen:
+            evaluate = sizevars.statically_known_true
+        else:
+            evaluate = sizevars.guard_or_false
+        suppress = (
+            contextlib.nullcontext() if install_guards else shape_env.suppress_guards()
+        )
+
+        if not install_guards:
+            self._considered_frozen = shape_env.frozen
+        try:
+            with suppress:
+                for condition, message in self._guarded_requirements():
+                    if not evaluate(condition):
+                        if install_guards:
+                            if shape_env.frozen and self._considered_frozen is False:
+                                message += (
+                                    "; the candidate was considered before the ShapeEnv"
+                                    " froze, so this requirement could no longer be"
+                                    " guarded. See Note: [NVGEMM dynamic shapes]"
+                                )
+                            raise AssertionError(message)
+                        return False
+        except ValueError:
+            if install_guards:
+                raise
+            return False
+        return True
+
+    def output_node(self, *, install_guards: bool = True) -> TensorBox:
         from torch._inductor.ir import NVUniversalGemmBuffer
+
+        if install_guards:
+            self._check_guarded_requirements(install_guards=True)
 
         # Without memoization, each call registers a new buffer (via
         # TemplateBuffer.__init__ → V.graph.register_buffer), leaking orphan
@@ -1036,6 +1323,10 @@ def _add_nv_gemm_choices_impl(
                 bias_node=bias_node,
                 output_scale_node=output_scale_node,
             )
+            # Consider without guards; output_node() guards the selected kernel.
+            # See Note: [NVGEMM dynamic shapes]
+            if not caller._check_guarded_requirements(install_guards=False):
+                continue
             choices.append(caller)
             num_added += 1
         except Exception:

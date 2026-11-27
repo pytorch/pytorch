@@ -1,5 +1,7 @@
+#include <ATen/cpu/Utils.h>
 #include <ATen/native/CPUBlas.h>
 #include <c10/core/Device.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
@@ -614,6 +616,73 @@ torch_get_num_threads(uint32_t* out_num_threads) {
       { *out_num_threads = static_cast<uint32_t>(at::get_num_threads()); });
 }
 
+static const c10::IValue* find_cpu_capability(const char* key) {
+  // Capture the capability map on the first lookup.
+  static const auto capabilities = at::cpu::get_cpu_capabilities();
+  const auto it = capabilities.find(key);
+  return it == capabilities.end() ? nullptr : &it->second;
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_int(
+    const char* key,
+    int64_t* ret_value,
+    bool* ret_key_exists) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto* value = find_cpu_capability(key);
+    if (value) {
+      TORCH_CHECK_TYPE(
+          value->isInt(),
+          "CPU capability '",
+          key,
+          "' has type ",
+          value->tagKind(),
+          ", expected Int");
+      *ret_value = value->toInt();
+    }
+    *ret_key_exists = value != nullptr;
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_string(
+    const char* key,
+    const char** ret_value,
+    bool* ret_key_exists) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto* value = find_cpu_capability(key);
+    if (value) {
+      TORCH_CHECK_TYPE(
+          value->isString(),
+          "CPU capability '",
+          key,
+          "' has type ",
+          value->tagKind(),
+          ", expected String");
+      *ret_value = value->toStringRef().c_str();
+    }
+    *ret_key_exists = value != nullptr;
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_bool(
+    const char* key,
+    bool* ret_value,
+    bool* ret_key_exists) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto* value = find_cpu_capability(key);
+    if (value) {
+      TORCH_CHECK_TYPE(
+          value->isBool(),
+          "CPU capability '",
+          key,
+          "' has type ",
+          value->tagKind(),
+          ", expected Bool");
+      *ret_value = value->toBool();
+    }
+    *ret_key_exists = value != nullptr;
+  });
+}
+
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_const_data_ptr(AtenTensorHandle tensor, const void** ret_data_ptr) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
@@ -706,6 +775,26 @@ torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference) {
         torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
     *ret_is_inference = t->is_inference();
   });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_create_inference_mode_guard(
+    bool enabled,
+    InferenceModeGuardHandle* ret_guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_guard = reinterpret_cast<InferenceModeGuardHandle>(
+        new c10::InferenceMode(enabled));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_inference_mode_guard(InferenceModeGuardHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<c10::InferenceMode*>(guard); });
+}
+
+// This reads a thread-local flag and is not expected to throw.
+AOTI_TORCH_EXPORT bool torch_is_inference_mode_enabled() {
+  return c10::InferenceMode::is_enabled();
 }
 
 // Python interop conversions. These are the only stable

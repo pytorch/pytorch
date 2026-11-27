@@ -6,6 +6,7 @@ import pickle
 import torch
 from torch.optim.swa_utils import (
     AveragedModel,
+    get_ema_avg_fn,
     get_ema_multi_avg_fn,
     get_swa_multi_avg_fn,
     update_bn,
@@ -59,6 +60,12 @@ class SWATestCNN(torch.nn.Module):
 
 class TestSWAUtilsGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("avg_fn", [get_ema_avg_fn, get_ema_multi_avg_fn])
+    @parametrize("decay", [-0.1, 1.5, float("nan")])
+    def test_ema_invalid_decay(self, avg_fn, decay):
+        with self.assertRaisesRegex(ValueError, "Invalid decay value"):
+            avg_fn(decay)
 
     def test_averaged_model_state_dict(self):
         dnn = torch.nn.Sequential(
