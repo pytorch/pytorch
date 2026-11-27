@@ -440,32 +440,16 @@ def _multi_tensor_muon(
     )
 
     # Phase 3: weight-decay shrink (uniform scale across all params) followed
-    # by the shape-grouped negative-lr add. Group by shape, dtype, and device
-    # so each _foreach_add_ call preserves per-tensor dtype semantics while
-    # still sharing the shape-specific adjusted_lr.
+    # by the shape-grouped negative-lr add: the adjusted lr depends on the
+    # shape, and _foreach_add_ takes a single alpha per call.
     torch._foreach_mul_(params, 1 - lr * weight_decay)
 
-    add_groups: dict[
-        tuple[int, int, torch.dtype, torch.dtype, torch.device, torch.device], list[int]
-    ] = {}
-    for i, (p, update) in enumerate(zip(params, updates, strict=True)):
-        add_groups.setdefault(
-            (p.size(0), p.size(1), p.dtype, update.dtype, p.device, update.device),
-            [],
-        ).append(i)
+    add_groups: dict[tuple[int, int], list[int]] = {}
+    for i, p in enumerate(params):
+        add_groups.setdefault((p.size(0), p.size(1)), []).append(i)
     for indices in add_groups.values():
         group_params = [params[i] for i in indices]
         group_updates = [updates[i] for i in indices]
-        # _foreach_add_ silently falls back to per-tensor add_ when self/other
-        # dtypes differ. NS outputs bf16; params are typically fp32. Cast once
-        # via a fused _foreach_copy_ so _foreach_add_ stays on the multi-tensor
-        # fast path. The cast is bit-equivalent to the per-tensor add_ that the
-        # single-tensor path performs internally.
-        target_dtype = group_params[0].dtype
-        if group_updates[0].dtype != target_dtype:
-            cast = [torch.empty_like(p) for p in group_params]
-            torch._foreach_copy_(cast, group_updates)
-            group_updates = cast
         adjusted_lr = _adjust_lr(lr, adjust_lr_fn, group_params[0].shape)
         torch._foreach_add_(group_params, group_updates, alpha=-adjusted_lr)
 
