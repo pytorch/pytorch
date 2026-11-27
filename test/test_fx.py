@@ -5827,9 +5827,9 @@ graph():
             """\
 graph():
     %x_1 : [num_users=1] = placeholder[target=x_1]
+    %sym_size_int : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%x_1, 0), kwargs = {})
     %y_1 : [num_users=1] = placeholder[target=y_1]
     %nonzero : [num_users=2] = call_function[target=torch.ops.aten.nonzero.default](args = (%y_1,), kwargs = {})
-    %sym_size_int : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%x_1, 0), kwargs = {})
     %sym_size_int_1 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%nonzero, 0), kwargs = {})
     %floordiv : [num_users=1] = call_function[target=operator.floordiv](args = (%sym_size_int_1, %sym_size_int), kwargs = {})
     %add : [num_users=1] = call_function[target=operator.add](args = (1, %floordiv), kwargs = {})

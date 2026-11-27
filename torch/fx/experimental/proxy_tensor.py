@@ -66,6 +66,7 @@ from torch._subclasses.fake_tensor import (
     in_kernel_invocation_manager,
     is_fake,
     is_fake_tensor,
+    maybe_get_fake_constant,
     maybe_get_fake_dispatch_keys,
     maybe_get_fake_mode,
     maybe_get_real_tensor,
@@ -2258,6 +2259,71 @@ def _replay_original_aten_view(
     return target(native, *args, **kwargs)
 
 
+def _original_aten_mutation_storages(graph: fx.Graph) -> set[int]:
+    return {
+        mutation[0].untyped_storage()._cdata
+        for node in graph.nodes
+        if isinstance(mutation := node.meta.get("original_aten_mutation"), tuple)
+        and isinstance(mutation[0], Tensor)
+        and is_fake_tensor(mutation[0])
+    }
+
+
+def _preserve_original_aten_mutation_storage(
+    node: fx.Node,
+    old: Any,
+    new: Any,
+    native_storages: set[int],
+    args_kwargs: Any,
+) -> bool:
+    from torch.fx.passes.reinplace import _is_view_op
+    from torch.utils._python_dispatch import _disable_current_modes
+
+    from .symbolic_shapes import statically_known_true, sym_eq
+
+    if not (
+        isinstance(old, Tensor)
+        and isinstance(new, Tensor)
+        and is_fake_tensor(old)
+        and is_fake_tensor(new)
+        and node.op == "call_function"
+        and not _is_view_op(node.target)
+        and (mode := maybe_get_fake_mode(new)) is not None
+        and maybe_get_fake_mode(old) is mode
+        and maybe_get_fake_constant(old) is None
+        and maybe_get_fake_constant(new) is None
+        and maybe_get_real_tensor(old) is None
+        and maybe_get_real_tensor(new) is None
+        and old.layout == new.layout == torch.strided
+        and old.untyped_storage()._cdata in native_storages
+        and old.dtype == new.dtype
+        and old.device == new.device
+        and old.is_neg() == new.is_neg()
+        and old.is_conj() == new.is_conj()
+        and statically_known_true(sym_eq(old.size(), new.size()))
+        and statically_known_true(sym_eq(old.stride(), new.stride()))
+        and statically_known_true(old.storage_offset() == new.storage_offset())
+    ):
+        return False
+    input_storages = {
+        value.untyped_storage()._cdata
+        for value in pytree.tree_leaves(args_kwargs)
+        if isinstance(value, Tensor) and value.layout == torch.strided
+    }
+    old_storage = old.untyped_storage()._cdata
+    new_storage = new.untyped_storage()._cdata
+    if (
+        old_storage in input_storages
+        or new_storage in input_storages
+        or old_storage == new_storage
+    ):
+        return False
+    # Keep fresh value/symbol metadata; preserve only the existing allocation token.
+    with disable_proxy_modes_tracing(), _disable_current_modes(), mode, torch.no_grad():
+        new.set_(old.untyped_storage(), new.storage_offset(), new.size(), new.stride())
+    return True
+
+
 def _original_aten_view_mutation_base(node: fx.Node) -> Tensor | None:
     from torch.fx.passes.reinplace import _VIEW_INVERSE_MAP
     from torch.utils._python_dispatch import _disable_current_modes
@@ -2268,8 +2334,86 @@ def _original_aten_view_mutation_base(node: fx.Node) -> Tensor | None:
         sym_eq,
     )
 
+    canonical_reference = None
     original = node.meta.get("original_aten")
     mutation = node.meta.get("original_aten_mutation")
+    result = (
+        mutation[1]
+        if isinstance(mutation, tuple) and isinstance(mutation[1], Tensor)
+        else node.meta.get("val")
+    )
+    if (
+        node.target in _VIEW_INVERSE_MAP
+        and isinstance(original, OpOverload)
+        and original._schema.is_mutable
+        and isinstance(mutation, tuple)
+        and isinstance(native := mutation[0], Tensor)
+        and isinstance(result, Tensor)
+        and node.args
+        and isinstance(base := node.args[0], fx.Node)
+        and isinstance(base_value := base.meta.get("val"), Tensor)
+    ):
+        native_device = native.device
+
+        def matches_base(candidate: Tensor, metadata: Tensor = base_value) -> bool:
+            return (
+                candidate.dtype == metadata.dtype == result.dtype
+                and candidate.device
+                == metadata.device
+                == result.device
+                == native_device
+                and all(
+                    statically_known_true(sym_eq(a, b))
+                    for a, b in (
+                        (candidate.size(), metadata.size()),
+                        (candidate.stride(), metadata.stride()),
+                        (candidate.storage_offset(), metadata.storage_offset()),
+                        (candidate.size(), result.size()),
+                    )
+                )
+            )
+
+        if isinstance(mutation[1], Tensor) and matches_base(native):
+            return native
+        reference = base
+        while reference is not None:
+            reference_value = reference.meta.get("val")
+            if not isinstance(reference_value, Tensor):
+                break
+            native_base = _original_mutation_destination(
+                reference_value, node=reference
+            )
+            if (
+                isinstance(native_base, Tensor)
+                and native.untyped_storage()._cdata
+                == native_base.untyped_storage()._cdata
+            ):
+                if matches_base(native_base):
+                    return native_base
+                if matches_base(native_base, reference_value):
+                    # Materialization may change layout; replay below must
+                    # reproduce the captured mutation view of its native owner.
+                    canonical_reference = native_base
+                    break
+            reference_mutation = reference.meta.get("original_aten_mutation")
+            if not (
+                reference.meta.get("original_aten") == original
+                and isinstance(reference_mutation, tuple)
+                and isinstance(reference_mutation[0], Tensor)
+                and isinstance(reference_mutation[1], Tensor)
+                and reference_mutation[0].untyped_storage()._cdata
+                == native.untyped_storage()._cdata
+                and reference.args
+                and isinstance(reference.args[0], fx.Node)
+                and isinstance(input_value := reference.args[0].meta.get("val"), Tensor)
+                and input_value.dtype == reference_value.dtype
+                and input_value.device == reference_value.device
+                and statically_known_true(
+                    sym_eq(input_value.size(), reference_value.size())
+                )
+            ):
+                break
+            reference = reference.args[0]
     if not (
         node.target in _VIEW_INVERSE_MAP
         and isinstance(original, OpOverload)
@@ -2293,7 +2437,9 @@ def _original_aten_view_mutation_base(node: fx.Node) -> Tensor | None:
         and mutation[0].untyped_storage() == source_mutation[0].untyped_storage()
     ):
         return None
-    if mutation[1] is None:
+    if canonical_reference is not None:
+        native = canonical_reference
+    elif mutation[1] is None:
         native = _original_mutation_destination(base.meta["val"], node=base)
     else:
         # The completed writeback already captured its canonical base.
@@ -2364,11 +2510,17 @@ def _original_mutation_destination(
     views = []
     while node is not None:
         mutation = node.meta.get("original_aten_mutation")
+        canonical_base = (
+            _original_aten_view_mutation_base(node)
+            if isinstance(mutation, tuple)
+            else None
+        )
         if isinstance(mutation, tuple) and (
-            _is_original_aten_mutation(node)
-            or _original_aten_view_mutation_base(node) is not None
+            _is_original_aten_mutation(node) or canonical_base is not None
         ):
             original, result = mutation[:2]
+            if canonical_base is not None:
+                original = canonical_base
             if isinstance(original, Tensor) and isinstance(result, Tensor):
                 # Replay describes metadata, not graph operations or fresh outputs.
                 with (

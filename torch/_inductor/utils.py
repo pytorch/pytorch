@@ -5506,6 +5506,8 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     - Ops with sparse tensor outputs
     """
     target = fx_node.target
+    if target is torch.ops.higher_order.with_effects:
+        target = fx_node.args[1]
 
     # Check against the forbidden ops set
     if str(target) in FORBIDDEN_CUDAGRAPH_OPS:
