@@ -8,6 +8,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
+from ..codegen.common import BackendFeature, has_backend_feature
 from ..heuristics.template.triton import mm_allow_tf32
 from ..ir import (
     ComputedBuffer,
@@ -32,7 +33,7 @@ from ..select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from ..utils import ceildiv, is_bf16x9_matmul
+from ..utils import ceildiv, is_bf16x9_matmul, is_gpu
 
 
 B2B_GEMM_PASS = PatternMatcherPass(
@@ -376,11 +377,12 @@ def is_b2b_gemm_good_on(
     if any(is_bf16x9_matmul(t.device.type, t.dtype) for t in fake_tensors):
         return False
 
-    def check_all_attr_true(objects, attr):
-        return all(hasattr(obj, attr) and getattr(obj, attr) for obj in objects)
-
-    if not check_all_attr_true(fake_tensors, "is_cuda") and not check_all_attr_true(
-        fake_tensors, "is_xpu"
+    # Same device/backend gate as use_triton_template's GPU branch
+    # (GPU-class + TRITON_TEMPLATES; excludes MPS).
+    if not all(
+        is_gpu(t.device.type)
+        and has_backend_feature(t.device, BackendFeature.TRITON_TEMPLATES)
+        for t in fake_tensors
     ):
         return False
     if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
