@@ -3467,15 +3467,86 @@ def pin_content(holder):
     return {"content": holder["s"] if type(holder) is dict else holder[1]}
 
 
+def pin_holding():
+    cfg = PinCfg()
+    cfg.content = PinCfg()
+    return cfg
+
+
+def pin_held(cfg):
+    return {"object": cfg, "content": cfg.content}
+
+
 def pin_runs(compiled):
     """How many times the regions of a function have run."""
     return sum(r["runs"] for r in vm.regions(compiled) if r["state"] == "region")
 
 
+# How a reader comes by the __dict__ of an instance without the instance:
+# what the program keeps (made of `vars(OBJ)`), what a call computes with it,
+# and how the program changes the dict it reads and puts it back. In place
+# of the dict itself in the last two, `{d}` is the dict to change.
+PIN_DICT_READERS = {
+    "items_view": ("KEPT = vars(OBJ).items()", "dict(KEPT)['k']"),
+    "values_view": ("KEPT = vars(OBJ).values()", "list(KEPT)[0]"),
+    "keys_view": (
+        "KEPT = vars(OBJ).keys()",
+        "2.0 + float('z' in KEPT)",
+        "{d}['z'] = 1",
+        "del {d}['z']",
+    ),
+    "mappingproxy": ("KEPT = types.MappingProxyType(vars(OBJ))", "KEPT['k']"),
+    "bound_method": ("KEPT = vars(OBJ).get", "KEPT('k')"),
+    "the_dict": ("KEPT = vars(OBJ)", "KEPT['k']"),
+    "the_instance": ("KEPT = None", "OBJ.k", "OBJ.k = 3.0", "OBJ.k = 2.0"),
+}
+# What becomes of the instance's dict before the change: nothing, or the
+# instance is given an equal one (the reader still has the old one).
+PIN_DICT_FATES = {
+    "in_place": "pass",
+    "instance_given_an_equal_dict": "OBJ.__dict__ = dict(OLD)",
+}
+PIN_DICT_PROGRAM = """
+class Cfg:
+    def __init__(self):
+        self.k = 2.0
+        self.j = 1.0
+
+
+OBJ = Cfg()
+OLD = vars(OBJ)
+{kept}
+
+
+def program(x):
+    y = (x.sin() * OBJ.j).cos()
+    k = {fetch}
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def change():
+    {fate}
+    {change}
+
+
+def back():
+    {back}
+"""
+
 PIN_FROM_A_CELL = pin_cell()
 PIN_WAYS = {
     "argument": (pin_argument, pin_as_argument(PinCfg)),
     "argument_with_slots": (pin_argument, pin_as_argument(PinSlots, pin_content)),
+    # What the instance's __dict__ holds goes with the instance: the dict
+    # the region read `k` from is not kept either.
+    "argument_holding_an_object": (
+        pin_argument,
+        pin_as_argument(pin_holding, pin_held),
+    ),
+    "global_holding_an_object": (
+        pin_from_a_global,
+        pin_as_global("PIN_GLOBAL", pin_holding, pin_held),
+    ),
     "argument_in_a_tuple": (
         pin_argument_in_a_tuple,
         pin_as_argument(lambda: (PinCfg(), 1), lambda pair: {"object": pair[0]}),
@@ -3655,6 +3726,43 @@ class TestVmPins(TestCase):
         where = [r["where"] for r in vm.regions(compiled)]
         mine = [w for w in where if "_dropped" in w or "noting" in w]
         self.assertEqual(mine, [], msg=str(where))
+
+    @parametrize("reader", list(PIN_DICT_READERS))
+    @parametrize("fate", list(PIN_DICT_FATES))
+    @checks_isolated
+    def test_dict_of_an_instance_read_without_the_instance(self, device, reader, fate):
+        """A region that reads an attribute through the instance compares
+        what it read in the dict the instance has, and holds neither. What it
+        read of that dict some other way (a view, a mappingproxy, a bound
+        method, the dict itself, kept by the program) is of the dict that was
+        read: once the instance has another dict, however equal, the region
+        is not entered on the instance's word."""
+        kept, fetch, *how = PIN_DICT_READERS[reader]
+        change, back = how or ("{d}['k'] = 3.0", "{d}['k'] = 2.0")
+        source = PIN_DICT_PROGRAM.format(
+            kept=kept,
+            fetch=fetch,
+            fate=PIN_DICT_FATES[fate],
+            change=change.format(d="OLD"),
+            back=back.format(d="OLD"),
+        )
+        mine, theirs = {"types": types}, {"types": types}
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine["program"], passes=CHECKS_EARLY)
+        # The schedule A, B, A.
+        for phase, calls in enumerate((6, 3, 4)):
+            for names in (mine, theirs):
+                if phase:
+                    names["change" if phase == 1 else "back"]()
+            for call in range(calls):
+                torch.manual_seed(10 * phase + call)
+                x = torch.randn(4, 8, device=device)
+                msg = f"phase {phase}, call {call}"
+                want = theirs["program"](x)
+                self.assertEqual(compiled(x), want, atol=0, rtol=0, msg=msg)
+            if phase == 0:
+                self.assertGreater(pin_runs(compiled), 0, msg="no region ran")
 
     @parametrize("way", ["argument", "item_of_a_dict"])
     @checks_isolated

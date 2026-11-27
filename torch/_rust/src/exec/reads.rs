@@ -1590,8 +1590,9 @@ enum Start<'a> {
 //     slot or another attribute C code gives, what its class or a base has
 //     under a name;
 //   - the items of a tuple or a frozenset, at any depth; what a bound
-//     method (of a Python function or of C code) is bound to: none of them
-//     can be bound anew;
+//     method (of a Python function or of C code) is bound to; the dict a
+//     view of a dict (keys, values, items) or a mappingproxy shows: none of
+//     them can be bound anew;
 //   - the defaults and the keyword-only defaults of a function a frame of
 //     which ran (its Function entry says they are still the ones).
 // Nothing else leads anywhere: an object some C code handed out, an item of
@@ -1612,6 +1613,10 @@ unsafe fn led(e: &Entries, start: Start) -> HashSet<usize> {
             }
             if let Some(items) = fixed(o) {
                 fresh.extend(items);
+            } else if !tr_view_dict(o).is_null() || !tr_proxy_dict(o).is_null() {
+                // A view of a dict and a mappingproxy show the one dict they
+                // were made of for as long as they live.
+                fresh.push(if tr_view_dict(o).is_null() { tr_proxy_dict(o) } else { tr_view_dict(o) });
             } else if !tr_bound_self(o).is_null() {
                 fresh.push(tr_bound_self(o));
             } else if !tr_builtin_self(o).is_null() {
@@ -1713,7 +1718,11 @@ fn held(e: &Entries, hold: &mut impl FnMut(&Py<PyAny>)) {
 // instance, a module, a function, a code object, a class, a tensor, a set, a
 // bound method, an instance of a subclass of dict or list. An instance's (or
 // a module's) __dict__: through the instance, and the items read are then
-// compared in the dict the instance has when the region is entered. Only
+// compared in the dict the instance has when the region is entered, which
+// must be the dict it had: the entry that says which dict the instance has
+// stays, by the dict's address (Pin::at), because something else may still
+// read the dict that was read (a view or a mappingproxy made of it, kept
+// somewhere) after the instance was given an equal one. Only
 // where the instance is the one way the trace came by the dict: a dict that
 // outlives its instance and is found some other way must stay checked when
 // the instance died. Still counted, for as long as the region lives,
@@ -1745,19 +1754,14 @@ unsafe fn weaken(e: &mut Entries) {
         d.obj.weaken();
     }
     let groups = &mut e.groups;
-    // Kept: the entry that says which dict the instance has, where the
-    // dict stays counted.
-    e.dicted.retain_mut(|d| {
+    for d in &mut e.dicted {
         let dict = d.dict.as_ptr();
-        if !alone(dict as usize) {
-            return true;
+        let group = groups.iter_mut().find(|g| g.holder.is(dict));
+        // (A namespace a global was loaded from stays counted.)
+        if alone(dict as usize) && !group.as_ref().is_some_and(|g| g.root) && d.dict.at(&d.obj) && let Some(g) = group {
+            g.holder.through(&d.obj);
         }
-        match groups.iter_mut().find(|g| g.holder.is(dict)) {
-            Some(g) if g.root => true,
-            Some(g) => !g.holder.through(&d.obj),
-            None => !d.dict.through(&d.obj),
-        }
-    });
+    }
     for g in groups.iter_mut() {
         g.holder.weaken();
         g.items.iter_mut().filter(|i| i.want == Want::Is).filter_map(|i| i.value.as_mut()).for_each(Pin::weaken);

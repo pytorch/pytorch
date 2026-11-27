@@ -10,8 +10,10 @@
 //! handed out only while the object at it is the pinned one (an address is
 //! used again by another object), and `is(x)` is false for a dead pin and
 //! for NULL. A `__dict__` pinned `through` its owner is the dict the owner
-//! has now, found again on every use. No Python code runs in `live`,
-//! `as_ptr`, `is` and `dead`.
+//! has now, found again on every use; one pinned `at` its owner is the dict
+//! the owner has now only while that is the dict it had (see `at` for why
+//! an address says so there). No Python code runs in `live`, `as_ptr`, `is`
+//! and `dead`.
 //!
 //! May not assume: that a pin lets go of an object whose class takes no
 //! weak reference (an exact dict, list or tuple, a cell, an int, a str, an
@@ -32,6 +34,8 @@ enum Held {
     Weak(Py<PyAny>),
     // A weak reference to the object whose __dict__ is pinned.
     DictOf(Py<PyAny>),
+    // The same, and the address of the __dict__ the object had.
+    DictAt(Py<PyAny>, usize),
 }
 
 pub struct Pin(Held);
@@ -86,8 +90,33 @@ impl Pin {
         true
     }
 
+    // For a counted pin of the __dict__ `owner` has, with `owner` held
+    // weakly: from now on the pin counts nothing and says which dict the
+    // owner has, by the dict's address. Whether it is.
+    //
+    // The one place where an address stands for an object, compared only
+    // while the owner lives. It is exact: as long as the dict that was
+    // pinned is alive no other object is at its address, so the owner's
+    // dict at that address is that dict; and once it died nothing reads it
+    // any more (whatever shows a dict to a reader, a view, a mappingproxy,
+    // a bound method of it, keeps it alive), so a dict the owner then has
+    // at that address is the only dict a reader can come by, and what was
+    // read is compared in it. Everything else is `is` / `was`.
+    pub fn at(&mut self, owner: &Pin) -> bool {
+        let (Held::Counted(dict), Held::Weak(weak)) = (&self.0, &owner.0) else { return false };
+        unsafe {
+            let o = referent(weak);
+            if o.is_null() || tr_instance_dict(o) != dict.as_ptr() {
+                return false;
+            }
+            self.0 = Held::DictAt(weak.clone_ref(Python::assume_attached()), dict.as_ptr() as usize);
+        }
+        true
+    }
+
     // None: the object died. Otherwise the object (borrowed), which for a
-    // dict found through its owner is NULL while the owner has none.
+    // dict found through its owner is NULL while the owner has none, and for
+    // one pinned `at` its owner also while the owner has another.
     #[inline]
     pub fn live(&self) -> Option<*mut PyObject> {
         unsafe {
@@ -95,6 +124,7 @@ impl Pin {
                 Held::Counted(o) => Some(o.as_ptr()),
                 Held::Weak(weak) => Some(referent(weak)).filter(|o| !o.is_null()),
                 Held::DictOf(weak) => Some(referent(weak)).filter(|o| !o.is_null()).map(|o| tr_instance_dict(o)),
+                Held::DictAt(weak, address) => Some(referent(weak)).filter(|o| !o.is_null()).map(|o| Some(tr_instance_dict(o)).filter(|d| *d as usize == *address).unwrap_or(std::ptr::null_mut())),
             }
         }
     }
