@@ -9528,6 +9528,15 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(4, 1, 8), torch.randn(4, 6, 8), torch.randn(4, 6, 8)),
         )
 
+    @config.patch(force_pointwise_cat=True)
+    def test_cat_clamped_relative_position(self):
+        def fn(emb, x):
+            pos = torch.arange(x.shape[0], device=x.device)
+            bias = emb[(pos[:, None] - pos[None, :]).clamp(-4, 4) + 4]
+            return torch.cat([bias, x.new_zeros(x.shape[0], 1, emb.shape[1])], 1)
+
+        self.common(fn, (torch.randn(9, 8), torch.randn(32, 8)))
+
     def test_cat_uint8(self):
         def fn(x):
             batch_shape = x.shape[:1]
@@ -14290,7 +14299,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_mps  # Small tolerances bug
     @skip_if_gpu_halide  # slow
     def test_max_pool2d_with_indices_backward2(self):
         def fn(a, b, c):
@@ -14409,7 +14417,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, [torch.randn_like(result), x, indices])
 
     # From https://github.com/pytorch/torchdynamo/issues/1352
-    @xfail_if_mps  # Small tolerances bug
     @skip_if_halide  # hangs forever
     def test_max_pool2d_with_indices_backward4(self):
         def fn(a, b, c):
