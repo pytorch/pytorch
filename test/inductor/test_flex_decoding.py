@@ -27,7 +27,6 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf32_off
 from torch.testing._internal.common_device_type import (
-    skipIf,
     Capability,
     E4M3_MAX_POS,
     e4m3_type,
@@ -37,6 +36,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipCUDAIf,
     skipCUDAIfMIG,
+    skipIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
@@ -2507,7 +2507,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
 
 class TestGetSplitKDeviceRouting(common_utils.TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CUDA
 
     # Regression guard: get_split_k must query the SM count from the kernel's
     # own device via DeviceInterface, not from ambient backend state.
