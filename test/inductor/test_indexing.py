@@ -574,7 +574,7 @@ class TestIndexingSimplificationGeneric(InductorTestCase):
 class TestIndexingSimplificationAccelerator(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_int8_unpack(self, device):
         @torch.compile
         def f(x):
@@ -595,7 +595,7 @@ class TestIndexingSimplificationAccelerator(InductorTestCase):
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
 
-    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_int8_unpack_dynamic_shape(self, device):
         @torch.compile(dynamic=True)
         def f(x):
@@ -613,7 +613,7 @@ class TestIndexingSimplificationAccelerator(InductorTestCase):
         # pointwise-cat view instead of loading from s*x1 + x0//2.
         self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
 
-    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
+    @skipIf(not HAS_TRITON, "requires triton")
     def test_floordiv_div_sympy_is_integer_bug(self, device):
         def foo(arg0, arg1, arg2, arg3, arg4, sentinel):
             t0 = arg0
