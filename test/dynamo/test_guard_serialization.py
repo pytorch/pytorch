@@ -3255,6 +3255,35 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
+    @parametrize("keep_class", [False, True])
+    @parametrize("base", [object, tuple])
+    def test_pinned_class_skips_redundant_dict_lookup(self, keep_class, base):
+        def install(ctx):
+            from torch._dynamo.guards import GuardBuilder, install_guard
+            from torch._dynamo.source import TypeDictSource
+
+            source = LocalSource("cls")
+            install_guard(
+                source.make_guard(GuardBuilder.CLASS_MATCH),
+                TypeDictSource(source).make_guard(
+                    functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key="mro")
+                ),
+            )
+
+        def fn(x, cls):
+            comptime(install)
+            return x + 1
+
+        x = torch.ones(1)
+        kinds = ["DICT_NOT_CONTAINS"]
+        if keep_class:
+            kinds.append("CLASS_MATCH")
+        managers = self._test_serialization(kinds, fn, x, base)
+        for manager in managers:
+            self.assertEqual("DICT_CONTAINS:" in str(manager), not keep_class)
+        for cls, expected in ((base, True), (dict, not keep_class), (type, False)):
+            self._test_check_fn(*managers, {"x": x, "cls": cls}, expected)
+
     @parametrize("reordered", [False, True])
     def test_native_ordered_dict_order(self, reordered):
         def install_order_guard(ctx):
@@ -3842,11 +3871,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
 
         # Check verbose_code_parts from leaf guards (they include hints)
+        checked = 0
+
         def check_leaf_guards(mgr):
+            nonlocal checked
             for guard in mgr.get_leaf_guards():
                 verbose_parts = guard.verbose_code_parts()
                 verbose_str = " ".join(verbose_parts)
-                if "___check_type_id" in verbose_str and "L['m']" in verbose_str:
+                if "___check_type_id(L['m']," in verbose_str:
+                    checked += 1
                     self.assertIn(
                         "HINT: type",
                         verbose_str,
@@ -3873,6 +3906,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 check_leaf_guards(child_mgr)
 
         check_leaf_guards(ref.root)
+        self.assertGreater(checked, 0)
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
@@ -4282,6 +4316,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         class Local:
             pass
 
+        impostor = collections.namedtuple("Point", ["x"], module=__name__)
+        impostor.__qualname__ = _TupleOwner.Point.__qualname__
         cases = [
             (math, True),
             (math.sqrt, True),
@@ -4312,7 +4348,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (Local, False),
             # Its __qualname__ leads to _wrapped_target instead.
             (_wraps_wrapper, False),
-            (_TupleOwner.Point, False),
+            (_TupleOwner.Point, True),
+            (impostor, False),
             # The guard-state pickler refuses a class with a nested metaclass.
             (_WithNestedMeta, False),
             # Bound to the module's Random instance, with no __module__.
@@ -4350,11 +4387,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 return x
             return x + 1
 
-        # The guard-state pickler rebuilds a nested NamedTuple as a fresh class.
-        with self.assertRaisesRegex(
-            PackageError, "CLASS_MATCH guard cannot be serialized."
-        ):
-            self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("CLASS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.object(_TupleOwner, "Point", tuple):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_guarded_user_object_prunes_unguarded_attributes(self):
         def fn(x, holder):

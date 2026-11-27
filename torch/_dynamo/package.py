@@ -519,6 +519,8 @@ class _GuardsStateUnpickler(pickle.Unpickler):
 def load_guards_state(guards_state: bytes) -> Any:
     from torch._subclasses.fake_tensor import unset_fake_temporarily
 
+    from .guards import GuardsState
+
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
 
@@ -529,7 +531,13 @@ def load_guards_state(guards_state: bytes) -> Any:
     # tensors; from_meta_and_device rejects fakes. Other active dispatch modes
     # still apply.
     with ctx, unset_fake_temporarily():
-        return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
+        state = _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
+        # Earlier artifacts recorded no constant-result globals to restore.
+        if isinstance(state, GuardsState) and not hasattr(
+            state.output_graph, "constant_result_names"
+        ):
+            state.output_graph.constant_result_names = set()
+        return state
 
 
 def load_guard_manager(
@@ -1577,9 +1585,8 @@ class CompilePackage:
         # by a loaded artifact's guards -- AOTCompiledFunction._seed_guard_scope
         # seeds those aliases into a live module scope and nothing re-seeds them
         # -- so uninstall() must leave a binding this package did not create
-        # alone. The aliases and the ___unnamed_scope keys _bind_unnamed_scopes
-        # binds are the only names install() records that are ever seeded that
-        # way.
+        # alone. The same ownership rule applies to generated constant-result
+        # names and the ___unnamed_scope keys bound by _bind_unnamed_scopes.
         for alias, module_name in import_sources.items():
             module_obj = importlib.import_module(module_name)
             self._install_global(module, alias, module_obj, record_only_if_new=True)
@@ -1679,6 +1686,9 @@ class CompilePackage:
             guards_state = load_guards_state(guarded_code.guards_state)
         runtime_global_scope = sys.modules[python_module].__dict__
         output_graph = guards_state.output_graph
+        for name in output_graph.constant_result_names:
+            if name not in runtime_global_scope:
+                self._install_global(module, name, output_graph.global_scope[name])
         if builtin_dict_name := output_graph.name_of_builtins_dict_key_in_fglobals:
             _seed_builtins_dict(runtime_global_scope, builtin_dict_name)
         # After the builtins dict above, which a recorded source can be rooted at.
