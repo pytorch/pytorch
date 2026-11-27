@@ -1906,7 +1906,10 @@ class Module:
             for hook_id, hook in _global_forward_hooks.items():
                 if hook_id in _global_forward_hooks_always_called and hook_id not in called_always_called_hooks:  # type: ignore[possibly-undefined]
                     try:
-                        hook_result = hook(self, args, result)  # type: ignore[possibly-undefined]
+                        if hook_id in _global_forward_hooks_with_kwargs:
+                            hook_result = hook(self, args, kwargs, result)  # type: ignore[possibly-undefined]
+                        else:
+                            hook_result = hook(self, args, result)  # type: ignore[possibly-undefined]
                         if hook_result is not None:
                             result = hook_result
                     except Exception as e:

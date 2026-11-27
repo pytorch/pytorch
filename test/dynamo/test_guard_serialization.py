@@ -1073,8 +1073,7 @@ class _NamespaceMeta(type):
     def __getattribute__(cls, name):
         namespace = super().__getattribute__(name)
         if name == "__dict__":
-            namespace = dict(namespace)
-            namespace["__reduce_ex__"] = object.__reduce_ex__
+            return {**namespace, "__reduce_ex__": object.__reduce_ex__}
         return namespace
 
 
@@ -1945,10 +1944,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         unused = {"lock": threading.Lock(), "token": orphan}
         unused["self"] = unused
         backing.private = unused
-        proxy = types.MappingProxyType(backing)
-        unused["proxy"] = proxy
-        scope = {"cfg": cfg, "unused": unused, "get": proxy.get, "proxy": proxy}
-        scope["alias"] = unused
+        proxy = unused["proxy"] = types.MappingProxyType(backing)
+        scope = dict(cfg=cfg, unused=unused, get=proxy.get, proxy=proxy, alias=unused)
         scope["orphan"] = types.MappingProxyType({"consumer": TokenConsumer(orphan)})
         # Registered globals outside the saved scopes are not pickle roots.
         holder = ReducedHolder(2, {})
@@ -1962,31 +1959,41 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         for name in ("lock", "token"):
             self.assertIsInstance(saved["unused"][name], _Missing)
 
-        def copy():
-            return {"nested": [_MappingCallable(cfg)], "rank": backing.copy.call_count}
-
-        backing.copy = mock.Mock(side_effect=copy)
+    @parametrize("proxy_first", [False, True])
+    @parametrize("source", ["list", "instance", "dict"])
+    def test_mapping_proxy_copy_needs_pruned_state(self, proxy_first, source):
+        token = DictionaryToken(value=3, payload=["required"])
+        slot = 0 if source == "list" else "token"
+        items = [token] if source == "list" else {slot: token}
+        consumer = _MappingCallable(items) if source == "dict" else TokenConsumer(token)
+        backing = PlainNamespaceDict()
+        backing.copy = mock.Mock(
+            side_effect=lambda: {"nested": [consumer], "rank": backing.copy.call_count}
+        )
+        proxy = types.MappingProxyType(backing)
+        scope = {"items": items, "proxy": proxy}
+        if source == "instance":
+            scope["token"] = token
+        if proxy_first:
+            scope = {"proxy": proxy, **scope}
         scope["second"] = types.MappingProxyType(backing)
-        with self.assertRaisesRegex(PackageError, "guarded input"):
-            self._roundtrip_pruned(scope, [cfg, unused])
+        dictionaries = [] if source == "list" else [items]
+        error = r"L\['proxy'\] needs pruned (dict|DictionaryToken) state"
+        with self.assertRaisesRegex(PackageError, error):
+            self._roundtrip_pruned(scope, dictionaries)
         backing.copy.assert_called_once_with()
         backing.copy.reset_mock()
-        saved = self._roundtrip_pruned(scope, [cfg, unused], token, token.payload)
+        saved = self._roundtrip_pruned(scope, dictionaries, token, token.payload)
         self.assertEqual((saved["proxy"]["rank"], saved["second"]["rank"]), (1, 2))
-        self.assertIs(saved["get"]("nested")[0].cfg, saved["cfg"])
         self.assertEqual(backing.copy.call_count, 2)
+        restored = saved["proxy"]["nested"][0]
+        if source == "dict":
+            self.assertIs(restored.cfg, saved["items"])
+        else:
+            self.assertIs(restored.token, saved["items"][slot])
+            self.assertEqual(restored.token.payload, ["required"])
 
-    def test_mapping_proxy_copy_needs_pruned_list_item(self):
-        token = DictionaryToken()
-        backing = PlainNamespaceDict()
-        backing.copy = mock.Mock(return_value={"consumer": TokenConsumer(token)})
-        scope = {"items": [token], "proxy": types.MappingProxyType(backing)}
-        with self.assertRaisesRegex(PackageError, "mapping proxy copy needs pruned"):
-            self._roundtrip_pruned(scope, [])
-        saved = self._roundtrip_pruned(scope, [], token)
-        self.assertIs(saved["proxy"]["consumer"].token, saved["items"][0])
-
-    def test_dictionary_pruning_does_not_call_metaclass_equality(self):
+    def test_state_traversal_bypasses_user_attribute_lookup_and_equality(self):
         class Meta(type):
             def __eq__(cls, other):
                 raise AssertionError("Pickle protocol lookup must not compare classes")
@@ -1995,26 +2002,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 return hash(PlainNamespaceDict)
 
         class Mapping(dict, metaclass=Meta):
-            pass
+            @property
+            def __class__(self):
+                raise AssertionError("Required-state traversal must not read __class__")
 
         mapping, plain = Mapping(), PlainNamespaceDict()
+        mapping.state = [{"saved": _Mode.FAST}]
         pickler = GuardsStatePickler({}, {}, {}, {}, io.BytesIO())
         with mock.patch.dict(copyreg.dispatch_table, {Mapping: tuple}):
             pickler.prune_scopes({}, {}, [mapping, plain])
         self.assertNotIn(id(mapping), pickler._pruned_dictionary_ids)
         self.assertIn(id(plain), pickler._pruned_dictionary_ids)
-
-    def test_required_state_traversal_does_not_read_class_property(self):
-        class Key:
-            @property
-            def __class__(self):
-                raise AssertionError("Required-state traversal must not read __class__")
-
-        key = Key()
-        key.state = [{"saved": _Mode.FAST}]
-        pickler = GuardsStatePickler({id(key): key}, {}, {}, {}, io.BytesIO())
-        pickler._retain_required_state({key: "saved"})
-        for value in (key, key.state, key.state[0], _Mode.FAST):
+        pickler._retain_required_state((mapping,))
+        for value in (mapping, mapping.state, mapping.state[0], _Mode.FAST):
             self.assertIs(pickler._whole_compared_values[id(value)], value)
 
     hw_classification = HardwareClassification.GENERIC
@@ -3659,31 +3659,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
         check(inputs, True)
         return check
 
-    def test_annotation_aliases_unguarded_module_attribute(self):
-        def fn(x, m):
-            return m.linear(x)
+    def test_saved_constructor_and_annotation_aliases(self):
+        def fn(x, m, items, holder):
+            return m.linear(x) + items[1] + holder.weight
 
+        first, second, direct = (DictionaryToken() for _ in range(3))
+        holder = DictionaryToken(weight=3, cb=TokenConsumer(first).__reduce_ex__)
         m = GlobalNestedModule()
         m.stages = [0, 1]
-        inputs = {"x": torch.ones(1, 10), "m": m}
+        items = [first, 5, second, direct]
+        inputs = dict(x=torch.ones(1, 10), m=m, items=items, holder=holder)
         with torch.fx.traceback.annotate({"stages": m.stages}):
             check = self._roundtrip_checks(("TYPE_MATCH", "FX_ANNOTATION"), fn, inputs)
         check(inputs, False)
-
-    def test_list_leaf_alias_in_saved_constructor(self):
-        def fn(x, items, holder):
-            return x + items[1] + holder.weight
-
-        first, second = DictionaryToken(), DictionaryToken()
-        holder = DictionaryToken(weight=3, cb=TokenConsumer(first).__reduce_ex__)
-        with torch.fx.traceback.annotate({"consumer": TokenConsumer(second)}):
-            self._test_serialization(
-                "CONSTANT_MATCH", fn, torch.ones(1), [first, 5, second], holder
-            )
+        annotation = {"consumer": TokenConsumer(second), "token": direct}
+        with torch.fx.traceback.annotate(annotation):
+            self._test_serialization("CONSTANT_MATCH", fn, **inputs)
         graph = load_guards_state(self._cached_guards_state).output_graph
         items = graph.local_scope["items"]
         self.assertIs(graph.local_scope["holder"].cb.__self__.token, items[0])
         self.assertIs(graph.fx_annotation["consumer"].token, items[2])
+        self.assertIs(graph.fx_annotation["token"], items[3])
 
     @parametrize("helper_type", [DictionaryToken, ReducedHolder, TokenConsumer])
     @parametrize("mapping_type", [dict, collections.defaultdict])
@@ -3796,25 +3792,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # The walk pops cb first, while its dictionary alias still looks prunable.
         parent.cfg = {"cb": global_func}
         parent.cb = global_func
-        inputs = {
-            "x": torch.ones(1),
-            "cfg": cfg,
-            "keyed": {_Mode.FAST: 0},
-            "items": [helper, 5, global_func, global_add],
-            "parent": parent,
-        }
+        items = [helper, 5, global_func, global_add]
+        inputs = dict(
+            x=torch.ones(1), cfg=cfg, keyed={_Mode.FAST: 0}, items=items, parent=parent
+        )
         kinds = ("DICT_KEYS_MATCH", "CONSTANT_MATCH")
         check = self._roundtrip_checks(kinds, fn, inputs)
         scope = self._saved_scope
         self.assertIs(scope["parent"].cb, global_func)
         self.assertIs(scope["parent"].cfg["cb"], global_func)
-        self.assertIsInstance(scope["items"][3], _Missing)
+        for item in (scope["items"][0], scope["items"][3]):
+            self.assertIsInstance(item, _Missing)
         saved = scope["cfg"]
         self.assertIs(saved["alias"], next(iter(scope["keyed"])))
         check({**inputs, "keyed": {_Mode.SLOW: 0}}, False)
         self.assertIsInstance(saved["inner"]["lock"], _Missing)
         self.assertIsInstance(saved["opts"][1], _Missing)
-        self.assertIsInstance(scope["items"][0], _Missing)
         cfg["inner"]["guarded"] += 1
         check(inputs, False)
 
@@ -3822,9 +3815,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         "consumer_type",
         [_PayloadConsumer, _NewConsumer, _RegisteredConsumer, _DynamicConsumer],
     )
-    def test_custom_constructor_keeps_independently_guarded_arguments(
-        self, consumer_type
-    ):
+    def test_custom_constructor_keeps_guarded_arguments(self, consumer_type):
         def fn(x, consumer, token):
             return x + consumer.scale + token.scale
 
@@ -5282,9 +5273,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         "mapping_type",
         [_ODictSubclass, _ODictNoKeys, _DictStateLookup, _DictStateGetattr],
     )
-    def test_implicit_dictionary_bystander_keeps_shared_subclass_state(
-        self, mapping_type
-    ):
+    def test_implicit_dictionary_keeps_shared_subclass_state(self, mapping_type):
         def fn(x, owner, other):
             return x + len(owner), tuple(other)
 

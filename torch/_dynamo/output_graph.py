@@ -904,6 +904,7 @@ class OutputGraph(OutputGraphCommon):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache: dict[Source, VariableTracker] = {}
+        self.created_enum_classes: dict[int, type] = {}
         # The concrete input type can differ from a tracker's modeled CPython type.
         self.source_types: dict[Source, type] = {}
         # Cache for sources resolved via MRO walk, keyed by (id(owning class),

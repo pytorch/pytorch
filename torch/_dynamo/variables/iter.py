@@ -43,6 +43,7 @@ from ..source import (
     is_from_local_source,
     is_from_skip_guard_source,
     LocalSource,
+    TempLocalSource,
 )
 from ..utils import raise_args_mismatch, tracked_repr, unpack_iterable
 from .base import Method, ValueMutationExisting, ValueMutationNew, VariableTracker
@@ -72,6 +73,7 @@ _REPEAT_SIGNATURE = inspect.Signature(
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._guards import Source
 
 
 MAX_ITERATOR_LIMIT = 100 * 1024  # 100k
@@ -997,17 +999,46 @@ class DictViewIterator(IteratorVariable):
         from .dicts import ConstDictVariable, DunderDictVariable
         from .sets import BaseSetVariable
 
-        if not container.source:
-            # Reconstructing a new object's namespace emits a copy of its entries.
-            return (
-                "new instance namespace"
-                if isinstance(container, DunderDictVariable)
-                else None
-            )
+        def guard_distinct(left: "Source", right: "Source") -> str | None:
+            if _method_identity_guards_filtered(tx) or any(
+                is_from_skip_guard_source(s)
+                or not (is_from_local_source(s) or is_from_global_source(s))
+                for s in (left, right)
+            ):
+                return f"cannot guard against an alias of {right.name}"
+            check = functools.partial(GuardBuilder.NOT_DUPLICATE_INPUT, source_b=right)
+            install_guard(left.make_guard(check))
+            return None
+
         # Stack reconstruction precedes replay of mutations to a live input.
         side_effects = tx.output.side_effects
+        if not container.source:
+            if isinstance(container, DunderDictVariable):
+                # Reconstructing a new object's namespace emits a copy of its entries.
+                return "new instance namespace"
+            mutations = side_effects.store_attr_mutations
+            bindings = (variables.CellVariable, variables.NewGlobalVariable)
+            for owner, attrs in mutations.items():
+                if attrs.get("__dict__") is not container or isinstance(
+                    owner, bindings
+                ):
+                    continue
+                # A write to another input can target this namespace on a cache hit.
+                for target, writes in mutations.items():
+                    if writes.keys() <= {"__dict__"} or isinstance(target, bindings):
+                        continue
+                    if owner is target:
+                        return "pending attribute write to a rebound instance namespace"
+                    left, right = owner.source, target.source
+                    if not left or not right:
+                        continue
+                    if any(isinstance(s, TempLocalSource) for s in (left, right)):
+                        continue
+                    if reason := guard_distinct(left, right):
+                        return reason
+            return None
         if side_effects.is_modified(container):
-            return f"pending mutation of {container.source}"
+            return f"pending mutation of {container.source.name}"
         if issubclass(container.python_type(), dict):
             # A dict input can alias an instance namespace or the globals on a cache hit.
             for var, attrs in side_effects.store_attr_mutations.items():
@@ -1029,9 +1060,9 @@ class DictViewIterator(IteratorVariable):
                     elif type(src) is GlobalSource:
                         binding = frame.f_globals.get(src.global_name)
                     else:
-                        return f"cannot exclude an alias of {src}"
+                        return f"cannot exclude an alias of {src.name}"
                     if type(binding) is not dict or binding is namespace:
-                        return f"possible alias of modified mapping {src}"
+                        return f"possible alias of modified mapping {src.name}"
         else:
             modified_sources = (
                 var.source
@@ -1043,15 +1074,8 @@ class DictViewIterator(IteratorVariable):
                 and var.source is not None
             )
         for source in modified_sources:
-            sources = (container.source, source)
-            if _method_identity_guards_filtered(tx) or any(
-                is_from_skip_guard_source(s)
-                or not (is_from_local_source(s) or is_from_global_source(s))
-                for s in sources
-            ):
-                return f"cannot guard against an alias of {source}"
-            check = functools.partial(GuardBuilder.NOT_DUPLICATE_INPUT, source_b=source)
-            install_guard(container.make_guard(check))
+            if reason := guard_distinct(container.source, source):
+                return reason
         return None
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -1070,7 +1094,7 @@ class DictViewIterator(IteratorVariable):
                 context=reason,
                 explanation="Rebuilding the iterator could change its backing container or the mutations it observes.",
                 hints=[
-                    "Keep iterator creation and consumption in the same region, or create the iterator in eager code.",
+                    "Consume the iterator before returning or reaching a graph break, or create it outside torch.compile.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )

@@ -1091,11 +1091,24 @@ class SideEffects:
         # Avoid VT cycles from e.g., recursive function.
         visited: set[VariableTracker] = set()
         live_new_objects: set[VariableTracker] = set()
+        # Writes to a new object remain observable through its assigned __dict__.
+        namespace_owners: dict[VariableTracker, list[VariableTracker]] = {}
+        for owner, attrs in self.store_attr_mutations.items():
+            if (
+                isinstance(owner.mutation_type, AttributeMutationNew)
+                and len(attrs) > 1
+                and "__dict__" in attrs
+            ):
+                namespace_owners.setdefault(attrs["__dict__"].unwrap(), []).append(
+                    owner
+                )
 
         def visit(var: VariableTracker) -> None:
             if var in visited:
                 return
             visited.add(var)
+            if var in namespace_owners:
+                VariableTracker.visit(visit, namespace_owners[var])  # noqa: F821
             # Object may have been mutated, store this mutation.
             if isinstance(var.mutation_type, AttributeMutationNew):
                 live_new_objects.add(var)
@@ -1333,7 +1346,7 @@ class SideEffects:
                     )
                 if var.mutation_type.cls_source is None:
                     if type(var) is variables.OrderedDictVariable:
-                        var.unsupported_instance_state("returning a local OrderedDict")
+                        var.unsupported_instance_state("OrderedDict reconstruction")
                     unimplemented(
                         gb_type="Reconstruct user defined class without a source",
                         context=f"Class: {var.python_type().__name__}",
