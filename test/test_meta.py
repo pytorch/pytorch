@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
     xfailIfTorchDynamo,
-    skipIfXpu,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -1598,10 +1597,9 @@ class TestMeta(_TestMetaBase):
 
 
 @unMarkDynamoStrictTest
-class TestMetaCudaRef(_TestMetaBase):
-    # Tests whose reference stride/output comes from the CUDA kernel, so the
-    # whole class is restricted to CUDA via only_for='cuda'.
-    hw_classification = HardwareClassification.CUDA
+class TestMetaDeviceType(_TestMetaBase):
+    # Tests whose reference stride/output comes from the accelerator kernel.
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfCrossRef
     @suppress_warnings
@@ -1724,7 +1722,7 @@ class TestMetaCore(TestCase):
     # Device-agnostic meta tests. Tests here may use the CPU eager kernel as the
     # reference; CPU is treated as the baseline device, not a hardware-specific
     # accelerator, so a CPU reference does not couple these tests to hardware.
-    # CUDA-referenced tests live in TestMetaCudaRef instead.
+    # Accelerator-referenced tests live in TestMetaDeviceType instead.
     hw_classification = HardwareClassification.GENERIC
 
     def test_empty_quantized(self):
@@ -2699,7 +2697,6 @@ class TestMetaKernelRegistrations(TestCase):
             )
             self.assertEqual(result, expected)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181490")
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -3043,7 +3040,7 @@ class TestMetaKernelRegistrations(TestCase):
 
 
 instantiate_device_type_tests(TestMeta, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestMetaDeviceType, globals(), except_for=("cpu",), allow_xpu=True)
 
 
 def print_op_str_if_not_supported(op_str):

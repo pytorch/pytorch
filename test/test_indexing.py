@@ -1201,6 +1201,7 @@ class TestIndexingDevice(TestCase):
 
     @onlyAccelerator
     @parametrize("accumulate", [False, subtest(True, decorators=[expectedFailureMPS])])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6084")  # fmt: skip
     def test_index_put_sorted_contiguous_size_one_stride(self, device, accumulate):
         # A size-1 dim may carry any stride and the tensor is still contiguous.
         # The sort-based kernel (used for accumulate=True and in deterministic
@@ -2133,7 +2134,16 @@ class TestIndexingDevice(TestCase):
             torch.uint64,
         )
     )
-    @dtypesIfXPU(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfXPU(
+        *all_types_complex_float8_and(
+            torch.half,
+            torch.bool,
+            torch.bfloat16,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
