@@ -1936,9 +1936,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         self.assertFalse(st_cuda is st)
         self.assertEqual(st_cuda.dtype, torch.float16)
 
-        cuda_tensor = torch.randn(
-            3, 4, dtype=torch.float16, device=f"{device_type}:2"
-        )
+        cuda_tensor = torch.randn(3, 4, dtype=torch.float16, device=f"{device_type}:2")
         st_cuda = st.to(cuda_tensor)
         self.assertEqual(st_cuda.dtype, torch.float16)
 
