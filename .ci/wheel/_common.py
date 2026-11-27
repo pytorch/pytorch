@@ -49,7 +49,9 @@ _BASH_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 #
 # Keep in sync with the numpy case in .ci/wheel/linux/build_common.sh, which
 # serves the s390x build -- the one Linux arch that does not run this
-# pipeline.
+# pipeline. Also check .ci/pytorch/windows/arm64/requirements-build-constraints.txt
+# when bumping these pins; ARM64 uses newer NumPy for Python 3.11-3.13 because
+# the x64 pins have no Windows ARM64 wheels.
 NUMPY_PINS: dict[str, str] = {
     "3.11": "2.0.2",
     "3.12": "2.0.2",

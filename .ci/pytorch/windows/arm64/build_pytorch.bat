@@ -41,7 +41,7 @@ where python
 :: python install dependencies
 python -m pip install --upgrade pip
 if errorlevel 1 exit /b 1
-python -m pip install --only-binary=numpy -c "%~dp0requirements-build-constraints.txt" -r requirements.txt
+python -m pip install --only-binary=numpy -c "%PYTORCH_ROOT%\.ci\pytorch\windows\arm64\requirements-build-constraints.txt" -r requirements.txt
 if errorlevel 1 exit /b 1
 :: DISTUTILS_USE_SDK should be set after psutil dependency
 set DISTUTILS_USE_SDK=1

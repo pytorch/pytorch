@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 # Install the Python.org Python requested by $DESIRED_PYTHON and expose
-# it on PATH for the subsequent build_env_setup.py / build_install_deps.py /
-# build_wheel.py invocations.
+# it on PATH for the x64 wheel pipeline and ARM64 build/test batch scripts.
 #
 # Windows analog of `.ci/wheel/linux/set_desired_python.sh`. The Linux variant
 # just prepends a manylinux-image-shipped /opt/python/cpXY/bin to PATH; the
@@ -58,8 +57,8 @@ fi
 # minor on its oldest, CVE-laden release. Security-only minors (3.11-3.12)
 # are pinned to their last release that shipped a Windows installer; later
 # patches are source-only and 404. Bugfix minors (3.13+) point at the
-# current newest installer and should be bumped here deliberately. Keep this
-# in sync with the matrix in generated-windows-binary-wheel-nightly.yml.
+# current newest installer and should be bumped here deliberately. This table
+# serves both generated Windows binary workflows and win-arm64-build-test.yml.
 case "$PYTHON_BASE" in
     3.11) PYTHON_FULL="3.11.9" ;;
     3.12) PYTHON_FULL="3.12.10" ;;
@@ -117,7 +116,7 @@ for ((i = 1; i <= attempts; i++)); do
     # cleanup. PowerShell's Start-Process -Wait blocks for the process
     # *and its descendants*, matching what `start /wait` did in the
     # legacy cmd-native chain.
-    if curl --retry 3 -fkL "$PYTHON_INSTALLER_URL" --output "$INSTALLER" \
+    if curl --retry 3 -fL "$PYTHON_INSTALLER_URL" --output "$INSTALLER" \
         && powershell -NoProfile -NonInteractive -Command \
             "\$p = Start-Process -FilePath '${INSTALLER_W}' -ArgumentList ${PS_INSTALL_ARGS} -Wait -NoNewWindow -PassThru; exit \$p.ExitCode"
     then

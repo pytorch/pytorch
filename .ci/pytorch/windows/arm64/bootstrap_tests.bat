@@ -16,10 +16,10 @@ where python
 :: install dependencies
 python -m pip install --upgrade pip
 if errorlevel 1 exit /b 1
-python -m pip install --only-binary=numpy -c "%~dp0requirements-build-constraints.txt" -r requirements.txt pytest protobuf expecttest hypothesis
+python -m pip install --only-binary=numpy -c "%PYTORCH_ROOT%\.ci\pytorch\windows\arm64\requirements-build-constraints.txt" -r requirements.txt pytest protobuf expecttest hypothesis
 if errorlevel 1 exit /b 1
 
 :: find file name for pytorch wheel
 for /f "delims=" %%f in ('dir /b "%PYTORCH_FINAL_PACKAGE_DIR%" ^| findstr "torch-"') do set "TORCH_WHEEL_FILENAME=%PYTORCH_FINAL_PACKAGE_DIR%\%%f"
 
-python -m pip install -c "%~dp0requirements-build-constraints.txt" "%TORCH_WHEEL_FILENAME%"
+python -m pip install -c "%PYTORCH_ROOT%\.ci\pytorch\windows\arm64\requirements-build-constraints.txt" "%TORCH_WHEEL_FILENAME%"
