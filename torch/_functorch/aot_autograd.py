@@ -916,6 +916,7 @@ def autograd_cache_key(
     compiler_config_extra: CompilerConfigExtra,
     keep_inference_input_mutations: bool = False,
     disable_functionalization: bool = False,
+    preserve_tangent_layout: bool = False,
 ):
     (
         _params_buffers_flat,
@@ -932,6 +933,7 @@ def autograd_cache_key(
         ignore_shape_env,
         force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
         disable_functionalization=disable_functionalization,
+        preserve_tangent_layout=preserve_tangent_layout,
     )
 
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
@@ -954,6 +956,7 @@ def prepare_aot_config(
     force_non_lazy_backward_lowering: bool = False,
     disable_functionalization: bool = False,
     _disable_torch_fn_metadata_mode: bool = False,
+    preserve_tangent_layout: bool = False,
 ) -> tuple[
     list[torch.nn.Parameter | Tensor],
     list[str],
@@ -1029,6 +1032,7 @@ def prepare_aot_config(
         ignore_shape_env=ignore_shape_env,
         precompile_backend_id=getattr(mod, "_backend_id", None),
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
+        preserve_tangent_layout=preserve_tangent_layout,
         disable_functionalization=disable_functionalization,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
@@ -1056,6 +1060,7 @@ def prepare_aot_module_simplified(
     disable_functionalization: bool = False,
     _record_nn_module_stack: bool = False,
     _disable_torch_fn_metadata_mode: bool = False,
+    preserve_tangent_layout: bool = False,
 ) -> tuple[
     Any,
     list[torch.nn.Parameter | Tensor],
@@ -1092,6 +1097,7 @@ def prepare_aot_module_simplified(
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
         disable_functionalization=disable_functionalization,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
+        preserve_tangent_layout=preserve_tangent_layout,
     )
 
     params_buffers_spec = params_spec + buffers_spec
@@ -1162,6 +1168,7 @@ def aot_module_simplified(
     ]
     | None = None,
     compile_region_name: str | None = None,
+    preserve_tangent_layout: bool = False,
 ) -> Callable[..., Any]:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1207,7 +1214,14 @@ def aot_module_simplified(
             flatten=False,
             force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
             disable_functionalization=disable_functionalization,
+            preserve_tangent_layout=preserve_tangent_layout,
         )
+
+        if preserve_tangent_layout:
+            # Cache hits must retain a compiler for later tangent layouts.
+            aot_config = dataclasses.replace(
+                aot_config, bw_compiler=bw_compiler or fw_compiler
+            )
 
         compiled_fn = None
 

@@ -347,6 +347,127 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch(
+        {"strict_pointwise": True, "compile_threads": 1, "fx_graph_cache": True}
+    )
+    def test_backward_tangent_layout_reshape_cache(self):
+        def fn(x):
+            return x.reshape(3, 4).sin()
+
+        upstream = torch.arange(12, dtype=torch.float32).reshape(4, 3).t()
+        for round_idx in range(2):
+            if round_idx:
+                self._clear_dynamo_and_codecache()
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            for grad in (
+                upstream,
+                upstream.contiguous(),
+                upstream,
+                upstream.contiguous(),
+            ):
+                x = torch.arange(12, dtype=torch.float32).requires_grad_()
+                expected = torch.autograd.grad(fn(x), x, grad)
+                actual = torch.autograd.grad(compiled(x), x, grad)
+                self.assertEqual(actual, expected)
+        self.assertGreaterEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        strict_pointwise=True, compile_threads=1, fx_graph_cache=True
+    )
+    @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
+    def test_backward_tangent_layout_unbacked_cache(self):
+        def fn(x):
+            return x[x > 0]
+
+        for round_idx in range(2):
+            if round_idx:
+                self._clear_dynamo_and_codecache()
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            for values in ((-2.0, 3.0, 4.0, -1.0), (-2.0, 3.0, 4.0, 5.0)) * 2:
+                for dense in (False, True):
+                    x = torch.tensor(values, requires_grad=True)
+                    expected_output = fn(x)
+                    grad = torch.ones(1).expand(expected_output.numel())
+                    if dense:
+                        grad = grad.contiguous()
+                    expected = torch.autograd.grad(expected_output, x, grad)
+                    actual = torch.autograd.grad(compiled(x), x, grad)
+                    self.assertEqual(actual, expected)
+        self.assertGreaterEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {"fx_graph_cache": True, "fx_graph_remote_cache": False, "compile_threads": 1}
+    )
+    @parametrize("dynamic", (False, True))
+    @parametrize("preserve", (False, True))
+    def test_backward_tangent_layout_variants(self, dynamic, preserve):
+        from torch._functorch._aot_autograd import runtime_wrappers
+
+        def fn(x):
+            return x * x + x, x + x
+
+        compile_backward = runtime_wrappers._AutogradBackwardCompiler._compile_backward
+        compiled_layouts = []
+
+        def record_compile(compiler, inputs, signature=None):
+            compiled_layouts.append(
+                tuple((tuple(t.shape), tuple(t.stride())) for t in inputs[-2:])
+            )
+            return compile_backward(compiler, inputs, signature)
+
+        calls = ((4, 0), (4, 1), (4, 0), (4, 1))
+        if dynamic:
+            calls = ((4, 0), (4, 1), (7, 0), (7, 1), (4, 0), (4, 1))
+        with (
+            patch.object(
+                runtime_wrappers._AutogradBackwardCompiler,
+                "_compile_backward",
+                record_compile,
+            ),
+            inductor_config.patch(strict_pointwise=preserve),
+        ):
+            for round_idx in range(2):
+                if round_idx:
+                    self._clear_dynamo_and_codecache()
+                compiled_fn = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    dynamic=dynamic,
+                )
+                for call_idx, (n, stride) in enumerate(calls):
+                    x = torch.arange(n, dtype=torch.float32).requires_grad_()
+                    g = torch.ones(1).expand(n)
+                    if stride:
+                        g = g.contiguous()
+                    grads = (g, torch.full((n,), 2.0))
+                    expected = torch.autograd.grad(fn(x), x, grad_outputs=grads)
+                    outputs = compiled_fn(x)
+                    with inductor_config.patch(strict_pointwise=False):
+                        actual = torch.autograd.grad(outputs, x, grad_outputs=grads)
+                    self.assertEqual(actual, expected)
+                    if call_idx == len(calls) - 3:
+                        compile_count = len(compiled_layouts)
+                self.assertEqual(len(compiled_layouts), compile_count)
+
+        self.assertGreaterEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+        if preserve:
+            self.assertIn((((4,), (0,)), ((4,), (1,))), compiled_layouts)
+            # Initial lowering can already provide the contiguous variant.
+            if dynamic:
+                self.assertIn((((7,), (0,)), ((7,), (1,))), compiled_layouts)
+                self.assertIn((((7,), (1,)), ((7,), (1,))), compiled_layouts)
+        else:
+            self.assertTrue(
+                all(stride == (1,) for ts in compiled_layouts for _, stride in ts)
+            )
+
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
         {
             "fx_graph_cache": True,
             "fx_graph_remote_cache": False,
@@ -3801,6 +3922,229 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
     pass
+
+
+@instantiate_parametrized_tests
+class AOTAutogradArtifactTests(InductorTestCase):
+    @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
+    @parametrize("mutate", (False, True))
+    def test_backward_tangent_layout_unbacked(self, mutate):
+        from functorch.compile import make_boxed_func
+        from torch._functorch._aot_autograd import runtime_wrappers
+
+        class MutatingBackward(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                mask = x > 0
+                ctx.save_for_backward(x, mask)
+                return x[mask]
+
+            @staticmethod
+            def backward(ctx, grad):
+                x, mask = ctx.saved_tensors
+                x.add_(1)
+                return torch.zeros_like(x).masked_scatter(mask, grad)
+
+        def fn(x):
+            return MutatingBackward.apply(x) if mutate else x[x > 0]
+
+        def backend(gm, inputs):
+            return aot_autograd.aot_module_simplified(
+                gm,
+                inputs,
+                fw_compiler=lambda gm, inputs: make_boxed_func(gm.forward),
+                bw_compiler=lambda gm, inputs: make_boxed_func(gm.forward),
+                preserve_tangent_layout=True,
+            )
+
+        compile_backward = runtime_wrappers._AutogradBackwardCompiler._compile_backward
+        layouts = []
+
+        def record_compile(compiler, inputs, signature=None):
+            layouts.append((tuple(inputs[-1].shape), tuple(inputs[-1].stride())))
+            return compile_backward(compiler, inputs, signature)
+
+        with patch.object(
+            runtime_wrappers._AutogradBackwardCompiler,
+            "_compile_backward",
+            record_compile,
+        ):
+            compiled = torch.compile(fn, backend=backend, fullgraph=True)
+            if mutate:
+                x = torch.tensor([-2.0, 3.0, 4.0, -1.0], requires_grad=True)
+                before = x.detach().clone()
+                with self.assertRaisesRegex(RuntimeError, "input aliasing changed"):
+                    torch.autograd.grad(compiled(x), x, x.detach()[1:3])
+                self.assertEqual(x, before)
+            for values in ((-2.0, 3.0, 4.0, -1.0), (-2.0, 3.0, 4.0, 5.0)) * 2:
+                for dense in (False, True):
+                    x = torch.tensor(values, requires_grad=True)
+                    reference = x.detach().clone().requires_grad_()
+                    expected_output = fn(reference)
+                    grad = torch.ones(1).expand(expected_output.numel())
+                    if dense:
+                        grad = grad.contiguous()
+                    expected = torch.autograd.grad(expected_output, reference, grad)
+                    actual = torch.autograd.grad(compiled(x), x, grad)
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(x, reference)
+            self.assertEqual(
+                layouts, [((2,), (0,)), ((2,), (1,)), ((3,), (0,)), ((3,), (1,))]
+            )
+
+    @parametrize("preserve", (False, True))
+    @parametrize("reshape", (False, True))
+    def test_backward_tangent_layout_bound_method_compiler(self, preserve, reshape):
+        for eager in (False, True):
+            backward_compiles = []
+
+            def compiler(gm, inputs):
+                return gm.forward
+
+            def backward_compiler(gm, inputs):
+                backward_compiles.append(gm.forward)
+                return gm.forward
+
+            x = torch.arange(12 if reshape else 4, dtype=torch.float32).requires_grad_()
+            gm = torch.fx.symbolic_trace(
+                (lambda x: (x.reshape(3, 4).sin(),))
+                if reshape
+                else (lambda x: (x * x,))
+            )
+            upstream = (
+                torch.arange(12, dtype=torch.float32).reshape(4, 3).t()
+                if reshape
+                else torch.ones(1).expand(4)
+            )
+            with functorch_config.patch(force_non_lazy_backward_lowering=eager):
+                compiled = aot_autograd.aot_module_simplified(
+                    gm,
+                    [x],
+                    fw_compiler=compiler,
+                    bw_compiler=backward_compiler,
+                    preserve_tangent_layout=preserve,
+                )
+                for stride in (0, 1, 0, 1):
+                    grad = upstream.contiguous() if stride else upstream
+                    expected = torch.autograd.grad(gm(x)[0], x, grad)
+                    (actual,) = torch.autograd.grad(compiled(x)[0], x, grad)
+                    self.assertEqual(actual, expected[0])
+            self.assertEqual(len(backward_compiles), 2 if preserve else 1)
+
+    @parametrize("compiled_autograd", (None, "raw", "eager"))
+    def test_backward_tangent_layout_saved_input_mutation(self, compiled_autograd):
+        class MutatingBackward(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone().reshape(3, 4)
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                x.add_(1)
+                return grad.reshape(12) * 2
+
+        def mutating_forward(x):
+            return MutatingBackward.apply(x)
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("x")
+        out = graph.call_function(mutating_forward, (inp,))
+        graph.output((out,))
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        def ca_compiler(gm):
+            return (
+                gm.forward
+                if compiled_autograd == "raw"
+                else torch.compile(gm, backend="eager", fullgraph=False)
+            )
+
+        x = torch.arange(12, dtype=torch.float32).requires_grad_()
+        compiled = aot_autograd.aot_module_simplified(
+            gm,
+            [x],
+            fw_compiler=lambda gm, inputs: gm.forward,
+            bw_compiler=lambda gm, inputs: gm.forward,
+            preserve_tangent_layout=True,
+        )
+        upstream = torch.arange(12, dtype=torch.float32).reshape(4, 3).t()
+        for grad in (upstream, upstream.contiguous()):
+            reference = x.detach().clone().requires_grad_()
+            expected = torch.autograd.grad(gm(reference)[0], reference, grad)
+            with (
+                torch._dynamo.compiled_autograd._enable(ca_compiler)
+                if compiled_autograd
+                else contextlib.nullcontext()
+            ):
+                actual = torch.autograd.grad(compiled(x)[0], x, grad)
+            self.assertEqual(actual, expected)
+            self.assertEqual(x, reference)
+
+        x = torch.arange(12, dtype=torch.float32).requires_grad_()
+        before = x.detach().clone()
+        with (
+            torch._dynamo.compiled_autograd._enable(ca_compiler)
+            if compiled_autograd
+            else contextlib.nullcontext(),
+            patch.object(
+                autograd_cache,
+                "sync_cache_decision_cross_ranks",
+                wraps=autograd_cache.sync_cache_decision_cross_ranks,
+            ) as sync_aliases,
+            self.assertRaisesRegex(RuntimeError, "input aliasing changed"),
+        ):
+            torch.autograd.grad(compiled(x)[0], x, x.detach().reshape(4, 3).t())
+        sync_aliases.assert_called_once_with(False)
+        self.assertEqual(x, before)
+
+        # A valid local contract must also reject an invalid peer's aliases.
+        with (
+            torch._dynamo.compiled_autograd._enable(ca_compiler)
+            if compiled_autograd
+            else contextlib.nullcontext(),
+            patch.object(
+                autograd_cache, "sync_cache_decision_cross_ranks", return_value=False
+            ) as sync_aliases,
+            self.assertRaisesRegex(RuntimeError, "input aliasing changed"),
+        ):
+            torch.autograd.grad(compiled(x)[0], x, upstream)
+        sync_aliases.assert_called_once_with(True)
+        self.assertEqual(x, before)
+
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch({"compile_threads": 1})
+    @parametrize("bundled", (False, True))
+    @parametrize("preserve", (False, True))
+    def test_backward_tangent_layout_standalone_artifact(self, bundled, preserve):
+        import tempfile
+
+        from torch._inductor.standalone_compile import standalone_compile
+
+        x = torch.arange(4, dtype=torch.float32).requires_grad_()
+        gm = torch.fx.symbolic_trace(lambda x: (x * x + x,))
+        with inductor_config.patch(strict_pointwise=preserve):
+            artifact = standalone_compile(
+                gm,
+                [x],
+                dynamic_shapes="from_example_inputs",
+                options={},
+                aot=bundled,
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "artifact")
+            artifact_format = "binary" if bundled else "unpacked"
+            artifact.save(path=path, format=artifact_format)
+            loaded = type(artifact).load(path=path, format=artifact_format)
+            (grad,) = torch.autograd.grad(loaded(x)[0], x, torch.ones(4))
+            self.assertEqual(grad, x.detach() * 2 + 1)
+            if preserve:
+                with self.assertRaisesRegex(RuntimeError, "no compiled variant"):
+                    torch.autograd.grad(loaded(x)[0], x, torch.ones(1).expand(4))
+            else:
+                (grad,) = torch.autograd.grad(loaded(x)[0], x, torch.ones(1).expand(4))
+                self.assertEqual(grad, x.detach() * 2 + 1)
 
 
 @dataclasses.dataclass
