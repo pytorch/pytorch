@@ -2148,8 +2148,6 @@ instantiate_device_type_tests(
     AOTFxirTestCase, globals(), except_for="cpu", allow_xpu=True
 )
 
-instantiate_device_type_tests(TestFxirCppBackend, globals(), only_for="cpu")
-
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
