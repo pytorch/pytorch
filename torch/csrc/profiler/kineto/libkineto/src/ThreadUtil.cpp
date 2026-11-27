@@ -216,8 +216,8 @@ std::string processName([[maybe_unused]] int32_t pid) {
 #ifdef __linux__
   std::ifstream cmdfile(fmt::format("/proc/{}/cmdline", pid));
   std::string command;
-  // cmdline is NUL-separated: the first field is executable name.
-  if (std::getline(cmdfile, command, '\0') && !command.empty()) {
+  // Rewritten process titles may include arguments in the first cmdline field.
+  if (cmdfile >> command) {
     return basename(command.c_str());
   }
   // NOLINTNEXTLINE(performance-avoid-endl)
