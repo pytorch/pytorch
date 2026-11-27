@@ -1,4 +1,3 @@
-#include <c10/core/impl/GPUTrace.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUFunctions.h>
@@ -292,7 +291,6 @@ c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device) {
 // `ext_oneapi_device_wait` is widely deployed across all supported platforms,
 // deprecate syncStreamsOnDevice and route callers to device_synchronize.
 void device_synchronize(c10::DeviceIndex device) {
-#if SYCL_COMPILER_VERSION >= 20260100
   initDevicePoolCallOnce();
   if (device == -1) {
     device = c10::xpu::current_device();
@@ -303,12 +301,6 @@ void device_synchronize(c10::DeviceIndex device) {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_device_synchronization(c10::kXPU);
   }
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "device_synchronize is not supported for the current SYCL compiler version. ",
-      "Please upgrade to SYCL compiler version 2026.1 or newer.");
-#endif
 }
 
 } // namespace c10::xpu

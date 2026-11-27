@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/boxing/BoxedKernel.h>
 #include <c10/core/Device.h>
 #include <c10/macros/Export.h>
 
@@ -8,6 +9,7 @@
 namespace c10 {
 struct FakeTensorMode;
 struct TensorImpl;
+struct VariableVersion;
 } // namespace c10
 
 namespace at {
@@ -38,10 +40,28 @@ TORCH_API void init_cpp_fake(
 
 namespace impl {
 
+// FakeTensorMode.may_turn_const with CONSTANT_NUMEL_LIMIT == 1.
+TORCH_API bool may_turn_const(const Tensor& tensor);
+
 // Metadata-only fake kernels. The caller validates the inputs and disables
 // dispatch, but must not enter InKernelInvocationGuard: the copies stay fake.
 TORCH_API Tensor fake_detach(const Tensor& self);
 TORCH_API Tensor& fake_shallow_copy_data_(Tensor& self, const Tensor& source);
+
+// Unlike the kernels above, data access keeps Python's shallow-copy hook
+// active.
+TORCH_API Tensor fake_tensor_data(
+    const Tensor& self,
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change);
+
+// Out-of-core fakes (torchdistx's) carry the Fake key without a
+// FakeTensorMode. The Fake fallback hands an op for which it finds no mode to
+// this handler, if one is set, instead of raising.
+using ModelessFakeFallback =
+    c10::BoxedKernel::BoxedKernelFunction_withDispatchKeys;
+TORCH_API void setModelessFakeFallback(ModelessFakeFallback* fn);
+TORCH_API ModelessFakeFallback* getModelessFakeFallback();
 
 } // namespace impl
 

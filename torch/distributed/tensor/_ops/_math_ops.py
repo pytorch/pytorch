@@ -132,13 +132,21 @@ class _NormPartial(Partial):
         return f"_NormP({self.norm_type})"
 
 
-def _infer_reduction_dims(dims_arg: object, ndim: int) -> list[int] | None:
+def _infer_reduction_dims(
+    dims_arg: object, ndim: int, op: torch._ops.OpOverload
+) -> list[int] | None:
+    """Return the normalized reduction dims; None means all dims.
+
+    An empty dim list means all dims, except for any/all (ATen semantics) and the
+    prims reductions (their meta functions keep every dim), where it means none.
+    """
     if dims_arg is None:
         return None
     dims = cast(list[int], as_list(dims_arg))
+    if not dims and op.namespace != "prims" and op not in NON_LINEAR_BOOL_REDUCTION_OPS:
+        return None
     dims = cast(list[int], normalize_dims(dims, ndim))
-    empty_dims = [[0], [-1], []]
-    if ndim == 0 and dims_arg in empty_dims:
+    if ndim == 0 and dims_arg in ([0], [-1]):
         return None
     return dims
 
@@ -361,7 +369,15 @@ def _reduction_single_dim_strategy(
     # Partial propagation: Partial(reduction_op) input -> Partial(reduction_op) output.
     # Skip for NormReduction: the old OpStrategy path did not propagate
     # _NormPartial through, so keep that behavior.
-    if reduction_linear and not isinstance(reduction_op, NormReduction):
+    # Skip for max/min: NCCL's all_reduce MAX/MIN ignores NaN, so a NaN in one
+    # rank's local values would hide that rank's other values. E.g. P(max) with
+    # local values [nan, 9] and [1, 2]: on NCCL the input is [1, 9] and amax is 9,
+    # but max(amax([nan, 9]), amax([1, 2])) = max(nan, 2) = 2.
+    if (
+        reduction_linear
+        and not isinstance(reduction_op, NormReduction)
+        and reduction_op not in ("max", "min")
+    ):
         partial_placement = get_placement_from_reduction_op(reduction_op)
         strategies.append([partial_placement, partial_placement])
 
@@ -375,13 +391,12 @@ def _reduction_single_dim_strategy(
 # all/any are listed here because the remaining reduction helpers share this map,
 # but they are registered separately with reduction_linear=False.
 LINEAR_REDUCTION_OP_MAP = {
-    aten.all.default: "min",
-    aten.all.dim: "min",
-    aten.all.dims: "min",
-    aten.any.default: "max",
-    aten.any.dim: "max",
-    aten.any.dims: "max",
-    aten.any.out: "max",
+    aten.all.default: "product",
+    aten.all.dim: "product",
+    aten.any.default: "sum",
+    aten.any.dim: "sum",
+    aten.any.dims: "sum",
+    aten.any.out: "sum",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
     prims.sum.default: "sum",
@@ -391,9 +406,7 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.prod.int_out: "product",
     prims.prod.default: "product",
     aten.max.default: "max",
-    aten.max.out: "max",
     aten.min.default: "min",
-    aten.min.out: "min",
     aten.amax.default: "max",
     aten.amax.out: "max",
     prims.amax.default: "max",
@@ -409,9 +422,9 @@ FOREACH_LINEAR_REDUCTION_OP_MAP = {
 
 FOREACH_LINEAR_REDUCTION_OPS = list(FOREACH_LINEAR_REDUCTION_OP_MAP)
 
-# Bool reductions combine local results with min/max, not sum/product.
-# Shards on reduction dims can reduce locally, including uneven/empty shards.
-# Existing partial inputs need dtype-aware rules before converting to bool.
+# all/any only shard non-reduction dims: a Partial output would leak into
+# decomposition-derived strategies (e.g. isin), and P(sum) counts instead of ORing
+# for uint8 any. bool_reduction_handler reduces such shards locally instead.
 NON_LINEAR_BOOL_REDUCTION_OPS = [
     aten.all.default,
     aten.all.dim,
@@ -463,7 +476,7 @@ def linear_reduction_single_dim_strategy(
 
     dims = None
     if len(args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], ndim)
+        dims = _infer_reduction_dims(args_schema[1], ndim, op)
 
     keep_dim = len(args_schema) > 2 and bool(args_schema[2])
     reduction_op = (
@@ -471,13 +484,20 @@ def linear_reduction_single_dim_strategy(
         if op in FOREACH_LINEAR_REDUCTION_OP_MAP
         else LINEAR_REDUCTION_OP_MAP[op]
     )
-    return _reduction_single_dim_strategy(
+    strategies = _reduction_single_dim_strategy(
         args_schema,
         reduction_dims=dims,
         keep_dim=keep_dim,
         reduction_linear=True,
         reduction_op=reduction_op,
     )
+    if op == aten.nansum.default:
+        # No P(sum) -> P(sum): nansum drops a NaN held by one rank, but the
+        # reduced input is NaN there. E.g. P(sum) with local values [nan, 1] and
+        # [2, 3]: the input is [nan, 4] and its nansum is 4, but
+        # nansum([nan, 1]) + nansum([2, 3]) = 6.
+        strategies.remove([Partial("sum"), Partial("sum")])
+    return strategies
 
 
 def _is_spec_evenly_sharded_on_dim(spec: DTensorSpec, dim: int) -> bool:
@@ -511,7 +531,9 @@ def _mean_full_mesh_strategy_filter(
     input_spec = input_specs[0]
     dims = None
     if len(op_schema.args_schema) > 1:
-        dims = _infer_reduction_dims(op_schema.args_schema[1], input_spec.ndim)
+        dims = _infer_reduction_dims(
+            op_schema.args_schema[1], input_spec.ndim, op_schema.op
+        )
     reduce_dims = list(range(input_spec.ndim)) if dims is None else dims
 
     return all(_is_spec_evenly_sharded_on_dim(input_spec, dim) for dim in reduce_dims)
@@ -534,7 +556,7 @@ def mean_single_dim_strategy(
 
     dims = None
     if len(args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], ndim)
+        dims = _infer_reduction_dims(args_schema[1], ndim, op)
 
     reduce_dims = list(range(ndim)) if dims is None else dims
     keep_dim = len(args_schema) > 2 and bool(args_schema[2])
@@ -554,44 +576,17 @@ def mean_single_dim_strategy(
     return strategies
 
 
-def _bool_reduction_full_mesh_strategy_filter(
-    _mesh: DeviceMesh,
-    op_schema: OpSchema,
-    input_specs: list[DTensorSpec],
-    _output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
-) -> bool:
-    r"""Materialize numeric min/max partial axes before truth-value conversion."""
-    input_strategy = op_schema.args_schema[0]
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-    input_spec = input_strategy.strategies[0].output_spec
-    input_meta = input_spec.tensor_meta
-    if input_meta is None:
-        raise AssertionError("Expected input tensor meta")
-    if input_meta.dtype == torch.bool:
-        return True
-    # min/max NaN behavior can differ between all-reduce and reduce-scatter.
-    # Materialize numeric partial axes before changing their values to bool.
-    # Other shard axes can still reduce locally and produce bool partials.
-    return all(
-        not (isinstance(placement, Partial) and placement.reduce_op in ("min", "max"))
-        or target.is_replicate()
-        for placement, target in zip(input_spec.placements, input_specs[0].placements)
-    )
-
-
 @register_single_dim_strategy(
     NON_LINEAR_BOOL_REDUCTION_OPS,
-    schema_info=RuntimeSchemaInfo(1, ["out"]),
+    schema_info=RuntimeSchemaInfo(1),
     allow_uneven_sharding=True,
-    full_mesh_strategy_filter=_bool_reduction_full_mesh_strategy_filter,
 )
 def bool_reduction_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    r"""Reduce shards locally and propagate matching bool partials."""
+    """all/any: only shard on non-reduction dims (no partial propagation)."""
     input_meta = args_schema[0]
     if not isinstance(input_meta, TensorMeta):
         raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
@@ -599,28 +594,16 @@ def bool_reduction_single_dim_strategy(
 
     dims = None
     if len(args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], ndim)
+        dims = _infer_reduction_dims(args_schema[1], ndim, op)
 
     keep_dim = len(args_schema) > 2 and bool(args_schema[2])
-    reduction_op = LINEAR_REDUCTION_OP_MAP[op]
-    strategies = _reduction_single_dim_strategy(
+    return _reduction_single_dim_strategy(
         args_schema,
         reduction_dims=dims,
         keep_dim=keep_dim,
         reduction_linear=False,
-        reduction_op=reduction_op,
+        reduction_op="sum",
     )
-    partial = Partial(reduction_op)
-    reduce_dims = range(ndim) if dims is None else dims
-    strategies.extend([partial, _ShardingPlaceholder(dim)] for dim in reduce_dims)
-    # Resolve numeric partials before converting them to truth values.
-    # bool(max(-1, 0)) is False, while max(bool(-1), bool(0)) is True.
-    # Bool inputs can safely propagate a matching min/max partial.
-    if input_meta.dtype == torch.bool:
-        strategies.append([partial, partial])
-    if "out" in kwargs_schema:
-        strategies = [rule + [rule[0]] for rule in strategies]
-    return strategies
 
 
 def _shard_non_reduction_dim(
@@ -679,7 +662,10 @@ def max_min_dim_single_dim_strategy(
 
 
 def _argmax_argmin_reduction_dims(
-    args_schema: tuple[Any, ...], kwargs_schema: dict[str, Any], ndim: int
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+    ndim: int,
 ) -> list[int]:
     if "dim" in kwargs_schema:
         dims_arg = kwargs_schema["dim"]
@@ -687,7 +673,7 @@ def _argmax_argmin_reduction_dims(
         dims_arg = args_schema[1]
     else:
         dims_arg = None
-    dims = _infer_reduction_dims(dims_arg, ndim)
+    dims = _infer_reduction_dims(dims_arg, ndim, op)
     return list(range(ndim)) if dims is None else dims
 
 
@@ -716,7 +702,7 @@ def _argmax_argmin_full_mesh_strategy_filter(
         raise AssertionError("Expected input tensor meta")
 
     reduce_dims = _argmax_argmin_reduction_dims(
-        args_schema, op_schema.kwargs_schema, len(input_meta.shape)
+        op_schema.op, args_schema, op_schema.kwargs_schema, len(input_meta.shape)
     )
 
     input_spec = input_strategy.strategies[0].output_spec
@@ -750,7 +736,7 @@ def argmax_argmin_single_dim_strategy(
         raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
     ndim = len(input_meta.shape)
 
-    reduce_dims = _argmax_argmin_reduction_dims(args_schema, kwargs_schema, ndim)
+    reduce_dims = _argmax_argmin_reduction_dims(op, args_schema, kwargs_schema, ndim)
     keep_dim = (
         bool(kwargs_schema["keepdim"])
         if "keepdim" in kwargs_schema
@@ -924,7 +910,7 @@ def std_var_single_dim_strategy(
 
     dims = None
     if len(args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], ndim)
+        dims = _infer_reduction_dims(args_schema[1], ndim, op)
 
     keep_dim = cast(bool, kwargs_schema.get("keepdim", False))
     strategies = _reduction_single_dim_strategy(
@@ -1016,7 +1002,7 @@ def vector_norm_single_dim_strategy(
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
     dim, keepdim = _dim_keepdim_from_schema(op, args_schema)
-    dims = _infer_reduction_dims(dim, ndim)
+    dims = _infer_reduction_dims(dim, ndim, op)
 
     return _reduction_single_dim_strategy(
         args_schema,
@@ -1053,7 +1039,7 @@ def powsum_single_dim_strategy(
     ndim = len(input_meta.shape)
 
     dim, keepdim = _dim_keepdim_from_schema(op, args_schema)
-    dims = _infer_reduction_dims(dim, ndim)
+    dims = _infer_reduction_dims(dim, ndim, op)
 
     return _reduction_single_dim_strategy(
         args_schema,
@@ -1645,7 +1631,7 @@ def logsumexp_single_dim_strategy(
         raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
     ndim = len(input_meta.shape)
 
-    dims = _infer_reduction_dims(args_schema[1], ndim)
+    dims = _infer_reduction_dims(args_schema[1], ndim, op)
     keep_dim = cast(bool, kwargs_schema.get("keepdim", False))
     return _reduction_single_dim_strategy(
         args_schema,
@@ -1854,6 +1840,7 @@ def linalg_cross_strategy(
         aten._upsample_bilinear2d_aa.default,
         aten._upsample_bicubic2d_aa.default,
         aten._upsample_lanczos2d_aa.default,
+        aten._upsample_inter_area2d.default,
         aten.upsample_bicubic2d.default,
         aten.upsample_bilinear2d.default,
         aten.upsample_linear1d.default,
@@ -1880,14 +1867,19 @@ def interp_upsample_1out_1in_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # 1 output + 1 input = 2 placements; shard on batch (0) and channel (1)
-    # Upsample is a linear transformation so Partial(sum/avg) is valid.
-    return [
+    # 1 output + 1 input = 2 placements; shard on batch (0) and channel (1).
+    strategies: list[list[Placement | _ShardingPlaceholder]] = [
         [_ShardingPlaceholder(0)] * 2,
         [_ShardingPlaceholder(1)] * 2,
-        [Partial("sum"), Partial("sum")],
-        [Partial("avg"), Partial("avg")],
     ]
+    # uint8 inter-area rounds, so partial inputs must be reduced before resize.
+    if (
+        op == aten._upsample_inter_area2d.default
+        and cast(TensorMeta, args_schema[0]).dtype == torch.uint8
+    ):
+        return strategies
+    strategies.extend([[Partial("sum")] * 2, [Partial("avg")] * 2])
+    return strategies
 
 
 @register_single_dim_strategy(

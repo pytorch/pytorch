@@ -31,6 +31,7 @@
 
 #include <climits>
 #include <iostream>
+#include <limits>
 
 namespace c10 {
 
@@ -289,9 +290,8 @@ operator*(const Float8_e4m3fn& a, const Float8_e4m3fn& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE Float8_e4m3fn operator/(
-    const Float8_e4m3fn& a,
-    const Float8_e4m3fn& b) __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE Float8_e4m3fn
+operator/(const Float8_e4m3fn& a, const Float8_e4m3fn& b) {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
@@ -338,8 +338,7 @@ inline C10_HOST_DEVICE float operator-(Float8_e4m3fn a, float b) {
 inline C10_HOST_DEVICE float operator*(Float8_e4m3fn a, float b) {
   return static_cast<float>(a) * b;
 }
-inline C10_HOST_DEVICE float operator/(Float8_e4m3fn a, float b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE float operator/(Float8_e4m3fn a, float b) {
   return static_cast<float>(a) / b;
 }
 
@@ -352,8 +351,7 @@ inline C10_HOST_DEVICE float operator-(float a, Float8_e4m3fn b) {
 inline C10_HOST_DEVICE float operator*(float a, Float8_e4m3fn b) {
   return a * static_cast<float>(b);
 }
-inline C10_HOST_DEVICE float operator/(float a, Float8_e4m3fn b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE float operator/(float a, Float8_e4m3fn b) {
   return a / static_cast<float>(b);
 }
 
@@ -381,8 +379,7 @@ inline C10_HOST_DEVICE double operator-(Float8_e4m3fn a, double b) {
 inline C10_HOST_DEVICE double operator*(Float8_e4m3fn a, double b) {
   return static_cast<double>(a) * b;
 }
-inline C10_HOST_DEVICE double operator/(Float8_e4m3fn a, double b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE double operator/(Float8_e4m3fn a, double b) {
   return static_cast<double>(a) / b;
 }
 
@@ -395,8 +392,7 @@ inline C10_HOST_DEVICE double operator-(double a, Float8_e4m3fn b) {
 inline C10_HOST_DEVICE double operator*(double a, Float8_e4m3fn b) {
   return a * static_cast<double>(b);
 }
-inline C10_HOST_DEVICE double operator/(double a, Float8_e4m3fn b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE double operator/(double a, Float8_e4m3fn b) {
   return a / static_cast<double>(b);
 }
 
@@ -504,7 +500,7 @@ class numeric_limits<c10::Float8_e4m3fn> {
   static constexpr bool has_infinity = false;
   static constexpr bool has_quiet_NaN = true;
   static constexpr bool has_signaling_NaN = false;
-  static constexpr auto has_denorm = true;
+  static constexpr auto has_denorm = std::denorm_present;
   static constexpr auto has_denorm_loss = true;
   static constexpr auto round_style = numeric_limits<float>::round_style;
   static constexpr bool is_iec559 = false;

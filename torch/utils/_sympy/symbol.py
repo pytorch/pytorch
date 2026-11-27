@@ -81,6 +81,10 @@ prefix_str = {
 }
 
 
+def symt_to_block_prefix(symt: SymT) -> str:
+    return prefix_str[symt].upper()
+
+
 def make_symbol(prefix: SymT, idx: int, **kwargs: bool | None) -> sympy.Symbol:
     # TODO: maybe put the assumptions here directly
     return sympy.Symbol(f"{prefix_str[prefix]}{idx}", **kwargs)

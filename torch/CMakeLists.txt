@@ -297,12 +297,6 @@ if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
 endif()
 
-# coreml
-if(USE_COREML_DELEGATE)
-  list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/backend.cpp)
-  list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/preprocess.cpp)
-endif()
-
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
@@ -483,7 +477,7 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
 
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
-  # by torch/distributed/_token_switch.py so libtorch_cuda never references
+  # by torch/distributed/_token_switch/__init__.py so libtorch_cuda never references
   # ncclEp*. How it links libnccl_ep follows how torch links NCCL:
   #  - USE_SYSTEM_NCCL=OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked
   #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT

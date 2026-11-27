@@ -19,6 +19,7 @@ mem_eff_forward_ck(
   float p_dropout,
   bool return_dropout_randval,
   std::optional<bool> is_causal,
+  bool causal_top_left,
   std::optional<float> scale,
   const std::optional<at::Tensor>& attn_bias_,
   std::optional<at::Tensor>& out_,
@@ -50,7 +51,8 @@ mem_eff_forward_ck(
       non_null_window_right, // window_size_right
       false,                 // return_softmax/return_debug_mask
       gen_,                  // gen
-      attn_bias_);           // attn_bias
+      attn_bias_,            // attn_bias
+      causal_top_left);      // causal_top_left
   } else {
     // seqstart_q is only set in nested tensor path which CK does not support
     TORCH_CHECK(false, "Nested Tensors not supported with CK backend.");

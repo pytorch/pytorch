@@ -8,6 +8,13 @@ name: xpu-test
 on:
   workflow_call:
     inputs:
+      keep-going:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          Keep running the rest of a test file after a consistent failure, in
+          addition to the branch/label rules of filter-test-configs.
       build-environment:
         required: true
         type: string
@@ -77,6 +84,8 @@ env:
 
 jobs:
   test:
+    env:
+      CPP_FAKETENSOR: ${{ matrix.fake_tensor == 'cpp' && '1' || '0' }}
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
@@ -198,7 +207,7 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          CONTINUE_THROUGH_ERROR: ${{ (inputs.keep-going || steps.keep-going.outputs.keep-going == 'true') && 'True' || 'False' }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
@@ -244,6 +253,7 @@ jobs:
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
+            -e CPP_FAKETENSOR \
             -e NUM_TEST_SHARDS \
             -e REENABLED_ISSUES \
             -e PYTORCH_RETRY_TEST_CASES \

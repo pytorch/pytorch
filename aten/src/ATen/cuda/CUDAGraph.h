@@ -100,6 +100,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void enable_debug_mode();
   cudaGraph_t raw_cuda_graph();
   cudaGraphExec_t raw_cuda_graph_exec();
+  // Adopt an exec instantiated from raw_cuda_graph(). The caller owns the
+  // replaced exec; reset/destruction owns the installed exec. Null clears it.
+  void set_raw_cuda_graph_exec(cudaGraphExec_t graph_exec);
 
   static CUDAGraph* get_currently_capturing_graph();
   void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor);
@@ -175,6 +178,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // know you'll replay those graphs in the same order you captured them.
   MempoolId_t mempool_id_;
   std::vector<MempoolId_t> retained_mempool_ids_;
+  // Host pools retained by retain_pool(), released on reset.
+  std::vector<MempoolId_t> retained_host_mempool_ids_;
 
   // Stream on which capture began
   at::cuda::CUDAStream capture_stream_;
