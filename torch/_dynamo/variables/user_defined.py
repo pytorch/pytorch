@@ -2622,6 +2622,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
+        if id(type(self.value)) in tx.output.created_enum_classes:
+            variables.BuiltinVariable.check_format_slots(tx, self, ("__repr__",))
         # The type's tp_repr is its C base's or object_repr unless the class
         # defines __repr__, which installs slot_tp_repr.
         cls = type(self.value)
@@ -2640,6 +2642,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/typeobject.c#L9475
+        if id(type(self.value)) in tx.output.created_enum_classes:
+            slots = ("__str__", "__repr__")
+            variables.BuiltinVariable.check_format_slots(tx, self, slots)
         if type(self.value).__str__ is object.__str__ or self.inherits_base_slot(
             "__str__"
         ):

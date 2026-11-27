@@ -3,11 +3,15 @@ import functools
 from collections import deque
 
 import torch
-from torch.fx.experimental.symbolic_shapes import optimization_hint
+from torch.fx.experimental.symbolic_shapes import (
+    has_free_unbacked_symbols,
+    optimization_hint,
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
+from ..codegen.common import BackendFeature, has_backend_feature
 from ..heuristics.template.triton import mm_allow_tf32
 from ..ir import (
     ComputedBuffer,
@@ -32,7 +36,7 @@ from ..select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from ..utils import ceildiv, is_bf16x9_matmul
+from ..utils import ceildiv, is_bf16x9_matmul, is_gpu
 
 
 B2B_GEMM_PASS = PatternMatcherPass(
@@ -376,20 +380,33 @@ def is_b2b_gemm_good_on(
     if any(is_bf16x9_matmul(t.device.type, t.dtype) for t in fake_tensors):
         return False
 
-    def check_all_attr_true(objects, attr):
-        return all(hasattr(obj, attr) and getattr(obj, attr) for obj in objects)
-
-    if not check_all_attr_true(fake_tensors, "is_cuda") and not check_all_attr_true(
-        fake_tensors, "is_xpu"
+    # Same device/backend gate as use_triton_template's GPU branch
+    # (GPU-class + TRITON_TEMPLATES; excludes MPS).
+    if not all(
+        is_gpu(t.device.type)
+        and has_backend_feature(t.device, BackendFeature.TRITON_TEMPLATES)
+        for t in fake_tensors
     ):
         return False
     if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
         return False
-    if not ((A.shape[1] == B.shape[0]) and (B.shape[1] == C.shape[0])):
+    if has_free_unbacked_symbols(fake_tensors):
         return False
     # size checks: we only dispatch to B2B-GEMM when the average load ratio is > 1
-    M, N, O, P = (optimization_hint(d, fallback=0) for d in (*A.shape, *C.shape))
-    if 0 in (M, N, O, P):
+    M, N = A.shape
+    B_N, B_O = B.shape
+    O, P = C.shape
+    # The load ratio is only a profitability heuristic, so do not guard on the
+    # representative values of backed symbolic dimensions.
+    M, N, B_N, B_O, O, P = (
+        optimization_hint(d, fallback=0) for d in (M, N, B_N, B_O, O, P)
+    )
+    # `all_reach_via_pointwise_with_no_other_inputs` (enforced during matching)
+    # forbids external operands in the epilogue, so B's extents are fully
+    # determined by A and C. The templates read only B's strides and derive its
+    # extents from A and C. This is a belt-and-suspenders sanity check on the
+    # example values above; it does not prove symbolic extent agreement.
+    if 0 in (M, N, O, P) or N != B_N or B_O != O:
         return False
     ratios = []
     if is_left_assoc:
@@ -563,9 +580,7 @@ def tuned_b2b_gemm(
         outer_dtype,
         [A.shape[0], C.shape[1]],  # type: ignore[index]
     )
-    placeholders = [
-        create_placeholder("inner_mm", inner_dtype, A.get_device_or_error())
-    ]
+    placeholders = [create_placeholder("inner_mm", inner_dtype, layout.device)]
     subgraph_buffer = build_subgraph_buffer(
         placeholders,  # type: ignore[arg-type, list-item]
         subgraph,
