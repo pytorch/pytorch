@@ -10509,7 +10509,7 @@ class TestVmCallsShadow(TestCase):
             0,
             "an output that is not stated: bool, a value that is not known",
             True,
-        ),  # noqa: B950
+        ),
         # A param on the stack where the first block ends, and the answer of
         # its test.
         "out_input": (2, None, True),
@@ -10519,7 +10519,7 @@ class TestVmCallsShadow(TestCase):
             0,
             "an output that is not stated: bool, a value that is not known",
             True,
-        ),  # noqa: B950
+        ),
         # A tuple built for the exit.
         "out_tuple": (1, None, True),
         # One that another instruction named before the exit.
@@ -10527,14 +10527,14 @@ class TestVmCallsShadow(TestCase):
             0,
             "an output that is not stated: tuple, which holds results of entries, which no BUILD of the run made for the exit",
             False,
-        ),  # noqa: B950
+        ),
         # One with a float the list is specialized on: its value is known,
         # not which object the tuple holds.
         "out_tuple_valued": (
             0,
             "an output that is not stated: tuple, which holds results of entries, built of a value known by its value only: float",
             False,
-        ),  # noqa: B950
+        ),
         # A function the reads lead to, and the answer of the test.
         "out_led": (2, None, True),
         # The iterator of a loop: only a template of outputs could state it.
@@ -13412,8 +13412,9 @@ elif sys.argv[1] == "first interrupted":
     torch._rust._cfg_fail_plans("callee", True, True)
     print(json.dumps(run(caller, 2)))
 elif sys.argv[1] == "later interrupted":
+    # Every later plan of `callee` meets a KeyboardInterrupt, in calls 0 and 1.
     torch._rust._cfg_fail_plans("callee", False, True)
-    print(json.dumps(run(caller)))
+    print(json.dumps(run(caller, 2)))
 else:
     # No plan for `callee`: its first ("first") or every later one ("later").
     if sys.argv[1] != "none":
@@ -13513,12 +13514,16 @@ class TestVmEdgePlans(TestCase):
         self.assertEqual(got["explained"], [])
         ran = sum(r["runs"] for r in got["rows"] if r["state"] == "region")
         self.assertGreater(ran, 0, msg=str(got["rows"]))
-        # While a later plan is made, after a frame of the code returned:
-        # the frame's value is the program's, the interrupt goes to
-        # sys.unraisablehook, as it did, and the code stays the executor's.
+        # While a later plan is made, behind a frame of the code that
+        # returned or in the round that plans every code again: the
+        # interrupt is the program's too. The call raises it in place of
+        # its result, nothing goes to sys.unraisablehook, and the code
+        # stays the executor's.
         got = self.program("later interrupted")
-        self.assertEqual(got["verdicts"], ["same"] * 8)
-        self.assertIn("KeyboardInterrupt", got["printed"])
+        for verdict in got["verdicts"][:2]:
+            self.assertIn("raised KeyboardInterrupt", verdict)
+        self.assertEqual(got["verdicts"][2:], ["same"] * 6)
+        self.assertNotIn("KeyboardInterrupt", got["printed"])
         self.assertEqual([r for r in got["rows"] if r["state"] == "on CPython"], [])
         ran = sum(
             r["runs"]
@@ -19171,6 +19176,196 @@ class TestVmRulesDump(TestCase):
                 answer,
                 r"^stop\|.* stops a trace: the table of torch's members is not made$",
             )
+
+
+# A program whose cfg pass (Python code of the user's that the planner runs)
+# is handed a SIGINT, before the call named on the command line: per call,
+# whether it returned or raised, the code the pass was planning when it took
+# the interrupt, and what went to sys.unraisablehook.
+INTERRUPT_PROGRAM = r"""
+import json, signal, sys
+import torch
+from torch import vm
+
+ARMED = [False]
+TAKEN = []
+UNRAISABLE = []
+sys.unraisablehook = lambda u: UNRAISABLE.append(type(u.exc_value).__name__)
+# A process that is started in the background ignores SIGINT, and Python
+# then installs no handler of its own: the program asks for it.
+signal.signal(signal.SIGINT, signal.default_int_handler)
+
+
+def interrupted(cfg):
+    if ARMED[0]:
+        ARMED[0] = False
+        TAKEN.append(cfg.qualname)
+        signal.raise_signal(signal.SIGINT)
+        # The handler runs at the next check of the interpreter: here.
+        for _ in range(100):
+            pass
+
+
+def helper(x):
+    return x * 2.0
+
+
+def f(x):
+    return (helper(x).sin() + 1.0).cos()
+
+
+early = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+g = vm(f, passes=[interrupted, *early])
+want = (torch.ones(4) * 2.0).sin().add(1.0).cos()
+calls = []
+for call in range(8):
+    ARMED[0] = call == int(sys.argv[1])
+    TAKEN.clear()
+    UNRAISABLE.clear()
+    try:
+        how = "returned" if torch.equal(g(torch.ones(4)), want) else "another value"
+    except KeyboardInterrupt:
+        how = "KeyboardInterrupt"
+    calls.append([how, list(TAKEN), list(UNRAISABLE)])
+print(json.dumps(calls))
+"""
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+@instantiate_parametrized_tests
+class TestVmEdgeInterrupts(TestCase):
+    """A Ctrl-C that the interpreter hands to Python code the planner runs
+    is the program's: the call under which it was taken raises
+    KeyboardInterrupt, as a call on plain Python does when the interrupt
+    arrives inside it. It is neither dropped nor printed, and the calls
+    behind it run as they would have."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    # The call before which the interrupt is armed, and the code that is
+    # being planned when it is taken: the callee's, behind its returned
+    # frame, in the first call; the function's, in the round that plans
+    # every code again, in the second.
+    @parametrize("armed,planning", [(0, "helper"), (1, "f")])
+    def test_an_interrupt_taken_while_code_is_planned_is_raised(self, armed, planning):
+        command = [sys.executable, "-c", INTERRUPT_PROGRAM, str(armed)]
+        ran = subprocess.run(command, capture_output=True, text=True, timeout=600)
+        self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+        calls = json.loads(ran.stdout.splitlines()[-1])
+        for call, (how, taken, unraisable) in enumerate(calls):
+            self.assertEqual(unraisable, [], msg=call)
+            if call == armed:
+                self.assertEqual((how, taken), ("KeyboardInterrupt", [planning]))
+            else:
+                self.assertEqual((how, taken), ("returned", []), msg=call)
+        self.assertNotIn("Exception ignored", ran.stderr)
+
+    def test_an_interrupt_armed_where_nothing_is_planned_is_not_taken(self):
+        # The third call plans nothing: the pass does not run, and the
+        # program's own handler is never asked.
+        command = [sys.executable, "-c", INTERRUPT_PROGRAM, "2"]
+        ran = subprocess.run(command, capture_output=True, text=True, timeout=600)
+        self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+        calls = json.loads(ran.stdout.splitlines()[-1])
+        self.assertEqual(calls, [["returned", [], []]] * 8)
+
+
+# `is` between arguments of a torch.vm function, walked over eight calls
+# (the case is named on the command line): whether each call's result is
+# eager's, how many regions ran in it, and what torch.vm.regions says. In
+# calls 4 to 6 the arguments are another pair than in the others.
+SCALAR_IS_PROGRAM = r"""
+import json
+import sys
+
+import torch
+from torch import vm
+
+
+def ident(x, a, b):
+    y = ((x.sin() * a).cos() + b).tanh()
+    return y * (a is b) + (a is not b)
+
+
+def const(x, s):
+    y = ((x.sin() * s).cos() + s).tanh()
+    return y * (s is 1.5)
+
+
+def none(x, a):
+    y = ((x.sin() * a).cos() + a).tanh()
+    return y * (a is None) + (a is not None)
+
+
+K15 = [c for c in const.__code__.co_consts if isinstance(c, float)][0]
+F15, G15 = float("1.5"), float("1.5")
+BIG, BIG2 = int("1099511627776"), int("1099511627776")
+assert F15 is not G15 and BIG is not BIG2 and K15 is not G15
+other = lambda i: 4 <= i <= 6
+CASES = {
+    "float_twice": (ident, lambda i: (F15, F15)),
+    "floats_same_bits": (ident, lambda i: (F15, G15) if other(i) else (F15, F15)),
+    "const": (const, lambda i: (G15,) if other(i) else (K15,)),
+    "ints": (ident, lambda i: (BIG, BIG2) if other(i) else (BIG, BIG)),
+    "bools": (ident, lambda i: (True, False) if other(i) else (True, True)),
+    "float_none": (none, lambda i: (F15,)),
+}
+fn, args = CASES[sys.argv[1]]
+g = vm(fn, passes=vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1))
+same, runs = [], []
+for i in range(8):
+    x = torch.full((4,), i + 1.0)
+    want = fn(x, *args(i))
+    before = sum(r["runs"] for r in vm.regions(g) if r["state"] == "region")
+    same.append(torch.equal(want, g(x, *args(i))))
+    runs.append(sum(r["runs"] for r in vm.regions(g) if r["state"] == "region") - before)
+print(json.dumps({"same": same, "runs": runs, "regions": [[r["state"], str(r.get("why", r.get("reason", "")))] for r in vm.regions(g)]}))
+"""
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+@instantiate_parametrized_tests
+class TestVmScalarIdentity(TestCase):
+    """While a region is traced a float argument is a stand-in, which is
+    another object than the argument: `a is b` between two floats asks which
+    object an argument is, and neither the stand-in nor a check on the
+    argument's value can answer. Such a trace is refused and the code runs
+    as it is; an `is` that no float argument can satisfy stays in a region."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def walk(self, case):
+        command = [sys.executable, "-c", SCALAR_IS_PROGRAM, case]
+        ran = subprocess.run(command, capture_output=True, text=True, timeout=600)
+        self.assertEqual(ran.returncode, 0, ran.stderr[-2000:])
+        found = json.loads(ran.stdout.splitlines()[-1])
+        # Every call computes what eager computes.
+        self.assertEqual(found["same"], [True] * 8, msg=str(found))
+        return found
+
+    # One float object passed twice (`a is b` is True); one object, then
+    # two objects of the same bits (True, then False); the code's own
+    # constant, then another float of its bits (`s is 1.5`).
+    @parametrize("case", ["float_twice", "floats_same_bits", "const"])
+    def test_is_between_floats_is_no_region(self, case):
+        found = self.walk(case)
+        self.assertEqual(found["runs"], [0] * 8)
+        self.assertEqual([state for state, _ in found["regions"]], ["refused"])
+        self.assertIn("asks which object a float argument is", found["regions"][0][1])
+
+    # Two ints (one object twice, then two objects of one value) and two
+    # bools are the arguments themselves in a trace; a float against None
+    # is False for every float, as for its stand-in.
+    @parametrize("case", ["ints", "bools", "float_none"])
+    def test_is_that_a_trace_can_answer_stays_a_region(self, case):
+        found = self.walk(case)
+        self.assertEqual([state for state, _ in found["regions"]], ["region"])
+        self.assertEqual(found["runs"][:4], [0] * 4)
+        self.assertGreaterEqual(sum(found["runs"]), 3)
 
 
 if __name__ == "__main__":

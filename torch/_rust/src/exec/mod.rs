@@ -1199,7 +1199,7 @@ unsafe fn run_frame(
         return leave(tstate, frame, gen_frame, run::Outcome::Error);
     }
     let in_instr = tracing && reads::in_instr();
-    let outcome = {
+    let mut outcome = {
         let _using = Using::new(plan);
         run::run(c, &plan.prep, frame, start)
     };
@@ -1211,9 +1211,10 @@ unsafe fn run_frame(
     }
     if matches!(outcome, run::Outcome::Return(_)) && OPTIMIZE.load(Ordering::Relaxed) && !OPTIMIZING.get() && !tracing && !shadow {
         let py = Python::assume_attached();
+        let mut interrupt = None;
         if !c.auto_optimized.swap(true, Ordering::Relaxed) {
             if let Some(e) = optimize(py, c, None).err().and_then(|e| left::compiled(py, c, e)) {
-                e.write_unraisable(py, None);
+                interrupt = not_planned(py, e);
             }
             c.sweep();
         } else if (ELIDE.load(Ordering::Relaxed) || region::enabled() || PURE_CALLS.load(Ordering::Relaxed))
@@ -1223,16 +1224,23 @@ unsafe fn run_frame(
             // By now its clones (and theirs) have been optimized and have
             // observed: optimize again, eliding what they allow.
             if let Some(e) = outside_executor(|| optimize_now(py, c, None, true)).err().and_then(|e| left::compiled(py, c, e)) {
-                e.write_unraisable(py, None);
+                interrupt = not_planned(py, e);
             }
             c.sweep();
         } else if value_reads::again(c) {
             // A trace of its code was given up for a value the run read
             // from a tensor: planned again, its regions end at that read.
             if let Some(e) = outside_executor(|| optimize_now(py, c, None, true)).err().and_then(|e| left::compiled(py, c, e)) {
-                e.write_unraisable(py, None);
+                interrupt = not_planned(py, e);
             }
             c.sweep();
+        }
+        // The program's own exception, taken while its code was planned:
+        // the call raises it in place of its result.
+        if let (Some(e), run::Outcome::Return(result)) = (interrupt, &outcome) {
+            pyo3::ffi::Py_DECREF(*result);
+            e.restore(py);
+            outcome = run::Outcome::Error;
         }
     }
     if observed {
@@ -1440,6 +1448,20 @@ thread_local! {
 // Runs outside the executor: the Python code it runs (see is_in_graph) would
 // otherwise be recorded as effects of whatever site is running (the call
 // whose callee just returned, for the optimization after a first run).
+// A plan could not be made, for `e`, which is not of the code. An exception
+// that is no Exception (KeyboardInterrupt: a Ctrl-C the interpreter handed
+// to Python code that a pass of the plan ran; SystemExit) is the program's:
+// it is handed back, to be raised where the program is. Anything else is
+// the planner's own failure: it is reported and the program goes on with
+// the plan it has.
+fn not_planned(py: Python<'_>, e: PyErr) -> Option<PyErr> {
+    if e.is_instance_of::<pyo3::exceptions::PyException>(py) {
+        e.write_unraisable(py, None);
+        return None;
+    }
+    Some(e)
+}
+
 fn optimize(py: Python<'_>, c: &Compiled, block: Option<BlockId>) -> PyResult<()> {
     outside_executor(|| optimize_now(py, c, block, false))
 }
@@ -1481,28 +1503,34 @@ pub fn _cfg_plan_stats() -> Vec<(&'static str, usize)> {
 }
 
 /// Optimize every code the executor ran (and every clone) again, from what
-/// they observed (see _reoptimize). Returns how many were.
+/// they observed (see _reoptimize). Returns how many were. An exception that
+/// is no Exception (KeyboardInterrupt), raised by Python code a pass ran,
+/// ends the round and is raised.
 #[pyfunction]
-pub fn _reoptimize_all(py: Python<'_>) -> usize {
+pub fn _reoptimize_all(py: Python<'_>) -> PyResult<usize> {
     let mut n = 0;
     for c in registered() {
         if !c.auto_optimized.load(Ordering::Relaxed) {
             continue;
         }
-        match outside_executor(|| optimize_now(py, &c, None, true)) {
+        let planned = outside_executor(|| optimize_now(py, &c, None, true));
+        // A round doesn't keep the round before.
+        c.sweep();
+        match planned {
             Ok(()) => n += 1,
             Err(e) => {
-                if let Some(e) = left::compiled(py, &c, e)
-                    && std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some()
-                {
-                    eprintln!("reoptimize {}: {e}", c.qualname);
+                if let Some(e) = left::compiled(py, &c, e) {
+                    if !e.is_instance_of::<pyo3::exceptions::PyException>(py) {
+                        return Err(e);
+                    }
+                    if std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some() {
+                        eprintln!("reoptimize {}: {e}", c.qualname);
+                    }
                 }
             }
         }
-        // A round doesn't keep the round before.
-        c.sweep();
     }
-    n
+    Ok(n)
 }
 
 // Whether _cfg_bypass_cold was called.

@@ -2305,6 +2305,11 @@ impl Act<'_> {
         // about to be read without it seeing that (see scalars.rs)?
         if ins.args.iter().any(|x| scalars::stand_in(self.val(*x))) {
             let operands: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+            if scalars::asks_which(ins, &operands) {
+                let why = "it asks which object a float argument is (`is` between two floats), and the trace has a stand-in where the argument was";
+                super::region::refuse(pyo3::Python::assume_attached(), why, false);
+                return Err(Exc::Error);
+            }
             let name = if let Op::StoreAttr(n) = ins.op { self.name(n) } else { std::ptr::null_mut() };
             scalars::before(ins, &operands, name);
         }

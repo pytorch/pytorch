@@ -23,6 +23,8 @@
 //     trace's torch-function mode sees the operation);
 //   - a store or a load that only moves the object (a local, an item of a
 //     list, a dict or a tuple, an attribute held in a dict or a slot);
+//   - `is` against an object that is no float (None, a tensor): no float
+//     argument is that object, and neither is its stand-in;
 //   - a call that enters a Python frame for the callee itself;
 //   - a call of C code that torch._rust_inductor knows (`_c_call` decides:
 //     torch's own functions, builtins that move the object or call its
@@ -30,7 +32,9 @@
 //     floats, whose result it makes a stand-in computed in the graph).
 // For what is reported the region is checked on the value of the inputs the
 // stand-in came from: a later call with another value gets a region of its
-// own.
+// own. An `is` between a stand-in and a float asks which object an argument
+// is, which no stand-in can answer and no check on a value holds: the
+// trace is refused there (`asks_which`).
 //
 // May not assume: that it sees a stand-in C code comes by some other way
 // (out of a generator the code is handed, through an attribute of an object
@@ -122,6 +126,17 @@ unsafe fn holds_objects(container: *mut PyObject) -> bool {
             || ffi::PyDict_CheckExact(container) != 0
             || ffi::PyAnySet_CheckExact(container) != 0
             || !tffi::tensor_by_type(container as usize).is_null())
+}
+
+// Whether the instruction `ins`, with these operands (one of them is a
+// stand-in), asks WHICH object a float argument is: `is` and `is not`
+// between a stand-in and a float (an exact one or another stand-in). The
+// stand-in is not the argument: one float passed twice is two stand-ins,
+// and the code's own constant is not the argument that is that constant.
+// Against anything that is no float the answer is False for every float
+// argument, as it is for the stand-in.
+pub unsafe fn asks_which(ins: &Instr, operands: &[*mut PyObject]) -> bool {
+    matches!(ins.op, Op::Bytecode { opcode: opcodes::IS_OP, .. }) && operands.len() == 2 && operands.iter().all(|o| !o.is_null() && ffi::PyFloat_Check(*o) != 0)
 }
 
 // The instruction `ins`, with these operands (in the order of its args; one
