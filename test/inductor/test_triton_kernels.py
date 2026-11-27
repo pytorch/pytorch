@@ -2841,11 +2841,10 @@ class KernelTestsRuntime(_KernelTestsBase):
         self.assertEqual(compiled_out, eager_out)
 
     @onlyAccelerator
-    @unittest.skipUnless(
-        torch.cuda.is_available() or torch.xpu.is_available(),
-        "requires CUDA or XPU libdevice",
-    )
     def test_triton_kernel_with_imported_submodule(self, device):
+        if torch.device(device).type not in ("cuda", "xpu"):
+            self.skipTest("requires CUDA or XPU libdevice")
+
         @triton.jit
         def divide_kernel_with_imported_submodule(
             in_ptr,
@@ -4880,6 +4879,9 @@ class KernelTestsImportedSymbols(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_triton_kernel_with_imported_symbol(self, device):
+        if torch.device(device).type not in ("cuda", "xpu"):
+            self.skipTest("requires CUDA or XPU libdevice")
+
         @triton.jit
         def add_kernel_with_imported_symbol(
             in_ptr,
@@ -4910,6 +4912,9 @@ class KernelTestsImportedSymbols(torch._inductor.test_case.TestCase):
         self.assertEqual(compiled_out, eager_out)
 
     def test_triton_kernel_with_imported_symbol_with_custom_name(self, device):
+        if torch.device(device).type not in ("cuda", "xpu"):
+            self.skipTest("requires CUDA or XPU libdevice")
+
         @triton.jit
         def add_kernel_with_imported_symbol(
             in_ptr,
@@ -4945,7 +4950,7 @@ def make_mutation_test(fn):
     def test_fn(self, device):
         from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
 
-        kernel, inputs, tma_descriptor_metadata, outputs = fn()
+        kernel, inputs, tma_descriptor_metadata, outputs = fn(device)
         tensor_accesses = identify_accessed_tensors(
             kernel, inputs, tma_descriptor_metadata
         )
@@ -4980,7 +4985,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
     # Test that a scalar args are not flagged as mutated when passed
     # to a tt.call op.
     @make_mutation_test
-    def test_scalar_via_nested_write():
+    def test_scalar_via_nested_write(device):
         @triton.jit
         def inner(ptr, scalar_offset):
             tl.store(ptr + scalar_offset, 1.0)
@@ -4989,7 +4994,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         def outer(out_ptr, n_elements):
             inner(out_ptr, n_elements)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             outer,
             {"out_ptr": t, "n_elements": 4},
@@ -4999,7 +5004,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
 
     # Regression test for #169782
     @make_mutation_test
-    def test_with_none_arg():
+    def test_with_none_arg(device):
         @triton.jit
         def add_kernel_with_none_arg(
             in_ptr0,
@@ -5018,7 +5023,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 x = x + y
             tl.store(out_ptr + offsets, x, mask=mask)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             add_kernel_with_none_arg,
             {
@@ -5033,7 +5038,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_omitted_default_arg():
+    def test_omitted_default_arg(device):
         @triton.jit
         def scale_kernel(
             out_ptr,
@@ -5047,7 +5052,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             x = tl.load(in_ptr + offsets, mask=mask)
             tl.store(out_ptr + offsets, x * SCALE, mask=mask)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             scale_kernel,
             {"out_ptr": t, "in_ptr": t, "n_elements": 4, "BLOCK_SIZE": 4},
@@ -5056,7 +5061,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_out_of_order_kernel():
+    def test_out_of_order_kernel(device):
         @triton.jit
         def add_kernel_out_of_order(
             in_ptr0,
@@ -5074,7 +5079,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             add_kernel_out_of_order,
             {
@@ -5089,7 +5094,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_out_of_order_kernel_call():
+    def test_out_of_order_kernel_call(device):
         @triton.jit
         def add_kernel_out_of_order_fn1(
             in_ptr0,
@@ -5106,7 +5111,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 in_ptr0, in_ptr1, n_elements, out_ptr, BLOCK_SIZE=BLOCK_SIZE
             )
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             add_kernel_out_of_order_fn1,
             {
@@ -5121,7 +5126,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_reduce_sum():
+    def test_reduce_sum(device):
         @triton.jit
         def reduce_sum_kernel(a_ptr, c_ptr, stride_am, stride_an):
             offs_am = tl.arange(0, 4)
@@ -5133,7 +5138,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             m = tl.sum(a, axis=1)
             tl.store(c_ptr + tl.arange(0, 4), m)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         kernel = reduce_sum_kernel
         kwargs = {
             "a_ptr": t,
@@ -5163,7 +5168,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_argmax():
+    def test_argmax(device):
         @triton.jit
         def argmax_kernel(a_ptr, c_ptr, stride_am, stride_an):
             offs_am = tl.arange(0, 4)
@@ -5175,7 +5180,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             m = tl.argmax(a, axis=1)
             tl.store(c_ptr + tl.arange(0, 4), m)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         kernel = argmax_kernel
         kwargs = {
             "a_ptr": t,
@@ -5221,7 +5226,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             self.assertEqual(out_ref, out_test)
 
     @make_mutation_test
-    def test_cumsum():
+    def test_cumsum(device):
         @triton.jit
         def cumsum_kernel(in_ptr, out_ptr, XBLOCK: tl.constexpr, RBLOCK: tl.constexpr):
             rindex = tl.arange(0, RBLOCK)[None, :]
@@ -5232,7 +5237,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             tl.device_assert(scan <= expected_max)
             tl.store(out_ptr + xindex * RBLOCK + rindex, scan)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         kernel = cumsum_kernel
         kwargs = {
             "in_ptr": t,
@@ -5262,7 +5267,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_fn_call_one_return():
+    def test_fn_call_one_return(device):
         @triton.jit
         def add_kernel_with_fn_call(
             in_ptr0,
@@ -5281,7 +5286,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             out = helper_id(out_ptr)
             tl.store(out + offsets, output, mask=mask)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             add_kernel_with_fn_call,
             {
@@ -5296,7 +5301,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_fn_call_multi_return():
+    def test_fn_call_multi_return(device):
         @triton.jit
         def add_kernel_with_fn_call(
             in_ptr0,
@@ -5314,7 +5319,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             output, out = helper_add_and_out(x, y, out_ptr)
             tl.store(out + offsets, output, mask=mask)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             add_kernel_with_fn_call,
             {
@@ -5329,7 +5334,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_nested_cond_op_kernel():
+    def test_nested_cond_op_kernel(device):
         @triton.jit
         def nested_cond_op_kernel(
             in_ptr0,
@@ -5351,7 +5356,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             else:
                 pass
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             nested_cond_op_kernel,
             {
@@ -5366,7 +5371,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_add_for_loop():
+    def test_add_for_loop(device):
         @triton.jit
         def add_4_times_kernel(
             in_ptr0,
@@ -5386,7 +5391,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 output += x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             add_4_times_kernel,
             {
@@ -5401,7 +5406,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_add_for_loop2():
+    def test_add_for_loop2(device):
         @triton.jit
         def add_1_time_kernel(
             in_ptr0,
@@ -5421,7 +5426,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             add_1_time_kernel,
             {
@@ -5436,7 +5441,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_add_nested_for_loop():
+    def test_add_nested_for_loop(device):
         @triton.jit
         def add_4_times_kernel(
             in_ptr0,
@@ -5457,7 +5462,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                     output += x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             add_4_times_kernel,
             {
@@ -5472,7 +5477,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_add_nested_for_loop_multi_return():
+    def test_add_nested_for_loop_multi_return(device):
         @triton.jit
         def add_4_times_kernel(
             in_ptr0,
@@ -5496,7 +5501,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             output = output1 + output2
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             add_4_times_kernel,
             {
@@ -5511,7 +5516,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_labels():
+    def test_labels(device):
         @triton.jit
         def kernel_with_label(
             in_ptr0,
@@ -5531,7 +5536,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        t = torch.randn(4)
+        t = torch.randn(4, device=device)
         return (
             kernel_with_label,
             {
@@ -5546,7 +5551,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_for_loop_arg():
+    def test_for_loop_arg(device):
         @triton.jit
         def fwd_kernel(
             X_ptr,
@@ -5587,7 +5592,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 # Store output
                 tl.store(o_block_ptr, o)
 
-        t = torch.randn(64)
+        t = torch.randn(64, device=device)
         return (
             fwd_kernel,
             {
@@ -5607,7 +5612,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
 
     @requires_block_ptr
     @make_mutation_test
-    def test_for_loop_arg_2():
+    def test_for_loop_arg_2(device):
         @triton.jit
         def fwd_kernel(
             x_ptr,
@@ -5646,7 +5651,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 X_block_ptr = tl.advance(X_block_ptr, (BLOCK_M, 0))
                 O_block_ptr = tl.advance(O_block_ptr, (BLOCK_M, 0))
 
-        t = torch.randn((32, 64, 128))
+        t = torch.randn((32, 64, 128), device=device)
         o = torch.empty_like(t)
         B, M, N = t.shape
         return (
@@ -5668,7 +5673,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
 
     @requires_block_ptr
     @make_mutation_test
-    def test_while_loop():
+    def test_while_loop(device):
         @triton.jit
         def fwd_kernel(
             x_ptr,
@@ -5709,7 +5714,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 O_block_ptr = tl.advance(O_block_ptr, (BLOCK_M, 0))
                 i += 1
 
-        t = torch.randn((32, 64, 128))
+        t = torch.randn((32, 64, 128), device=device)
         o = torch.empty_like(t)
         B, M, N = t.shape
         return (
@@ -5730,7 +5735,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_branch_with_multiple_yield_args():
+    def test_branch_with_multiple_yield_args(device):
         @triton.jit
         def branch_with_multiple_yield_args(
             in_ptr0,
@@ -5757,10 +5762,10 @@ class MutationTests(torch._inductor.test_case.TestCase):
             y = tl.load(in1 + offsets, mask=mask)
             tl.store(out + offsets, x + y, mask=mask)
 
-        x = torch.randn(15)
-        y = torch.randn(15)
-        out = torch.zeros(15)
-        conditional = torch.tensor(True)
+        x = torch.randn(15, device=device)
+        y = torch.randn(15, device=device)
+        out = torch.zeros(15, device=device)
+        conditional = torch.tensor(True, device=device)
         return (
             branch_with_multiple_yield_args,
             {
@@ -5780,11 +5785,11 @@ class MutationTests(torch._inductor.test_case.TestCase):
         "requires experimental TMA descriptor API",
     )
     @make_mutation_test
-    def test_add_kernel_on_device_tma_old_api():
-        a = torch.randn(1024, 1024)
-        b = torch.randn(1024, 1024)
-        c = torch.empty(1024, 1024)
-        workspace = torch.empty(128 * 3, dtype=torch.int8)
+    def test_add_kernel_on_device_tma_old_api(device):
+        a = torch.randn(1024, 1024, device=device)
+        b = torch.randn(1024, 1024, device=device)
+        c = torch.empty(1024, 1024, device=device)
+        workspace = torch.empty(128 * 3, dtype=torch.int8, device=device)
         return (
             add_kernel_on_device_tma_old_api,
             {
@@ -5805,12 +5810,12 @@ class MutationTests(torch._inductor.test_case.TestCase):
         "requires TensorDescriptor API in Triton",
     )
     @make_mutation_test
-    def test_add_kernel_on_device_tma_new_api():
-        a = torch.randn(1024, 1024)
-        b = torch.randn(1024, 1024)
-        c = torch.empty(1024, 1024)
+    def test_add_kernel_on_device_tma_new_api(device):
+        a = torch.randn(1024, 1024, device=device)
+        b = torch.randn(1024, 1024, device=device)
+        c = torch.empty(1024, 1024, device=device)
         workspace = torch.empty(
-            128 * 3, dtype=torch.int8
+            128 * 3, dtype=torch.int8, device=device
         )  # Not used by the new API but kept for consistency
         return (
             add_kernel_on_device_tma_new_api,
@@ -5877,7 +5882,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             b = in1_desc.load([off_m, off_n])
             out_desc.store([off_m, off_n], a + b)
 
-        t = torch.randn(64, 64)
+        t = torch.randn(64, 64, device=device)
         tensor_accesses = identify_accessed_tensors(
             add_kernel_descriptor_method,
             {
@@ -9747,14 +9752,18 @@ class KernelTestsDecomposition(torch._inductor.test_case.TestCase):
         "dsl",
         [
             common_utils.subtest(
-                "triton", decorators=[onlyAccelerator, requires_triton()]
+                "triton",
+                decorators=[
+                    unittest.skipUnless(has_triton_package(), "requires Triton package")
+                ],
             ),
             "scale",
         ],
     )
     @mock.patch.dict(_user_kernel_hops)
+    @mock.patch("torch._subclasses.fake_tensor.init_gpu_context", new=lambda _: None)
     def test_triton_kernel_functional_decomposition_before_type_fallback(
-        self, device, dsl, case
+        self, dsl, case
     ):
         import torch._inductor.codegen.triton_utils as triton_utils
         import torch._inductor.lowering as lowering
@@ -9762,9 +9771,34 @@ class KernelTestsDecomposition(torch._inductor.test_case.TestCase):
         from torch._inductor.fx_passes.post_grad import (
             decompose_user_kernel_wrapper_functional,
         )
+        from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.proxy_tensor import make_fx
 
         if dsl == "triton":
+            import triton
+            from triton import language as tl
+
+            @triton.jit
+            def add_kernel_with_optional_param(
+                in_ptr0,
+                in_ptr1,
+                out_ptr,
+                n_elements,
+                ARGS_PASSED: "tl.constexpr",
+                BLOCK_SIZE: "tl.constexpr",
+            ):
+                pid = tl.program_id(axis=0)
+                block_start = pid * BLOCK_SIZE
+                offsets = block_start + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                x = tl.load(in_ptr0 + offsets, mask=mask)
+                if ARGS_PASSED == "two":
+                    y = tl.load(in_ptr1 + offsets, mask=mask)
+                    output = x + y
+                else:
+                    output = x
+                tl.store(out_ptr + offsets, output, mask=mask)
+
             kernel_side_table.reset_table()
             kernel_idx = kernel_side_table.add_kernel(add_kernel_with_optional_param)
             constant_args_idx = kernel_side_table.add_constant_args(
@@ -9784,7 +9818,7 @@ class KernelTestsDecomposition(torch._inductor.test_case.TestCase):
                 return out["out_ptr"]
 
             device = {"meta": "meta", "sparse": "cpu", "cpu_output": "cpu"}.get(
-                case, device
+                case, "cuda:0"
             )
         else:
             info = scale_kernel_hop_info
@@ -9803,10 +9837,11 @@ class KernelTestsDecomposition(torch._inductor.test_case.TestCase):
             "fp8": torch.float8_e4m3fn,
             "fp8_uint8": torch.float8_e4m3fn,
         }.get(case, torch.float32)
-        src = torch.empty(16, dtype=dtype, device=device)
-        output = torch.empty(16, device=device)
-        if case == "sparse":
-            src = torch.sparse_coo_tensor([[0]], [1.0], (16,))
+        with FakeTensorMode():
+            src = torch.empty(16, dtype=dtype, device=device)
+            output = torch.empty(16, device=device)
+            if case == "sparse":
+                src = torch.sparse_coo_tensor([[0]], [1.0], (16,))
 
         # These inputs exercise wrapper decomposition, not kernel execution.
         with (
@@ -9919,7 +9954,7 @@ class KernelTestsConstantFolding(torch._inductor.test_case.TestCase):
 
 common_utils.instantiate_parametrized_tests(KernelTestsGeneric)
 common_utils.instantiate_parametrized_tests(KernelTestsCudaClusters)
-instantiate_device_type_tests(KernelTestsDecomposition, globals(), allow_xpu=True)
+common_utils.instantiate_parametrized_tests(KernelTestsDecomposition)
 instantiate_device_type_tests(KernelTestsConstantFolding, globals(), allow_xpu=True)
 
 
@@ -9959,7 +9994,6 @@ common_utils.instantiate_parametrized_tests(KernelTestsInlineAsm)
 instantiate_device_type_tests(
     KernelTestsImportedSymbols,
     globals(),
-    only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
