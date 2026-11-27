@@ -4665,6 +4665,47 @@ class TestOpInfos(TestCase):
 # Tests that validate the various sample generating functions on each OpInfo.
 class TestOpInfoSampleFunctions(TestCase):
 
+
+    @parametrize("seed", [0, 1, 2])
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.float32, torch.float64)
+    def test_rpow_reference_scalar_domain(self, device, dtype, seed):
+        from torch.testing._internal.opinfo.core import reference_inputs_elementwise_binary
+
+        op = next(op for op in op_db if op.name == "__rpow__")
+        torch.manual_seed(seed)
+        original = list(reference_inputs_elementwise_binary(op, device, dtype, False))
+        torch.manual_seed(seed)
+        samples = list(op.reference_inputs(device, dtype, set_seed=False))
+        self.assertEqual(len(samples), len(original))
+        self.assertTrue(any(not isinstance(sample.input, torch.Tensor) for sample in samples))
+        self.assertTrue(any(isinstance(sample.input, torch.Tensor) and (sample.input < 0).any() for sample in samples))
+        for sample in samples:
+            output = op.op(sample.input, *sample.args, **sample.kwargs)
+            self.assertEqual(output.shape, torch.broadcast_shapes(
+                *(value.shape for value in (sample.input, *sample.args) if isinstance(value, torch.Tensor))))
+
+    @parametrize("requires_grad", [False, True])
+    @dtypes(torch.bfloat16, torch.float32, torch.float64)
+    def test_where_reference_scalar_gradients(self, device, dtype, requires_grad):
+        from torch.utils._pytree import tree_leaves
+
+        op = next(op for op in op_db if op.name == "where")
+        samples = list(op.reference_inputs(device, dtype, requires_grad=requires_grad))
+        complex_samples = [sample for sample in samples if any(
+            isinstance(value, complex) for value in (sample.input, *sample.args))]
+        self.assertEqual(len(complex_samples), 2)
+        for sample in samples:
+            output = op.op(sample.input, *sample.args, **sample.kwargs)
+            tensors = [value for value in tree_leaves((sample.input, sample.args))
+                       if isinstance(value, torch.Tensor) and value.requires_grad]
+            if tensors and output.requires_grad:
+                grads = torch.autograd.grad(output, tensors, grad_outputs=torch.ones_like(output), allow_unused=True)
+                self.assertEqual(len(grads), len(tensors))
+        for sample in complex_samples:
+            expected_grad = requires_grad and dtype != torch.bfloat16
+            output = op.op(sample.input, *sample.args, **sample.kwargs)
+            self.assertEqual(output.requires_grad, expected_grad)
+
     @parametrize("op_name", ["add", "remainder"])
     @parametrize("requires_grad", [False, True])
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
