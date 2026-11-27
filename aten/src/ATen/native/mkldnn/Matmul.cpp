@@ -420,15 +420,15 @@ void mkldnn_matmul(
   mat2_ = may_convert_to_default_contiguous_strides(mat2_);
 
   // mkldnn_matmul only proceed CPU tensor
-  const mkldnn::MkldnnMemory x = itensor_view_from_const_dense(mat1_);
-  const mkldnn::MkldnnMemory w = itensor_view_from_const_dense(mat2_);
-  mkldnn::MkldnnMemory y = itensor_view_from_dense(result_unsqueezed);
+  const mkldnn::MkldnnMemory x = memory_view_from_const_dense(mat1_);
+  const mkldnn::MkldnnMemory w = memory_view_from_const_dense(mat2_);
+  mkldnn::MkldnnMemory y = memory_view_from_dense(result_unsqueezed);
   mkldnn::matmul_forward(x, w, y, alpha, beta, op_attr);
   if (y.get_data_handle() != result.const_data_ptr()){
     // matmul_forward will query onednn expect format of output
     // if given output format is not expected, matmul_forward will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
-    mkldnn::MkldnnMemory public_y = itensor_view_from_dense(result);
+    mkldnn::MkldnnMemory public_y = memory_view_from_dense(result);
     y.reorder_to(public_y);
   }
 

@@ -1682,7 +1682,7 @@ static at::Tensor _quantized_convolution_onednn(
   const std::vector<int32_t> dst_zero_points = std::vector<int32_t>(1, output_zero_point);
 
   // Weight
-  auto packed_weight = at::native::itensor_from_mkldnn(weight);
+  auto packed_weight = at::native::memory_from_mkldnn(weight);
 
   // Bias
   at::native::mkldnn::MkldnnMemory onednn_bias;
@@ -1739,7 +1739,7 @@ static at::Tensor _quantized_convolution_onednn(
     // must not return tensors that alias inputs, so return a copy.
     return has_accum_postop_sum ? output.clone() : output;
   }
-  at::native::mkldnn::MkldnnMemory dst = at::native::itensor_view_from_dense(output);
+  at::native::mkldnn::MkldnnMemory dst = at::native::memory_view_from_dense(output);
   static at::native::mkldnn::MkldnnMemory::desc dummy_accum_desc;
   at::native::mkldnn::Attr op_attr = onednn_utils::create_attr_by_post_op(
     binary_attr.has_value() ? binary_attr.value() : "none",

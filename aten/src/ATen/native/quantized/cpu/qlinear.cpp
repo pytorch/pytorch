@@ -1231,7 +1231,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   auto input_contig =
       dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
 
-  auto src = at::native::itensor_from_tensor(input_contig);
+  auto src = at::native::memory_from_tensor(input_contig);
 
   auto output_size = input.sizes().vec();
   output_size[dim - 1] = N;
@@ -1251,21 +1251,21 @@ static at::Tensor linear_int8_with_onednn_weight(
   if (output.numel() == 0) {
     return output;
   }
-  tensor dst = at::native::itensor_view_from_dense(output);
+  tensor dst = at::native::memory_view_from_dense(output);
   tensor src1 = binary_post_op == "add" ?
-      at::native::itensor_view_from_dense(other.value().reshape({-1, other.value().size(dim - 1)})) :
+      at::native::memory_view_from_dense(other.value().reshape({-1, other.value().size(dim - 1)})) :
       empty_tensor;
 
   // Regular path
-  auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
+  auto packed_weight = at::native::memory_from_mkldnn(onednn_weight);
   tensor onednn_bias;
   if (with_bias) {
     at::Tensor bias_val_float = bias.value();
     if (bias_val_float.dim() == 1) {
       auto b_reshape = bias_val_float.reshape({1, bias_val_float.size(0)});
-      onednn_bias = at::native::itensor_view_from_dense(b_reshape);
+      onednn_bias = at::native::memory_view_from_dense(b_reshape);
     } else {
-      onednn_bias = at::native::itensor_view_from_dense(bias_val_float);
+      onednn_bias = at::native::memory_view_from_dense(bias_val_float);
     }
   }
   // Create onednn primitive
@@ -1335,7 +1335,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     args.insert({DNNL_ARG_BIAS, onednn_bias});
   }
   tensor src_scales_t = tensor(std::vector<float>(1, input_scale));
-  tensor wei_scales_t = at::native::itensor_from_tensor(weight_scales);
+  tensor wei_scales_t = at::native::memory_from_tensor(weight_scales);
   tensor dst_scales_t = tensor(std::vector<float>(1, output_scale));
   tensor src_zp_t = tensor(std::vector<int32_t>(1, input_zero_point));
   tensor dst_zp_t = tensor(std::vector<int32_t>(1, output_zero_point));
