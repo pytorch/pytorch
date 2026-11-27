@@ -46,6 +46,27 @@ def _blackwell_decompose_k_partial_impl(
     return torch.stack(partials).view(k_split * m_pad, n)
 
 
+def _cudnn_batch_norm_statistics_impl(input, running_mean, running_var, momentum, eps):
+    dtype = torch.float64 if input.dtype == torch.float64 else torch.float32
+    shape = (input.shape[1],)
+    mean = (
+        torch.zeros(shape, dtype=dtype, device=input.device)
+        if running_mean is None
+        else running_mean.clone()
+    )
+    var = (
+        torch.ones(shape, dtype=dtype, device=input.device)
+        if running_var is None
+        else running_var.clone()
+    )
+    weight, bias = torch.ones_like(mean), torch.zeros_like(mean)
+    with torch._C._AutoDispatchBelowAutograd():
+        _, save_mean, save_invstd, _ = torch.ops.aten.cudnn_batch_norm.default(
+            input, weight, bias, mean, var, True, momentum, eps
+        )
+    return save_mean, save_invstd, mean, var
+
+
 def make_prim(
     schema: str,
     impl_aten,
@@ -73,6 +94,125 @@ def make_prim(
         doc=doc,
         tags=tags,
     )
+
+
+cudnn_batch_norm_statistics = make_prim(
+    "cudnn_batch_norm_statistics(Tensor input, Tensor? running_mean, Tensor? running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)",
+    _cudnn_batch_norm_statistics_impl,
+    return_type=(_prims.RETURN_TYPE.NEW,) * 4,
+    doc="Compute cuDNN training statistics and updated running statistics without mutating inputs.",
+)
+
+
+def _cudnn_batch_norm_impl(
+    input, weight, bias, running_mean, running_var, training, momentum, eps
+):
+    mean = (
+        running_mean.clone() if running_mean is not None else torch.zeros_like(weight)
+    )
+    var = running_var.clone() if running_var is not None else torch.ones_like(weight)
+    with torch._C._AutoDispatchBelowAutograd():
+        output, save_mean, invstd, reserve = torch.ops.aten.cudnn_batch_norm.default(
+            input,
+            weight,
+            bias,
+            mean if training or running_mean is not None else None,
+            var if training or running_var is not None else None,
+            training,
+            momentum,
+            eps,
+        )
+    return output, save_mean, invstd, reserve, mean, var
+
+
+def _cudnn_batch_norm_meta(
+    input, weight, bias, running_mean, running_var, training, momentum, eps
+):
+    from torch._prims_common import suggest_memory_format
+
+    output = torch.empty_like(input, memory_format=suggest_memory_format(input))
+    stats_shape = (input.shape[1],) if training else (0,)
+    mean = torch.empty(stats_shape, dtype=weight.dtype, device=input.device)
+    invstd = torch.empty_like(mean)
+    reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input, training)  # type: ignore[attr-defined]
+    reserve = torch.empty(reserve_size, dtype=torch.uint8, device=input.device)
+    new_mean = torch.empty_like(weight if running_mean is None else running_mean)
+    new_var = torch.empty_like(weight if running_var is None else running_var)
+    return output, mean, invstd, reserve, new_mean, new_var
+
+
+cudnn_batch_norm = _prims._make_prim(
+    schema="inductor_cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)",
+    meta=_cudnn_batch_norm_meta,
+    impl_aten=_cudnn_batch_norm_impl,
+    return_type=(_prims.RETURN_TYPE.NEW,) * 6,
+    doc="Functional cuDNN batch norm with its eager forward and backward numerical contracts.",
+)
+
+
+def _cudnn_batch_norm_setup_context(ctx, inputs, output):
+    input, weight, bias, mean, var, training, _, eps = inputs
+    ctx.training = training
+    ctx.eps = eps
+    ctx.save_for_backward(
+        input,
+        weight,
+        output[4] if training else mean,
+        output[5] if training else var,
+        output[1],
+        output[2],
+        output[3],
+    )
+    ctx.mark_non_differentiable(*output[1:])
+
+
+def _cudnn_batch_norm_backward(ctx, grad, *unused):
+    input, weight, mean, var, save_mean, invstd, reserve = ctx.saved_tensors
+    if ctx.training:
+        grads = torch.ops.aten.batch_norm_backward.default(
+            grad,
+            input,
+            weight,
+            mean,
+            var,
+            save_mean,
+            invstd,
+            True,
+            ctx.eps,
+            [True, True, True],
+            reserve,
+        )
+    else:
+        grads = torch.ops.aten.native_batch_norm_backward.default(
+            grad,
+            input,
+            weight,
+            mean,
+            var,
+            save_mean,
+            invstd,
+            False,
+            ctx.eps,
+            list(ctx.needs_input_grad[:3]),
+        )
+    return (
+        *(
+            grad if needed else None
+            for grad, needed in zip(grads, ctx.needs_input_grad[:3])
+        ),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+torch.library.register_autograd(
+    cudnn_batch_norm,
+    _cudnn_batch_norm_backward,
+    setup_context=_cudnn_batch_norm_setup_context,
+)
 
 
 def _cuda_pointwise_iteration_layout(inputs, contiguous_output):
