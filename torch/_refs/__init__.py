@@ -2131,6 +2131,8 @@ def where(
         raise NotImplementedError
 
     utils.check_same_device(pred, a, b, allow_cpu_scalar_tensors=True)
+    if pred.dtype is torch.uint8:
+        pred = pred.to(torch.bool)
     torch._check(
         pred.dtype is torch.bool,
         lambda: f"expected predicate to be bool, got {pred.dtype}",
