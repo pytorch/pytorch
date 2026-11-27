@@ -1239,6 +1239,11 @@ class SlotDef:
     slot: int
     wrapper: WrapperType
 
+    def __post_init__(self) -> None:
+        if self.wrapper in (_wrap_binaryfunc, _wrap_binaryfunc_r):
+            named = functools.partial(self.wrapper, name=f"wrapper {self.name}()")
+            object.__setattr__(self, "wrapper", named)
+
     def __call__(
         self,
         vt: VariableTracker,
@@ -1261,8 +1266,6 @@ def MPSLOT(name: str, impl: str, slot: int, wrapper: WrapperType) -> SlotDef:
 
 
 def NBSLOT(name: str, impl: str, slot: int, wrapper: WrapperType) -> SlotDef:
-    if wrapper in (_wrap_binaryfunc, _wrap_binaryfunc_r):
-        wrapper = functools.partial(wrapper, name=f"wrapper {name}()")
     return SlotDef(name, impl, SlotGroup.NUMBER, slot, wrapper)
 
 
