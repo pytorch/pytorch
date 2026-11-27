@@ -1,7 +1,7 @@
 import torch
 import torch.xpu
 from torch.testing._internal.common_utils import IS_WINDOWS, LazyVal, TEST_XPU
-from torch.xpu._utils import get_xpu_arch, XPUArch
+from torch.xpu._utils import get_xpu_arch, get_xpu_codename, XPUArch, XPUCodename
 
 
 XPU_ALREADY_INITIALIZED_ON_IMPORT = torch.xpu.is_initialized()
