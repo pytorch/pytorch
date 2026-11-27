@@ -243,6 +243,51 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_double_to_narrow_rounding(self, device, dtype, numerics, upcast):
+        mantissa_bits = 10 if dtype == torch.float16 else 7
+        midpoint = 1.0 + 2.0 ** (-mantissa_bits - 1)
+        values = [midpoint - 2**-40, midpoint, midpoint + 2**-40]
+        x = torch.tensor(
+            values + [-v for v in values], device=device, dtype=torch.float64
+        )
+
+        def fn(x):
+            result = x.to(dtype)
+            return result, result.double()
+
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )(x)
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(x)),
+        )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_cube_intermediate_rounding(self, device, dtype, numerics, upcast):
+        x = _exhaustive_16bit(dtype, device)
+
+        def fn(x):
+            result = x.pow(3)
+            return result, result.double()
+
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )(x)
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(x)),
+        )
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("op_name", ("floor_divide", "remainder", "true_divide"))
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -1890,10 +1935,6 @@ BACKWARD_XFAIL = frozenset(
         ("addcdiv", "bfloat16"),
         ("addcdiv", "float16"),
         ("addcdiv", "float32"),
-        ("double", "bfloat16"),
-        ("double", "float16"),
-        ("float_power", "bfloat16"),
-        ("float_power", "float16"),
         ("float_power", "float32"),
         ("hypot", "float16"),
         ("hypot", "float32"),
@@ -1936,6 +1977,8 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "double",
+        "float_power",
         "__rmod__",
         "addcdiv",
         "div_floor_rounding",
