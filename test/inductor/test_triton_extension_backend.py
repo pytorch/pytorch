@@ -72,7 +72,7 @@ try:
 except ImportError:
     from test_extension_backend import BaseExtensionBackendTests
 
-if HAS_TRITON:
+if HAS_TRITON or TRITON_HAS_CPU:
     import triton
     import triton.language as tl
 
@@ -257,8 +257,12 @@ class TritonExtensionBackendAcceleratorTests(_TritonExtensionBackendTestsBase):
                     )
                 return ExtensionPythonWrapperCodegen()
 
+        # register_backend_for_device() keys backends by device type, while the
+        # injected `device` carries an index (e.g. "cuda:0"), so strip the index.
         register_backend_for_device(
-            device, ExtensionTritonScheduling, ExtensionPythonWrapperCodegen
+            torch.device(device).type,
+            ExtensionTritonScheduling,
+            ExtensionPythonWrapperCodegen,
         )
 
     @unittest.skipUnless(HAS_TRITON or TRITON_HAS_CPU, "requires triton")
