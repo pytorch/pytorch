@@ -69,7 +69,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON, IS_BIG_GPU
-from torch.utils._triton import has_triton_package
 
 
 # A module-level (global) model + a function referencing it, to exercise the
@@ -3646,18 +3645,8 @@ class TestPrecompileNumericsDevice(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the accelerator lowering, not just CPU.
 
-    @unittest.skipUnless(
-        torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
-    )
     @torch._inductor.config.patch({"compile_threads": 1})
     def test_cache_reload_without_eager_static_launcher_rehydration(self, device):
-        # A cold load should use JIT instead of eagerly rehydrating the static launcher.
-        import torch._inductor.config as ind_config
-
-        if ind_config.force_disable_caches or not ind_config.fx_graph_cache:
-            self.skipTest("requires inductor FxGraphCache enabled")
-        if not ind_config.use_static_cuda_launcher:
-            self.skipTest("requires the static CUDA launcher")
         from torch._dynamo.utils import counters
         from torch._inductor.utils import fresh_cache
 
@@ -4014,25 +4003,6 @@ class TestPrecompileNumericsDevice(TestCase):
         self.assertEqual(x, torch.ones(4, device=device))
         self.assertEqual(out, torch.ones(4, device=device))
 
-    @unittest.skipUnless(TEST_CUDA, "functionalize_rng_ops seeds via CUDA rng state")
-    def test_functionalized_rng_supported(self, device):
-        # Functionalized RNG (dropout) threads seed/offset; the AOT backend composes
-        # the RNG wrapper in. The artifact runs and produces a valid dropout mask. Even
-        # for a CPU tensor the wrapper seeds from CUDARngStateHelper.get_torch_state_as_tuple,
-        # which raises unless CUDA is available, so the whole test is gated on TEST_CUDA
-        # rather than on the tensor's device.
-        import torch._functorch.config as functorch_config
-
-        x = make_tensor((64,), device=device, dtype=torch.float32)
-        with functorch_config.patch(functionalize_rng_ops=True):
-            code, cache = _precompile_pair(
-                lambda a: torch.nn.functional.dropout(a, 0.5, training=True), x
-            )
-            f_c = _load_pair(code, cache)
-            out = f_c(x)
-        self.assertEqual(out.shape, x.shape)
-        self.assertTrue((out == 0).any())
-
     def test_batchnorm_train_buffer_mutation(self, device):
         # A stateful module (BatchNorm in training mode) mutates its running stats.
         # precompile reflects that onto the runtime model's buffers and matches eager
@@ -4305,7 +4275,7 @@ instantiate_device_type_tests(TestPrecompileNumericsDevice, globals(), allow_xpu
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @unittest.skipUnless(TEST_CUDA, "functionalize_rng_ops seeds via CUDA rng state")
 class TestPrecompileFunctionalizedRngCUDA(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     def test_functionalized_rng_matches_eager_cpu(self):
         # Under functionalized RNG the dropout draw is seeded from the global generator,
@@ -4333,13 +4303,32 @@ class TestPrecompileFunctionalizedRngCUDA(TestCase):
         self.assertTrue((out == 0).any())  # dropout zeroed some elements
         self.assertEqual(out, ref)  # same mask under the same seed
 
+    @unittest.skipUnless(TEST_CUDA, "functionalize_rng_ops seeds via CUDA rng state")
+    def test_functionalized_rng_supported(self, device):
+        # Functionalized RNG (dropout) threads seed/offset; the AOT backend composes
+        # the RNG wrapper in. The artifact runs and produces a valid dropout mask. Even
+        # for a CPU tensor the wrapper seeds from CUDARngStateHelper.get_torch_state_as_tuple,
+        # which raises unless CUDA is available, so the whole test is gated on TEST_CUDA
+        # rather than on the tensor's device.
+        import torch._functorch.config as functorch_config
+
+        x = make_tensor((64,), device=device, dtype=torch.float32)
+        with functorch_config.patch(functionalize_rng_ops=True):
+            code, cache = _precompile_pair(
+                lambda a: torch.nn.functional.dropout(a, 0.5, training=True), x
+            )
+            f_c = _load_pair(code, cache)
+            out = f_c(x)
+        self.assertEqual(out.shape, x.shape)
+        self.assertTrue((out == 0).any())
+
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @unittest.skipIf(not HAS_TRITON, "requires Triton")
     @onlyAccelerator
     def test_artifact_with_module_level_kernels_runs_from_its_file(self, device):
         # A module-level Triton kernel reads its source back from the module's file,
@@ -4363,7 +4352,7 @@ class TestPrecompileDevice(TestCase):
         for _, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
             self.assertEqual(f_c(m, x), m(x))
 
-    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @unittest.skipIf(not HAS_TRITON, "requires Triton")
     @onlyAccelerator
     def test_cache_bundles_autotune_artifacts(self, device):
         from torch._inductor.utils import fresh_cache
@@ -6903,10 +6892,10 @@ print("transport phase ok:", phase)
 
 
 @skipIfTorchDynamo("exports a Triton cache directory, not a traced program")
-@unittest.skipUnless(has_triton_package(), "requires Triton")
+@unittest.skipUnless(HAS_TRITON, "requires Triton")
 @instantiate_parametrized_tests
 class TestTritonRuntimeCacheTransport(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
     CONTEXT = {"build": "test"}
 
     def _bundle(self, directory, **kwargs):
@@ -8131,8 +8120,7 @@ _FRESH_REPLAY_PRELUDE = """
 import os
 import sys
 
-phase, directory, module = sys.argv[1:4]
-device = sys.argv[-1]
+phase, directory, module, device = sys.argv[1:5]
 os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, phase, "inductor")
 # Neither phase sets TRITON_CACHE_DIR or TRITON_CACHE_AUTOTUNING: capture and
 # load pick Triton's cache directory and autotuning cache themselves.
@@ -8282,7 +8270,7 @@ def recording_benchmark_sub_kernels(self, *args, **kwargs):
 CachingAutotuner.bench = recording_bench
 MultiKernelCall.benchmark_sub_kernels = recording_benchmark_sub_kernels
 x, w = inputs(0)
-make_fx = sys.argv[4] == "make_fx"
+make_fx = sys.argv[5] == "make_fx"
 if phase == "capture":
     # Positive control: outside a capture this fn does build a multi-kernel.
     with torch._inductor.config.patch({"triton.autotune_at_compile_time": False}):
@@ -8333,7 +8321,7 @@ def _capture_and_replay(
         for phase in ("capture", "replay"):
             cmd = [sys.executable, "-c", driver, phase, directory, module]
             out = subprocess.run(
-                [*cmd, *extra_args, device], capture_output=True, text=True, timeout=900
+                [*cmd, device, *extra_args], capture_output=True, text=True, timeout=900
             )
             test.assertEqual(out.returncode, 0, out.stderr)
             test.assertIn(f"{marker}: {phase}", out.stdout)
@@ -8342,7 +8330,7 @@ def _capture_and_replay(
 
 
 def _user_stream_fn(x):
-    device_module = torch.xpu if x.device.type == "xpu" else torch.cuda
+    device_module = torch.get_device_module()
     s = device_module.Stream()
     s.wait_stream(device_module.current_stream())
     with device_module.stream(s):
@@ -8354,7 +8342,7 @@ def _user_stream_fn(x):
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
