@@ -2327,6 +2327,7 @@ impl Act<'_> {
                 }
                 if self.reading {
                     super::made::cell(*self.local(*slot));
+                    reads::wrote(*self.local(*slot), 0, super::wrote::How::Cell, std::ptr::null_mut(), a(0), 0);
                 }
                 return Ok(());
             }

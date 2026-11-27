@@ -17,8 +17,11 @@ void op_hook_pause(bool paused);
 // while wanted on a thread, every op reaching the PreDispatch key at ANY depth
 // is reported to Rust's on_witness_op, with no text made, and the key stays in
 // the thread's include set below a reported op. The key is included iff the
-// text above or the witness wants it. Returns op_hook_seeing().
-bool op_hook_witness(bool wanted);
+// text above or the witness wants it. While one is `open` (wanted or paused),
+// the storages that reported ops made or wrote are remembered, for
+// WitnessWrite's `made` and on_witness_made; with none open they are
+// forgotten. Returns op_hook_seeing().
+bool op_hook_witness(bool wanted, bool open);
 // Whether an op run now on this thread would reach the hook: false when
 // something took the key out of the include set or put it into the exclude
 // set (no_dispatch(), the end of a pre-dispatch mode, an op in flight that
@@ -26,6 +29,10 @@ bool op_hook_witness(bool wanted);
 bool op_hook_seeing();
 // How many reported ops are in flight on this thread.
 std::uint32_t op_hook_depth();
+// How many ops were reported on this thread so far: the n-th has the serial n.
+std::uint64_t op_hook_serial();
+// The serial of the innermost reported op in flight on this thread (0: none).
+std::uint64_t op_hook_innermost();
 
 // Defined by the cxx bridge (src/bindings/ffi.rs).
 struct TensorIdent;

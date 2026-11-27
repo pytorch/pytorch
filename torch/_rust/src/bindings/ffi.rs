@@ -100,11 +100,28 @@ pub mod op_hook {
         storage: usize,
     }
 
-    // An argument an op's schema says it writes: its position, and the tensor
-    // (a member of the list, for a list of tensors).
+    // An argument an op's schema says it writes: its position, the tensor (a
+    // member of the list, for a list of tensors), and the serial of the op
+    // that made its storage while a witness was open (0: none did).
     struct WitnessWrite {
         arg: u32,
         id: TensorIdent,
+        made: u64,
+    }
+
+    // What on_witness_op is told of an op, as bits of its `flags`.
+    #[repr(u32)]
+    enum WitnessFlag {
+        // No schema, or an argument or a written value it does not account for.
+        Unreadable = 1,
+        // Tagged nondeterministic_seeded.
+        Draws = 2,
+        // Tagged data_dependent_output.
+        ReadsValue = 4,
+        // A result that is no tensor, list of tensors or optional tensor.
+        ValueOut = 8,
+        // Tagged dynamic_output_shape.
+        DataSized = 16,
     }
 
     unsafe extern "C++" {
@@ -113,15 +130,18 @@ pub mod op_hook {
         fn op_hook_enable();
         fn op_hook_disable();
         fn op_hook_pause(paused: bool);
-        fn op_hook_witness(wanted: bool) -> bool;
+        fn op_hook_witness(wanted: bool, open: bool) -> bool;
         fn op_hook_seeing() -> bool;
         fn op_hook_depth() -> u32;
+        fn op_hook_serial() -> u64;
+        fn op_hook_innermost() -> u64;
         fn tensor_ident(py_obj: usize, out: &mut TensorIdent);
     }
 
     extern "Rust" {
         fn on_torch_op(op: &str, args: &str) -> Result<()>;
-        fn on_witness_op(name: &str, overload: &str, depth: u32, flags: u32, wrote: &[WitnessWrite]);
+        fn on_witness_op(name: &str, overload: &str, depth: u32, serial: u64, flags: u32, wrote: &[WitnessWrite]);
+        fn on_witness_made(storage: usize, since: u64, by: u64);
     }
 }
 
@@ -145,7 +165,7 @@ pub mod autograd {
 }
 
 use crate::exec::autograd::{node_apply, node_release, NodeState};
-use crate::exec::calls::witness::on_witness_op;
+use crate::exec::calls::witness::{on_witness_made, on_witness_op};
 use crate::exec::torch_ops::on_torch_op;
 
 pub use self::ffi::*;

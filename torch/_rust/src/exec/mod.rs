@@ -37,6 +37,7 @@ pub mod torch_ops;
 mod trampoline;
 pub mod types;
 pub mod value_reads;
+mod wrote;
 pub mod writes;
 
 use std::cell::Cell;

@@ -33,7 +33,7 @@ use std::os::raw::c_int;
 use pyo3::exceptions::{PyRecursionError, PyRuntimeError, PySystemError, PyValueError};
 use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyCFunction, PyDict, PyList, PyModule, PyTuple};
 
 use super::super::ffi::{tr_binary_op, tr_call, tr_generic, tr_type_version_is};
 use super::slots::tuple_like;
@@ -434,10 +434,23 @@ pub fn _calls_run<'py>(list: &Bound<'py, List>, inputs: &Bound<'py, PyAny>, pins
 // The rest is the tests' entry to the witness (witness.rs), here because it
 // calls its argument. The tensors among a call's operands and the tests'
 // names of them: position or keyword, or (that, index) for a member of an
-// exact list or tuple.
-fn operands<'py>(args: &Bound<'py, PyTuple>, kwargs: Option<&Bound<'py, PyDict>>) -> PyResult<(Vec<TensorIdent>, Vec<Py<PyAny>>)> {
+// exact list or tuple. The object a builtin is bound to (`a.add_`) is the
+// first operand, in front of the positional ones; a function of a module is
+// bound to the module and a static one to nothing, which are no operands.
+// What any other callable holds (a method-wrapper's object, a closure) is no
+// operand: a write to it is a write outside.
+fn operands<'py>(
+    func: &Bound<'py, PyAny>,
+    args: &Bound<'py, PyTuple>,
+    kwargs: Option<&Bound<'py, PyDict>>,
+) -> PyResult<(Vec<TensorIdent>, Vec<Py<PyAny>>)> {
     let py = args.py();
-    let named = args.iter().enumerate().map(|(k, v)| (k.into_pyobject(py).unwrap().into_any(), v));
+    let bound = func.cast_exact::<PyCFunction>().ok().and_then(|f| {
+        // SAFETY: an exact builtin; its self is borrowed from it, or NULL.
+        unsafe { Bound::from_borrowed_ptr_or_opt(py, ffi::PyCFunction_GetSelf(f.as_ptr())) }
+    });
+    let positional = bound.into_iter().filter(|s| s.cast::<PyModule>().is_err()).chain(args.iter());
+    let named = positional.enumerate().map(|(k, v)| (k.into_pyobject(py).unwrap().into_any(), v));
     let (mut ids, mut names) = (vec![], vec![]);
     let mut add = |obj: &Bound<'py, PyAny>, name: Py<PyAny>| {
         let mut id = TensorIdent::default();
@@ -461,9 +474,10 @@ fn operands<'py>(args: &Bound<'py, PyTuple>, kwargs: Option<&Bound<'py, PyDict>>
 
 /// For tests: `func(*args, **kwargs)` under a witness, on CPython. Returns
 /// (result, what was witnessed): "ops", "below", "wrote" as (op, argument,
-/// operand or None, nested), "opaque", "why", "drew", "read_value",
-/// "read_value_top", "entered_python", and "pure": the call is licensed with
-/// nothing allowed.
+/// operand or None, nested), "wrote_outside", "opaque", "why", "drew",
+/// "read_value", "read_value_top", "data_sized", "entered_python", and
+/// "saw_nothing": the call is licensed with nothing allowed. That is no
+/// statement about the call (see the head of witness.rs).
 #[pyfunction]
 #[pyo3(signature = (func, /, *args, **kwargs))]
 pub fn _witness<'py>(
@@ -472,23 +486,25 @@ pub fn _witness<'py>(
     kwargs: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<(Bound<'py, PyAny>, Bound<'py, PyDict>)> {
     let py = func.py();
-    let (ids, names) = operands(args, kwargs)?;
+    let (ids, names) = operands(func, args, kwargs)?;
     let _frames = crate::exec::FramesHooked::new();
     witness::begin();
     let result = func.call(args, kwargs);
     let seen = witness::end();
     let wrote = seen.wrote.iter().map(|w| (w.op, w.arg, w.operand(&ids).map(|k| names[k].clone_ref(py)), w.nested));
-    let (opaque, drew, read_value, read_value_top, entered_python) = seen.flags();
+    let flags = seen.flags();
     let d = PyDict::new(py);
     d.set_item("ops", &seen.ops)?;
     d.set_item("below", seen.below)?;
     d.set_item("wrote", wrote.collect::<Vec<_>>())?;
-    d.set_item("opaque", opaque)?;
-    d.set_item("drew", drew)?;
-    d.set_item("read_value", read_value)?;
-    d.set_item("read_value_top", read_value_top)?;
+    d.set_item("wrote_outside", seen.wrote_outside(&ids))?;
+    d.set_item("opaque", flags.opaque)?;
+    d.set_item("drew", flags.drew)?;
+    d.set_item("read_value", flags.read_value)?;
+    d.set_item("read_value_top", flags.read_value_top)?;
+    d.set_item("data_sized", flags.data_sized)?;
     d.set_item("why", &seen.why)?;
-    d.set_item("entered_python", entered_python)?;
-    d.set_item("pure", seen.licenses(&ids, &witness::Allowed::default()))?;
+    d.set_item("entered_python", flags.entered_python)?;
+    d.set_item("saw_nothing", seen.licenses(&ids, &witness::Allowed::default()))?;
     Ok((result?, d))
 }

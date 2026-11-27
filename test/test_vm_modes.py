@@ -7117,6 +7117,15 @@ class TestVmAskedDomain(TestCase):
 instantiate_device_type_tests(TestVmAskedDomain, globals())
 
 
+# The pass lists a rule about writes is tested under: with the default one a
+# store into what outlives the call ends a region in front of it, with the
+# Effects pass a region makes the store again.
+MODES_OWN_PASSES = {
+    "default": EARLY,
+    "effects": (*EARLY, vm.passes.Effects()),
+}
+
+
 class ModesDropped:
     """An object whose finalizer changes state: the change is made inside the
     call that drops the object, and by no instruction of that call."""
@@ -7230,8 +7239,45 @@ def modes_stale_tensor(device):
     return (lambda: float(t.shape[0]), change)
 
 
+def modes_stale_absent(device):
+    state = {}
+
+    def change():
+        if "k" in state:
+            del state["k"]
+        else:
+            state["k"] = 2.0
+
+    return (lambda: state.get("k", 3.0), change)
+
+
+def modes_stale_set(device):
+    state = set()
+
+    def change():
+        if state:
+            state.discard(5)
+        else:
+            state.add(5)
+
+    return (lambda: 2.0 + float(5 in state), change)
+
+
+def modes_stale_kwdefaults(device):
+    def scale(*, k=2.0):
+        return k
+
+    def change():
+        scale.__kwdefaults__["k"] = 5.0 - scale.__kwdefaults__["k"]
+
+    return (lambda: scale(), change)
+
+
 MODES_STALE = {
     "item": modes_stale_item,
+    "absent": modes_stale_absent,
+    "set": modes_stale_set,
+    "kwdefaults": modes_stale_kwdefaults,
     "list_item": modes_stale_list_item,
     "length": modes_stale_length,
     "whole": modes_stale_whole,
@@ -7263,10 +7309,11 @@ class TestVmStaleReads(TestCase):
         return out
 
     @parametrize("what", list(MODES_STALE))
+    @parametrize("passes", list(MODES_OWN_PASSES))
     @isolated
-    def test_read_changed_by_a_finalizer_gives_no_region(self, device, what):
+    def test_read_changed_by_a_finalizer_gives_no_region(self, device, what, passes):
         want = self.log(device, what, modes_stale_reading)
-        compiled = vm(modes_stale_reading, passes=EARLY)
+        compiled = vm(modes_stale_reading, passes=MODES_OWN_PASSES[passes])
         self.assertEqual(self.log(device, what, compiled), want, atol=0, rtol=0)
         name = modes_stale_reading.__name__
         rows = [r for r in vm.regions(compiled) if r["function"] == name]
@@ -7274,6 +7321,277 @@ class TestVmStaleReads(TestCase):
 
 
 instantiate_device_type_tests(TestVmStaleReads, globals())
+
+
+# What a call reads (`read`, a number), from what (`setup`), the stores the
+# call itself can make there (`writes`), what a finalizer does to what was
+# read (`change`), and which of the stores put a value over the finalizer's
+# (`over`). `whole`: the read is of all of the holder or of its length.
+MODES_OWN_READS = {
+    "dict_item": {
+        "setup": "S = {'a': 2.0, 'b': 0.0}",
+        "read": "S['a']",
+        "writes": {
+            "same": "S['a'] = 5.0 - S['a']",
+            "other": "S['b'] = 1.0 - S['b']",
+            "new": "S['n'] = 1.0",
+        },
+        "change": "S['a'] = 5.0 - S['a']",
+        "over": ("same",),
+        "state": "list(S.items())",
+    },
+    "list_item": {
+        "setup": "S = [2.0, 0.0]",
+        "read": "S[0]",
+        "writes": {
+            "same": "S[0] = 5.0 - S[0]",
+            "other": "S[1] = 1.0 - S[1]",
+            "new": "S.append(1.0)",
+        },
+        "change": "S[0] = 5.0 - S[0]",
+        "over": ("same",),
+        "state": "list(S)",
+    },
+    "attribute": {
+        "setup": "S = ModesHolder()\nS.a = 2.0\nS.b = 0.0",
+        "read": "S.a",
+        "writes": {
+            "same": "S.a = 5.0 - S.a",
+            "other": "S.b = 1.0 - S.b",
+            "new": "S.n = 1.0",
+        },
+        "change": "S.a = 5.0 - S.a",
+        "over": ("same",),
+        "state": "sorted(vars(S).items())",
+    },
+    "module_attribute": {
+        "setup": "S = torch.nn.Linear(2, 2)\nS.a = 2.0\nS.b = 0.0",
+        "read": "S.a",
+        "writes": {
+            "same": "S.a = 5.0 - S.a",
+            "other": "S.b = 1.0 - S.b",
+            "new": "S.n = 1.0",
+        },
+        "change": "S.a = 5.0 - S.a",
+        "over": ("same",),
+        "state": "(S.a, S.b, getattr(S, 'n', None))",
+    },
+    # A dict that also has a slot of the item's name: a store into the slot
+    # is no store of the item, whatever then puts the same object there.
+    "dict_with_a_slot": {
+        "setup": "class Slotted(dict):\n    __slots__ = ('a',)\n\n\nS = Slotted(a=2.0)\nS.a = 0.0",
+        "read": "S['a']",
+        "writes": {"slot": "S.a = 5.0 - S['a']"},
+        "change": "S['a'] = S.a",
+        "over": (),
+        "state": "(list(S.items()), S.a)",
+    },
+    "dict_length": {
+        "setup": "S = {'a': 2.0}",
+        "read": "float(len(S))",
+        "writes": {"same": "S['a'] = 5.0 - S['a']", "new": "S['n'] = 1.0"},
+        "change": "S.pop('z') if 'z' in S else S.__setitem__('z', 1.0)",
+        "over": (),
+        "whole": True,
+        "state": "list(S.items())",
+    },
+    "list_length": {
+        "setup": "S = [2.0]",
+        "read": "float(len(S))",
+        "writes": {"same": "S[0] = 5.0 - S[0]", "new": "S.append(1.0)"},
+        "change": "S.pop() if len(S) % 2 == 0 else S.append(1.0)",
+        "over": (),
+        "whole": True,
+        "state": "list(S)",
+    },
+    "dict_whole": {
+        "setup": "S = {'a': 2.0, 'b': 1.0}",
+        "read": "sum(S.values())",
+        "writes": {
+            "same": "S['a'] = 5.0 - S['a']",
+            "other": "S['b'] = 1.0 - S['b']",
+            "new": "S['n'] = 1.0",
+        },
+        "change": "S['a'] = 5.0 - S['a']",
+        "over": ("same",),
+        "whole": True,
+        "state": "list(S.items())",
+    },
+    "list_whole": {
+        "setup": "S = [2.0, 1.0]",
+        "read": "sum(S)",
+        "writes": {
+            "same": "S[0] = 5.0 - S[0]",
+            "other": "S[1] = 1.0 - S[1]",
+            "new": "S.append(1.0)",
+        },
+        "change": "S[0] = 5.0 - S[0]",
+        "over": ("same",),
+        "whole": True,
+        "state": "list(S)",
+    },
+    "set_whole": {
+        "setup": "S = {1}",
+        "read": "2.0 + float(5 in S)",
+        "writes": {"same": "S.add(1)", "new": "S.add(7)", "out": "S.discard(7)"},
+        "change": "S.discard(5) if 5 in S else S.add(5)",
+        "over": (),
+        "whole": True,
+        "state": "sorted(S)",
+    },
+    "keyword_defaults": {
+        "setup": "def scale(*, k=2.0):\n    return k\n\n\nS = scale.__kwdefaults__",
+        "read": "scale()",
+        "writes": {"same": "S['k'] = 5.0 - S['k']"},
+        "change": "S['k'] = 5.0 - S['k']",
+        "over": ("same",),
+        "whole": True,
+        "state": "list(S.items())",
+    },
+}
+
+MODES_OWN_ORDERS = {
+    "read_write_drop": ("read", "write", "drop"),
+    "write_read_drop": ("write", "read", "drop"),
+    "read_drop_write": ("read", "drop", "write"),
+}
+
+MODES_OWN_PROGRAM = """
+{setup}
+
+
+def CHANGE():
+    {change}
+
+
+class Dropped:
+    def __del__(self):
+        CHANGE()
+
+
+def {name}(x):
+    y = modes_work(x)
+    {first}
+    {second}
+    {third}
+    return modes_work(y * k)
+
+
+def state():
+    return {state}
+"""
+
+MODES_OWN_STALE = "no write the run recorded explains it"
+
+
+def modes_own_refused(passes, read, order, write, changed):
+    """Whether the trace of a program is refused for a read that is no longer
+    as it was read: True, False, "either" (the rule does not say), or None for
+    a program the rule does not speak about."""
+    if not changed:
+        return False
+    if passes == "default":
+        # The store ends a region in front of it, and which of the read and
+        # the drop the regions around it hold is not the rule's to say (a
+        # drop in a region without the read is another matter: a finalizer
+        # that changes what its region did not read). Without a store of the
+        # call's own: TestVmStaleReads.
+        return None
+    if read.get("whole") and order == "write_read_drop":
+        # Read whole after the call changed it: refused for that.
+        return "either"
+    # Only a store of the call behind the finalizer's change, to the very
+    # item it changed, leaves what the call wrote.
+    return not (order == "read_drop_write" and write in read["over"])
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmOwnWrites(TestCase):
+    """A read of a traced call that is no longer as it was read when the call
+    is over is explained only by the call's own store to that very item with
+    the value that is there: a store to another item of the same dict, list
+    or object explains nothing, and neither does one that something else
+    then changed. Every program computes what the interpreter computes and
+    leaves the state the interpreter leaves, with and without the Effects
+    pass."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def run_program(self, device, passes, name, **parts):
+        # The rows of vm.regions are by function name: one name per program.
+        source = MODES_OWN_PROGRAM.format(name=name, **parts)
+        names = {"torch": torch, "modes_work": modes_work, "ModesHolder": ModesHolder}
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES[passes])
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            where = f"{name}, call {call}:\n{source}"
+            self.assertEqual(compiled(x), theirs[name](x), atol=0, rtol=0, msg=where)
+            self.assertEqual(mine["state"](), theirs["state"](), msg=where)
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        return [str(r.get("why") or r.get("reason") or "") for r in rows], compiled
+
+    @parametrize("what", list(MODES_OWN_READS))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_only_the_store_of_that_item_explains_a_changed_read(
+        self, device, what, passes
+    ):
+        read = MODES_OWN_READS[what]
+        steps = {"read": "k = " + read["read"], "drop": "Dropped()"}
+        ran = 0
+        for order, write, changed in itertools.product(
+            MODES_OWN_ORDERS, read["writes"], (False, True)
+        ):
+            refused = modes_own_refused(passes, read, order, write, changed)
+            if refused is None:
+                continue
+            steps["write"] = read["writes"][write]
+            first, second, third = (steps[s] for s in MODES_OWN_ORDERS[order])
+            name = f"{order}_{write}_{'changed' if changed else 'left'}"
+            with self.subTest(order=order, write=write, changed=changed):
+                reasons, compiled = self.run_program(
+                    device,
+                    passes,
+                    name,
+                    setup=read["setup"],
+                    change=read["change"] if changed else "pass",
+                    first=first,
+                    second=second,
+                    third=third,
+                    state=read["state"],
+                )
+                stale = any(MODES_OWN_STALE in r for r in reasons)
+                if refused != "either":
+                    self.assertEqual(stale, refused, msg=f"{name}: {reasons}")
+                ran = region_runs(compiled)
+        # The calls compared were not all the interpreter's.
+        self.assertGreater(ran, 0)
+
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_cell_the_call_stores_into_behind_its_read(self, device, passes):
+        # The cell is the call's own: what it held when it was read is no
+        # check, once the call's own store put what it holds.
+        reasons, compiled = self.run_program(
+            device,
+            passes,
+            "stores_into_a_cell",
+            setup="S = [0.0]\n\n\ndef counted(y):\n    n = 2.0\n\n    def more():\n        nonlocal n\n        was = n\n        n = was + 1.0\n        return was\n\n    return more() + more() + n",
+            change="pass",
+            first="k = counted(y)",
+            second="S[0] = k",
+            third="Dropped()",
+            state="list(S)",
+        )
+        self.assertFalse(any(MODES_OWN_STALE in r for r in reasons), msg=str(reasons))
+        self.assertGreater(region_runs(compiled), 0)
+
+
+instantiate_device_type_tests(TestVmOwnWrites, globals())
 
 
 if __name__ == "__main__":

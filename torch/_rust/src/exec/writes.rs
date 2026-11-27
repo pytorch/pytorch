@@ -23,7 +23,9 @@
 //     write_call), and whether it then succeeded (done);
 //   - by reads.rs: what the trace has read so far (to tell the objects that
 //     died with the run), and the place where it notes that an item was
-//     written (what the run reads of it afterwards is its own);
+//     written (what the run reads of it afterwards is its own) and what
+//     each write that is recorded left there (wrote.rs: a read that is no
+//     longer as it was read is explained by that alone);
 //   - by the region tracer (torch/vm/_writes.py): for each write, how its
 //     target and values are made on a later run (a RegionOut::Call each).
 //
@@ -71,6 +73,7 @@ use super::ffi::*;
 use super::reads;
 use super::covered;
 use super::made;
+use super::wrote::How;
 use super::{Prepared, types};
 use crate::cfg::ir::{Instr, Op, RegionOut, ValueId};
 use crate::cfg::opcodes;
@@ -351,28 +354,31 @@ unsafe fn push(how: &Py<PyAny>, target: *mut PyObject, args: &[*mut PyObject], u
 // The write recorded as `token` was made (`ok`), or raised: then it is none.
 pub fn done(token: Token, ok: bool) {
     if token != 0 && token != REFUSED && !ok {
-        WRITES.with_borrow_mut(|ws| {
-            if ws.len() == token {
-                ws.pop();
-            }
-        });
+        let last = WRITES.with_borrow_mut(|ws| ws.len() == token && ws.pop().is_some());
+        if last {
+            reads::unwrote(token);
+        }
     }
 }
 
 // A store (`old`: what was there, NULL for nothing) or a deletion (`value`
-// NULL) by `set` / `delete`, with the call that takes it back.
-unsafe fn store(target: *mut PyObject, key: *mut PyObject, value: *mut PyObject, old: *mut PyObject, set: (&Py<PyAny>, &Py<PyAny>), delete: (&Py<PyAny>, &Py<PyAny>)) -> Token {
-    if value.is_null() {
-        if old.is_null() {
-            // It raises.
-            return 0;
-        }
+// NULL) by `set` / `delete`, with the call that takes it back. `holder`:
+// what the reads know the item by (an instance's __dict__ for an attribute
+// stored there, else the target), `how`: as an item of it or as a slot.
+unsafe fn store(holder: *mut PyObject, how: How, target: *mut PyObject, key: *mut PyObject, value: *mut PyObject, old: *mut PyObject, set: (&Py<PyAny>, &Py<PyAny>), delete: (&Py<PyAny>, &Py<PyAny>)) -> Token {
+    if value.is_null() && old.is_null() {
+        // It raises.
+        return 0;
+    }
+    let token = if value.is_null() {
         push(delete.0, target, &[key], Some((set.1, vec![key, old])))
     } else if old.is_null() {
         push(set.0, target, &[key, value], Some((delete.1, vec![key])))
     } else {
         push(set.0, target, &[key, value], Some((set.1, vec![key, old])))
-    }
+    };
+    reads::wrote(holder, token, how, key, value, old.is_null() as isize - value.is_null() as isize);
+    token
 }
 
 // `obj.name = value` (value null: `del obj.name`) is about to run; `generic`:
@@ -398,13 +404,13 @@ pub unsafe fn store_attr(obj: *mut PyObject, name: *mut PyObject, value: *mut Py
                 reads::needs_key(d, name);
             }
             reads::wrote_item(d, name);
-            store(obj, name, value, reads::dict_get(d, name), set, delete)
+            store(d, How::Item, obj, name, value, reads::dict_get(d, name), set, delete)
         }
         // A slot: the generic store, through the slot's descriptor.
         3 => {
             let old = tr_slot_get(obj, name);
             reads::wrote_item(obj, name);
-            let token = store(obj, name, value, old, set, delete);
+            let token = store(obj, How::Slot, obj, name, value, old, set, delete);
             ffi::Py_XDECREF(old);
             token
         }
@@ -439,7 +445,7 @@ pub unsafe fn store_item(container: *mut PyObject, key: *mut PyObject, value: *m
         changes(container);
         let set = called.as_ref().filter(|_| !del).unwrap_or(&w.dict_setitem);
         let delete = called.as_ref().filter(|_| del).unwrap_or(&w.dict_delitem);
-        return store(container, key, value, reads::dict_get(container, key), (set, &w.dict_setitem), (delete, &w.dict_delitem));
+        return store(container, How::Item, container, key, value, reads::dict_get(container, key), (set, &w.dict_setitem), (delete, &w.dict_delitem));
     }
     if ffi::PyList_CheckExact(container) != 0 && ffi::PyLong_CheckExact(key) != 0 {
         let n = ffi::PyList_GET_SIZE(container);
@@ -457,7 +463,9 @@ pub unsafe fn store_item(container: *mut PyObject, key: *mut PyObject, value: *m
         reads::needs_length(container);
         reads::wrote_item(container, key);
         changes(container);
-        return if del { push(&w.list_delitem, container, &[key], Some((&w.list_insert, vec![key, old]))) } else { push(&w.list_setitem, container, &[key, value], Some((&w.list_setitem, vec![key, old]))) };
+        let token = if del { push(&w.list_delitem, container, &[key], Some((&w.list_insert, vec![key, old]))) } else { push(&w.list_setitem, container, &[key, value], Some((&w.list_setitem, vec![key, old]))) };
+        reads::wrote(container, token, How::Index(i), std::ptr::null_mut(), value, -(del as isize));
+        return token;
     }
     if how.is_none() && tr_python_setitem(ffi::Py_TYPE(container), del as std::ffi::c_int) != 0 {
         // The class's own code runs: its stores are what happens.
@@ -536,7 +544,9 @@ pub unsafe fn write_call(callee: *mut PyObject, args: &[*mut PyObject]) -> Token
         0
     } else if is(&w.list_append) && all.len() == 2 && ffi::PyList_Check(all[0]) != 0 {
         changes(all[0]);
-        push(&w.list_append, all[0], &[all[1]], Some((&w.list_pop, vec![])))
+        let token = push(&w.list_append, all[0], &[all[1]], Some((&w.list_pop, vec![])));
+        reads::wrote(all[0], token, How::Append, std::ptr::null_mut(), all[1], 1);
+        token
     } else if (is(&w.set_add) || is(&w.set_discard)) && all.len() == 2 && ffi::PySet_Check(all[0]) != 0 {
         let had = ffi::PySet_Contains(all[0], all[1]);
         if had < 0 {
@@ -547,7 +557,10 @@ pub unsafe fn write_call(callee: *mut PyObject, args: &[*mut PyObject]) -> Token
         changes(all[0]);
         let add = is(&w.set_add);
         let undo = if add == (had == 1) { None } else if add { Some((&w.set_discard, vec![all[1]])) } else { Some((&w.set_add, vec![all[1]])) };
-        push(if add { &w.set_add } else { &w.set_discard }, all[0], &[all[1]], undo)
+        let token = push(if add { &w.set_add } else { &w.set_discard }, all[0], &[all[1]], undo);
+        let grew = if add == (had == 1) { 0 } else if add { 1 } else { -1 };
+        reads::wrote(all[0], token, if add { How::Add } else { How::Discard }, std::ptr::null_mut(), all[1], grew);
+        token
     } else {
         0
     }

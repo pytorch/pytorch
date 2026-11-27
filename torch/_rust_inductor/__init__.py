@@ -3117,6 +3117,13 @@ def _trace_region(
             result["repeatable"] = not backups
             backups.clear()
             as_given.clear()
+            # Everything is as the run left it, the stand-ins where the body
+            # found them or wrote them: what the run read that is no longer
+            # as it was read, and that its own writes do not explain
+            # (exec/reads.rs). And which tensors are the trace's own, while
+            # it still knows: its inputs and the results of the operators it
+            # recorded.
+            _rust()._region_settled(list(fx_tracers[-1].tensor_tracker.keys()))
             written.take(_rust()._region_writes(), _plain_result)
             # A comprehension's loop body adds to a container it was given
             # (which purity doesn't see): a region would skip that, unless
@@ -3169,11 +3176,6 @@ def _trace_region(
             result["tensors"] = tensor_outs
             return tensor_outs
         finally:
-            # While the stand-ins are still where the body found them: what
-            # the run read that is no longer as it was read (exec/reads.rs).
-            # And which tensors are the trace's own, while it still knows:
-            # its inputs and the results of the operators it recorded.
-            _rust()._region_settled(list(fx_tracers[-1].tensor_tracker.keys()))
             _scalar_state = None
             for container, k, v, stand_in in reversed(restore):
                 # Only where the stand-in still is: a slot the body wrote to

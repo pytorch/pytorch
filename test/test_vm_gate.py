@@ -27,6 +27,7 @@ import re
 import struct
 import subprocess
 import sys
+import tempfile
 import traceback
 import types
 import unittest
@@ -3027,11 +3028,13 @@ def _wt_bits(x):
 class TestVmWitness(TestCase):
     """The witness says what the dispatcher and the frame hook saw while one
     C call ran: its top-level operators in order, the arguments their schemas
-    say they write (mapped to the call's operands), whether an operator tagged
-    as drawing or as handing out a value ran at any depth, whether Python was
+    say they write (mapped to the call's operands, or to what the call made,
+    or outside), whether an operator tagged as drawing, as handing out a value
+    or as sizing its result by data ran at any depth, whether Python was
     entered. The rules: it changes nothing a program computes; what it cannot
-    classify is opaque, and opaque is everything at once; what no schema
-    declares it does not see, and the tests say so.
+    classify is opaque, and opaque is everything at once and stays; what no
+    schema declares and what is no operator it does not see, and the tests
+    say so: "saw_nothing" is what it saw, never what the call did.
     """
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -3046,8 +3049,9 @@ class TestVmWitness(TestCase):
         self.assertEqual(_wt_bits(r), _wt_bits(a + b))
         self.assertEqual(
             d,
-            {"ops": ["aten::add.Tensor"], "below": 0, "wrote": [], "opaque": False, "why": "", "drew": False,
-             "read_value": False, "read_value_top": False, "entered_python": False, "pure": True},
+            {"ops": ["aten::add.Tensor"], "below": 0, "wrote": [], "wrote_outside": False, "opaque": False, "why": "",
+             "drew": False, "read_value": False, "read_value_top": False, "data_sized": False, "entered_python": False,
+             "saw_nothing": True},
         )  # fmt: skip
 
     def test_a_declared_write_is_mapped_to_the_operand(self, device):
@@ -3056,7 +3060,7 @@ class TestVmWitness(TestCase):
         self.assertEqual(
             (d["ops"], d["wrote"]), (["aten::add_.Tensor"], [(0, 0, 0, False)])
         )
-        self.assertFalse(d["pure"])
+        self.assertEqual((d["saw_nothing"], d["wrote_outside"]), (False, False))
         # By keyword; a member of a list; an operand written through a view
         # the kernel makes (found by its storage).
         _, d = _witness(torch.add, a, b, out=torch.empty_like(a))
@@ -3075,7 +3079,7 @@ class TestVmWitness(TestCase):
         # for no license.
         _, d = _witness(torch.mul, a, 2)
         self.assertEqual([w[2] for w in d["wrote"]], [None] * len(d["wrote"]))
-        self.assertTrue(d["pure"])
+        self.assertEqual((d["saw_nothing"], d["wrote_outside"]), (True, False))
 
     def test_batch_norm_writes_its_statistics_unseen(self, device):
         gen = torch.Generator().manual_seed(0)
@@ -3087,13 +3091,16 @@ class TestVmWitness(TestCase):
         self.assertNotEqual(_wt_bits(mean), _wt_bits(torch.zeros(3, device=device)))
         # No schema declares that write: the measured table knows it, the witness cannot.
         self.assertEqual([w for w in d["wrote"] if w[2] is not None], [])
-        self.assertEqual((d["ops"], d["pure"]), (["aten::batch_norm"], True))
+        self.assertEqual(
+            (d["ops"], d["saw_nothing"], d["wrote_outside"]),
+            (["aten::batch_norm"], True, False),
+        )
 
     def test_draws(self, device):
         a, _ = self.pair(device)
         _, d = _witness(torch.dropout, a, 0.5, True)
         self.assertEqual(
-            (d["ops"], d["drew"], d["pure"]), (["aten::dropout"], True, False)
+            (d["ops"], d["drew"], d["saw_nothing"]), (["aten::dropout"], True, False)
         )
         self.assertGreater(d["below"], 0)
         # The tag is given by the operator's name, not by what a call does.
@@ -3139,7 +3146,7 @@ class TestVmWitness(TestCase):
         ):
             _, d = _witness(fn, *args)
             self.assertEqual(
-                (d["ops"], d["read_value_top"], d["pure"]), ([op], True, False)
+                (d["ops"], d["read_value_top"], d["saw_nothing"]), ([op], True, False)
             )
         # A read below the top-level operator (a kernel checking LAPACK's
         # status) is no value of the call's.
@@ -3150,7 +3157,7 @@ class TestVmWitness(TestCase):
         self.assertEqual((d["read_value"], d["opaque"]), (False, False))
         # A read that is no operator is not seen.
         r, d = _witness(torch.Tensor.tolist, a)
-        self.assertEqual((len(r), d["read_value"], d["pure"]), (3, False, True))
+        self.assertEqual((len(r), d["read_value"], d["saw_nothing"]), (3, False, True))
 
     def test_operators_in_order(self, device):
         a, _ = self.pair(device)
@@ -3188,7 +3195,7 @@ class TestVmWitness(TestCase):
 
         r, d = _witness(Twice.apply, a)
         self.assertEqual(_wt_bits(r), _wt_bits(a * 2))
-        self.assertEqual((d["entered_python"], d["pure"]), (True, False))
+        self.assertEqual((d["entered_python"], d["saw_nothing"]), (True, False))
         _, d = _witness(torch.add, a.as_subclass(Sub), b)
         self.assertEqual((d["ops"][0], d["entered_python"]), ("aten::add.Tensor", True))
         for fn, args in (
@@ -3326,8 +3333,10 @@ class TestVmWitness(TestCase):
             "drew": True,
             "read_value": True,
             "read_value_top": True,
+            "data_sized": True,
             "entered_python": True,
-            "pure": False,
+            "wrote_outside": True,
+            "saw_nothing": False,
         }
         # An operator outside aten: its tags say nothing.
         enter = torch._C._jit_get_operation("profiler::_record_function_enter_new")[0]
@@ -3474,6 +3483,386 @@ class TestVmWitness(TestCase):
                 False,
                 False,
             )
+
+    def test_the_object_a_builtin_is_bound_to_is_an_operand(self, device):
+        a, b = self.pair(device)
+        want = a + b
+        # `a.add_` holds `a`: the call's first operand, written.
+        for bound in (a.add_, a.__iadd__):
+            before = a.clone()
+            r, d = _witness(bound, b)
+            self.assertIs(r, a)
+            self.assertEqual(_wt_bits(a), _wt_bits(before + b))
+            self.assertEqual(
+                (d["ops"], d["wrote"], d["wrote_outside"], d["saw_nothing"]),
+                (["aten::add_.Tensor"], [(0, 0, 0, False)], False, False),
+            )
+        self.assertEqual(_wt_bits(a), _wt_bits(want + b))
+        # A function of a module is bound to the module, a static one to
+        # nothing: the positions are the arguments'.
+        for fn in (torch._C._nn.elu_, torch.sigmoid_):
+            _, d = _witness(fn, b)
+            self.assertEqual(
+                (d["wrote"], d["wrote_outside"]), ([(0, 0, 0, False)], False)
+            )
+        # What another kind of callable holds is no operand: a write to it is
+        # a write outside, which nothing licenses.
+        r, d = _witness(a.__setitem__, 0, 3.0)
+        self.assertEqual(_wt_bits(a[0]), _wt_bits(torch.full_like(a[0], 3.0)))
+        self.assertEqual(
+            (d["wrote"], d["wrote_outside"], d["opaque"], d["saw_nothing"]),
+            ([(1, 0, None, False)], True, False, False),
+        )
+
+    def test_a_write_to_what_the_call_made_needs_no_license(self, device):
+        a, b = self.pair(device)
+        m = _WtMake(device)
+        # linear over a 4-d input adds the bias in place into the product it
+        # made: a nested operator writing a temporary.
+        x, weight, bias = m.f(2, 2, 3, 4), m.f(5, 4), m.f(5)
+        r, d = _witness(torch._C._nn.linear, x, weight, bias)
+        self.assertEqual(_wt_bits(r), _wt_bits(torch._C._nn.linear(x, weight, bias)))
+        on_cpu = torch.device(device).type == "cpu"
+        self.assertEqual(
+            {(e[2], e[3]) for e in d["wrote"]}, {(None, True)} if on_cpu else set()
+        )
+        self.assertEqual(
+            (d["ops"], d["wrote_outside"], d["saw_nothing"]),
+            (["aten::linear"], False, True),
+        )
+        # A reduction over integers fills its result through operators of its
+        # own before it returns it: known to be made only when it returns.
+        mask = a > 0
+        r, d = _witness(torch.sum, mask)
+        self.assertEqual(_wt_bits(r), _wt_bits(torch.sum(mask)))
+        self.assertIn((0, 0, None, True), d["wrote"])
+        self.assertEqual(
+            (d["ops"], d["wrote_outside"], d["saw_nothing"]),
+            (["aten::sum"], False, True),
+        )
+
+        # Made by storage: a view of what the call made is what the call made.
+        def body():
+            t = torch.zeros(3, 4, device=device)
+            t.view(-1).add_(b.view(-1))
+            inner.append(_witness(lambda: t.add_(b))[1])
+            return t
+
+        inner = []
+        r, d = _witness(body)
+        self.assertEqual(_wt_bits(r), _wt_bits(torch.zeros_like(b) + b + b))
+        self.assertEqual(
+            ([e[2] for e in d["wrote"]], d["wrote_outside"]), ([None] * 3, False)
+        )
+        # For a witness opened later, what was made before it is outside.
+        self.assertEqual(
+            (inner[0]["wrote"], inner[0]["wrote_outside"]),
+            ([(0, 0, None, False)], True),
+        )
+
+    def test_a_write_outside_is_never_licensed(self, device):
+        a, b = self.pair(device)
+        # The autograd engine adds into a gradient that is there: a tensor no
+        # operand leads to. Through Tensor.backward, and at the engine's own
+        # C entry, where no frame is entered and nothing else is seen.
+        # KNOWN HOLE, asserted so that it is seen when it closes: the engine
+        # runs a graph of another device than the CPU on a thread of its own,
+        # where no witness is. Of such a backward nothing is seen.
+        seen = torch.device(device).type == "cpu"
+        leaf = a.clone().requires_grad_()
+        leaf.grad = torch.ones_like(a)
+        _, d = _witness(torch.Tensor.backward, (leaf * 2).sum())
+        self.assertEqual(_wt_bits(leaf.grad), _wt_bits(torch.full_like(a, 3.0)))
+        self.assertEqual((d["wrote_outside"], d["saw_nothing"]), (seen, False))
+        run = torch.autograd.Variable._execution_engine.run_backward
+        loss = (leaf * 2).sum()
+        ones = (torch.ones_like(loss),)
+        _, d = _witness(
+            run, (loss,), ones, False, False, (), allow_unreachable=True, accumulate_grad=True
+        )  # fmt: skip
+        self.assertEqual(_wt_bits(leaf.grad), _wt_bits(torch.full_like(a, 5.0)))
+        added = [(d["ops"].index("aten::add_.Tensor"), 0, None, False)] if seen else []
+        self.assertEqual([e for e in d["wrote"] if not e[3]], added)
+        self.assertEqual(
+            (d["entered_python"], d["opaque"], d["wrote_outside"], d["saw_nothing"]),
+            (False, False, seen, not seen),
+        )
+        # NOT SEEN: the first gradient is attached, not added. No operator
+        # writes, so the witness has nothing to say about it.
+        leaf.grad = None
+        loss = (leaf * 2).sum()
+        _, d = _witness(
+            run, (loss,), ones, False, False, (), allow_unreachable=True, accumulate_grad=True
+        )  # fmt: skip
+        self.assertEqual(_wt_bits(leaf.grad), _wt_bits(torch.full_like(a, 2.0)))
+        self.assertEqual((d["wrote_outside"], d["saw_nothing"]), (False, True))
+
+        # A view, made inside the call, of a tensor that a closure leads to.
+        outside = torch.zeros(3, 4, device=device)
+
+        class WritesOutside(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                outside.view(-1).add_(1)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, g):
+                return g * 2
+
+        _, d = _witness(WritesOutside.apply, a)
+        self.assertEqual(_wt_bits(outside), _wt_bits(torch.ones_like(a)))
+        self.assertIn((d["ops"].index("aten::add_.Tensor"), 0, None, False), d["wrote"])
+        self.assertEqual((d["wrote_outside"], d["saw_nothing"]), (True, False))
+        # The same of an operand is a write to that operand.
+        _, d = _witness(torch.Tensor.__setitem__, a, 0, 3.0)
+        self.assertEqual(
+            (d["ops"], d["wrote"], d["wrote_outside"], d["saw_nothing"]),
+            (
+                ["aten::select.int", "aten::fill_.Scalar"],
+                [(1, 0, 0, False)],
+                False,
+                False,
+            ),
+        )
+
+        # A tensor inside a container the caller did not open is no operand.
+        def zero(box):
+            box["t"].zero_()
+
+        _, d = _witness(zero, {"t": b})
+        self.assertEqual(
+            (d["wrote"], d["wrote_outside"]), ([(0, 0, None, False)], True)
+        )
+
+    def test_state_an_operator_hands_out_is_not_what_it_made(self, device):
+        # "Made" is a new tensor on a storage none of the operator's arguments
+        # holds. Three ways an operator returns memory that was there before,
+        # each written afterwards: outside, and the witness can tell (it is
+        # not opaque).
+        values = torch.ones(2, device=device)
+        index = torch.tensor([[0, 1]], device=device)
+        sparse = torch.sparse_coo_tensor(index, values, (3,), check_invariants=False)
+        scale = torch.tensor([0.1, 0.2], dtype=torch.float64)
+        quantized = torch.quantize_per_channel(
+            torch.ones(2, 2), scale, torch.zeros(2, dtype=torch.long), 0, torch.quint8
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "mapped")
+            with open(path, "wb") as f:
+                f.write(bytes(16))
+
+            # The parts of a sparse tensor (it names no storage), a tensor a
+            # quantizer keeps (somebody else holds it), a file's memory.
+            def parts():
+                sparse._values().add_(1)
+
+            def kept():
+                quantized.q_per_channel_scales().add_(1)
+
+            def mapped():
+                torch.from_file(path, shared=True, size=4).add_(1)
+
+            for body in (parts, kept, mapped):
+                _, d = _witness(body)
+                self.assertEqual(
+                    (d["ops"][1:], d["opaque"], d["wrote_outside"]),
+                    (["aten::add_.Tensor"], False, True),
+                    body.__name__,
+                )
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), struct.pack("4f", 1.0, 1.0, 1.0, 1.0))
+        self.assertEqual(_wt_bits(sparse._values()), _wt_bits(values))
+        self.assertEqual(_wt_bits(values), _wt_bits(torch.full_like(values, 2.0)))
+        self.assertEqual(quantized.q_per_channel_scales().tolist(), [1.1, 1.2])
+
+    def test_a_result_sized_by_data(self, device):
+        a, b = self.pair(device)
+        index = torch.tensor([0, 2], device=device)
+        for fn, args in (
+            (torch.nonzero, (a,)),
+            (torch.masked_select, (a, a > 0)),
+            (torch.Tensor.__getitem__, (a, a > 0)),
+            (torch.bincount, (index,)),
+            # Below the top-level operator: where(condition) runs nonzero.
+            (torch.where, (a > 0,)),
+            # The tag is the operator's, as the draw tag: also an index by
+            # integers, whose size follows no data.
+            (torch.Tensor.__getitem__, (a, index)),
+        ):
+            _, d = _witness(fn, *args)
+            self.assertEqual(
+                (d["data_sized"], d["saw_nothing"], d["opaque"]),
+                (True, False, False),
+                fn,
+            )
+        _, d = _witness(torch.Tensor.__getitem__, a, 0)
+        self.assertEqual((d["data_sized"], d["saw_nothing"]), (False, True))
+
+    def test_a_witness_blinded_in_the_middle_stays_opaque(self, device):
+        a, b = self.pair(device)
+        set_key = torch._C._dispatch_tls_set_dispatch_key_included
+        is_key = torch._C._dispatch_tls_is_dispatch_key_included
+        inner = []
+
+        # No Python frame is entered between the clearing and what finds it.
+        def a_witness_inside():
+            set_key("PreDispatch", False)
+            a.add_(b)
+            inner.append(_witness(torch.neg, a)[1])
+
+        def a_pause():
+            set_key("PreDispatch", False)
+            a.add_(b)
+            _witness_pause(True)
+            _witness_pause(False)
+
+        def nothing():
+            pass
+
+        def a_frame():
+            set_key("PreDispatch", False)
+            a.add_(b)
+            nothing()
+            set_key("PreDispatch", True)
+
+        # torch/_ops.py clears the key when its last pre-dispatch mode goes.
+        def a_tracer():
+            from torch.fx.experimental.proxy_tensor import make_fx
+
+            make_fx(torch.neg, pre_dispatch=True)(b)
+            inner.append(is_key("PreDispatch"))
+            a.add_(b)
+            set_key("PreDispatch", True)
+
+        for body, at in (
+            (a_witness_inside, "a begin"),
+            (a_pause, "a pause"),
+            (a_frame, "a Python frame"),
+            (a_tracer, "a Python frame"),
+        ):
+            before = a.clone()
+            _, d = _witness(body)
+            self.assertEqual(_wt_bits(a), _wt_bits(before + b))
+            self.assertEqual(
+                (
+                    d["opaque"],
+                    d["why"],
+                    d["saw_nothing"],
+                    "aten::add_.Tensor" in d["ops"],
+                ),
+                (True, "could not see at " + at, False, False),
+                body.__name__,
+            )
+            self.assertFalse(is_key("PreDispatch"))
+        # The witness inside saw what ran while it was open; the tracer left
+        # the key cleared.
+        self.assertEqual(
+            (inner[0]["ops"], inner[0]["opaque"], inner[1]),
+            (["aten::neg"], False, False),
+        )
+
+        # A handler of a dispatch mode runs with the key excluded: what it
+        # runs is not seen, and the frame it enters says so.
+        class Writes(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                a.add_(b)
+                return func(*args, **(kwargs or {}))
+
+        def under_a_mode():
+            with Writes():
+                torch.neg(b)
+
+        before = a.clone()
+        _, d = _witness(under_a_mode)
+        self.assertEqual(_wt_bits(a), _wt_bits(before + b))
+        self.assertEqual(
+            (d["ops"], d["opaque"], d["why"]),
+            (["aten::neg"], True, "could not see at a Python frame"),
+        )
+
+    def test_known_hole_the_key_cleared_and_set_again_unseen(self, device):
+        # KNOWN HOLE, asserted so that it is seen when it closes. The key is
+        # taken away and put back with no call of the witness and no Python
+        # frame entered in between: the operators in between are not seen and
+        # nothing says so. Seeing it needs a change to c10 or to the binding.
+        a, b = self.pair(device)
+        set_key = torch._C._dispatch_tls_set_dispatch_key_included
+        hole = ([], [], False, False, True)
+
+        def what(d):
+            return (
+                d["ops"],
+                d["wrote"],
+                d["opaque"],
+                d["wrote_outside"],
+                d["saw_nothing"],
+            )
+
+        # Inside one C call: a call list of three C calls.
+        set_entry = ("vector", set_key, "set")
+        add_entry = ("vector", torch.Tensor.add_, "add_")
+        T = torch.Tensor
+        both = _calls_make((2, 0, ["PreDispatch", False, True], [
+            (set_entry, [("const", 0), ("const", 1)], None, None, 0, (), (), (str, bool)),
+            (add_entry, [("in", 0), ("in", 1)], None, None, 0, (), (), (T, T)),
+            (set_entry, [("const", 0), ("const", 2)], None, None, 0, (), (), (str, bool)),
+        ], []))  # fmt: skip
+        before = a.clone()
+        _, d = _witness(_calls_run, both, (a, b), ())
+        self.assertEqual(_wt_bits(a), _wt_bits(before + b))
+        self.assertEqual(what(d), hole)
+
+        # C calls of one frame: the key excluded and included again.
+        def guarded():
+            with torch._C._DisableTorchDispatch():
+                a.add_(b)
+
+        before = a.clone()
+        _, d = _witness(guarded)
+        self.assertEqual(_wt_bits(a), _wt_bits(before + b))
+        self.assertEqual(what(d)[:4], hole[:4])
+        self.assertFalse(torch._C._dispatch_tls_is_dispatch_key_included("PreDispatch"))
+
+    def test_a_resume_inside_an_operator_in_flight(self, device):
+        # An operator with a kernel in Python, whose operators come to the
+        # hook below it. A witness paused when that operator began and resumed
+        # inside it did not see it begin: what runs below is no part of the
+        # last operator the witness saw, and is not top-level.
+        a, _ = self.pair(device)
+
+        def kernel(x):
+            _witness_pause(False)
+            return torch.neg(x).add_(1)
+
+        def body(first):
+            if first:
+                torch.exp(a)
+            _witness_pause(True)
+            return torch.ops.vmwitness.resumes(a)
+
+        with torch.library._scoped_library("vmwitness", "FRAGMENT") as lib:
+            lib.define("resumes(Tensor x) -> Tensor")
+            lib.impl("resumes", kernel, "CompositeExplicitAutograd")
+            for first in (False, True):
+                # Around it a witness that is not paused: the operator comes
+                # to the hook.
+                (r, d), _ = _witness(_witness, body, first)
+                self.assertEqual(_wt_bits(r), _wt_bits(torch.neg(a) + 1))
+                self.assertEqual(
+                    (d["ops"], d["opaque"], d["why"]),
+                    (["aten::exp"] * first, True, "resumed inside an operator that began while it was paused"),
+                )  # fmt: skip
+
+        # Paused and resumed with no operator in flight: nothing to refuse.
+        def between():
+            _witness_pause(True)
+            torch.neg(a)
+            _witness_pause(False)
+            torch.exp(a)
+
+        _, d = _witness(between)
+        self.assertEqual((d["ops"], d["opaque"]), (["aten::exp"], False))
 
 
 instantiate_device_type_tests(TestVmWitness, globals())
@@ -5204,6 +5593,1149 @@ class TestVmRulesImports(TestCase):
             self.assertEqual(a, b, atol=0, rtol=0, msg=f"value {at}")
         # A region ran over the import while the module was being reloaded.
         self.assertGreater(during[0], 0, msg=str(vm.regions(compiled)))
+
+
+if CHECKS_HAS_VM:
+    from torch._rust_inductor import lower as _lw
+
+
+def _lw_keys(tensors):
+    return [x if type(x) is float else _lw.key_of(x) for x in tensors]
+
+
+def _lw_key_tree(x):
+    if isinstance(x, torch.Tensor):
+        return _lw.key_of(x)
+    return type(x)(_lw_key_tree(i) for i in x) if type(x) in (tuple, list) else x
+
+
+def _lw_copy(x):
+    if not isinstance(x, torch.Tensor):
+        return x
+    if type(x) is torch.nn.Parameter:
+        return torch.nn.Parameter(x.detach().clone(), requires_grad=x.requires_grad)
+    return x.detach().clone().requires_grad_(x.requires_grad)
+
+
+def _lw_leaves(t):
+    """The templates under ``t`` that are no container."""
+    if t[0] not in ("seq", "map", "slice"):
+        return [t]
+    parts = t[2] if t[0] != "slice" else t[1:]
+    return [leaf for part in parts for leaf in _lw_leaves(part)]
+
+
+def _lw_stated(spec, inputs=(), pins=()):
+    """``spec``, written with what a test is about, in the form a list has:
+    every operand pinned to its class (an input, a pin and a constant to the
+    class of the object, torch.Tensor where none is given; a result to what
+    its entry asserts), every kept result asserted to be of a class
+    (torch.Tensor if the entry names none), and every slot that no entry
+    moves or drops and no output names dropped behind the last entry."""
+    ninputs, npins, consts, entries, outputs = spec
+    asserted, live, stated = {}, set(), []
+    given = {"in": inputs, "pin": pins, "const": consts}
+
+    def pinned(t):
+        kind = t[0]
+        if kind in ("seq", "map", "slice"):
+            return tuple(pinned(part) for part in (t[2] if kind != "slice" else t[1:]))
+        if kind in given:
+            return type(given[kind][t[1]]) if t[1] < len(given[kind]) else torch.Tensor
+        if kind == "move":
+            live.discard(t[1])
+        if kind in ("res", "move"):
+            return asserted.get(t[1], torch.Tensor)
+        return None if kind == "null" else torch.Tensor
+
+    for k, e in enumerate(entries):
+        if e[0] == "drop":
+            live.difference_update(e[1])
+            stated.append(e)
+            continue
+        callee, args, kwnames, out, at, flags, asserts, _ = e
+        classes = tuple(pinned(t) for t in args)
+        if out is not None:
+            named = [
+                a[1] if a[0] == "class" else type(a[1])
+                for a in asserts
+                if a[0] in ("class", "key")
+            ]
+            asserted[k] = named[0] if named else torch.Tensor
+            asserts = asserts if named else (*asserts, ("class", torch.Tensor))
+            live.add(k)
+        stated.append((callee, args, kwnames, out, at, flags, asserts, classes))
+    kept = {t[1] for o in outputs for t in _lw_leaves(o) if t[0] in ("res", "part")}
+    if live - kept:
+        stated.append(_cl_drop(*sorted(live - kept)))
+    return (ninputs, npins, consts, stated, outputs)
+
+
+def _lw_lower(spec, inputs, pins=(), facts=None):
+    """The list of ``spec`` (stated), and its lowering from the keys of
+    ``inputs`` and ``pins`` and from what one real run of the list on copies
+    of them left (``facts``: a function of that, to say something else)."""
+    spec = _lw_stated(spec, inputs, pins)
+    h = _calls_make(spec)
+    a, b = [_lw_copy(x) for x in inputs], [_lw_copy(x) for x in pins]
+    before = _lw_keys(a), _lw_keys(b)
+    out = _calls_run(h, tuple(a), tuple(b))
+    left = _lw.Traced(
+        tuple(_lw_key_tree(o) for o in out), tuple(_lw_keys(a)), tuple(_lw_keys(b))
+    )
+    return h, _lw.lower(h, spec, *before, left if facts is None else facts(left))
+
+
+def _lw_modes():
+    return (
+        torch._C._len_torch_dispatch_stack(),
+        torch._C._len_torch_function_stack(),
+    )
+
+
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmLower(TestCase):
+    """The lowering makes the aten-level graph of a call list from a
+    data-free run of the list. The rule: a graph it hands out computes what
+    the list computes (results bit for bit, and every tensor the list
+    writes), and a list it does not understand in full, or whose data-free
+    run is not what the traced run was, gets no graph but a reason that
+    names the entry.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def lw_agrees(self, spec, make, calls=None):
+        """Lowers ``spec`` for the tensors of ``make(0)`` and holds the graph
+        against the list on those of three other seeds."""
+        inputs, pins = make(0)
+        h, low = _lw_lower(spec, inputs, pins)
+        self.assertIsInstance(low, _lw.Lowered, msg=getattr(low, "reason", ""))
+        self.assertEqual(_lw_modes(), (0, 0))
+        for seed in (1, 2, 3):
+            mine, theirs = make(seed), make(seed)
+            torch.manual_seed(seed)
+            want = _calls_run(h, tuple(theirs[0]), tuple(theirs[1]))
+            torch.manual_seed(seed)
+            got = low.gm(*mine[0], *mine[1], *low.constants)
+            self.assertEqual(_wt_bits(got), _wt_bits(want))
+            self.assertEqual(_wt_bits(mine), _wt_bits(theirs))
+        return low
+
+    def lw_tensors(self, device, *shapes, pins=(), grad=False):
+        def make(seed):
+            gen = torch.Generator().manual_seed(seed)
+            inputs = [torch.randn(*s, generator=gen).to(device) for s in shapes]
+            made = [torch.randn(*s, generator=gen).to(device) for s in pins]
+            return inputs, [torch.nn.Parameter(p, requires_grad=grad) for p in made]
+
+        return make
+
+    def test_in_place_operators(self, device):
+        spec = (2, 1, [0.5], [
+            _cl_entry(("binary", "*"), [("in", 0), ("pin", 0)], out=0, flags=["pure", "fresh"]),
+            _cl_entry(("binary", "+="), [("res", 0), ("in", 1)], out=1, flags=[("writes", (0,))]),
+            _cl_entry(_cl_vector(torch.Tensor.mul_), [("res", 1), ("const", 0)], out=2, flags=[("writes", (0,))]),
+            _cl_entry(("binary", "-="), [("in", 1), ("res", 2)], out=3, flags=[("writes", (0,))]),
+            _cl_entry(_cl_vector(torch.relu_), [("in", 0)], flags=[("writes", (0,))]),
+        ], [("res", 2), ("res", 3)])  # fmt: skip
+        low = self.lw_agrees(spec, self.lw_tensors(device, (3, 4), (3, 4), pins=[(4,)]))
+        self.assertEqual(low.list_facts, {"writes_input"})
+        self.assertEqual(
+            [n.name for n in low.gm.graph.find_nodes(op="placeholder")],
+            ["arg0_1", "arg1_1", "const_0"],
+        )
+        # The second output is the input the list wrote, the object itself.
+        (x, y), (w,) = self.lw_tensors(device, (3, 4), (3, 4), pins=[(4,)])(5)
+        self.assertIs(low.gm(x, y, w)[1], y)
+
+    def test_a_view_chain_written_through(self, device):
+        tail = ("slice", ("const", 1), ("null",), ("null",))
+        spec = (1, 0, [2, -1, 0, 1, 1.0], [
+            _cl_entry(_cl_vector(torch.Tensor.view), [("in", 0), ("const", 0), ("const", 1)], out=0, flags=["pure"]),
+            _cl_entry(_cl_vector(torch.Tensor.transpose), [("res", 0), ("const", 2), ("const", 3)], out=1, flags=["pure"]),
+            _cl_entry(("getitem",), [("res", 1), tail], out=2, flags=["pure"]),
+            _cl_entry(_cl_vector(torch.Tensor.add_), [("res", 2), ("const", 4)], out=3, flags=[("writes", (0,))]),
+            _cl_entry(("getattr", "T"), [("res", 0)], out=4, flags=["pure"]),
+        ], [("res", 2), ("res", 4)])  # fmt: skip
+        low = self.lw_agrees(spec, self.lw_tensors(device, (4, 3)))
+        # Written: a result that is not known to be over memory of its own.
+        self.assertEqual(low.list_facts, {"writes_input"})
+
+    def test_cat_of_a_list_and_keywords(self, device):
+        both = ("seq", "list", [("in", 0), ("in", 1)])
+        twice = ("seq", "tuple", [("res", 0), ("res", 0)])
+        spec = (2, 0, [1, -1, True], [
+            _cl_entry(_cl_vector(torch.cat), [both, ("const", 0)], ("dim",), out=0, flags=["pure", "fresh"]),
+            _cl_entry(_cl_vector(torch.stack), [twice], out=1, flags=["pure", "fresh"]),
+            _cl_entry(_cl_vector(torch.Tensor.softmax), [("res", 1), ("const", 1)], ("dim",), out=2, flags=["pure", "fresh"]),
+            _cl_entry(_cl_vector(torch.sum), [("res", 2), ("const", 0), ("const", 2)], ("dim", "keepdim"), out=3, flags=["pure", "fresh"]),
+        ], [("res", 3), ("res", 0)])  # fmt: skip
+        low = self.lw_agrees(spec, self.lw_tensors(device, (3, 2), (3, 5)))
+        self.assertEqual(low.list_facts, frozenset())
+
+    def test_a_tuple_result_and_its_parts(self, device):
+        pair = ("seq", "list", [("in", 0), ("res", 1)])
+        spec = (1, 0, [1, 2.0], [
+            _cl_entry(_cl_vector(torch.max), [("in", 0), ("const", 0)], out=0, flags=["pure"], asserts=[("class", torch.return_types.max), ("count", 2)]),
+            _cl_entry(("binary", "*"), [("part", 0, (0,)), ("part", 0, (1,))], out=1, flags=["pure", "fresh"]),
+            _cl_entry(_cl_vector(torch._foreach_mul), [pair, ("const", 1)], out=2, flags=["pure"], asserts=[("class", tuple)]),
+        ], [("part", 0, (1,)), ("res", 1), ("res", 2), ("part", 2, (0,))])  # fmt: skip
+        self.lw_agrees(spec, self.lw_tensors(device, (4, 4)))
+
+    def test_dropout_in_training(self, device):
+        spec = (1, 1, [0.5, True], [
+            _cl_entry(_cl_vector(torch.dropout), [("in", 0), ("const", 0), ("const", 1)], out=0, flags=["draws", "fresh"]),
+            _cl_entry(("binary", "*"), [("res", 0), ("pin", 0)], out=1, flags=["pure", "fresh"]),
+        ], [("res", 1)])  # fmt: skip
+        low = self.lw_agrees(spec, self.lw_tensors(device, (8, 8), pins=[(8,)]))
+        self.assertEqual(low.list_facts, {"draws"})
+
+    def test_items_comparison_and_negation(self, device):
+        column = (
+            "seq",
+            "tuple",
+            [("slice", ("null",), ("null",), ("null",)), ("const", 0)],
+        )
+        spec = (2, 0, [1], [
+            _cl_entry(("getitem",), [("in", 1), column], out=0, flags=["pure"]),
+            _cl_entry(("setitem",), [("res", 0), ("in", 0), column], flags=[("writes", (1,))]),
+            _cl_entry(("unary", "-"), [("in", 0)], out=2, flags=["pure", "fresh"]),
+            _cl_entry(("compare", "<"), [("res", 2), ("in", 1)], out=3, flags=["pure", "fresh"]),
+            _cl_entry(_cl_vector(torch.where), [("res", 3), ("in", 0), ("in", 1)], out=4, flags=["pure", "fresh"]),
+        ], [("res", 3), ("res", 4)])  # fmt: skip
+        low = self.lw_agrees(spec, self.lw_tensors(device, (3, 4), (3, 4)))
+        self.assertEqual(low.list_facts, {"writes_input"})
+
+    def test_gradients_are_asked_of_the_graph_as_of_the_list(self, device):
+        spec = (1, 2, [], [
+            _cl_entry(_cl_vector(torch._C._nn.linear), [("in", 0), ("pin", 0), ("pin", 1)], out=0, flags=["pure", "fresh"]),
+            _cl_entry(_cl_vector(torch.relu_), [("res", 0)], out=1, flags=[("writes", (0,))]),
+            _cl_entry(_cl_vector(torch.Tensor.sum), [("res", 1)], out=2, flags=["pure", "fresh"]),
+        ], [("res", 2)])  # fmt: skip
+        make = self.lw_tensors(device, (5, 4), pins=[(3, 4), (3,)], grad=True)
+        low = self.lw_agrees(spec, make)
+        h = _calls_make(_lw_stated(spec, *make(0)))
+        (x,), mine = make(7)
+        _, theirs = make(7)
+        low.gm(x, *mine)[0].backward()
+        _calls_run(h, (x,), tuple(theirs))[0].backward()
+        self.assertEqual(
+            _wt_bits([p.grad for p in mine]), _wt_bits([p.grad for p in theirs])
+        )
+
+    def test_a_float_input_is_a_constant_of_the_graph(self, device):
+        spec = (3, 0, [], [
+            _cl_entry(("binary", "*"), [("in", 0), ("in", 1)], out=0, flags=["pure", "fresh"]),
+            _cl_entry(_cl_vector(torch.add), [("res", 0), ("in", 0), ("in", 1)], ("alpha",), out=1, flags=["pure", "fresh"]),
+        ], [("res", 1)])  # fmt: skip
+        make = self.lw_tensors(device, (3, 4))
+        low = self.lw_agrees(spec, lambda seed: ([*make(seed)[0], 2.5, 7.0], []))
+        # The float the list uses is named; the one it does not use is not.
+        self.assertEqual(low.specialized, (1,))
+        (x,), _ = make(4)
+        self.assertEqual(_wt_bits(low.gm(x, 3.5, 7.0)), _wt_bits(low.gm(x, 2.5, 7.0)))
+
+    def test_a_tensor_made_of_constants_is_a_trailing_placeholder(self, device):
+        spec = (1, 1, [2.0, device], [
+            _cl_entry(_cl_vector(torch.tensor), [("const", 0), ("const", 1)], ("device",), out=0, flags=["pure", "fresh"]),
+            _cl_entry(("binary", "*"), [("in", 0), ("res", 0)], out=1, flags=["pure", "fresh"]),
+            _cl_entry(("binary", "+"), [("res", 1), ("pin", 0)], out=2, flags=["pure", "fresh"]),
+        ], [("res", 2)])  # fmt: skip
+        low = self.lw_agrees(spec, self.lw_tensors(device, (3, 4), pins=[(4,)]))
+        self.assertEqual(_wt_bits(list(low.constants)), _wt_bits([torch.tensor(2.0)]))
+        self.assertEqual(
+            [n.name for n in low.gm.graph.find_nodes(op="placeholder")],
+            ["arg0_1", "const_0", "const_1"],
+        )
+        self.assertEqual(list(low.gm.graph.find_nodes(op="get_attr")), [])
+
+    def lw_refused(self, spec, inputs, pins=(), facts=None):
+        h, low = _lw_lower(spec, inputs, pins, facts)
+        self.assertIsInstance(low, _lw.NotLowerable)
+        self.assertEqual(_lw_modes(), (0, 0))
+        return low
+
+    def test_what_has_no_graph_and_why(self, device):
+        x = torch.randn(3, 4, device=device)
+        one = torch.randn((), device=device)
+
+        def single(
+            callee, args, flags=("pure",), out=0, consts=(), outputs=None, cls=None
+        ):
+            asserts = [("class", cls)] if cls else []
+            entries = [_cl_entry(callee, args, out=out, flags=flags, asserts=asserts)]
+            return (
+                2,
+                0,
+                list(consts),
+                entries,
+                [("in", 0)] if outputs is None else outputs,
+            )
+
+        add = _cl_vector(torch.add)
+        ops = [("in", 0), ("in", 0)]
+        cases = {
+            "an opaque call": single(add, ops, ["opaque"]),
+            "an effect": single(add, ops, ["effect"]),
+            "changes a tensor's key in place": single(_cl_vector(torch.Tensor.t_), ops[:1], [("writes", (0,)), ("rekeys", (0,))]),
+            "no flag says what the entry does": single(add, ops, []),
+            "a 'setattr' entry is not lowered": single(("setattr", "requires_grad"), [("const", 0), ("in", 0)], [("writes", (1,))], None, [True]),
+            "a 'delitem' entry is not lowered": single(("delitem",), [("in", 0), ("const", 0)], [("writes", (0,))], None, [0]),
+            "a read of .data": single(("getattr", "data"), ops[:1]),
+            "depends on a tensor's data (DataDependentOutputException": single(_cl_vector(torch.Tensor.is_nonzero), [("in", 1)], cls=bool),
+            "depends on a tensor's data (DynamicOutputShapeException": single(_cl_vector(torch.nonzero), ops[:1]),
+            "it has no fake kernel": single(_cl_vector(torch.Tensor.to_sparse), ops[:1]),
+            "Please convert all Tensors to FakeTensors": single(add, [("in", 0), ("const", 0)], consts=[torch.ones(4, device=device)]),
+            "a part of a result is not there": single(_cl_vector(torch.max), [("in", 0), ("const", 0)], ["pure", "fresh"], consts=[1], outputs=[("part", 0, (2,))], cls=torch.return_types.max),
+            "are not compared": single(add, ops, consts=[1.5], outputs=[("const", 0)]),
+            "differ in what the tensor is": single(add, ops, consts=[torch.ones(2)], outputs=[("const", 0)]),
+        }  # fmt: skip
+        for why, spec in cases.items():
+            with self.subTest(why=why):
+                # The list itself runs (but for the two that raise as
+                # written): what is refused is its graph.
+                if "a part" in why or "delitem" in why:
+                    keys = _lw_keys([x, one])
+                    left = _lw.Traced((keys[0],), tuple(keys), ())
+                    spec = _lw_stated(spec, (x, one))
+                    low = _lw.lower(_calls_make(spec), spec, keys, [], left)
+                else:
+                    low = self.lw_refused(spec, (x, one))
+                self.assertIn(why, low.reason)
+                no_entry = ("compared", "what the tensor is", "a part")
+                at_output = any(text in why for text in no_entry)
+                self.assertEqual(low.entry, None if at_output else 0)
+                self.assertEqual(_lw_modes(), (0, 0))
+        self.assertEqual(
+            self.lw_refused(cases["an effect"], (x, one)).list_facts, {"effects"}
+        )
+        self.assertEqual(
+            self.lw_refused(cases["a read of .data"], (x, one)).list_facts,
+            {"data_attr"},
+        )
+        reads = "depends on a tensor's data (DataDependentOutputException"
+        self.assertEqual(
+            self.lw_refused(cases[reads], (x, one)).list_facts, {"reads_value"}
+        )
+
+    def test_keys_that_are_not_lowered(self, device):
+        x = torch.randn(3, 4, device=device)
+        spec = _lw_stated(
+            (
+                1,
+                0,
+                [],
+                [
+                    _cl_entry(
+                        _cl_vector(torch.add),
+                        [("in", 0), ("in", 0)],
+                        out=0,
+                        flags=["pure"],
+                    )
+                ],
+                [("res", 0)],
+            )
+        )
+        h = _calls_make(spec)
+        key = _lw.key_of(x)
+        out = _lw.Traced((key,), (key,), ())
+        self.assertIsInstance(_lw.lower(h, spec, [key], [], out), _lw.Lowered)
+        for why, given in {
+            "has no key": None,
+            "conjugate": key._replace(conj=True),
+            "negative bit": key._replace(neg=True),
+            "inference tensor": key._replace(inference=True),
+            "has no key (": (3, 4),
+        }.items():
+            with self.subTest(why=why):
+                low = _lw.lower(h, spec, [given], [], out)
+                self.assertIsInstance(low, _lw.NotLowerable)
+                self.assertIn(why, low.reason)
+        # What has a key: the exact classes, dense and strided.
+        self.assertIsNone(_lw.key_of(x.to_sparse()))
+        self.assertIsNone(_lw.key_of(x.as_subclass(KeySubclass)))
+        self.assertIsNone(_lw.key_of(2.5))
+        for count in ([key, key], []):
+            low = _lw.lower(h, spec, count, [], out)
+            self.assertIn("not as many", low.reason)
+        low = _lw.lower(h, spec, [key], [], _lw.Traced((key, key), (key,), ()))
+        self.assertIn("not as many", low.reason)
+        with TorchFunctionMode():
+            low = _lw.lower(h, spec, [key], [], out)
+        self.assertIn("a function mode is on", low.reason)
+        # A fake tensor that requires grad is a leaf: the key does not say
+        # whether the traced tensor was one, and a leaf is not written.
+        spec = _lw_stated(
+            (
+                1,
+                0,
+                [],
+                [
+                    _cl_entry(
+                        _cl_vector(torch.relu_),
+                        [("in", 0)],
+                        out=0,
+                        flags=[("writes", (0,))],
+                    )
+                ],
+                [("res", 0)],
+            )
+        )
+        key = key._replace(requires_grad=True)
+        low = _lw.lower(
+            _calls_make(spec), spec, [key], [], _lw.Traced((key,), (key,), ())
+        )
+        self.assertIn("a leaf Variable that requires grad", low.reason)
+        self.assertEqual(_lw_modes(), (0, 0))
+
+    def test_no_mode_is_left_on_a_stack(self, device):
+        x = torch.randn(3, 4, device=device)
+        for push, pop, mode in (
+            (torch._C._push_on_torch_dispatch_stack, lambda: torch._C._pop_torch_dispatch_stack(None), TorchDispatchMode()),
+            (torch._C._push_on_torch_function_stack, torch._C._pop_torch_function_stack, TorchFunctionMode()),
+        ):  # fmt: skip
+            with self.subTest(push=push.__name__):
+                # A list that pushes a mode and goes on: the next operator
+                # fails under it, or the run ends with a mode on the stack.
+                low, left = None, None
+                spec = _lw_stated((1, 0, [mode], [
+                    _cl_entry(_cl_vector(push), [("const", 0)], flags=["pure"]),
+                    _cl_entry(_cl_vector(torch.add), [("in", 0), ("in", 0)], out=1, flags=["pure"]),
+                ], [("res", 1)]))  # fmt: skip
+                key = _lw.key_of(x)
+                try:
+                    low = _lw.lower(
+                        _calls_make(spec),
+                        spec,
+                        [key],
+                        [],
+                        _lw.Traced((key,), (key,), ()),
+                    )
+                    left = _lw_modes()
+                finally:
+                    while _lw_modes() != (0, 0):
+                        pop()
+                self.assertEqual(left, (0, 0))
+                self.assertIsInstance(low, _lw.NotLowerable)
+
+    def test_a_run_that_is_not_the_traced_one_has_no_graph(self, device):
+        # L2. The traced run made float64 (the default dtype then); the
+        # data-free run, under another default, makes float32.
+        spec = _lw_stated((1, 0, [3, device], [
+            _cl_entry(_cl_vector(torch.zeros), [("const", 0), ("const", 1)], ("device",), out=0, flags=["pure", "fresh"]),
+            _cl_entry(("binary", "+"), [("res", 0), ("in", 0)], out=1, flags=["pure", "fresh"]),
+        ], [("res", 0), ("res", 1)]))  # fmt: skip
+        x = torch.randn(3, device=device)
+        h = _calls_make(spec)
+        torch.set_default_dtype(torch.float64)
+        try:
+            out = _calls_run(h, (x,), ())
+        finally:
+            torch.set_default_dtype(torch.float32)
+        key = _lw.key_of(x)
+        left = _lw.Traced(tuple(map(_lw.key_of, out)), (key,), ())
+        low = _lw.lower(h, spec, [key], [], left)
+        self.assertIsInstance(low, _lw.NotLowerable)
+        self.assertEqual(
+            low.reason, "output 0: the data-free run and the traced run differ in dtype"
+        )
+        torch.set_default_dtype(torch.float64)
+        try:
+            low = _lw.lower(h, spec, [key], [], left)
+        finally:
+            torch.set_default_dtype(torch.float32)
+        self.assertIsInstance(low, _lw.Lowered)
+
+    def test_every_field_of_every_recorded_key_is_compared(self, device):
+        spec = (1, 1, [], [
+            _cl_entry(_cl_vector(torch.Tensor.add_), [("in", 0), ("pin", 0)], out=0, flags=[("writes", (0,))]),
+            _cl_entry(_cl_vector(torch.Tensor.t), [("pin", 0)], out=1, flags=["pure"]),
+            _cl_entry(_cl_vector(torch._foreach_neg), [("seq", "list", [("res", 1)])], out=2, flags=["pure"], asserts=[("class", tuple)]),
+        ], [("res", 0), ("pin", 0), ("res", 2)])  # fmt: skip
+        x = torch.randn(4, 4, device=device)
+        w = torch.nn.Parameter(torch.randn(4, 4, device=device))
+        self.assertIsInstance(_lw_lower(spec, [x], [w])[1], _lw.Lowered)
+        other = {
+            "parameter": lambda k: not k.parameter,
+            "dtype": lambda k: torch.float64,
+            "device": lambda k: torch.device("meta"),
+            "sizes": lambda k: (4, 5),
+            "strides": lambda k: (1, 4) if k.strides == (4, 1) else (4, 1),
+            "requires_grad": lambda k: not k.requires_grad,
+            "conj": lambda k: True,
+            "neg": lambda k: True,
+            "inference": lambda k: True,
+        }
+        self.assertEqual(set(other), set(_lw.Key._fields))
+
+        def changed(where, field):
+            def facts(left):
+                trees = {
+                    "outputs": list(left.outputs),
+                    "inputs": list(left.inputs),
+                    "pins": list(left.pins),
+                }
+                group, i = where
+                key = trees[group][i]
+                inner = type(key) is not _lw.Key
+                key = key[0] if inner else key
+                new = key._replace(**{field: other[field](key)})
+                trees[group][i] = type(trees[group][i])([new]) if inner else new
+                return _lw.Traced(
+                    *(tuple(trees[g]) for g in ("outputs", "inputs", "pins"))
+                )
+
+            return facts
+
+        places = [
+            ("outputs", 0),
+            ("outputs", 1),
+            ("outputs", 2),
+            ("inputs", 0),
+            ("pins", 0),
+        ]
+        for where in places:
+            for field in _lw.Key._fields:
+                with self.subTest(where=where, field=field):
+                    low = self.lw_refused(spec, [x], [w], changed(where, field))
+                    self.assertIn(f"differ in {field}", low.reason)
+        # The shape of what is handed out: a list is no tuple, None no tensor.
+        for facts in (
+            lambda left: left._replace(
+                outputs=(
+                    *left.outputs[:2],
+                    (list if type(left.outputs[2]) is tuple else tuple)(
+                        left.outputs[2]
+                    ),
+                )
+            ),
+            lambda left: left._replace(
+                outputs=(*left.outputs[:2], [*left.outputs[2], left.outputs[2][0]])
+            ),
+            lambda left: left._replace(outputs=(None, *left.outputs[1:])),
+            lambda left: left._replace(inputs=(None,)),
+        ):
+            self.lw_refused(spec, [x], [w], facts)
+
+    def test_what_an_assert_says_is_compared(self, device):
+        x = torch.randn(3, 4, device=device)
+        wide = torch.randn(3, 4, device=device, dtype=torch.float64)
+        T, P = torch.Tensor, torch.nn.Parameter
+
+        def spec(callee, flags, *asserts):
+            args = [("in", 0), ("const", 0)]
+            entry = _cl_entry(callee, args, out=0, flags=flags, asserts=asserts)
+            return _lw_stated((1, 0, [1], [entry], [("in", 0)]))
+
+        add, add_, top = (
+            _cl_vector(torch.add),
+            _cl_vector(torch.Tensor.add_),
+            _cl_vector(torch.max),
+        )
+        pure, writes = ["pure"], [("writes", (0,))]
+        pair = ("class", torch.return_types.max)
+        holds = [
+            spec(add, pure, ("key", x)),
+            spec(add, pure, ("class", T)),
+            spec(add_, writes, ("is", 0), ("class", T)),
+            spec(top, pure, ("count", 2), pair),
+        ]
+        fails = [
+            spec(add, pure, ("key", wide)),
+            spec(add, pure, ("key", x[0])),
+            spec(add, pure, ("key", x.to("meta"))),
+            spec(add, pure, ("key", x.clone().requires_grad_())),
+            spec(add, pure, ("key", torch.randn(4, 3, device=device).t())),
+            spec(add, pure, ("key", P(x, requires_grad=False))),
+            spec(add, pure, ("class", P)),
+            spec(add, pure, pair),
+            spec(add, pure, ("class", float)),
+            spec(top, pure, ("class", T)),
+            spec(add, pure, ("is", 0), ("class", T)),
+            spec(add_, writes, ("is", 1), ("class", T)),
+            spec(top, pure, ("count", 3), pair),
+            spec(add, pure, ("count", 2)),
+        ]
+        key = _lw.key_of(x)
+        out = _lw.Traced((key,), (key,), ())
+        for s in holds:
+            low = _lw.lower(_calls_make(s), s, [key], [], out)
+            self.assertIsInstance(low, _lw.Lowered, msg=getattr(low, "reason", ""))
+        for k, s in enumerate(fails):
+            with self.subTest(k=k):
+                low = _lw.lower(_calls_make(s), s, [key], [], out)
+                self.assertIsInstance(low, _lw.NotLowerable)
+                self.assertEqual(low.entry, 0)
+                self.assertEqual(_lw_modes(), (0, 0))
+
+    def test_the_class_an_operand_is_pinned_to_is_compared(self, device):
+        # A tensor is a fake tensor in the data-free run, whatever its class:
+        # its pin is held against the class its recorded key names. What is
+        # no tensor is the object itself there, and must be of its pin.
+        x = torch.randn(3, 4, device=device)
+        w = torch.nn.Parameter(torch.randn(3, 4, device=device), requires_grad=False)
+        T, P = torch.Tensor, torch.nn.Parameter
+        kx, kw = _lw.key_of(x), _lw.key_of(w)
+
+        def spec(result=P, pin=P, tensor=T, number=float):
+            return (2, 1, [], [
+                _cl_entry(_cl_vector(torch.Tensor.add_), [("pin", 0), ("in", 0)], out=0, flags=[("writes", (0,))], asserts=[("class", result), ("is", 0)], classes=(pin, tensor)),
+                _cl_entry(_cl_vector(torch.mul), [("res", 0), ("in", 1)], out=1, flags=["pure", "fresh"], asserts=[("class", T)], classes=(result, number)),
+                _cl_drop(0),
+            ], [("res", 1)])  # fmt: skip
+
+        def low(s, keys=(kx, 2.5), pins=(kw,)):
+            left = _lw.Traced((kx,), tuple(keys), tuple(pins))
+            return _lw.lower(_calls_make(s), s, list(keys), list(pins), left)
+
+        good = spec()
+        graph = low(good)
+        self.assertIsInstance(graph, _lw.Lowered, msg=getattr(graph, "reason", ""))
+        h = _calls_make(good)
+        mine, theirs = [_lw_copy(x), _lw_copy(w)], [_lw_copy(x), _lw_copy(w)]
+        want = _calls_run(h, (theirs[0], 2.5), (theirs[1],))
+        self.assertEqual(_wt_bits(graph.gm(mine[0], 2.5, mine[1])), _wt_bits(want))
+        self.assertEqual(_wt_bits(mine), _wt_bits(theirs))
+        for why, entry, refused in (
+            ("an operand is pinned to be a Tensor", 0, low(spec(pin=T))),
+            ("an operand is pinned to be a Parameter", 0, low(spec(tensor=P))),
+            ("the result is asserted to be a Tensor", 0, low(spec(result=T))),
+            ("is not of the class it is pinned to", 1, low(spec(number=int))),
+            ("is not of the class it is pinned to", 1, low(spec(number=T))),
+            # The same pins, and keys that name the other classes.
+            ("an operand is pinned to be a Parameter", 0, low(good, pins=(kx,))),
+            ("an operand is pinned to be a Tensor", 0, low(good, keys=(kw, 2.5))),
+        ):
+            with self.subTest(why=why):
+                self.assertIsInstance(refused, _lw.NotLowerable)
+                self.assertIn(why, refused.reason)
+                self.assertEqual(refused.entry, entry)
+                self.assertEqual(_lw_modes(), (0, 0))
+
+    def test_where_a_list_releases_is_nothing_in_its_graph(self, device):
+        # a = x * w; b = relu_(a); c = b + y; d = stack([c, b]); d.sum(0), c
+        mul, relu_ = _cl_vector(torch.mul), _cl_vector(torch.relu_)
+        add, stack = _cl_vector(torch.add), _cl_vector(torch.stack)
+        total = _cl_vector(torch.Tensor.sum)
+        made, wrote, same = ["pure", "fresh"], [("writes", (0,))], [("is", 0)]
+        at_the_end = (2, 1, [0], [
+            _cl_entry(mul, [("in", 0), ("pin", 0)], out=0, flags=made),
+            _cl_entry(relu_, [("res", 0)], out=1, flags=wrote, asserts=same),
+            _cl_entry(add, [("res", 1), ("in", 1)], out=2, flags=made),
+            _cl_entry(stack, [("seq", "list", [("res", 2), ("res", 1)])], out=3, flags=made),
+            _cl_entry(total, [("res", 3), ("const", 0)], out=4, flags=made),
+        ], [("res", 4), ("res", 2)])  # fmt: skip
+        moved = (2, 1, [0], [
+            _cl_entry(mul, [("in", 0), ("pin", 0)], out=0, flags=made),
+            _cl_entry(relu_, [("move", 0)], out=1, flags=wrote, asserts=same),
+            _cl_entry(add, [("res", 1), ("in", 1)], out=2, flags=made),
+            _cl_entry(stack, [("seq", "list", [("res", 2), ("move", 1)])], out=3, flags=made),
+            _cl_entry(total, [("move", 3), ("const", 0)], out=4, flags=made),
+        ], [("res", 4), ("res", 2)])  # fmt: skip
+        dropped = (2, 1, [0], [
+            _cl_entry(mul, [("in", 0), ("pin", 0)], out=0, flags=made),
+            _cl_entry(relu_, [("res", 0)], out=1, flags=wrote, asserts=same),
+            _cl_drop(0),
+            _cl_entry(add, [("res", 1), ("in", 1)], out=3, flags=made),
+            _cl_entry(stack, [("seq", "list", [("res", 3), ("res", 1)])], out=4, flags=made),
+            _cl_drop(1),
+            _cl_entry(total, [("res", 4), ("const", 0)], out=6, flags=made),
+            _cl_drop(4),
+        ], [("res", 6), ("res", 3)])  # fmt: skip
+        make = self.lw_tensors(device, (3, 4), (3, 4), pins=[(4,)])
+        graphs = [self.lw_agrees(spec, make) for spec in (at_the_end, moved, dropped)]
+        self.assertEqual(len({low.gm.code for low in graphs}), 1)
+        self.assertEqual({low.list_facts for low in graphs}, {frozenset()})
+        # The stated lists do release where they say.
+        stated = [_lw_stated(spec, *make(0)) for spec in (moved, dropped)]
+        texts = [_calls_text(_calls_make(spec)) for spec in stated]
+        self.assertEqual(texts[0].count("move r"), 3)
+        self.assertEqual(texts[1].count("drop r"), 3)
+
+    def test_a_release_that_could_be_seen_has_no_graph(self, device):
+        # A graph has no place for a release. Of a tensor of the run, a plain
+        # value and a tuple of those nothing sees one; of any other object
+        # (a weak reference to it, its class's deallocator) that is not
+        # known, and the list keeps its releases by having no graph.
+        x = torch.randn(3, 4, device=device)
+        x0, log = ("in", 0), []
+
+        class Finalized:
+            def __del__(self):
+                log.append("released")
+
+        # A finalizer, a weak reference, a class that takes weak references.
+        seen = [
+            (object.__new__, ("const", 0), Finalized),
+            (weakref.ref, x0, weakref.ReferenceType),
+            (set, None, set),
+        ]
+        unseen = [
+            (torch.Tensor.dim, x0, int),
+            (torch.Tensor.unbind, x0, tuple),
+            (torch.Tensor.size, x0, torch.Size),
+            (torch.Tensor.sort, x0, torch.return_types.sort),
+            (torch.Tensor.neg, x0, torch.Tensor),
+            (list, ("seq", "tuple", [x0]), list),
+        ]
+
+        def spec(case, release):
+            callee, operand, cls = case
+            out = None if release == "not kept" else 0
+            asserts = [("class", cls)] if out == 0 else []
+            first = _cl_entry(_cl_vector(callee), [operand] if operand else [], out=out, flags=["pure"], asserts=asserts)  # fmt: skip
+            then = {
+                "dropped": [_cl_drop(0)],
+                "moved": [_cl_entry(_cl_vector(id), [("move", 0)], flags=["pure"])],
+            }.get(release, [])
+            out = [("res", 0)] if release == "handed out" else [("in", 0)]
+            return (1, 0, [Finalized], [first, *then], out)
+
+        for release in ("dropped", "moved", "not kept"):
+            for case in seen:
+                with self.subTest(release=release, cls=case[2].__name__):
+                    low = self.lw_refused(spec(case, release), [x])
+                    said = f"the list releases its result, a {case[2].__name__}"
+                    self.assertIn(said, low.reason)
+                    self.assertEqual(low.entry, 0)
+            for case in unseen:
+                with self.subTest(release=release, cls=case[2].__name__):
+                    low = _lw_lower(spec(case, release), [x])[1]
+                    self.assertIsInstance(
+                        low, _lw.Lowered, msg=getattr(low, "reason", "")
+                    )
+        # Handed out, a release is the caller's: a list of tensors is a form
+        # of output. The others are not, so they have no graph either way.
+        low = _lw_lower(spec(unseen[-1], "handed out"), [x])[1]
+        self.assertIsInstance(low, _lw.Lowered, msg=getattr(low, "reason", ""))
+        self.assertIs(low.gm(x)[0][0], x)
+        for case in seen:
+            self.lw_refused(spec(case, "handed out"), [x])
+        # No fact says "its releases can be seen": no pass is given such a list.
+        self.assertNotIn("release", " ".join(_lw.FACTS))
+
+    def test_what_is_not_understood_has_no_graph(self, device):
+        x = torch.randn(3, 4, device=device)
+        key = _lw.key_of(x)
+        out = _lw.Traced((key,), (key,), ())
+        T = torch.Tensor
+
+        def spec(
+            callee=None, args=None, flags=("pure",), fields=8, top=5, more=(), **given
+        ):
+            given = {"asserts": [("class", T)], **given}
+            entry = _cl_entry(
+                callee or _cl_vector(torch.add),
+                args or [("in", 0), ("in", 0)],
+                out=0,
+                flags=flags,
+                **given,
+            )
+            entry = (*entry, *[()] * (fields - 8))[:fields]
+            whole = (1, 0, [], [entry, *more], [("res", 0)]) + (None,) * (top - 5)
+            return whole[:top]
+
+        known = spec()
+        h = _calls_make(known)
+        self.assertIsInstance(_lw.lower(h, known, [key], [], out), _lw.Lowered)
+        # A spec the list was not made of, in a form of later: each is
+        # refused by the lowering itself, whatever the interpreter takes.
+        for why, later in {
+            "the flag 'later' is not understood": spec(flags=["pure", "later"]),
+            "the flag 'moves' is not understood": spec(flags=["pure", ("moves", (0,))]),
+            "the operand template 'moved' is not understood": spec(
+                args=[("moved", 0), ("in", 0)]
+            ),
+            "a 'drop' entry is not lowered": spec(callee=("drop",)),
+            "a 'state' entry is not lowered": spec(
+                callee=("state", torch._C._set_grad_enabled)
+            ),
+            "the assert 'later' is not understood": spec(asserts=[("later", 1)]),
+            "entries of 8": spec(fields=7),
+            "entries of 8 ": spec(fields=9),
+            "drops of 3": spec(more=[("drop", ())]),
+            "drops of 3 ": spec(more=[("drop", (), 0, ())]),
+            "a spec that is not understood: ValueError": spec(classes=(T,)),
+            "a spec that is not understood: ValueError ": spec(classes=(T, (T,))),
+            "a spec of 5 fields": spec(top=4),
+            "a spec that is not understood": None,
+        }.items():
+            with self.subTest(why=why):
+                low = _lw.lower(h, later, [key], [], out)
+                self.assertIsInstance(low, _lw.NotLowerable)
+                self.assertIn(why.strip(), low.reason)
+
+    def test_the_facts_of_a_list(self, device):
+        x = torch.randn(3, 4, device=device)
+        w = torch.randn(3, 4, device=device)
+        mul_ = _cl_vector(torch.Tensor.mul_)
+        made = _cl_entry(
+            _cl_vector(torch.add),
+            [("in", 0), ("pin", 0)],
+            out=0,
+            flags=["pure", "fresh"],
+        )
+        view = _cl_entry(
+            _cl_vector(torch.Tensor.view_as),
+            [("in", 0), ("pin", 0)],
+            out=0,
+            flags=["pure"],
+        )
+        parts = _cl_entry(
+            _cl_vector(torch.Tensor.unbind),
+            [("in", 0)],
+            out=0,
+            flags=["pure"],
+            asserts=[("class", tuple)],
+        )
+        both = ("seq", "list", [("res", 0), ("pin", 0)])
+
+        def written(first, operand, callee=mul_, rest=(("const", 0),)):
+            return (
+                1,
+                1,
+                [2.0],
+                [first, _cl_entry(callee, [operand, *rest], flags=[("writes", (0,))])],
+                [("res", 0)],
+            )
+
+        for spec, facts in (
+            (written(made, ("res", 0)), set()),
+            (written(view, ("res", 0)), {"writes_input"}),
+            (written(made, ("in", 0)), {"writes_input"}),
+            (written(made, ("pin", 0)), {"writes_input"}),
+            (written(parts, ("part", 0, (0,))), {"writes_input"}),
+            (written(made, both, _cl_vector(torch._foreach_mul_)), {"writes_input"}),
+            (
+                written(
+                    made, ("seq", "list", [("res", 0)]), _cl_vector(torch._foreach_mul_)
+                ),
+                set(),
+            ),
+        ):
+            with self.subTest(
+                spec=_calls_text(_calls_make(_lw_stated(spec, [x], [w])))
+            ):
+                low = _lw_lower(spec, [x], [w])[1]
+                self.assertIsInstance(low, _lw.Lowered, msg=getattr(low, "reason", ""))
+                self.assertEqual(low.list_facts, facts)
+                self.assertLessEqual(low.list_facts, set(_lw.FACTS))
+
+    def test_the_module_names_nothing_of_the_tracer(self, device):
+        with open(_lw.__file__) as f:
+            tree = ast.parse(f.read())
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                names.add("." * node.level + (node.module or ""))
+        self.assertEqual(
+            names,
+            {
+                "dataclasses",
+                "typing",
+                "torch",
+                "torch._rust",
+                "torch._subclasses",
+                "torch.fx.experimental.proxy_tensor",
+                "torch.fx.experimental.symbolic_shapes",
+                ".lower_scalars",
+            },
+        )
+
+
+instantiate_device_type_tests(TestVmLower, globals())
+
+
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmLowerScalars(TestCase):
+    """A list may read a number out of a tensor and compute with it. The
+    rule: the graph of such a list computes the number of every call, as
+    the list does (nothing of the traced value is in it; what was recorded
+    is the number's class), and a list that needs the value where a graph
+    cannot have it (a size, an index, a branch inside a callee, the number
+    as an output) gets no graph but a reason.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def lws_agrees(self, spec, make):
+        """Lowers ``spec`` for the tensors of ``make(0)`` and holds the graph
+        against the list on those of three other seeds: other values in
+        the tensors that are read."""
+        h, low = _lw_lower(spec, *make(0))
+        self.assertIsInstance(low, _lw.Lowered, msg=getattr(low, "reason", ""))
+        self.assertEqual(_lw_modes(), (0, 0))
+        self.assertIn("reads_value", low.list_facts)
+        for seed in (1, 2, 3):
+            mine, theirs = make(seed), make(seed)
+            want = _calls_run(h, tuple(theirs[0]), tuple(theirs[1]))
+            got = low.gm(*mine[0], *mine[1], *low.constants)
+            self.assertEqual(_wt_bits(got), _wt_bits(want))
+            self.assertEqual(_wt_bits(mine), _wt_bits(theirs))
+        return low
+
+    def lws_tensors(self, device, *values):
+        """make(seed): one input of (3, 4) and a scalar pin per value (a
+        function of the seed)."""
+
+        def make(seed):
+            gen = torch.Generator().manual_seed(seed)
+            x = torch.randn(3, 4, generator=gen).to(device)
+            return [x], [torch.tensor(v(seed), device=device) for v in values]
+
+        return make
+
+    def lws_reads(self, low):
+        read = torch.ops.aten._local_scalar_dense.default
+        return len(low.gm.graph.find_nodes(op="call_function", target=read))
+
+    def test_arithmetic_on_a_read_is_done_by_the_graph(self, device):
+        # s = t.item(); w = 0.001 / (1.0 - 0.9 ** s); k = n.item()
+        # (x * w + k) * -s, the operators as instructions and as C calls.
+        item = _cl_vector(torch.Tensor.item)
+        number, count = [("class", float)], [("class", int)]
+        spec = (1, 2, [0.9, 1.0, 0.001], [
+            _cl_entry(item, [("pin", 0)], out=0, flags=["pure"], asserts=number),
+            _cl_entry(("binary", "**"), [("const", 0), ("res", 0)], out=1, flags=["pure"], asserts=number),
+            _cl_entry(("binary", "-"), [("const", 1), ("move", 1)], out=2, flags=["pure"], asserts=number),
+            _cl_entry(_cl_vector(operator.truediv), [("const", 2), ("move", 2)], out=3, flags=["pure"], asserts=number),
+            _cl_entry(("binary", "*"), [("in", 0), ("move", 3)], out=4, flags=["pure", "fresh"]),
+            _cl_entry(item, [("pin", 1)], out=5, flags=["pure"], asserts=count),
+            _cl_entry(_cl_vector(torch.add), [("move", 4), ("move", 5)], out=6, flags=["pure", "fresh"]),
+            _cl_entry(("unary", "-"), [("move", 0)], out=7, flags=["pure"], asserts=number),
+            _cl_entry(_cl_vector(torch.Tensor.mul_), [("move", 6), ("move", 7)], out=8, flags=[("writes", (0,))]),
+        ], [("res", 8)])  # fmt: skip
+        values = (lambda seed: 1.5 + seed, lambda seed: 2 + seed)
+        low = self.lws_agrees(spec, self.lws_tensors(device, *values))
+        self.assertEqual(low.list_facts, {"reads_value"})
+        self.assertEqual(low.specialized, ())
+        self.assertEqual(self.lws_reads(low), 2)
+        # No number of the traced call (2.5, 2 and what was made of them).
+        text = low.gm.code
+        for traced in ("2.5", "0.76", "0.0012", "1.5"):
+            self.assertNotIn(traced, text)
+
+    def test_a_tensor_written_between_two_reads_is_read_twice(self, device):
+        item, mul = _cl_vector(torch.Tensor.item), _cl_vector(torch.mul)
+        number = [("class", float)]
+
+        def spec(written):
+            write = _cl_entry(_cl_vector(torch.Tensor.add_), [("pin", 0), ("const", 0)], flags=[("writes", (0,))])  # fmt: skip
+            again = _cl_entry(
+                _cl_vector(torch.Tensor.abs), [("pin", 0)], flags=["pure"]
+            )
+            return (1, 1, [1.0], [
+                _cl_entry(item, [("pin", 0)], out=0, flags=["pure"], asserts=number),
+                write if written else again,
+                _cl_entry(item, [("pin", 0)], out=2, flags=["pure"], asserts=number),
+                _cl_entry(mul, [("in", 0), ("move", 0)], out=3, flags=["pure", "fresh"]),
+                _cl_entry(mul, [("in", 0), ("move", 2)], out=4, flags=["pure", "fresh"]),
+            ], [("res", 3), ("res", 4)])  # fmt: skip
+
+        make = self.lws_tensors(device, lambda seed: 0.5 * seed)
+        low = self.lws_agrees(spec(True), make)
+        self.assertEqual(self.lws_reads(low), 2)
+        self.assertEqual(low.list_facts, {"reads_value", "writes_input"})
+        self.assertEqual(self.lws_reads(self.lws_agrees(spec(False), make)), 2)
+
+    def test_every_read_of_the_list_is_a_read_of_the_graph(self, device):
+        # s = a.item(); b.add_(1.0); t = a.item(); x * s, x * t
+        item, mul = _cl_vector(torch.Tensor.item), _cl_vector(torch.mul)
+        number = [("class", float)]
+        spec = (1, 2, [1.0], [
+            _cl_entry(item, [("pin", 0)], out=0, flags=["pure"], asserts=number),
+            _cl_entry(_cl_vector(torch.Tensor.add_), [("pin", 1), ("const", 0)], flags=[("writes", (0,))]),
+            _cl_entry(item, [("pin", 0)], out=2, flags=["pure"], asserts=number),
+            _cl_entry(mul, [("in", 0), ("move", 0)], out=3, flags=["pure", "fresh"]),
+            _cl_entry(mul, [("in", 0), ("move", 2)], out=4, flags=["pure", "fresh"]),
+        ], [("res", 3), ("res", 4)])  # fmt: skip
+        make = self.lws_tensors(
+            device, lambda seed: 0.5 * seed, lambda seed: 2.0 * seed
+        )
+        low = self.lws_agrees(spec, make)
+        self.assertEqual(self.lws_reads(low), 2)
+        # The two tensors of a later call may be one memory: its write is
+        # then between the two reads, in the graph as in the list.
+        (x,), (a, _) = make(1)
+        (y,), (b, _) = make(1)
+        h = _calls_make(_lw_stated(spec, [x], [a, a]))
+        want = _calls_run(h, (x,), (a, a.view(())))
+        got = low.gm(y, b, b.view(()))
+        self.assertEqual(_wt_bits(got), _wt_bits(want))
+        self.assertNotEqual(_wt_bits(got[0]), _wt_bits(got[1]))
+
+    def test_what_is_recorded_of_a_read_is_its_class(self, device):
+        item = _cl_vector(torch.Tensor.item)
+        values = {
+            float: torch.tensor(2.5, device=device),
+            int: torch.tensor(3, device=device),
+            bool: torch.tensor(True, device=device),
+        }
+        x = torch.randn(3, 4, device=device)
+
+        def spec(asserts, out=0):
+            return _lw_stated((1, 1, [], [
+                _cl_entry(item, [("pin", 0)], out=out, flags=["pure"], asserts=asserts),
+                _cl_entry(_cl_vector(torch.neg), [("in", 0)], out=1, flags=["pure", "fresh"]),
+            ], [("res", 1)]), [x], [x])  # fmt: skip
+
+        def low(s, pin):
+            keys = _lw_keys([x, pin])
+            left = _lw.Traced((keys[0],), (keys[0],), (keys[1],))
+            return _lw.lower(_calls_make(s), s, keys[:1], keys[1:], left)
+
+        for cls, pin in values.items():
+            for said in values:
+                with self.subTest(read=cls.__name__, said=said.__name__):
+                    got = low(spec([("class", said)]), pin)
+                    if said is cls:
+                        self.assertIsInstance(
+                            got, _lw.Lowered, msg=getattr(got, "reason", "")
+                        )
+                        self.assertEqual(got.list_facts, {"reads_value"})
+                    else:
+                        self.assertIsInstance(got, _lw.NotLowerable)
+                        self.assertEqual(got.entry, 0)
+        # A read of which no class was recorded: kept or not.
+        for s in (spec([]), spec([], out=None), spec([("class", torch.Tensor)])):
+            got = low(s, values[float])
+            self.assertIsInstance(got, _lw.NotLowerable)
+            self.assertIn("of no asserted class", got.reason)
+            self.assertEqual((got.entry, got.list_facts), (0, {"reads_value"}))
+        self.assertEqual(_lw_modes(), (0, 0))
+
+    def test_where_the_value_is_needed_there_is_no_graph(self, device):
+        item = _cl_vector(torch.Tensor.item)
+        x = torch.randn(3, 4, device=device)
+        pins = [torch.tensor(1, device=device), torch.tensor(0.25, device=device)]
+        count, number = ("pin", 0), ("pin", 1)
+        r = ("res", 0)
+
+        def spec(
+            read, callee, args, flags=("pure",), out=None, outputs=None, asserts=()
+        ):
+            cls = int if read is count else float
+            return (1, 2, [0, -1, 0.5], [
+                _cl_entry(item, [read], out=0, flags=["pure"], asserts=[("class", cls)]),
+                _cl_entry(callee, args, out=out, flags=flags, asserts=asserts),
+            ], [("in", 0)] if outputs is None else outputs)  # fmt: skip
+
+        bound = ("slice", ("null",), r, ("null",))
+        writes = [("writes", (1,))]
+        needs = "it needs the value of a number read from a tensor"
+        cases = {
+            "a size": (spec(count, _cl_vector(torch.zeros), [r], out=1), "a size of its result", 1),
+            "a view's size": (spec(count, _cl_vector(torch.Tensor.view), [("in", 0), ("const", 1), r], out=1), "a size of its result", 1),
+            "a size in a tuple": (spec(count, _cl_vector(torch.topk), [("in", 0), r], out=1, asserts=[("class", torch.return_types.topk)]), "a size of its result", 1),
+            "an index": (spec(count, ("getitem",), [("in", 0), r], out=1), "is an index", 1),
+            "a bound of a slice": (spec(count, ("getitem",), [("in", 0), bound], out=1), "is an index", 1),
+            "an index of a store": (spec(count, ("setitem",), [("const", 2), ("in", 0), r], writes), "is an index", 1),
+            "range": (spec(count, _cl_vector(range), [r]), needs, 1),
+            "int": (spec(number, _cl_vector(int), [r]), needs, 1),
+            "float": (spec(number, _cl_vector(float), [r]), needs, 1),
+            "bool": (spec(number, _cl_vector(bool), [r]), needs, 1),
+            "math.sqrt": (spec(number, _cl_vector(math.sqrt), [r]), needs, 1),
+            "max": (spec(number, _cl_vector(max), [r, ("const", 2)]), needs, 1),
+            "an output": (spec(number, _cl_vector(torch.neg), [("in", 0)], outputs=[r]), "are not compared", None),
+        }  # fmt: skip
+        for what, (s, why, entry) in cases.items():
+            with self.subTest(what=what):
+                low = _lw_lower(s, [x], pins)[1]
+                self.assertIsInstance(low, _lw.NotLowerable)
+                self.assertIn(why, low.reason)
+                self.assertEqual(low.entry, entry)
+                self.assertEqual(_lw_modes(), (0, 0))
+        # The same numbers where no fact of the run hangs on the value: what
+        # a tensor is filled with, the index a callee is handed (the kernel
+        # of every call checks it, as the list's does).
+        fill = spec(number, _cl_vector(torch.full), [("seq", "tuple", [("const", 2)]), r], out=1)  # fmt: skip
+        fill = (1, 2, [0, -1, 2], *fill[3:])
+        low = _lw_lower(fill, [x], pins)[1]
+        self.assertIsInstance(low, _lw.Lowered, msg=getattr(low, "reason", ""))
+        row = spec(count, _cl_vector(torch.select), [("in", 0), ("const", 0), r], out=1, outputs=[("res", 1)])  # fmt: skip
+        h, low = _lw_lower(row, [x], pins)
+        self.assertIsInstance(low, _lw.Lowered, msg=getattr(low, "reason", ""))
+        for n in (0, 2, -1):
+            at = [torch.tensor(n, device=device), pins[1]]
+            self.assertEqual(
+                _wt_bits(low.gm(x, *at)), _wt_bits(_calls_run(h, (x,), tuple(at)))
+            )
+        outside = [torch.tensor(3, device=device), pins[1]]
+        with self.assertRaises(IndexError):
+            _calls_run(h, (x,), tuple(outside))
+        h.release()
+        with self.assertRaises(IndexError):
+            low.gm(x, *outside)
+
+    def test_what_the_run_assumed_of_a_float_is_an_assert_of_the_graph(self, device):
+        # x * (1.0 - 0.5 ** s) ** 0.5: a float while 0.5 ** s <= 1.0, as at
+        # the trace; a complex number for a negative s.
+        number = [("class", float)]
+
+        def spec(base):
+            return (1, 1, [1.0, 0.5], [
+                _cl_entry(_cl_vector(torch.Tensor.item), [("pin", 0)], out=0, flags=["pure"], asserts=number),
+                _cl_entry(("binary", "**"), [("const", 1), ("move", 0)], out=1, flags=["pure"], asserts=number),
+                _cl_entry(("binary", "-"), [("const", 0), ("move", 1)], out=2, flags=["pure"], asserts=number),
+                _cl_entry(("binary", "**"), [(base, 2), ("const", 1)], out=3, flags=["pure"], asserts=number),
+                _cl_entry(("binary", "*"), [("in", 0), ("move", 3)], out=4, flags=["pure", "fresh"]),
+            ], [("res", 4)])  # fmt: skip
+
+        make = self.lws_tensors(device, lambda seed: 0.25 * seed)
+        low = self.lws_agrees(spec("move"), make)
+        check = torch.ops.aten._assert_scalar.default
+        self.assertEqual(
+            len(low.gm.graph.find_nodes(op="call_function", target=check)), 1
+        )
+        # A call whose number is outside it: the list stops at the entry
+        # whose result is no float (a miss: nothing was written), the graph
+        # raises. Neither hands out a value.
+        (x,), _ = make(1)
+        s = torch.tensor(-2.0, device=device)
+        h = _calls_make(_lw_stated(spec("move"), [x], [s]))
+        self.assertIsNone(_calls_run(h, (x,), (s,)))
+        self.assertEqual(h.stopped[:2], (3, "assert"))
+        h.release()
+        with self.assertRaises(RuntimeError):
+            low.gm(x, s)
+        # An assumption that cannot be made an assert (here: of the read
+        # number itself, s <= 1.0 for (1.0 - s) ** 0.5): no graph.
+        bare = spec("move")
+        bare = (*bare[:3], [bare[3][0], _cl_drop(0), *bare[3][2:]], bare[4])
+        bare[3][2] = _cl_entry(("binary", "-"), [("const", 0), ("res", 0)], out=2, flags=["pure"], asserts=number)  # fmt: skip
+        bare[3][1] = _cl_entry(
+            ("binary", "**"), [("const", 1), ("res", 0)], flags=["pure"]
+        )
+        refused = _lw_lower(bare, *make(1))[1]
+        self.assertIsInstance(refused, _lw.NotLowerable)
+        self.assertIn("could not be made an assert of the graph", refused.reason)
+
+    def test_the_module_of_the_scalars_names_nothing_of_the_tracer(self, device):
+        beside = os.path.join(os.path.dirname(_lw.__file__), "lower_scalars.py")
+        with open(beside) as f:
+            tree = ast.parse(f.read())
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                names.add("." * node.level + (node.module or ""))
+        self.assertEqual(
+            names,
+            {
+                "operator",
+                "torch",
+                "torch._subclasses.fake_tensor",
+                "torch.fx.experimental.symbolic_shapes",
+                "torch.fx.passes.runtime_assert",
+            },
+        )
+
+
+instantiate_device_type_tests(TestVmLowerScalars, globals())
 
 
 if __name__ == "__main__":
