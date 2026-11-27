@@ -197,7 +197,10 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
     """
     Wrappers that run on every dispatch function
     """
-    return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
+    return [
+        AOTDedupeWrapper(trace_joint=needs_autograd),
+        AOTSyntheticBaseWrapper(trace_joint=needs_autograd),
+    ]
 
 
 def aot_stage1_graph_capture(
@@ -223,14 +226,35 @@ def aot_stage1_graph_capture(
     aot_config = aot_state.aot_config
 
     wrappers = _create_wrappers_for_dispatch(aot_state.needs_autograd)
+    dedupe, synthetic = wrappers
     flat_fn, aot_state.flat_args, aot_state.flat_args_descs, aot_state.fw_metadata = (
         pre_compile(
-            wrappers,
+            [dedupe],
             orig_flat_fn2,
             aot_state.flat_args,
             aot_state.flat_args_descs,
             aot_config,
             fw_metadata=aot_state.fw_metadata,
+        )
+    )
+    if not isinstance(dedupe, AOTDedupeWrapper) or not isinstance(
+        synthetic, AOTSyntheticBaseWrapper
+    ):
+        raise AssertionError("expected dedupe and synthetic-base dispatch wrappers")
+    sources = aot_config.aot_autograd_arg_pos_to_source or []
+    source_to_deduped_arg = {
+        source.name: dedupe.add_dupe_map[idx] if dedupe.add_dupe_map else idx
+        for idx, source in enumerate(sources)
+        if source is not None
+    }
+    flat_fn, aot_state.flat_args, aot_state.flat_args_descs, aot_state.fw_metadata = (
+        synthetic.pre_compile(
+            flat_fn,
+            aot_state.flat_args,
+            aot_state.flat_args_descs,
+            aot_config,
+            fw_metadata=aot_state.fw_metadata,
+            source_to_deduped_arg=source_to_deduped_arg,
         )
     )
     if aot_config.disable_functionalization:
@@ -648,6 +672,30 @@ def collect_bw_donated_buffer_idxs(
     bw_outs = next(reversed(bw_module.graph.find_nodes(op="output"))).args[0]
     fw_outs = next(reversed(fw_module.graph.find_nodes(op="output"))).args[0]
 
+    from torch._inductor import config as inductor_config
+
+    native_user_fw_outs: list[torch.Tensor | None] = []
+    native_saved_tensors: list[torch.Tensor | None] | None = None
+    if inductor_config.strict_pointwise:
+        from torch.fx.experimental.proxy_tensor import _original_mutation_destination
+
+        def native_alias_reference(node: object) -> torch.Tensor | None:
+            if not isinstance(node, torch.fx.Node) or not is_fake_tensor(
+                value := node.meta.get("val")
+            ):
+                return None
+            return _original_mutation_destination(value, node=node)
+
+        # Keep ordinary exclusions, and also exclude native storage aliases
+        # retained by strict writeback after functionalization introduces copies.
+        native_user_fw_outs = [
+            native_alias_reference(node) for node in fw_outs[: fw_metadata.num_forward]
+        ]
+        native_saved_tensors = [
+            native_alias_reference(node)
+            for node in fw_outs[fw_metadata.tensors_saved_for_backwards_slice]
+        ]
+
     fw_ins = [
         n.meta["val"] if (hasattr(n, "meta") and "val" in n.meta) else None
         for n in fw_ins
@@ -670,6 +718,17 @@ def collect_bw_donated_buffer_idxs(
         bw_outs,
         saved_tensors,
     )
+
+    if native_saved_tensors is not None:
+        native_donated = set(
+            collect_fw_donated_buffer_idxs(
+                fw_ins,
+                user_fw_outs + native_user_fw_outs,
+                bw_outs,
+                native_saved_tensors,
+            )
+        )
+        fw_donated_buffer = [i for i in fw_donated_buffer if i in native_donated]
 
     if fw_metadata.num_symints_saved_for_bw is None:
         raise AssertionError("fw_metadata.num_symints_saved_for_bw must not be None")
@@ -1971,6 +2030,7 @@ def _partition_joint_graph_into_fw_bw(
         + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
     )
 
+    native_gradient_info = fx_g.meta.get("native_gradient_info")
     fx_g = run_joint_graph_passes_on_hops(
         fx_g, joint_inputs, aot_config, default_partition_fn=partition_fn
     )
@@ -2005,12 +2065,18 @@ def _partition_joint_graph_into_fw_bw(
 
     # fx_g's primals are the unwrapped inputs, whose static positions are in
     # inner_meta.
+    if native_gradient_info is not None:
+        fx_g.meta["native_gradient_info"] = native_gradient_info
+
     fw_module, bw_module = partition_fn(
         fx_g,
         joint_inputs,
         num_fwd_outputs=num_inner_fwd_outputs,
         static_lifetime_input_indices=inner_meta.static_input_indices,
     )
+
+    if native_gradient_info is not None:
+        bw_module.meta["native_gradient_info"] = native_gradient_info
 
     rng_states = [
         n
@@ -2676,6 +2742,18 @@ def _aot_stage2c_make_autograd_function(
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
         backward_input_signature=backward_input_signature,
+        original_view_input_indices=tuple(
+            idx
+            for wrapper in wrappers
+            if isinstance(wrapper, AOTSyntheticBaseWrapper)
+            for idx in wrapper.original_view_input_indices
+        ),
+        original_view_output_info={
+            idx: info
+            for wrapper in wrappers
+            if isinstance(wrapper, AOTSyntheticBaseWrapper)
+            for idx, info in wrapper.original_view_output_info.items()
+        },
     )
     compiled_fn = AOTDispatchAutograd.post_compile(compile_spec)
 
@@ -2786,7 +2864,8 @@ def _cache_autograd_info(
                     serialized_bw_module=serialize_graph_module(
                         copy.deepcopy(bw_module)
                         if aot_config.preserve_tangent_layout
-                        else bw_module
+                        else bw_module,
+                        preserve_metadata=aot_config.preserve_tangent_layout,
                     ),
                     min_cut_info_str=min_cut_info_str,
                     backward_input_signature=backward_input_signature,
