@@ -960,16 +960,21 @@ def _rand_like(
         ).to(memory_format=memory_format)
 
     if utils.is_non_overlapping_and_dense_or_false(self):
+        # Draw in physical (memory) order to match eager RNG under
+        # functionalize_rng_ops / align_random_eager, then only adjust strides.
         rand_kwargs = kwargs
         if requires_grad:
             rand_kwargs = kwargs.copy()
             rand_kwargs.pop("requires_grad", None)
+        shape, permutation = _get_shape_permutation_like(self)
         result = rand_fn(
-            self.shape,
+            shape,
             dtype=dtype,
             device=device,
             **rand_kwargs,
         )
+        if permutation != list(range(len(permutation))):
+            result = result.permute(permutation)
         if not _same_stride(result.stride(), self.stride()):
             empty = torch.empty_strided(
                 self.shape,
