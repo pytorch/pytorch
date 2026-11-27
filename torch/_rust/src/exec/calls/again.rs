@@ -12,13 +12,21 @@
 // What it guarantees
 //   - a list is run again only if record.rs armed it: every entry is one
 //     whose row says it only computes, and the witness of none disagreed;
-//   - it runs on an arrival only if that arrival's tensors (the params, then
-//     the frame's locals, each tensor once: the order record.rs numbers
-//     inputs in) are as many as the recorded run's and have the same keys,
-//     and every pin is alive; any other arrival is counted "not comparable";
+//   - it runs on an arrival only if that arrival's inputs (origins.rs walk:
+//     the params, then the frame's locals, and the items of the exact tuples
+//     and lists among them, each tensor once) are found by the same paths as
+//     the recorded run's and have the same keys, and every pin is alive; any
+//     other arrival is counted "not comparable";
 //   - what the list made is compared with what the block made (shadow.rs
 //     compare) and then released; the first difference is kept in the
 //     place's Shadow, and the list is not run again after one;
+//   - a list that its OWN check ended before the entry the check is for ran,
+//     with nothing to take back (run.rs: the stops "class", "part" and
+//     "assert" that are restartable, for which no exception is set), is a
+//     MISS of the list on that arrival, counted by the check: the block runs
+//     as written there, which is what it did. Any other stop (an entry that
+//     raised, a stop that is not restartable, a refusal to run) is a
+//     difference: the block ran to its end on those operands;
 //   - at most LATER arrivals per place.
 // What it may not assume
 //   - that the block's own outputs are eager's: they are what today's engine
@@ -30,7 +38,8 @@ use std::collections::HashMap;
 use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;
 
-use super::origins::plain_tensor;
+use super::origins::{plain_tensor, walk};
+use super::run::{Stop, What};
 use super::{shadow, List};
 use crate::exec::ffi::{tr_frame_localsplus, tr_frame_nlocalsplus, Frame};
 use crate::exec::pin::Pin;
@@ -41,6 +50,8 @@ const LATER: u32 = 16;
 pub struct Armed {
     pub list: List,
     pub keys: Vec<TensorKey>,
+    // The path each input was found by at the recorded run.
+    pub paths: Vec<Box<[u32]>>,
     pub pins: Vec<Pin>,
     // For each output of the list, the position among the block's outputs.
     pub outs: Vec<usize>,
@@ -72,6 +83,19 @@ pub fn armed(key: (usize, u32)) -> bool {
     ARMED.with_borrow(|a| a.get(&key).is_some_and(|x| x.left > 0))
 }
 
+// What a stop of a list on a later arrival is. Ok(the check): a miss, only
+// where the list's interpreter itself says that nothing is to be taken back
+// (Stop::restartable: every entry up to the stop is reversible, run.rs and
+// check.rs) AND the stop is one of the list's own checks. Err(the text): a
+// difference, for every other stop. Nothing here works out whether a stop
+// can be taken back.
+pub fn stopped(stop: &Stop) -> Result<&'static str, String> {
+    match stop.what {
+        What::Class | What::Part | What::Assert if stop.restartable => Ok(stop.what.text()),
+        _ => Err(format!("DIFFERENT on a later arrival: the list stopped at entry {} ({})", stop.entry, stop.what.text())),
+    }
+}
+
 // An arrival whose block's outputs are awaited. Dropped with none told: the
 // block did not reach its end, and what the list made is released.
 pub struct Again(u64);
@@ -85,18 +109,19 @@ impl Drop for Again {
     }
 }
 
-// The plain tensors of an arrival in the order record.rs numbers inputs.
-unsafe fn inputs(params: &[*mut PyObject], frame: *mut Frame) -> Vec<*mut PyObject> {
+// The inputs of an arrival as origins.rs numbers them, each with its path.
+unsafe fn inputs(params: &[*mut PyObject], frame: *mut Frame) -> (Vec<*mut PyObject>, Vec<Box<[u32]>>) {
     unsafe {
         let locals = tr_frame_localsplus(frame);
         let all = params.iter().copied().chain((0..tr_frame_nlocalsplus(frame) as usize).map(|i| *locals.add(i)));
-        let mut found: Vec<*mut PyObject> = Vec::new();
-        for o in all.filter(|o| plain_tensor(*o)) {
-            if !found.contains(&o) {
+        let (mut found, mut paths): (Vec<*mut PyObject>, Vec<Box<[u32]>>) = (Vec::new(), Vec::new());
+        walk(all, &mut |path, o| {
+            if plain_tensor(o) && !found.contains(&o) {
                 found.push(o);
+                paths.push(path.into());
             }
-        }
-        found
+        });
+        (found, paths)
     }
 }
 
@@ -104,11 +129,11 @@ unsafe fn inputs(params: &[*mut PyObject], frame: *mut Frame) -> Vec<*mut PyObje
 pub unsafe fn begin(key: (usize, u32), params: &[*mut PyObject], frame: *mut Frame) -> Option<Again> {
     unsafe {
         let py = Python::assume_attached();
-        let inputs = inputs(params, frame);
+        let (inputs, paths) = inputs(params, frame);
         // The list leaves the table while it runs: nothing it runs can find it.
         let mut armed = ARMED.with_borrow_mut(|a| a.remove(&key))?;
         armed.left -= 1;
-        let same = inputs.len() == armed.keys.len() && inputs.iter().zip(&armed.keys).all(|(o, k)| TensorKey::of(*o).as_ref() == Some(k));
+        let same = paths == armed.paths && inputs.len() == armed.keys.len() && inputs.iter().zip(&armed.keys).all(|(o, k)| TensorKey::of(*o).as_ref() == Some(k));
         let pins = armed.pins.iter().map(|p| p.live().filter(|o| !o.is_null()).map(|o| Py::<PyAny>::from_borrowed_ptr(py, o))).collect::<Option<Vec<_>>>();
         let (true, Some(pins)) = (same, pins) else {
             shadow::amend(armed.kept, |s| s.again.1 += 1);
@@ -126,9 +151,16 @@ pub unsafe fn begin(key: (usize, u32), params: &[*mut PyObject], frame: *mut Fra
             }
             Err(stop) => {
                 ffi::PyErr_Clear();
-                let why = format!("DIFFERENT on a later arrival: the list stopped at entry {} ({})", stop.entry, stop.what.text());
-                shadow::amend(armed.kept, |s| s.again.2 = Some(why));
-                armed.left = 0;
+                match stopped(&stop) {
+                    Ok(check) => shadow::amend(armed.kept, |s| match s.missed.iter_mut().find(|(c, _)| c == check) {
+                        Some((_, n)) => *n += 1,
+                        None => s.missed.push((check.to_string(), 1)),
+                    }),
+                    Err(why) => {
+                        shadow::amend(armed.kept, |s| s.again.2 = Some(why));
+                        armed.left = 0;
+                    }
+                }
                 None
             }
         };

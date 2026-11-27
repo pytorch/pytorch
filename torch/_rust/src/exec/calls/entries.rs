@@ -56,7 +56,6 @@ pub unsafe fn text(s: *mut PyObject) -> String {
 
 pub struct Maker<'a> {
     pub origins: &'a mut Origins,
-    pub loose: &'a mut u32,
     pub facts: &'a mut u64,
     // The body's step in flight, and the activation the instruction is of.
     pub at: u32,
@@ -80,14 +79,14 @@ impl Maker<'_> {
                 }
                 _ => return None,
             };
-            Some(self.origins.build(kind, &parts, self.depth, self.loose))
+            Some(self.origins.build(kind, &parts, self.depth))
         }
     }
 
     unsafe fn operands(&mut self, objects: &[*mut PyObject], values: &[u32]) -> Result<(Vec<Tmpl>, Vec<Option<Py<PyAny>>>), String> {
         let (mut tmpls, mut classes) = (Vec::new(), Vec::new());
         for (o, v) in objects.iter().zip(values) {
-            let (t, c) = unsafe { self.origins.template(*o, (self.depth, *v), self.loose) }?;
+            let (t, c) = unsafe { self.origins.template(*o, (self.depth, *v)) }?;
             tmpls.push(t);
             classes.extend(c);
         }

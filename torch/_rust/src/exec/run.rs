@@ -121,7 +121,8 @@ struct Act<'a> {
     // The span being traced (see span_trace), or null.
     stop: *const Span,
     // Whether this activation runs a traced region's body (or a frame under
-    // it): what its instrs read is recorded (see reads.rs).
+    // it), or a run the call-list recorder records the reads of: what its
+    // instrs read is recorded (see reads.rs).
     reading: bool,
     // Whether this activation runs a frame under a traced body: it runs
     // only what the optimizer's verdict covered (see covered.rs).
@@ -314,6 +315,7 @@ pub unsafe fn run(c: &Compiled, prep: &Prepared, f: *mut Frame, start: Start) ->
     };
     recording(prep, site, |rec| {
         let Bufs { vals, args, outs, edge } = Bufs::take(prep.cfg.instrs.len());
+        let shadow = if super::calls::record::recording() { 2 } else { 0 };
         let mut act = Act {
             c: Some(c),
             p: prep,
@@ -333,9 +335,9 @@ pub unsafe fn run(c: &Compiled, prep: &Prepared, f: *mut Frame, start: Start) ->
             outs,
             edge,
             stop: std::ptr::null(),
-            reading: reads::entered_by_body(),
+            reading: reads::entered_by_body() || (shadow != 0 && super::calls::record::reads()),
             under_body: reads::entered_by_body(),
-            shadow: if super::calls::record::recording() { 2 } else { 0 },
+            shadow,
         };
         // Between this frame's instrs no instr is running (the caller puts
         // back what was, once the frame is gone).
@@ -956,7 +958,7 @@ impl Act<'_> {
                 code_units: self.code_units,
                 breaker_flag: self.breaker_flag,
                 stop: std::ptr::null(),
-                reading: self.reading,
+                reading: self.reading || (shadow != 0 && super::calls::record::reads()),
                 under_body: self.under_body,
                 shadow,
             };
@@ -1643,6 +1645,9 @@ impl Act<'_> {
         super::covered::place(sp.state.gave_up.load(std::sync::atomic::Ordering::Relaxed));
         let (traced_code, traced_by) = self.c.map_or((0, 0), |c| (c.code, c as *const super::Compiled as usize));
         super::value_reads::begin(traced_code, traced_by);
+        if super::calls::record::on() {
+            super::calls::record::yields();
+        }
         let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, sp.asked, self.f, &mut body));
         for (cell, old) in cells {
             PyCell_Set(cell, old);
@@ -1843,6 +1848,7 @@ impl Act<'_> {
         let code = &self.p.code[b.idx()][vi];
         if super::calls::record::on() {
             super::calls::record::traced((self.p as *const Prepared as usize, b.0));
+            super::calls::record::yields();
         }
         let ids: Vec<ValueId> = blk.params.iter().chain(&ver.inputs).copied().collect();
         let args: Vec<*mut PyObject> = ids.iter().map(|x| self.val(*x)).collect();
@@ -2124,11 +2130,15 @@ impl Act<'_> {
             _ => std::ptr::null_mut(),
         };
         let site = super::rules::Site { frame: self.f, names: self.names, operands: &operands, kwnames };
-        let told = super::calls::record::before(self.shadow == 1, v.0, ins, &site, callee);
+        let (told, entry) = super::calls::record::before(self.shadow == 1, v.0, ins, &site, callee);
+        // What an entry is handed is no read of the run (record::before).
+        let reading = self.reading;
+        self.reading = reading && !entry;
         let done = match callee {
             Some(f) if super::backward::is(f) => super::outside_executor(|| self.exec(v, ins)),
             _ => self.exec(v, ins),
         };
+        self.reading = reading;
         if told {
             let made = &self.p.projects[v.idx()];
             let results: Vec<*mut PyObject> = if made.is_empty() { vec![self.val(v)] } else { made.iter().flatten().map(|x| self.val(*x)).collect() };

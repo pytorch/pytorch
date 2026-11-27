@@ -90,8 +90,12 @@ impl Rec {
                 self.reasons.add("operator(s) ran between the instructions of the run".into());
                 self.shadow.notes.push(format!("{outside} operator(s) ran between the instructions of the run"));
             }
-            if self.shadow.loose > 0 {
-                self.reasons.add("a tensor taken as a pin: no read of it is recorded as a check".into());
+            // The reads that lead to a pin are recorded; until a later
+            // arrival is entered under them, a list with a pin is not shown
+            // to be the body.
+            self.shadow.pins = self.origins.pins.len() as u32;
+            if self.shadow.pins > 0 {
+                self.reasons.add("a pin: the reads that lead to it are not run as a check on a later arrival yet".into());
             }
             if Origins::lost() {
                 self.reasons.add("a death was not noted: the releases are not known".into());
@@ -114,7 +118,8 @@ impl Rec {
                 None => shadow::validate(py, &list, &self.origins.inputs, &self.origins.pins, &made),
             };
             let keys = self.origins.inputs.iter().map(|p| p.live().and_then(|o| TensorKey::of(o))).collect::<Option<Vec<_>>>();
-            let armed = keys.filter(|_| self.shadow.validated == "equal").map(|keys| Armed { list, keys, pins: std::mem::take(&mut self.origins.pins), outs: places, kept: 0, left: 0 });
+            let paths = std::mem::take(&mut self.origins.paths);
+            let armed = keys.filter(|_| self.shadow.validated == "equal").map(|keys| Armed { list, keys, paths, pins: std::mem::take(&mut self.origins.pins), outs: places, kept: 0, left: 0 });
             (self.shadow, armed)
         }
     }

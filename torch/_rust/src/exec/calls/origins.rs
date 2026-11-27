@@ -4,7 +4,7 @@
 //
 // What it is given
 //   - at the start of a recorded run: the block's params and the body
-//     frame's locals (input);
+//     frame's locals (begin, which walks them: walk);
 //   - behind each entry: its tensor result, or the tensor items of its tuple
 //     result (mark);
 //   - behind an instruction that made no entry and whose C code produced a
@@ -27,14 +27,25 @@
 //   - an operand of the closed immutable list is a constant BY VALUE at the
 //     recorded run (by_value counts them); unless known.rs knows it for a
 //     constant of the code, it is told as baked: the list is not the body;
-//   - a plain tensor with no origin is LOOSE: something that was there
-//     before, found by reads nobody recorded here (the executor's read hooks
-//     work under today's trace only). It is taken as a pin WITHOUT a check
-//     and counted apart (loose);
+//   - an INPUT is a plain tensor found at the start of the run by walk():
+//     a param or a local, or an item of an exact tuple or list among them
+//     (as deep as REACH, no longer than WIDE), each tensor once, with the
+//     path it was found by. A later arrival is asked for its inputs by the
+//     same walk, so an input is that arrival's tensor at the same path;
+//   - a plain tensor with no origin is a PIN only if the reads recorded so
+//     far (reads.rs, which the recorded run's instructions tell as a trace's
+//     do) lead to it from what was there before the run: a namespace a
+//     global was loaded from, a cell the run did not make, or a ROOT, an
+//     input object that takes a weak reference (a module, a function, a
+//     class). The reads that lead to it are its check. A tensor that no
+//     recorded read leads to (handed out by C code, found in a list or a
+//     dict that is an input) has no origin: Err, and the recording stops;
 //   - anything else has no origin: Err says what, and the recording stops.
 // What it may not assume
 //   - that a tensor with no mark was there before the run: C code that makes
-//     a tensor without an operator and hides it in a container is not seen.
+//     a tensor without an operator and hides it in a container is not seen
+//     (it is no pin either: no read leads to it);
+//   - that a root lives: it is held weakly, and one that died leads nowhere.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -105,9 +116,13 @@ pub struct Origins {
     pub baked: Vec<String>,
     pub consts: Vec<Py<PyAny>>,
     pub ninputs: u32,
-    // Inputs, then pins (all loose), held weakly for the validation.
+    // Inputs, then pins, held weakly for the validation; the path each
+    // input was found by (walk).
     pub inputs: Vec<Pin>,
+    pub paths: Vec<Box<[u32]>>,
     pub pins: Vec<Pin>,
+    // The input objects a recorded read can start from, held weakly.
+    roots: Vec<Pin>,
     // Immutable operands taken by value, by class.
     pub by_value: HashMap<&'static str, u64>,
 }
@@ -148,6 +163,37 @@ pub unsafe fn reach(o: *mut PyObject, depth: u8, f: &mut dyn FnMut(*mut PyObject
     }
 }
 
+// What a run starts from, in the one order every arrival is walked in: each
+// of `all` (the block's params, then the frame's locals) and, through exact
+// tuples and lists no longer than WIDE and as deep as REACH, their items,
+// with the path ([position, index, ...]). `f` is told every object that is
+// no such container and not NULL; a container too long or too deep is told
+// as the object it is, and what it holds is not walked.
+pub const WIDE: isize = 64;
+pub unsafe fn walk(all: impl Iterator<Item = *mut PyObject>, f: &mut dyn FnMut(&[u32], *mut PyObject)) {
+    unsafe fn item(o: *mut PyObject, path: &mut Vec<u32>, f: &mut dyn FnMut(&[u32], *mut PyObject)) {
+        unsafe {
+            let (tuple, list) = (ffi::PyTuple_CheckExact(o) != 0, ffi::PyList_CheckExact(o) != 0);
+            if !(tuple || list) || path.len() > REACH as usize || ffi::Py_SIZE(o) > WIDE {
+                return f(path, o);
+            }
+            for i in 0..ffi::Py_SIZE(o) {
+                // (Looked up again each time: `f` runs no code of the
+                // program, and a list is as long as it was.)
+                let x = if tuple { ffi::PyTuple_GET_ITEM(o, i) } else { ffi::PyList_GET_ITEM(o, i) };
+                path.push(i as u32);
+                if !x.is_null() {
+                    item(x, path, f);
+                }
+                path.pop();
+            }
+        }
+    }
+    for (position, o) in all.enumerate().filter(|(_, o)| !o.is_null()) {
+        unsafe { item(o, &mut vec![position as u32], f) };
+    }
+}
+
 unsafe fn class_of(o: *mut PyObject) -> Option<Py<PyAny>> {
     unsafe { Some(Py::from_borrowed_ptr(Python::assume_attached(), ffi::Py_TYPE(o) as *mut PyObject)) }
 }
@@ -157,25 +203,35 @@ pub unsafe fn class_text(o: *mut PyObject) -> String {
 }
 
 impl Origins {
-    pub fn begin() -> Origins {
+    // A run begins on `all`: the block's params, then the frame's locals.
+    pub unsafe fn begin(all: impl Iterator<Item = *mut PyObject>) -> Origins {
         DEATHS.with_borrow_mut(|d| d.clear());
         LOST.set(false);
-        Origins::default()
+        let mut origins = Origins::default();
+        unsafe {
+            walk(all, &mut |path, o| {
+                if plain_tensor(o) {
+                    if origins.get(o).is_none() && origins.mark(o, Origin::In(origins.ninputs)) {
+                        origins.inputs.push(Pin::weak(o));
+                        origins.paths.push(path.into());
+                        origins.ninputs += 1;
+                    }
+                } else if (*ffi::Py_TYPE(o)).tp_weaklistoffset != 0 {
+                    // Weak, or no root: an input lives as long as the
+                    // program keeps it.
+                    let root = Pin::weak(o);
+                    if root.counts().is_none() {
+                        origins.roots.push(root);
+                    }
+                }
+            })
+        };
+        origins
     }
 
     // Whether a death could not be noted: the releases are not known.
     pub fn lost() -> bool {
         LOST.get()
-    }
-
-    // A plain tensor that is live when the run starts.
-    pub unsafe fn input(&mut self, o: *mut PyObject) {
-        unsafe {
-            if plain_tensor(o) && self.get(o).is_none() && self.mark(o, Origin::In(self.ninputs)) {
-                self.inputs.push(Pin::weak(o));
-                self.ninputs += 1;
-            }
-        }
     }
 
     // False: no weak reference to `o` could be made.
@@ -247,8 +303,8 @@ impl Origins {
     }
 
     // The template of the operand `o`, which is value `v` of activation
-    // `depth`; `loose`: counts the tensors taken with no origin.
-    pub unsafe fn template(&mut self, o: *mut PyObject, at: (u32, u32), loose: &mut u32) -> Made {
+    // `depth`.
+    pub unsafe fn template(&mut self, o: *mut PyObject, at: (u32, u32)) -> Made {
         unsafe {
             if let Some((made, baked)) = self.built.remove(&at) {
                 self.baked.extend(baked);
@@ -265,12 +321,15 @@ impl Origins {
                     Some(Origin::Part(j, i)) => Tmpl::Part(j, Box::new([i])),
                     Some(Origin::Unknown(by)) => return Err(format!("an operand of unknown origin: {} made by {by}", class_text(o))),
                     None => {
+                        let roots: Vec<*mut PyObject> = self.roots.iter().filter_map(|r| r.live()).filter(|r| !r.is_null()).collect();
+                        if !crate::exec::reads::leads_to(o, &roots) {
+                            return Err("an operand of unknown origin: a tensor no recorded read leads to".into());
+                        }
                         let i = self.pins.len() as u32;
                         if !self.mark(o, Origin::Pin(i)) {
                             return Err("an operand of unknown origin: a tensor no weak reference can be made to".into());
                         }
                         self.pins.push(Pin::weak(o));
-                        *loose += 1;
                         Tmpl::Pin(i)
                     }
                 };
@@ -293,11 +352,11 @@ impl Origins {
 
     // The template of what a BUILD instruction makes of `parts` (object,
     // value): a list, a tuple, a dict of these plain keys, a slice.
-    pub unsafe fn build(&mut self, kind: Built, parts: &[(*mut PyObject, u32)], depth: u32, loose: &mut u32) -> Made {
+    pub unsafe fn build(&mut self, kind: Built, parts: &[(*mut PyObject, u32)], depth: u32) -> Made {
         unsafe {
             let (mut tmpls, mut classes) = (Vec::new(), Vec::new());
             for (o, v) in parts {
-                let (t, c) = self.template(*o, (depth, *v), loose)?;
+                let (t, c) = self.template(*o, (depth, *v))?;
                 tmpls.push(t);
                 classes.extend(c);
             }

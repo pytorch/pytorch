@@ -8942,15 +8942,74 @@ def lost(x):
     torch.relu_(y)
     return F.relu(y) + 1
 
+def in_a_tuple(*args):
+    return args[0] * 2 + 1
+
+def in_a_list(x):
+    xs = [x, x + 1]
+    if STATE["double"]:
+        return xs[1] * 2
+    return xs[1]
+
+def in_a_dict(x):
+    d = {"a": x + 1}
+    if STATE["double"]:
+        return d["a"] * 2
+    return d["a"]
+
+def patched(x):
+    return x * 2 + 1
+
+def patched_behind(x):
+    return torch.relu(x) * 2
+
+def later_stops():
+    # Three hand-built lists whose operator `*` was resolved on torch.Tensor,
+    # run again after the class changed: at the first entry, behind an entry
+    # that only computes, behind an entry that writes its operand.
+    T, make, later = torch.Tensor, torch._rust._calls_make, torch._rust._calls_later
+    mul = lambda operand, out: (("binary", "*"), [operand, ("const", 0)], None, out, 0, ("pure",), (("class", T),), (T, int))
+    relu = (("vector", torch.relu, "torch.relu"), [("in", 0)], None, 0, 0, ("pure",), (("class", T),), (T,))
+    add_ = (("vector", T.add_, "Tensor.add_"), [("in", 0), ("const", 1)], None, None, 0, (("writes", (0,)),), (), (T, float))
+    lists = {
+        "first": make((1, 0, [2], [mul(("in", 0), 0)], [("res", 0)])),
+        "behind_computing": make((1, 0, [2], [relu, mul(("move", 0), 1)], [("res", 1)])),
+        "behind_writing": make((1, 0, [2, 1.0], [add_, mul(("in", 0), 1)], [("res", 1)])),
+    }
+    before = {k: later(l, [torch.ones(2)], []) for k, l in lists.items()}
+    T.audit_mark = 1
+    xs = {k: torch.ones(2) for k in lists}
+    after = {k: later(l, [xs[k]], []) for k, l in lists.items()}
+    return {"before": before, "after": after, "operand": {k: x.tolist() for k, x in xs.items()}}
+
+def twice(y):
+    return y * 2 + 1
+
+def overlap(x):
+    y = torch.relu(x)
+    torch.relu_(y)
+    return twice(twice(y)) + 1
+
+def shifted(x):
+    y = twice(x + 1)
+    torch.relu_(y)
+    return twice(y) + 1
+
+LATE = ("overlap", "shifted")
 BETWEEN = {
     "global_number": lambda: globals().__setitem__("SCALE", 3.0),
     "flag_under": lambda: STATE.__setitem__("double", False),
     "flag_operand": lambda: STATE.__setitem__("double", False),
     "default_operand": lambda: setattr(default_helper, "__defaults__", (5,)),
     "length_of_a_global": lambda: globals().__setitem__("m", torch.randn(4, 16)),
+    "patched": lambda: setattr(torch.Tensor, "audit_mark", 1),
+    "patched_behind": lambda: setattr(torch.Tensor, "audit_mark", 1),
 }
 M0 = m.clone()
 name = sys.argv[1]
+if name == "later_stops":
+    print(json.dumps(later_stops()))
+    sys.exit()
 fn = globals()[name]
 inputs = [torch.randn(2, 3, 8, 8) for _ in range(6)]
 flat = lambda r: r if isinstance(r, tuple) else (r,)
@@ -8965,6 +9024,8 @@ def run(f):
     for i, x in enumerate(inputs):
         if i == 4 and name in BETWEEN:
             BETWEEN[name]()
+        if i == 2 and name in LATE and f is not fn:
+            torch._rust._set_cfg_regions(True, 2, 4, 64)
         outs.append(flat(f(x.clone())))
     return outs, bn.running_mean.clone(), int(bn.num_batches_tracked), list(STATE["dead"]), M0.clone()
 M0C = M0.clone()
@@ -8973,7 +9034,8 @@ def equal(a, b):
         return torch.is_tensor(b) and a.shape == b.shape and torch.equal(a, b)
     return type(a) is type(b) and a == b
 want = run(fn)
-compiled = vm(fn, passes=vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1))
+schedule = {"at": 100, "observe": 99} if name in LATE else {"at": 3, "observe": 1}
+compiled = vm(fn, passes=vm.configure(vm.DEFAULT_PASSES, regions=schedule, pure_calls=1))
 got = run(compiled)
 same = all(equal(p, q) for a, b in zip(want[0], got[0]) for p, q in zip(a, b))
 same = same and all(equal(p, q) for p, q in zip(want[1:], got[1:]))
@@ -9000,16 +9062,18 @@ SHADOW_STOPS = {
     "leaves_by_exception": ("the end of the body", "the block left by an exception"),
     "callback": ("died", "a frame that no instruction of the body called"),
     "lost": ("relu_", "aten::relu_"),
+    "in_a_dict": ("Binary(*)", "a tensor no recorded read leads to"),
 }  # fmt: skip
 
 # program: (a reason its recording must give, whether the list must differ
 # from the block on a later arrival: the program changes at its fifth call
 # what the list took by value).
 SHADOW_PARTIAL = {
-    "chain": ("a tensor taken as a pin: no read of it is recorded as a check", False),
+    "chain": ("a pin: the reads that lead to it are not run as a check on a later arrival yet", False),
     "frame_under": ("no row: call py torch.nn.functional.relu", False),
     "in_place": ("a read with no check, or a kind the recorder does not list: LoadGlobal", False),
-    "method_of_a_global": ("a tensor taken as a pin: no read of it is recorded as a check", False),
+    "method_of_a_global": ("a pin: the reads that lead to it are not run as a check on a later arrival yet", False),
+    "in_a_tuple": ("no row: BINARY_SUBSCR (later: subscripts) x tuple", False),
     "reads_value": ("the witness of an entry disagrees with it: torch._C._linalg.linalg_cond", False),
     "global_number": ("an operand taken by value that is no constant of the code: float", True),
     "flag_under": ("a jump under the body tested the result of ToBool", True),
@@ -9048,7 +9112,19 @@ class TestVmCallsShadow(TestCase):
     hw_classification = HardwareClassification.GENERIC
     RAN: dict = {}
     PROGRAMS = sorted(
-        {*SHADOW_STOPS, *SHADOW_PARTIAL, "part", "sliced", "state", "operators"}
+        {
+            *SHADOW_STOPS,
+            *SHADOW_PARTIAL,
+            "part",
+            "sliced",
+            "state",
+            "operators",
+            "in_a_list",
+            "overlap",
+            "shifted",
+            "patched",
+            "patched_behind",
+        }  # fmt: skip
     )
 
     def program(self, name, mode="shadow", same=True):
@@ -9119,7 +9195,7 @@ class TestVmCallsShadow(TestCase):
                     # output and release stated, and never a difference.
                     for field in ("left", "handed", "notes"):
                         self.assertEqual(found[field], [], field)
-                    for field in ("loose", "late", "unstated"):
+                    for field in ("pins", "late", "unstated"):
                         self.assertEqual(found[field], 0, field)
                     self.assertEqual(found["jumps"][1], 0)
                     self.assertFalse(found["validated"].startswith("DIFFERENT"))
@@ -9187,8 +9263,9 @@ class TestVmCallsShadow(TestCase):
         self.assertIn("r0 = torch.conv2d(in0, pin0, None, 1, 1)", lines[0])
         self.assertIn("r1 = torch.relu(move r0)", lines[1])
         self.assertIn("r2 = move r1 @ pin1", lines[2])
-        # The two tensors of the module's globals have no recorded origin.
-        self.assertEqual(found["loose"], 2)
+        # The two tensors of the module's globals are pins: the run's
+        # recorded loads of the globals lead to them.
+        self.assertEqual(found["pins"], 2)
         self.assertEqual(found["outputs"][0], 1)
 
     def test_a_frame_under_the_body_gives_its_c_call(self):
@@ -9199,7 +9276,7 @@ class TestVmCallsShadow(TestCase):
         # A list the body built for the call, its parts by origin.
         self.assertIn("r2 = torch.cat([move r0, move r1], dim=1)", lines[2])
         self.assertEqual(found["validated"], "equal")
-        self.assertEqual((found["loose"], found["frames"]), (0, 1))
+        self.assertEqual((found["pins"], found["frames"]), (0, 1))
         # What the rule table has not taken over is counted, and a reason.
         self.assertIn(
             "call py torch.nn.functional.relu x torch.Tensor", dict(found["left"])
@@ -9236,7 +9313,7 @@ class TestVmCallsShadow(TestCase):
         # LoadMethod hands the receiver back: it made no tensor.
         found = self.reached("method_of_a_global")
         self.assertIn("r0 = torch.Tensor.sin(pin0)", found["text"])
-        self.assertEqual(found["loose"], 1)
+        self.assertEqual(found["pins"], 1)
 
     def test_a_result_tuple_and_a_slice_built_for_a_subscript(self):
         # The tuple leaves its block whole: its release was not seen, and
@@ -9269,6 +9346,100 @@ class TestVmCallsShadow(TestCase):
         self.assertTrue(
             any(s["place"].startswith("relu:") and not s["stop"] for s in shadow)
         )
+
+    def test_a_tensor_among_the_items_of_an_input_is_an_input(self):
+        # `*args` holds the tensor: an input by its path, every arrival's own.
+        found = self.reached("in_a_tuple")
+        self.assertIn("r0 = in0 * 2", found["text"].splitlines()[0])
+        self.assertEqual((found["pins"], found["validated"]), (0, "equal"))
+        self.assertRegex(found["again"], r"^equal on [1-9]\d* later arrival")
+        # The second item of a list that an earlier block of the frame built.
+        found = [s for s in self.places("in_a_list") if "in1 * 2" in s["text"]]
+        self.assertTrue(found, self.places("in_a_list"))
+        self.assertEqual((found[0]["pins"], found[0]["validated"]), (0, "equal"))
+        self.assertRegex(found[0]["again"], r"^equal on [1-9]\d* later arrival")
+
+    def test_a_pin_is_a_tensor_the_recorded_reads_lead_to_or_the_list_stops(self):
+        # The same tensor operand of the same operator: found by a load of a
+        # global, a pin; found in a dict a local holds, which no recorded read
+        # leads to, no list.
+        for name in ("chain", "method_of_a_global"):
+            found = self.reached(name)
+            self.assertGreater(found["pins"], 0)
+            self.assertNotEqual(found["status"], "replayable")
+        for found in self.places("in_a_dict"):
+            if found["stop"] is not None:
+                self.assertEqual((found["pins"], found["entries"]), (0, 0))
+        for name in self.PROGRAMS:
+            for found in self.program(name, same=name != "reads_value")["shadow"]:
+                # No list with a pin passes for the body.
+                self.assertFalse(found["pins"] and found["status"] == "replayable")
+
+    def test_a_trace_under_a_stopped_recording_is_the_engines_own(self):
+        # `overlap` stops at relu_; behind the stop `twice` runs twice: the
+        # first run of its block is recorded on top, the second is due for a
+        # trace of today's engine, which begins while the stopped recording
+        # is still there. Values and regions are what they are without the
+        # recorder, but for this: the recorded run of a block is its plain
+        # instructions, under which a callee runs its own code, not the copy
+        # the block's version calls, so the callee's own block is arrived at,
+        # traced, and found too small.
+        on, off = self.program("overlap"), self.program("overlap", None)
+        self.assertEqual(on["digest"], off["digest"])
+
+        def running(out):
+            return [r for r in out["regions"] if r[0] == "region"]
+
+        self.assertEqual(running(on), running(off))
+        self.assertTrue(running(on))
+        extra = [r for r in on["regions"] if r not in off["regions"]]
+        self.assertEqual(extra, [["too small", 0]])
+        twice = [s for s in on["shadow"] if s["place"].startswith("twice:")]
+        self.assertTrue(twice and all(s["traced"] for s in twice), twice)
+        self.assertTrue(all(s["stop"] is None for s in twice), twice)
+        # A callee that runs once behind the stop is recorded, never traced.
+        on, off = self.program("shifted"), self.program("shifted", None)
+        self.assertEqual((on["digest"], on["regions"]), (off["digest"], off["regions"]))
+
+    def test_a_list_its_own_check_ends_with_nothing_done_is_a_miss(self):
+        # At its fifth call the program puts an attribute on torch.Tensor:
+        # the class the list's operators were resolved on is no longer the
+        # one it was. The list's own check ends it in front of its first
+        # entry: a miss of the list, where the block runs as written, and no
+        # difference. The arrivals before it were equal.
+        found = self.reached("patched")
+        self.assertEqual((found["status"], found["validated"]), ("replayable", "equal"))
+        self.assertRegex(found["again"], r"^equal on [1-9]\d* later arrival")
+        self.assertEqual([check for check, _ in found["missed"]], ["class"])
+        self.assertIn("missed by the list's own check (class)", found["again"])
+        # The same behind an entry that only computes (torch.relu is found
+        # by identity; the operator behind it was resolved on the class).
+        found = self.reached("patched_behind")
+        self.assertIn("r0 = torch.relu(in0)", found["text"].splitlines()[0])
+        self.assertEqual([check for check, _ in found["missed"]], ["class"])
+        # A list that gives other values than the block is a difference.
+        found = self.reached("global_number")
+        self.assertEqual(found["missed"], [])
+        self.assertTrue(found["again"].startswith("DIFFERENT"))
+        # A list with an entry that writes is never run again.
+        found = self.reached("in_place")
+        self.assertEqual((found["again"], found["missed"]), ("", []))
+
+    def test_a_miss_is_what_the_lists_interpreter_says_can_be_taken_back(self):
+        # The list's own check for the class its operator was resolved on,
+        # after the class changed. In front of the first entry and behind an
+        # entry that only computes nothing is to be taken back: a miss.
+        # Behind an entry that wrote its operand the write stands: no miss.
+        out = self.program("later_stops", same=False)
+        self.assertEqual(set(out["before"].values()), {"ran"})
+        self.assertEqual(out["after"]["first"], "miss: class at entry 0")
+        self.assertEqual(out["after"]["behind_computing"], "miss: class at entry 1")
+        self.assertEqual(
+            out["after"]["behind_writing"],
+            "DIFFERENT on a later arrival: the list stopped at entry 1 (class)",
+        )
+        self.assertEqual(out["operand"]["behind_writing"], [2.0, 2.0])
+        self.assertEqual(out["operand"]["behind_computing"], [1.0, 1.0])
 
     def test_state_is_eagers_and_its_writer_stops_the_recording(self):
         # Batch norm in training mode writes its running statistics.

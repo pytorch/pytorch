@@ -60,9 +60,9 @@ pub struct Shadow {
     // The recording reached the end and the check of lists refused it.
     pub refused: Option<String>,
     pub text: String,
-    // Tensors taken as pins with no check; slots whose release was not
-    // seen (stated at the end of the body).
-    pub loose: u32,
+    // Tensors taken as pins: found by reads the run recorded (origins.rs);
+    // slots whose release was not seen (stated at the end of the body).
+    pub pins: u32,
     pub late: u32,
     // Outputs that are results of entries; the block's other outputs.
     pub outputs: (usize, usize),
@@ -85,6 +85,11 @@ pub struct Shadow {
     // gave the block's outputs, how many could not be compared, and the
     // first that differed.
     pub again: (u32, u32, Option<String>),
+    // Later arrivals on which the list's own check ended it before the
+    // entry it was made for ran, with nothing to take back (the list's
+    // stops "class", "part", "assert" that are restartable: a miss of the
+    // list, where the block runs as written), by the check.
+    pub missed: Vec<(String, u64)>,
 }
 
 thread_local! {
@@ -144,8 +149,11 @@ impl Shadow {
     fn again_text(&self) -> String {
         match &self.again {
             (_, _, Some(different)) => different.clone(),
-            (0, 0, None) => String::new(),
-            (equal, skipped, None) => format!("equal on {equal} later arrival(s), {skipped} not comparable"),
+            (0, 0, None) if self.missed.is_empty() => String::new(),
+            (equal, skipped, None) => {
+                let missed = self.missed.iter().map(|(check, n)| format!(", {n} missed by the list's own check ({check})")).collect::<String>();
+                format!("equal on {equal} later arrival(s), {skipped} not comparable{missed}")
+            }
         }
     }
 
@@ -153,10 +161,10 @@ impl Shadow {
         let counts = |v: &[(String, u64)]| format!("{{{}}}", v.iter().map(|(k, n)| format!("{}: {n}", quoted(k))).collect::<Vec<_>>().join(", "));
         let stop = self.stop.as_ref().map_or("null".into(), |(at, why)| format!("[{}, {}]", quoted(at), quoted(why)));
         format!(
-            "{{\"place\": {}, \"status\": {}, \"traced\": {}, \"entries\": {}, \"seen\": {}, \"left_behind\": {}, \"stop\": {stop}, \"refused\": {}, \"text\": {}, \"loose\": {}, \"late\": {}, \"outputs\": [{}, {}], \"unstated\": {}, \"by_value\": {}, \"left\": {}, \"handed\": {}, \"facts\": {}, \"notes\": [{}], \"validated\": {}, \"reasons\": {}, \"jumps\": [{}, {}], \"frames\": {}, \"again\": {}}}",
+            "{{\"place\": {}, \"status\": {}, \"traced\": {}, \"entries\": {}, \"seen\": {}, \"left_behind\": {}, \"stop\": {stop}, \"refused\": {}, \"text\": {}, \"pins\": {}, \"late\": {}, \"outputs\": [{}, {}], \"unstated\": {}, \"by_value\": {}, \"left\": {}, \"handed\": {}, \"facts\": {}, \"notes\": [{}], \"validated\": {}, \"reasons\": {}, \"jumps\": [{}, {}], \"frames\": {}, \"again\": {}, \"missed\": {}}}",
             quoted(&self.place), quoted(&self.status()), self.traced, self.entries, self.seen, self.left_behind, self.refused.as_deref().map_or("null".into(), quoted), quoted(&self.text),
-            self.loose, self.late, self.outputs.0, self.outputs.1, self.unstated, counts(&self.by_value), counts(&self.left), counts(&self.handed), self.facts,
-            self.notes.iter().map(|n| quoted(n)).collect::<Vec<_>>().join(", "), quoted(&self.validated), counts(&self.reasons), self.jumps.0, self.jumps.1, self.frames, quoted(&self.again_text())
+            self.pins, self.late, self.outputs.0, self.outputs.1, self.unstated, counts(&self.by_value), counts(&self.left), counts(&self.handed), self.facts,
+            self.notes.iter().map(|n| quoted(n)).collect::<Vec<_>>().join(", "), quoted(&self.validated), counts(&self.reasons), self.jumps.0, self.jumps.1, self.frames, quoted(&self.again_text()), counts(&self.missed)
         )
     }
 }
@@ -179,8 +187,10 @@ extern "C" fn dump() {
 /// check of lists refused what was recorded: ``refused``). ``traced``: today's
 /// engine went on to trace the place. ``validated``: "equal", "DIFFERENT: ..."
 /// or "not validated: ...", on the recorded run's operands; ``again``: the same
-/// on later arrivals at the place. ``loose``: tensors taken as pins with no
-/// check. ``jumps``: conditional jumps under the body on a (known, other) value.
+/// on later arrivals at the place; ``missed``: the later arrivals on which the
+/// list's own check ended it with nothing done, by the check. ``pins``: tensors that were there before
+/// the run and that the reads it recorded lead to. ``jumps``: conditional
+/// jumps under the body on a (known, other) value.
 #[pyfunction]
 pub fn _calls_shadow(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
     KEPT.with_borrow(|kept| {
@@ -196,7 +206,7 @@ pub fn _calls_shadow(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
                 d.set_item("stop", s.stop.clone())?;
                 d.set_item("refused", s.refused.clone())?;
                 d.set_item("text", &s.text)?;
-                d.set_item("loose", s.loose)?;
+                d.set_item("pins", s.pins)?;
                 d.set_item("late", s.late)?;
                 d.set_item("outputs", s.outputs)?;
                 d.set_item("unstated", s.unstated)?;
@@ -210,6 +220,7 @@ pub fn _calls_shadow(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
                 d.set_item("jumps", s.jumps)?;
                 d.set_item("frames", s.frames)?;
                 d.set_item("again", s.again_text())?;
+                d.set_item("missed", s.missed.clone())?;
                 Ok(d.unbind())
             })
             .collect()
@@ -351,6 +362,27 @@ pub unsafe fn validate(py: Python<'_>, list: &List, inputs: &[Pin], pins: &[Pin]
         let verdict = compare(made, outs, &operands);
         ffi::Py_DECREF(made);
         verdict
+    }
+}
+
+/// For tests: what the validation of a later arrival makes of the hand-built
+/// ``list`` run on ``inputs`` and ``pins``: "ran", "miss: <check> at entry
+/// <k>" (the list's own check ended it and its interpreter says nothing is to
+/// be taken back), or "DIFFERENT on a later arrival: ..." for any other stop.
+#[pyfunction]
+pub fn _calls_later(list: &Bound<'_, List>, inputs: Vec<Py<PyAny>>, pins: Vec<Py<PyAny>>) -> String {
+    unsafe {
+        let pointers = |held: &[Py<PyAny>]| held.iter().map(|o| o.as_ptr()).collect::<Vec<_>>();
+        match crate::exec::outside_executor(|| list.get().run(list.py(), &pointers(&inputs), &pointers(&pins))) {
+            Ok(made) => {
+                ffi::Py_DECREF(made);
+                "ran".into()
+            }
+            Err(stop) => {
+                ffi::PyErr_Clear();
+                super::again::stopped(&stop).map_or_else(|why| why, |check| format!("miss: {check} at entry {}", stop.entry))
+            }
+        }
     }
 }
 

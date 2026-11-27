@@ -409,12 +409,14 @@ pub fn begin() {
     asked::init();
     super::built::init();
     TRACE.set(Some(Trace { thread: super::ambient::word(), ..Trace::default() }));
+    OWNER.set(Owner::Trace);
 }
 
 pub fn end() {
     super::made::clear();
     TRACE.set(None);
     ON.set(false);
+    OWNER.set(Owner::Nobody);
 }
 
 // Records while it lives: around the traced body, and around what the
@@ -2443,6 +2445,10 @@ pub fn _region_read_misses() -> u64 {
 #[pyfunction]
 #[pyo3(signature = (given=vec![]))]
 pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(Option<Py<Reads>>, Option<String>)> {
+    // The call-list recorder's reads are not a trace's to take (see Owner).
+    if OWNER.get() == Owner::Recorder {
+        return Ok((None, None));
+    }
     // The entries that go here (swept, dropped, held weakly from now on)
     // and the rest of the trace's records let go of what they counted: a
     // frame that runs for it is seen (foreign.rs).
@@ -2562,4 +2568,67 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
 // that enters a Python frame for the callee itself hands them on unread).
 pub unsafe fn reads_args(callee: *mut PyObject) -> bool {
     tr_calls_builtin(callee) != 0
+}
+
+// ---- Whose the reads of this thread are -------------------------------------
+//
+// The one Trace of a thread has one owner, stated here and never worked out
+// from what is running: nobody, a trace of today's engine (begin .. end), or
+// the call-list recorder (begin_for_recorder .. end_for_recorder; see
+// calls/record.rs). The recorder begins only what nobody owns, and a trace
+// that begins takes the thread whoever had it: the recorder then finds that
+// it is no longer the owner (leads_to, standing) and stops; what it had
+// recorded is gone, and a trace never takes a Trace the recorder made
+// (_region_reads). ON stays off for the recorder: its activations are told to
+// record (Act::reading), and nothing that asks on() (the writes of a trace,
+// the refusals of the frame hook) runs for it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Owner {
+    Nobody,
+    Trace,
+    Recorder,
+}
+
+thread_local! {
+    static OWNER: Cell<Owner> = const { Cell::new(Owner::Nobody) };
+}
+
+// False, and nothing begun: somebody owns the reads of this thread.
+pub fn begin_for_recorder() -> bool {
+    if OWNER.get() != Owner::Nobody {
+        return false;
+    }
+    begin();
+    OWNER.set(Owner::Recorder);
+    true
+}
+
+// The recorder lets go of its reads; of reads that are not its own it lets
+// nothing go. What they held is released here, and the thread is nobody's
+// before that: a finalizer that runs then may be recorded or traced.
+pub fn end_for_recorder() {
+    if OWNER.get() == Owner::Recorder {
+        OWNER.set(Owner::Nobody);
+        end();
+    }
+}
+
+// How many reads the recorder's Trace holds, or why nothing more is recorded
+// into it: a trace took the thread, or a read was met that no check covers.
+pub fn standing() -> Result<usize, String> {
+    if OWNER.get() != Owner::Recorder {
+        return Err("a trace began under the recording".into());
+    }
+    TRACE.with_borrow(|t| match t.as_ref().map(|t| (&t.refused, t.count)) {
+        Some((None, count)) => Ok(count),
+        Some((Some(why), _)) => Err(format!("a read of the run that no check covers: {why}")),
+        None => Err("the reads of the run are gone".into()),
+    })
+}
+
+// Whether the reads the recorder's Trace holds lead to `o` from what was there
+// before its run (see led): the namespaces, the cells, and `given`, which the
+// caller holds alive. False for reads that do not stand.
+pub unsafe fn leads_to(o: *mut PyObject, given: &[*mut PyObject]) -> bool {
+    standing().is_ok() && TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| led(&t.entries, Start::Before(given)).contains(&(o as usize))))
 }
