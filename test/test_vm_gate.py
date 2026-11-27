@@ -19,6 +19,7 @@ import faulthandler
 import functools
 import gc
 import glob
+import hashlib
 import importlib
 import itertools
 import json
@@ -892,6 +893,17 @@ def ambient_plainly(fn, x):
     return fn(x)
 
 
+def ambient_called_under(enter):
+    """How a call is made under the context manager ``enter()`` (None: in
+    the state the thread is in)."""
+
+    def run(fn, x):
+        with contextlib.ExitStack() if enter is None else enter():
+            return fn(x)
+
+    return run
+
+
 @contextlib.contextmanager
 def ambient_set(get, put, value):
     old = get()
@@ -959,10 +971,23 @@ AMBIENT_WORD = {
     ),
     "grad_mode": (None, torch.no_grad),
     "inference_mode": (torch.no_grad, torch.inference_mode),
+    "forward_grad_mode": (
+        None,
+        lambda: torch.autograd.forward_ad._set_fwd_grad_enabled(False),
+    ),
+    "autograd_multithreading": (
+        None,
+        lambda: torch.autograd.set_multithreading_enabled(False),
+    ),
+    "view_replay": (
+        None,
+        lambda: torch.autograd._force_original_view_tracking(True),
+    ),
 }
 
 # What the word has and the sweep cannot set, and why.
 AMBIENT_NOT_SWEPT = {
+    "grad layout enforcement": "no function of Python sets it",
     "autocast for cuda, xpu and mps": "as for the CPU, on a device of that type",
     "the current CUDA device": "needs two CUDA devices: see "
     "test_the_current_cuda_device_is_in_the_word",
@@ -1025,6 +1050,31 @@ def ambient_under_anomaly_mode(fn, x):
             return fn(x)
 
 
+def ambient_recorded(profile):
+    """What a profiler recorded of operators and of labelled blocks."""
+    events = profile.key_averages()
+    return sorted(
+        (e.key, e.count) for e in events if e.key.startswith(("aten::", "ambient_"))
+    )
+
+
+def ambient_under_the_autograd_profiler(fn, x):
+    with torch.autograd.profiler.profile() as profile:
+        out = fn(x)
+    return out, ambient_recorded(profile)
+
+
+def ambient_under_the_kineto_profiler(fn, x):
+    with torch.profiler.profile() as profile:
+        out = fn(x)
+    return out, ambient_recorded(profile)
+
+
+def ambient_excluding_a_dispatch_key():
+    keys = torch._C.DispatchKeySet(torch._C.DispatchKey.ADInplaceOrView)
+    return torch._C._ExcludeDispatchKeyGuard(keys)
+
+
 # What must be neutral: how a call runs under each item, giving what the
 # program computes and what the item saw of it.
 AMBIENT_NEUTRAL = {
@@ -1035,12 +1085,65 @@ AMBIENT_NEUTRAL = {
     "saved_tensor_hooks": ambient_under_saved_tensor_hooks,
     "fx_tracing": ambient_under_fx_tracing,
     "anomaly_mode": ambient_under_anomaly_mode,
+    "the_autograd_profiler": ambient_under_the_autograd_profiler,
+    "the_kineto_profiler": ambient_under_the_kineto_profiler,
+    "emit_itt": ambient_called_under(torch.autograd.profiler.emit_itt),
+    "an_excluded_dispatch_key": ambient_called_under(ambient_excluding_a_dispatch_key),
+    "dispatch_below_autograd": ambient_called_under(
+        lambda: torch._C._AutoDispatchBelowAutograd()
+    ),
+    "torch_function_disabled": ambient_called_under(
+        lambda: torch._C.DisableTorchFunctionSubclass()
+    ),
+    "saved_tensor_hooks_disabled": ambient_called_under(
+        lambda: torch.autograd.graph.disable_saved_tensors_hooks("not here")
+    ),
 }
 
 AMBIENT_NEUTRAL_NOT_SWEPT = {
     "JIT tracing": "this build has no torch.jit.trace to start it",
     "autocast for a device type the word does not name": "torch.autocast "
     "takes it only where a backend of that type is registered",
+    "emit_nvtx": "needs a CUDA device",
+    "the Python dispatcher, a fake tensor mode of C++, node-creation hooks, a "
+    "graph-execution group, the flags of functionalization and of DTensor": "no "
+    "call of the program runs under them as it runs in eager; that each is not "
+    "neutral is asked without a call (TestVmAmbientNeutral)",
+}
+
+# Thread state that is not neutral, entered without making a call under it:
+# name -> the context manager. (The members of AMBIENT_NEUTRAL are asked by
+# the calls they make.)
+AMBIENT_NOT_NEUTRAL = {
+    "a_dispatch_mode": lambda: TorchDispatchMode(),
+    "a_torch_function_mode": lambda: TorchFunctionMode(),
+    "a_forward_ad_level": lambda: torch.autograd.forward_ad.dual_level(),
+    "saved_tensor_hooks": lambda: torch.autograd.graph.saved_tensors_hooks(
+        lambda t: t, lambda t: t
+    ),
+    "saved_tensor_hooks_disabled": lambda: (
+        torch.autograd.graph.disable_saved_tensors_hooks("not here")
+    ),
+    "fx_tracing": lambda: torch.fx._symbolic_trace._is_fx_tracing_context(True),
+    "anomaly_mode": lambda: torch.autograd.detect_anomaly(check_nan=False),
+    "the_autograd_profiler": lambda: torch.autograd.profiler.profile(),
+    "the_kineto_profiler": lambda: torch.profiler.profile(),
+    "emit_itt": lambda: torch.autograd.profiler.emit_itt(),
+    "an_excluded_dispatch_key": ambient_excluding_a_dispatch_key,
+    "an_included_dispatch_key": lambda: torch._C._IncludeDispatchKeyGuard(
+        torch._C.DispatchKey.Python
+    ),
+    "dispatch_below_autograd": lambda: torch._C._AutoDispatchBelowAutograd(),
+    "torch_function_disabled": lambda: torch._C.DisableTorchFunction(),
+    "torch_function_disabled_for_subclasses": lambda: (
+        torch._C.DisableTorchFunctionSubclass()
+    ),
+    "the_python_dispatcher": lambda: (
+        torch._dispatch.python.enable_python_dispatcher()
+    ),
+    "a_default_device": lambda: ambient_set(
+        lambda: None, torch.set_default_device, "cpu"
+    ),
 }
 
 
@@ -8818,7 +8921,7 @@ class TestVmRulesTorch(TestCase):
 
 
 SHADOW_PROGRAM = """
-import functools, hashlib, json, sys, weakref, torch, torch.nn.functional as F
+import functools, gc, hashlib, json, sys, weakref, torch, torch.nn.functional as F
 from torch import vm
 
 torch.manual_seed(0)
@@ -8963,6 +9066,69 @@ def patched(x):
 def patched_behind(x):
     return torch.relu(x) * 2
 
+class Quiet:
+    def __del__(self):
+        pass
+
+def holds(y):
+    held = Quiet()
+    return y * 2
+
+def finalizer_at_frame_exit(x):
+    return holds(x + 1) + 1
+
+class Scaled:
+    def __init__(self, k):
+        self.k = k
+
+def class_called(x):
+    return x * Scaled(2).k
+
+class Holder:
+    @property
+    def scale(self):
+        return 2
+
+HOLDER = Holder()
+
+def property_read(x):
+    return x * HOLDER.scale
+
+class Getter:
+    def __get__(self, obj, objtype=None):
+        return 2
+
+class Described:
+    scale = Getter()
+
+DESCRIBED = Described()
+
+def descriptor_read(x):
+    return x * DESCRIBED.scale
+
+LIN = torch.nn.Linear(8, 8)
+
+def module_called(x):
+    return LIN(x) + 1
+
+class Cycle:
+    def __del__(self):
+        STATE["dead"].append("cycle")
+
+def collects(x):
+    y = x + 1
+    z = torch.relu(y)
+    return torch.relu(z) * 2
+
+def collects_garbage(x):
+    c = Cycle()
+    c.me = c
+    c = None
+    gc.enable()
+    y = x + 1
+    z = torch.relu(y)
+    return torch.relu(z) * 2
+
 def later_stops():
     # Three hand-built lists whose operator `*` was resolved on torch.Tensor,
     # run again after the class changed: at the first entry, behind an entry
@@ -8996,6 +9162,9 @@ def shifted(x):
     return twice(y) + 1
 
 LATE = ("overlap", "shifted")
+# A collection is due after every second allocation; in `collects_garbage`
+# the collector is off until the body turns it on.
+COLLECTS = ("collects", "collects_garbage")
 BETWEEN = {
     "global_number": lambda: globals().__setitem__("SCALE", 3.0),
     "flag_under": lambda: STATE.__setitem__("double", False),
@@ -9026,13 +9195,20 @@ def run(f):
             BETWEEN[name]()
         if i == 2 and name in LATE and f is not fn:
             torch._rust._set_cfg_regions(True, 2, 4, 64)
+        if name == "collects_garbage":
+            gc.disable()
         outs.append(flat(f(x.clone())))
+    if name in COLLECTS:
+        gc.enable()
+        gc.collect()
     return outs, bn.running_mean.clone(), int(bn.num_batches_tracked), list(STATE["dead"]), M0.clone()
 M0C = M0.clone()
 def equal(a, b):
     if torch.is_tensor(a):
         return torch.is_tensor(b) and a.shape == b.shape and torch.equal(a, b)
     return type(a) is type(b) and a == b
+if name in COLLECTS:
+    gc.set_threshold(1, 100000, 100000)
 want = run(fn)
 schedule = {"at": 100, "observe": 99} if name in LATE else {"at": 3, "observe": 1}
 compiled = vm(fn, passes=vm.configure(vm.DEFAULT_PASSES, regions=schedule, pure_calls=1))
@@ -9063,6 +9239,11 @@ SHADOW_STOPS = {
     "callback": ("died", "a frame that no instruction of the body called"),
     "lost": ("relu_", "aten::relu_"),
     "in_a_dict": ("Binary(*)", "a tensor no recorded read leads to"),
+    "length_of_a_global": ("Tensor.__len__", "it ran under call c builtins.len, which names no function"),
+    "finalizer_at_frame_exit": ("Quiet.__del__", "it ran under call py __main__.holds, whose callee's frame had been entered already"),
+    "class_called": ("Scaled.__init__", "it ran under call class __main__.Scaled, which names no function"),
+    "property_read": ("Holder.scale", "it ran under LoadAttr (later: attributes), which names no function"),
+    "collects_garbage": ("Cycle.__del__", "it ran between two instructions"),
 }  # fmt: skip
 
 # program: (a reason its recording must give, whether the list must differ
@@ -9079,7 +9260,6 @@ SHADOW_PARTIAL = {
     "flag_under": ("a jump under the body tested the result of ToBool", True),
     "flag_operand": ("a jump under the body tested the result of ToBool", False),
     "default_operand": ("an operand taken by value that is no constant of the code: int", True),
-    "length_of_a_global": ("no row: call c builtins.len x torch.Tensor", True),
 }  # fmt: skip
 
 # What the recorder's validation answers for a list of one entry, a slice of
@@ -9124,6 +9304,9 @@ class TestVmCallsShadow(TestCase):
             "shifted",
             "patched",
             "patched_behind",
+            "module_called",
+            "descriptor_read",
+            "collects",
         }  # fmt: skip
     )
 
@@ -9440,6 +9623,49 @@ class TestVmCallsShadow(TestCase):
         )
         self.assertEqual(out["operand"]["behind_writing"], [2.0, 2.0])
         self.assertEqual(out["operand"]["behind_computing"], [1.0, 1.0])
+
+    def test_a_frame_is_the_bodys_only_as_the_callee_of_the_instruction_in_flight(self):
+        # The call of a module enters what its class has under __call__, that
+        # calls two bound methods, and the lookups of the weight and the bias
+        # fall back to the class's __getattr__: five frames, each the one
+        # function the instruction in flight names, and the C call under
+        # them is the entry.
+        found = self.reached("module_called")
+        self.assertEqual(found["frames"], 5)
+        self.assertIn("r0 = torch._C._nn.linear(in0, pin0, pin1)", found["text"])
+        # An attribute that the object's class resolves to a descriptor
+        # written in Python enters that descriptor's __get__.
+        self.assertEqual(self.reached("descriptor_read")["frames"], 1)
+        # A frame under an instruction that names another function, or none,
+        # is no frame of the body: the finalizer of a callee's local, which
+        # runs when the callee's frame ends and the call is still in flight;
+        # the __init__ under the call of a class; a property's getter.
+        for name in ("finalizer_at_frame_exit", "class_called", "property_read"):
+            stopped = [s for s in self.places(name) if s["stop"] is not None]
+            self.assertTrue(stopped, name)
+            for found in stopped:
+                self.assertIn(
+                    "a frame that no instruction of the body called", found["stop"][1]
+                )
+        # (Before the finalizer ran, the callee's own frame was taken.)
+        self.assertEqual(self.places("finalizer_at_frame_exit")[0]["frames"], 1)
+
+    def test_the_executors_own_empty_function_is_no_frame_of_the_program(self):
+        # A collection is due after every second allocation, so behind the
+        # calls of the body the executor calls its empty function, by which
+        # the interpreter handles what is pending. It is told by the identity
+        # of its function object and is nothing to the recording, which
+        # reaches the block's end.
+        found = self.reached("collects")
+        self.assertGreater(found["breaks"], 0)
+        self.assertEqual(found["entries"], 4)
+        # The finalizer of garbage that the collector finds there runs under
+        # that function, and no instruction called it: the recording stops.
+        stopped = [s for s in self.places("collects_garbage") if s["stop"] is not None]
+        self.assertTrue(stopped)
+        for found in stopped:
+            self.assertEqual(found["stop"][0], "Cycle.__del__")
+            self.assertGreater(found["breaks"], 0)
 
     def test_state_is_eagers_and_its_writer_stops_the_recording(self):
         # Batch norm in training mode writes its running statistics.
@@ -9956,58 +10182,98 @@ class TestVmEdgeGenerators(TestCase):
 # The bridge between the executor (Rust) and torch (C++): the rule is at the
 # head of torch/_rust/src/bindings/ffi.rs. Every function Rust calls across
 # it, with its kind and the reason:
-#   plain   its C++ body cannot throw;
-#   edge    it can, and catches at its edge to answer its refusing value;
-#   result  it returns Result, and the caller's failure branch refuses.
+#   edge    its body is inside edge(...) or edge_py(...), which catch
+#           everything and answer the function's refusing value;
+#   result  it returns Result, and the caller's failure branch refuses;
+#   plain   it has no refusing value and its body cannot throw. The third
+#           item is the digest of that body as it was read (BRIDGE_HELPERS:
+#           of what such bodies call in their file): a body that changes
+#           fails TestVmBridge until it is read again and its digest
+#           recorded.
 BRIDGE_FUNCTIONS = {
     "tensor_from_pyobject": ("edge", "isinstance may run Python code and raise: null"),
-    "tensor_by_type": ("plain", "a walk of the type's bases and a field of the object"),
-    "torch_function_mode_active": ("plain", "a thread-local"),
-    "grad_mode_enabled": ("plain", "a thread-local"),
-    "region_word": ("edge", "a getter of the context or of CUDA may raise: no word"),
-    "region_modes": (
-        "plain",
-        "two thread-locals; fx's flag by the C API, 2 on failure",
+    "tensor_by_type": (
+        "edge",
+        "a walk of the type's bases, a field of the object: null",
     ),
+    "torch_function_mode_active": (
+        "edge",
+        "a count of the thread's modes: true, one is on",
+    ),
+    "region_word": ("edge", "a getter of the context or of CUDA may raise: no word"),
     "region_not_neutral": ("edge", "what cannot be asked is 255: not neutral"),
-    "set_grad_mode": ("plain", "a thread-local"),
     "tensor_version": ("edge", "an inference tensor has no counter and raises: -1"),
     "tensor_home": ("edge", "a tensor's layout and storage may raise: 0"),
     "tensor_span": ("edge", "a tensor's device, sizes and storage may raise: false"),
-    "tensor_is_cow": ("plain", "the storage's data pointer, read without a check"),
-    "forward_ad_active": ("plain", "a count behind a mutex and a thread-local"),
-    "saved_tensor_hooks_active": ("plain", "the thread's stack of hooks"),
+    "tensor_is_cow": ("edge", "the storage's data pointer: false, not unwritten"),
+    "forward_ad_active": ("edge", "an atomic count of the process's levels: true"),
+    "saved_tensor_hooks_active": (
+        "edge",
+        "the thread's stack of hooks: true, they are on",
+    ),
     "tensor_key": ("edge", "a tensor's device and dtype may raise: false, no key"),
     "tensor_key_is": ("edge", "as tensor_key: false, another key"),
-    "tensor_dim": ("edge", "a Python-dispatch tensor answers in Python: -1"),
-    "tensor_numel": ("edge", "as tensor_dim: -1"),
-    "tensor_size_at": ("edge", "a dimension out of range raises: -1"),
-    "tensor_stride_at": ("edge", "as tensor_size_at: -1"),
-    "tensor_sizes": ("result", "a nested tensor and symbolic sizes raise"),
-    "tensor_strides": ("result", "as tensor_sizes"),
     "tensor_is_contiguous": (
         "edge",
         "a Python-dispatch tensor answers in Python: false",
     ),
     "tensor_is_cpu": ("edge", "a tensor without a device raises: false"),
-    "tensor_is_cuda": ("edge", "as tensor_is_cpu: false"),
-    "tensor_defined": ("plain", "a pointer comparison"),
-    "tensor_requires_grad": ("plain", "a field of the autograd metadata"),
-    "tensor_is_leaf": ("plain", "a field of the autograd metadata"),
+    "tensor_is_leaf": (
+        "edge",
+        "an undefined tensor raises: true, which its caller refuses",
+    ),
     "tensor_meta": ("edge", "dtype, device and sizes may raise: undefined, no shape"),
     "dtype_name": ("edge", "making the string may raise: the empty string"),
     "device_name": ("edge", "an unknown device type raises: the empty string"),
-    "op_hook_enable": ("plain", "a pointer and a bit of the thread's dispatch keys"),
-    "op_hook_disable": ("plain", "as op_hook_enable"),
-    "op_hook_pause": ("plain", "as op_hook_enable"),
-    "op_hook_witness": ("plain", "as op_hook_enable, and clearing a table"),
-    "op_hook_seeing": ("plain", "thread-locals"),
-    "op_hook_depth": ("plain", "a thread-local"),
-    "op_hook_serial": ("plain", "a thread-local"),
-    "op_hook_innermost": ("plain", "a thread-local"),
-    "tensor_ident": ("plain", "two pointers of the tensor"),
     "make_cfg_node": ("edge", "false with a Python error set, which the caller raises"),
+    "tensor_sizes": ("result", "a nested tensor and symbolic sizes raise"),
+    "tensor_strides": ("result", "as tensor_sizes"),
+    "grad_mode_enabled": (
+        "plain",
+        "a bit of the thread's autograd state",
+        "64b97f8cbbe1",
+    ),
+    "set_grad_mode": (
+        "plain",
+        "a bit of the thread's autograd state, read and written",
+        "218ba2131eaa",
+    ),
+    "tensor_requires_grad": (
+        "plain",
+        "a null test and a field of the autograd metadata",
+        "b8d6c75248fd",
+    ),
+    "op_hook_enable": (
+        "plain",
+        "a counter and a flag of the thread, then sync",
+        "03cb55bec573",
+    ),
+    "op_hook_disable": (
+        "plain",
+        "a counter and a flag of the thread, then sync",
+        "cc661355cefb",
+    ),
+    "op_hook_pause": ("plain", "a flag of the thread, then sync", "d1c70004b996"),
+    "op_hook_witness": (
+        "plain",
+        "flags of the thread, a table of weak storages cleared, sync",
+        "2eae04a3b00c",
+    ),
+    "op_hook_seeing": (
+        "plain",
+        "a flag of the thread and two bits of its dispatch keys",
+        "2bc8e3baf2fc",
+    ),
+    "op_hook_depth": ("plain", "a counter of the thread", "02211b038e37"),
+    "op_hook_serial": ("plain", "a counter of the thread", "42634771f3c6"),
+    "op_hook_innermost": ("plain", "a counter of the thread", "a80390b4865d"),
+    "tensor_ident": (
+        "plain",
+        "tensor_by_type (an edge) and two pointers of the tensor",
+        "d5f5a5e3340e",
+    ),
 }
+BRIDGE_HELPERS = {"sync": "5bdb8472b0b0", "identify": "64695ad972a4"}
 # The other way: what C++ calls of Rust. A panic in one ends the process.
 BRIDGE_RUST_SIDE = [
     "node_apply",
@@ -10029,6 +10295,77 @@ BRIDGE_SOURCES = [
 ]
 
 
+class BridgeRaises(torch.Tensor):
+    """A tensor that answers for its sizes in Python, by raising."""
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        raise ValueError("this class does not say")
+
+
+def bridge_inference_tensor():
+    with torch.inference_mode():
+        return torch.randn(4, 8)
+
+
+def bridge_hands_on(x, c):
+    y = x.sin() * 2 + 1
+    return y.cos().tanh().exp(), c
+
+
+def bridge_computes_with(x, c):
+    y = x.sin() * 2 + 1
+    return y.cos().tanh().exp(), (c * 1).sum()
+
+
+# Tensors whose questions raise in C++, or are answered in Python: how each
+# is made, and the answers of the bridge that are refusals for it.
+BRIDGE_ODD_TENSORS = {
+    "inference": (
+        bridge_inference_tensor,
+        {"tensor_version": -1, "tensor_key": True},
+    ),
+    "nested": (
+        lambda: torch.nested.nested_tensor([torch.ones(2), torch.ones(3)]),
+        {
+            "tensor_key": False,
+            "tensor_key_is": False,
+            "tensor_sizes": None,
+            "tensor_strides": None,
+            "tensor_span": False,
+            "tensor_meta": (True, True, False),
+        },
+    ),
+    "sparse": (
+        lambda: torch.randn(4, 8).to_sparse(),
+        {"tensor_key": False, "tensor_span": False, "tensor_home": False},
+    ),
+    "mkldnn": (
+        lambda: torch.randn(4, 8).to_mkldnn(),
+        {"tensor_key": False, "tensor_span": False, "tensor_home": False},
+    ),
+    "sizes_in_python": (
+        lambda: torch.Tensor._make_wrapper_subclass(
+            BridgeRaises, (4, 8), dispatch_sizes_strides_policy="sizes"
+        ),
+        {
+            "tensor_key": False,
+            "tensor_sizes": None,
+            "tensor_strides": None,
+            "tensor_span": False,
+            "tensor_home": False,
+            "tensor_is_contiguous": False,
+            "tensor_meta": (True, False, False),
+        },
+    ),
+    "meta": (
+        lambda: torch.randn(4, 8, device="meta"),
+        {"tensor_span": False, "tensor_home": False, "tensor_is_cpu": False},
+    ),
+}
+
+
+@instantiate_parametrized_tests
 class TestVmBridge(TestCase):
     """No C++ exception leaves a function the executor calls across its
     bridge to torch: one that did would end the process. The functions are
@@ -10088,22 +10425,27 @@ class TestVmBridge(TestCase):
         )
         self.assertEqual(rust_side, BRIDGE_RUST_SIDE)
 
+    def digest(self, name):
+        text = " ".join(self.body(name)[1].split())
+        return hashlib.sha256(text.encode()).hexdigest()[:12]
+
     def test_a_function_is_of_its_recorded_kind(self):
         declared, _ = self.bridge()
-        for name, (kind, why) in BRIDGE_FUNCTIONS.items():
+        for name, (kind, why, *read) in BRIDGE_FUNCTIONS.items():
             self.assertIn(kind, ("plain", "edge", "result"), msg=name)
             self.assertTrue(why, msg=name)
             self.assertEqual(declared[name], kind == "result", msg=name)
             noexcept, body = self.body(name)
-            catches = "edge(" in body or "catch (...)" in body
-            if kind == "edge":
-                self.assertTrue(
-                    noexcept and catches, msg=f"{name} is to catch at its edge"
-                )
-            else:
-                self.assertFalse(catches, msg=f"{name} catches: its kind is edge")
-            if kind == "result":
-                self.assertFalse(noexcept, msg=name)
+            catches = re.search(r"\bedge(_py)?\(|catch \(\.\.\.\)", body) is not None
+            self.assertEqual(catches, kind == "edge", msg=f"{name}: {kind}")
+            if kind != "plain":
+                self.assertEqual(noexcept, kind == "edge", msg=name)
+            if kind == "plain":
+                msg = f"the body of {name} is not the one that was read: read it again"
+                self.assertEqual([self.digest(name)], read, msg=msg)
+        for name, read in BRIDGE_HELPERS.items():
+            msg = f"{name}, which plain functions call, is not as it was read"
+            self.assertEqual(self.digest(name), read, msg=msg)
 
     def test_no_other_file_declares_cxx_and_c_is_declared_where_recorded(self):
         if not os.path.isdir(CRATE):
@@ -10123,6 +10465,41 @@ class TestVmBridge(TestCase):
         csrc = os.path.join(os.path.dirname(CRATE), "csrc")
         sources = sorted(f for f in os.listdir(csrc) if not f.endswith(".h"))
         self.assertEqual(sources, BRIDGE_SOURCES)
+
+    @parametrize("case", list(BRIDGE_ODD_TENSORS))
+    @unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension")
+    @checks_isolated
+    def test_a_tensor_whose_questions_raise_gets_the_refusing_answers(self, case):
+        make, expected = BRIDGE_ODD_TENSORS[case]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            odd = make()
+        answers = torch._rust._bridge_answers(odd)
+        # Every function of the bridge that takes a tensor was asked.
+        asked = {n for n in BRIDGE_FUNCTIONS if n.startswith("tensor_")}
+        self.assertEqual(
+            set(answers) - {"a_pending_error_is_kept"}, asked - {"tensor_ident"}
+        )
+        self.assertTrue(answers["a_pending_error_is_kept"])
+        for name, want in expected.items():
+            self.assertEqual(answers[name], want, msg=f"{case}: {name}")
+        # And a function on the VM that is handed it does what eager does.
+        for body in (bridge_hands_on, bridge_computes_with):
+            compiled = vm(body, passes=CHECKS_EARLY)
+            for call in range(10):
+                torch.manual_seed(call)
+                x = torch.randn(4, 8)
+                want = checks_outcome(body, x, odd)
+                got = checks_outcome(compiled, x, odd)
+                msg = f"{case}: {body.__name__}, call {call}"
+                if isinstance(want, Exception):
+                    self.assertIs(type(got), type(want), msg=msg)
+                    continue
+                self.assertEqual(got[0], want[0], atol=0, rtol=0, msg=msg)
+                if isinstance(want[1], torch.Tensor) and want[1] is not odd:
+                    self.assertEqual(got[1], want[1], atol=0, rtol=0, msg=msg)
+                else:
+                    self.assertIs(got[1], want[1], msg=msg)
 
     @unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension")
     @checks_isolated
@@ -10256,28 +10633,32 @@ def ambient_fresh_body(name, read=None):
     return scope[name]
 
 
-# How a function gets onto the VM and how a call of it is made: entry(fn)
-# gives (call, compiled); `compiled` is what the regions of fn are counted
-# on, and `exact` says whether its results are eager's to the bit.
+# How a function gets onto the VM and where a call of it is made from:
+# entry(fn) gives (call, compiled). call(x, how) makes the call
+# how(function, x) (a member of AMBIENT_NEUTRAL, ambient_called_under(...),
+# or plainly) from where the entry says; `compiled` is what the regions of
+# fn are counted on. Beside it in the table: whether the results are eager's
+# to the bit.
 def ambient_entered_directly(fn):
     compiled = vm(fn, passes=CHECKS_EARLY)
-    return compiled, compiled
+    return (lambda x, how=ambient_plainly: how(compiled, x)), compiled
 
 
 def ambient_entered_on_another_thread(fn):
     compiled = vm(fn, passes=CHECKS_EARLY)
     calls = itertools.count()
 
-    def call(x):
-        # Every other call, the traced one among them, on a thread of its own.
+    def call(x, how=ambient_plainly):
+        # Every other call, the traced one among them, on a thread of its
+        # own, which starts in the state a process starts in.
         if next(calls) % 2 == 0:
-            return compiled(x)
+            return how(compiled, x)
         box = []
-        thread = threading.Thread(
-            target=lambda: box.append(checks_outcome(compiled, x))
+        made = threading.Thread(
+            target=lambda: box.append(checks_outcome(how, compiled, x))
         )
-        thread.start()
-        thread.join()
+        made.start()
+        made.join()
         if isinstance(box[0], Exception):
             raise box[0]
         return box[0]
@@ -10288,16 +10669,19 @@ def ambient_entered_on_another_thread(fn):
 def ambient_entered_from_another_function(fn):
     compiled = vm(fn, passes=CHECKS_EARLY)
 
-    def ambient_outer(x):
-        return compiled(x)
+    # On the VM itself: the state changes, and the region is entered, inside
+    # this function's run.
+    def ambient_outer(x, how):
+        return how(compiled, x)
 
-    return vm(ambient_outer, passes=CHECKS_EARLY), compiled
+    outer = vm(ambient_outer, passes=CHECKS_EARLY)
+    return (lambda x, how=ambient_plainly: outer(x, how)), compiled
 
 
 def ambient_entered_under_the_fast_list(fn):
     fast = vm.configure(vm.FAST, regions={"at": 3, "observe": 1}, pure_calls=1)
     compiled = vm(fn, passes=fast)
-    return compiled, compiled
+    return (lambda x, how=ambient_plainly: how(compiled, x)), compiled
 
 
 AMBIENT_ENTRY = {
@@ -10306,6 +10690,268 @@ AMBIENT_ENTRY = {
     "from_another_function": (ambient_entered_from_another_function, True),
     "under_the_fast_list": (ambient_entered_under_the_fast_list, False),
 }
+# (item of the word, entry) -> a defect of the engine that the pair meets,
+# which is not the entry's: the test holds that it is still there.
+AMBIENT_ENTRY_KNOWN = {
+    ("default_dtype", "under_the_fast_list"): "a region that vm.FAST lowers "
+    "while the default dtype is float64 hands out float32 on its first run",
+}
+
+
+def ambient_read_back():
+    """The word as a program reads it back: the getters torch has for it."""
+    return (
+        torch.get_default_dtype(),
+        torch.is_autocast_enabled("cpu"),
+        torch.get_autocast_dtype("cpu"),
+        torch.is_grad_enabled(),
+        torch.is_inference_mode_enabled(),
+        torch.are_deterministic_algorithms_enabled(),
+        torch.is_deterministic_algorithms_warn_only_enabled(),
+        torch._C._get_cudnn_enabled(),
+        torch._C._get_cudnn_benchmark(),
+        torch._C._get_cudnn_deterministic(),
+        torch._C._get_mkldnn_enabled(),
+        torch._C._is_view_replay_enabled(),
+        torch._C._is_multithreading_enabled(),
+    )
+
+
+def ambient_body_reading_back(x):
+    y = x.sin() * 2 + torch.ones(8)
+    k = ambient_read_back()
+    return (y @ y.t()).cos().tanh().exp(), k
+
+
+def ambient_labelled_body(x):
+    y = x.sin() * 2 + torch.ones(8)
+    with torch.autograd.profiler.record_function("ambient_block"):
+        z = (y @ y.t()).cos().tanh()
+    return z.exp()
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmAmbientNeutral(TestCase):
+    """Neutral is a positive statement: the state torch keeps for a thread
+    is what a thread starts with, or what the ambient word holds. A thread
+    as the process made it is neutral, every item of the word leaves it
+    neutral and moves the word, and anything else is not neutral: the items
+    somebody listed and a dispatch key nobody did."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_a_thread_as_it_starts_is_neutral(self):
+        import torch._dynamo
+        import torch.func
+        import torch.fx
+
+        self.assertIsNone(torch._rust._not_neutral())
+        asked = []
+        made = threading.Thread(target=lambda: asked.append(torch._rust._not_neutral()))
+        made.start()
+        made.join()
+        self.assertEqual(asked, [None])
+
+    @parametrize("item", list(AMBIENT_WORD))
+    def test_the_word_accounts_for(self, item):
+        states = []
+        for enter in AMBIENT_WORD[item]:
+            with contextlib.ExitStack() if enter is None else enter():
+                self.assertIsNone(torch._rust._not_neutral())
+                states.append(torch._rust._ambient_word())
+        self.assertIsNotNone(states[0])
+        self.assertIsNotNone(states[1])
+        self.assertNotEqual(states[0], states[1])
+        self.assertIsNone(torch._rust._not_neutral())
+
+    @parametrize("item", list(AMBIENT_NOT_NEUTRAL))
+    def test_is_not_neutral(self, item):
+        self.assertIsNone(torch._rust._not_neutral())
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with AMBIENT_NOT_NEUTRAL[item]():
+                self.assertIsNotNone(torch._rust._not_neutral())
+        self.assertIsNone(torch._rust._not_neutral())
+
+    def test_a_functorch_transform_is_not_neutral(self):
+        asked = []
+
+        def body(x):
+            asked.append(torch._rust._not_neutral())
+            return x.sum()
+
+        torch.func.vmap(body)(torch.ones(2, 2))
+        torch.func.grad(body)(torch.ones(2))
+        torch.func.functionalize(body)(torch.ones(2))
+        self.assertEqual(asked, ["a functorch transform is on"] * 3)
+        self.assertIsNone(torch._rust._not_neutral())
+
+    def test_the_tables_name_one_another(self):
+        # What a call can be made under is asked without a call too.
+        callable_under = set(AMBIENT_NEUTRAL) - {"a_functorch_transform"}
+        self.assertEqual(callable_under - set(AMBIENT_NOT_NEUTRAL), set())
+
+    @checks_isolated
+    def test_a_profiler_records_the_calls_of_a_labelled_block(self):
+        compiled = vm(ambient_labelled_body, passes=CHECKS_EARLY)
+        ran = []
+        for call in range(10):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, requires_grad=True)
+            how = (
+                ambient_under_the_autograd_profiler
+                if call in (6, 7)
+                else ambient_plainly
+            )
+            before = checks_region_runs(compiled, ambient_labelled_body)
+            got, want = how(compiled, x), how(ambient_labelled_body, x)
+            ran.append(checks_region_runs(compiled, ambient_labelled_body) - before)
+            if call in (6, 7):
+                self.assertIn(("ambient_block", 1), want[1])
+                self.assertIn(("aten::matmul", 1), want[1])
+                self.assertEqual(got[1], want[1], msg=f"call {call}")
+                got, want = got[0], want[0]
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertGreaterEqual(ran[5], 1, msg=str(ran))
+        self.assertEqual(ran[6:8], [0, 0], msg=str(ran))
+        self.assertGreaterEqual(ran[9], 1, msg=str(ran))
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmAmbientEntry(TestCase):
+    """A region runs from one place, which every entry passes: a block's
+    region and a span's, on the thread of the trace and on another, from a
+    call of the program and from inside another function's run on the VM,
+    under the default list and under vm.FAST. There the thread must be
+    neutral and its word the word of the region's trace, for every region:
+    also with the check of the reads switched off, which used to take the
+    comparison of the word with it."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def agrees(self, got, want, msg, tolerance):
+        if isinstance(want, torch.Tensor):
+            self.assertIsInstance(got, torch.Tensor, msg=msg)
+            self.assertEqual(got.dtype, want.dtype, msg=msg)
+            self.assertEqual(got.requires_grad, want.requires_grad, msg=msg)
+            self.assertEqual(got.is_inference(), want.is_inference(), msg=msg)
+            if tolerance["rtol"] and want.dtype in (torch.bfloat16, torch.float16):
+                # A lowering rounds a 16-bit result at other steps.
+                tolerance = {"atol": 0.05, "rtol": 0.05}
+            self.assertEqual(got, want, msg=msg, **tolerance)
+        elif isinstance(want, tuple):
+            self.assertEqual(len(got), len(want), msg=msg)
+            for g, w in zip(got, want):
+                self.agrees(g, w, msg, tolerance)
+        else:
+            self.assertEqual(got, want, msg=msg)
+
+    def entered(self, entry, how, body=ambient_body):
+        """Ten calls of ``body``, entered by ``entry``, call n made by
+        ``how(n)``: how many of its regions each ran."""
+        enter, exact = AMBIENT_ENTRY[entry]
+        tolerance = {"atol": 0, "rtol": 0} if exact else {"atol": 1e-05, "rtol": 1e-04}
+        call, compiled = enter(body)
+        runs = []
+        for n in range(10):
+            torch.manual_seed(n)
+            x = torch.randn(4, 8, requires_grad=True)
+            before = checks_region_runs(compiled, body)
+            got = call(x, how(n))
+            runs.append(checks_region_runs(compiled, body) - before)
+            self.agrees(got, how(n)(body, x), f"call {n}", tolerance)
+        return runs
+
+    def under_another_word(self, item, entry, body=ambient_body):
+        first, other = AMBIENT_WORD[item]
+        runs = self.entered(
+            entry,
+            lambda n: ambient_called_under(other if n in (6, 7) else first),
+            body,
+        )
+        self.assertGreaterEqual(runs[5], 1, msg=str(runs))
+        self.assertEqual(runs[6], 0, msg=str(runs))
+        self.assertGreaterEqual(runs[9], 1, msg=str(runs))
+
+    @parametrize("entry", list(AMBIENT_ENTRY))
+    @parametrize("item", list(AMBIENT_WORD))
+    @checks_isolated
+    def test_a_call_under_another_word_enters_no_region(self, item, entry):
+        known = AMBIENT_ENTRY_KNOWN.get((item, entry))
+        if known is None:
+            self.under_another_word(item, entry)
+            return
+        with self.assertRaises(AssertionError, msg=f"no longer so: {known}"):
+            self.under_another_word(item, entry)
+
+    @parametrize("item", list(AMBIENT_WORD))
+    @checks_isolated
+    def test_the_word_is_compared_with_the_reads_unchecked(self, item):
+        # The body reads the word back: a region entered under another word
+        # would hand out the answers of its trace.
+        torch._rust._set_cfg_region_reads(False)
+        try:
+            self.under_another_word(item, "directly", ambient_body_reading_back)
+        finally:
+            torch._rust._set_cfg_region_reads(True)
+
+    @parametrize("item", list(AMBIENT_WORD))
+    @checks_isolated
+    def test_a_word_changed_behind_the_checks_is_a_miss(self, item):
+        # What a check of the entry releases can run a finalizer of the
+        # program, which can change the thread's state: the door stands for
+        # it. It opens on calls 6 and 7, behind the last check of the entry
+        # that would take the call, and puts the thread under the other
+        # state of the item until the call is over.
+        first, other = AMBIENT_WORD[item]
+        compiled = vm(ambient_body_reading_back, passes=CHECKS_EARLY)
+        changed = contextlib.ExitStack()
+        armed = []
+
+        def door():
+            if armed and other is not None:
+                armed.clear()
+                changed.enter_context(other())
+
+        torch._rust._region_entry_door(door)
+        runs = []
+        try:
+            with contextlib.ExitStack() if first is None else first():
+                for n in range(10):
+                    torch.manual_seed(n)
+                    x = torch.randn(4, 8, requires_grad=True)
+                    before = checks_region_runs(compiled, ambient_body_reading_back)
+                    armed[:] = [True] if n in (6, 7) else []
+                    with changed:
+                        got = compiled(x)
+                        entered = not armed
+                        # Eager under the state the call ended in.
+                        want = ambient_body_reading_back(x)
+                    ran = checks_region_runs(compiled, ambient_body_reading_back)
+                    runs.append(ran - before)
+                    self.agrees(got, want, f"call {n}", {"atol": 0, "rtol": 0})
+                    if n in (6, 7):
+                        self.assertTrue(entered, msg=f"call {n}: the door did not open")
+        finally:
+            torch._rust._region_entry_door(None)
+        # No region of the first state ran on the call the state changed in
+        # (on the next one a region traced under the other state may run).
+        self.assertGreaterEqual(runs[5], 1, msg=str(runs))
+        self.assertEqual(runs[6], 0, msg=str(runs))
+        self.assertGreaterEqual(runs[9], 1, msg=str(runs))
+
+    @parametrize("entry", list(AMBIENT_ENTRY))
+    @parametrize("item", list(AMBIENT_NEUTRAL))
+    @checks_isolated
+    def test_a_call_that_is_not_neutral_enters_no_region(self, item, entry):
+        runs = self.entered(
+            entry, lambda n: AMBIENT_NEUTRAL[item] if n in (6, 7) else ambient_plainly
+        )
+        self.assertGreaterEqual(runs[5], 1, msg=str(runs))
+        self.assertEqual(runs[6:8], [0, 0], msg=str(runs))
+        self.assertGreaterEqual(runs[9], 1, msg=str(runs))
 
 
 @instantiate_parametrized_tests
@@ -11199,6 +11845,2301 @@ class TestVmEdgeAskers(TestCase):
             self.assertNotIn(asker, record.get("text") or "", msg=str(record))
             if record["stop"] and asker in record["stop"][0]:
                 self.assertEqual(record["status"], "stopped", msg=str(record))
+
+
+# The release-order table (TestVmReleaseOrder): one member per kind of
+# instruction that lets go of a reference. Under "== name": definitions, a
+# line "--", and the statement (with no "--": the statement alone). The
+# operands are objects whose death is logged: T(name) by its __del__, a
+# tensor through F(tensor, name) by a weak reference's callback.
+RELEASE_MEMBERS = r"""
+== operator: binary
+V("a") + V("b")
+== operator: binary, reflected
+T("a") + V("b")
+== operator: binary, in place
+v = V("a")
+v += V("b")
+log("mid")
+del v
+== operator: binary, in place, answers another object
+class W(V):
+    def __iadd__(self, other):
+        return V("sum")
+--
+v = W("a")
+v += V("b")
+log("mid")
+del v
+== operator: unary
+-V("a")
+== operator: not
+not V("a")
+== operator: compare
+V("a") < V("b")
+== operator: compare, chained
+V("a") < V("b") < V("c")
+== operator: compare, chained, cut short
+Z("a") < V("b") < V("c")
+== operator: contains
+V("a") in V("b")
+== operator: is
+V("a") is V("b")
+== operator: and, both operands
+r = V("a") and V("b")
+log("mid")
+del r
+== operator: and, cut short
+r = Z("a") and V("b")
+log("mid")
+del r
+== operator: or, both operands
+r = Z("a") or V("b")
+log("mid")
+del r
+== operator: or, discarded
+Z("a") or V("b")
+== operator: conditional expression
+r = V("a") if Z("c") else V("b")
+log("mid")
+del r
+== subscript: load
+V("c")[V("k")]
+== subscript: store
+V("c")[V("k")] = V("v")
+== subscript: delete
+del V("c")[V("k")]
+== subscript: slice load
+V("c")[V("lo") : V("hi")]
+== subscript: slice store
+V("c")[V("lo") : V("hi")] = V("v")
+== subscript: slice delete
+del V("c")[V("lo") : V("hi")]
+== subscript: slice load with a step
+V("c")[V("lo") : V("hi") : V("st")]
+== subscript: augmented
+d = {"k": V("a")}
+d["k"] += V("b")
+log("mid")
+del d
+== attribute: load
+V("o").name
+== attribute: load of a property
+class Prop(T):
+    @property
+    def p(self):
+        log("get")
+        return 1
+--
+Prop("o").p
+== attribute: load through __getattr__
+class Ga(T):
+    def __getattr__(self, name):
+        log("get")
+        return 1
+--
+Ga("o").missing
+== attribute: store on a temporary
+T("o").field = T("v")
+== attribute: store replaces a value
+h = T("h")
+h.field = T("v")
+log("mid")
+h.field = T("w")
+log("mid2")
+del h
+== attribute: store through __setattr__
+class Sa(T):
+    def __setattr__(self, name, value):
+        object.__setattr__(self, name, value)
+--
+h = Sa("h")
+h.field = T("v")
+log("mid")
+h.field = T("w")
+log("mid2")
+del h
+== attribute: store into a slot
+class Sl:
+    __slots__ = ("field",)
+--
+h = Sl()
+h.field = T("v")
+log("mid")
+h.field = T("w")
+log("mid2")
+del h
+== attribute: delete
+h = T("h")
+h.field = T("v")
+log("mid")
+del h.field
+log("mid2")
+del h
+== attribute: augmented
+h = V("h")
+h.n = V("n")
+h.n += V("m")
+log("mid")
+del h
+== container: list built and dropped
+[T("a"), T("b"), T("c")]
+== container: tuple built and dropped
+(T("a"), T("b"), T("c"))
+== container: dict built and dropped
+{"a": T("a"), "b": T("b")}
+== container: dict with object keys built and dropped
+{T("k"): T("a"), T("j"): T("b")}
+== container: list item store
+l = [T("a")]
+l[0] = T("b")
+log("mid")
+del l
+== container: list item delete
+l = [T("a"), T("b")]
+del l[0]
+log("mid")
+del l
+== container: list slice store
+l = [T("a"), T("b"), T("c")]
+l[0:2] = [T("d")]
+log("mid")
+del l
+== container: dict item store
+d = {"k": T("a")}
+d["k"] = T("b")
+log("mid")
+del d
+== container: dict item delete
+d = {"k": T("a"), "j": T("b")}
+del d["k"]
+log("mid")
+del d
+== container: list append and pop
+l = []
+l.append(T("a"))
+log("mid")
+l.pop()
+log("mid2")
+== container: list clear
+l = [T("a"), T("b")]
+l.clear()
+log("mid")
+== container: dict pop, update, clear
+d = {"k": T("a")}
+d.pop("k")
+log("mid")
+d.update(k=T("b"))
+d.clear()
+log("mid2")
+== container: list extended in place
+l = [T("a")]
+l += [T("b")]
+log("mid")
+del l
+== container: starred into a list
+l = [*[T("a"), T("b")], T("c")]
+log("mid")
+del l
+== C call: one positional
+id(T("a"))
+== C call: two positional
+operator.is_(T("a"), T("b"))
+== C call: keyword
+dict(a=T("a"), b=T("b"))
+== C call: starred list
+operator.is_(*[T("a"), T("b")])
+== C call: starred tuple
+operator.is_(*(T("a"), T("b")))
+== C call: ** dict
+dict(**{"a": T("a"), "b": T("b")})
+== C call: positional and ** dict
+dict({"c": T("c")}, **{"a": T("a")})
+== C call: raises
+try:
+    operator.index(T("a"))
+except TypeError:
+    log("caught")
+== C call: a class
+list((T("a"), T("b")))
+== C call: isinstance
+isinstance(T("a"), T)
+== C call: str of an object
+str(T("a"))
+== C method: receiver
+T("r").__sizeof__()
+== C method: receiver and operand
+T("r").__setattr__("field", T("v"))
+== C method: of a temporary container
+[T("a")].append(T("b"))
+== C method: loaded, called later
+m = T("r").__sizeof__
+log("mid")
+m()
+log("mid2")
+del m
+== call: positional, unused
+def callee(a):
+    log("inside")
+--
+callee(T("a"))
+== call: positional, deleted in the callee
+def callee(a):
+    del a
+    log("after del")
+--
+callee(T("a"))
+== call: positional, rebound in the callee
+def callee(a):
+    a = None
+    log("after rebind")
+--
+callee(T("a"))
+== call: positional, returned and dropped
+def callee(a):
+    return a
+--
+callee(T("a"))
+== call: positional, returned and kept
+def callee(a):
+    return a
+--
+r = callee(T("a"))
+log("mid")
+del r
+== call: positional, stored by the callee
+def callee(a):
+    KEEP.append(a)
+--
+callee(T("a"))
+log("mid")
+KEEP.clear()
+== call: positional, raised by the callee
+def callee(a):
+    raise ValueError(a)
+--
+try:
+    callee(T("a"))
+except ValueError:
+    log("caught")
+== call: the callee raises, argument unused
+def callee(a):
+    raise ValueError("no")
+--
+try:
+    callee(T("a"))
+except ValueError:
+    log("caught")
+== call: the callee raises after it deleted the argument
+def callee(a):
+    del a
+    log("after del")
+    raise ValueError("no")
+--
+try:
+    callee(T("a"))
+except ValueError:
+    log("caught")
+== call: two positional, deleted in the other order
+def callee(a, b):
+    del b
+    log("after b")
+    del a
+    log("after a")
+--
+callee(T("a"), T("b"))
+== call: two positional, unused
+def callee(a, b):
+    log("inside")
+--
+callee(T("a"), T("b"))
+== call: argument also held by the caller
+def callee(a):
+    del a
+    log("after del")
+--
+t = T("a")
+callee(t)
+log("mid")
+del t
+== call: keyword, deleted in the callee
+def callee(a, b):
+    del a
+    log("after a")
+--
+callee(b=T("b"), a=T("a"))
+== call: keyword, unused
+def callee(a, b):
+    log("inside")
+--
+callee(b=T("b"), a=T("a"))
+== call: positional and keyword
+def callee(a, b):
+    del b
+    log("after b")
+--
+callee(T("a"), b=T("b"))
+== call: a default is used
+def callee(a, b=None):
+    del a
+    log("after del")
+--
+callee(T("a"))
+== call: starred list
+def callee(a, b):
+    del a
+    log("after a")
+--
+callee(*[T("a"), T("b")])
+== call: starred tuple
+def callee(a, b):
+    del a
+    log("after a")
+--
+callee(*(T("a"), T("b")))
+== call: positional and starred
+def callee(a, b, c):
+    del a
+    log("after a")
+    del c
+    log("after c")
+--
+callee(T("a"), *[T("b"), T("c")])
+== call: * parameter, deleted
+def callee(*args):
+    del args
+    log("after del")
+--
+callee(T("a"), T("b"))
+== call: * parameter, unused
+def callee(*args):
+    log("inside")
+--
+callee(T("a"), T("b"))
+== call: ** parameter, deleted
+def callee(**kwargs):
+    del kwargs
+    log("after del")
+--
+callee(a=T("a"), b=T("b"))
+== call: ** dict operand
+def callee(a, b):
+    del a
+    log("after a")
+--
+callee(**{"a": T("a"), "b": T("b")})
+== call: ** dict operand into a ** parameter
+def callee(**kwargs):
+    del kwargs
+    log("after del")
+--
+callee(**{"a": T("a"), "b": T("b")})
+== call: keyword-only
+def callee(*, a, b=None):
+    del a
+    log("after del")
+--
+callee(a=T("a"))
+== call: positional-only
+def callee(a, /, b):
+    del a
+    log("after a")
+    del b
+    log("after b")
+--
+callee(T("a"), T("b"))
+== call: wrong number of arguments
+def callee(a):
+    pass
+--
+try:
+    callee(T("a"), T("b"))
+except TypeError:
+    log("caught")
+== call: nested, the outer keeps its argument
+def inner(a):
+    del a
+    log("inner after del")
+
+
+def outer(a):
+    inner(a)
+    log("outer after inner")
+--
+outer(T("a"))
+== call: nested, handed on from a deleted local
+def inner(a):
+    del a
+    log("inner after del")
+
+
+def outer(a):
+    b = [a]
+    del a
+    inner(b.pop())
+    log("outer after inner")
+--
+outer(T("a"))
+== call: the argument is a call's result
+def make():
+    return T("a")
+
+
+def callee(a):
+    del a
+    log("after del")
+--
+callee(make())
+== call: recursive
+def callee(a, n):
+    if n:
+        callee(a, n - 1)
+        log("back")
+        return
+    del a
+    log("after del")
+--
+callee(T("a"), 2)
+== call: a lambda
+(lambda a: log("inside"))(T("a"))
+== call: a lambda that hands the argument on
+def callee(a):
+    del a
+    log("after del")
+--
+(lambda a: callee(a))(T("a"))
+== call: a functools.partial
+def callee(a, b):
+    del b
+    log("after del")
+
+
+bound = functools.partial(callee, 1)
+--
+bound(T("b"))
+== call: through map
+def callee(a):
+    del a
+    log("after del")
+--
+list(map(callee, [T("a")]))
+== call: a closure
+def make():
+    k = 1
+
+    def callee(a):
+        del a
+        log("after del")
+        return k
+
+    return callee
+
+
+callee = make()
+--
+callee(T("a"))
+== call: a generator function
+def gen(a):
+    del a
+    log("gen after del")
+    yield 1
+--
+g = gen(T("a"))
+log("mid")
+next(g)
+log("mid2")
+del g
+== method: receiver deleted
+class M(T):
+    def method(self):
+        del self
+        log("after del")
+--
+M("r").method()
+== method: receiver unused
+class M(T):
+    def method(self):
+        log("inside")
+--
+M("r").method()
+== method: receiver and argument
+class M(T):
+    def method(self, a):
+        del a
+        log("after a")
+        del self
+        log("after self")
+--
+M("r").method(T("a"))
+== method: loaded, called later
+class M(T):
+    def method(self):
+        log("inside")
+--
+m = M("r").method
+log("mid")
+m()
+log("mid2")
+del m
+== method: a bound method of a temporary, called at once
+class M(T):
+    def method(self):
+        del self
+        log("after del")
+
+
+def bound(r):
+    return r.method
+--
+bound(M("r"))()
+== method: classmethod
+class M(T):
+    @classmethod
+    def make(cls, a):
+        del a
+        log("after del")
+--
+M.make(T("a"))
+== method: staticmethod
+class M(T):
+    @staticmethod
+    def make(a):
+        del a
+        log("after del")
+--
+M.make(T("a"))
+== method: an instance with __call__
+class C(T):
+    def __call__(self, a):
+        del a
+        log("after del")
+--
+C("f")(T("a"))
+== method: super
+class Base(T):
+    def method(self, a):
+        del a
+        log("base after del")
+
+
+class M(Base):
+    def method(self, a):
+        super().method(a)
+        log("after super")
+--
+M("r").method(T("a"))
+== class: __init__ deletes the argument
+class C:
+    def __init__(self, a):
+        del a
+        log("after del")
+--
+C(T("a"))
+== class: __init__ keeps the argument
+class C:
+    def __init__(self, a):
+        self.a = a
+--
+C(T("a"))
+log("mid")
+c = C(T("b"))
+log("mid2")
+del c
+== class: __new__
+class C:
+    def __new__(cls, a):
+        del a
+        log("after del")
+        return object.__new__(cls)
+--
+C(T("a"))
+== class: __new__ and __init__
+class C:
+    def __new__(cls, a):
+        log("new")
+        return object.__new__(cls)
+
+    def __init__(self, a):
+        del a
+        log("init after del")
+--
+C(T("a"))
+== class: __init__ raises
+class C(T):
+    def __init__(self, a):
+        T.__init__(self, "c")
+        raise ValueError
+--
+try:
+    C(T("a"))
+except ValueError:
+    log("caught")
+== class: a metaclass with __call__
+class Meta(type):
+    def __call__(cls, a):
+        del a
+        log("after del")
+
+
+class C(metaclass=Meta):
+    pass
+--
+C(T("a"))
+== class: a class statement
+class K:
+    a = T("a")
+    b = T("b")
+log("mid")
+del K
+== function: decorator's operand
+def deco(tag):
+    def wrap(f):
+        return f
+
+    return wrap
+--
+@deco(T("a"))
+def g():
+    pass
+log("mid")
+del g
+== function: decorator that keeps its operand
+def deco(tag):
+    def wrap(f):
+        f.tag = tag
+        return f
+
+    return wrap
+--
+@deco(T("a"))
+def g():
+    pass
+log("mid")
+del g
+== function: a default argument's value
+def g(a=T("d")):
+    return a
+log("mid")
+g()
+log("mid2")
+del g
+== function: defaults replaced
+def g(a=T("d")):
+    return a
+g.__defaults__ = (T("e"),)
+log("mid")
+del g
+== function: a keyword-only default
+def g(*, a=T("d")):
+    return a
+log("mid")
+del g
+== function: an annotation
+def g(a: T("ann")):
+    return a
+log("mid")
+del g
+== function: cells at exit
+def outer():
+    a = T("a")
+    b = T("b")
+
+    def inner():
+        return a, b
+
+    log("made")
+    return inner
+--
+f = outer()
+log("mid")
+del f
+== function: a free variable of a called closure
+def outer(a):
+    def inner():
+        return a.name
+
+    return inner()
+--
+outer(T("a"))
+== function: a cell variable deleted
+def outer():
+    a = T("a")
+
+    def inner():
+        return a
+
+    del a
+    log("after del")
+    return inner
+--
+f = outer()
+log("mid")
+del f
+== function: a cell rebound by the inner function
+def outer():
+    a = T("a")
+
+    def inner():
+        nonlocal a
+        a = T("b")
+        log("rebound")
+
+    inner()
+    log("after inner")
+--
+outer()
+== frame: locals at exit, in their order
+def callee():
+    a = T("a")
+    b = T("b")
+    c = T("c")
+    log("made")
+--
+callee()
+== frame: locals at exit, made in another order
+def callee(first=True):
+    if not first:
+        a = b = c = None
+    c = T("c")
+    b = T("b")
+    a = T("a")
+    log("made")
+--
+callee()
+== frame: parameters and locals at exit
+def callee(p, q):
+    r = T("r")
+    log("made")
+--
+callee(T("p"), T("q"))
+== frame: locals when it raises
+def callee():
+    a = T("a")
+    b = T("b")
+    raise ValueError
+--
+try:
+    callee()
+except ValueError:
+    log("caught")
+log("after try")
+== frame: the body's own locals
+a = T("a")
+b = T("b")
+== frame: the body's own locals, made in another order
+if x is None:
+    a = b = None
+b = T("b")
+a = T("a")
+== frame: return of a temporary
+def callee():
+    return T("a")
+--
+callee()
+== frame: return of a local, other locals
+def callee():
+    a = T("a")
+    b = T("b")
+    return a
+--
+callee()
+== frame: return value kept
+def callee():
+    a = T("a")
+    b = T("b")
+    return a
+--
+r = callee()
+log("mid")
+del r
+== frame: return inside a loop
+def callee():
+    for item in [T("a"), T("b")]:
+        return item
+--
+r = callee()
+log("mid")
+del r
+== statement: rebinding
+a = T("a")
+a = T("b")
+log("mid")
+del a
+== statement: rebinding to an object made from the old
+def wrap(a):
+    return T(a.name + "2")
+--
+a = T("a")
+a = wrap(a)
+log("mid")
+del a
+== statement: del
+a = T("a")
+b = a
+del a
+log("mid")
+del b
+== statement: a temporary dropped
+T("a")
+== statement: a discarded call result
+def make():
+    return T("a")
+--
+make()
+== statement: a global rebinding
+global G
+G = T("a")
+log("mid")
+G = T("b")
+log("mid2")
+del G
+== statement: unpacking a pair
+a, b = T("a"), T("b")
+log("mid")
+del a, b
+== statement: unpacking a call's tuple
+def pair():
+    return (T("a"), T("b"))
+--
+a, b = pair()
+log("mid")
+del b
+log("mid2")
+del a
+== statement: unpacking, dropped at once
+def pair():
+    return (T("a"), T("b"))
+--
+a, b = pair()
+a = b = None
+== statement: unpacking with a star
+a, *b = [T("a"), T("b"), T("c")]
+log("mid")
+del a
+log("mid2")
+del b
+== statement: unpacking an iterator
+a, b = V("it")
+== statement: unpacking fails
+try:
+    a, b = [T("a")]
+except ValueError:
+    log("caught")
+== statement: swap
+a = T("a")
+b = T("b")
+a, b = b, a
+del a
+log("mid")
+del b
+== statement: f-string
+f"{V('a')}{V('b')!r}"
+== statement: % formatting
+"%s %s" % (T("a"), T("b"))
+== statement: assert that fails
+try:
+    assert Z("a"), T("message")
+except AssertionError:
+    log("caught")
+== statement: import of a name
+from os import path as p
+T("a")
+del p
+== loop: for over a temporary list
+for item in [T("a"), T("b")]:
+    log("body")
+log("after loop")
+== loop: for over a tuple display
+for item in (T("a"), T("b")):
+    log("body")
+log("after loop")
+== loop: for with a break
+for item in [T("a"), T("b")]:
+    log("body")
+    break
+log("after loop")
+== loop: the loop variable deleted in the body
+for item in [T("a"), T("b")]:
+    del item
+    log("body")
+log("after loop")
+== loop: for over a generator
+def gen():
+    yield T("a")
+    log("resumed")
+    yield T("b")
+    log("done")
+--
+for item in gen():
+    log("body")
+log("after loop")
+== loop: for over a Python iterator
+class It(T):
+    def __init__(self, name):
+        T.__init__(self, name)
+        self.left = 2
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if not self.left:
+            raise StopIteration
+        self.left -= 1
+        return T("item" + str(self.left))
+--
+for item in It("it"):
+    log("body")
+log("after loop")
+== loop: for that returns
+def callee():
+    for item in [T("a"), T("b")]:
+        log("body")
+        return 1
+--
+callee()
+== loop: while over temporaries
+n = 0
+while V("cond") and n < 2:
+    n += 1
+    log("body")
+log("after loop")
+== loop: list comprehension
+[t.name for t in [T("a"), T("b")]]
+== loop: list comprehension, kept
+r = [t for t in [T("a"), T("b")]]
+log("mid")
+del r
+== loop: the comprehension's variable
+[log("item") for t in (T("a"), T("b"))]
+== loop: dict comprehension
+{t.name: t for t in [T("a"), T("b")]}
+== loop: comprehension with a condition
+[t for t in [T("a"), T("b")] if t.name == "a"]
+== loop: comprehension over a name that is also a local
+t = T("outer")
+r = [t.name for t in [T("a"), T("b")]]
+log("mid")
+del t
+== loop: generator expression, exhausted
+list(t.name for t in [T("a"), T("b")])
+== loop: generator expression, not exhausted
+g = (t for t in [T("a"), T("b")])
+next(g)
+log("mid")
+del g
+== loop: generator's locals at close
+def gen():
+    a = T("a")
+    yield 1
+    b = T("b")
+    yield 2
+--
+g = gen()
+next(g)
+log("mid")
+next(g)
+log("mid2")
+del g
+== loop: generator, exhausted
+def gen():
+    a = T("a")
+    yield 1
+    b = T("b")
+    yield 2
+--
+g = gen()
+list(g)
+log("mid")
+del g
+== loop: generator, a yielded temporary and a sent value
+def gen():
+    got = yield T("y")
+    log("resumed")
+    del got
+    log("after del")
+    yield 2
+--
+g = gen()
+next(g)
+log("mid")
+g.send(T("s"))
+log("mid2")
+del g
+== loop: yield from
+def inner():
+    yield T("a")
+    yield T("b")
+
+
+def gen():
+    yield from inner()
+    log("inner done")
+--
+for item in gen():
+    log("body")
+log("after loop")
+== with: manager, target, __exit__
+class CM(T):
+    def __enter__(self):
+        log("enter")
+        return T("target")
+
+    def __exit__(self, kind, value, tb):
+        log("exit")
+        return False
+--
+with CM("cm") as t:
+    log("body")
+log("after with")
+del t
+== with: no target
+class CM(T):
+    def __enter__(self):
+        log("enter")
+        return T("target")
+
+    def __exit__(self, kind, value, tb):
+        log("exit")
+        return False
+--
+with CM("cm"):
+    log("body")
+log("after with")
+== with: the exception is suppressed
+class CM(T):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, kind, value, tb):
+        log("exit")
+        return True
+--
+with CM("cm"):
+    raise ValueError(T("payload"))
+log("after with")
+== with: the exception goes on
+class CM(T):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, kind, value, tb):
+        log("exit")
+        return False
+--
+try:
+    with CM("cm"):
+        raise ValueError(T("payload"))
+except ValueError:
+    log("caught")
+log("after try")
+== with: __exit__ deletes its arguments
+class CM(T):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, kind, value, tb):
+        del kind, value, tb
+        log("exit after del")
+        return True
+--
+with CM("cm"):
+    raise ValueError(T("payload"))
+log("after with")
+== with: two managers
+class CM(T):
+    def __enter__(self):
+        log("enter " + self.name)
+        return T("target of " + self.name)
+
+    def __exit__(self, kind, value, tb):
+        log("exit " + self.name)
+        return False
+--
+with CM("m1") as a, CM("m2") as b:
+    log("body")
+log("after with")
+del a, b
+== with: return inside
+class CM(T):
+    def __enter__(self):
+        return T("target")
+
+    def __exit__(self, kind, value, tb):
+        log("exit")
+        return False
+
+
+def callee():
+    with CM("cm") as t:
+        return t
+--
+callee()
+== with: contextlib
+import contextlib
+
+
+@contextlib.contextmanager
+def manager():
+    t = T("inside")
+    yield T("target")
+    log("resumed")
+--
+with manager() as t:
+    log("body")
+log("after with")
+del t
+== exception: the raised object
+try:
+    raise ValueError(T("payload"))
+except ValueError:
+    log("caught")
+log("after try")
+== exception: bound to a name
+try:
+    raise ValueError(T("payload"))
+except ValueError as e:
+    log("caught")
+log("after try")
+== exception: kept past the handler
+try:
+    raise ValueError(T("payload"))
+except ValueError as e:
+    keep = e
+log("after try")
+del keep
+== exception: the traceback keeps a frame's locals
+def callee():
+    a = T("a")
+    raise ValueError
+--
+try:
+    callee()
+except ValueError as e:
+    log("caught")
+log("after try")
+== exception: the traceback kept
+def callee():
+    a = T("a")
+    raise ValueError
+--
+try:
+    callee()
+except ValueError as e:
+    tb = e.__traceback__
+log("after try")
+del tb
+== exception: finally
+try:
+    a = T("a")
+finally:
+    log("finally")
+    del a
+== exception: finally with an exception passing
+def callee():
+    a = T("a")
+    try:
+        raise ValueError
+    finally:
+        log("finally")
+        del a
+--
+try:
+    callee()
+except ValueError:
+    log("caught")
+== exception: raise from
+try:
+    raise ValueError(T("a")) from KeyError(T("b"))
+except ValueError:
+    log("caught")
+log("after try")
+== exception: raised in a handler
+try:
+    try:
+        raise KeyError(T("a"))
+    except KeyError:
+        raise ValueError(T("b"))
+except ValueError:
+    log("caught")
+log("after try")
+== exception: raised again
+try:
+    try:
+        raise KeyError(T("a"))
+    except KeyError:
+        log("inner")
+        raise
+except KeyError:
+    log("caught")
+log("after try")
+== exception: a handler that does not match
+try:
+    try:
+        raise KeyError(T("a"))
+    except ValueError:
+        log("never")
+except KeyError:
+    log("caught")
+log("after try")
+== exception: raised by C code with the operand
+try:
+    {}[T("k")]
+except KeyError:
+    log("caught")
+log("after try")
+== exception: temporaries on the stack when it raises
+def fails():
+    raise ValueError
+
+
+def callee(a, b):
+    pass
+--
+try:
+    callee(T("a"), fails())
+except ValueError:
+    log("caught")
+log("after try")
+== exception: a container being built when it raises
+def fails():
+    raise ValueError
+--
+try:
+    [T("a"), T("b"), fails()]
+except ValueError:
+    log("caught")
+log("after try")
+== exception: escapes the function
+raise ValueError(T("payload"))
+== exception: escapes the function with locals
+a = T("a")
+b = T("b")
+raise ValueError
+== exception: escapes a callee and the function
+def callee():
+    a = T("a")
+    raise ValueError(T("payload"))
+--
+b = T("b")
+callee()
+== exception: try, else
+try:
+    a = T("a")
+except ValueError:
+    log("never")
+else:
+    log("else")
+    del a
+== tensor: binary
+F(x + 1.0, "a") * F(x + 2.0, "b")
+== tensor: binary, kept
+r = F(x + 1.0, "a") * F(x + 2.0, "b")
+log("mid")
+del r
+== tensor: binary in place
+t = F(x + 1.0, "a")
+t += F(x + 2.0, "b")
+log("mid")
+del t
+== tensor: binary with a number
+F(x + 1.0, "a") * 2.0
+== tensor: unary
+-F(x + 1.0, "a")
+== tensor: compare
+F(x + 1.0, "a") < F(x + 2.0, "b")
+== tensor: subscript load
+F(x + 1.0, "a")[0]
+== tensor: subscript load by a tensor
+F(x + 1.0, "a")[F(x > 2.0, "k")]
+== tensor: subscript store
+F(x + 1.0, "c")[0] = F(x.sum(), "v")
+== tensor: slice
+F(x + 1.0, "a")[1:3]
+== tensor: attribute
+F(x + 1.0, "a").shape
+== tensor: method
+F(x + 1.0, "a").sin()
+== tensor: method with an operand
+F(x + 1.0, "a").add(F(x + 2.0, "b"))
+== tensor: torch function
+torch.add(F(x + 1.0, "a"), F(x + 2.0, "b"))
+== tensor: torch function, keyword
+torch.add(F(x + 1.0, "a"), other=F(x + 2.0, "b"))
+== tensor: torch function, starred
+torch.add(*[F(x + 1.0, "a"), F(x + 2.0, "b")])
+== tensor: torch function, ** dict
+torch.add(**{"input": F(x + 1.0, "a"), "other": F(x + 2.0, "b")})
+== tensor: torch function of a list
+torch.cat([F(x + 1.0, "a"), F(x + 2.0, "b")])
+== tensor: rebinding
+t = F(x + 1.0, "a")
+t = F(t * 2.0, "b")
+log("mid")
+del t
+== tensor: a chain, each freed before the next is made
+a = F(x + 1.0, "a")
+b = F(a * 2.0, "b")
+del a
+log("mid")
+c = F(b + 1.0, "c")
+del b
+log("mid2")
+del c
+== tensor: temporaries of an expression
+r = (F(x + 1.0, "a") * 2.0 + F(x + 2.0, "b")).sum()
+log("mid")
+del r
+== tensor: handed to a function that deletes it
+def callee(t, x):
+    y = x * t
+    del t
+    log("after del")
+    return y + 1.0
+--
+r = callee(F(x + 1.0, "a"), x)
+log("mid")
+del r
+== tensor: handed to a module
+torch.manual_seed(0)
+lin = torch.nn.Linear(4, 4)
+--
+r = lin(F(x + 1.0, "a"))
+log("mid")
+del r
+== tensor: a callee's locals
+def callee(x):
+    a = F(x + 1.0, "a")
+    b = F(a * 2.0, "b")
+    return b + 1.0
+--
+r = callee(x)
+log("mid")
+del r
+== tensor: rebound in a loop
+t = x
+for i in range(3):
+    t = F(t + 1.0, "t" + str(i))
+    log("body")
+log("after loop")
+del t
+== tensor: a comprehension
+r = [F(x + i, "t" + str(i)) for i in range(2)]
+log("mid")
+del r
+== tensor: under no_grad
+with torch.no_grad():
+    t = F(x + 1.0, "a")
+    t = F(t * 2.0, "b")
+log("after with")
+del t
+== tensor: an operator that raises
+try:
+    F(x + 1.0, "a") @ F(x.reshape(2, 2), "b")
+except RuntimeError:
+    log("caught")
+log("after try")
+== tensor: unpacking
+a, b = F(x + 1.0, "s").chunk(2)
+log("mid")
+del a
+log("mid2")
+del b
+== tensor: the function's own locals
+a = F(x + 1.0, "a")
+b = F(a * 2.0, "b")
+== dead store: None over an object
+t = T("a")
+t = None
+== dead store: a constant over an object
+t = T("a")
+t = 3
+== dead store: a tuple over an object
+t = T("a")
+t = (x, 1)
+== dead store: a tensor expression over an object
+t = T("a")
+t = x + 1.0
+== dead store: a call result over an object
+t = T("a")
+t = len("abc")
+== dead store: an object over an object
+t = T("a")
+t = T("b")
+== dead store: None over a popped object
+b = [T("a")]
+t = b.pop()
+t = None
+== dead store: two locals
+t = T("a")
+u = T("b")
+t = None
+u = 3
+== dead store: None over a tensor
+t = F(x + 1.0, "a")
+t = None
+== dead store: a constant over a tensor
+t = F(x + 1.0, "a")
+t = 3
+== dead store: a tuple over a tensor
+t = F(x + 1.0, "a")
+t = (x, 1)
+== dead store: a tensor expression over a tensor
+t = F(x + 1.0, "a")
+t = x + 2.0
+== dead store: a call result over a tensor
+t = F(x + 1.0, "a")
+t = len("abc")
+== dead store: a popped tensor, then a tensor expression
+b = [F(x + 1.0, "a")]
+t = b.pop()
+t = x + 2.0
+"""
+
+# The calls of a member: the first; later ones (its plans were made again
+# on the second); the one in which regions are traced; those in which
+# regions run.
+RELEASE_WAYS = (("F", (0,)), ("L", (1, 2)), ("T", (3,)), ("R", (4, 5, 6, 7)))
+# How the statement stands in the function: by itself between two marks;
+# between two marks and two tensor computations; between two tensor
+# computations with no mark (inside what is traced as one region).
+RELEASE_FORMS = ("alone", "between", "inside")
+
+RELEASE_PROGRAM = r"""
+import gc, importlib, json, os, signal, sys, time
+import torch
+from torch import vm
+
+CALLS = 8
+EARLY = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+# What a first call of a torch.vm function imports: imported once, here.
+PRELOAD = ("torch._rust_inductor", "torch._dynamo", "torch.fx.experimental.proxy_tensor", "torch._functorch.aot_autograd",
+           "torch._inductor.compile_fx", "torch._inductor.fx_passes.joint_graph", "torch._functorch.partitioners", "networkx",
+           "torch.distributed", "torch.onnx", "torch._numpy", "torch.ao.quantization", "torch._export")
+
+PRELUDE = r'''
+import functools
+import operator
+import sys
+import weakref
+
+import torch
+
+LOG = []
+KEEP = []
+REFS = []
+# What each finalizer saw of the frame it interrupted (when VIEW is set).
+VIEWS = []
+VIEW = False
+
+
+def log(what):
+    LOG.append(what)
+
+
+def short(value):
+    if value is None or type(value) in (int, float, bool, str):
+        return repr(value)
+    if isinstance(value, T):
+        return "T(" + value.name + ")"
+    if isinstance(value, torch.Tensor):
+        return "tensor"
+    return type(value).__name__
+
+
+def view(name, frame):
+    code = frame.f_code
+    if code.co_filename != "<member>" or not code.co_flags & 1:
+        VIEWS.append(name + "@" + code.co_name)
+        return
+    names = frame.f_locals
+    bound = ",".join(k + "=" + short(v) for k, v in sorted(names.items()))
+    # The snapshot is the frame object's: it is not to keep the locals alive.
+    names.clear()
+    # An instruction the compiler made for no line of the source has none.
+    line = "?" if frame.f_lineno is None else str(frame.f_lineno - code.co_firstlineno)
+    VIEWS.append(name + "@" + code.co_name + ":" + line + "{" + bound + "}")
+
+
+class T:
+    def __init__(self, name):
+        self.name = name
+
+    def __del__(self):
+        LOG.append("-" + self.name)
+        if VIEW:
+            view(self.name, sys._getframe(1))
+
+
+class V(T):
+    def __add__(self, other):
+        return 1
+
+    def __radd__(self, other):
+        return 1
+
+    def __iadd__(self, other):
+        return self
+
+    def __neg__(self):
+        return 1
+
+    def __lt__(self, other):
+        return True
+
+    def __contains__(self, item):
+        return False
+
+    def __getitem__(self, key):
+        return 1
+
+    def __setitem__(self, key, value):
+        pass
+
+    def __delitem__(self, key):
+        pass
+
+    def __iter__(self):
+        return iter((1, 2))
+
+    def __format__(self, spec):
+        return "v"
+
+    def __bool__(self):
+        return True
+
+
+class Z(V):
+    def __lt__(self, other):
+        return False
+
+    def __bool__(self):
+        return False
+
+
+def F(tensor, name):
+    def died(r):
+        LOG.append("-" + name)
+        if VIEW:
+            view(name, sys._getframe(1))
+
+    REFS.append(weakref.ref(tensor, died))
+    return tensor
+'''
+
+FORMS = {
+    "alone": '''
+def body(x):
+    log("in")
+{stmt}
+    log("out")
+''',
+    "between": '''
+def body(x):
+    y = ((x.sin() * 2.0).cos() + 1.0).tanh()
+    log("in")
+{stmt}
+    log("out")
+    return ((y.sin() * 2.0).cos() + 1.0).tanh()
+''',
+    "inside": '''
+def body(x):
+    y = ((x.sin() * 2.0).cos() + 1.0).tanh()
+{stmt}
+    return ((y.sin() * 2.0).cos() + 1.0).tanh()
+''',
+}
+
+
+def members(text):
+    # name -> (definitions, statement)
+    out, name = {}, None
+    for line in text.splitlines():
+        if line.startswith("== "):
+            name = line[3:].strip()
+            out[name] = [[], []]
+        elif name is not None and line.strip() == "--":
+            out[name] = [out[name][1], []]
+        elif name is not None:
+            out[name][1].append(line)
+    return {k: ("\n".join(d), "\n".join(s)) for k, (d, s) in out.items()}
+
+
+def source(member, form):
+    defs, stmt = member
+    stmt = "\n".join("    " + line if line.strip() else line for line in stmt.splitlines())
+    return PRELUDE + "\n" + defs + "\n" + FORMS[form].format(stmt=stmt)
+
+
+def region_runs(fn):
+    return sum(r["runs"] for r in vm.regions(fn) if r["state"] == "region")
+
+
+def run(text, passes):
+    # The logs of CALLS calls of the member's function: as plain Python
+    # (passes None), or on torch.vm.
+    ns = {"__name__": "member", "VIEW": True}
+    exec(compile(text, "<member>", "exec"), ns)
+    ns["VIEW"] = True
+    fn = ns["body"] if passes is None else vm(ns["body"], passes=passes)
+    log, logs, views, runs = ns["LOG"], [], [], []
+    for i in range(CALLS):
+        x = torch.full((4,), i + 1.0)
+        gc.collect()
+        log.clear()
+        ns["VIEWS"].clear()
+        ns["REFS"].clear()
+        ns["KEEP"].clear()
+        before = 0 if passes is None else region_runs(fn)
+        try:
+            r = fn(x)
+        except Exception as e:
+            log.append("RAISED:" + type(e).__name__)
+            r = None
+        log.append("RET")
+        r = None
+        log.append("DROP")
+        gc.collect()
+        log.append("GC")
+        logs.append(" ".join(log))
+        views.append(" ".join(ns["VIEWS"]))
+        runs.append(0 if passes is None else region_runs(fn) - before)
+    return logs, views, runs
+
+
+def member(table, name, form):
+    gc.disable()
+    # What exists now is no garbage of the member's: a collection looks only
+    # at what is made from here on.
+    gc.freeze()
+    text = source(table[name], form)
+    # Eager first: no executor has run in this process.
+    eager, eager_views, _ = run(text, None)
+    got, got_views, runs = run(text, EARLY)
+    return {"name": name, "form": form, "eager": eager, "vm": got, "eager_views": eager_views, "vm_views": got_views, "runs": runs}
+
+
+def main():
+    # Each member x form runs in a process of its own, forked from this one,
+    # which has imported everything and has run nothing (no tensor
+    # operation, no torch.vm call): the executor's switches and plans are
+    # process-wide, and a child starts as a new process does.
+    group, forms = sys.argv[1], sys.argv[2].split(",")
+    table = members(sys.stdin.read())
+    for m in PRELOAD:
+        try:
+            importlib.import_module(m)
+        except Exception:
+            pass
+    for name in table:
+        if name.split(":")[0] != group:
+            continue
+        for form in forms:
+            r, w = os.pipe()
+            pid = os.fork()
+            if pid == 0:
+                os.close(r)
+                try:
+                    os.write(w, json.dumps(member(table, name, form)).encode())
+                finally:
+                    os._exit(0)
+            os.close(w)
+            os.set_blocking(r, False)
+            start, data = time.time(), b""
+            while True:
+                try:
+                    chunk = os.read(r, 1 << 16)
+                except BlockingIOError:
+                    if time.time() - start > 120:
+                        os.kill(pid, signal.SIGKILL)
+                        break
+                    time.sleep(0.01)
+                    continue
+                if not chunk:
+                    break
+                data += chunk
+            os.close(r)
+            status = os.waitpid(pid, 0)[1]
+            try:
+                found = json.loads(data.decode())
+            except ValueError:
+                found = {"name": name, "form": form, "died": status}
+            print(json.dumps(found), flush=True)
+
+
+main()
+"""
+
+# What torch.vm does today where it is not what eager does: the record. Under
+# "== name", one line per form and kind that differs: the form; "deaths" (the
+# log of the deaths and marks of a call) or "views" (what the finalizers saw
+# of the frame they interrupted, in a call whose deaths are eager's); the ways
+# that differ (RELEASE_WAYS, "." for one that is equal); eager's and
+# torch.vm's of the first call that differs (of the views: the first entry
+# that differs). A member that is not here is equal in every form and way. A
+# correction takes lines out of here.
+RELEASE_KNOWN = r"""
+== operator: binary
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== operator: binary, reflected
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== operator: binary, in place
+alone views .LTR b@body:3{v=T(a),x=tensor} | b@body:3{x=tensor}
+between views .LTR b@body:4{v=T(a),x=tensor,y=tensor} | b@body:4{x=tensor,y=tensor}
+inside views .LTR b@body:3{v=T(a),x=tensor,y=tensor} | b@body:3{x=tensor}
+== operator: binary, in place, answers another object
+alone deaths .LTR in -b -a mid -sum out RET DROP GC | in -a -b mid -sum out RET DROP GC
+between deaths .LTR in -b -a mid -sum out RET DROP GC | in -a -b mid -sum out RET DROP GC
+inside deaths .LTR -b -a mid -sum RET DROP GC | -a -b mid -sum RET DROP GC
+== operator: unary
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== operator: not
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== operator: compare
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== operator: compare, chained
+alone deaths .LTR in -a -b -c out RET DROP GC | in -a -c -b out RET DROP GC
+between deaths .LTR in -a -b -c out RET DROP GC | in -a -c -b out RET DROP GC
+inside deaths .LTR -a -b -c RET DROP GC | -a -c -b RET DROP GC
+== operator: compare, chained, cut short
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== operator: contains
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== operator: is
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== operator: or, discarded
+alone views FLTR b@body:?{x=tensor} | b@body:2{x=tensor}
+between views FLTR b@body:?{x=tensor,y=tensor} | b@body:3{x=tensor,y=tensor}
+inside views FLTR b@body:?{x=tensor,y=tensor} | b@body:2{x=tensor,y=tensor}
+== operator: conditional expression
+alone views ..T. c@body:2{x=tensor} | c@body
+between views ..TR c@body:3{x=tensor,y=tensor} | c@body
+inside views .LTR c@body:2{x=tensor,y=tensor} | c@body:2{x=tensor}
+== subscript: load
+alone views ..T. c@body:2{x=tensor} | c@body
+between views ..TR c@body:3{x=tensor,y=tensor} | c@body
+inside views .LTR c@body:2{x=tensor,y=tensor} | c@body:2{x=tensor}
+== subscript: slice load
+alone deaths FLTR in -lo -hi -c out RET DROP GC | in -c -lo -hi out RET DROP GC
+between deaths FLTR in -lo -hi -c out RET DROP GC | in -c -lo -hi out RET DROP GC
+inside deaths FLTR -lo -hi -c RET DROP GC | -c -lo -hi RET DROP GC
+== subscript: slice store
+alone deaths FLTR in -lo -hi -v -c out RET DROP GC | in -v -c -lo -hi out RET DROP GC
+between deaths FLTR in -lo -hi -v -c out RET DROP GC | in -v -c -lo -hi out RET DROP GC
+inside deaths FLTR -lo -hi -v -c RET DROP GC | -v -c -lo -hi RET DROP GC
+== subscript: slice load with a step
+alone deaths ..T. in -c -st -lo -hi out RET DROP GC | in -lo -hi -st -c out RET DROP GC
+between deaths ..TR in -c -st -lo -hi out RET DROP GC | in -lo -hi -st -c out RET DROP GC
+inside deaths ..T. -c -st -lo -hi RET DROP GC | -lo -hi -st -c RET DROP GC
+inside views .L.R c@body:2{x=tensor,y=tensor} | c@body:2{x=tensor}
+== subscript: augmented
+alone views .LTR b@body:3{d=dict,x=tensor} | b@body:3{x=tensor}
+between views .LTR b@body:4{d=dict,x=tensor,y=tensor} | b@body:4{x=tensor,y=tensor}
+inside views .LTR b@body:3{d=dict,x=tensor,y=tensor} | b@body:3{x=tensor}
+== attribute: load
+inside views .LTR o@body:2{x=tensor,y=tensor} | o@body:2{x=tensor}
+== attribute: store on a temporary
+inside views .LTR o@body:2{x=tensor,y=tensor} | o@body:2{x=tensor}
+== attribute: augmented
+alone views .LTR m@body:4{h=T(h),x=tensor} | m@body:4{x=tensor}
+between views .LTR m@body:5{h=T(h),x=tensor,y=tensor} | m@body:5{x=tensor,y=tensor}
+inside views .LTR m@body:4{h=T(h),x=tensor,y=tensor} | m@body:4{x=tensor}
+== container: list built and dropped
+alone deaths .LTR in -c -b -a out RET DROP GC | in -a -b -c out RET DROP GC
+between deaths .LTR in -c -b -a out RET DROP GC | in -a -b -c out RET DROP GC
+inside deaths .LTR -c -b -a RET DROP GC | -a -b -c RET DROP GC
+== container: tuple built and dropped
+alone deaths .LTR in -c -b -a out RET DROP GC | in -a -b -c out RET DROP GC
+between deaths .LTR in -c -b -a out RET DROP GC | in -a -b -c out RET DROP GC
+inside deaths .LTR -c -b -a RET DROP GC | -a -b -c RET DROP GC
+== container: dict built and dropped
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== container: dict with object keys built and dropped
+alone views ..T. k@body:2{x=tensor} | k@body
+between views ..TR k@body:3{x=tensor,y=tensor} | k@body
+inside views .LTR k@body:2{x=tensor,y=tensor} | k@body:2{x=tensor}
+== C call: keyword
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== C call: ** dict
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== C call: positional and ** dict
+alone views ..T. c@body:2{x=tensor} | c@body
+between views ..TR c@body:3{x=tensor,y=tensor} | c@body
+inside views .LTR c@body:2{x=tensor,y=tensor} | c@body:2{x=tensor}
+== C call: raises
+inside views .LTR a@body:3{x=tensor,y=tensor} | a@body:3{x=tensor}
+== C call: a class
+alone deaths ..T. in -b -a out RET DROP GC | in -a -b out RET DROP GC
+between deaths ..TR in -b -a out RET DROP GC | in -a -b out RET DROP GC
+inside deaths ..T. -b -a RET DROP GC | -a -b RET DROP GC
+inside views .L.R b@body:2{x=tensor,y=tensor} | b@body:2{x=tensor}
+== C call: isinstance
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== C call: str of an object
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== C method: of a temporary container
+alone deaths .LTR in -b -a out RET DROP GC | in -a -b out RET DROP GC
+between deaths .LTR in -b -a out RET DROP GC | in -a -b out RET DROP GC
+inside deaths .LTR -b -a RET DROP GC | -a -b RET DROP GC
+== call: positional, deleted in the callee
+alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+== call: positional, rebound in the callee
+alone deaths FLTR in -a after rebind out RET DROP GC | in after rebind -a out RET DROP GC
+between deaths FLTR in -a after rebind out RET DROP GC | in after rebind -a out RET DROP GC
+inside deaths FLTR -a after rebind RET DROP GC | after rebind -a RET DROP GC
+== call: positional, returned and dropped
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== call: the callee raises after it deleted the argument
+alone deaths FLTR in -a after del caught out RET DROP GC | in after del -a caught out RET DROP GC
+between deaths FLTR in -a after del caught out RET DROP GC | in after del -a caught out RET DROP GC
+inside deaths FLTR -a after del caught RET DROP GC | after del -a caught RET DROP GC
+== call: two positional, deleted in the other order
+alone deaths FLTR in -b after b -a after a out RET DROP GC | in after b after a -a -b out RET DROP GC
+between deaths FLTR in -b after b -a after a out RET DROP GC | in after b after a -a -b out RET DROP GC
+inside deaths FLTR -b after b -a after a RET DROP GC | after b after a -a -b RET DROP GC
+== call: keyword, deleted in the callee
+alone deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+between deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+inside deaths FLTR -a after a -b RET DROP GC | after a -b -a RET DROP GC
+== call: keyword, unused
+alone deaths FLTR in inside -a -b out RET DROP GC | in inside -b -a out RET DROP GC
+between deaths FLTR in inside -a -b out RET DROP GC | in inside -b -a out RET DROP GC
+inside deaths FLTR inside -a -b RET DROP GC | inside -b -a RET DROP GC
+== call: positional and keyword
+alone deaths FLTR in -b after b -a out RET DROP GC | in after b -a -b out RET DROP GC
+between deaths FLTR in -b after b -a out RET DROP GC | in after b -a -b out RET DROP GC
+inside deaths FLTR -b after b -a RET DROP GC | after b -a -b RET DROP GC
+== call: a default is used
+alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+== call: starred list
+alone deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+between deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+inside deaths FLTR -a after a -b RET DROP GC | after a -b -a RET DROP GC
+== call: starred tuple
+alone deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+between deaths FLTR in -a after a -b out RET DROP GC | in after a -b -a out RET DROP GC
+inside deaths FLTR -a after a -b RET DROP GC | after a -b -a RET DROP GC
+== call: positional and starred
+alone deaths FLTR in -a after a -c after c -b out RET DROP GC | in after a after c -c -b -a out RET DROP GC
+between deaths FLTR in -a after a -c after c -b out RET DROP GC | in after a after c -c -b -a out RET DROP GC
+inside deaths FLTR -a after a -c after c -b RET DROP GC | after a after c -c -b -a RET DROP GC
+== call: * parameter, deleted
+alone deaths FLTR in -b -a after del out RET DROP GC | in after del -a -b out RET DROP GC
+between deaths FLTR in -b -a after del out RET DROP GC | in after del -a -b out RET DROP GC
+inside deaths FLTR -b -a after del RET DROP GC | after del -a -b RET DROP GC
+== call: * parameter, unused
+alone deaths FLTR in inside -b -a out RET DROP GC | in inside -a -b out RET DROP GC
+between deaths FLTR in inside -b -a out RET DROP GC | in inside -a -b out RET DROP GC
+inside deaths FLTR inside -b -a RET DROP GC | inside -a -b RET DROP GC
+== call: ** parameter, deleted
+alone deaths FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
+between deaths FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
+inside deaths FLTR -a -b after del RET DROP GC | after del -a -b RET DROP GC
+== call: ** dict operand
+alone deaths FLTR in -a after a -b out RET DROP GC | in after a -a -b out RET DROP GC
+between deaths FLTR in -a after a -b out RET DROP GC | in after a -a -b out RET DROP GC
+inside deaths FLTR -a after a -b RET DROP GC | after a -a -b RET DROP GC
+== call: ** dict operand into a ** parameter
+alone deaths FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
+between deaths FLTR in -a -b after del out RET DROP GC | in after del -a -b out RET DROP GC
+inside deaths FLTR -a -b after del RET DROP GC | after del -a -b RET DROP GC
+== call: keyword-only
+alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+== call: positional-only
+alone deaths FLTR in -a after a -b after b out RET DROP GC | in after a after b -a -b out RET DROP GC
+between deaths FLTR in -a after a -b after b out RET DROP GC | in after a after b -a -b out RET DROP GC
+inside deaths FLTR -a after a -b after b RET DROP GC | after a after b -a -b RET DROP GC
+== call: wrong number of arguments
+alone deaths FLTR in -b -a caught out RET DROP GC | in -a -b caught out RET DROP GC
+between deaths FLTR in -b -a caught out RET DROP GC | in -a -b caught out RET DROP GC
+inside deaths FLTR -b -a caught RET DROP GC | -a -b caught RET DROP GC
+== call: nested, handed on from a deleted local
+alone deaths FLTR in -a inner after del outer after inner out RET DROP GC | in inner after del outer after inner -a out RET DROP GC
+between deaths FLTR in -a inner after del outer after inner out RET DROP GC | in inner after del outer after inner -a out RET DROP GC
+inside deaths FLTR -a inner after del outer after inner RET DROP GC | inner after del outer after inner -a RET DROP GC
+== call: the argument is a call's result
+alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+== call: a closure
+alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+== method: receiver deleted
+alone deaths FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
+between deaths FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
+inside deaths FLTR -r after del RET DROP GC | after del -r RET DROP GC
+== method: receiver and argument
+alone deaths FLTR in -a after a -r after self out RET DROP GC | in after a after self -r -a out RET DROP GC
+between deaths FLTR in -a after a -r after self out RET DROP GC | in after a after self -r -a out RET DROP GC
+inside deaths FLTR -a after a -r after self RET DROP GC | after a after self -r -a RET DROP GC
+== method: a bound method of a temporary, called at once
+alone deaths FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
+between deaths FLTR in -r after del out RET DROP GC | in after del -r out RET DROP GC
+inside deaths FLTR -r after del RET DROP GC | after del -r RET DROP GC
+== method: classmethod
+alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+== method: staticmethod
+alone deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+between deaths FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
+inside deaths FLTR -a after del RET DROP GC | after del -a RET DROP GC
+== class: __init__ keeps the argument
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== function: decorator's operand
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== function: a free variable of a called closure
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== frame: parameters and locals at exit
+alone deaths FLTR in made -p -q -r out RET DROP GC | in made -r -p -q out RET DROP GC
+between deaths FLTR in made -p -q -r out RET DROP GC | in made -r -p -q out RET DROP GC
+inside deaths FLTR made -p -q -r RET DROP GC | made -r -p -q RET DROP GC
+== frame: the body's own locals
+inside views .LTR a@run | a@body:4{x=tensor}
+== frame: the body's own locals, made in another order
+inside deaths .LTR -a -b RET DROP GC | -b -a RET DROP GC
+== frame: return of a temporary
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== frame: return of a local, other locals
+alone views .LTR b@body:2{x=tensor} | b@callee:2{}
+between views .LTR b@body:3{x=tensor,y=tensor} | b@callee:2{}
+inside views .LTR b@body:2{x=tensor,y=tensor} | b@callee:2{}
+== frame: return value kept
+alone views .LTR b@body:2{x=tensor} | b@callee:2{}
+between views .LTR b@body:3{x=tensor,y=tensor} | b@callee:2{}
+inside views .LTR b@body:2{x=tensor,y=tensor} | b@callee:2{}
+== frame: return inside a loop
+alone views FLTR b@callee:2{item=T(a)} | b@callee:1{}
+between views FLTR b@callee:2{item=T(a)} | b@callee:1{}
+inside views FLTR b@callee:2{item=T(a)} | b@callee:1{}
+== statement: rebinding
+alone views .LTR a@body:3{a=T(b),x=tensor} | a@body:4{x=tensor}
+between views .LTR a@body:4{a=T(b),x=tensor,y=tensor} | a@body:5{x=tensor,y=tensor}
+inside views .LTR a@body:3{a=T(b),x=tensor,y=tensor} | a@body:4{x=tensor}
+== statement: rebinding to an object made from the old
+alone views .LTR a@body:3{a=T(a2),x=tensor} | a@body:3{x=tensor}
+between views .LTR a@body:4{a=T(a2),x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
+inside views .LTR a@body:3{a=T(a2),x=tensor,y=tensor} | a@body:3{x=tensor}
+== statement: a temporary dropped
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== statement: a discarded call result
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== statement: unpacking, dropped at once
+alone deaths .L.R in -a -b out RET DROP GC | in -b -a out RET DROP GC
+alone views F.T. a@body:3{a=None,b=T(b),x=tensor} | a@body:2{a=None,b=T(b),x=tensor}
+between deaths .L.R in -a -b out RET DROP GC | in -b -a out RET DROP GC
+between views F.TR a@body:4{a=None,b=T(b),x=tensor,y=tensor} | a@body:3{a=None,b=T(b),x=tensor,y=tensor}
+inside views F... a@body:3{a=None,b=T(b),x=tensor,y=tensor} | a@body:2{a=None,b=T(b),x=tensor,y=tensor}
+== statement: unpacking an iterator
+alone views ..T. it@body:2{x=tensor} | it@body
+between views ..TR it@body:3{x=tensor,y=tensor} | it@body
+inside views .LTR it@body:2{x=tensor,y=tensor} | it@body:2{x=tensor}
+== statement: unpacking fails
+inside views .LTR a@body:3{x=tensor,y=tensor} | a@body:3{x=tensor}
+== statement: f-string
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== statement: % formatting
+alone views ..T. a@body:2{x=tensor} | a@body
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
+== statement: assert that fails
+alone views ..T. a@body:3{x=tensor} | a@body
+between views ..TR a@body:4{x=tensor,y=tensor} | a@body
+inside views .LTR a@body:3{x=tensor,y=tensor} | a@body:3{x=tensor}
+== statement: import of a name
+alone views .LTR a@body:3{p=module,x=tensor} | a@body:3{x=tensor}
+between views .LTR a@body:4{p=module,x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
+inside views .LTR a@body:3{p=module,x=tensor,y=tensor} | a@body:3{x=tensor}
+== loop: for with a break
+alone deaths FLTR in body -b after loop out -a RET DROP GC | in -b body after loop out -a RET DROP GC
+between deaths FLTR in body -b after loop out -a RET DROP GC | in -b body after loop out -a RET DROP GC
+inside deaths FLTR body -b after loop -a RET DROP GC | -b body after loop -a RET DROP GC
+== loop: for that returns
+alone deaths FLTR in body -b -a out RET DROP GC | in -b body -a out RET DROP GC
+between deaths FLTR in body -b -a out RET DROP GC | in -b body -a out RET DROP GC
+inside deaths FLTR body -b -a RET DROP GC | -b body -a RET DROP GC
+== loop: while over temporaries
+alone views .LTR cond@body:3{n=0,x=tensor} | cond@body:3{x=tensor}
+between views .LTR cond@body:4{n=0,x=tensor,y=tensor} | cond@body:4{x=tensor,y=tensor}
+inside views .LTR cond@body:3{n=0,x=tensor,y=tensor} | cond@body:3{x=tensor}
+== loop: list comprehension
+inside views .LTR b@body:2{x=tensor,y=tensor} | b@run
+== loop: the comprehension's variable
+inside views .LTR b@body:2{x=tensor,y=tensor} | b@run
+== loop: dict comprehension
+alone views FLTR a@body:2{x=tensor} | a@body:2{t=T(b),x=tensor}
+between views FLTR a@body:3{x=tensor,y=tensor} | a@body:3{t=T(b),x=tensor,y=tensor}
+inside views FLTR a@body:2{x=tensor,y=tensor} | a@body:2{t=T(b),x=tensor,y=tensor}
+== loop: comprehension with a condition
+alone deaths FLTR in -b -a out RET DROP GC | in -a -b out RET DROP GC
+between deaths FLTR in -b -a out RET DROP GC | in -a -b out RET DROP GC
+inside deaths FLTR -b -a RET DROP GC | -a -b RET DROP GC
+== loop: comprehension over a name that is also a local
+alone views .LTR b@body:3{r=list,t=T(outer),x=tensor} | b@body:3{t=T(outer),x=tensor}
+between views .LTR b@body:4{r=list,t=T(outer),x=tensor,y=tensor} | b@body:4{t=T(outer),x=tensor,y=tensor}
+inside views .LTR b@body:3{r=list,t=T(outer),x=tensor,y=tensor} | b@body:3{t=T(outer),x=tensor,y=tensor}
+== with: the exception is suppressed
+alone deaths FLTR in exit -payload -cm after with out RET DROP GC | in exit -cm -payload after with out RET DROP GC
+between deaths FLTR in exit -payload -cm after with out RET DROP GC | in exit -cm -payload after with out RET DROP GC
+inside deaths FLTR exit -payload -cm after with RET DROP GC | exit -cm -payload after with RET DROP GC
+== with: the exception goes on
+alone views FLTR cm@body:4{x=tensor} | cm@body:3{x=tensor}
+between views FLTR cm@body:5{x=tensor,y=tensor} | cm@body:4{x=tensor,y=tensor}
+inside views FLTR cm@body:4{x=tensor,y=tensor} | cm@body:3{x=tensor,y=tensor}
+== with: __exit__ deletes its arguments
+alone deaths FLTR in exit after del -payload -cm after with out RET DROP GC | in exit after del -cm -payload after with out RET DROP GC
+between deaths FLTR in exit after del -payload -cm after with out RET DROP GC | in exit after del -cm -payload after with out RET DROP GC
+inside deaths FLTR exit after del -payload -cm after with RET DROP GC | exit after del -cm -payload after with RET DROP GC
+== exception: a container being built when it raises
+alone deaths FLTR in -b -a caught after try out RET DROP GC | in -a -b caught after try out RET DROP GC
+between deaths FLTR in -b -a caught after try out RET DROP GC | in -a -b caught after try out RET DROP GC
+inside deaths FLTR -b -a caught after try RET DROP GC | -a -b caught after try RET DROP GC
+== tensor: binary
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: binary with a number
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: unary
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: compare
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: subscript load
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: slice
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: attribute
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: method
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: method with an operand
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: torch function
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: torch function, keyword
+inside views ..T. a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: torch function, starred
+inside deaths ..TR -b -a RET DROP GC | -a -b RET DROP GC
+== tensor: torch function, ** dict
+inside views ..TR a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
+== tensor: torch function of a list
+inside deaths ..TR -b -a RET DROP GC | -a -b RET DROP GC
+== tensor: temporaries of an expression
+alone views ..T. b@body:2{x=tensor} | b@body:3{x=tensor}
+between views ..TR b@body:3{x=tensor,y=tensor} | b@body:4{x=tensor,y=tensor}
+inside views ..TR b@body:2{x=tensor,y=tensor} | b@body:3{x=tensor,y=tensor}
+== tensor: handed to a function that deletes it
+alone deaths FLTR in -a after del mid out RET DROP GC | in after del -a mid out RET DROP GC
+between deaths FLTR in -a after del mid out RET DROP GC | in after del -a mid out RET DROP GC
+inside deaths FLTR -a after del mid RET DROP GC | after del -a mid RET DROP GC
+== tensor: a callee's locals
+alone deaths .LTR in -a -b mid out RET DROP GC | in -b -a mid out RET DROP GC
+between deaths .LTR in -a -b mid out RET DROP GC | in -b -a mid out RET DROP GC
+inside deaths .LTR -a -b mid RET DROP GC | -b -a mid RET DROP GC
+== tensor: the function's own locals
+inside deaths .LTR -a -b RET DROP GC | -b -a RET DROP GC
+== dead store: None over an object
+alone views FLTR a@body:3{t=None,x=tensor} | a@body:2{t=None,x=tensor}
+between views FLTR a@body:4{t=None,x=tensor,y=tensor} | a@body:3{t=None,x=tensor,y=tensor}
+inside views F... a@body:3{t=None,x=tensor,y=tensor} | a@body:2{t=None,x=tensor,y=tensor}
+== dead store: a constant over an object
+alone views FLTR a@body:3{t=3,x=tensor} | a@body:2{t=3,x=tensor}
+between views FLTR a@body:4{t=3,x=tensor,y=tensor} | a@body:3{t=3,x=tensor,y=tensor}
+inside views F... a@body:3{t=3,x=tensor,y=tensor} | a@body:2{t=3,x=tensor,y=tensor}
+== dead store: a tuple over an object
+alone views FLTR a@body:3{t=tuple,x=tensor} | a@body:2{t=tuple,x=tensor}
+between views FLTR a@body:4{t=tuple,x=tensor,y=tensor} | a@body:3{t=tuple,x=tensor,y=tensor}
+inside views F... a@body:3{t=tuple,x=tensor,y=tensor} | a@body:2{t=tuple,x=tensor,y=tensor}
+== dead store: a tensor expression over an object
+alone views .LTR a@body:3{t=tensor,x=tensor} | a@body:4{x=tensor}
+between views .LTR a@body:4{t=tensor,x=tensor,y=tensor} | a@body:5{x=tensor,y=tensor}
+inside views .LTR a@body:3{t=tensor,x=tensor,y=tensor} | a@body:4{x=tensor}
+== dead store: a call result over an object
+alone views .LTR a@body:3{t=3,x=tensor} | a@body:4{x=tensor}
+between views .LTR a@body:4{t=3,x=tensor,y=tensor} | a@body:5{x=tensor,y=tensor}
+inside views .LTR a@body:3{t=3,x=tensor,y=tensor} | a@body:4{x=tensor}
+== dead store: an object over an object
+alone views .LTR a@body:3{t=T(b),x=tensor} | a@body:4{x=tensor}
+between views .LTR a@body:4{t=T(b),x=tensor,y=tensor} | a@body:5{x=tensor,y=tensor}
+inside views .LTR a@body:3{t=T(b),x=tensor,y=tensor} | a@body:4{x=tensor}
+== dead store: None over a popped object
+alone views FLTR a@body:4{b=list,t=None,x=tensor} | a@body:3{b=list,t=None,x=tensor}
+between views FLTR a@body:5{b=list,t=None,x=tensor,y=tensor} | a@body:4{b=list,t=None,x=tensor,y=tensor}
+inside views F... a@body:4{b=list,t=None,x=tensor,y=tensor} | a@body:3{b=list,t=None,x=tensor,y=tensor}
+== dead store: two locals
+alone deaths .LTR in -a -b out RET DROP GC | in -b -a out RET DROP GC
+alone views F... a@body:4{t=None,u=T(b),x=tensor} | a@body:3{t=None,u=T(b),x=tensor}
+between deaths .LTR in -a -b out RET DROP GC | in -b -a out RET DROP GC
+between views F... a@body:5{t=None,u=T(b),x=tensor,y=tensor} | a@body:4{t=None,u=T(b),x=tensor,y=tensor}
+inside views F... a@body:4{t=None,u=T(b),x=tensor,y=tensor} | a@body:3{t=None,u=T(b),x=tensor,y=tensor}
+== dead store: None over a tensor
+alone views FLTR a@body:3{t=None,x=tensor} | a@body:2{t=None,x=tensor}
+between views FLTR a@body:4{t=None,x=tensor,y=tensor} | a@body:3{t=None,x=tensor,y=tensor}
+inside views F... a@body:3{t=None,x=tensor,y=tensor} | a@body:2{t=None,x=tensor,y=tensor}
+== dead store: a constant over a tensor
+alone views FLTR a@body:3{t=3,x=tensor} | a@body:2{t=3,x=tensor}
+between views FLTR a@body:4{t=3,x=tensor,y=tensor} | a@body:3{t=3,x=tensor,y=tensor}
+inside views F... a@body:3{t=3,x=tensor,y=tensor} | a@body:2{t=3,x=tensor,y=tensor}
+== dead store: a tuple over a tensor
+alone views FLTR a@body:3{t=tuple,x=tensor} | a@body:2{t=tuple,x=tensor}
+between views FLTR a@body:4{t=tuple,x=tensor,y=tensor} | a@body:3{t=tuple,x=tensor,y=tensor}
+inside views F... a@body:3{t=tuple,x=tensor,y=tensor} | a@body:2{t=tuple,x=tensor,y=tensor}
+== dead store: a tensor expression over a tensor
+alone views .LTR a@body:3{t=tensor,x=tensor} | a@body:3{x=tensor}
+between views .LTR a@body:4{t=tensor,x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
+inside views .LTR a@body:3{t=tensor,x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
+== dead store: a call result over a tensor
+alone views .LTR a@body:3{t=3,x=tensor} | a@body:4{x=tensor}
+between views .LTR a@body:4{t=3,x=tensor,y=tensor} | a@body:5{x=tensor,y=tensor}
+inside views .LTR a@body:3{t=3,x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
+== dead store: a popped tensor, then a tensor expression
+alone views .LTR a@body:4{b=list,t=tensor,x=tensor} | a@body:4{b=list,x=tensor}
+between views .LTR a@body:5{b=list,t=tensor,x=tensor,y=tensor} | a@body:5{b=list,x=tensor,y=tensor}
+inside views .LTR a@body:4{b=list,t=tensor,x=tensor,y=tensor} | a@body:5{b=list,x=tensor,y=tensor}
+"""
+
+
+def release_found(result):
+    """The record lines of one member in one form (see RELEASE_KNOWN)."""
+    form, lines = result["form"], []
+    if "died" in result:
+        return [f"{form} died {result['died']}"]
+    eager, got = result["eager"], result["vm"]
+    seen, saw = result["eager_views"], result["vm_views"]
+    deaths = [i for i in range(len(eager)) if eager[i] != got[i]]
+    views = [i for i in range(len(eager)) if eager[i] == got[i] and seen[i] != saw[i]]
+    for kind, calls in (("deaths", deaths), ("views", views)):
+        if not calls:
+            continue
+        ways = "".join(
+            way if any(i in calls for i in of) else "." for way, of in RELEASE_WAYS
+        )
+        first = calls[0]
+        if kind == "deaths":
+            pair = (eager[first], got[first])
+        else:
+            a, b = seen[first].split(), saw[first].split()
+            at = next((k for k in range(min(len(a), len(b))) if a[k] != b[k]), None)
+            pair = (seen[first], saw[first]) if at is None else (a[at], b[at])
+        lines.append(f"{form} {kind} {ways} {pair[0]} | {pair[1]}")
+    return lines
+
+
+def release_table(text):
+    """name -> its lines, of a table with "== name" heads."""
+    out, name = {}, None
+    for line in text.splitlines():
+        if line.startswith("== "):
+            name = line[3:].strip()
+            out[name] = []
+        elif name is not None and line.strip():
+            out[name].append(line)
+    return out
+
+
+RELEASE_GROUPS = tuple(
+    dict.fromkeys(n.split(":")[0] for n in release_table(RELEASE_MEMBERS))
+)
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+@instantiate_parametrized_tests
+class TestVmReleaseOrder(TestCase):
+    """The executor lets go of an object where CPython does: a program can
+    see when an object dies (``__del__``, a weak reference's callback, the
+    order of two deaths) and what the frame it interrupts looks like then
+    (the function, the line, the locals that are bound). The table has a
+    statement for every kind of instruction that lets go of a reference;
+    each runs as plain Python and as a ``torch.vm`` function, eight calls
+    each, alone, between two tensor computations and inside a stretch that
+    is traced as one region, and the two logs are compared call by call.
+    Where they differ today is recorded (``RELEASE_KNOWN``): the test fails
+    for a difference that is not recorded and for a recorded one that is
+    gone, so a correction has to take its lines out of the record.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("group", RELEASE_GROUPS)
+    def test_an_object_dies_where_eager_lets_it_die(self, group):
+        names = [n for n in release_table(RELEASE_MEMBERS) if n.split(":")[0] == group]
+        command = [
+            sys.executable,
+            "-c",
+            RELEASE_PROGRAM,
+            group,
+            ",".join(RELEASE_FORMS),
+        ]
+        ran = subprocess.run(
+            command, input=RELEASE_MEMBERS, capture_output=True, text=True, timeout=1800
+        )
+        self.assertEqual(ran.returncode, 0, msg=ran.stderr[-2000:])
+        results = [
+            json.loads(line) for line in ran.stdout.splitlines() if line.startswith("{")
+        ]
+        self.assertEqual(
+            [(r["name"], r["form"]) for r in results],
+            [(name, form) for name in names for form in RELEASE_FORMS],
+        )
+        known = release_table(RELEASE_KNOWN)
+        for name in names:
+            found = [
+                line for r in results if r["name"] == name for line in release_found(r)
+            ]
+            self.assertEqual(
+                found, known.get(name, []), msg=f"== {name}\n" + "\n".join(found)
+            )
+
+    def test_the_record_names_members_of_the_table(self):
+        table = release_table(RELEASE_MEMBERS)
+        self.assertEqual(len(table), 242)
+        for name, lines in release_table(RELEASE_KNOWN).items():
+            self.assertIn(name, table)
+            self.assertTrue(lines, msg=name)
+            for line in lines:
+                form, kind, ways = line.split(" ", 3)[:3]
+                self.assertIn(form, RELEASE_FORMS, msg=line)
+                self.assertIn(kind, ("deaths", "views"), msg=line)
+                self.assertRegex(ways, "^[F.][L.][T.][R.]$", msg=line)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@
 //!
 //! Guarantees: an answer is made of the writes recorded after the read
 //! alone, in order: what the last of them to that very item (key, index,
-//! cell) put there; what a dict, a list or a set read whole holds once
+//! slot, cell) put there; what a dict, a list or a set read whole holds once
 //! each of them is made on what was read; by how many the target grew.
 //! A write is to the item a read found only if its key is the read's: the
 //! same object, or both of exactly one class (str or int) and the same
@@ -48,10 +48,10 @@ use super::exact;
 pub enum How {
     // Item `key` of a dict: `value`, or nothing.
     Item,
-    // Slot `key` of an object: `value`, or nothing. No question here is
-    // about a slot yet (a slot's read is compared when the trace is over,
-    // see reads.rs), and none takes one for an item: an instance of a dict
-    // subclass with __slots__ is the target of both under one name.
+    // Slot `key` of an object: `value`, or nothing. No question about an
+    // item takes one for an item, nor `slot` an item for one: an instance
+    // of a dict subclass with __slots__ is the target of both under one
+    // name.
     Slot,
     // The item at this index of a list, from the front: `value`, or taken out.
     Index(isize),
@@ -209,6 +209,27 @@ impl Log {
                 (How::Index(i), Some(v)) if n >= after && i == at => last = Since::Put(v.as_ptr()),
                 (How::Index(_), Some(_)) | (How::Append, _) => {}
                 _ => return Since::Unplaced,
+            }
+        }
+        last
+    }
+
+    // What the writes since `after` say of slot `name` of the object
+    // `target`. A slot is named by an exact str; a write under a name of
+    // any other class cannot be placed.
+    pub unsafe fn slot(&self, target: *mut PyObject, after: usize, name: *mut PyObject) -> Since {
+        if !self.targets.contains(&(target as usize)) {
+            return Since::Nothing;
+        }
+        let text = &raw mut ffi::PyUnicode_Type;
+        let mut last = Since::Nothing;
+        for w in self.all.iter().skip(after).filter(|w| w.target == target as usize && w.how == How::Slot) {
+            let wrote = ptr(&w.key);
+            if wrote.is_null() || ffi::Py_TYPE(wrote) != text || ffi::Py_TYPE(name) != text {
+                return Since::Unplaced;
+            }
+            if exact::same(wrote, name) {
+                last = Since::Put(ptr(&w.value));
             }
         }
         last

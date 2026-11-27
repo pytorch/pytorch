@@ -44,7 +44,8 @@
 //   - any other instruction or builtin handed a dict, a list, a set or a dict
 //     view (iterating it, unpacking it, slicing it, zip, sorted, ...): the
 //     whole content, in order (an OrderedDict's own order, which is not the
-//     order of the dict's table); len() and truth: the length. C code reads
+//     order of the dict's table); len() and truth: the length (of a dict
+//     view or a mappingproxy: that of the dict it shows). C code reads
 //     through what it is handed (the list inside the tuple of a subscript,
 //     the rows of a nested list made into a tensor): the lists, dicts, sets
 //     and tuples inside a container or a tuple are read whole too, and what
@@ -59,11 +60,15 @@
 // comparison per dict and per class. A class is compared by what its names
 // give, not by the tag alone: fx binds nn.Module's __call__ and __getattr__
 // to its own while a region is traced and puts them back, which changes the
-// tag of every module class and nothing a region depends on.
+// tag of every module class and nothing a region depends on. What a class
+// has under a name is taken when the name is read; a name the run read
+// while the trace had its own object bound there (_region_bound) is taken
+// again once the trace has put the class's own back.
 //
 // The thread state a graph is specialized on and no instruction reads
-// (autocast, the default dtype, deterministic algorithms) is one integer,
-// taken when the trace starts and compared first.
+// (autocast, the default dtype, deterministic algorithms) is the ambient
+// word, taken when the trace starts and compared where a region is entered,
+// before these reads and whether or not they are checked (region.rs).
 //
 // Two kinds of entries are dropped rather than checked. One whose holder
 // nothing else refers to: nothing can change it. And one whose holder is a
@@ -84,7 +89,12 @@
 // traced body is over refuses the trace, unless the run's own recorded
 // writes to that very item left what is there (see _region_settled and
 // wrote.rs), because what else changed it is something no region would do
-// again; and one that changes later is a later call's miss.
+// again; and one that changes later is a later call's miss. That is one
+// moment for every kind of entry (_region_settled, which says what that
+// rests on). A read the run makes again (of an item, of a container whole,
+// of a length, of a cell, of a slot, of a name of a class, of the class of
+// an object, of the bases of a class) is held to the first in the same
+// way, at the read.
 //
 // The writes of the traced run to what outlives it are recorded by writes.rs:
 // a region makes them again, in order, on every run. Here is what they mean
@@ -223,7 +233,7 @@ struct Class {
     // The class's version tag when it last held.
     tag: Cell<u32>,
     // What the class has under each name looked up (None: nothing), found
-    // when the trace is over.
+    // when the name was read (see looked).
     names: Vec<(Py<PyAny>, Option<Pin>)>,
 }
 
@@ -280,6 +290,8 @@ struct Asked {
     // An input of the trace or the result of an operator it recorded (see
     // _region_settled): the guard's to compare, or the graph's to make.
     ours: bool,
+    // It no longer had that key when the body was over.
+    changed: bool,
 }
 
 #[derive(Default)]
@@ -308,7 +320,6 @@ impl Entries {
 // The reads of a trace in progress.
 #[derive(Default)]
 struct Trace {
-    thread: Option<tffi::Word>,
     entries: Entries,
     group_of: HashMap<usize, usize>,
     class_of: HashMap<usize, usize>,
@@ -344,16 +355,33 @@ struct Trace {
     // The tuples and containers one handing to C code has walked (see
     // through).
     walked: HashSet<usize>,
+    // Where the read of a cell (name 0) or of an attribute a descriptor of
+    // C gives is among the entries, by the addresses of the object and the
+    // name, while the body runs.
+    read_at: HashMap<(usize, usize), usize>,
+    // Which class each object whose class decided something was of when
+    // that was first recorded, and the place of each class among the orders
+    // of bases: by address, while the body runs.
+    typed_as: HashMap<usize, usize>,
+    mro_at: HashMap<usize, usize>,
+    // What the trace itself has bound on classes of the program's while the
+    // body runs (see _region_bound).
+    bound: Vec<Py<PyAny>>,
 }
 
 // What a stale read was read from: a cell, a function (its code and
 // defaults), an object (its __dict__), a container (an item, all of it, its
-// length).
+// length), a class (what it has under a name), an object (a slot or
+// another attribute C code gives). Fresh: an attribute C code makes another
+// object for on every read, which no check can compare.
 enum Stale {
     Cell,
     Function,
     Dict,
     Group,
+    Class,
+    Slot,
+    Fresh,
 }
 
 thread_local! {
@@ -408,7 +436,7 @@ pub fn begin() {
     super::made::clear();
     asked::init();
     super::built::init();
-    TRACE.set(Some(Trace { thread: super::ambient::word(), ..Trace::default() }));
+    TRACE.set(Some(Trace::default()));
     OWNER.set(Owner::Trace);
 }
 
@@ -652,7 +680,8 @@ unsafe fn put(log: &wrote::Log, holder: *mut PyObject, kind: Holder, key: *mut P
     match kind {
         Holder::Dict => log.item(holder, after, key),
         Holder::List => log.index(holder, after, ffi::PyLong_AsSsize_t(key)),
-        Holder::Set => Since::Nothing,
+        // (No read is of an item of a set.)
+        Holder::Set => Since::Unplaced,
     }
 }
 
@@ -740,10 +769,30 @@ impl Group {
 }
 
 impl Class {
-    // Whether the class still has what it had under each name.
-    unsafe fn holds(&self) -> bool {
+    // The one answer to "does the class have under this name what the run
+    // read there": the names (by their place) under which it has something
+    // else now, each with what it has (NULL: nothing). Asked when the run
+    // reads a name of the class again (Trace::looked), when the body is
+    // over (_region_settled), when the trace has taken its own objects off
+    // the classes (_region_reads), and before a region is entered (holds).
+    unsafe fn differing(&self) -> impl Iterator<Item = (usize, *mut PyObject)> + '_ {
         let tp = self.class.as_ptr() as *mut ffi::PyTypeObject;
-        self.names.iter().all(|(name, had)| pin::was(had, tr_type_lookup(tp, name.as_ptr())))
+        self.names.iter().enumerate().filter_map(move |(i, (name, had))| {
+            let now = tr_type_lookup(tp, name.as_ptr());
+            (!pin::was(had, now)).then_some((i, now))
+        })
+    }
+
+    unsafe fn holds(&self) -> bool {
+        self.differing().next().is_none()
+    }
+
+    // For a refusal: the name at place `i`, what was read there and `now`.
+    unsafe fn differs(&self, i: usize, now: *mut PyObject, when: &str) -> String {
+        let (name, had) = &self.names[i];
+        let was = had.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr());
+        let class = std::ffi::CStr::from_ptr((*(self.class.as_ptr() as *mut ffi::PyTypeObject)).tp_name).to_string_lossy();
+        format!("what the class {class} has as .{}, which was {} and is {} {when}", text(name.as_ptr()), shown(was), shown(now))
     }
 }
 
@@ -766,6 +815,24 @@ impl Function {
 }
 
 impl Read {
+    // Whether `now` (NULL: nothing) is what the run left in the cell or the
+    // slot: what its own last store there since the read put, or with none,
+    // what was read; never with a store the log cannot place. The one
+    // answer for a read the run makes again (Trace::given, cell) and for
+    // the end of the body (_region_settled).
+    unsafe fn settled(&self, log: &wrote::Log, now: *mut PyObject) -> bool {
+        let obj = self.obj.as_ptr();
+        let put = match &self.name {
+            None => log.cell(obj, self.after).map_or(Since::Nothing, Since::Put),
+            Some(name) => log.slot(obj, self.after, name.as_ptr()),
+        };
+        match put {
+            Since::Nothing => same(now, self.want, self.value.as_ref()),
+            Since::Put(put) => left(now, put),
+            Since::Unplaced => false,
+        }
+    }
+
     unsafe fn holds(&self) -> bool {
         match &self.name {
             None => same(PyCell_Get_borrowed(self.obj.as_ptr()), self.want, self.value.as_ref()),
@@ -862,8 +929,26 @@ impl Trace {
         self.item(d, Holder::Dict, key, want, now);
     }
 
+    // Notes that `holder`, read before, is not what the run finds now: once
+    // per holder.
+    unsafe fn again(&mut self, holder: *mut PyObject, what: String) {
+        if !self.stale.iter().any(|(kind, at, _)| matches!(kind, Stale::Group) && *at == holder as usize) {
+            self.stale.push((Stale::Group, holder as usize, format!("{what} when the run reads it again")));
+        }
+    }
+
+    // The first read of a container whole is the one recorded. A later one
+    // is to find what the first found with the run's own writes since made
+    // on it, as a later read of an item is (see item).
     unsafe fn whole(&mut self, holder: *mut PyObject, kind: Holder) {
-        if self.group_of.get(&(holder as usize)).is_some_and(|i| self.entries.groups[*i].whole.is_some()) || self.own.contains(&(holder as usize)) {
+        if self.own.contains(&(holder as usize)) {
+            return;
+        }
+        if let Some(w) = self.group_of.get(&(holder as usize)).and_then(|i| self.entries.groups[*i].whole.as_ref()) {
+            if !w.settled(&self.wrote, holder, kind) {
+                let what = format!("a {} whole{}, which holds something else", type_name(holder), w.at);
+                self.again(holder, what);
+            }
             return;
         }
         // What cannot be compared later is refused when the trace is over,
@@ -899,10 +984,23 @@ impl Trace {
         }
         let (n, after) = (size(holder, kind), self.wrote.len());
         let g = self.group(holder, kind);
-        if g.len.is_none() && g.whole.is_none() {
-            g.len = Some(n);
-            g.len_after = after;
-            self.count += 1;
+        // The length read first, or that of what was read whole, and when.
+        let per = if kind == Holder::Dict { 2 } else { 1 };
+        let first = g.len.map(|n| (n, g.len_after)).or_else(|| g.whole.as_ref().map(|w| ((w.items.len() / per) as isize, w.after)));
+        match first {
+            None => {
+                g.len = Some(n);
+                g.len_after = after;
+                self.count += 1;
+            }
+            // A later one is to find that and what the run's own writes
+            // since added.
+            Some((was, at)) => {
+                if n != was + self.wrote.grew(holder, at) {
+                    let what = format!("the length of a {}, which was {was} and is {n}", type_name(holder));
+                    self.again(holder, what);
+                }
+            }
         }
     }
 
@@ -921,7 +1019,7 @@ impl Trace {
             return;
         }
         self.asked_at.insert(o as usize, self.asked_of.len());
-        self.asked_of.push(Asked { weak: Py::from_owned_ptr(Python::assume_attached(), weak), key: TensorKey::of(o), ours: false });
+        self.asked_of.push(Asked { weak: Py::from_owned_ptr(Python::assume_attached(), weak), key: TensorKey::of(o), ours: false, changed: false });
     }
 
     unsafe fn container(o: *mut PyObject) -> Option<(*mut PyObject, Holder)> {
@@ -1005,10 +1103,7 @@ impl Trace {
         if tr_type_immutable(tp) != 0 {
             return;
         }
-        if self.seen.insert((o as usize, 0)) {
-            self.count += 1;
-            self.entries.typed.push(Typed { obj: counted(o), class: counted(tp as *mut PyObject) });
-        }
+        self.of_class(o);
         if self.seen.insert((tp as usize, usize::MAX - 1)) {
             for name in special::names() {
                 self.looked(tp, *name as *mut PyObject);
@@ -1023,11 +1118,24 @@ impl Trace {
         if tr_type_immutable(tp) != 0 {
             return;
         }
+        self.of_class(obj);
+        self.looked(tp, name);
+    }
+
+    // Which class obj is of decides something: the class it is of now, once
+    // per object. Whenever the run asks again it is to be of that class: no
+    // write of the run gives an object another (writes.rs refuses the
+    // store), so anything else did, and the trace is refused whatever
+    // becomes of obj, as when the body is over (_region_settled).
+    unsafe fn of_class(&mut self, obj: *mut PyObject) {
+        let tp = ffi::Py_TYPE(obj);
         if self.seen.insert((obj as usize, 0)) {
             self.count += 1;
+            self.typed_as.insert(obj as usize, tp as usize);
             self.entries.typed.push(Typed { obj: counted(obj), class: counted(tp as *mut PyObject) });
+        } else if self.typed_as.get(&(obj as usize)) != Some(&(tp as usize)) {
+            self.refused = Some(format!("the class of a {} changed while it was traced", type_name(obj)));
         }
-        self.looked(tp, name);
     }
 
     // As typed, for a special method the interpreter looks up by its name.
@@ -1041,11 +1149,18 @@ impl Trace {
         }
     }
 
-    // What class tp has under `name` decides something.
+    // What class tp has under `name` decides something: what it has now,
+    // which it is to have when the body is over (see _region_settled). The
+    // first read of a name is the one recorded. Whenever the run reads a
+    // name of the class again, every name read of it so far is to give
+    // what it gave: no write of the run is to a class (writes.rs refuses
+    // the store), so nothing explains another answer. (By the class's
+    // version tag where that is the one of the last read: one comparison.)
     unsafe fn looked(&mut self, tp: *mut ffi::PyTypeObject, name: *mut PyObject) {
-        if tr_type_immutable(tp) != 0 || !self.seen.insert((tp as usize, name as usize)) {
+        if tr_type_immutable(tp) != 0 {
             return;
         }
+        let first = self.seen.insert((tp as usize, name as usize));
         let i = match self.class_of.get(&(tp as usize)) {
             Some(i) => *i,
             None => {
@@ -1054,8 +1169,38 @@ impl Trace {
                 self.entries.classes.len() - 1
             }
         };
-        self.count += 1;
-        self.entries.classes[i].names.push((own(name), None));
+        let c = &self.entries.classes[i];
+        if tr_type_version_is(tp, c.tag.get()) == 0 {
+            if let Some((n, now)) = self.class_differs(c, true)
+                && !self.stale.iter().any(|(kind, at, _)| matches!(kind, Stale::Class) && *at == tp as usize)
+            {
+                let what = c.differs(n, now, "when the run reads the class again");
+                self.stale.push((Stale::Class, tp as usize, what));
+            }
+        }
+        if first {
+            self.count += 1;
+            let found = tr_type_lookup(tp, name);
+            self.entries.classes[i].names.push((own(name), (!found.is_null()).then(|| counted(found))));
+        }
+        self.entries.classes[i].tag.set(tr_type_version(tp));
+    }
+
+    // Whether the trace itself bound `o` on a class (see _region_bound).
+    fn bound(&self, o: *mut PyObject) -> bool {
+        !o.is_null() && self.bound.iter().any(|b| b.as_ptr() == o)
+    }
+
+    // The first name of class `c` that does not give what the run read
+    // there (Class::differing), as long as the trace has its own objects on
+    // classes. A name that gives one of those now is the trace's to take
+    // off again, and is compared then (_region_reads). `body`: the body
+    // runs, and the tracer takes its own off and puts them back around a
+    // call of the program's (autograd.Function.apply): a name READ AS one
+    // of them may give the class's own now. When the body is over
+    // (_region_settled) they are all on, and such a name changed.
+    unsafe fn class_differs(&self, c: &Class, body: bool) -> Option<(usize, *mut PyObject)> {
+        c.differing().find(|(n, now)| !self.bound(*now) && !(body && c.names[*n].1.as_ref().is_some_and(|had| self.bound(had.as_ptr()))))
     }
 
     // The traced run asked a question about a class (see asked.rs): what the
@@ -1087,9 +1232,18 @@ impl Trace {
         if self.refused.is_some() || q.against.is_null() {
             return;
         }
-        if tr_type_immutable(of) == 0 && self.seen.insert((of as usize, usize::MAX)) {
-            self.count += 1;
-            self.entries.mros.push(Mro { class: counted(of as *mut PyObject), mro: own((*of).tp_mro) });
+        // The order the class resolves its bases in, once per class; a
+        // later question about the class is to find that order (as the
+        // class of an object: see of_class).
+        if tr_type_immutable(of) == 0 {
+            if self.seen.insert((of as usize, usize::MAX)) {
+                self.count += 1;
+                self.mro_at.insert(of as usize, self.entries.mros.len());
+                self.entries.mros.push(Mro { class: counted(of as *mut PyObject), mro: own((*of).tp_mro) });
+            } else if !self.mro_at.get(&(of as usize)).and_then(|i| self.entries.mros.get(*i)).is_some_and(|m| m.class.as_ptr() == of as *mut PyObject && m.holds()) {
+                self.refused = Some(format!("the bases of {} changed while it was traced", std::ffi::CStr::from_ptr((*of).tp_name).to_string_lossy()));
+                return;
+            }
         }
         let special = if q.instance { c"__instancecheck__" } else { c"__subclasscheck__" };
         let mut against = vec![];
@@ -1200,6 +1354,7 @@ impl Trace {
                     }
                     if self.seen.insert((obj as usize, n as usize)) {
                         self.count += 1;
+                        self.read_at.insert((obj as usize, n as usize), self.entries.reads.len());
                         self.entries.reads.push(Read { obj: counted(obj), name: Some(own(n)), want: Want::Is, value: Some(counted(v)), at: place(), after: self.wrote.len() });
                     }
                     if ffi::PyDict_Check(v) != 0 {
@@ -1211,6 +1366,42 @@ impl Trace {
             }
         } else if super::effects::lru_cache_wrapper(obj) && !super::user_pure(obj) {
             self.refused = Some("it calls a function behind functools.lru_cache, whose cache it cannot check".into());
+        }
+    }
+
+    // A descriptor of C (a slot, a getset) gave `value` for obj.name. The
+    // first read is the one recorded. What the run reads of a slot it wrote
+    // is what its last store put there, and no entry; a later read is to
+    // find what the first found, or what the run's own last store since
+    // put there (see item).
+    unsafe fn given(&mut self, obj: *mut PyObject, name: *mut PyObject, value: *mut PyObject) {
+        let at = (obj as usize, name as usize);
+        let note = |t: &mut Trace, how: &str| {
+            if !t.stale.iter().any(|(kind, a, _)| matches!(kind, Stale::Slot) && *a == obj as usize) {
+                t.stale.push((Stale::Slot, obj as usize, format!(".{} of a {}, which {how} and is {} when the run reads it again", text(name), type_name(obj), shown(value))));
+            }
+        };
+        if self.written.contains(&at) {
+            match self.wrote.slot(obj, 0, name) {
+                Since::Put(p) if left(value, p) => return,
+                // (The store that marked it raised: a read as any.)
+                Since::Nothing => {}
+                _ => return note(self, "the run wrote"),
+            }
+        }
+        if self.seen.insert(at) {
+            self.count += 1;
+            self.read_at.insert(at, self.entries.reads.len());
+            self.entries.reads.push(Read { obj: counted(obj), name: Some(own(name)), want: want_of(value), value: Some(counted(value)), at: place(), after: self.wrote.len() });
+        } else if let Some(r) = self.read_at.get(&at).and_then(|i| self.entries.reads.get(*i)).filter(|r| r.obj.as_ptr() == obj && r.name.as_ref().is_some_and(|n| n.as_ptr() == name)) {
+            if !r.settled(&self.wrote, value) {
+                let was = format!("was {}", shown(r.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr())));
+                note(self, &was);
+            }
+        } else {
+            // Read before, and the first read is not among the entries:
+            // nothing says what this one is to find.
+            self.refused = Some(format!("it reads .{} of a {} again, and the first read is not on record", text(name), type_name(obj)));
         }
     }
 
@@ -1285,10 +1476,8 @@ impl Trace {
                 let n = text(name);
                 // `__dict__` too: the items read from the dict it gave are
                 // obj's for as long as obj has that dict.
-                let written = self.written.contains(&(obj as usize, name as usize));
-                if !ran && !written && !value.is_null() && n != "__class__" && self.seen.insert((obj as usize, name as usize)) {
-                    self.count += 1;
-                    self.entries.reads.push(Read { obj: counted(obj), name: Some(own(name)), want: want_of(value), value: Some(counted(value)), at: place(), after: self.wrote.len() });
+                if !ran && !value.is_null() && n != "__class__" {
+                    self.given(obj, name, value);
                 }
             }
             4 => {
@@ -1405,6 +1594,9 @@ pub(super) fn sweep_trace() {
     TRACE.with_borrow_mut(|t| {
         if let Some(t) = t {
             unsafe { sweep(&mut t.entries) };
+            t.read_at.clear();
+            t.typed_as.clear();
+            t.mro_at.clear();
             t.group_of = t.entries.groups.iter().enumerate().map(|(i, g)| (g.holder.as_ptr() as usize, i)).collect();
         }
     });
@@ -1473,12 +1665,7 @@ pub unsafe fn class_of(obj: *mut PyObject, name: *mut PyObject) {
 // an object that can be given another class although the class itself cannot
 // change, where typed() records nothing: a module (`m.__class__ = Sub`).
 pub unsafe fn class_is(obj: *mut PyObject) {
-    with(|t| {
-        if t.seen.insert((obj as usize, 0)) {
-            t.count += 1;
-            t.entries.typed.push(Typed { obj: counted(obj), class: counted(ffi::Py_TYPE(obj) as *mut PyObject) });
-        }
-    });
+    with(|t| t.of_class(obj));
 }
 
 // super().name was loaded in a method of class `cls` on `obj`: what the
@@ -1574,7 +1761,17 @@ pub unsafe fn cell(cell: *mut PyObject, value: *mut PyObject) {
     with(|t| {
         if t.seen.insert((cell as usize, 0)) {
             t.count += 1;
+            t.read_at.insert((cell as usize, 0), t.entries.reads.len());
             t.entries.reads.push(Read { obj: counted(cell), name: None, want: want_of(value), value: Some(counted(value)), at: String::new(), after: t.wrote.len() });
+        } else if let Some(r) = t.read_at.get(&(cell as usize, 0)).and_then(|i| t.entries.reads.get(*i)).filter(|r| r.name.is_none() && r.obj.as_ptr() == cell) {
+            // A later read is to find what the first found, or what the
+            // run's own last store since put there (see Trace::item).
+            if !r.settled(&t.wrote, value) && !t.stale.iter().any(|(kind, at, _)| matches!(kind, Stale::Cell) && *at == cell as usize) {
+                let was = r.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr());
+                t.stale.push((Stale::Cell, cell as usize, format!("a cell that held {} and holds {} when the run reads it again", shown(was), shown(value))));
+            }
+        } else {
+            t.refused = Some("it reads a cell again, and the first read is not on record".into());
         }
     });
 }
@@ -1617,10 +1814,18 @@ pub unsafe fn starred(o: *mut PyObject) {
 }
 
 // The truth (or length) of obj was taken.
+// A view of a dict (keys, values, items) has the dict's length, and a
+// mappingproxy what the mapping it shows answers: a dict's own length, or
+// for an instance of a Python class what its class says.
 pub unsafe fn truth(obj: *mut PyObject) {
     with(|t| {
-        if let Some((h, kind)) = Trace::container(obj).filter(|(h, _)| *h == obj) {
+        if let Some((h, kind)) = Trace::container(obj) {
             t.length(h, kind);
+            if h != obj && tr_view_dict(obj).is_null() {
+                t.special(h, c"__len__");
+            }
+        } else if ffi::Py_TYPE(obj) == &raw mut ffi::PyDictProxy_Type {
+            t.refused = Some("it measures the namespace of something that isn't a class".into());
         } else {
             if tensor(obj) {
                 t.keyed(obj);
@@ -1716,7 +1921,6 @@ struct Constant {
 // file). Made by torch._rust._region_reads when the body's trace is over.
 #[pyclass(frozen, module = "torch._rust")]
 pub struct Reads {
-    thread: Option<tffi::Word>,
     entries: GilCell<Entries>,
     consts: GilCell<Vec<Constant>>,
     // Called before the region's function when a constant's data moved (set
@@ -2027,6 +2231,14 @@ impl Reads {
         self.last.get()
     }
 
+    // The region was not entered for `why`, asked where it is entered (see
+    // region.rs's Variant::enter): counted with the misses of the reads.
+    pub fn missed(&self, why: &'static str) {
+        self.misses.set(self.misses.get() + 1);
+        MISSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.last.set(why);
+    }
+
     // Whether an object the entries expect to find died (found at a check
     // that failed): the region can never be entered again.
     pub fn dead(&self) -> bool {
@@ -2070,9 +2282,7 @@ impl Reads {
             }
             ok
         };
-        let why = if self.thread.is_none() || super::ambient::word() != self.thread {
-            "thread state"
-        } else if tffi::torch_function_mode_active() {
+        let why = if tffi::torch_function_mode_active() {
             // The mode is to see the program's own calls: a region makes none.
             "a torch function mode"
         } else if e.groups.get(self.hot.get()).is_some_and(|g| !passes(g)) {
@@ -2283,7 +2493,7 @@ impl Reads {
             if unsafe { exact_scalar(o.as_ptr()) } || o.is_none() || o.is_instance_of::<pyo3::types::PyBool>() { format!("{}", o.repr().map_or("?".into(), |r| r.to_string())) } else { format!("<{tp} at {:p}>", o.as_ptr()) }
         };
         let show = |p: &Pin| unsafe { Bound::from_borrowed_ptr_or_opt(py, p.as_ptr()) }.map_or("<an object that died>".into(), |o| shown(&o.unbind()));
-        let mut out = vec![format!("thread state {}", self.thread.map_or("unread".into(), |w| format!("{:#x} {:#x}", w.a, w.b)))];
+        let mut out = vec![];
         out.extend(unsafe { &*self.consts.get() }.iter().map(|c| format!("{} stays a {}", shown(&c.obj), c.key)));
         out.extend(e.keyed.iter().map(|k| format!("{}, which was asked about, stays a {}", show(&k.obj), k.key)));
         out.extend(e.typed.iter().map(|t| format!("type({}) is {}", show(&t.obj), show(&t.class))));
@@ -2368,15 +2578,55 @@ pub fn _region_known(obj: &Bound<'_, PyAny>, given: Vec<Bound<'_, PyAny>>) -> bo
 /// asked about, those are the guard's to compare or the graph's to make.
 #[pyfunction]
 pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
-    // What the stores replaced, and the log of the writes below, are let go
-    // of here: a frame that runs for it is seen (foreign.rs).
+    // WHAT THE COMPARISONS HERE REST ON. This is the one moment every kind
+    // of read is compared with what is there, and it is not the last moment
+    // code of the program's can run under the trace: behind it the trace
+    // lets go of what it still counts (the log of the writes just below,
+    // the records of the writes in _region_writes, the entries in
+    // _region_reads, what the tracer's Python code holds at the trace's
+    // gate), and an object that dies of it runs its finalizer THEN, behind
+    // the comparison. They rest on foreign.rs: every such release is under
+    // a `Releasing`, what the tracer's Python code holds of the program's
+    // is kept until the gate, and a frame entered under any of them makes
+    // the trace no region. So a region is made only if no frame of the
+    // program's ran between this moment and the gate.
+    // WHAT THEY DO NOT REST ON, because nothing gives it: code a death runs
+    // that enters no frame (a C callable as the callback of a weak
+    // reference, the deallocator of a C type). What such code changes
+    // behind this moment is compared by nothing: the entry stays as it was
+    // read, and a later call that finds it so enters the region.
+    // The stores' replaced values, and the log of the writes below, are let
+    // go of here: a frame that runs for it is seen (foreign.rs).
     let _releasing = super::foreign::Releasing::start();
     // The run stands: what its stores replaced is let go of first. The
     // finalizer of an object that dies of it is the last thing the run's
     // own writes set off, and what it changes is compared below.
     super::writes::let_go();
-    TRACE.with_borrow_mut(|t| {
-        let Some(t) = t else { return };
+    // A slot, or another attribute a descriptor of C gives, is asked for
+    // where the trace is not borrowed (were the descriptor replaced by one
+    // of Python, its frame runs here and is seen as any frame under a
+    // release), and what it gave is let go of there too.
+    let slots: Vec<(Py<PyAny>, Py<PyAny>)> = TRACE.with_borrow(|t| t.as_ref().map_or(vec![], |t| t.entries.reads.iter().filter_map(|r| r.name.as_ref().map(|n| unsafe { (own(r.obj.as_ptr()), own(n.as_ptr())) })).collect()));
+    let ask = |(obj, name): &(Py<PyAny>, Py<PyAny>)| unsafe {
+        let now = ffi::PyObject_GenericGetAttr(obj.as_ptr(), name.as_ptr());
+        if now.is_null() {
+            ffi::PyErr_Clear();
+        }
+        (!now.is_null()).then(|| Py::<PyAny>::from_owned_ptr(Python::assume_attached(), now))
+    };
+    let given: Vec<Option<Py<PyAny>>> = slots.iter().map(&ask).collect();
+    let ptr = |o: &Option<Py<PyAny>>| o.as_ref().map_or(std::ptr::null_mut(), |o| o.as_ptr());
+    // The slots that are not as the run left them: the place of each among
+    // `slots`, and whether a store of the run was to it since the read.
+    let mut unsettled: Vec<(usize, bool)> = vec![];
+    let log = TRACE.with_borrow_mut(|t| {
+        let t = t.as_mut()?;
+        unsafe {
+            for a in t.asked_of.iter_mut() {
+                let o = ffi::PyWeakref_GetObject(a.weak.as_ptr());
+                a.changed = o != ffi::Py_None() && a.key.as_ref().is_some_and(|k| !k.holds(o));
+            }
+        }
         for o in &ours {
             if let Some(i) = t.asked_at.get(&(o.as_ptr() as usize))
                 && unsafe { ffi::PyWeakref_GetObject(t.asked_of[*i].weak.as_ptr()) } == o.as_ptr()
@@ -2385,23 +2635,22 @@ pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
             }
         }
         // (Taken: the writes are compared this once, and what the log
-        // counts is not to pass for alive when the entries are swept.)
-        let (e, log) = (&t.entries, std::mem::take(&mut t.wrote));
+        // counts is not to pass for alive when the entries are swept. The
+        // caller drops it where the trace is not borrowed.)
+        let log = std::mem::take(&mut t.wrote);
+        let e = &t.entries;
         let mut stale = vec![];
+        let mut restored = vec![];
         unsafe {
             for r in e.reads.iter().filter(|r| r.name.is_none()) {
                 let (cell, was) = (r.obj.as_ptr(), r.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr()));
                 let now = PyCell_Get_borrowed(cell);
-                match log.cell(cell, r.after) {
-                    None if r.holds() => {}
-                    Some(put) if left(now, put) => {
-                        // What the cell held before the run's own store is
-                        // no check (see _region_reads).
-                        if !r.holds() {
-                            t.restored.insert(cell as usize);
-                        }
-                    }
-                    _ => stale.push((Stale::Cell, cell as usize, format!("a cell that held {} and holds {} when the traced run ends", shown(was), shown(now)))),
+                if !r.settled(&log, now) {
+                    stale.push((Stale::Cell, cell as usize, format!("a cell that held {} and holds {} when the traced run ends", shown(was), shown(now))));
+                } else if !r.holds() {
+                    // What the cell held before the run's own store is no
+                    // check (see _region_reads).
+                    restored.push(cell as usize);
                 }
             }
             for f in e.functions.iter().filter(|f| !f.holds()) {
@@ -2420,8 +2669,78 @@ pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
                     stale.push((Stale::Group, h as usize, format!("{what} when the traced run ends")));
                 }
             }
+            // What a class has under a name it was asked for: what it had
+            // then (see class_differs for what the trace itself has there).
+            for c in &e.classes {
+                if let Some((n, now)) = t.class_differs(c, false) {
+                    stale.push((Stale::Class, c.class.as_ptr() as usize, c.differs(n, now, "when the traced run ends")));
+                }
+            }
+            // A slot: as it was read, or what the run's own last store into
+            // it put there (Read::settled). The reads are those `slots` was
+            // made of, in order: nothing ran in between that records one.
+            let named: Vec<&Read> = e.reads.iter().filter(|r| r.name.is_some()).collect();
+            if named.len() != slots.len() || named.iter().zip(&slots).any(|(r, (obj, _))| r.obj.as_ptr() != obj.as_ptr()) {
+                t.refused.get_or_insert_with(|| "its reads of slots changed while they were compared".into());
+            }
+            for (i, (r, now)) in named.iter().zip(&given).enumerate() {
+                if !r.settled(&log, ptr(now)) {
+                    let unwritten = matches!(log.slot(r.obj.as_ptr(), r.after, slots[i].1.as_ptr()), Since::Nothing);
+                    unsettled.push((i, unwritten));
+                }
+            }
+            // What is compared for any holder, whether or not it outlives
+            // the run: which class an object is of, the order a class
+            // resolves its bases in, abc's registrations.
+            if t.refused.is_none() {
+                if let Some(c) = e.typed.iter().find(|c| ffi::Py_TYPE(c.obj.as_ptr()) as *mut PyObject != c.class.as_ptr()) {
+                    t.refused = Some(format!("the class of a {} changed while it was traced", type_name(c.obj.as_ptr())));
+                } else if let Some(m) = e.mros.iter().find(|m| !m.holds()) {
+                    t.refused = Some(format!("the bases of {} changed while it was traced", std::ffi::CStr::from_ptr((*(m.class.as_ptr() as *mut ffi::PyTypeObject)).tp_name).to_string_lossy()));
+                } else if e.abc.is_some_and(|was| asked::token() != was) {
+                    t.refused = Some("a class was registered with an ABC while it was traced".into());
+                }
+            }
         }
+        t.restored.extend(restored);
         t.stale.extend(stale);
+        Some(log)
+    });
+    drop(log);
+    // A slot that is not as the run left it is asked once more: one that is
+    // another object on every read is one no check can compare, and is
+    // named as that.
+    let again: Vec<Option<Py<PyAny>>> = unsettled.iter().map(|(i, _)| ask(&slots[*i])).collect();
+    TRACE.with_borrow_mut(|t| {
+        let Some(t) = t else { return };
+        for ((i, unwritten), again) in unsettled.iter().zip(&again) {
+            let (obj, name) = (slots[*i].0.as_ptr(), slots[*i].1.as_ptr());
+            let now = ptr(&given[*i]);
+            unsafe {
+                let Some(r) = t.entries.reads.iter().filter(|r| r.name.is_some()).nth(*i) else { continue };
+                if *unwritten && !left(ptr(again), now) {
+                    t.stale.push((Stale::Fresh, obj as usize, format!("it reads .{} of a {}, which is another object on every read{}", text(name), type_name(obj), r.at)));
+                } else {
+                    let was = r.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr());
+                    t.stale.push((Stale::Slot, obj as usize, format!(".{} of a {}, which was {} and is {} when the traced run ends", text(name), type_name(obj), shown(was), shown(now))));
+                }
+            }
+        }
+    });
+}
+
+/// What the trace on this thread has itself bound on classes of the
+/// program's for as long as its body runs (``nn.Module.__call__`` and
+/// ``__getattr__`` by fx, ``autograd.Function.apply`` and the ``__init__`` of
+/// a Function's context by the tracer), by identity: where the run read one
+/// of these under a class's name, what the class has there once the trace
+/// has taken them off again is what a region checks (see _region_reads).
+#[pyfunction]
+pub fn _region_bound(objs: Vec<Bound<'_, PyAny>>) {
+    TRACE.with_borrow_mut(|t| {
+        if let Some(t) = t {
+            t.bound = objs.into_iter().map(Bound::unbind).collect();
+        }
     });
 }
 
@@ -2453,7 +2772,7 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
     // and the rest of the trace's records let go of what they counted: a
     // frame that runs for it is seen (foreign.rs).
     let _releasing = super::foreign::Releasing::start();
-    let Some(t) = TRACE.take() else { return Ok((None, None)) };
+    let Some(mut t) = TRACE.take() else { return Ok((None, None)) };
     if let Some(why) = t.refused {
         return Ok((None, Some(why)));
     }
@@ -2462,23 +2781,22 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
     }
     let mut e = t.entries;
     unsafe {
-        if let Some(c) = e.typed.iter().find(|c| ffi::Py_TYPE(c.obj.as_ptr()) as *mut PyObject != c.class.as_ptr()) {
-            return Ok((None, Some(format!("the class of a {} changed while it was traced", type_name(c.obj.as_ptr())))));
-        }
-        if let Some(m) = e.mros.iter().find(|m| !m.holds()) {
-            return Ok((None, Some(format!("the bases of {} changed while it was traced", std::ffi::CStr::from_ptr((*(m.class.as_ptr() as *mut ffi::PyTypeObject)).tp_name).to_string_lossy()))));
-        }
-        if e.abc.is_some_and(|was| asked::token() != was) {
-            return Ok((None, Some("a class was registered with an ABC while it was traced".into())));
-        }
-        // fx has put back what it bound on nn.Module: what the classes have
-        // now is what the body's own code saw.
+        // The trace has taken off what it bound on classes (_region_bound):
+        // where the run read one of those, what the class has now is what
+        // the body's own code sees without a trace, and what a region
+        // checks. Any other name is to give what it gave when it was read
+        // (see _region_settled for what that rests on). The tags are those
+        // of the trace's reads: a region compares the names the first time.
         for c in &mut e.classes {
-            let tp = c.class.as_ptr() as *mut ffi::PyTypeObject;
-            for (name, had) in &mut c.names {
-                let found = tr_type_lookup(tp, name.as_ptr());
-                *had = (!found.is_null()).then(|| counted(found));
+            let differing: Vec<(usize, *mut PyObject)> = c.differing().collect();
+            for (n, now) in differing {
+                if c.names[n].1.as_ref().is_some_and(|had| t.bound.iter().any(|b| had.is(b.as_ptr()))) {
+                    c.names[n].1 = (!now.is_null()).then(|| counted(now));
+                } else {
+                    t.stale.push((Stale::Class, c.class.as_ptr() as usize, c.differs(n, now, "when the trace is over")));
+                }
             }
+            c.tag.set(0);
         }
         // What the run read from a container it made is no entry: every
         // run of the region makes its own, and the trace's is the traced
@@ -2488,10 +2806,6 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
         // is no entry (so a getset that gives another object on every read
         // of one of them is nothing to refuse).
         sweep(&mut e);
-        if let Some(r) = e.reads.iter().find(|r| r.name.is_some() && !r.holds()) {
-            let name = r.name.as_ref().map_or("?".into(), |n| text(n.as_ptr()));
-            return Ok((None, Some(format!("it reads .{name} of a {}, which is another object on every read{}", type_name(r.obj.as_ptr()), r.at))));
-        }
         // A container the run read whole after changing it: what it holds
         // on a later call is not what the trace saw, unless the run made it
         // (swept above) or the region checks all of it as it is given (then
@@ -2505,13 +2819,22 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
         // without that check would run on a state its trace did not see.
         let stale = |what: &str| -> PyResult<(Option<Py<Reads>>, Option<String>)> { Ok((None, Some(format!("it read {what}, and no write the run recorded explains it")))) };
         let at = |o: &Pin| o.as_ptr() as usize;
-        if let Some((_, _, what)) = t.stale.iter().find(|(kind, a, _)| match kind {
+        if let Some((kind, a, what)) = t.stale.iter().find(|(kind, a, _)| match kind {
             Stale::Cell => e.reads.iter().any(|r| r.name.is_none() && at(&r.obj) == *a),
             Stale::Function => e.functions.iter().any(|f| at(&f.func) == *a),
             Stale::Dict => e.dicted.iter().any(|d| at(&d.obj) == *a),
             Stale::Group => e.groups.iter().any(|g| at(&g.holder) == *a),
+            Stale::Class => e.classes.iter().any(|c| at(&c.class) == *a),
+            Stale::Slot | Stale::Fresh => e.reads.iter().any(|r| r.name.is_some() && at(&r.obj) == *a),
         }) {
-            return stale(what);
+            // (An attribute that is another object on every read is named
+            // as that, whichever read found it first.)
+            let fresh = |a: &usize| t.stale.iter().find(|(k, b, _)| matches!(k, Stale::Fresh) && b == a).map(|(_, _, what)| what.clone());
+            return match (kind, a) {
+                (Stale::Fresh, _) => Ok((None, Some(what.clone()))),
+                (Stale::Slot, a) if fresh(a).is_some() => Ok((None, fresh(a))),
+                _ => stale(what),
+            };
         }
         // What a cell held before the run's own store that it still held
         // when the body was over (see _region_settled) is no check.
@@ -2541,7 +2864,7 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
             let Some(key) = a.key else {
                 return Ok((None, Some(format!("it asks about a {} it read from state that has no key (no plain dense tensor of exactly torch.Tensor or nn.Parameter), which it cannot check", type_name(o)))));
             };
-            if !key.holds(o) {
+            if a.changed {
                 return stale(&format!("the class, dtype, device, shape or requires_grad of a {}, which is another when the traced run ends", type_name(o)));
             }
             e.keyed.push(Keyed { obj: counted(o), key, ours: a.ours });
@@ -2549,7 +2872,6 @@ pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(
         weaken(&mut e);
     }
     let reads = Reads {
-        thread: t.thread,
         entries: GilCell::new(e),
         consts: GilCell::new(vec![]),
         rebind: GilCell::new(None),

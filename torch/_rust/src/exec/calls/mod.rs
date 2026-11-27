@@ -82,6 +82,7 @@ mod again;
 mod check;
 mod entries;
 mod finish;
+mod frames;
 mod known;
 mod origins;
 mod reading;

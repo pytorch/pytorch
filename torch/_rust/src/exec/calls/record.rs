@@ -55,10 +55,14 @@
 //     a release that was not seen; an operator between the instructions;
 //     an exception raised under the body; a generator's yield; a witness
 //     that disagrees with its entry;
-//   - a Python frame is the body's only if an instruction that may enter
-//     one (no row, or a row that names frames) is in flight in the innermost
-//     activation of the run. Any other frame (a finalizer, a weak-reference
-//     callback, a signal handler: no instruction called it) is a STOP;
+//   - a Python frame is the body's only if the instruction in flight in the
+//     innermost activation of the run names its function and has entered no
+//     frame yet (frames.rs). Any other frame (a finalizer, a weak-reference
+//     callback, a signal handler: no instruction called it) is a STOP. The
+//     one frame that is nothing is the executor's own empty function, by
+//     which CPython handles what is pending (trampoline.rs), told by the
+//     identity of its function object and counted; a frame that runs UNDER
+//     it (the finalizer of garbage the collector found) is a stop like any;
 //   - nothing is witnessed behind a stop: the entry's witness, if its call
 //     is in flight, and the run's are ended there;
 //   - every recording is kept: one that begins inside a stopped one (a
@@ -79,6 +83,7 @@ use pyo3::prelude::*;
 
 use super::again::{self, Armed};
 use super::entries::{blank, text, Call, Maker};
+use super::frames::Frames;
 use super::known::{self, Reasons};
 pub use super::known::Plain;
 use super::origins::{class_text, plain_tensor, Origin, Origins};
@@ -86,8 +91,8 @@ use super::shadow::{self, Shadow};
 use super::{reading, slots, witness, Assert, Callee, Entry, Tmpl, PURE};
 use crate::cfg::ir::{Instr, Op};
 use crate::cfg::opcodes::IS_OP;
-use crate::exec::ffi::{tr_frame_localsplus, tr_frame_nlocalsplus, tr_frame_qualname, Frame};
-use crate::exec::rules::{self, Class, Enters, License, Res, Site};
+use crate::exec::ffi::{tr_frame_func, tr_frame_localsplus, tr_frame_nlocalsplus, tr_frame_qualname, Frame};
+use crate::exec::rules::{self, Class, License, Res, Site};
 use crate::exec::tensor_key::TensorKey;
 use crate::exec::hist;
 use crate::exec::reads;
@@ -129,9 +134,9 @@ enum Pending {
     Entry(Box<Call>),
     // No entry: what it is; whether a tensor it leaves was made by it; why
     // it is no entry though it runs C code on a tensor, if that is so; the
-    // tensors among its operands; whether it may enter a Python frame;
-    // whether its result is a known value (None: known.rs was told).
-    Other { what: String, makes: bool, why: Option<String>, operands: Vec<usize>, enters: bool, known: Option<bool> },
+    // tensors among its operands; the Python frame it may enter; whether
+    // its result is a known value (None: known.rs was told).
+    Other { what: String, makes: bool, why: Option<String>, operands: Vec<usize>, frames: Frames, known: Option<bool> },
 }
 
 // An instruction in flight: with the operators the run's witness had seen
@@ -264,7 +269,7 @@ impl Rec {
             };
             if let Some(made) = self.maker().built(ins, all) {
                 self.origins.built(at, made);
-                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), enters: false, known: Some(false) }, at);
+                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), frames: Frames::of(row, &ins.op, site, callee), known: Some(false) }, at);
             }
             let facts = self.shadow.facts;
             let call = match (row, callee) {
@@ -324,9 +329,9 @@ impl Rec {
             // an instruction that runs C code on a tensor.
             let makes = callee.map_or(row.is_none() && tensor, |f| rules::torch::name(f).is_some());
             let operands = all.iter().filter(|o| plain_tensor(**o)).map(|o| *o as usize).collect();
-            let enters = row.is_none_or(|r| r.enters == Enters::Named);
+            let frames = Frames::of(row, &ins.op, site, callee);
             let what = if matches!(ins.op, Op::ToBool) { format!("{name} of {}", self.origins.known.maker((depth, ins.args[0].0))) } else { format!("{name}{later}") };
-            self.push(Pending::Other { what, makes, why, operands, enters, known }, at)
+            self.push(Pending::Other { what, makes, why, operands, frames, known }, at)
         }
     }
 
@@ -549,6 +554,14 @@ pub fn scope(begins: bool) {
 // A Python frame is entered under the recorded run; `runs`: the executor
 // runs it (asked first), false: it is left to CPython.
 pub unsafe fn frame(frame: *mut Frame, runs: bool) {
+    // The executor's own empty function: no code of the program's, and no
+    // frame an instruction entered. What runs under it is told like any.
+    if crate::exec::trampoline::is_breaker(unsafe { tr_frame_func(frame) }) {
+        if runs {
+            REC.with_borrow_mut(|r| r.last_mut().map(|r| r.shadow.breaks += r.shadow.stop.is_none() as u64));
+        }
+        return;
+    }
     if runs {
         // What reads.rs is told of an instruction: whether it entered a frame.
         reads::frame_entered();
@@ -565,12 +578,11 @@ pub unsafe fn frame(frame: *mut Frame, runs: bool) {
             r.stop(&name(), "a frame the executor does not run: nothing of it is seen".into());
             return;
         }
-        let stop = match r.stack.last() {
+        let stop = match r.stack.last_mut() {
             Some(InFlight { pending: Pending::Entry(call), .. }) => Some((call.label.clone(), format!("the Python frame {} ran under the C call of an entry", name()))),
-            // The innermost activation has an instruction in flight that may
-            // enter a frame: the frame is taken for the one it called.
-            Some(InFlight { pending: Pending::Other { enters: true, .. }, at, .. }) if at.0 == depth => None,
-            Some(InFlight { pending: Pending::Other { what, .. }, at, .. }) if at.0 == depth => Some((name(), format!("a frame that no instruction of the body called: it ran under {what}, which enters none"))),
+            // The innermost activation has an instruction in flight: the
+            // frame is the one it called, or no frame of the body's.
+            Some(InFlight { pending: Pending::Other { what, frames, .. }, at, .. }) if at.0 == depth => frames.enter(frame).err().map(|why| (name(), format!("a frame that no instruction of the body called: it ran under {what}, {why}"))),
             _ => Some((name(), "a frame that no instruction of the body called: it ran between two instructions (a finalizer, a callback)".into())),
         };
         match stop {

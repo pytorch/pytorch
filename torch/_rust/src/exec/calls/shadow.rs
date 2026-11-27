@@ -79,8 +79,10 @@ pub struct Shadow {
     pub reasons: Vec<(String, u64)>,
     // Conditional jumps taken under the body: on a known value, on any other.
     pub jumps: (u64, u64),
-    // Python frames that ran under the body.
+    // Python frames that ran under the body; how often the executor's own
+    // empty function ran under it (what is pending is handled there).
     pub frames: u64,
+    pub breaks: u64,
     // Later arrivals at the place the list was run on (again.rs): how many
     // gave the block's outputs, how many could not be compared, and the
     // first that differed.
@@ -161,10 +163,10 @@ impl Shadow {
         let counts = |v: &[(String, u64)]| format!("{{{}}}", v.iter().map(|(k, n)| format!("{}: {n}", quoted(k))).collect::<Vec<_>>().join(", "));
         let stop = self.stop.as_ref().map_or("null".into(), |(at, why)| format!("[{}, {}]", quoted(at), quoted(why)));
         format!(
-            "{{\"place\": {}, \"status\": {}, \"traced\": {}, \"entries\": {}, \"seen\": {}, \"left_behind\": {}, \"stop\": {stop}, \"refused\": {}, \"text\": {}, \"pins\": {}, \"late\": {}, \"outputs\": [{}, {}], \"unstated\": {}, \"by_value\": {}, \"left\": {}, \"handed\": {}, \"facts\": {}, \"notes\": [{}], \"validated\": {}, \"reasons\": {}, \"jumps\": [{}, {}], \"frames\": {}, \"again\": {}, \"missed\": {}}}",
+            "{{\"place\": {}, \"status\": {}, \"traced\": {}, \"entries\": {}, \"seen\": {}, \"left_behind\": {}, \"stop\": {stop}, \"refused\": {}, \"text\": {}, \"pins\": {}, \"late\": {}, \"outputs\": [{}, {}], \"unstated\": {}, \"by_value\": {}, \"left\": {}, \"handed\": {}, \"facts\": {}, \"notes\": [{}], \"validated\": {}, \"reasons\": {}, \"jumps\": [{}, {}], \"frames\": {}, \"breaks\": {}, \"again\": {}, \"missed\": {}}}",
             quoted(&self.place), quoted(&self.status()), self.traced, self.entries, self.seen, self.left_behind, self.refused.as_deref().map_or("null".into(), quoted), quoted(&self.text),
             self.pins, self.late, self.outputs.0, self.outputs.1, self.unstated, counts(&self.by_value), counts(&self.left), counts(&self.handed), self.facts,
-            self.notes.iter().map(|n| quoted(n)).collect::<Vec<_>>().join(", "), quoted(&self.validated), counts(&self.reasons), self.jumps.0, self.jumps.1, self.frames, quoted(&self.again_text()), counts(&self.missed)
+            self.notes.iter().map(|n| quoted(n)).collect::<Vec<_>>().join(", "), quoted(&self.validated), counts(&self.reasons), self.jumps.0, self.jumps.1, self.frames, self.breaks, quoted(&self.again_text()), counts(&self.missed)
         )
     }
 }
@@ -190,7 +192,9 @@ extern "C" fn dump() {
 /// on later arrivals at the place; ``missed``: the later arrivals on which the
 /// list's own check ended it with nothing done, by the check. ``pins``: tensors that were there before
 /// the run and that the reads it recorded lead to. ``jumps``: conditional
-/// jumps under the body on a (known, other) value.
+/// jumps under the body on a (known, other) value. ``breaks``: how often the
+/// executor's own empty function, by which the interpreter handles what is
+/// pending, ran under the recorded run.
 #[pyfunction]
 pub fn _calls_shadow(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
     KEPT.with_borrow(|kept| {
@@ -219,6 +223,7 @@ pub fn _calls_shadow(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
                 d.set_item("reasons", s.reasons.clone())?;
                 d.set_item("jumps", s.jumps)?;
                 d.set_item("frames", s.frames)?;
+                d.set_item("breaks", s.breaks)?;
                 d.set_item("again", s.again_text())?;
                 d.set_item("missed", s.missed.clone())?;
                 Ok(d.unbind())

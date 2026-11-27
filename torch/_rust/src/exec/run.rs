@@ -1379,24 +1379,15 @@ impl Act<'_> {
 
     // Runs the variant of a place that is for a call with these args (the
     // place's args, borrowed) in this frame: the first of those to ask (see
-    // region::Variants) whose own checks hold and whose region takes the
-    // call. As region::call: None if there is none.
+    // region::Variants) that takes the call. As region::Variant::enter:
+    // None if there is none.
     unsafe fn place_call(&self, variants: &super::region::Variants, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
         let mut key = None;
         let mut i = 0;
         let home = super::region::namespaces(self.f);
         while let Some(v) = variants.candidate(args, &mut key, i) {
             i += 1;
-            let own = v.facts_hold(args, &home)
-                && v.checks.iter().all(|c| match c {
-                    super::region::Own::Is(k, o) => o.is(args[*k as usize]),
-                    super::region::Own::Check(k, c) => self.check(c, k.map_or(std::ptr::null_mut(), |k| args[k as usize])),
-                });
-            if !own {
-                super::region::passed_over();
-                continue;
-            }
-            match super::region::call(&v.spec, args) {
+            match v.enter(args, &home, &|c, o| self.check(c, o)) {
                 // (One whose reads found an object gone is dropped when
                 // the place is next entered.)
                 Ok(None) => {}

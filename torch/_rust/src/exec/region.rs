@@ -62,6 +62,7 @@ use pyo3::ffi::PyObject;
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
 
+use crate::bindings::ffi as tffi;
 use crate::cfg::ir::{Check, RegionOut, RegionSpec};
 use crate::exec::ffi::{Frame, GilCell, tr_frame_builtins, tr_frame_globals};
 use crate::exec::pin::Pin;
@@ -312,7 +313,6 @@ pub fn _region_body<'py>(py: Python<'py>, args: &Bound<'py, PyTuple>) -> PyResul
     let outs = {
         let _exec = super::ExecGuard::new();
         let _recording = super::reads::Recording::start();
-        let _own = super::ambient::Own::start();
         unsafe { (*body)(&objs) }
     };
     match outs {
@@ -345,12 +345,16 @@ pub type Pos = (u32, u32);
 const WHOLE: u32 = u32::MAX;
 
 // One region of a place: the state it was traced in (what its trace
-// depended on among the place's args), and what runs then.
+// depended on among the place's args), and what runs then. It runs by
+// `enter` and by nothing else.
 pub struct Variant {
     // A block's: what the trace added to the guard. A span's region makes
     // every check itself (see RegionSpec::quick and its func).
-    pub checks: Vec<Own>,
+    checks: Vec<Own>,
     pub spec: RegionSpec,
+    // The ambient word of its trace (see ambient.rs): a call under another
+    // is not for this variant. No variant is made without one.
+    word: tffi::Word,
     // What its checks (these, the quick ones, func's) pin to one object or
     // to one small value, by position (sorted): the atom the arg or item has
     // whenever they hold. A call whose atom there is another is not for this
@@ -375,15 +379,85 @@ impl Variant {
     // whichever of its checks the fact comes from (func's, for a str or a
     // bound method), and one traced in a frame with other globals or
     // builtins whatever its checks say of the dicts it was traced in.
-    pub unsafe fn facts_hold(&self, args: &[*mut PyObject], home: &[*mut PyObject; 2]) -> bool {
+    unsafe fn facts_hold(&self, args: &[*mut PyObject], home: &[*mut PyObject; 2]) -> bool {
         self.home.iter().zip(home).all(|(mine, now)| mine.is(*now)) && !self.pins.iter().any(Pin::dead) && self.facts.iter().all(|(p, a)| atom_at(args, *p) == *a)
+    }
+
+    // THE ENTRY of a region: the one place its graph is run from, for a
+    // block's region and for a span's alike. Everything that must hold of a
+    // call before any region may take it is asked here, in this order, and
+    // each "no" is the same answer, Ok(None): this variant is not for the
+    // call, and the code runs as written unless another variant takes it.
+    //   1. The frame has the namespaces of the traced frame, the objects the
+    //      variant is found by live, and its facts and its own checks of
+    //      the args hold (`check`: the guard's evaluation of one check).
+    //   2. The thread is neutral (ambient.rs), which includes that its word
+    //      can be read.
+    //   3. The quick checks of the args hold.
+    //   4. The thread's word is the word of the trace.
+    //   5. What the trace read is as it was (reads.rs).
+    // THE INVARIANT: between the last read of the thread's state and the
+    // call of the region's function nothing is released and nothing of the
+    // program's runs. The checks of steps 1 to 5 may let go of what they
+    // hold (the reads drop the entries of a holder that died, and with them
+    // the last reference to an object whose finalizer is the program's; a
+    // lowering bound to constants is bound anew), so the state read in step
+    // 2 only turns a call away early and cheaply. What decides is `run`'s
+    // read of it again, behind every check and every release, as the last
+    // thing before the function is called.
+    // `args` (borrowed): the place's args, in a frame with the namespaces
+    // `home`. Some(the place's outputs, owned), or Err with an exception set.
+    pub unsafe fn enter(&self, args: &[*mut PyObject], home: &[*mut PyObject; 2], check: &dyn Fn(&Check, *mut PyObject) -> bool) -> Result<Option<Vec<*mut PyObject>>, ()> {
+        let own = self.facts_hold(args, home)
+            && self.checks.iter().all(|c| match c {
+                Own::Is(k, o) => o.is(args[*k as usize]),
+                Own::Check(k, c) => check(c, k.map_or(std::ptr::null_mut(), |k| args[k as usize])),
+            });
+        if !own {
+            passed_over();
+            return Ok(None);
+        }
+        let py = Python::assume_attached();
+        let spec = &self.spec;
+        let debug = |what: &str| {
+            if std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some() {
+                eprintln!("region {}: {what}", spec.name);
+            }
+        };
+        // Under a mode, a transform or a tracer of the program the code runs
+        // as written: its calls are to be seen one by one. (The thread's
+        // state is asked once: a neutral thread says its word.)
+        let word = match super::ambient::state() {
+            Ok(word) => word,
+            Err(why) => {
+                debug(&format!("not entered: {why}"));
+                return Ok(None);
+            }
+        };
+        // The region of another state of its place (another input size) is
+        // passed over here, for next to nothing.
+        if !spec.quick.iter().all(|q| q.holds(py, args)) {
+            passed_over();
+            return Ok(None);
+        }
+        // Before anything of the region runs.
+        if word != self.word {
+            spec.reads.get().missed("thread state");
+            debug("miss on thread state");
+            return Ok(None);
+        }
+        if CHECK_READS.load(Ordering::Relaxed) && !spec.reads.get().check() {
+            debug(&format!("miss on {}", spec.reads.get().last()));
+            return Ok(None);
+        }
+        run(spec, self.word, args)
     }
 
     // Whether it can never run again: an object it is found by died (a
     // module whose dict was a namespace of its frame too), or one its reads
     // expect to find (see reads.rs).
     fn dead(&self) -> bool {
-        self.pins.iter().chain(&self.home).any(Pin::dead) || self.spec.reads.as_ref().is_some_and(|r| r.get().dead())
+        self.pins.iter().chain(&self.home).any(Pin::dead) || self.spec.reads.get().dead()
     }
 }
 
@@ -748,6 +822,10 @@ unsafe fn parse_facts(keys: &[Bound<'_, PyTuple>]) -> PyResult<(Vec<(Pos, u64)>,
 pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: &[u32], span: bool, asked: bool, f: *mut Frame, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
     let py = Python::assume_attached();
     let null = null_sentinel(py)?;
+    // The word the region is for: read here, before anything of the trace
+    // runs. A thread without one is not traced (the tracer says why: it is
+    // not neutral).
+    let word = super::ambient::word();
     let items: Vec<Bound<'_, PyAny>> =
         args.iter().map(|a| Bound::from_borrowed_ptr_or_opt(py, *a).unwrap_or_else(|| null.clone())).collect();
     let n_args = args.len();
@@ -784,7 +862,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
                 ffi::PyException_SetContext(e.as_ptr(), std::ptr::null_mut());
             }
         });
-        let made = r.and_then(|r| traced(name, r, n_args, span, f));
+        let made = r.and_then(|r| traced(name, r, n_args, span, f, word));
         drop(args);
         made
     };
@@ -805,11 +883,21 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     }
 }
 
-// The region the tracer's result `r` is (None: no region).
-unsafe fn traced(name: &str, r: Bound<'_, PyAny>, n_args: usize, span: bool, f: *mut Frame) -> PyResult<Option<Traced>> {
+// The region the tracer's result `r` is (None: no region). `word`: the
+// thread's word when the trace began.
+unsafe fn traced(name: &str, r: Bound<'_, PyAny>, n_args: usize, span: bool, f: *mut Frame, word: Option<tffi::Word>) -> PyResult<Option<Traced>> {
     if r.is_none() {
         return Ok(None);
     }
+    // No region without the word of its trace and the reads of its trace,
+    // and none whose trace ended under another word than it began under or
+    // on a thread that is no longer neutral: what the body did after the
+    // change is not what a run under the first word does. (The tracer
+    // refuses each of these itself, with its reason; this is the same
+    // answer where it did not.)
+    let Some(word) = word.filter(|w| super::ambient::state() == Ok(*w)) else {
+        return Ok(None);
+    };
     #[allow(clippy::type_complexity)]
     let (func, outputs, objects, checks, reads, quick, keys, writes): (
         Bound<'_, PyAny>,
@@ -821,6 +909,7 @@ unsafe fn traced(name: &str, r: Bound<'_, PyAny>, n_args: usize, span: bool, f: 
         Vec<Bound<'_, PyTuple>>,
         Vec<Bound<'_, PyAny>>,
     ) = r.extract()?;
+    let Some(reads) = reads else { return Ok(None) };
     let writes = writes.iter().map(parse_out).collect::<PyResult<Vec<_>>>()?;
     let quick = quick.iter().map(parse_quick).collect::<PyResult<Vec<_>>>()?;
     let outputs = outputs.iter().map(parse_out).collect::<PyResult<Vec<_>>>()?;
@@ -839,6 +928,7 @@ unsafe fn traced(name: &str, r: Bound<'_, PyAny>, n_args: usize, span: bool, f: 
                 reads,
                 quick,
             },
+            word,
             facts,
             pins: held,
             home: namespaces(f).map(|dict| namespace(dict)),
@@ -938,41 +1028,32 @@ fn parse_out(o: &Bound<'_, PyAny>) -> PyResult<RegionOut> {
     })
 }
 
-// Runs an Op::Region on `args` (borrowed: the block's params, then the
-// version's inputs): Some(the block's outputs, owned), None if the region's
-// own checks failed (run the version it was traced from), or Err with an
-// exception set.
-pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
+thread_local! {
+    // See _region_entry_door.
+    static DOOR: std::cell::RefCell<Option<Py<PyAny>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// For tests of the entry's invariant: `door` (None: no door) is called on
+/// this thread inside every region entry, behind the last of its checks and
+/// in front of the last read of the thread's state: where a release that a
+/// check makes would run a finalizer of the program.
+#[pyfunction]
+#[pyo3(signature = (door=None))]
+pub fn _region_entry_door(door: Option<Py<PyAny>>) {
+    DOOR.set(door);
+}
+
+// Runs a region's graph on `args` (borrowed: the block's params, then the
+// version's inputs), for Variant::enter, which has asked everything a call
+// must pass, under the word `word`, which it reads once more: Some(the
+// block's outputs, owned), None if the thread is no longer under that word
+// or the region's own checks failed (run the version it was traced from),
+// or Err with an exception set.
+unsafe fn run(spec: &RegionSpec, word: tffi::Word, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
     let py = Python::assume_attached();
-    // Under a mode, a transform or a tracer of the program the code runs
-    // as written: its calls are to be seen one by one.
-    if let Some(why) = super::ambient::not_neutral() {
-        if std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some() {
-            eprintln!("region {}: not entered: {why}", spec.name);
-        }
-        return Ok(None);
-    }
-    // The region of another state of its place (another input size) is
-    // passed over here, for next to nothing.
-    if !spec.quick.iter().all(|q| q.holds(py, args)) {
-        passed_over();
-        return Ok(None);
-    }
-    // Before anything of the region runs.
-    if let Some(reads) = &spec.reads
-        && CHECK_READS.load(Ordering::Relaxed)
-        && !reads.get().check()
-    {
-        if std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some() {
-            eprintln!("region {}: miss on {}", spec.name, reads.get().last());
-        }
-        return Ok(None);
-    }
     // A lowering bound to the region's constants is bound anew first if the
     // data of one moved (see reads.rs).
-    if let Some(reads) = &spec.reads
-        && reads.get().rebind(py).is_err()
-    {
+    if spec.reads.get().rebind(py).is_err() {
         return Err(());
     }
     let Ok(null) = null_sentinel(py) else { return Err(()) };
@@ -984,6 +1065,24 @@ pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Option<V
         let a = if a.is_null() { null.as_ptr() } else { *a };
         ffi::Py_INCREF(a);
         ffi::PyList_SET_ITEM(list, i as ffi::Py_ssize_t, a);
+    }
+    // (For tests: what a release behind the checks would run.)
+    if let Some(door) = DOOR.with_borrow(|d| d.as_ref().map(|f| f.clone_ref(py)))
+        && let Err(e) = super::outside_executor(|| door.call0(py))
+    {
+        e.restore(py);
+        ffi::Py_DECREF(list);
+        return Err(());
+    }
+    // The last look at the thread (see Variant::enter): nothing is released
+    // and nothing of the program's runs between it and the call below.
+    if super::ambient::state() != Ok(word) {
+        ffi::Py_DECREF(list);
+        spec.reads.get().missed("thread state");
+        if std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some() {
+            eprintln!("region {}: miss on thread state, behind its checks", spec.name);
+        }
+        return Ok(None);
     }
     // The compiled graph's Python wrappers run on CPython.
     let r = super::outside_executor(|| ffi::PyObject_CallOneArg(spec.func.as_ptr(), list));

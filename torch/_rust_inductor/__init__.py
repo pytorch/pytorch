@@ -3042,6 +3042,8 @@ def _trace_region(
         stats["refused"] += 1
         _traced(name, "refused", not_neutral)
         return None
+    # The word the region will be for (exec/region.rs takes the same).
+    word = _rust()._ambient_word()
     try:
         checks, plan = _plan(
             args, set(unused), span, scalars=block_pipeline is not None
@@ -3146,6 +3148,15 @@ def _trace_region(
         try:
             _rust()._region_own(_writes.own(_tracer()))
             _rust()._region_callbacks(_writes.callbacks(_tracer()))
+            # What is bound on the program's classes for the trace alone (by
+            # fx, and below): a class read under one of these names is
+            # checked on what it has once they are taken off again.
+            module = vars(torch.nn.Module)
+            fx_bound = (module.get("__call__"), module.get("__getattr__"))
+            _rust()._region_bound(
+                [f for f in fx_bound if hasattr(f, "_fx_already_patched")]
+                + [_refusing_init, applying]
+            )
             before = _contents(call_args)
             keep((call_args, restore, before))
             scalar_args = (
@@ -3243,8 +3254,9 @@ def _trace_region(
                 except (KeyError, IndexError):
                     pass
 
+    applying = classmethod(_tracing_apply)
     Backward.__init__ = _refusing_init
-    torch.autograd.Function.apply = classmethod(_tracing_apply)
+    torch.autograd.Function.apply = applying
     try:
         # An explicit (empty) table: without one make_fx turns `detach` into
         # an alias, and the region's graph, which autograd differentiates
@@ -3283,6 +3295,8 @@ def _trace_region(
         or _lost(reads, result.get("held", ()), roots)
         or written.unreachable(reads, roots)
     )
+    if reads is None and unchecked is None:
+        unchecked = "its reads were not recorded"
     if unchecked is not None:
         result.setdefault("refused", unchecked)
     # Whether the code is planned again with its regions ending in front of
@@ -3409,6 +3423,18 @@ def _trace_region(
     elif checked:
         # The reads say when a constant's data is somewhere else.
         reads.shares(overlap)
+    # A region is for the word its trace started under, on a neutral thread:
+    # what a body does after it changed either is not what a run under the
+    # first word does. Asked here, as the last thing before the place gets
+    # its row: exec/region.rs asks the same when it takes the region, with
+    # nothing in between.
+    changed = _rust()._not_neutral()
+    if changed is None and _rust()._ambient_word() != word:
+        changed = "it leaves the state of the thread another than it found"
+    if changed is not None:
+        stats["refused"] += 1
+        _traced(name, "refused", changed)
+        return None
     record = _traced(
         name,
         "region",

@@ -37,6 +37,7 @@ a tensor a region is handed: it is a check of the region. And of where a
 region sits: at the same place whatever the process did before.
 """
 
+import abc
 import array
 import collections
 import contextlib
@@ -7324,7 +7325,24 @@ class ModesDropped:
         ModesDropped.change()
 
 
+class ModesDroppedStoring(ModesDropped):
+    """Its __init__ stores an attribute: the record of the call's writes
+    holds the object until the traced call is over."""
+
+    def __init__(self):
+        self.n = 1
+
+
+class ModesDroppedCalled(ModesDropped):
+    """A method of it is called: the record of the call's reads holds the
+    object until the traced call is over."""
+
+    def poke(self):
+        return None
+
+
 MODES_STALE_READ = None
+MODES_FOREIGN = "a frame that is not the body's ran under it"
 
 
 def modes_stale_reading(x):
@@ -7332,6 +7350,30 @@ def modes_stale_reading(x):
     k = MODES_STALE_READ()
     ModesDropped()
     return modes_work(y * k)
+
+
+def modes_stale_reading_storing(x):
+    y = modes_work(x)
+    k = MODES_STALE_READ()
+    ModesDroppedStoring()
+    return modes_work(y * k)
+
+
+def modes_stale_reading_called(x):
+    y = modes_work(x)
+    k = MODES_STALE_READ()
+    ModesDroppedCalled().poke()
+    return modes_work(y * k)
+
+
+# Where the dropped object dies under a trace: at the drop, or when the
+# trace lets go of the record that held it (behind the moment the trace
+# compares what it read).
+MODES_STALE_DROPS = {
+    "at_the_drop": modes_stale_reading,
+    "held_by_a_write": modes_stale_reading_storing,
+    "held_by_a_read": modes_stale_reading_called,
+}
 
 
 def modes_stale_item(device):
@@ -7461,7 +7503,146 @@ def modes_stale_kwdefaults(device):
     return (lambda: scale(), change)
 
 
+def modes_stale_slot(device):
+    class Slotted:
+        __slots__ = ("k",)
+
+    box = Slotted()
+    box.k = 2.0
+
+    def change():
+        box.k = 5.0 - box.k
+
+    return (lambda: box.k, change)
+
+
+def modes_stale_class_attribute(device):
+    class Scaled:
+        k = 2.0
+
+    def change():
+        Scaled.k = 5.0 - Scaled.k
+
+    return (lambda: Scaled.k, change)
+
+
+def modes_stale_class_attribute_of_an_instance(device):
+    class Scaled:
+        k = 2.0
+
+    box = Scaled()
+
+    def change():
+        Scaled.k = 5.0 - Scaled.k
+
+    return (lambda: box.k, change)
+
+
+def modes_stale_method(device):
+    class Scaled:
+        def two(self):
+            return 2.0
+
+        def three(self):
+            return 3.0
+
+        scale = two
+
+    box = Scaled()
+
+    def change():
+        Scaled.scale = Scaled.three if Scaled.scale is Scaled.two else Scaled.two
+
+    return (lambda: box.scale(), change)
+
+
+def modes_stale_class(device):
+    class Two:
+        def scale(self):
+            return 2.0
+
+    class Three:
+        def scale(self):
+            return 3.0
+
+    box = Two()
+
+    def change():
+        box.__class__ = Three if type(box) is Two else Two
+
+    return (lambda: box.scale(), change)
+
+
+def modes_stale_bases(device):
+    class Plain:
+        pass
+
+    class Marked:
+        pass
+
+    class Based(Plain):
+        pass
+
+    box = Based()
+
+    def change():
+        Based.__bases__ = (Marked,) if Based.__bases__ == (Plain,) else (Plain,)
+
+    return (lambda: 2.0 + float(isinstance(box, Marked)), change)
+
+
+def modes_stale_registered(device):
+    Registry = abc.ABCMeta("Registry", (), {})
+
+    class Plain:
+        pass
+
+    box = Plain()
+
+    def change():
+        Registry.register(type("Other", (), {}))
+
+    return (lambda: 2.0 + float(isinstance(box, Registry)), change)
+
+
+def modes_stale_view(make):
+    def kind(device):
+        state = {"a": 1}
+        view = make(state)
+
+        def change():
+            if "b" in state:
+                del state["b"]
+            else:
+                state["b"] = 1
+
+        return (lambda: float(len(view)) + 1.0, change)
+
+    return kind
+
+
+def modes_stale_requires_grad(device):
+    t = torch.ones(3, device=device)
+
+    def change():
+        t.requires_grad_(not t.requires_grad)
+
+    return (lambda: 2.0 + float(t.requires_grad), change)
+
+
 MODES_STALE = {
+    "requires_grad": modes_stale_requires_grad,
+    "slot": modes_stale_slot,
+    "class_attribute": modes_stale_class_attribute,
+    "class_attribute_of_an_instance": modes_stale_class_attribute_of_an_instance,
+    "method": modes_stale_method,
+    "class": modes_stale_class,
+    "bases": modes_stale_bases,
+    "registered": modes_stale_registered,
+    "keys_length": modes_stale_view(dict.keys),
+    "values_length": modes_stale_view(dict.values),
+    "items_length": modes_stale_view(dict.items),
+    "proxy_length": modes_stale_view(types.MappingProxyType),
     "item": modes_stale_item,
     "absent": modes_stale_absent,
     "set": modes_stale_set,
@@ -7475,6 +7656,201 @@ MODES_STALE = {
     "dict": modes_stale_dict,
     "tensor": modes_stale_tensor,
 }
+
+
+# What a call reads twice, with a change in between that no instruction of
+# the call makes and that is taken back before the call is over: `change` is
+# what the finalizer does the first time (by `step`, which nothing of the
+# call reads) and the second time (back to what was read first).
+def modes_stale_item_again(step):
+    state = {"k": 2.0}
+
+    def change(first):
+        state["k"] = 2.0 + step[0] if first else 2.0
+
+    return (lambda: state["k"], change)
+
+
+def modes_stale_whole_again(step):
+    state = [2.0, 1.0]
+
+    def change(first):
+        state[0] = 2.0 + step[0] if first else 2.0
+
+    return (lambda: sum(state), change)
+
+
+def modes_stale_length_again(step):
+    state = [2.0]
+
+    def change(first):
+        if first:
+            state.extend([0.0] * int(step[0]))
+        else:
+            del state[1:]
+
+    return (lambda: float(len(state)), change)
+
+
+def modes_stale_view_length_again(step):
+    state = {"a": 2.0}
+    view = state.keys()
+
+    def change(first):
+        for n in range(int(step[0])):
+            if first:
+                state[n] = 0.0
+            else:
+                del state[n]
+
+    return (lambda: float(len(view)), change)
+
+
+def modes_stale_cell_again(step):
+    k = 2.0
+
+    def change(first):
+        nonlocal k
+        k = 2.0 + step[0] if first else 2.0
+
+    return (lambda: k, change)
+
+
+def modes_stale_slot_again(step):
+    class Slotted:
+        __slots__ = ("k",)
+
+    box = Slotted()
+    box.k = 2.0
+
+    def change(first):
+        box.k = 2.0 + step[0] if first else 2.0
+
+    return (lambda: box.k, change)
+
+
+def modes_stale_class_attribute_again(step):
+    class Scaled:
+        k = 2.0
+
+    two = Scaled.k
+
+    def change(first):
+        Scaled.k = 2.0 + step[0] if first else two
+
+    return (lambda: Scaled.k, change)
+
+
+def modes_stale_method_again(step):
+    class Scaled:
+        def two(self):
+            return 2.0
+
+        def three(self):
+            return 3.0
+
+        def four(self):
+            return 4.0
+
+        def five(self):
+            return 5.0
+
+        scale = two
+
+    box = Scaled()
+    scales = [vars(Scaled)[n] for n in ("two", "three", "four", "five")]
+
+    def change(first):
+        Scaled.scale = scales[int(step[0])] if first else scales[0]
+
+    return (lambda: box.scale(), change)
+
+
+def modes_stale_class_again(step):
+    class Two:
+        def scale(self):
+            return 2.0
+
+    class Three(Two):
+        def scale(self):
+            return 3.0
+
+    class Four(Two):
+        def scale(self):
+            return 4.0
+
+    box = Two()
+
+    def change(first):
+        box.__class__ = (Three if step[0] == 1.0 else Four) if first else Two
+
+    return (lambda: box.scale(), change)
+
+
+def modes_stale_bases_again(step):
+    class Plain:
+        pass
+
+    class Marked:
+        pass
+
+    class Other:
+        pass
+
+    class Based(Plain):
+        pass
+
+    box = Based()
+
+    def change(first):
+        Based.__bases__ = ((Marked if step[0] == 1.0 else Other) if first else Plain,)
+
+    return (lambda: 2.0 + float(isinstance(box, Marked)), change)
+
+
+# By name: what is read twice, and what the refusal says (the second read
+# is what found the change: when the call is over all is as it was).
+MODES_STALE_AGAIN = {
+    "item": (modes_stale_item_again, "when the run reads it again"),
+    "slot": (modes_stale_slot_again, "when the run reads it again"),
+    "whole": (modes_stale_whole_again, "when the run reads it again"),
+    "length": (modes_stale_length_again, "when the run reads it again"),
+    "view_length": (modes_stale_view_length_again, "when the run reads it again"),
+    "cell": (modes_stale_cell_again, "when the run reads it again"),
+    "class_attribute": (
+        modes_stale_class_attribute_again,
+        "when the run reads the class again",
+    ),
+    "method": (modes_stale_method_again, "when the run reads the class again"),
+    "class": (modes_stale_class_again, "changed while it was traced"),
+    "bases": (modes_stale_bases_again, "changed while it was traced"),
+}
+
+
+def modes_stale_reading_again(x):
+    y = modes_work(x)
+    k = MODES_STALE_READ()
+    ModesDropped()
+    k = k + MODES_STALE_READ()
+    ModesDropped()
+    return modes_work(y * k)
+
+
+# The length of a view of a dict (or of a mappingproxy) kept in state.
+# By name: the class of the dict, and what makes the view of it.
+MODES_VIEWS = {
+    "keys": (dict, dict.keys),
+    "values": (dict, dict.values),
+    "items": (dict, dict.items),
+    "proxy": (dict, types.MappingProxyType),
+    "ordered_keys": (collections.OrderedDict, collections.OrderedDict.keys),
+}
+MODES_VIEW = None
+
+
+def modes_view_length(x):
+    y = modes_work(x)
+    return modes_work(y * float(len(MODES_VIEW)))
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
@@ -7497,15 +7873,84 @@ class TestVmStaleReads(TestCase):
         return out
 
     @parametrize("what", list(MODES_STALE))
+    @parametrize("drop", list(MODES_STALE_DROPS))
     @parametrize("passes", list(MODES_OWN_PASSES))
     @isolated
-    def test_read_changed_by_a_finalizer_gives_no_region(self, device, what, passes):
-        want = self.log(device, what, modes_stale_reading)
-        compiled = vm(modes_stale_reading, passes=MODES_OWN_PASSES[passes])
+    def test_read_changed_by_a_finalizer_gives_no_region(
+        self, device, what, drop, passes
+    ):
+        reading = MODES_STALE_DROPS[drop]
+        want = self.log(device, what, reading)
+        compiled = vm(reading, passes=MODES_OWN_PASSES[passes])
         self.assertEqual(self.log(device, what, compiled), want, atol=0, rtol=0)
-        name = modes_stale_reading.__name__
+        rows = [r for r in vm.regions(compiled) if r["function"] == reading.__name__]
+        why = [str(r.get("why") or "") for r in rows if r["state"] == "refused"]
+        self.assertTrue(why, msg=str(rows))
+        if drop == "at_the_drop":
+            # The change is there when the trace compares what it read: the
+            # comparison says so itself.
+            self.assertFalse([r for r in why if MODES_FOREIGN in r], msg=str(rows))
+
+    def log_again(self, device, what, fn):
+        global MODES_STALE_READ
+        step, dropped = [0.0], [0]
+        MODES_STALE_READ, change = MODES_STALE_AGAIN[what][0](step)
+
+        def toggle():
+            dropped[0] += 1
+            change(dropped[0] % 2 == 1)
+
+        ModesDropped.change = toggle
+        out = []
+        for call in range(12):
+            step[0] = float(call % 3) + 1.0
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            out.append((fn(x), MODES_STALE_READ()))
+        return out
+
+    @parametrize("what", list(MODES_STALE_AGAIN))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_read_again_behind_a_change_gives_no_region(self, device, what, passes):
+        # When the call is over everything is as it was first read: only
+        # the second read saw the change.
+        want = self.log_again(device, what, modes_stale_reading_again)
+        compiled = vm(modes_stale_reading_again, passes=MODES_OWN_PASSES[passes])
+        self.assertEqual(self.log_again(device, what, compiled), want, atol=0, rtol=0)
+        name = modes_stale_reading_again.__name__
         rows = [r for r in vm.regions(compiled) if r["function"] == name]
-        self.assertIn("refused", [r["state"] for r in rows], msg=str(rows))
+        why = [str(r.get("why") or "") for r in rows if r["state"] == "refused"]
+        said = MODES_STALE_AGAIN[what][1]
+        self.assertTrue([r for r in why if said in r], msg=str(rows))
+
+    @parametrize("what", list(MODES_VIEWS))
+    @isolated
+    def test_length_of_a_view_follows_its_dict(self, device, what):
+        # The dict changes between calls, in place: a region with the
+        # length of the traced call is not entered then, and is again once
+        # the dict is as it was.
+        make, view = MODES_VIEWS[what]
+
+        def log(fn):
+            global MODES_VIEW
+            state = make({"j": 1.0, "k": 2.0})
+            MODES_VIEW = view(state)
+            out = []
+            for call in range(13):
+                if call == 5:
+                    state["z"] = 0.0
+                if call == 9:
+                    del state["z"]
+                torch.manual_seed(call)
+                out.append(fn(torch.randn(4, 8, device=device)))
+            return out
+
+        want = log(modes_view_length)
+        compiled = vm(modes_view_length, passes=EARLY)
+        self.assertEqual(log(compiled), want, atol=0, rtol=0)
+        self.assertGreater(region_runs(compiled), 0)
+        self.assertGreater(torch._rust._region_read_misses(), 0)
 
 
 instantiate_device_type_tests(TestVmStaleReads, globals())
@@ -7572,6 +8017,19 @@ MODES_OWN_READS = {
         "over": ("same", "put"),
         "again": ("same",),
         "state": "(S.a, S.b, getattr(S, 'n', None))",
+    },
+    "slot": {
+        "setup": "class Slots:\n    __slots__ = ('a', 'b')\n\n\nS = Slots()\nS.a = 2.0\nS.b = 0.0",
+        "read": "S.a",
+        "writes": {
+            "same": "S.a = 5.0 - S.a",
+            "put": "S.a = 7.0",
+            "other": "S.b = 1.0 - S.b",
+        },
+        "change": "S.a = 5.0 - S.a",
+        "over": ("same", "put"),
+        "again": ("same",),
+        "state": "(S.a, S.b)",
     },
     # A dict that also has a slot of the item's name: a store into the slot
     # is no store of the item, whatever then puts the same object there.
@@ -8084,7 +8542,6 @@ instantiate_device_type_tests(TestVmOwnWrites, globals())
 # under it (code that first runs once a function of the process is traced
 # is unknown to it: a process with one program is where a trace runs over
 # the death).
-MODES_FOREIGN = "a frame that is not the body's ran under it"
 MODES_FOREIGN_OUTSIDE = ("indirectly", "its code is unknown", "it hasn't run")
 
 MODES_FOREIGN_PROGRAM = """
@@ -8394,6 +8851,135 @@ class TestVmForeignFrames(TestCase):
 
 
 instantiate_device_type_tests(TestVmForeignFrames, globals())
+
+
+# Code a death runs that enters NO frame: a C callable as the callback of a
+# weak reference. By name: the state, the callback (it is handed the dead
+# weak reference), what puts the state back before each call, what the call
+# reads of it as a number, and the state as it is compared.
+MODES_UNFRAMED = {
+    "slot": (
+        "class Slotted:\n    __slots__ = ('k',)\n\n\nO = Slotted()",
+        "functools.partial(setattr, O, 'k')",
+        "O.k = 2.0",
+        "2.0 + float(type(O.k) is float)",
+        "type(O.k).__name__",
+    ),
+    "class_attribute": (
+        "class Counted:\n    k = 2.0",
+        "functools.partial(setattr, Counted, 'k')",
+        "Counted.k = 2.0",
+        "2.0 + float(type(Counted.k) is float)",
+        "type(Counted.k).__name__",
+    ),
+    "attribute": (
+        "O = ModesHolder()",
+        "functools.partial(setattr, O, 'k')",
+        "O.k = 2.0",
+        "2.0 + float(type(O.k) is float)",
+        "type(O.k).__name__",
+    ),
+    "item": (
+        "S = {'a': 2.0}",
+        "functools.partial(operator.setitem, S, 'a')",
+        "S['a'] = 2.0",
+        "2.0 + float(type(S['a']) is float)",
+        "type(S['a']).__name__",
+    ),
+    "length": ("S = []", "S.append", "del S[1:]", "2.0 + len(S) % 2", "len(S)"),
+}
+
+# The object is state, and the call's store drops it: the read in front of
+# the store, or behind it.
+MODES_UNFRAMED_ORDERS = {
+    "read_then_dropped": "k = {read}\n    H['h'] = None",
+    "dropped_then_read": "H['h'] = None\n    k = {read}",
+}
+
+MODES_UNFRAMED_PROGRAM = """
+class Plain:
+    pass
+
+
+H = {{'h': None}}
+W = {{}}
+{state}
+
+
+def before(call):
+    {reset}
+    H['h'] = Plain()
+    W['w'] = weakref.ref(H['h'], {callback})
+
+
+def state():
+    return {read_state}
+
+
+def {name}(x):
+    y = modes_work(x)
+    {body}
+    return modes_work(y * k)
+"""
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmUnframedDeaths(TestCase):
+    """C code that a death runs under a traced call enters no frame, so
+    nothing sees it run: what it changed of what the call read is found
+    when the trace compares its reads, and the trace is no region."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("what", list(MODES_UNFRAMED))
+    @parametrize("order", list(MODES_UNFRAMED_ORDERS))
+    @isolated
+    def test_read_changed_by_c_code_a_death_runs_gives_no_region(
+        self, device, what, order
+    ):
+        state, callback, reset, read, read_state = MODES_UNFRAMED[what]
+        name = f"{what}_{order}"
+        source = MODES_UNFRAMED_PROGRAM.format(
+            name=name,
+            state=state,
+            callback=callback,
+            reset=reset,
+            read_state=read_state,
+            body=MODES_UNFRAMED_ORDERS[order].format(read=read),
+        )
+        names = {
+            "weakref": weakref,
+            "functools": functools,
+            "operator": operator,
+            "modes_work": modes_work,
+            "ModesHolder": ModesHolder,
+        }
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES["effects"])
+        differing = 0
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results = []
+            for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                space["before"](call)
+                results.append(fn(x))
+            differing += int(not torch.equal(*results))
+            self.assertEqual(mine["state"](), theirs["state"](), msg=source)
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        why = [str(r.get("why") or "") for r in rows if r["state"] == "refused"]
+        said = "no write the run recorded explains it"
+        self.assertTrue([r for r in why if said in r], msg=f"{rows}\n{source}")
+        # Under the trace the store's record holds the object until the
+        # body is over: the callback runs behind a read that the
+        # interpreter makes behind it, in the traced call alone.
+        late = 1 if order == "dropped_then_read" else 0
+        self.assertLessEqual(differing, late, msg=source)
+
+
+instantiate_device_type_tests(TestVmUnframedDeaths, globals())
 
 
 if __name__ == "__main__":

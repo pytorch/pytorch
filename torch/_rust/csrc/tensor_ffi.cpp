@@ -1,17 +1,27 @@
 #include <torch/_rust/csrc/tensor_ffi.h>
 
-#include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/Context.h>
+#include <ATen/DTensorState.h>
+#include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/NodeCreationHooks.h>
+#include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
+#include <ATen/ThreadLocalState.h>
 #include <ATen/autocast_mode.h>
+#include <ATen/record_function.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/AutogradState.h>
 #include <c10/core/DefaultDtype.h>
+#include <c10/core/GraphExecGroupState.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/impl/COW.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
+#include <torch/_rust/csrc/op_hook.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/forward_grad.h>
@@ -34,18 +44,39 @@ namespace torch::rust {
 namespace {
 
 // The edge of the bridge (see src/bindings/ffi.rs): whatever `f` throws ends
-// here, and the caller gets `refusal`, the answer it takes for a miss. A
-// Python error that was turned into the exception is still set: dropped.
+// here, and the caller gets `refusal`, the answer it takes for a miss. For a
+// body that runs no Python code and calls nothing of CPython that raises:
+// the thread's Python error, if one is pending, is not touched. (Should
+// such a body throw a python_error all the same, the error it is made of
+// is dropped rather than left set behind an answer.)
 template <typename T, typename F>
 T edge(T refusal, F&& f) noexcept {
   try {
     return f();
+  } catch (python_error&) {
+    PyErr_Clear();
+    return refusal;
   } catch (...) {
-    if (PyGILState_Check() && PyErr_Occurred()) {
-      PyErr_Clear();
-    }
     return refusal;
   }
+}
+
+// As edge, for a body that may run Python code or raise a Python error (a
+// tensor that answers in Python, isinstance, a read of an attribute): an
+// error that was pending before the call is set aside first and put back
+// after, so that what is dropped is the body's own error and nothing else.
+template <typename T, typename F>
+T edge_py(T refusal, F&& f) noexcept {
+  struct Pending {
+    PyObject* error = PyErr_GetRaisedException();
+    ~Pending() {
+      PyErr_Clear();
+      if (error) {
+        PyErr_SetRaisedException(error);
+      }
+    }
+  } pending;
+  return edge(refusal, std::forward<F>(f));
 }
 
 } // namespace
@@ -60,38 +91,21 @@ const Tensor* TORCH_RUST_NULLABLE tensor_from_pyobject(
     return nullptr;
   }
   // isinstance can run Python code, and raise.
-  return edge(static_cast<const Tensor*>(nullptr), [&]() -> const Tensor* {
+  return edge_py(static_cast<const Tensor*>(nullptr), [&]() -> const Tensor* {
     return THPVariable_Check(obj) ? &THPVariable_Unpack(obj) : nullptr;
   });
 }
 
 const Tensor* TORCH_RUST_NULLABLE tensor_by_type(std::uintptr_t py_obj) noexcept {
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  PyObject* obj = reinterpret_cast<PyObject*>(py_obj);
-  if (!obj || !THPVariableClass ||
-      !PyType_IsSubtype(Py_TYPE(obj), (PyTypeObject*)THPVariableClass)) {
-    return nullptr;
-  }
-  return &THPVariable_Unpack(obj);
-}
-
-// What a tensor answers by a policy of its own (a Python-dispatch tensor: in
-// Python; a nested tensor, symbolic sizes, a dimension out of range: by
-// raising) ends at the edge: -1, or false.
-int64_t tensor_dim(const Tensor& t) noexcept {
-  return edge(int64_t(-1), [&] { return t.dim(); });
-}
-
-int64_t tensor_numel(const Tensor& t) noexcept {
-  return edge(int64_t(-1), [&] { return t.numel(); });
-}
-
-int64_t tensor_size_at(const Tensor& t, int64_t dim) noexcept {
-  return edge(int64_t(-1), [&] { return t.size(dim); });
-}
-
-int64_t tensor_stride_at(const Tensor& t, int64_t dim) noexcept {
-  return edge(int64_t(-1), [&] { return t.stride(dim); });
+  return edge(static_cast<const Tensor*>(nullptr), [&]() -> const Tensor* {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    PyObject* obj = reinterpret_cast<PyObject*>(py_obj);
+    if (!obj || !THPVariableClass ||
+        !PyType_IsSubtype(Py_TYPE(obj), (PyTypeObject*)THPVariableClass)) {
+      return nullptr;
+    }
+    return &THPVariable_Unpack(obj);
+  });
 }
 
 // No slice says "it has none": these two are fallible (Result in the
@@ -106,28 +120,24 @@ int64_t tensor_stride_at(const Tensor& t, int64_t dim) noexcept {
   return ::rust::Slice<const int64_t>(s.data(), s.size());
 }
 
+// What a tensor answers by a policy of its own (a Python-dispatch tensor: in
+// Python; a tensor without a device: by raising) ends at the edge: false.
 bool tensor_is_contiguous(const Tensor& t) noexcept {
-  return edge(false, [&] { return t.is_contiguous(); });
+  return edge_py(false, [&] { return t.is_contiguous(); });
 }
 
 bool tensor_is_cpu(const Tensor& t) noexcept {
-  return edge(false, [&] { return t.is_cpu(); });
-}
-
-bool tensor_is_cuda(const Tensor& t) noexcept {
-  return edge(false, [&] { return t.is_cuda(); });
-}
-
-bool tensor_defined(const Tensor& t) noexcept {
-  return t.defined();
+  return edge_py(false, [&] { return t.is_cpu(); });
 }
 
 bool tensor_requires_grad(const Tensor& t) noexcept {
   return t.requires_grad();
 }
 
+// An undefined tensor raises: taken for a leaf, which is what its caller
+// refuses on.
 bool tensor_is_leaf(const Tensor& t) noexcept {
-  return t.is_leaf();
+  return edge(true, [&] { return t.is_leaf(); });
 }
 
 void tensor_meta(const Tensor& t, TensorMeta& out) noexcept {
@@ -198,7 +208,9 @@ const char* dtype_short_name(at::ScalarType t) {
 }
 
 bool torch_function_mode_active() noexcept {
-  return at::impl::torch_function_mode_enabled();
+  return edge(true, [] {
+    return at::impl::PythonTorchFunctionTLS::stack_len() > 0;
+  });
 }
 
 bool grad_mode_enabled() noexcept {
@@ -289,9 +301,17 @@ bool region_word(Word& out) noexcept {
     a.put(ctx.deterministicCuDNN(), 1);
     a.put(ctx.userEnabledMkldnn(), 1);
     // What decides whether a result is recorded for autograd and which kind
-    // of tensor it is, and where a tensor of `device="cuda"` is made.
-    a.put(at::GradMode::is_enabled(), 1);
-    a.put(c10::InferenceMode::is_enabled(), 1);
+    // of tensor it is: every flag of the thread's autograd state (six
+    // today, one byte of bits).
+    static_assert(sizeof(c10::AutogradState) == 1);
+    const auto& autograd = c10::AutogradState::get_tls_state();
+    a.put(grad_mode_enabled(), 1);
+    a.put(autograd.get_inference_mode(), 1);
+    a.put(autograd.get_fw_grad_mode(), 1);
+    a.put(autograd.get_multithreading_enabled(), 1);
+    a.put(autograd.get_view_replay_enabled(), 1);
+    a.put(autograd.get_grad_layout_enforcement_enabled(), 1);
+    // Where a tensor of `device="cuda"` is made.
     a.put(current_cuda_device(), 8);
     // The float32 precision of every (backend, operator) pair as a kernel
     // and torch.backends read it, inherited values resolved: three bits each
@@ -321,54 +341,138 @@ bool region_word(Word& out) noexcept {
   });
 }
 
-void region_modes(AmbientModes& out) noexcept {
-  out.dispatch_modes = c10::impl::TorchDispatchModeTLS::stack_len();
-  out.function_modes = at::impl::PythonTorchFunctionTLS::stack_len();
-  out.fx_tracing = fx_tracing();
-}
+namespace {
 
-std::uint8_t region_not_neutral(const AmbientModes& own) noexcept {
-  // What cannot be asked is not neutral.
-  return edge(std::uint8_t(255), [&]() -> std::uint8_t {
-    AmbientModes now;
-    region_modes(now);
-    if (now.dispatch_modes != own.dispatch_modes) {
+// The autocast key of each device type the word names (region_word).
+constexpr std::pair<at::DeviceType, c10::DispatchKey> kWordAutocast[] = {
+    {at::kCPU, c10::DispatchKey::AutocastCPU},
+    {at::kCUDA, c10::DispatchKey::AutocastCUDA},
+    {at::kXPU, c10::DispatchKey::AutocastXPU},
+    {at::kMPS, c10::DispatchKey::AutocastMPS},
+};
+
+// torch's own record of what the state of a thread is has grown a member
+// (at::ThreadLocalState: what the autograd engine carries to its worker
+// threads): region_not_neutral has to say what that member is on a neutral
+// thread, or that the word holds it. Checked where the layout is known.
+#if defined(__linux__) && defined(__x86_64__) && defined(__GLIBCXX__) && \
+    !defined(_GLIBCXX_DEBUG)
+static_assert(
+    sizeof(at::ThreadLocalState) == 520,
+    "at::ThreadLocalState changed: see region_not_neutral");
+#endif
+
+} // namespace
+
+std::uint8_t region_not_neutral() noexcept {
+  // What cannot be asked is not neutral. (The read of fx's flag raises and
+  // drops an AttributeError where the thread has none.)
+  return edge_py(std::uint8_t(255), [&]() -> std::uint8_t {
+    // at::ThreadLocalState, member by member: each is what a thread starts
+    // with, or what the word says it is. Then what torch keeps elsewhere.
+    //
+    // dispatch_key_. The keys the dispatcher adds to and takes from every
+    // call on this thread are the default ones, moved only by what the word
+    // holds: autocast on for a device type it names takes that type's key
+    // out of the excluded set; inference mode takes ADInplaceOrView out of
+    // the included set and puts the autograd keys into the excluded one.
+    // The executor's own hook keeps PreDispatch included while it looks on.
+    // Any other key on either side, one that does not exist yet too, is not
+    // neutral; the common ones are named first, for the reason they give.
+    const auto keys = c10::impl::tls_local_dispatch_key_set();
+    if (c10::impl::TorchDispatchModeTLS::stack_len() != 0) {
       return 1;
     }
-    if (now.function_modes != own.function_modes) {
-      return 2;
-    }
-    // A functorch transform keeps these two keys on while one of its levels
-    // is open (its own header needs more than this file can include).
-    if (c10::impl::tls_is_dispatch_key_included(
-            c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
-        c10::impl::tls_is_dispatch_key_included(
-            c10::DispatchKey::FuncTorchDynamicLayerBackMode)) {
+    if (keys.included_.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
+        keys.included_.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode)) {
       return 3;
     }
-    if (torch::autograd::ForwardADLevel::has_any_level()) {
-      return 4;
+    const bool inference = c10::InferenceMode::is_enabled();
+    auto included = c10::default_included_set;
+    auto excluded = c10::default_excluded_set;
+    for (auto [device, key] : kWordAutocast) {
+      if (at::autocast::is_autocast_enabled(device)) {
+        excluded = excluded.remove(key);
+      }
     }
+    if (inference) {
+      included = included.remove(c10::DispatchKey::ADInplaceOrView);
+      excluded = excluded | c10::autograd_dispatch_keyset;
+    }
+    if (op_hook_seeing()) {
+      included = included.add(c10::DispatchKey::PreDispatch);
+    }
+    if (keys.excluded_ != excluded) {
+      return ((keys.excluded_ ^ excluded) - c10::autocast_dispatch_keyset).empty()
+          ? 9
+          : 11;
+    }
+    if (keys.included_ != included) {
+      return 11;
+    }
+    // fake_tensor_mode_state_, in_kernel_invocation_state_.
+    if (c10::impl::FakeTensorModeTLS::get_state() ||
+        c10::impl::FakeTensorModeTLS::in_kernel_invocation()) {
+      return 13;
+    }
+    // debug_info_ and rf_tls_: a profiler (the autograd profiler, kineto,
+    // emit_nvtx, emit_itt) keeps its state in the first and its callbacks,
+    // which see every operator and every record_function, in the second or
+    // among the process's.
+    if (c10::ThreadLocalDebugInfo::current() || at::hasCallbacks() ||
+        !at::isRecordFunctionEnabled()) {
+      return 10;
+    }
+    // functorch_tls_: its header needs more than this file can include; a
+    // transform keeps the two keys asked above included while a level is
+    // open. autograd_tls_: in the word, every flag of it.
+    //
+    // graph_exec_group_state_, node_creation_hooks_state_.
+    if (c10::GraphExecGroupState::get_tls_state().has_value() ||
+        !at::impl::NodeCreationHooks::empty() ||
+        at::impl::NodeCreationHooks::get_tls_state().is_firing) {
+      return 15;
+    }
+    // torch_dispatch_mode_state_: asked first. python_dispatcher_state_.
+    if (c10::impl::PythonDispatcherTLS::get_state()) {
+      return 14;
+    }
+    // python_torch_function_state_.
+    if (torch_function_mode_active()) {
+      return 2;
+    }
+    if (at::impl::PythonTorchFunctionTLS::get_disabled_state() !=
+        at::impl::TorchFunctionDisabledState::ENABLED) {
+      return 12;
+    }
+    // saved_tensors_default_hooks_state_.
     if (saved_tensor_hooks_active()) {
       return 5;
+    }
+    // functionalization_reapply_views_state_,
+    // dtensor_allow_implicit_replication_.
+    if (at::functionalization::impl::getFunctionalizationReapplyViewsTLS() ||
+        at::get_dtensor_allow_implicit_replication()) {
+      return 16;
+    }
+    // saved_objects_ (Python objects kept under names of their owners'
+    // choosing) cannot be asked for "none": not looked at. autocast_dtypes_:
+    // in the word for the device types it names; for the others autocast is
+    // off (their keys are excluded, above).
+    //
+    // What is not thread-local state of that record: forward-AD levels (the
+    // process's), the JIT's tracer, torch.fx's flag, anomaly mode.
+    if (forward_ad_active()) {
+      return 4;
     }
     if (torch::jit::tracer::isTracing()) {
       return 6;
     }
-    if (now.fx_tracing == kFxUnknown || now.fx_tracing != own.fx_tracing) {
+    if (fx_tracing() != kFxOff) {
       return 7;
     }
     if (torch::autograd::AnomalyMode::is_enabled()) {
       return 8;
-    }
-    // Autocast for a device type the word does not name.
-    for (auto k :
-         {c10::DispatchKey::AutocastIPU, c10::DispatchKey::AutocastHPU,
-          c10::DispatchKey::AutocastXLA, c10::DispatchKey::AutocastPrivateUse1,
-          c10::DispatchKey::AutocastMTIA, c10::DispatchKey::AutocastMAIA}) {
-      if (!c10::impl::tls_is_dispatch_key_excluded(k)) {
-        return 9;
-      }
     }
     return 0;
   });
@@ -465,21 +569,28 @@ std::uintptr_t tensor_home(
 }
 
 bool tensor_is_cow(const Tensor& t) noexcept {
-  const c10::TensorImpl* impl = t.unsafeGetTensorImpl();
-  if (!t.defined() || impl->is_python_dispatch() || !impl->has_storage()) {
-    return false;
-  }
-  return c10::impl::cow::is_cow_data_ptr(
-      impl->unsafe_storage().unsafeGetStorageImpl()->_mutable_data_ptr_no_checks());
+  return edge(false, [&] {
+    const c10::TensorImpl* impl = t.unsafeGetTensorImpl();
+    if (!t.defined() || impl->is_python_dispatch() || !impl->has_storage()) {
+      return false;
+    }
+    return c10::impl::cow::is_cow_data_ptr(
+        impl->unsafe_storage().unsafeGetStorageImpl()->_mutable_data_ptr_no_checks());
+  });
 }
 
 bool forward_ad_active() noexcept {
-  return torch::autograd::ForwardADLevel::has_any_level() &&
-      c10::AutogradState::get_tls_state().get_fw_grad_mode();
+  return edge(true, [] {
+    return torch::autograd::ForwardADLevel::has_any_level();
+  });
 }
 
 bool saved_tensor_hooks_active() noexcept {
-  return at::SavedTensorDefaultHooks::get_hooks().has_value();
+  return edge(true, [] {
+    const auto& hooks = at::SavedTensorDefaultHooks::get_tls_state();
+    return !hooks.stack.empty() || hooks.disabled_error_message.has_value() ||
+        hooks.is_tracing;
+  });
 }
 
 namespace {

@@ -733,8 +733,8 @@ pub struct RegionSpec {
     pub writes: Vec<RegionOut>,
     pub name: String,
     // What the trace read from outside its args (see exec/reads.rs): checked
-    // before `func` is called.
-    pub reads: Option<pyo3::Py<crate::exec::reads::Reads>>,
+    // before `func` is called. No region is without.
+    pub reads: pyo3::Py<crate::exec::reads::Reads>,
     // Checks of the args that `func` makes too, asked before the reads and
     // before `func`: the regions of a place's other states under the same
     // key are passed over by them (see exec/region.rs).

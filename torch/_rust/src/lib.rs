@@ -86,6 +86,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::reads::_region_own, m)?)?;
     m.add_function(wrap_pyfunction!(exec::foreign::_region_keep, m)?)?;
     m.add_function(wrap_pyfunction!(exec::foreign::_region_callbacks, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_bound, m)?)?;
     m.add_function(wrap_pyfunction!(exec::writes::_region_writes, m)?)?;
     m.add_function(wrap_pyfunction!(exec::writes::_set_cfg_effects, m)?)?;
     m.add_function(wrap_pyfunction!(exec::writes::_cfg_write_site, m)?)?;
@@ -111,6 +112,8 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::exact::_same, m)?)?;
     m.add_function(wrap_pyfunction!(exec::ambient::_not_neutral, m)?)?;
     m.add_function(wrap_pyfunction!(exec::ambient::_ambient_word, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_region_entry_door, m)?)?;
+    m.add_function(wrap_pyfunction!(bindings::tensor::_bridge_answers, m)?)?;
     m.add_class::<exec::TreeChecks>()?;
     m.add_class::<exec::tensor_key::TensorKey>()?;
     m.add_function(wrap_pyfunction!(exec::region::_region_given_up, m)?)?;

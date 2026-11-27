@@ -10,15 +10,21 @@
 // an exception there ends the process, whatever the program was doing. So a
 // function declared in an `extern "C++"` block is one of three kinds, and
 // test_vm_gate.py (TestVmBridge) holds the list, with the reason of each:
-//   plain   its C++ body cannot throw: it reads fields of a tensor or
-//           thread-locals that have no failing path, and calls nothing of
-//           torch that checks, allocates or runs Python code;
-//   edge    its body can throw (a c10::Error from a torch call, bad_alloc, a
-//           Python error turned into an exception) and is inside `edge(...)`
-//           (csrc/tensor_ffi.cpp), which catches everything and answers the
-//           function's refusing value: the one its callers take for "not a
-//           tensor", "no key", "no word", "not neutral", a miss;
-//   result  it returns Result, and the caller's Err branch refuses.
+//   edge    its body is inside `edge(...)` or `edge_py(...)`
+//           (csrc/tensor_ffi.cpp), which catch everything (a c10::Error from
+//           a torch call, bad_alloc, a Python error turned into an
+//           exception) and answer the function's refusing value: the one its
+//           callers take for "not a tensor", "no key", "no word", "not
+//           neutral", a miss. `edge_py` where the body may run Python code
+//           or raise a Python error: an error pending before the call is put
+//           back after it. Every function that has a refusing value is of
+//           this kind, whether or not its body can throw today;
+//   result  it returns Result, and the caller's Err branch refuses;
+//   plain   it has no refusing value (both answers of a bool are answers,
+//           a count is a count) and its body cannot throw: it reads a
+//           thread-local or a field and calls nothing that checks,
+//           allocates or runs Python code. The test records the text of
+//           each such body: one that changes fails until it is read again.
 // A new function is added to that list with its kind. The functions of the
 // `extern "Rust"` blocks go the other way: a panic in one ends the process
 // (cxx's own guard), so they do not panic. The `extern "C"` blocks elsewhere
@@ -55,14 +61,6 @@ pub mod ffi {
         b: u64,
     }
 
-    // See region_modes in tensor_ffi.h.
-    #[derive(Default, Clone, Copy)]
-    struct AmbientModes {
-        dispatch_modes: i64,
-        function_modes: i64,
-        fx_tracing: u8,
-    }
-
     // See tensor_span in tensor_ffi.h.
     #[derive(Default)]
     struct TensorSpan {
@@ -86,8 +84,7 @@ pub mod ffi {
         fn torch_function_mode_active() -> bool;
         fn grad_mode_enabled() -> bool;
         fn region_word(out: &mut Word) -> bool;
-        fn region_modes(out: &mut AmbientModes);
-        fn region_not_neutral(own: &AmbientModes) -> u8;
+        fn region_not_neutral() -> u8;
         fn set_grad_mode(on: bool) -> bool;
         fn tensor_version(t: &Tensor) -> i64;
         fn tensor_home(t: &Tensor, storage: &mut usize) -> usize;
@@ -97,18 +94,12 @@ pub mod ffi {
         fn saved_tensor_hooks_active() -> bool;
         fn tensor_key(t: &Tensor, out: &mut TensorFacts) -> bool;
         fn tensor_key_is(t: &Tensor, want: &TensorFacts, sizes: &[i64], strides: &[i64]) -> bool;
-        fn tensor_dim(t: &Tensor) -> i64;
-        fn tensor_numel(t: &Tensor) -> i64;
-        fn tensor_size_at(t: &Tensor, dim: i64) -> i64;
-        fn tensor_stride_at(t: &Tensor, dim: i64) -> i64;
 
         fn tensor_sizes(t: &Tensor) -> Result<&[i64]>;
         fn tensor_strides(t: &Tensor) -> Result<&[i64]>;
 
         fn tensor_is_contiguous(t: &Tensor) -> bool;
         fn tensor_is_cpu(t: &Tensor) -> bool;
-        fn tensor_is_cuda(t: &Tensor) -> bool;
-        fn tensor_defined(t: &Tensor) -> bool;
         fn tensor_requires_grad(t: &Tensor) -> bool;
         fn tensor_is_leaf(t: &Tensor) -> bool;
 
