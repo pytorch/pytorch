@@ -12,6 +12,7 @@ are wrapped in InterleavedComplexTensor instead, which views the input's storage
 
 from __future__ import annotations
 
+import operator
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -55,13 +56,24 @@ def _maybe_unwrap(value: Any) -> Any:
     return value
 
 
-def _view_base(node: Any) -> Any:
-    while (
+def _is_view(node: Any) -> bool:
+    return (
         isinstance(node, fx.Node)
         and isinstance(node.target, torch._ops.OpOverload)
         and node.target.is_view
-    ):
+    )
+
+
+def _viewed_node(node: Any) -> Any:
+    """The node that `node` is a view of, or `None`. Sees through `getitem` of e.g. `split`."""
+    if isinstance(node, fx.Node) and node.target is operator.getitem:
         node = node.args[0]
+    return node.args[0] if _is_view(node) else None
+
+
+def _view_base(node: Any) -> Any:
+    while (viewed := _viewed_node(node)) is not None:
+        node = viewed
     return node
 
 
@@ -114,6 +126,10 @@ class _ComplexInterpreter(fx.Interpreter):
             raw = self.raw_inputs[id(args[0])]
             raw.copy_(_maybe_unwrap(args[1]), *args[2:], **kwargs)
             return args[0]
+        if target is torch.ops.aten.view.dtype and isinstance(args[0], ComplexTensor):
+            # `ComplexTensor` can't be viewed as another dtype, but the graph is functional,
+            # so viewing an interleaved copy is equivalent.
+            args = (InterleavedComplexTensor(args[0].as_interleaved()), *args[1:])
         if isinstance(target, torch._ops.HigherOrderOperator):
             # HOP subgraphs are not decomposed; run them on plain complex tensors.
             args, kwargs = pytree.tree_map(_maybe_unwrap, (args, kwargs))

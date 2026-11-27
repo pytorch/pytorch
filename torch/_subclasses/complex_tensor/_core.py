@@ -177,6 +177,7 @@ class InterleavedComplexTensor(Tensor):
     Ops are computed via `ComplexTensor`; mutations are written back into the original storage.
     """
 
+    # The interleaved complex tensor.
     _data: Tensor
 
     def __new__(cls, t: Tensor, /) -> Self:
@@ -202,7 +203,7 @@ class InterleavedComplexTensor(Tensor):
             layout=t.layout,
             requires_grad=False,
         )
-        res._data = torch.view_as_real(t.detach())
+        res._data = t.detach()
         return res
 
     def __init__(self, *a: Any, **kw: Any) -> None:
@@ -210,11 +211,11 @@ class InterleavedComplexTensor(Tensor):
 
     @property
     def re(self) -> Tensor:
-        return self._data[..., 0]
+        return torch.real(self._data)
 
     @property
     def im(self) -> Tensor:
-        return self._data[..., 1]
+        return torch.imag(self._data)
 
     @property
     def real(self) -> Tensor:  # type: ignore[bad-override]
@@ -233,7 +234,7 @@ class InterleavedComplexTensor(Tensor):
         self.im[...] = value
 
     def as_interleaved(self) -> Tensor:
-        return torch.view_as_complex(self._data)
+        return self._data
 
     def to_complex_tensor(self) -> ComplexTensor:
         return ComplexTensor(self.re, self.im)
@@ -282,7 +283,7 @@ class InterleavedComplexTensor(Tensor):
         outer_size: tuple[int, ...],
         outer_stride: tuple[int, ...],
     ) -> InterleavedComplexTensor:
-        return InterleavedComplexTensor(torch.view_as_complex(inner_tensors["_data"]))
+        return InterleavedComplexTensor(inner_tensors["_data"])
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
         return ["_data"], None
