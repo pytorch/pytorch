@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     xfailIfS390X,
@@ -54,21 +55,21 @@ class _ConverterTestMixin:
             if opt == "script":
                 # Separate two models for testing non-functional effects
                 if check_persistent:
-                    original_ts_model = torch.jit.script(M())
-                    ts_model = torch.jit.script(M())
+                    original_ts_model = torch.jit._script.script(M())
+                    ts_model = torch.jit._script.script(M())
                     eager_model = M()
                 else:
-                    original_ts_model = torch.jit.script(M)
-                    ts_model = torch.jit.script(M)
+                    original_ts_model = torch.jit._script.script(M)
+                    ts_model = torch.jit._script.script(M)
                     eager_model = M
             elif opt == "trace":
                 if check_persistent:
-                    original_ts_model = torch.jit.trace(M(), tracing_inputs)
-                    ts_model = torch.jit.trace(M(), tracing_inputs)
+                    original_ts_model = torch.jit._trace.trace(M(), tracing_inputs)
+                    ts_model = torch.jit._trace.trace(M(), tracing_inputs)
                     eager_model = M()
                 else:
-                    original_ts_model = torch.jit.trace(M, tracing_inputs)
-                    ts_model = torch.jit.trace(M, tracing_inputs)
+                    original_ts_model = torch.jit._trace.trace(M, tracing_inputs)
+                    ts_model = torch.jit._trace.trace(M, tracing_inputs)
                     eager_model = M
             else:
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
@@ -111,6 +112,7 @@ class _ConverterTestMixin:
                 self.assertEqual(x, y)
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestConverter(_ConverterTestMixin, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -574,7 +576,7 @@ class TestConverter(_ConverterTestMixin, TestCase):
             def __init__(self, dim: int) -> None:
                 super().__init__()
                 m = LinearM(dim)
-                m = torch.jit.script(m)
+                m = torch.jit._script.script(m)
                 self.mod1 = m
                 self.mod2 = Wrapper(m)
 
@@ -588,7 +590,7 @@ class TestConverter(_ConverterTestMixin, TestCase):
             def __init__(self, dim: int) -> None:
                 super().__init__()
                 m = M(dim)
-                m = torch.jit.script(m)
+                m = torch.jit._script.script(m)
                 self.mod1 = m
                 self.mod2 = Wrapper(m)
 
@@ -1277,7 +1279,7 @@ class TestConverter(_ConverterTestMixin, TestCase):
         self._check_equal_ts_ep_converter(M(), inp)
 
     def test_hidden_input_name(self):
-        @torch.jit.script
+        @torch.jit._script.script
         def func1(x):
             return x + 1
 
@@ -1432,8 +1434,8 @@ class TestConverter(_ConverterTestMixin, TestCase):
             # Use customized checking here, because state_dict of quantization will be
             # modified by the quantization pass.
             inp = (torch.randn(4, 1, 4, 4),)
-            original_ts_model = torch.jit.script(model)
-            ts_model = torch.jit.script(model)
+            original_ts_model = torch.jit._script.script(model)
+            ts_model = torch.jit._script.script(model)
             converter = TS2EPConverter(ts_model, inp)
             ep = converter.convert()
 

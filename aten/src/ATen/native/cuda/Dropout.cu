@@ -9,6 +9,7 @@
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/macros/Macros.h>
 #include <curand_kernel.h>
+#include <type_traits>
 #include <utility>
 
 #include <ATen/native/TensorIterator.h>
@@ -30,16 +31,21 @@ namespace at::native {
 
 namespace {
 
-// philox generates 128 bits of randomness at a time. Kernel uses this explicitly by putting suitably transformed result into float4
-// for all members of float4 to be consumed UNROLL has to be 4. Don't change!
-// Note: VEC <= 4 (and in most real-world cases will be 4), so same logic applies.
-const int UNROLL = 4;
+// philox generates 128 bits of randomness at a time, returned as a float4 by curand_uniform4.
+// Each iteration handles at least UNROLL elements so that all 4 values are used; the unvectorized
+// kernel handles exactly UNROLL. Don't change!
+constexpr int UNROLL = 4;
+
+// Elements each thread handles per grid-stride iteration. Each output element needs one philox
+// value, so this is also the number of philox values drawn per iteration.
+C10_HOST_DEVICE constexpr int elems_per_iter(int vec) {
+  return vec > UNROLL ? vec : UNROLL;
+}
 
 template <
     typename scalar_t,
     typename accscalar_t,
     typename IndexType,
-    int ADims,
     int VEC,
     typename mask_t>
 C10_LAUNCH_BOUNDS_2(256, 4)
@@ -49,85 +55,60 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
                          at::cuda::detail::TensorInfo<mask_t, IndexType> c,
                          IndexType totalElements, accscalar_t p,
                          PhiloxCudaState philox_args) {
-  using LoadT = memory::aligned_vector<scalar_t, VEC>;
-  using MaskLoadT = memory::aligned_vector<mask_t, VEC>;
-
   auto [seed, offset] = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
   curand_init(seed, idx, offset, &state);
-
-  // Helps align the total number of times curand_uniform4 is called by each thread for the same totalElements
-  // in the vec=2 and vec=4 cases.
-  bool gridxvec_loop_state = false;
   accscalar_t scale = 1.0 / p;
 
-  constexpr int RAND_SIZE = (VEC + 4 - 1) / 4;
-  float4 rand[RAND_SIZE];
+  // Elements per thread per iteration, one philox value each.
+  constexpr int ELEMS = elems_per_iter(VEC);
+  static_assert(ELEMS % 4 == 0 && ELEMS % VEC == 0, "VEC must be a power of two");
+  // Number of VEC-sized chunks per thread per iteration; > 1 only for VEC < 4.
+  constexpr int CHUNKS = ELEMS / VEC;
 
-  // Note: Vectorized loads means we'll stride each thread by an additional VEC factor, as we'll load VEC elements at a time
-  for (IndexType linearIndex = idx * VEC;
-      linearIndex < totalElements;
-      linearIndex += gridDim.x * blockDim.x * VEC) {
-    // local storage
-    scalar_t src[VEC];
-    // We'll use this to actually cause vectorized loads later
-    LoadT *value = reinterpret_cast<LoadT*>(&src);
-
-    //curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for Halfs, so generate float for everything
-    // Note: need a new set of random values per 4 elements -- we'll handle VEC elements in this thread, so need ceil(VEC / 4)
-    // sets of rand.
-    if ((VEC >= 4) || (gridxvec_loop_state == 0)) {
-      #pragma unroll
-      for (int ii = 0; ii < RAND_SIZE; ii++) {
-        rand[ii] = curand_uniform4(&state);
-      }
-    } else {
-      // sets up the last two values we generated last iteration to be used this iteration.
-      rand[0].x = rand[0].z;
-      rand[0].y = rand[0].w;
-      gridxvec_loop_state ^= 1;
-    }
-
-    rand[0].x = rand[0].x < p;
-    rand[0].y = rand[0].y < p;
-    if constexpr (VEC >= 4) {
-      rand[0].z = rand[0].z < p;
-      rand[0].w = rand[0].w < p;
-    }
-
+  // An iteration's chunks are chunk_stride apart, so neighboring threads access neighboring memory.
+  const IndexType chunk_stride = gridDim.x * blockDim.x * VEC;
+  // Note: We explicitly check for is_contiguous() before launching the vectorized kernel
+  // and use linear indices directly to allow vectorization of NHWC (or other) ordering.
+  for (IndexType base = idx * VEC; base < totalElements; base += chunk_stride * CHUNKS) {
+    // Draw this iteration's philox values.
+    float rand[ELEMS];
     #pragma unroll
-    for (int ii = 1; ii < RAND_SIZE; ii++) {
-      rand[ii].x = rand[ii].x < p;
-      rand[ii].y = rand[ii].y < p;
-      rand[ii].z = rand[ii].z < p;
-      rand[ii].w = rand[ii].w < p;
+    for (int d = 0; d < ELEMS / 4; d++) {
+      // curand_uniform_double was pure evil anyway, not doing what it promises, and there's
+      // nothing for Halfs, so generate float for everything
+      const float4 r4 = curand_uniform4(&state);
+      rand[4 * d] = r4.x;
+      rand[4 * d + 1] = r4.y;
+      rand[4 * d + 2] = r4.z;
+      rand[4 * d + 3] = r4.w;
     }
 
-    // Note: We explicitly check for is_contiguous() before launching the vectorized kernel
-    // and replace IndexToOffset call with linearIndex to allow vectorization of NHWC (or other)
-    // ordering.
-    // Single vectorized load
-    *value = *reinterpret_cast<const LoadT*>(&a.data[linearIndex]);
-
-    scalar_t r[VEC];
-    mask_t mask[VEC];
-
-    // Perform the actual computation
+    // Apply dropout to each chunk and store its outputs and mask.
     #pragma unroll
-    for (int jj = 0; jj < RAND_SIZE; jj++) {
-      #pragma unroll
-      for (int ii = 0; ii < std::min(VEC, 4); ii++) {
-        r[jj * 4 + ii] = src[jj * 4 + ii]*(&rand[jj].x)[ii]*scale;
-        mask[jj * 4 + ii] = (mask_t)(&rand[jj].x)[ii];
+    for (int ci = 0; ci < CHUNKS; ci++) {
+      const IndexType chunk_start = base + ci * chunk_stride;
+      if (chunk_start >= totalElements) {
+        break;
       }
+      using ChunkT = memory::aligned_vector<scalar_t, VEC>;
+      using MaskChunkT = memory::aligned_vector<mask_t, VEC>;
+      scalar_t src[VEC];
+      scalar_t out[VEC];
+      mask_t mask[VEC];
+      *reinterpret_cast<ChunkT*>(&src[0]) = *reinterpret_cast<const ChunkT*>(&a.data[chunk_start]);
+      #pragma unroll
+      for (int ii = 0; ii < VEC; ii++) {
+        const float keep = rand[ci * VEC + ii] < p;
+        out[ii] = src[ii] * keep * scale;
+        mask[ii] = (mask_t)keep;
+      }
+      *reinterpret_cast<ChunkT*>(&b.data[chunk_start]) = *reinterpret_cast<ChunkT*>(&out[0]);
+      *reinterpret_cast<MaskChunkT*>(&c.data[chunk_start]) = *reinterpret_cast<MaskChunkT*>(&mask[0]);
+      // Not needed for correctness; keeping warps in step measurably helps memory throughput.
+      __syncthreads();
     }
-
-    // Vectorized writes for both mask & result
-    *(reinterpret_cast<LoadT*>(&b.data[linearIndex])) = *reinterpret_cast<LoadT*>(&r[0]);
-    *(reinterpret_cast<MaskLoadT*>(&c.data[linearIndex])) = *reinterpret_cast<MaskLoadT*>(&mask[0]);
-
-    __syncthreads();
   }
 }
 
@@ -217,7 +198,6 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
     const int optimal_vec_size = 16 / static_cast<int>(sizeof(scalar_t));
     vec_size = std::min<int>(optimal_vec_size, vec_size);
 
-    // make sure we don't break assumption that we can't have > 4 elements / thread
     TORCH_INTERNAL_ASSERT(vec_size <= 8, "Value of VEC must be in [2, 4, 8]");
 #endif
   }
@@ -238,7 +218,7 @@ inline void launcher(
     Tensor& mask,
     double p,
     const int64_t nelem,
-    const PhiloxCudaState rng_engine_inputs,
+    CUDAGeneratorImpl* gen,
     dim3 grid,
     dim3 dim_block) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -262,71 +242,36 @@ inline void launcher(
 
         int vec_size = get_vector_size<scalar_t>(self, ret, mask);
 
+        // Philox values each thread draws: elems_per_iter per iteration, times its iteration count.
+        const int64_t elems = elems_per_iter(vec_size);
+        const int64_t total_threads = static_cast<int64_t>(dim_block.x) * grid.x;
+        const int64_t counter_offset = ((nelem - 1) / (total_threads * elems) + 1) * elems;
+        PhiloxCudaState rng_engine_inputs;
+        {
+          // See Note [Acquire lock when using random generators]
+          std::lock_guard<std::mutex> lock(gen->mutex_);
+          rng_engine_inputs = gen->philox_cuda_state(counter_offset);
+        }
+
         if (vec_size > 1) {
+          auto launch_vec = [&](auto vec) {
+            fused_dropout_kernel_vec<scalar_t, accscalar_t, index_type, decltype(vec)::value>
+                <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                    self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          };
           switch (vec_size) {
             case 16:
-              fused_dropout_kernel_vec<
-                  scalar_t,
-                  accscalar_t,
-                  index_type,
-                  1,
-                  16>
-                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                      self_info,
-                      ret_info,
-                      mask_info,
-                      nelem,
-                      pa,
-                      rng_engine_inputs);
-              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              launch_vec(std::integral_constant<int, 16>{});
               break;
             case 8:
-              fused_dropout_kernel_vec<
-                  scalar_t,
-                  accscalar_t,
-                  index_type,
-                  1,
-                  8>
-                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                      self_info,
-                      ret_info,
-                      mask_info,
-                      nelem,
-                      pa,
-                      rng_engine_inputs);
-              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              launch_vec(std::integral_constant<int, 8>{});
               break;
             case 4:
-              fused_dropout_kernel_vec<
-                  scalar_t,
-                  accscalar_t,
-                  index_type,
-                  1,
-                  4>
-                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                      self_info,
-                      ret_info,
-                      mask_info,
-                      nelem,
-                      pa,
-                      rng_engine_inputs);
-              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              launch_vec(std::integral_constant<int, 4>{});
               break;
             case 2:
-              fused_dropout_kernel_vec<
-                  scalar_t,
-                  accscalar_t,
-                  index_type,
-                  1,
-                  2>
-                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                      self_info,
-                      ret_info,
-                      mask_info,
-                      nelem,
-                      pa,
-                      rng_engine_inputs);
-              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              launch_vec(std::integral_constant<int, 2>{});
               break;
             default:
               TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
@@ -395,20 +340,12 @@ dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p){
   dim3 dim_block(block_size);
   dim3 grid((nelem + block_size -1)/block_size);
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
-//number of times random will be generated per thread, to offset philox counter in thc random state
-  int64_t counter_offset = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
-  PhiloxCudaState rng_engine_inputs;
-  {
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
-  }
   if (cuda::detail::canUse32BitIndexMath(self)){
     launcher<unsigned int, mask_t>(
-        self, ret, mask, p, nelem, rng_engine_inputs, grid, dim_block);
+        self, ret, mask, p, nelem, gen, grid, dim_block);
   } else {
     launcher<uint64_t, mask_t>(
-        self, ret, mask, p, nelem, rng_engine_inputs, grid, dim_block);
+        self, ret, mask, p, nelem, gen, grid, dim_block);
   }
   return std::tuple<Tensor,Tensor>(ret, mask);
 }

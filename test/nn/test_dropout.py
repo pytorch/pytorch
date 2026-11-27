@@ -321,9 +321,39 @@ class TestDropoutNNDeviceType(NNTestCase):
                         )
 
 
+class TestDropoutNNCUDA(NNTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_native_dropout_vec8_consecutive_calls_independent(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/202370: with
+        # 16-byte-aligned bf16 (VEC=8) each thread consumes 8 philox values per
+        # iteration but only 4 were reserved, so consecutive calls reused them.
+        x = torch.ones(4096, device=device, dtype=torch.bfloat16)
+        torch.manual_seed(0)
+        m1 = torch.native_dropout(x, 0.5, True)[1]
+        m2 = torch.native_dropout(x, 0.5, True)[1]
+        overlap = m1.view(-1, 8)[:, 4:] == m2.view(-1, 8)[:, :4]
+        self.assertLess(overlap.float().mean().item(), 0.6)
+
+    def test_native_dropout_vec2_consecutive_calls_independent(self, device):
+        # With 8-byte-aligned fp32 (VEC=2) each thread consumed 4 philox values per
+        # iteration instead of sharing them across two, overrunning the reservation
+        # once threads run multiple iterations. Mirrors the grid sizing in dropout_cuda.
+        props = torch.cuda.get_device_properties(device)
+        blocks_per_sm = props.max_threads_per_multi_processor // 256
+        num_threads = 256 * blocks_per_sm * props.multi_processor_count
+        x = torch.ones(4 * num_threads + 2, device=device)[2:]
+        torch.manual_seed(0)
+        m1 = torch.native_dropout(x, 0.5, True)[1]
+        m2 = torch.native_dropout(x, 0.5, True)[1]
+        overlap = m1[2 * num_threads :] == m2[: 2 * num_threads]
+        self.assertLess(overlap.float().mean().item(), 0.6)
+
+
 instantiate_device_type_tests(
     TestDropoutNNDeviceType, globals(), allow_mps=True, allow_xpu=True
 )
+instantiate_device_type_tests(TestDropoutNNCUDA, globals(), only_for="cuda")
 instantiate_parametrized_tests(TestDropoutNN)
 
 if __name__ == "__main__":

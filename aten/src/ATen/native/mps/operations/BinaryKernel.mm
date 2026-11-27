@@ -159,6 +159,10 @@ static void laguerre_polynomial_l_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "laguerre_polynomial_l");
 }
 
+static void legendre_polynomial_p_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "legendre_polynomial_p");
+}
+
 static void heaviside_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "heaviside");
 }
@@ -298,12 +302,24 @@ static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
 // The ILP threshold matches the floating-point default (256K) -- benchmark
 // shows float inputs gain ~4x at 1M; int inputs are neutral.
 static constexpr uint32_t kCmpILPThreshold = 1u << 18;
+// float4_e2m1fn_x2 has no Metal type; like CPU, eq/ne compare its packed bytes. TensorIterator has already rejected
+// operands of any other dtype.
+static void exec_equality_kernel(TensorIteratorBase& iter, const std::string& name) {
+  if (iter.common_dtype() == kFloat4_e2m1fn_x2) {
+    Tensor out = iter.output();
+    auto byte_iter = TensorIterator::comparison_op(out, iter.input(0).view(kByte), iter.input(1).view(kByte));
+    lib.exec_binary_kernel(byte_iter, name, std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+    return;
+  }
+  lib.exec_binary_kernel(iter, name, std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
 static void eq_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "eq", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+  exec_equality_kernel(iter, "eq");
 }
 
 static void ne_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "ne", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+  exec_equality_kernel(iter, "ne");
 }
 
 static void lt_mps_kernel(TensorIteratorBase& iter) {
@@ -358,6 +374,7 @@ REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polyno
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
 REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_mps_kernel)
+REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)

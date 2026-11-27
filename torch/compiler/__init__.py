@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
+import threading
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -575,14 +576,65 @@ def wrap_numpy(fn):
     return wrap(fn)
 
 
-_is_compiling_flag: bool = False
-_is_exporting_flag: bool = False
-_is_non_strict_tracing_flag: bool = False
+# Session flags live in per-thread TLS ("presence means True"), so sessions
+# in different threads cannot see each other and cannot fight over stash /
+# restore (#202042). Plain caller-spawned threads never inherit the flags.
+# The autograd engine installs an at::ThreadLocalState copy on its worker
+# per GraphTask (engine.cpp), so backward started inside the session
+# observes it while that task runs.
+_IS_COMPILING = "torch.compiler.is_compiling"
+_IS_EXPORTING = "torch.compiler.is_exporting"
+_IS_NON_STRICT_TRACING = "torch.compiler.is_non_strict_tracing"
+
+# Hot-path bindings hoisted to module globals: inline imports would add
+# attribute lookups to every flag read.
+_IS_KEY_IN_TLS = torch._C._is_key_in_tls
+_STASH_OBJ_IN_TLS = torch._C._stash_obj_in_tls
+_REMOVE_OBJ_FROM_TLS = torch._C._remove_obj_from_tls
+
+# Sessions entered and not yet exited, counted across all threads. The readers
+# below short-circuit on this count so the common case of no session running
+# costs a module global load instead of a TLS probe, which the runtime overhead
+# paths measured by pr_time_benchmarks are sensitive to. A stale inherited copy
+# (e.g. an autograd worker's mid-session snapshot) is therefore visible only
+# while some session is still running. The count is raised before stashing and
+# lowered after erasing, so it can err only in the direction of probing more.
+_SESSIONS_ACTIVE = 0
+_SESSIONS_ACTIVE_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _session_flags(*keys: str):
+    """Hold each session flag True in per-thread TLS while active.
+
+    Only flags not already set enter ``newly_set`` and are cleared on exit,
+    so nested sessions and inherited (at::ThreadLocalState-copied) flags are
+    left alone.
+    """
+    global _SESSIONS_ACTIVE
+    newly_set = [k for k in keys if not _IS_KEY_IN_TLS(k)]
+    with _SESSIONS_ACTIVE_LOCK:
+        _SESSIONS_ACTIVE += 1
+    try:
+        for k in newly_set:
+            _STASH_OBJ_IN_TLS(k, True)
+        yield
+    finally:
+        try:
+            for k in newly_set:
+                _REMOVE_OBJ_FROM_TLS(k)
+        finally:
+            with _SESSIONS_ACTIVE_LOCK:
+                _SESSIONS_ACTIVE -= 1
 
 
 def is_compiling() -> bool:
     """
     Indicates whether a graph is executed/traced as part of torch.compile() or torch.export().
+
+    The flag is per session: it is True in the thread running a
+    ``torch.compile`` / ``torch.export`` tracing session. Any other
+    threads will see False.
 
     Note that there are 2 other related flags that should deprecated eventually:
       * torch._dynamo.external_utils.is_compiling()
@@ -599,40 +651,25 @@ def is_compiling() -> bool:
     if torch.jit.is_scripting():
         return False
     else:
-        return _is_compiling_flag
+        return _SESSIONS_ACTIVE != 0 and _IS_KEY_IN_TLS(_IS_COMPILING)
 
 
 def _is_non_strict_tracing() -> bool:
     """
     Indicates whether we are inside a non-strict make_fx-based tracing session.
     """
-    return _is_non_strict_tracing_flag
+    return _SESSIONS_ACTIVE != 0 and _IS_KEY_IN_TLS(_IS_NON_STRICT_TRACING)
 
 
-@contextlib.contextmanager
 def _non_strict_tracing_context():
     """Context manager that sets the non-strict tracing flag."""
-    global _is_non_strict_tracing_flag
-    old = _is_non_strict_tracing_flag
-    try:
-        _is_non_strict_tracing_flag = True
-        yield
-    finally:
-        _is_non_strict_tracing_flag = old
+    return _session_flags(_IS_NON_STRICT_TRACING)
 
 
-@contextlib.contextmanager
 def _compile_session_context():
-    """Context manager that sets _is_compiling_flag for the duration of a
-    torch.compile session.
-    """
-    global _is_compiling_flag
-    old = _is_compiling_flag
-    try:
-        _is_compiling_flag = True
-        yield
-    finally:
-        _is_compiling_flag = old
+    """Context manager that sets the compiling flag for the duration of a
+    torch.compile session in the current thread (per-thread, see #202042)."""
+    return _session_flags(_IS_COMPILING)
 
 
 @contextlib.contextmanager
@@ -738,7 +775,8 @@ def is_exporting() -> bool:
     Indicates whether we're under exporting.
 
     It's stricter than is_compiling() flag, as it would only be set to True when
-    torch.export is used.
+    torch.export is used. See is_compiling() for the session visibility
+    semantics of the session flags.
 
     Example::
 
@@ -748,7 +786,7 @@ def is_exporting() -> bool:
         >>>
         >>>     # ...rest of the function...
     """
-    return _is_exporting_flag
+    return _SESSIONS_ACTIVE != 0 and _IS_KEY_IN_TLS(_IS_EXPORTING)
 
 
 def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:

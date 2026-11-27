@@ -35,11 +35,10 @@ def _restore_blas_workspace_sizes(cublas_size: int, cublaslt_size: int) -> None:
 
 def _disable_blas_workspaces(dev: torch.device, add_cleanup) -> None:
     # MemTracker accounts for tensor storages, while BLAS workspaces are raw
-    # caching-allocator allocations. ROCm allocates them per operation by
-    # default, up to 128 MiB each on gfx942 and gfx950, which distorts the
-    # accelerator peak used as ground truth, so disable both workspace kinds
-    # there.
-    if dev.type != "cuda" or not torch.version.hip:
+    # caching-allocator allocations. CUDA and ROCm allocate them per operation
+    # by default, which distorts the accelerator peak used as ground truth,
+    # so disable both workspace kinds.
+    if dev.type != "cuda":
         return
     cublas_size = torch.backends.cuda.cublas_workspace_size()
     cublaslt_size = torch.backends.cuda.cublaslt_workspace_size()

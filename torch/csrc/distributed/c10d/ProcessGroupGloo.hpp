@@ -2,6 +2,7 @@
 
 #ifdef USE_C10D_GLOO
 
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -21,7 +22,6 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/logger.hpp>
 
 #include <ATen/ThreadLocalState.h>
 
@@ -83,8 +83,15 @@ class TORCH_API ProcessGroupGloo : public Backend {
     std::vector<at::Tensor> result() override;
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+    // Completes when the gloo op finishes on the host. For CUDA tensors
+    // device-side work may still be queued.
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+    bool hasFutureResult() const override {
+      return true;
+    }
     uint64_t getSequencenumber() const override;
     std::chrono::milliseconds getTimeout() const override;
+    // These three are not read in-tree; kept for out-of-tree subclasses.
     virtual const std::vector<at::Tensor> getInputTensors() = 0;
     virtual const std::vector<at::Tensor> getOutputTensors() = 0;
     inline std::string getProfilerTitle() const {
@@ -96,10 +103,6 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
    protected:
     friend class ProcessGroupGloo;
-    // unique id used to tell the trace buffer that this
-    // work has completed
-    std::optional<uint64_t> trace_id_;
-    std::optional<uint64_t> trace_reset_epoch_;
     std::shared_ptr<gloo::Context> context_;
     const std::chrono::milliseconds timeout_;
 
@@ -112,6 +115,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     const std::vector<std::vector<at::Tensor>> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
+    c10::intrusive_ptr<at::ivalue::Future> resultFuture_;
     std::function<void()> recordFunctionBeforeCallback_;
     const uint64_t seq_;
     std::string profilingTitle_;
@@ -216,10 +220,19 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     uint64_t getSequencenumber() const override;
 
+    // Completes on the first wait() that finishes the op; stays pending if the
+    // work is never waited on or wait() is interrupted by abort().
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+    bool hasFutureResult() const override {
+      return true;
+    }
+
    protected:
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
     const uint64_t seq_;
+    c10::intrusive_ptr<at::ivalue::Future> resultFuture_;
+    std::atomic<bool> resultMarked_{false};
   };
 
   class TORCH_API RecvWork : public Work {
@@ -239,11 +252,20 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     uint64_t getSequencenumber() const override;
 
+    // Completes on the first wait() that finishes the op; stays pending if the
+    // work is never waited on or wait() is interrupted by abort().
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+    bool hasFutureResult() const override {
+      return true;
+    }
+
    protected:
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
     int srcRank_{-1};
     const uint64_t seq_;
+    c10::intrusive_ptr<at::ivalue::Future> resultFuture_;
+    std::atomic<bool> resultMarked_{false};
   };
 
   struct TORCH_API Options : public Backend::Options {
@@ -516,10 +538,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;
   uint64_t seq_{0};
-  size_t local_id_;
   mutable std::vector<uint64_t> defaultRanks_;
-  std::shared_ptr<ProcessGroupStatus> pgStatus_ =
-      std::make_shared<ProcessGroupStatus>();
 };
 
 } // namespace c10d

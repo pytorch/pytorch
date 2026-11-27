@@ -67,7 +67,6 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
-    SM70OrLater,
 )
 from torch.testing._internal.common_device_type import (
     E4M3_MAX_POS,
@@ -81,8 +80,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfHpu,
+    skipIfNoLapack,
     skipIfWindows,
-    skipIfXpu,
     xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -1042,6 +1041,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         if guard_manager_wrapper.diff_guard_root:
             self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
 
+    @skipIfNoLapack
     def test_linalg_inv_singular_aot_eager_raises(self):
         def fn(x):
             return torch.linalg.inv(x)
@@ -1056,6 +1056,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._C._LinAlgError, msg):
             opt_fn(x)
 
+    @skipIfNoLapack
     def test_linalg_inv_check_errors_preserved_in_aot_graph(self):
         def fn(x):
             return torch.linalg.inv(x)
@@ -4342,14 +4343,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
 
-    def test_jit_trace_errors(self):
-        @torch.compile(backend="eager", dynamic=True)
-        def f(x):
-            return x + 1
-
-        with self.assertRaises(RuntimeError):
-            torch.jit.trace(f, torch.randn(3))
-
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):
@@ -6258,7 +6251,7 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         torch.compile(fn2, backend="eager")()
 
     def test_jit_script_defaults(self):
-        @torch.jit.script
+        @torch.jit._script.script
         def fast_cos(x, c: float = 2.0):
             return torch.cos(x) * c
 
@@ -6594,10 +6587,6 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         )
         self.assertEqual(actual_str, expected_str)
 
-    @unittest.skipIf(
-        not SM70OrLater,
-        "Triton only supports devices of CUDA capability >= 7.0",
-    )
     def test_add_complex_conj(self):
         def f(x):
             return x + x.conj()
@@ -9625,7 +9614,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         peak_mem2 = torch.get_device_module(device).max_memory_allocated()
         self.assertTrue(peak_mem1 == peak_mem2)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3860")
     # test involves custom ops that return unbacked symints
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     # test requires the activation memory budget code to think
@@ -9986,7 +9974,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.accelerator.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3835")
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)

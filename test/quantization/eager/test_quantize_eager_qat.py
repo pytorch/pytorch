@@ -55,7 +55,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
 )
-from torch.testing._internal.common_utils import skipIfNoXNNPACK
+from torch.testing._internal.common_utils import HardwareClassification, skipIfNoXNNPACK
 
 
 hu.assert_deadline_disabled()
@@ -331,6 +331,8 @@ class _ReferenceConvBn2d(_ReferenceConvBnNd, nn.Conv2d):
 
 
 class TestQuantizeEagerQAT(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -356,7 +358,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.fc2), nnq.Linear)
                     test_only_eval_fn(model, self.calib_data)
-                    self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -379,7 +380,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.dropout), nnq.Dropout)
                     test_only_eval_fn(model, self.calib_data)
-                    self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -422,7 +422,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.fc2), nnq.Linear)
                     test_only_eval_fn(model, self.img_data_2d)
-                    self.checkScriptable(model, self.img_data_2d)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -455,7 +454,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.fc2), nnq.Linear)
                     test_only_eval_fn(model, self.img_data_2d)
-                    self.checkScriptable(model, self.img_data_2d)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -488,7 +486,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                 self.assertEqual(type(model.fc1), nnqd.Linear)
                 self.assertEqual(type(model.fc2), nnqd.Linear)
                 test_only_eval_fn(model, self.calib_data)
-                self.checkScriptable(model, self.calib_data)
                 self.checkNoQconfig(model)
 
     def test_defused_embedding_bag_linear(self):
@@ -525,7 +522,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertEqual(type(model.linear), nn.quantized.Linear)
 
                     test_only_eval_fn(model, self.embed_data)
-                    self.checkScriptable(model, self.embed_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -558,7 +554,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertTrue(type(model.linear), nnq.Linear)
 
                     test_only_eval_fn(model, self.embed_data)
-                    self.checkScriptable(model, self.embed_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -765,6 +760,8 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
 
 
 class TestQuantizeEagerQATNumerics(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_activation_convert_numerics_impl(self, Act, data):
         class M(torch.nn.Module):
             def __init__(self) -> None:

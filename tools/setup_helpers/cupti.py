@@ -11,11 +11,10 @@ import re
 from pathlib import Path
 
 
-# CUPTI 13.3.0 (CUPTI_API_VERSION == 130300). The field-id codegen needs the v2
+# CUPTI 13.5.0 (CUPTI_API_VERSION == 130500). The field-id codegen needs the v2
 # user-defined-record field-id enums, which the CUPTI ABI header only gained at
-# 13.3; an older header would emit an incomplete catalog. Mirrors Cuspy's
-# runtime floor.
-_MIN_CUPTI_API_VERSION = 130300
+# 13.3; the floor is 13.5 to mirror Cuspy's runtime floor (LIBCUPTI_MIN_VERSION).
+_MIN_CUPTI_API_VERSION = 130500
 
 
 def _cupti_api_version(include_dir: Path) -> int | None:

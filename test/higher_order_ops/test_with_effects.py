@@ -36,6 +36,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -92,6 +93,7 @@ def make_inputs_non_leaves(inps):
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestWithEffects(TestCase):
     hw_classification = HardwareClassification.GENERIC
 

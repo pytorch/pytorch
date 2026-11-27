@@ -3204,7 +3204,8 @@ class TestPatternMatcher(TestCase):
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
 
-    def test_nested_replacement_args_do_not_percolate_tags(self):
+    @parametrize("symint_layout", ["none", "flat", "nested"])
+    def test_nested_replacement_args_do_not_percolate_tags(self, symint_layout):
         class DummyMatch:
             def __init__(self, outputs):
                 self.nodes = outputs
@@ -3224,7 +3225,7 @@ class TestPatternMatcher(TestCase):
         graph.output(old)
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
 
-        def replacement(args):
+        def replacement(args, *shape):
             a, b = args
             return torch.mul(a, b)
 
@@ -3233,11 +3234,16 @@ class TestPatternMatcher(TestCase):
         old.meta["recompute"] = torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
         old.meta["ac_graph_id"] = 1
 
+        args = [(sin, y)]
+        if symint_layout != "none":
+            symint = ShapeEnv().create_unbacked_symint()
+            args.append(symint if symint_layout == "flat" else (symint,))
+
         ReplacementPatternEntry.replace_with_graph(
             DummyMatch([old]),
             gm.graph,
             replacement_gm,
-            args=[(sin, y)],
+            args=args,
         )
 
         self.assertFalse(
@@ -3251,6 +3257,11 @@ class TestPatternMatcher(TestCase):
         graph_str = str(gm.graph)
         self.assertIn("torch.mul", graph_str)
         self.assertIn("operator.getitem", graph_str)
+        gm.graph.lint()
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and node is not sin:
+                self.assertEqual(node.meta["recompute"], old.meta["recompute"])
+                self.assertEqual(node.meta["ac_graph_id"], old.meta["ac_graph_id"])
 
     def test_fwd_only_generate_original_aten_meta(self):
         def f(x):

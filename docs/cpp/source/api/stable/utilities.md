@@ -30,6 +30,18 @@ tensors and CUDA operations.
 // Previous device is restored
 ```
 
+## Generator Class
+
+```{doxygenclass} torch::stable::Generator
+:members:
+```
+
+## InferenceMode Class
+
+```{doxygenclass} torch::stable::InferenceMode
+:members:
+```
+
 ## Stream
 
 ```{doxygenclass} torch::stable::accelerator::Stream
@@ -77,6 +89,21 @@ my_kernel<<<blocks, threads, 0, stream>>>(args...);
 When using C shim APIs, the `TORCH_ERROR_CODE_CHECK` macro is required to properly check error codes and throw appropriate exceptions. `nativeHandle()`, along with all our highlevel C++ utility APIs, does this check for you.
 ```
 
+## CUDA BLAS Handle
+
+```{cpp:function} void* torch::stable::accelerator::getCurrentCUDABlasHandle(bool setup = true)
+
+Returns a borrowed BLAS handle for the current device. PyTorch owns the handle.
+See `at::cuda::getCurrentCUDABlasHandle` for the behavior of `setup`.
+
+Include `<torch/csrc/stable/accelerator.h>` and define `USE_CUDA` when compiling
+the extension. This API requires PyTorch 2.16 or newer headers.
+
+Targets from PyTorch 2.10 through 2.15 support `setup=true`. Passing
+`setup=false` requires a PyTorch 2.16 or newer target. Targets of PyTorch 2.16
+or newer also require a PyTorch 2.16 or newer runtime.
+```
+
 ## CUDA Error Checking Macros
 
 These macros provide stable ABI equivalents for CUDA error checking.
@@ -115,6 +142,52 @@ STD_CUDA_KERNEL_LAUNCH_CHECK();
 
 Minimum compatible version: PyTorch 2.10.
 ```
+
+## Warning Macros
+
+These macros are the stable ABI counterparts of `TORCH_WARN` and
+`TORCH_WARN_ONCE`.
+
+They differ from `TORCH_WARN` and `TORCH_WARN_ONCE` in two ways:
+
+- Arguments are streamed through `std::ostringstream` rather than `c10::str`,
+  so `std::optional`, scoped enums without an `operator<<`, and wide strings
+  compile with `TORCH_WARN` but not with `STABLE_TORCH_WARN`.
+- The warning is always a `UserWarning`. There is not yet a stable ABI
+  equivalent of `TORCH_WARN_DEPRECATION`.
+
+### STABLE_TORCH_WARN
+
+```{c:macro} STABLE_TORCH_WARN(...)
+
+Emits a warning with the given message.
+
+**Example:**
+
+```cpp
+STABLE_TORCH_WARN("my_op got n=", n, ", which may be slow");
+```
+
+Minimum compatible version: PyTorch 2.9.
+Build time minimum version: PyTorch 2.16.
+```
+### STABLE_TORCH_WARN_ONCE
+
+```{c:macro} STABLE_TORCH_WARN_ONCE(...)
+
+Emits a warning the first time the call site is reached, or on every call while
+`torch.set_warn_always(True)` is in effect.
+
+**Example:**
+
+```cpp
+STABLE_TORCH_WARN_ONCE("my_op is deprecated, use my_new_op instead");
+```
+
+Minimum compatible version: PyTorch 2.16.
+Build time minimum version: PyTorch 2.16.
+```
+
 ## Header-Only Utilities
 
 The `torch::headeronly` namespace provides header-only versions of common
@@ -286,4 +359,9 @@ in the PyTorch source tree.
 ```
 
 ```{doxygenfunction} torch::stable::get_num_threads
+```
+
+## CPU Capability Queries
+
+```{doxygenfunction} torch::stable::cpu::get_cpu_capability
 ```

@@ -1,5 +1,5 @@
-#include <c10/core/impl/GPUTrace.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/xpu/XPUFunctions.h>
 
 #include <vector>
@@ -122,7 +122,11 @@ inline void initGlobalDevicePoolState() {
   // the officially supported range (Intel GPUs starting from Arc (Alchemist)
   // series).
   namespace syclex = sycl::ext::oneapi::experimental;
-  for (const auto& device : gDevicePool.devices) {
+  for (const auto i : c10::irange(gDevicePool.devices.size())) {
+    const auto& device = gDevicePool.devices[i];
+    TORCH_CHECK(
+        device->ext_oneapi_index_within_platform() == i,
+        "Device index within platform does not match the expected index.");
     auto architecture = device->get_info<syclex::info::device::architecture>();
     if (architecture < syclex::architecture::intel_gpu_acm_g10) {
       TORCH_WARN(
@@ -243,16 +247,8 @@ DeviceIndex get_device_idx_from_pointer(void* ptr) {
       type == sycl::usm::alloc::device, "ptr is not a device type pointer.");
 
   sycl::device raw_device = sycl::get_pointer_device(ptr, get_device_context());
-  auto match_device = [raw_device](const auto& device) -> bool {
-    return raw_device == *device;
-  };
-  auto it = std::find_if(
-      gDevicePool.devices.begin(), gDevicePool.devices.end(), match_device);
-  TORCH_CHECK(
-      it != gDevicePool.devices.end(),
-      "Can't find the pointer from XPU devices.");
   return static_cast<DeviceIndex>(
-      std::distance(gDevicePool.devices.begin(), it));
+      raw_device.ext_oneapi_index_within_platform());
 }
 
 DeviceIndex device_count() {
@@ -295,7 +291,6 @@ c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device) {
 // `ext_oneapi_device_wait` is widely deployed across all supported platforms,
 // deprecate syncStreamsOnDevice and route callers to device_synchronize.
 void device_synchronize(c10::DeviceIndex device) {
-#if SYCL_COMPILER_VERSION >= 20260100
   initDevicePoolCallOnce();
   if (device == -1) {
     device = c10::xpu::current_device();
@@ -306,12 +301,6 @@ void device_synchronize(c10::DeviceIndex device) {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_device_synchronization(c10::kXPU);
   }
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "device_synchronize is not supported for the current SYCL compiler version. ",
-      "Please upgrade to SYCL compiler version 2026.1 or newer.");
-#endif
 }
 
 } // namespace c10::xpu

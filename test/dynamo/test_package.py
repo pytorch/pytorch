@@ -24,7 +24,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import PackageError, Unsupported
+from torch._dynamo.exc import PackageError, SkipFrame, Unsupported, UserError
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -36,15 +36,17 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import default_guard_filter_fn
+from torch._dynamo.replay_record import DummyModule, ExecutionRecorder
 from torch._dynamo.symbolic_convert import _import_module, UNNAMED_SCOPE_PREFIX
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -52,6 +54,18 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.utils._triton import has_triton
+
+
+_requires_triton_for_inductor = decorateIf(
+    unittest.skip("Requires Triton"),
+    lambda params: params["device"] != "cpu"
+    and params["backend"] == "inductor"
+    and (not has_triton()),
+)
+_requires_triton_for_accelerator = decorateIf(
+    unittest.skip("Requires Triton"),
+    lambda params: params["device"] != "cpu" and (not has_triton()),
+)
 
 
 def import_from_path(module_name, file_path):
@@ -236,6 +250,19 @@ def _package_op(x):
     return x + 1
 
 
+@torch._dynamo.disable
+def _opaque(y):
+    return y + 0
+
+
+def _dispatch(y, opaque_layers):
+    # Traces whole for opaque_layers=0. For more, the graph break inside the loop
+    # is one Dynamo cannot resume from, so it gives up on the code object.
+    for _ in range(opaque_layers):
+        y = _opaque(y)
+    return y.sin()
+
+
 @dataclasses.dataclass
 class _GraphBreakingDataclass:
     x: torch.Tensor
@@ -303,6 +330,28 @@ class TestPackage(torch._inductor.test_case.TestCase):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)
         return path
+
+    def count_backend_runs(self, fn, backends):
+        """Wrap the backends install() put in fn's module; the list grows by one
+        per run, so a served variant is told apart from an eager run."""
+        module = sys.modules[fn.__module__]
+        runs = []
+        for backend_id in backends:
+            installed = getattr(module, backend_id)
+
+            @torch._dynamo.disable
+            def run(*args, _installed=installed):
+                runs.append(1)
+                return _installed(*args)
+
+            def restore(backend_id=backend_id, run=run, installed=installed):
+                # uninstall() may already have removed the name; leave it gone.
+                if vars(module).get(backend_id) is run:
+                    setattr(module, backend_id, installed)
+
+            self.addCleanup(restore)
+            setattr(module, backend_id, run)
+        return runs
 
     def setUp(self):
         super().setUp()
@@ -478,7 +527,173 @@ print(eval(f"bbmod.{name}.{path}") is code)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(x))
 
-    def test_module_function_guard_saves_unfiltered_and_reports_a_miss(self):
+    def _reload_eager_package(self, fn, package, backends):
+        ctx = DiskDynamoStore()
+        for backend_id, backend in backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+        return ctx.load_package(fn, self.path())
+
+    def test_refuse_callback_runs_a_miss_of_an_eager_fallback_frame_eagerly(self):
+        from torch._dynamo.eval_frame import (
+            _RecompileRefusedError,
+            _RefuseRecompileCallback,
+        )
+
+        x = torch.randn(3)
+        package = CompilePackage(_dispatch)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(_dispatch)
+        compiled_fn(x, 0)
+        compiled_fn(x, 1)
+        entry = package._codes[_dispatch.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
+        # A reloaded package caches no backends, so keep the captured ones.
+        eager = dict(package.cached_backends)
+        package, backends = self._reload_eager_package(_dispatch, package, eager)
+
+        # A plain install() (DynamoCache's) takes no hold for the flag: a miss
+        # still reaches the callback.
+        compiled_fn = torch._dynamo.optimize(package=package)(_dispatch)
+        package.install(backends)
+        with (
+            torch.compiler.set_stance("fail_on_recompile"),
+            self.assertRaisesRegex(RuntimeError, "Detected recompile"),
+        ):
+            compiled_fn(x, 1)
+        package.uninstall()
+
+        # An installed precompile artifact's callback serves the variant and runs
+        # the miss eagerly; without the frame in eager_codes it refuses.
+        for eager_codes in ([_dispatch.__code__], []):
+            torch._dynamo.reset()
+            package, backends = self._reload_eager_package(_dispatch, package, eager)
+            context = torch._dynamo.optimize(package=package)
+            context.callback = _RefuseRecompileCallback(context.callback, eager_codes)
+            compiled_fn = context(_dispatch)
+            package.install(backends)
+            runs = self.count_backend_runs(_dispatch, backends)
+            self.assertEqual(compiled_fn(x, 0), x.sin())
+            self.assertEqual(len(runs), 1)
+            if eager_codes:
+                # The eager miss warns, once per frame.
+                torch._logging._internal.warning_once.cache_clear()
+                with self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs:
+                    self.assertEqual(compiled_fn(x, 1), x.sin())
+                    self.assertEqual(compiled_fn(x, 1), x.sin())
+                self.assertEqual(len(logs.output), 1, logs.output)
+                self.assertIn("no captured variant of _dispatch", logs.output[0])
+                self.assertEqual(compiled_fn(x, 0), x.sin())
+                self.assertEqual(len(runs), 2)
+            else:
+                msg = "Detected recompile of a frame whose callable refuses"
+                with self.assertRaisesRegex(_RecompileRefusedError, msg):
+                    compiled_fn(x, 1)
+            package.uninstall()
+
+    def test_a_suppressed_user_error_is_an_eager_fallback(self):
+        def fn(x, branch):
+            if branch:
+                # Tracing this raises a UserError, which Dynamo suppresses and
+                # skips the frame for, as for Unsupported; eager raises TypeError.
+                try:
+                    torch._dynamo.decorators.override_optimization_hint(x, 1)
+                except TypeError:
+                    pass
+            return x.sin()
+
+        package = CompilePackage(fn)
+        # Unsupported is flagged too, so pin that this one is a UserError.
+        flagged = []
+        record = package.record_eager_fallback
+
+        def spy(code):
+            flagged.append(type(sys.exc_info()[1]))
+            record(code)
+
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        x = torch.randn(3)
+        compiled_fn(x, False)
+        with patch.object(package, "record_eager_fallback", spy):
+            self.assertEqual(compiled_fn(x, True), x.sin())
+        self.assertEqual(flagged, [UserError])
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
+
+    def test_a_backend_skip_is_an_eager_fallback(self):
+        compiled = []
+
+        def backend(gm, example_inputs):
+            if compiled:
+                raise SkipFrame("declined")
+            compiled.append(gm)
+            return gm.forward
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        x = torch.randn(3)
+        compiled_fn(x)
+        compiled_fn(x.double())
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
+
+    def test_a_backend_fallback_error_is_an_eager_fallback(self):
+        # Dynamo turns this into a soft Unsupported for the whole frame.
+        calls = []
+
+        def backend(gm, example_inputs):
+            calls.append(gm)
+            raise DynamicOutputShapeException(torch.ops.aten.nonzero.default)
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        compiled_fn(torch.randn(3))
+        compiled_fn(torch.randn(3))
+        self.assertEqual(len(calls), 1)
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(entry.guarded_codes, [])
+
+    def test_a_recompile_limit_hit_or_suppressed_error_is_not_an_eager_fallback(self):
+        def fn(x):
+            return x.sin()
+
+        def failing_backend(gm, example_inputs):
+            if example_inputs[0].dtype == torch.float64:
+                raise RuntimeError("backend failed")
+            return gm.forward
+
+        x = torch.randn(3)
+        # The limit sets RUN_ONLY and stays a coverage gap. A non-soft error
+        # suppress_errors swallows skips the frame too, but is left unflagged so
+        # the failure stays a gap rather than a silent eager fallback.
+        for backend, config_patch in (
+            ("eager", torch._dynamo.config.patch(recompile_limit=1)),
+            (failing_backend, torch._dynamo.config.patch(suppress_errors=True)),
+        ):
+            torch._dynamo.reset()
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+            with config_patch:
+                compiled_fn(x)
+                self.assertEqual(compiled_fn(x.double()), x.double().sin())
+            entry = package._codes[fn.__code__]
+            self.assertEqual(len(entry.guarded_codes), 1)
+            self.assertFalse(entry.eager_fallback)
+
+    @parametrize("caching_precompile", (False, True))
+    def test_module_function_guard_saves_unfiltered_and_reports_a_miss(
+        self, caching_precompile
+    ):
         # No guard_filter_fn: the CLOSURE_MATCH on _package_op is still saved,
         # as a FUNCTION_CODE_MATCH, and a rebinding names it in the refusal.
         ctx = DiskDynamoStore()
@@ -487,22 +702,118 @@ print(eval(f"bbmod.{name}.{path}") is code)
             return _package_op(x) * 2
 
         x = torch.randn(3)
+        with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+            expected = compiled_fn(x)
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(package, self.path())
+
+            torch._dynamo.reset()
+            with torch.compiler.set_stance("fail_on_recompile"):
+                package, backends = ctx.load_package(fn, self.path())
+                compiled_fn = torch._dynamo.optimize(package=package)(fn)
+                package.install(backends)
+                self.assertEqual(expected, compiled_fn(x))
+                with patch.dict(globals(), {"_package_op": lambda x: x - 1}):
+                    with self.assertRaisesRegex(RuntimeError, "___check_function_code"):
+                        compiled_fn(x)
+                copy = types.FunctionType(_package_op.__code__.replace(), globals())
+                self.assertIsNot(copy.__code__, _package_op.__code__)
+                with patch.dict(globals(), {"_package_op": copy}):
+                    self.assertEqual(expected, compiled_fn(x))
+
+    @parametrize("caching_precompile", (False, True))
+    def test_caching_precompile_rebound_global_function(self, caching_precompile):
+        def fn(x):
+            return _package_op(x)
+
+        x = torch.ones(2)
+        with (
+            torch._dynamo.config.patch(caching_precompile=caching_precompile),
+            patch.dict(globals(), {"_package_op": lambda t: t * 2}),
+        ):
+            self.assertEqual(torch.compile(fn, backend="eager")(x), x * 2)
+            with patch.dict(globals(), {"_package_op": lambda t: t * 3}):
+                self.assertEqual(torch.compile(fn, backend="eager")(x), x * 3)
+
+    @parametrize("input_count", (1, 5))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_caching_precompile_function_guard_cache_reuse(self, input_count):
+        def fn(x):
+            return _package_op(x)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        with patch.dict(globals(), {"_package_op": lambda t: t * 2}):
+            for value in range(input_count):
+                x = torch.full((2,), float(value + 1))
+                self.assertEqual(compiled(x), x * 2)
+            self.assertEqual(counter.frame_count, 1)
+            with patch.dict(globals(), {"_package_op": lambda t: t * 3}):
+                for value in range(input_count):
+                    x = torch.full((2,), float(value + 1))
+                    self.assertEqual(compiled(x), x * 3)
+                self.assertEqual(counter.frame_count, 2)
+            self.assertEqual(compiled(x), x * 2)
+            self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("unportable", ("globals", "builtins"))
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_caching_precompile_unportable_function_guard_bypasses(self, unportable):
+        def fn(x):
+            return _package_op(x)
+
+        code = (lambda t: t * 2).__code__
+        if unportable == "globals":
+            callee = types.FunctionType(code, dict(globals()))
+        else:
+            with patch.dict(globals(), {"__builtins__": dict(vars(builtins))}):
+                callee = types.FunctionType(code, globals())
+
+        x = torch.ones(2)
+        counter = torch._dynamo.testing.CompileCounter()
         package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
-        expected = compiled_fn(x)
-        for backend_id, backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, backend)
-        ctx.save_package(package, self.path())
+        compiled = torch._dynamo.optimize(counter, package=package)(fn)
+        ctx = DiskDynamoStore()
+        with patch.dict(globals(), {"_package_op": callee}):
+            with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+                self.assertEqual(compiled(x), x * 2)
+            reason = "CLOSURE_MATCH guard cannot be serialized"
+            self.assertTrue(any(reason in line for line in logs.output))
+            entry = package._codes[fn.__code__]
+            self.assertTrue(entry.bypassed)
+            self.assertEqual(entry.guarded_codes, [])
+            self.assertEqual(package.cached_backends, {})
+            ctx.save_package(package, self.path())
+            with patch.dict(globals(), {"_package_op": lambda t: t * 3}):
+                self.assertEqual(compiled(x), x * 3)
+            self.assertEqual(counter.frame_count, 2)
 
         torch._dynamo.reset()
-        with torch.compiler.set_stance("fail_on_recompile"):
-            package, backends = ctx.load_package(fn, self.path())
-            compiled_fn = torch._dynamo.optimize(package=package)(fn)
-            package.install(backends)
-            self.assertEqual(expected, compiled_fn(x))
-            with patch.dict(globals(), {"_package_op": lambda x: x - 1}):
-                with self.assertRaisesRegex(RuntimeError, "___check_function_code"):
-                    compiled_fn(x)
+        package, backends = ctx.load_package(fn, self.path())
+        package.install(backends)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_caching_precompile_native_forward_guard(self):
+        mod = torch.nn.Module()
+        mod.forward = torch.neg
+
+        def fn(x):
+            return mod(x)
+
+        x = torch.ones(2)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x), -x)
+        reason = "CLOSURE_MATCH guard cannot be serialized"
+        self.assertTrue(any(reason in line for line in logs.output))
+        mod.forward = torch.abs
+        self.assertEqual(compiled(x), x)
+        self.assertEqual(counter.frame_count, 2)
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
@@ -1517,6 +1828,117 @@ def add(x, y):
         reloaded = pickle.loads(pickle.dumps(source))
         self.assertEqual(reloaded, source)
 
+    def test_imported_module_attribute_mutation(self):
+        name = "torch_test_package_imported_module_attribute_mutation"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 1
+
+        def fn(x):
+            import torch_test_package_imported_module_attribute_mutation as imported
+
+            imported.VALUE = 42
+            return x + imported.VALUE
+
+        try:
+            sys.modules[name] = module
+            x = torch.randn(3, 2)
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            result = compiled(x)
+            self.assertEqual(result, x + 42)
+            self.assertEqual(module.VALUE, 42)
+
+            module.VALUE = 1
+            with torch.compiler.set_stance("fail_on_recompile"):
+                result = compiled(x)
+            self.assertEqual(result, x + 42)
+            self.assertEqual(module.VALUE, 42)
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            _import_module.cache_clear()
+            torch._dynamo.reset()
+
+    @parametrize("fullgraph", [False, True])
+    def test_imported_replacement_module_attribute_mutation(self, fullgraph):
+        name = "torch_test_package_imported_replacement_module"
+        alias = f"__import_{name}"
+        old = types.ModuleType(name)
+        old.VALUE = 1
+        replacement = types.ModuleType(name)
+        replacement.VALUE = 10
+        newest = types.ModuleType(name)
+        newest.VALUE = 20
+
+        def warm(x):
+            import torch_test_package_imported_replacement_module as imported
+
+            return x + imported.VALUE
+
+        def fn(x, offset):
+            import torch_test_package_imported_replacement_module as imported
+
+            imported.VALUE += 1
+            return x + imported.VALUE + offset, imported
+
+        self.addCleanup(sys.modules.pop, name, None)
+        self.addCleanup(fn.__globals__.pop, alias, None)
+        self.addCleanup(_import_module.cache_clear)
+        _import_module.cache_clear()
+        sys.modules[name] = old
+        x = torch.randn(3, 2)
+        self.assertEqual(torch.compile(warm, backend="eager", fullgraph=True)(x), x + 1)
+        self.assertIs(_import_module(name), old)
+
+        sys.modules[name] = replacement
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=fullgraph)
+        result, imported = compiled(x, 0)
+        self.assertEqual(result, x + 11)
+        self.assertIs(imported, replacement)
+        self.assertEqual(replacement.VALUE, 11)
+        self.assertEqual(old.VALUE, 1)
+        self.assertEqual(counter.frame_count, 1)
+
+        replacement.VALUE = 10
+        with torch.compiler.set_stance("fail_on_recompile"):
+            result, imported = compiled(x, 0)
+        self.assertEqual(result, x + 11)
+        self.assertIs(imported, replacement)
+        self.assertEqual(replacement.VALUE, 11)
+        self.assertEqual(old.VALUE, 1)
+
+        replacement.VALUE = 10
+        sys.modules[name] = newest
+        # Changing offset forces a retrace independently of the module replacement.
+        result, imported = compiled(x, 1)
+        self.assertEqual(result, x + 22)
+        self.assertIs(imported, newest)
+        self.assertEqual(newest.VALUE, 21)
+        self.assertEqual(replacement.VALUE, 10)
+        self.assertEqual(old.VALUE, 1)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_import_name_replay_dummy_module(self):
+        name = "torch_test_package_replay_dummy_module"
+        recorded_name = f"{ExecutionRecorder.LOCAL_MOD_PREFIX}_0_None_{name}"
+        dummy_module = DummyModule(name)
+        dummy_module.VALUE = 3
+
+        def fn(x):
+            import torch_test_package_replay_dummy_module as imported
+
+            return x + imported.VALUE
+
+        fn.__globals__[recorded_name] = dummy_module
+        try:
+            x = torch.randn(3, 2)
+            result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(result, x + 3)
+        finally:
+            fn.__globals__.pop(recorded_name, None)
+            torch._dynamo.reset()
+
 
 class _tempTensorSamplerForQualName:
     def __init__(self, val, mask, prob):
@@ -1624,6 +2046,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         PrecompileContext.clear()
 
+    @_requires_triton_for_inductor
     @parametrize("backend", ("eager", "inductor"))
     def test_basic_fn(self, device, backend):
         if device != "cpu" and backend == "inductor" and not has_triton():
@@ -1664,6 +2087,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
+    @_requires_triton_for_inductor
     @parametrize("backend", ("eager", "inductor"))
     def test_lazy_backward(self, device, backend):
         if device != "cpu" and backend == "inductor" and not has_triton():
@@ -1707,6 +2131,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
+    @_requires_triton_for_accelerator
     def test_install_survives_a_cold_bundled_autotune_cache(self, device):
         # AutotuneCacheBundler keeps one bundle per compile context, left open
         # on a remote-cache miss, and install() post-compiles both of the
@@ -1753,6 +2178,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
                 for x in args:
                     self.assertEqual(compiled_fn(x), fn(x))
 
+    @_requires_triton_for_inductor
     @parametrize("backend", ("eager", "inductor"))
     def test_graph_break_bomb(self, device, backend):
         if device != "cpu" and backend == "inductor" and not has_triton():
@@ -1813,6 +2239,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
+    @_requires_triton_for_inductor
     @parametrize("backend", ("eager", "inductor"))
     def test_dynamic_shape(self, device, backend):
         if device != "cpu" and backend == "inductor" and not has_triton():
@@ -1859,6 +2286,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(*args2)
 
+    @_requires_triton_for_accelerator
     def test_dynamo_cache_manual_load(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
@@ -1892,6 +2320,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_serialize(self, device):
         if device != "cpu" and not has_triton():
@@ -1923,6 +2352,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_import_source_guard(self, device):
         if device != "cpu" and not has_triton():
@@ -1951,6 +2381,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(result, expected)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_recompiles(self, device):
         if device != "cpu" and not has_triton():
@@ -1981,6 +2412,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         self.assertEqual(result2, expected2)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO or IS_LINUX,
         "https://github.com/pytorch/pytorch/issues/183810",
@@ -2028,6 +2460,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             # Should have same number of frames as on cold start
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184832")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_lazy_backward(self, device):
@@ -2055,6 +2488,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_graph_break_partial_backend(self, device):
         if device != "cpu" and not has_triton():
@@ -2099,6 +2533,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         # One recompile on a new frame, so total_frames should increase by 1
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames + 1)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_call_function_from_resume(self, device):
         if device != "cpu" and not has_triton():
@@ -2124,6 +2559,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_code_with_generator(self, device):
         if device != "cpu" and not has_triton():
@@ -2142,6 +2578,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         compiled_fn(*args)
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks_from_print_model_as_fn(self, device):
         if device != "cpu" and not has_triton():
@@ -2188,6 +2625,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             compiled_fn(x)
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self, device):
         if device != "cpu" and not has_triton():
@@ -2207,6 +2645,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         x = torch.randn(10, 10, device=device)
         compiled_fn(x)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
         if device != "cpu" and not has_triton():

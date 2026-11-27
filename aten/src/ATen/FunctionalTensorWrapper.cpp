@@ -869,7 +869,7 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
 
   // Wrap all tensor-like inputs into FunctionalTensorWrappers.
   // When we re-invoke the dispatcher, this will automatically enable the functionalization pass.
-  for (uint64_t idx = 0; idx < num_arguments; ++idx) {
+  for (const auto idx : c10::irange(num_arguments)) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       const auto& t = ivalue.toTensor();

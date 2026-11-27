@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib
 import sys as py_sys
 import types
-from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ge, gt, le, lt, ne
@@ -274,14 +273,15 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # PyObject_GetIter itself falls back to PySequence_GetItem when tp_iter is NULL.
     if hasattr(b, "__iter__"):
         for x in b:
-            if x == a:
+            if x is a or x == a:
                 return True
         return False
     if hasattr(b, "__getitem__"):
         i = 0
         while True:
             try:
-                if b.__getitem__(i) == a:
+                item = b.__getitem__(i)
+                if item is a or item == a:
                     return True
                 i += 1
             except IndexError:
@@ -369,9 +369,6 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
     if (dict.__len__(d) != dict.__len__(other)) or (dict.keys(d) != dict.keys(other)):
         return False
 
-    if all(isinstance(a, OrderedDict) for a in (d, other)):
-        return list(dict.items(d)) == list(dict.items(other))
-
     # CPython's dict_equal uses PyObject_RichCompareBool for value
     # comparison, which has an identity shortcut (if v is w, eq is True).
     # This matters for NaN: {k: nan} == {k: nan} is True when same nan.
@@ -418,6 +415,13 @@ def dictview_richcompare(
     if len_self < len_other:
         return False
     return all(item in self for item in other)
+
+
+def dictview_isdisjoint(self: Iterable[T], other: Iterable[T]) -> bool:
+    """Mirrors dictviews_isdisjoint in Objects/dictobject.c, without its
+    iterate-the-shorter-operand optimization, which does not change the result.
+    """
+    return not any(item in self for item in other)
 
 
 def assert_dict_equal(
@@ -487,7 +491,7 @@ def mutable_mapping_update(
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
             self[key] = value
-    # FIXME: Enabling the `elif`-branch below needs too many `VariableClass.call_obj_hasattr` changes.
+    # FIXME: Enabling the `elif`-branch below needs too many `tp_getattro_impl` changes.
     #   >>> class Foo:
     #   ...     def __init__(self):
     #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method

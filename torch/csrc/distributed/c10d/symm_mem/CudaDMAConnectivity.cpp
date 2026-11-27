@@ -5,6 +5,7 @@
 #include <c10/cuda/driver_api.h>
 #include <fmt/printf.h>
 
+#include <c10/util/irange.h>
 #include <nvml.h>
 
 namespace {
@@ -28,7 +29,7 @@ struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
 
     std::vector<std::vector<int>> matrix;
     matrix.reserve(num_devices);
-    for (int i = 0; i < num_devices; ++i) {
+    for ([[maybe_unused]] const auto _ : c10::irange(num_devices)) {
       matrix.emplace_back(num_devices, 0);
     }
 
@@ -37,7 +38,7 @@ struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
     bus_id_to_device_idx.reserve(num_devices);
     std::vector<std::string> bus_ids;
     bus_ids.reserve(num_devices);
-    for (int i = 0; i < num_devices; ++i) {
+    for (const auto i : c10::irange(num_devices)) {
       auto bus_id = get_bus_id(i);
       bus_id_to_device_idx.emplace(bus_id, i);
       bus_ids.push_back(std::move(bus_id));
@@ -57,7 +58,7 @@ struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
 
     // Obtain the nvml device for all bus_ids
     std::vector<nvmlDevice_t> nvml_devices(num_devices, nullptr);
-    for (int i = 0; i < num_devices; ++i) {
+    for (const auto i : c10::irange(num_devices)) {
       auto res = driver_api->nvmlDeviceGetHandleByPciBusId_v2_(
           bus_ids[i].c_str(), &nvml_devices[i]);
       if (res != NVML_SUCCESS) {
@@ -69,8 +70,8 @@ struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
     }
 
     std::vector<int> switch_link_count(num_devices, 0);
-    for (int i = 0; i < num_devices; ++i) {
-      for (int link = 0; link < max_nvlinks; ++link) {
+    for (const auto i : c10::irange(num_devices)) {
+      for (const auto link : c10::irange(max_nvlinks)) {
         nvmlIntNvLinkDeviceType_t deviceType{};
         auto ret = driver_api->nvmlDeviceGetNvLinkRemoteDeviceType_(
             nvml_devices[i], link, &deviceType);
@@ -108,8 +109,8 @@ struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
 
     // Process NVSwitch connections.
     // For simplicity, we assume that all NVSwitches are interconnected.
-    for (int i = 0; i < num_devices; ++i) {
-      for (int j = 0; j < num_devices; ++j) {
+    for (const auto i : c10::irange(num_devices)) {
+      for (const auto j : c10::irange(num_devices)) {
         if (i == j) {
           continue;
         }

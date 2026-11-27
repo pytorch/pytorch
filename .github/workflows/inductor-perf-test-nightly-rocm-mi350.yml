@@ -121,7 +121,7 @@ jobs:
 
   test-periodically:
     name: linux-jammy-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test-no-dind.yml
+    uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_11-inductor-benchmark-build
     if: github.event.schedule == '15 0 * * 1-6'
     with:
@@ -138,7 +138,7 @@ jobs:
 
   test-weekly:
     name: linux-jammy-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test-no-dind.yml
+    uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_11-inductor-benchmark-build
     if: github.event.schedule == '0 7 * * 0'
     with:
@@ -155,7 +155,7 @@ jobs:
 
   test:
     name: linux-jammy-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test-no-dind.yml
+    uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_11-inductor-benchmark-build
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     with:

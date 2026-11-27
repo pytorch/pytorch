@@ -5,8 +5,7 @@ import io
 import sys
 import types
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, TypeVar
-from typing_extensions import Self
+from typing import Any, Self, TypeVar
 
 import torch
 import torch.distributed.rpc as rpc
@@ -97,7 +96,7 @@ def _create_module_with_interface(
 ):
     module = _create_module(module_cls, args, kwargs, device)
     if module_interface_cls is not None:
-        module = torch.jit.script(module)
+        module = torch.jit._script.script(module)
     return rpc.RRef(module, module_interface_cls)
 
 
@@ -182,9 +181,9 @@ class _RemoteModule(nn.Module):
             args (Sequence, optional): args to be passed to ``module_cls``.
             kwargs (Dict, optional): kwargs to be passed to ``module_cls``.
             _module_interface_cls (type, optional): The TorchScript interface type for the module
-                to be created. The type object should be decorated by @torch.jit.interface.
-                If not provided, the generated RemoteModule is not torchscript-able.
-                Warning, this is an experimental API and susceptible to frequent changes.
+                to be created. This experimental internal-only path requires an existing
+                TorchScript interface; public interface creation is no longer supported.
+                Omit this argument for an ordinary RemoteModule.
 
         Returns:
             A remote module instance which wraps the :class:`~nn.Module` created by the
@@ -565,9 +564,9 @@ class _RemoteModule(nn.Module):
             module_rref (RRef[nn.Module]): The module reference shared by both the caller and
                 the created remote module.
             _module_interface_cls (type, optional): The TorchScript interface type for the module
-                to be created. The type object should be decorated by @torch.jit.interface.
-                If not provided, the generated RemoteModule is not torchscript-able.
-                Warning, this is an experimental API and susceptible to frequent changes.
+                to be created. This experimental internal-only path requires an existing
+                TorchScript interface; public interface creation is no longer supported.
+                Omit this argument for an ordinary RemoteModule.
 
         Returns:
             A remote module instance which wraps the :class:`~nn.Module` created by the
@@ -605,6 +604,10 @@ class _RemoteModule(nn.Module):
 class RemoteModule(_RemoteModule):
     """
         A RemoteModule instance can only be created after RPC initialization.
+
+        .. deprecated:: 2.16
+            ``torch.distributed.rpc`` is deprecated and will be removed in a future version.
+            See :ref:`distributed-rpc-framework` for alternatives.
 
         It creates a user-specified module on a specified remote node.
         It behaves like a regular ``nn.Module`` except that the ``forward`` method is
@@ -672,10 +675,6 @@ class RemoteModule(_RemoteModule):
         >>>
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
-
-        Furthermore, a more practical example that is combined with
-        `DistributedDataParallel <https://pytorch.org/docs/stable/nn.html#torch.nn.parallel.DistributedDataParallel>`__ (DDP)
-        can be found in this `tutorial <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__.
     """
 
     def __init__(
@@ -739,7 +738,7 @@ def _recursive_script_module_receiver(
 ):
     """Deserializes a RecursiveScriptModule that does not contain a script RemoteModule."""
     f = io.BytesIO(recursive_script_module_serialized)
-    m = torch.jit.load(f)
+    m = torch.jit._serialization.load(f)
     return m
 
 
@@ -752,7 +751,7 @@ def _recursive_script_module_reducer(recursive_script_module):
         )
 
     f = io.BytesIO()
-    torch.jit.save(recursive_script_module, f)
+    torch.jit._serialization.save(recursive_script_module, f)
     return (_recursive_script_module_receiver, (f.getvalue(),))
 
 

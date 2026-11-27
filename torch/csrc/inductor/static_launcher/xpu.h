@@ -3,4 +3,5 @@
 #include <torch/csrc/python_headers.h>
 
 bool StaticXpuLauncher_init(PyObject* module);
+bool FastXpuLauncher_init(PyObject* module);
 #endif

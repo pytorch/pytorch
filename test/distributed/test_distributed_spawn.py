@@ -3,10 +3,6 @@
 import os
 import sys
 
-
-if os.environ.get("BACKEND") == "nccl":
-    os.environ["TORCH_DIST_USE_NCCL2"] = "0"
-
 import torch
 import torch.distributed as dist
 
@@ -76,6 +72,8 @@ if BACKEND in _allowed_backends:
             super().setUp()
             self._spawn_processes()
             torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
+
+    TestDistBackendWithSpawn.mark_statically_skipped()
 
 else:
     print(f"Invalid backend {BACKEND}. Tests will not be run!")
