@@ -1188,10 +1188,10 @@ class TestOptimRenewed(TestCase):
                 expected_max_mem *= 1.02
             elif TEST_XPU:
                 # XPU has no small buffer optimization either: every
-                # multi_tensor_apply launch allocates the tensor address table
-                # and the per-work-group chunk map as device tensors, and both
-                # are under the 512 byte minimum allocation block here.
-                expected_max_mem += 2 * 512
+                # multi_tensor_apply launch packs the tensor address table and
+                # per-work-group chunk map into a single device allocation,
+                # which fits within one 512-byte minimum allocation block here.
+                expected_max_mem += 512
 
             self.assertLessEqual(mt_max_mem, expected_max_mem)
 
