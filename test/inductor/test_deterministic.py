@@ -31,9 +31,7 @@ from torch.utils._triton import has_triton
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
-requires_triton = skipIf(
-    not has_triton(), "requires triton for CUDA or XPU", device_type=("cuda", "xpu")
-)
+requires_triton = skipIf(not has_triton(), "requires triton")
 
 
 class DeterministicTestGeneric(TestCase):
