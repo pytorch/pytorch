@@ -6,12 +6,13 @@ import torch
 from torch import Tensor
 from torch._decomp import decomposition_table
 from torch._ops import OpOverload, OpOverloadPacket
+from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch._refs import is_complex as _is_complex
 from torch.types import Number
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
-from .._core import ComplexTensor
+from .._core import ComplexTensor, InterleavedComplexTensor
 
 
 aten = torch.ops.aten
@@ -62,7 +63,7 @@ def is_complex_tensor(obj: Any, /) -> TypeIs[ComplexTensor]:
         >>> is_complex_tensor(ct)
         True
     """
-    return isinstance(obj, ComplexTensor)
+    return isinstance(obj, ComplexTensor | InterleavedComplexTensor)
 
 
 @overload
@@ -84,12 +85,10 @@ def promote_tensors(
     Promotes all tensors to a common dtype.
     Additionally promotes CPU tensors to at least `float32`.
     """
-    tensor = next(t for t in tensors if isinstance(t, Tensor))
-    out_dt = tensor.dtype
-    for t in tensors:
-        if isinstance(t, Tensor):
-            out_dt = torch.promote_types(out_dt, t.dtype)
-
+    # Like native, zero-dim tensors and scalars only promote to a higher category.
+    _, out_dt = elementwise_dtypes(
+        *tensors, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
     prom_dt = PROMOTE_TYPES.get(out_dt, out_dt)
     return out_dt, tuple(
         t.to(prom_dt) if isinstance(t, Tensor) else torch.asarray(t, dtype=prom_dt)
@@ -415,20 +414,24 @@ def register_inductor(
     return impls["default"]
 
 
-def _as_complex_tensor(arg: Tensor | Any) -> Tensor | ComplexTensor | Any:
+def _as_complex_tensor(
+    arg: Tensor | Any, interleaved: bool = False
+) -> Tensor | ComplexTensor | InterleavedComplexTensor | Any:
     """Convert a Tensor with complex dtypes to a ComplexTensor. Pass along other args as-is."""
     if (
-        not isinstance(arg, ComplexTensor)
+        not isinstance(arg, ComplexTensor | InterleavedComplexTensor)
         and isinstance(arg, Tensor)
         and arg.dtype in COMPLEX_TO_REAL
     ):
+        if interleaved:
+            return InterleavedComplexTensor(arg)
         return ComplexTensor.from_interleaved(arg)
     return arg
 
 
 def _as_interleaved(arg: ComplexTensor | Any) -> Tensor | Any:
     """Convert a ComplexTensor to a Tensor with a complex dtype. Pass other arguments as-is."""
-    if isinstance(arg, ComplexTensor):
+    if isinstance(arg, ComplexTensor | InterleavedComplexTensor):
         return arg.as_interleaved()
     return arg
 
