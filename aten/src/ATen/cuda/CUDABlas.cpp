@@ -2,6 +2,17 @@
   Provides the implementations of CUDA BLAS function templates.
  */
 
+#include <ATen/Dispatch.h>
+#include <cstring>
+#include <string_view>
+#include <unordered_map>
+#ifndef USE_ROCM
+#include <ATen/cuda/CUDAGraph.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/driver_api.h>
+#endif
+
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
@@ -3048,5 +3059,110 @@ void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::comple
       devInfoArray,
       batchSize));
 }
+
+#if !defined(USE_ROCM) && CUDART_VERSION >= 12040
+std::vector<GemvLaunch> getGemvLaunchPlan(
+    at::ScalarType dtype,
+    int64_t rows,
+    int64_t columns,
+    int64_t lda,
+    int64_t incx,
+    bool transposed,
+    int64_t matrix_alignment,
+    int64_t vector_alignment) {
+  TORCH_CHECK(rows > 0 && columns > 0 && lda > 0 && incx > 0);
+  at::globalContext().lazyInitDevice(at::kCUDA);
+  TORCH_CHECK(matrix_alignment >= 0 && matrix_alignment < 16);
+  TORCH_CHECK(vector_alignment >= 0 && vector_alignment < 16);
+  auto* api = c10::cuda::DriverAPI::get();
+  TORCH_CHECK(api->cuFuncGetName_ && api->cuFuncGetParamInfo_, "Strict CUDA GEMV planning requires CUDA driver 12.4 or newer");
+  auto stream = c10::cuda::getStreamFromPool();
+  c10::cuda::CUDAStreamGuard stream_guard(stream);
+  auto storage = c10::cuda::CUDACachingAllocator::get()->allocate(768);
+  auto* base = static_cast<char*>(storage.get());
+  {
+    auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
+  }
+  // Planning captures never replay; retain one graph to reuse both memory pools.
+  static thread_local std::unordered_map<c10::DeviceIndex, std::unique_ptr<at::cuda::CUDAGraph>> planning_pools;
+  auto& pool_owner = planning_pools[c10::cuda::current_device()];
+  auto graph = std::make_unique<at::cuda::CUDAGraph>(/*keep_graph=*/true);
+  graph->capture_begin(pool_owner ? pool_owner->pool() : c10::MempoolId_t{0, 0}, cudaStreamCaptureModeThreadLocal);
+  try {
+    cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+    C10_CUDA_CHECK(cudaStreamIsCapturing(stream.stream(), &status));
+    TORCH_CHECK(status == cudaStreamCaptureStatusActive);
+    {
+      auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
+      cudaStream_t blas_stream = nullptr;
+      TORCH_CUDABLAS_CHECK(cublasGetStream(handle, &blas_stream));
+      TORCH_CHECK(blas_stream == stream.stream());
+    }
+    // Capture is never instantiated or replayed. Only aligned addresses are needed.
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        at::kHalf, at::kBFloat16, dtype, "getGemvLaunchPlan", [&] {
+          at::cuda::blas::gemv<scalar_t>(
+              transposed ? 't' : 'n', rows, columns,
+              scalar_t(1),
+              reinterpret_cast<const scalar_t*>(base + matrix_alignment), lda,
+              reinterpret_cast<const scalar_t*>(base + 256 + vector_alignment), incx,
+              scalar_t(0), reinterpret_cast<scalar_t*>(base + 512), 1);
+        });
+  } catch (...) {
+    try {
+      graph->capture_end();
+    } catch (...) {
+      TORCH_WARN("Failed to end CUDA GEMV planning capture during exception cleanup");
+    }
+    throw;
+  }
+  graph->capture_end();
+  size_t count = 0;
+  C10_CUDA_DRIVER_CHECK(api->cuGraphGetNodes_(graph->raw_cuda_graph(), nullptr, &count));
+  std::vector<CUgraphNode> nodes(count);
+  C10_CUDA_DRIVER_CHECK(api->cuGraphGetNodes_(graph->raw_cuda_graph(), nodes.data(), &count));
+  std::vector<GemvLaunch> launches;
+  for (auto node : nodes) {
+    CUgraphNodeType type = CU_GRAPH_NODE_TYPE_EMPTY;
+    C10_CUDA_DRIVER_CHECK(api->cuGraphNodeGetType_(node, &type));
+    if (type != CU_GRAPH_NODE_TYPE_KERNEL) {
+      continue;
+    }
+    CUDA_KERNEL_NODE_PARAMS params{};
+    C10_CUDA_DRIVER_CHECK(api->cuGraphKernelNodeGetParams_(node, &params));
+    const char* name = nullptr;
+    C10_CUDA_DRIVER_CHECK(api->cuFuncGetName_(&name, params.func));
+    std::array<int64_t, 3> partition{1, 1, 0};
+    const bool gemvx = std::string_view(name).find("gemvx6kernel") != std::string_view::npos;
+    if (gemvx || std::string_view(name).find("dot_kernel") != std::string_view::npos) {
+      size_t offset = 0, size = 0;
+      C10_CUDA_DRIVER_CHECK(api->cuFuncGetParamInfo_(params.func, 0, &offset, &size));
+      TORCH_CHECK(offset == 0 && size >= sizeof(void*) && params.kernelParams && params.kernelParams[0]);
+      if (gemvx) {
+        std::array<int32_t, 3> tail{};
+        TORCH_CHECK(size >= sizeof(tail));
+        // cublasGemvParamsEx ends with the reduction chunk, stride and alignment.
+        std::memcpy(tail.data(), static_cast<const char*>(params.kernelParams[0]) + size - sizeof(tail), sizeof(tail));
+        TORCH_CHECK(tail[0] > 0 && tail[1] > 0);
+        partition[0] = tail[0];
+        partition[1] = tail[1];
+      }
+      const void* first_input = nullptr;
+      std::memcpy(static_cast<void*>(&first_input), params.kernelParams[0], sizeof(first_input));
+      TORCH_CHECK(first_input == base + matrix_alignment || first_input == base + 256 + vector_alignment);
+      partition[2] = first_input == base + 256 + vector_alignment;
+    }
+    launches.emplace_back(
+        name,
+        std::array<int64_t, 3>{params.gridDimX, params.gridDimY, params.gridDimZ},
+        std::array<int64_t, 3>{params.blockDimX, params.blockDimY, params.blockDimZ},
+        params.sharedMemBytes, partition);
+  }
+  if (!pool_owner) {
+    pool_owner = std::move(graph);
+  }
+  return launches;
+}
+#endif
 
 } // namespace at::cuda::blas

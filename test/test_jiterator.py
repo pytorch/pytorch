@@ -34,6 +34,70 @@ def ref_fn(x, y, alpha=1, beta=1):
     return alpha * x + beta * y
 
 class TestPythonJiterator(TestCase):
+    @dtypes(torch.float32, torch.complex128)
+    @parametrize("num_outputs", (1, 2))
+    def test_compile(self, device, dtype, num_outputs):
+        code = (
+            "template <typename T> T one(T a,T b,T alpha,T beta) { return a+alpha*b+beta; }"
+            if num_outputs == 1
+            else "template <typename T> void two(T a,T b,T alpha,T beta,T& x,T& y) "
+            "{ x=a+alpha*b+beta; y=a-beta*b; }"
+        )
+        fn = (
+            create_jit_fn(code, alpha=2.0, beta=4.0)
+            if num_outputs == 1
+            else create_multi_output_jit_fn(code, num_outputs=2, alpha=2.0, beta=4.0)
+        )
+        a = torch.arange(12, device=device, dtype=torch.float32).to(dtype)
+        if a.is_complex():
+            a = a + 1j * (a + 1)
+        a = a.reshape(3, 4).t()
+        b = torch.ones((1, 3), device=device, dtype=torch.float64)
+        compiled = torch.compile(fn, fullgraph=True)
+        alphas = (
+            2.0, 3.0,
+            torch.tensor(2.0), torch.tensor(3.0),
+            torch.tensor(2.0, device=device), torch.tensor(3.0, device=device),
+        )
+
+        def assert_outputs(expected, actual):
+            expected = torch.utils._pytree.tree_leaves(expected)
+            actual = torch.utils._pytree.tree_leaves(actual)
+            for eager, result in zip(expected, actual, strict=True):
+                self.assertEqual(result.stride(), eager.stride())
+                if eager.is_complex():
+                    eager, result = torch.view_as_real(eager), torch.view_as_real(result)
+                self.assertEqual(
+                    result.contiguous().view(torch.uint8),
+                    eager.contiguous().view(torch.uint8),
+                )
+
+        for alpha, beta in product(alphas, (4.0, torch.tensor(4.0, device=device))):
+            assert_outputs(
+                fn(a, b, alpha=alpha, beta=beta),
+                compiled(a, b, alpha=alpha, beta=beta),
+            )
+
+        def math_views(x, y, alpha=2.0, beta=4.0):
+            return tuple(fn(view, y, alpha=alpha, beta=beta) for view in (
+                x, x.conj(), torch._neg_view(x), torch._neg_view(x.conj()),
+            ))
+
+        compiled_views = torch.compile(math_views, fullgraph=True)
+        expanded = a[:3, :1].expand(3, 4)
+        transposed = torch.ones((4, 3), dtype=dtype, device=device).t()
+        for x, y in ((a, b), (expanded, transposed)):
+            for view in (x, x.conj(), torch._neg_view(x), torch._neg_view(x.conj())):
+                assert_outputs(math_views(view, y), compiled_views(view, y))
+        if dtype == torch.float32:
+            mask = torch.tensor([True, False], device=device)
+            zeros = torch.zeros_like(mask)
+            for view in (mask, torch._neg_view(mask)):
+                assert_outputs(
+                    math_views(view, zeros, 0.0, 0.0),
+                    compiled_views(view, zeros, 0.0, 0.0),
+                )
+
     @parametrize("shape_strides", [
         (([3, 3], [3, 1]), ([3, 3], [3, 1])),  # contiguous
     ])

@@ -379,6 +379,11 @@ aoti_torch_assign_tensors_out(AtenTensorHandle src, AtenTensorHandle* ret_dst);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_neg_view(AtenTensorHandle self, AtenTensorHandle* ret);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_clone_preserve_strides(AtenTensorHandle self, AtenTensorHandle* ret);
 
