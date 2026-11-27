@@ -2336,8 +2336,8 @@ static void geqrf_out_helper(const Tensor& input, const Tensor& QR, const Tensor
   TORCH_INTERNAL_ASSERT(input.scalar_type() == tau.scalar_type());
   TORCH_INTERNAL_ASSERT(input.device() == tau.device());
 
-  // if 'QR' has no elements we can modify it
-  if (QR.numel() == 0) {
+  // if 'QR' has no elements and the wrong shape, we can modify it
+  if (QR.numel() == 0 && !QR.sizes().equals(input.sizes())) {
     QR.resize_as_(input.mT(), MemoryFormat::Contiguous);
     QR.transpose_(-2, -1); // make Fortran-contiguous
   }

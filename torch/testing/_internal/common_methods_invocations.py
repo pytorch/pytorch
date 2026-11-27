@@ -14472,8 +14472,6 @@ op_db: list[OpInfo] = [
            skips=(
                # FIXME: geqrf can't forward with complex inputs that require grad
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
-               # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # RuntimeError: geqrf: MPS currently supports float32 only
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps', dtypes=[torch.complex64]),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps', dtypes=[torch.complex64]),
