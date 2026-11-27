@@ -366,14 +366,7 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 # Note [Fake mode lookups and CppFakeTensorMode]
 # maybe_get_fake_mode returns a CppFakeTensorMode for a C++ fake or a wrapper of
 # one, active_fake_mode while a C++ mode is installed, and detect_fake_mode in
-# either case. CppFakeTensorMode is not a FakeTensorMode subclass and has little of
-# its interface yet. Its from_tensor does not support tensors with nested ints.
-# Its converter's from_real_tensor rejects constants that are fakes or not plain
-# tensors, and its converter's from_meta_and_device raises NotImplementedError
-# for a pytype other than Tensor. So a caller that needs a Python
-# FakeTensorMode narrows the result with
-# torch._guards.require_python_fake_mode, which raises RuntimeError for a C++
-# mode.
+# either case. CppFakeTensorMode is not a FakeTensorMode subclass.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
     """The fake mode of t, a Python FakeTensorMode or, for a C++ fake or a
     wrapper of one, a CppFakeTensorMode (see Note [Fake mode lookups and
@@ -561,6 +554,8 @@ def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
 def maybe_get_fake_pytype(x: object) -> type[Tensor] | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.pytype
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return getattr(x, "_fake_pytype", None)
     return None
 
 
@@ -999,11 +994,12 @@ def _enter_fake_mode(
         prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
         torch._C._set_only_lift_cpu_tensors(True)
 
-        # In the case of a CUDA/XPU build with no device available, we
+        # In the case of an accelerator build with no device available, we
         # patch the device guard to use FakeGuardImpl. This enables us to
         # trace over device kernels under FakeTensorMode.
-        torch._C._ensureCUDADeviceGuardSet()
-        torch._C._ensureXPUDeviceGuardSet()
+        acc = torch.accelerator.current_accelerator()
+        if acc is not None:
+            torch._C._ensureDeviceGuardSet(acc.type)
 
     if mode is not maybe_prev_fake_mode:
         install()
@@ -1154,11 +1150,11 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
     ) -> Tensor:
-        if pytype not in (None, Tensor):
-            raise NotImplementedError(
-                f"C++ fake tensors of type {pytype} are not supported yet"
-            )
         out = torch._C._from_meta_and_device(t, torch.device(device), self)
+        # Guard metadata belongs to this Python object, like FakeTensor.pytype;
+        # new tensors produced by detach/clone do not inherit it.
+        if pytype is not None:
+            out._fake_pytype = pytype
         if dispatch_keys is not None:
             torch._C._set_fake_dispatch_keys(out, dispatch_keys)
         return out

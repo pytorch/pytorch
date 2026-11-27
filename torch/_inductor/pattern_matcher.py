@@ -419,9 +419,7 @@ class Match:
                     if "val" in arg.meta
                     else arg.meta["example_value"],
                 )
-                fake_mode = torch._guards.require_python_fake_mode(
-                    torch._dynamo.utils.detect_fake_mode(example_vals)
-                )
+                fake_mode = torch._dynamo.utils.detect_fake_mode(example_vals)
                 if fake_mode is not None:
 
                     def _convert_to_fake_mode(it):
