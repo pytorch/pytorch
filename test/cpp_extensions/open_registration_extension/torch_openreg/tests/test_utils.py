@@ -3,7 +3,9 @@
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.utils.dlpack import DLDeviceType
 
 
 class TestDLPack(TestCase):
@@ -73,6 +75,24 @@ class TestDLPack(TestCase):
 
         self.assertEqual(x_t.shape, y.shape)
         self.assertEqual(x_t, y)
+
+
+class TestDLPackProtocol(TestCase):
+    @parametrize("capsule", [False, True])
+    def test_dlpack_protocol_roundtrip(self, device, capsule):
+        x = torch.randn(2, 3, device=device)
+        expected = (DLDeviceType.kDLExtDev, x.device.index)
+        self.assertEqual(x.__dlpack_device__(), expected)
+        if capsule:
+            y = torch.from_dlpack(x.__dlpack__(dl_device=expected, copy=False))
+        else:
+            y = torch.from_dlpack(x, device=x.device, copy=False)
+        self.assertEqual(y.device, x.device)
+        self.assertEqual(y.data_ptr(), x.data_ptr())
+        self.assertEqual(y, x)
+
+
+instantiate_device_type_tests(TestDLPackProtocol, globals(), only_for="openreg")
 
 
 if __name__ == "__main__":
