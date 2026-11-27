@@ -4624,8 +4624,8 @@ class TestNVUniversalGemmLaunchContract(TestCase):
         caller.swap_ab = False
         caller.workspace_size = workspace
         caller.input_nodes = [
-            ir.Buffer("a", layout(m, k, offset)),
-            ir.Buffer("b", layout(k, n)),
+            ir.Buffer(name="a", layout=layout(m, k, offset)),
+            ir.Buffer(name="b", layout=layout(k, n)),
         ]
         caller._kernel_layout = layout(m, n)
         metadata = SimpleNamespace(
