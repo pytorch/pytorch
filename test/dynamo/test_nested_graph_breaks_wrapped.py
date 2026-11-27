@@ -89,6 +89,7 @@ tests = [
     test_repros.ReproTests,
     test_subgraphs.SubGraphTests,
 ]
+tests.extend(test_functions.get_function_device_test_classes())
 
 test = None
 for test in tests:

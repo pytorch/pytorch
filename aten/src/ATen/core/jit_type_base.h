@@ -554,7 +554,7 @@ inline TypePtr Type::withContained(std::vector<TypePtr> contained_types) {
 
 
 inline bool operator==(const Type& lhs, const Type& rhs) {
-  if (C10_UNLIKELY(!rhs.symmetric())) {
+  if (!rhs.symmetric()) [[unlikely]] {
     return rhs.equals(lhs);
   }
   return lhs.equals(rhs);

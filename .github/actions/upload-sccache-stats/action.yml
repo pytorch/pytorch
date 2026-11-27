@@ -15,7 +15,7 @@ runs:
   using: composite
   steps:
     - name: Upload sccache to s3
-      uses: seemethere/upload-artifact-s3@v5
+      uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
       with:
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact

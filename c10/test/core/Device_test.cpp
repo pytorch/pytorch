@@ -48,6 +48,18 @@ TEST(DeviceTest, BasicConstruction) {
   }
 }
 
+TEST(DeviceTest, UnknownTypeErrorOmitsXla) {
+  ASSERT_EQ(c10::Device("xla:0").type(), c10::DeviceType::XLA);
+  try {
+    c10::Device("tpu");
+    FAIL() << "Expected c10::Error";
+  } catch (const c10::Error& e) {
+    std::string msg = e.what_without_backtrace();
+    EXPECT_NE(msg.find("Expected one of cpu, cuda"), std::string::npos) << msg;
+    EXPECT_EQ(msg.find("xla"), std::string::npos) << msg;
+  }
+}
+
 TEST(DeviceTypeTest, PrivateUseOneDeviceType) {
   c10::register_privateuse1_backend("my_privateuse1_backend");
   ASSERT_TRUE(c10::is_privateuse1_backend_registered());

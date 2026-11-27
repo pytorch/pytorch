@@ -240,8 +240,8 @@ struct MediumRadixSort {
             false, "Expected size <= 128 to be handled by a different algorithm");
 #else
         HANDLE_CASE(32, 2);
-#endif
         break;
+#endif
       case 1:
         /* Nothing to do, data already sorted */
         break;

@@ -4,6 +4,7 @@
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/MultiTensorApply.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -28,7 +29,7 @@ static void _amp_non_finite_check_and_unscale_mps_single_impl(const Tensor& scal
     return;
   }
   TORCH_CHECK(scaled_grad.is_mps(), "Tensor is not on the MPS device.");
-  TORCH_CHECK(scaled_grad.numel() <= std::numeric_limits<uint32_t>::max(), "scaled_grad is too large");
+  TORCH_CHECK(std::in_range<uint32_t>(scaled_grad.numel()), "scaled_grad is too large");
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   auto ampPipelineState =

@@ -125,8 +125,12 @@ class LoopBody:
         iter_vars,
         reduce_vars,
         allow_same_symbol_in_index=False,
+        device: torch.device | None = None,
     ):
         super().__init__()
+        # the device of the buffer this body computes, inherited by the bodies
+        # derived from it; None for the C++ template bodies
+        self.device = device if device is not None else getattr(fn, "device", None)
 
         _flat_sizes = tuple(var_ranges.values())
         self.sizes = (
@@ -307,7 +311,12 @@ class LoopBody:
             return old_body(new_iter_idx, reduce_idx)
 
         loop_body = LoopBody(
-            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+            new_body,
+            (iter_vars, reduce_vars),
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+            device=self.device,
         )
 
         # use the original symbol prefix so we can do multiple round of reordering
@@ -348,7 +357,12 @@ class LoopBody:
             return old_body(old_iter_idx, list(reduce_idx))
 
         loop_body = LoopBody(
-            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+            new_body,
+            (iter_vars, reduce_vars),
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+            device=self.device,
         )
 
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
@@ -409,6 +423,7 @@ class LoopBody:
             var_ranges,
             iter_vars,
             reduce_vars,
+            device=self.device,
         )
 
     @property
@@ -637,7 +652,10 @@ class LoopBodyBlock:
         )
         if config.constant_and_index_propagation:
             handler = IndexPropagation(
-                handler, self.body.var_ranges, self.body.indirect_var_ranges
+                handler,
+                self.body.var_ranges,
+                self.body.indirect_var_ranges,
+                self.body.device,
             )
 
         with V.set_ops_handler(handler):

@@ -1,5 +1,4 @@
 #include <ATen/MapAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <atomic>
 #include <map>
@@ -151,44 +150,32 @@ CudaIPCSentData::CudaIPCSentData(
       offset_(offset),
       counter_ptr_(counter_ptr),
       device_(device) {
+  auto stream = c10::impl::VirtualGuardImpl(device_.type()).getStream(device_);
 #if !defined(USE_ROCM)
-  // CUDA have the unofficial limit on the number of recorded blocking
-  // interprocess events, to prevent using of all events, we are switching to
-  // StreamSync before limit reached.
-  //
-  //  ```python
-  //  import torch
-  //  a = [ torch.cuda.Event(
-  //      enable_timing=False, blocking=True, interprocess=True) for i in
-  //      range(30000) ]
-  //  [i.record() for i in a]
-  //  ```
-  //
+  // Backends may limit the number of live interprocess events, so fall back to
+  // stream sync once TORCH_IPC_MAXIMUM_EVENTS_TO_USE is reached.
   if (cuda_ipc_global_entities.sync_events_used_.load() <
       CUDA_IPC_MAXIMUM_EVENTS_TO_USE) {
     // TODO: More efficient would be to create event inside of main thread (at
     // the moment of the queue.put). The reason this is more efficient is
     // because the main thread may have queued extra work on the stream, which
     // this event will consequently wait for (uselessly).
+    event_.emplace(
+        device_.type(),
+        c10::EventFlag::INTERPROCESS | c10::EventFlag::BLOCKING);
+    event_->record(stream);
     cuda_ipc_global_entities.sync_events_used_++;
-    C10_CUDA_CHECK(cudaEventCreateWithFlags(
-        &event_,
-        cudaEventDisableTiming | cudaEventInterprocess |
-            cudaEventBlockingSync));
-    C10_CUDA_CHECK(cudaEventRecord(
-        event_, c10::cuda::getCurrentCUDAStream(device.index())));
     event_sync_required_ = true;
   } else {
-    auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-    at::cuda::stream_synchronize(stream);
-    event_ = nullptr;
+    stream.synchronize();
+    event_ = std::nullopt;
     event_sync_required_ = false;
   }
 #else
-  // cuIpcGetEventHandle with HIP is not supported, so we have to sync
-  // stream instead of passing event
-  auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-  at::cuda::stream_synchronize(stream);
+  // ROCm uses stream sync instead of IPC events: re-opening the same IPC event
+  // handle in one process fails with hipErrorInvalidValue, and
+  // hipIpcOpenEventHandle fails after a few thousand shared tensors.
+  stream.synchronize();
   event_sync_required_ = false;
 #endif
 }
@@ -201,8 +188,7 @@ CudaIPCSentData::~CudaIPCSentData() {
 #if !defined(USE_ROCM)
   try {
     if (event_sync_required_) {
-      at::cuda::CUDAGuard device_guard(device_.index());
-      C10_CUDA_CHECK(cudaEventDestroy(event_));
+      event_.reset();
       if (!CudaIPCGlobalEntities::alive) {
         return;
       }
@@ -219,11 +205,14 @@ uint64_t CudaIPCSentData::counter_value() {
 }
 
 at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
+  std::string ref_counter_handle;
+  uint64_t ref_counter_offset;
+  uint64_t* ref_counter_ptr;
   {
     std::lock_guard<std::mutex> lock(
         cuda_ipc_global_entities.ref_counters_mutex_);
     if (!cuda_ipc_global_entities.next_available_ref_counters_file_) {
-      std::string ref_counter_handle = at::NewProcessWideShmHandle();
+      ref_counter_handle = at::NewProcessWideShmHandle();
 
       int flags =
           at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
@@ -237,20 +226,27 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
       cuda_ipc_global_entities.ref_counters_files_[ref_counter_handle] = rc;
       cuda_ipc_global_entities.next_available_ref_counters_file_ = rc;
     }
+    auto& ref_counter_file =
+        cuda_ipc_global_entities.next_available_ref_counters_file_;
+    ref_counter_handle = ref_counter_file->handle();
+    ref_counter_offset = ref_counter_file->get_offset();
+    ref_counter_ptr = ref_counter_file->counter_ptr();
+    // Reserve the slot before CudaIPCSentData can trigger IPC collection.
+    ref_counter_file->set_counter(1);
+    ref_counter_file->rotate_offset();
+    if (!ref_counter_file->have_offsets()) {
+      ref_counter_file.reset();
+    }
   }
-  cuda_ipc_global_entities.next_available_ref_counters_file_->set_counter(1);
-  auto sent_data = new CudaIPCSentData(
-      cuda_ipc_global_entities.next_available_ref_counters_file_->handle(),
-      cuda_ipc_global_entities.next_available_ref_counters_file_->get_offset(),
-      cuda_ipc_global_entities.next_available_ref_counters_file_->counter_ptr(),
-      device);
-
-  cuda_ipc_global_entities.next_available_ref_counters_file_->rotate_offset();
-  if (!cuda_ipc_global_entities.next_available_ref_counters_file_
-           ->have_offsets()) {
-    cuda_ipc_global_entities.next_available_ref_counters_file_.reset();
+  try {
+    auto sent_data = std::make_unique<CudaIPCSentData>(
+        ref_counter_handle, ref_counter_offset, ref_counter_ptr, device);
+    return at::DataPtr(
+        data, sent_data.release(), CudaIPCSentDataDelete, device);
+  } catch (...) {
+    ReturnRefCounter(ref_counter_handle, ref_counter_offset);
+    throw;
   }
-  return at::DataPtr(data, sent_data, CudaIPCSentDataDelete, device);
 }
 
 bool CudaIPCCollect() {

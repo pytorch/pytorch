@@ -14,6 +14,7 @@ import socket
 import sys
 import unittest
 from contextlib import closing
+from unittest import mock
 
 from torch.distributed import DistNetworkError, DistStoreError
 from torch.distributed.elastic import utils as elastic_utils
@@ -26,6 +27,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
+    set_warn_always_context,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -140,35 +142,22 @@ class DistributedUtilTest(TestCase):
                 timeout=1,
             )
 
-    def test_create_store_with_libuv_support(self):
-        world_size = 1
-        wait_for_workers = False
-        localhost = socket.gethostname()
-
-        os.environ["USE_LIBUV"] = "0"
-        store = create_c10d_store(
-            is_server=True,
-            server_addr=localhost,
-            server_port=0,
-            timeout=2,
-            world_size=world_size,
-            wait_for_workers=wait_for_workers,
-        )
-        self.assertFalse(store.libuvBackend)
-        del os.environ["USE_LIBUV"]
-        if "USE_LIBUV" in os.environ:
-            raise AssertionError("Expected USE_LIBUV to be removed from os.environ")
-
-        # libuv backend is enabled by default
-        store = create_c10d_store(
-            is_server=True,
-            server_addr=localhost,
-            server_port=0,
-            timeout=2,
-            world_size=world_size,
-            wait_for_workers=wait_for_workers,
-        )
-        self.assertTrue(store.libuvBackend)
+    def test_create_store_use_libuv_env_deprecated(self):
+        with (
+            mock.patch.dict(os.environ, {"USE_LIBUV": "0"}),
+            set_warn_always_context(True),
+            self.assertWarnsRegex(FutureWarning, "use_libuv=False"),
+        ):
+            store = create_c10d_store(
+                is_server=True,
+                server_addr=socket.gethostname(),
+                server_port=0,
+                timeout=2,
+                world_size=1,
+                wait_for_workers=False,
+            )
+        store.set("key", "value")
+        self.assertEqual(store.get("key"), b"value")
 
     def test_port_already_in_use_on_server(self):
         # try to create the TCPStore server twice on the same port

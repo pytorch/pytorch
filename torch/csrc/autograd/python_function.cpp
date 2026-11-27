@@ -400,7 +400,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
   TORCH_INTERNAL_ASSERT(size > 0);
   // first value is unique id managed by AUTOGRAD_FUNCTION_COUNTER
   auto key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
-  if (C10_UNLIKELY(key < 0)) {
+  if (key < 0) [[unlikely]] {
     TORCH_CHECK(PyErr_Occurred(), "key must be positive");
     throw_python_error();
   }
@@ -412,7 +412,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
   f->compiled_autograd_symints.reserve(size - 1);
   for (const auto i : c10::irange(1, size)) {
     auto val = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), i));
-    if (C10_UNLIKELY(val == -1 && PyErr_Occurred()))
+    if (val == -1 && PyErr_Occurred()) [[unlikely]]
       throw_python_error();
     f->compiled_autograd_symints.emplace_back(val);
   }

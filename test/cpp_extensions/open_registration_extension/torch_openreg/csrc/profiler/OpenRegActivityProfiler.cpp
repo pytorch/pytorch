@@ -21,7 +21,12 @@ OpenRegActivityProfiler::availableActivities() const {
 std::unique_ptr<libkineto::IActivityProfilerSession>
 OpenRegActivityProfiler::configure(
     const std::set<libkineto::ActivityType>& /*activity_types*/,
-    const libkineto::Config& /*config*/) {
+    const libkineto::Config& config) {
+  // Sessions that request no device activity, such as CPU-only ones, must
+  // leave the device tracer off.
+  if (!config.deviceTracingEnabled()) {
+    return nullptr;
+  }
   // Real vendor: pass activity_types and config into your session constructor
   // to arm the device tracing API.
   return std::make_unique<OpenRegActivityProfilerSession>(/*deviceIndex=*/0);

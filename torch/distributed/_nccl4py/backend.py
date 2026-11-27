@@ -16,7 +16,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import Backend as C10DBackend, ReduceOp
+from torch._C._distributed_c10d import Backend as C10DBackend, ReduceOp, WorkResult
 from torch.distributed._watchdog import _get_watchdog, stream_complete, stream_timeout
 
 
@@ -35,9 +35,16 @@ class _NcclWork(dist._Work):
     of ProcessGroupNCCL(nccl2)'s coalesceWorks)
     """
 
-    def __init__(self, events, device, wd_handles=None, is_barrier=False):
+    def __init__(
+        self, events, device, backend, wd_handles=None, is_barrier=False, result=None
+    ):
         super().__init__()
         self._events = list(events)
+        # wait() clears _events; the result future still tracks the kernels.
+        self._kernel_events = tuple(self._events)
+        # Created on first use; a coalesced op's is completed by end_coalescing.
+        self._result = result
+        self._backend = backend
         self._device = device
         self._wd_handles = list(wd_handles) if wd_handles else []
         self._is_barrier = is_barrier
@@ -55,18 +62,42 @@ class _NcclWork(dist._Work):
         return True
 
     def get_future(self):
-        fut = torch.futures.Future(devices=[self._device])
-        if not self._events:
-            fut.set_result(True)
+        return self._complete_on_events(
+            torch.futures.Future(devices=[self._device]), True, self._events
+        )
+
+    def get_future_result(self):
+        if self._result is None:
+            # A CPU future, so it completes when the kernels finish rather
+            # than at enqueue.
+            self._result = self._complete_on_events(
+                torch.futures.Future(),
+                WorkResult.SUCCESS.value,
+                self._kernel_events,
+                skip_if_aborted=True,
+            )
+        return self._result
+
+    def _complete_on_events(self, fut, value, events, skip_if_aborted=False):
+        if not events:
+            fut.set_result(value)
             return fut
-        remaining = [len(self._events)]
+        remaining = [len(events)]
+        # Not self: the closure would keep the Work and its events alive on
+        # the watchdog thread.
+        backend = self._backend if skip_if_aborted else None
 
         def on_complete():
             remaining[0] -= 1
-            if remaining[0] == 0:
-                fut.set_result(True)
+            if remaining[0] != 0:
+                return
+            # Kernels cut short by abort() also complete their events; the
+            # result stays pending rather than claim success.
+            if backend is not None and backend._aborted:
+                return
+            fut.set_result(value)
 
-        for event in self._events:
+        for event in events:
             stream_complete(on_complete, event=event)
         return fut
 
@@ -114,11 +145,13 @@ class NCCL4PyBackend(C10DBackend):
                 uid = nccl.UniqueId.from_bytes(bytes(store.get(self._UID_STORE_KEY)))
             comm = nccl.Communicator.init(nranks=size, rank=rank, unique_id=uid)
         self._comm = comm
+        self._aborted = False
 
         self._internal_stream = torch.cuda.Stream(device=self._device)
         self._barrier_tensor = torch.zeros(1, dtype=torch.float32, device=self._device)
         self._coalescing = False
         self._coalesced_streams = set()
+        self._coalesced_results = []
         _get_watchdog()
 
     @property
@@ -170,7 +203,9 @@ class NCCL4PyBackend(C10DBackend):
         # the op used; end_coalescing records the events after group_end.
         if self._coalescing:
             self._coalesced_streams.update(streams)
-            return _NcclWork((), self._device)
+            result = torch.futures.Future()
+            self._coalesced_results.append(result)
+            return _NcclWork((), self._device, self, result=result)
         events = []
         wd_handles = []
         for stream in streams:
@@ -179,7 +214,7 @@ class NCCL4PyBackend(C10DBackend):
             with torch.cuda.stream(stream):
                 wd_handles.append(stream_timeout(self._options._timeout))
             events.append(event)
-        return _NcclWork(events, self._device, wd_handles, is_barrier=is_barrier)
+        return _NcclWork(events, self._device, self, wd_handles, is_barrier=is_barrier)
 
     def _get_nccl_redop(self, reduce_op, tensor):
         """Returns (nccl_op, custom_op_or_None).
@@ -212,6 +247,7 @@ class NCCL4PyBackend(C10DBackend):
     def start_coalescing(self):
         self._coalescing = True
         self._coalesced_streams = set()
+        self._coalesced_results = []
         nccl.group_start()
 
     def end_coalescing(self):
@@ -221,7 +257,17 @@ class NCCL4PyBackend(C10DBackend):
         self._coalesced_streams = set()
         if not streams:
             streams = {torch.cuda.current_stream(self._device)}
-        return self._make_work(*streams)
+        work = self._make_work(*streams)
+        results, self._coalesced_results = self._coalesced_results, []
+        if not results:
+            return work
+
+        def complete(fut):
+            for result in results:
+                result.set_result(fut.value())
+
+        work.get_future_result().add_done_callback(complete)
+        return work
 
     def send(self, tensor_list, dst, tag=0):
         self._check_tensors(tensor_list)
@@ -493,6 +539,7 @@ class NCCL4PyBackend(C10DBackend):
             self._comm = None
 
     def abort(self):
+        self._aborted = True
         if self._comm is not None and self._comm.is_valid:
             try:
                 self._comm.abort()

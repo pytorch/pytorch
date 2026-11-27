@@ -54,6 +54,8 @@ env:
 
 jobs:
   test:
+    env:
+      CPP_FAKETENSOR: ${{ matrix.fake_tensor == 'cpp' && '1' || '0' }}
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
@@ -171,7 +173,7 @@ jobs:
         env:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           INSTALL_WINDOWS_SDK: 1
-          PYTHON_VERSION: "3.10"
+          PYTHON_VERSION: "3.11"
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}

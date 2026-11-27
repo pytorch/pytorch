@@ -1275,8 +1275,8 @@ c10::IValue BlockRunner::move_outputs_to_tuple(uint32_t num_outputs) {
 /// same time, the current checks would fail to detect the alias.
 void BlockRunner::verify_and_correct_memory_overlap(ProcessedNode& n) {
   // The slow check can be removed once the internal/output buffers are merged
-  if (C10_UNLIKELY(n.check_outputs_for_memory_overlap())) {
-    if (C10_UNLIKELY(!planner_)) {
+  if (n.check_outputs_for_memory_overlap()) [[unlikely]] {
+    if (!planner_) [[unlikely]] {
       // slow check, for first iter only
       n.verify_and_correct_memory_overlap();
     } else {
@@ -1332,11 +1332,11 @@ void BlockRunner::Deallocator::cleanupImpl() {
   // MemoryPlanner is created after the first invocation of `run()`. This
   // is done intentionally because MemoryPlanner uses `Tensor` sizes of
   // the previous `run()` for memory planning of subsequent runs
-  if (C10_LIKELY(finished_)) {
+  if (finished_) [[likely]] {
     block_runner_.create_memory_planner();
   }
 
-  if (C10_LIKELY(block_runner_.planner_)) {
+  if (block_runner_.planner_) [[likely]] {
     block_runner_.planner_->deallocate();
   } else {
     // This is the first run, and it didn't finish, so we can't use a
@@ -1345,7 +1345,7 @@ void BlockRunner::Deallocator::cleanupImpl() {
   }
   // clean up owning refs of input tensors
   block_runner_.clean_up_input_ivalues();
-  if (C10_UNLIKELY(!finished_)) {
+  if (!finished_) [[unlikely]] {
     block_runner_.deallocateOutputTensors();
   }
 }
@@ -1402,7 +1402,7 @@ c10::IValue BlockRunner::run_impl_record_functions(
     const KeywordArgs& kwargs) {
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_MODEL);
-  if (C10_UNLIKELY(step_callbacks.has_value())) {
+  if (step_callbacks.has_value()) [[unlikely]] {
     at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     guard.needsInputs()
@@ -1448,7 +1448,7 @@ c10::intrusive_ptr<c10::ivalue::Future> BlockRunner::
         const KeywordArgs& kwargs) {
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_MODEL);
-  if (C10_UNLIKELY(step_callbacks.has_value())) {
+  if (step_callbacks.has_value()) [[unlikely]] {
     at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     guard.needsInputs()
@@ -2144,7 +2144,7 @@ void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_OP);
-  if (C10_UNLIKELY(step_callbacks.has_value())) {
+  if (step_callbacks.has_value()) [[unlikely]] {
     at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     if (guard.needsInputs()) {

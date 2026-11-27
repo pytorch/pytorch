@@ -1,9 +1,14 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <ATen/Utils.h>
 #include <ATen/core/ivalue.h>
+
+namespace caffe2::serialize {
+class PyTorchStreamWriter;
+}
 
 namespace torch::jit {
 
@@ -105,6 +110,15 @@ struct WriteableTensorData {
   at::Tensor tensor_;
   uint64_t size_;
 };
+
+// Write the bytes of a pickle archive and the tensors referenced inside that
+// archive
+TORCH_API void writeArchiveAndTensors(
+    const std::string& archive_name,
+    const char* pickle_bytes,
+    size_t size,
+    const std::vector<at::Tensor>& tensors,
+    caffe2::serialize::PyTorchStreamWriter& out);
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
 // if it was CUDA and to_cpu is True.

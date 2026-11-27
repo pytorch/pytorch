@@ -2,9 +2,9 @@
 
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_read.h>
+#include <torch/csrc/jit/serialization/pickler_helper.h>
 
 namespace torch::jit {
 
@@ -66,7 +66,6 @@ std::vector<char> pickle(
 // This has to live here instead of the C++ API to mirror torch.save since the
 // mobile build excludes the C++ API
 std::vector<char> pickle_save(const at::IValue& ivalue) {
-#ifndef C10_MOBILE
   // Pickle the IValue into an array of bytes
   std::vector<char> pickle_data;
   Pickler pickler([&](const char* buf, size_t size) {
@@ -95,17 +94,13 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
       pickler.tensorData(),
       writer);
   return container_data;
-#else
-  TORCH_CHECK(
-      false,
-      "pickle_save not supported on mobile "
-      "(see https://github.com/pytorch/pytorch/pull/30108)");
-#endif
 }
 
-#ifndef C10_MOBILE
-size_t VectorReader::read(uint64_t pos, void* buf, size_t n, const char* what)
-    const {
+size_t VectorReader::read(
+    uint64_t pos,
+    void* buf,
+    size_t n,
+    const char* /*what*/) const {
   std::copy(
       data_.data() + pos, data_.data() + pos + n, reinterpret_cast<char*>(buf));
   return n;
@@ -115,16 +110,14 @@ size_t StringViewReader::read(
     uint64_t pos,
     void* buf,
     size_t n,
-    const char* what) const {
+    const char* /*what*/) const {
   std::copy(
       data_.data() + pos, data_.data() + pos + n, reinterpret_cast<char*>(buf));
   return n;
 }
-#endif
 
 IValue pickle_load(const std::vector<char>& data) {
   // Read in the pickle data
-#ifndef C10_MOBILE
   caffe2::serialize::PyTorchStreamReader reader(
       std::make_unique<VectorReader>(data));
 
@@ -136,17 +129,10 @@ IValue pickle_load(const std::vector<char>& data) {
       /*obj_loader=*/std::nullopt,
       /*device=*/std::nullopt,
       reader);
-#else
-  TORCH_CHECK(
-      false,
-      "pickle_load not supported on mobile "
-      "(see https://github.com/pytorch/pytorch/pull/30108)");
-#endif
 }
 
 // A specialized version of pickle_load that can load custom objects.
 c10::IValue pickle_load_obj(std::string_view data) {
-#ifndef C10_MOBILE
   caffe2::serialize::PyTorchStreamReader reader(
       std::make_unique<torch::jit::StringViewReader>(data));
   return torch::jit::readArchiveAndTensors(
@@ -157,12 +143,6 @@ c10::IValue pickle_load_obj(std::string_view data) {
       /*obj_loader=*/torch::jit::ObjLoaderFunc,
       /*device=*/std::nullopt,
       reader);
-#else
-  TORCH_CHECK(
-      false,
-      "pickle_load not supported on mobile "
-      "(see https://github.com/pytorch/pytorch/pull/30108)");
-#endif
 }
 
 IValue unpickle(

@@ -67,7 +67,7 @@ from torch import Size, SymBool, SymInt, Tensor
 from torch._C import DispatchKey, DispatchKeySet, ScriptObject
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch._ops import OpOverload
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed import DeviceMesh, ProcessGroup
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.distributed_c10d import _get_default_group
@@ -75,11 +75,7 @@ from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.nested._internal.nested_int import NestedIntNode
 from torch.utils import _pytree as pytree
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode_stack,
-    return_and_correct_aliasing,
-    TorchDispatchMode,
-)
+from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispatchMode
 from torch.utils.checkpoint import get_device_states, set_device_states
 
 
@@ -93,9 +89,8 @@ from . import _c10d
 
 
 def _is_in_fake_tensor_mode() -> bool:
-    return any(
-        isinstance(mode, FakeTensorMode) for mode in _get_current_dispatch_mode_stack()
-    )
+    mode_key = torch._C._TorchDispatchModeKey.FAKE
+    return torch._C._get_dispatch_mode(mode_key) is not None
 
 
 def _reduce_multidim_lists(
@@ -317,9 +312,12 @@ def _combine_any_rank_results(rank_results: dict[int, Any]) -> Any:
 
 
 def _combine_rank_results(rank_results: dict[int, Any], default: Any | None) -> Any:
-    rank_ids = rank_results.keys()
-    rank_value = rank_results[next(iter(rank_ids))]
+    rank_value = next(iter(rank_results.values()))
 
+    # Lists and tuples are combined element by element, recursively, so nested
+    # results such as tuples of tuples work. A rank whose sequence is shorter gets
+    # ``default`` for the missing elements (e.g. aten.split returning fewer chunks
+    # on some ranks).
     if isinstance(rank_value, (list, tuple)):
         max_rank_result_len = max(len(v) for v in rank_results.values())
         ret_list = []
@@ -327,7 +325,7 @@ def _combine_rank_results(rank_results: dict[int, Any], default: Any | None) -> 
             rank_col_results = {
                 r: v[i] if i < len(v) else default for r, v in rank_results.items()
             }
-            ret_list.append(_combine_any_rank_results(rank_col_results))
+            ret_list.append(_combine_rank_results(rank_col_results, default))
         return type(rank_value)(ret_list)
     else:
         return _combine_any_rank_results(rank_results)

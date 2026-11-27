@@ -198,9 +198,8 @@ void materialize_cow(StorageImpl* storage) {
 
   auto data = ref->release();
   if (!copy) {
-    TORCH_INTERNAL_ASSERT(data.get() == data_ptr.get());
-    auto* ptr = data.release();
-    copy = DataPtr(ptr, ptr, data.get_deleter(), data_ptr.device());
+    copy = DataPtr(
+        data_ptr.get(), data.release(), data.get_deleter(), data_ptr.device());
   }
   auto old_data_ptr = storage->set_data_ptr_no_materialize(std::move(*copy));
 }

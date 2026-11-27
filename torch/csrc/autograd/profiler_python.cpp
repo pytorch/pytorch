@@ -321,7 +321,7 @@ typename Config<C>::cls_t set_class(
     typename Config<C>::cache_t& cache,
     const typename Config<C>::key_t& key,
     const typename Config<C>::ephemeral_t& frame) {
-  if (C10_UNLIKELY(!cache.location_.has_value())) {
+  if (!cache.location_.has_value()) [[unlikely]] {
     auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
     TORCH_INTERNAL_ASSERT(code.get() == getCode<C>());
     cache.location_ = PyCallKey(frame);
@@ -371,7 +371,7 @@ void ValueCache::store<CallType::PyCall>(
     const PyCallKey& key,
     no_ephemeral_t /*unused*/) {
   auto& locations = std::get<CallType::PyCall>(state_);
-  if (C10_UNLIKELY(locations.find(key) == locations.end())) {
+  if (locations.find(key) == locations.end()) [[unlikely]] {
     locations[key] = {
         key.line_number_,
         at::StringView(std::string(key.filename_)),
@@ -390,9 +390,8 @@ void ValueCache::store<CallType::PyModuleCall>(
     const PyModuleCallKey& key,
     Config<CallType::PyModuleCall>::ephemeral_t frame) {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
-  if (C10_UNLIKELY(
-          cache.cls_and_parameters_.find(key) ==
-          cache.cls_and_parameters_.end())) {
+  if (cache.cls_and_parameters_.find(key) == cache.cls_and_parameters_.end())
+      [[unlikely]] {
     auto cls = set_class<CallType::PyModuleCall>(this, cache, key, frame);
 
     py::dict params = py::handle((PyObject*)key).attr("_parameters");
@@ -430,9 +429,8 @@ void ValueCache::store<CallType::PyOptimizerCall>(
     const PyOptimizerCallKey& key,
     Config<CallType::PyOptimizerCall>::ephemeral_t frame) {
   auto& cache = std::get<CallType::PyOptimizerCall>(state_);
-  if (C10_UNLIKELY(
-          cache.cls_and_parameters_.find(key) ==
-          cache.cls_and_parameters_.end())) {
+  if (cache.cls_and_parameters_.find(key) == cache.cls_and_parameters_.end())
+      [[unlikely]] {
     auto cls = set_class<CallType::PyOptimizerCall>(this, cache, key, frame);
     const py::handle self{(PyObject*)key};
     std::vector<OptimizerInfo::ParameterInfo> params;
@@ -478,7 +476,7 @@ void ValueCache::store<CallType::PyCCall>(
     const PyCCallKey& key,
     Config<CallType::PyCCall>::ephemeral_t arg) {
   auto& names = std::get<CallType::PyCCall>(state_);
-  if (C10_UNLIKELY(names.find(key) == names.end())) {
+  if (names.find(key) == names.end()) [[unlikely]] {
     names[key] = at::StringView(py::repr(arg));
   }
 }
@@ -533,7 +531,7 @@ struct TraceKeyCacheState {
       typename Config<C>::ephemeral_t ephemeral,
       ValueCache& value_cache) {
     auto it = state_.find(callsite);
-    if (C10_UNLIKELY(it == state_.end())) {
+    if (it == state_.end()) [[unlikely]] {
       value_cache.store<C>(callsite.value_, ephemeral);
       value_cache.store<CallType::PyCall>(callsite.caller_, no_ephemeral_t());
       it = state_.insert({callsite, nextKey()}).first;
@@ -733,6 +731,10 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   std::atomic<bool> active_lock_{false};
   bool active_{false};
   bool gc_callback_registered_{false};
+  // Frames still open when tracing stops are closed at min(session end, this
+  // time). Only a single pause is supported: restart() clears it, and frames
+  // orphaned by an earlier pause are not handled.
+  std::optional<c10::approx_time_t> stop_time_;
 
   torch::profiler::impl::RecordQueue* queue_;
   PyInterpreterState* interpreter_{nullptr};
@@ -1186,6 +1188,7 @@ void PythonTracer::stop() {
         tls.profile_sem.release();
       }
     }
+    stop_time_ = c10::getApproximateTime();
 
 #if IS_PYTHON_3_12
     unregisterMonitoringCallback();
@@ -1206,6 +1209,7 @@ void PythonTracer::restart() {
         "Refusing to register profile functions.");
     return;
   }
+  stop_time_.reset();
   setprofileAllThreads(PythonTracer::pyProfileFn, (PyObject*)shared_ctx_);
 #if IS_PYTHON_3_12
   registerMonitoringCallback();
@@ -1487,6 +1491,12 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
   for (auto& tls : thread_local_results_) {
     tls.value_cache_.trimPrefixes();
   }
+  // Close frames still open when Python tracing is stopped at stop_time_.
+  // TorchOps keep recording after the stop, so they keep their own ends and may
+  // outlive their capped parent.
+  if (stop_time_.has_value()) {
+    end_time_ns = std::min(end_time_ns, time_converter(*stop_time_));
+  }
   PostProcess post_process(
       std::move(time_converter), thread_local_results_, end_time_ns);
   post_process.set_start_frames(start_frames_, enters);
@@ -1579,7 +1589,7 @@ int PythonTracer::pyProfileFn(
   HANDLE_TH_ERRORS
   auto* tracer = reinterpret_cast<TraceContext*>(obj)->tracer_;
   auto* local_results = tracer->findThreadLocalResults(PyThreadState_Get());
-  if (C10_UNLIKELY(!local_results)) {
+  if (!local_results) [[unlikely]] {
     return 0;
   }
   bool acquired = local_results->profile_sem.tryAcquire();

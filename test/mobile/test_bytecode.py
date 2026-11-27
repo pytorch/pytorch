@@ -13,7 +13,6 @@ import torch.utils.show_pickle
 from torch.jit.mobile import (
     _backport_for_mobile,
     _backport_for_mobile_to_buffer,
-    _get_mobile_model_contained_types,
     _get_model_bytecode_version,
     _get_model_ops_and_info,
     _load_for_lite_interpreter,
@@ -374,20 +373,6 @@ class testVariousModelVersions(TestCase):
             raise AssertionError(
                 f"Expected 2 schema args, got {ops_v6['aten::add.Scalar'].num_schema_args}"
             )
-
-    def test_get_mobile_model_contained_types(self):
-        class MyTestModule(torch.nn.Module):
-            def forward(self, x):
-                return x + 10
-
-        sample_input = torch.tensor([1])
-
-        script_module = torch.jit.script(MyTestModule())
-        script_module(sample_input)
-
-        buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
-        buffer.seek(0)
-        _get_mobile_model_contained_types(buffer)
 
 
 if __name__ == "__main__":

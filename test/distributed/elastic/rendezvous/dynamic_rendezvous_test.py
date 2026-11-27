@@ -15,7 +15,7 @@ import time
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import cast
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
@@ -198,7 +198,7 @@ class RendezvousStateTest(TestCase):
         state = _RendezvousState()
         state.round = 1
         state.complete = True
-        state.deadline = datetime.now(timezone.utc)
+        state.deadline = datetime.now(UTC)
         state.closed = True
 
         # fmt: off
@@ -224,8 +224,8 @@ class RendezvousStateTest(TestCase):
 
                     state.wait_list.add(node_waiting)
 
-                    state.last_heartbeats[node_running] = datetime.now(timezone.utc)
-                    state.last_heartbeats[node_waiting] = datetime.now(timezone.utc)
+                    state.last_heartbeats[node_running] = datetime.now(UTC)
+                    state.last_heartbeats[node_waiting] = datetime.now(UTC)
 
                 bits = pickle.dumps(state)
 
@@ -1371,7 +1371,7 @@ class DynamicRendezvousHandlerTest(TestCase):
         self._max_nodes = 2
         other_node = _NodeDesc("aaa_node", 1, 1)
         self._state.participants[other_node] = 0
-        self._state.last_heartbeats[other_node] = datetime.now(timezone.utc)
+        self._state.last_heartbeats[other_node] = datetime.now(UTC)
 
         handler = self._create_handler()
 
@@ -1574,9 +1574,7 @@ class DynamicRendezvousHandlerTest(TestCase):
         self.assertEqual(self._state.last_heartbeats[self._node], now)
 
     def _assert_keep_alive_swallows_rendezvous_errors(self) -> None:
-        last_heartbeat_time = datetime.now(timezone.utc) - (
-            self._keep_alive_interval * 2
-        )
+        last_heartbeat_time = datetime.now(UTC) - (self._keep_alive_interval * 2)
 
         self._state.last_heartbeats[self._node] = last_heartbeat_time
 
