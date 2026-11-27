@@ -3006,8 +3006,9 @@ class TestOptimRenewed(TestCase):
 
     @dtypes(torch.float32, torch.bfloat16)
     @parametrize("nesterov", [False, True])
+    @parametrize("foreach", [False, True])
     def test_muon_orthogonalization_does_not_alias_momentum_buffer(
-        self, device, dtype, nesterov
+        self, device, dtype, nesterov, foreach
     ):
         momentum = 0.9
         param = Parameter(torch.zeros(8, 5, device=device, dtype=dtype))
@@ -3018,6 +3019,7 @@ class TestOptimRenewed(TestCase):
             weight_decay=0,
             momentum=momentum,
             nesterov=nesterov,
+            foreach=foreach,
         )
         expected = torch.zeros_like(param)
         expected.lerp_(param.grad, 1 - momentum)
