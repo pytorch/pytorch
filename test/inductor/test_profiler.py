@@ -341,7 +341,8 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 class DynamoProfilerTestsCuda(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_cupti_lazy_reinit(self):
         x, y = (torch.randn(4, 4, device="cuda") for _ in range(2))
 
