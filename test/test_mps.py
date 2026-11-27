@@ -12804,10 +12804,15 @@ class TestSDPA(TestCaseMPS):
         from torch.nn.attention import sdpa_kernel, SDPBackend
         for name, (qkv, kwargs) in self._efficient_attention_cases(dtype).items():
             with self.subTest(name):
+                # Cases reuse one tensor for q, k and v; separate leaves give separate gradients.
+                # clone() keeps the strides, so layout cases stay non-contiguous.
                 mask = kwargs.get("attn_mask")
-                inputs = [t.requires_grad_() for t in qkv]
+                inputs = [t.clone().requires_grad_() for t in qkv]
                 if mask is not None and mask.is_floating_point():
-                    inputs.append(mask.requires_grad_())
+                    mask = mask.clone().requires_grad_()
+                    inputs.append(mask)
+                    kwargs = {**kwargs, "attn_mask": mask}
+                qkv = inputs[:3]
                 ref_inputs = [t.detach().cpu().double().requires_grad_() for t in inputs]
                 ref_qkv, ref_kwargs = ref_inputs[:3], dict(kwargs)
                 if len(ref_inputs) > 3:
@@ -12830,9 +12835,10 @@ class TestSDPA(TestCaseMPS):
                     )
                     errors[backend] = [(g.cpu().double() - r).abs().max().item() for g, r in zip(grads, ref)]
                 # P = exp(scores - logsumexp) from the forward is not renormalized, which costs
-                # a few ulps over math; the gradient bound follows test_transformers' fudge factors.
+                # fp32 gradients up to 12x math's error; test_transformers allows CUDA memory
+                # efficient attention 8.5x to 150x depending on the gradient.
                 for eff, math_err, r in zip(errors[SDPBackend.EFFICIENT_ATTENTION], errors[SDPBackend.MATH], ref):
-                    self.assertLessEqual(eff, 10 * math_err + torch.finfo(dtype).eps * r.abs().max().item())
+                    self.assertLessEqual(eff, 25 * math_err + torch.finfo(dtype).eps * r.abs().max().item())
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_efficient_attention_logsumexp(self, dtype):
