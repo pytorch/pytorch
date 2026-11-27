@@ -157,6 +157,28 @@ inline bool check_flash_causal_non_square_seqlens(
   return true;
 }
 
+inline bool check_flash_attention_dropout(
+    sdp_params const& params,
+    bool debug) {
+  if (params.dropout == 0.0) {
+    return true;
+  }
+  auto* device_prop = at::xpu::getCurrentDeviceProperties();
+  auto device_architecture = device_prop->architecture;
+  if (device_architecture ==
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc ||
+      device_architecture ==
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc_vg) {
+    if (debug) {
+      TORCH_WARN(
+          "FlashAttentionXPU with dropout is disabled on PVC due to known "
+          "accuracy issues with older IGC versions (requires IGC >= 2.27.10).");
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool check_flash_attention_deterministic(
     const sdp_params& params,
     bool debug) {
@@ -176,6 +198,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
           is_flash_attention_available,
           check_flash_attention_hardware_support,
           check_for_attn_mask,
+          check_flash_attention_dropout,
           check_nested_tensor,
           check_tensor_shapes,
           check_batch_size_and_num_heads_dense<true /*supports GQA*/>,

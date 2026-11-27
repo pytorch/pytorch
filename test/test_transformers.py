@@ -7355,7 +7355,6 @@ class TestSDPAXpuOnly(NNTestCase):
     @parametrize("dropout", [0.0, 0.7])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.half])
     @skipIfTorchDynamo()
-    @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     def test_fused_sdp_choice_xpu(self, device, type: str, dropout: float, dtype: torch.dtype):
         # Migrate from test_fused_sdp_choice_cpu
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
@@ -7367,8 +7366,7 @@ class TestSDPAXpuOnly(NNTestCase):
         elif dropout == 0.0:
             # OVERRIDEABLE does not support dropout
             expected = SDPBackend.OVERRIDEABLE
-        elif dtype in [torch.bfloat16, torch.float16]:
-            # FLASH_ATTENTION only supports bf16/fp16
+        elif dtype in [torch.bfloat16, torch.float16] and PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU:
             expected = SDPBackend.FLASH_ATTENTION
         else:
             expected = SDPBackend.MATH

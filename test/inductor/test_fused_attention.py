@@ -4,7 +4,6 @@ import itertools
 import math
 import os
 import re
-import unittest
 from types import SimpleNamespace
 from unittest import mock
 
@@ -2391,15 +2390,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_4_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_4
         test_sdpa_rewriter_5_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
         test_sdpa_rewriter_6_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_6
-        test_sdpa_rewriter_7_gpu = unittest.skipIf(
-            GPU_TYPE == "xpu" and not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-            "XPU Flash Attention is not supported",
-        )(TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_7)
+        test_sdpa_rewriter_7_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_7
         test_sdpa_rewriter_8_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_8
-        test_sdpa_rewriter_9_gpu = unittest.skipIf(
-            GPU_TYPE == "xpu" and not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-            "XPU Flash Attention is not supported",
-        )(TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_9)
+        test_sdpa_rewriter_9_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_9
         test_sdpa_rewriter_10_gpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_10
         )
