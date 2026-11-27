@@ -1844,9 +1844,8 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
           when called on an MPS tensor with floating or complex dtype
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, :func:`torch.nn.AdaptiveMaxPool2d`,
-          :func:`torch.nn.AvgPool2d`, and :func:`torch.nn.AvgPool3d` when attempting to differentiate
-          an MPS tensor
+        * :func:`torch.nn.MaxPool3d`, :func:`torch.nn.AdaptiveMaxPool2d`, and :func:`torch.nn.AvgPool3d`
+          when attempting to differentiate an MPS tensor
         * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
           in some cases
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
@@ -2005,11 +2004,11 @@ def set_deterministic_debug_mode(debug_mode: builtins.int | str) -> None:
             )
 
     if debug_mode == 0:
-        _C._set_deterministic_algorithms(False)
+        use_deterministic_algorithms(False)
     elif debug_mode == 1:
-        _C._set_deterministic_algorithms(True, warn_only=True)
+        use_deterministic_algorithms(True, warn_only=True)
     elif debug_mode == 2:
-        _C._set_deterministic_algorithms(True)
+        use_deterministic_algorithms(True)
     else:
         raise RuntimeError(
             f"invalid value of debug_mode, expected 0, 1, or 2, but got {debug_mode}"
@@ -2201,8 +2200,8 @@ def _check(
 
 
 @_deprecated(
-    "_check_is_size will be removed in a future PyTorch release along with guard_size_oblivious. \
-    Use _check(i >= 0) instead.",
+    "_check_is_size will be removed in a future PyTorch release. "
+    "Use _check(i >= 0) instead.",
     category=FutureWarning,
 )
 def _check_is_size(
@@ -2211,34 +2210,14 @@ def _check_is_size(
     *,
     max: "IntLikeType | None" = None,
 ) -> None:
-    """Checks that a given integer is a valid size (i.e., is non-negative).
-    You should use this over ``_check(i >= 0)`` because it can prevent
-    ``GuardOnDataDependentSymNode`` exceptions by opting yourself into alternate
-    semantics for ``guard_size_oblivious`` tests that treat values 0 and 1
-    equivalently to all other values.
+    """Checks that an integer is non-negative, with an optional upper bound.
 
-    When max is not None, this specifies an upper bound equivalent to
-    ``_check(i <= max)``.  This bound is also subject to alternate semantics:
-    in ``guard_size_oblivious`` tests, we assume that a constant max bound is
-    treated equivalently to all other values.  Symbolic max bounds are not yet
-    supported.
-
-    NB: Do NOT use this in contexts where a -1 size would be valid (indicating
-    to infer the size from context, or if you should wrap-around or truncate).
-    Only use this if the only valid value is an honest to goodness size.
+    Equivalent to ``_check(i >= 0)`` and, when ``max`` is given,
+    ``_check(i <= max)``; prefer those in new code.
     """
-    # This is responsible for the expect_true
     _check(i >= 0, message)
-    from torch.fx.experimental.symbolic_shapes import _advise_is_size
-
-    _advise_is_size(i)  # type: ignore[arg-type]
-
     if max is not None:
         _check(i <= max, message)
-
-        from torch.fx.experimental.symbolic_shapes import _advise_is_bounded
-
-        _advise_is_bounded(i, max)  # type: ignore[arg-type]
 
 
 def _check_index(

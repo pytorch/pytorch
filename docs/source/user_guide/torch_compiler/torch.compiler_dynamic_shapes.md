@@ -238,12 +238,15 @@ you never specialize.
 
 #### `mark_unbacked(tensor, dim)`
 
-The {func}`torch._dynamo.decorators.mark_unbacked` function marks a tensor dimension as unbacked. It is unlikely
-to be the tool you need, but it could be useful if the specialization occurs inside
-a condition `guard_size_oblivious(x)`, and if using it removes the specialization.
-Ensure it fixes the specialization and does not introduce a data-dependent error
-that converts to a graph break at or before the specialization location
-you are trying to  avoid. It might be better to use the next option.
+The {func}`torch._dynamo.decorators.mark_unbacked` function marks a tensor dimension
+as unbacked, so its concrete value is not used for specialization. Operations on
+that dimension must support unbacked symbols. For conditions that cannot be
+resolved at compile time, use explicit handling such as `guard_or_false`,
+`guard_or_true`, or `statically_known_true` when their semantics are appropriate.
+Otherwise, attempting to guard on the dimension can cause a data-dependent error
+or a graph break. See
+{ref}`troubleshooting_guardondatadependentsymnode_errors` for guidance on diagnosing
+and resolving these errors.
 
 (dynamic_sources_allow_list)=
 #### Dynamic Allow List (`DYNAMIC_SOURCES`)

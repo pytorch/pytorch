@@ -1,3 +1,4 @@
+#include <ATen/native/mps/kernels/GroupedMM.h>
 #include <ATen/native/mps/kernels/ScaledMM.h>
 #include <c10/metal/float8.h>
 #include <metal_simdgroup_matrix>
@@ -22,7 +23,7 @@ struct ScaledMMArgs {
 template <typename T>
 inline void scaled_mm_load_tiles(
     thread const ScaledMMArgs<T>& args,
-    constant ScaledMMParams<>& p,
+    thread const ScaledMMParams<>& p,
     uint row_start,
     uint col_start,
     uint k,
@@ -52,7 +53,7 @@ inline void scaled_mm_store(
     uint row,
     uint col,
     thread const ScaledMMArgs<T>& args,
-    constant ScaledMMParams<>& p) {
+    thread const ScaledMMParams<>& p) {
   if (p.has_tensor_scales) {
     value = (value * args.scale_a[p.rowwise ? row : 0]) *
         args.scale_b[p.rowwise ? col : 0];
@@ -139,7 +140,7 @@ inline void scaled_mm_store_tile(
     uint col_start,
     uint tid,
     thread const ScaledMMArgs<T>& args,
-    constant ScaledMMParams<>& p) {
+    thread const ScaledMMParams<>& p) {
   constexpr auto tile = scaled_mm_tile;
   for (uint i = tid; i < tile * tile; i += scaled_mm_threads) {
     const uint row = row_start + i / tile;
@@ -148,6 +149,22 @@ inline void scaled_mm_store_tile(
       scaled_mm_store(c_tile[i], row, col, args, p);
     }
   }
+}
+
+// Computes the output tile at (row_start, col_start) with simdgroup MMA
+template <typename T>
+inline void scaled_mm_tile_run(
+    thread const ScaledMMArgs<T>& args,
+    thread const ScaledMMParams<>& p,
+    uint row_start,
+    uint col_start,
+    uint tid,
+    uint sg,
+    threadgroup float* c_tile) {
+  scaled_mm_accumulate(args.a_tile, args.b_tile, c_tile, p.k, sg, [&](uint k) {
+    scaled_mm_load_tiles(args, p, row_start, col_start, k, tid);
+  });
+  scaled_mm_store_tile(c_tile, row_start, col_start, tid, args, p);
 }
 
 template <typename T>
@@ -159,7 +176,7 @@ kernel void scaled_mm(
     device const float* scale_a [[buffer(3)]],
     device const float* scale_b [[buffer(4)]],
     device const uchar* bias [[buffer(5)]],
-    constant ScaledMMParams<>& p [[buffer(6)]],
+    constant ScaledMMParams<>& params [[buffer(6)]],
     uint2 group [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]],
     uint sg [[simdgroup_index_in_threadgroup]]) {
@@ -167,13 +184,9 @@ kernel void scaled_mm(
   threadgroup half a_tile[tile * tile];
   threadgroup half b_tile[tile * tile];
   threadgroup float c_tile[tile * tile];
+  const ScaledMMParams<> p = params;
   const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, a_tile, b_tile};
-  const uint row_start = group.y * tile;
-  const uint col_start = group.x * tile;
-  scaled_mm_accumulate(a_tile, b_tile, c_tile, p.k, sg, [&](uint k) {
-    scaled_mm_load_tiles(args, p, row_start, col_start, k, tid);
-  });
-  scaled_mm_store_tile(c_tile, row_start, col_start, tid, args, p);
+  scaled_mm_tile_run(args, p, group.y * tile, group.x * tile, tid, sg, c_tile);
 }
 
 #define REGISTER_SCALED_MM_WITH_OUT_T(T)                            \
@@ -334,7 +347,7 @@ struct ScaledMMBlockwiseArgs {
 template <typename F, typename T, typename S>
 inline void scaled_mm_blockwise_load_tiles(
     thread const ScaledMMBlockwiseArgs<T>& args,
-    constant ScaledMMParams<>& p,
+    thread const ScaledMMParams<>& p,
     uint row_start,
     uint col_start,
     uint k,
@@ -342,7 +355,6 @@ inline void scaled_mm_blockwise_load_tiles(
     threadgroup S* a_tile,
     threadgroup S* b_tile) {
   constexpr auto tile = scaled_mm_tile;
-  const uint k_blocks = (p.k + F::block - 1) / F::block;
   const auto decode = [&](device const uchar* data,
                           device const uchar* scales,
                           int64_t stride,
@@ -351,7 +363,7 @@ inline void scaled_mm_blockwise_load_tiles(
                           uint k) {
     return outer < outer_size && k < p.k
         ? S(F::element(data + outer * stride, k) *
-            F::scale(scales[outer * k_blocks + k / F::block]))
+            F::scale(scales[outer * p.k_blocks + k / F::block]))
         : S(0);
   };
   // Consecutive threads walk K, the contiguous dimension of both operands
@@ -372,14 +384,34 @@ inline void scaled_mm_blockwise_load_tiles(
       device const float *tensor_scale_a [[buffer(5)]],                       \
       device const float *tensor_scale_b [[buffer(6)]],                       \
       device const uchar *bias [[buffer(7)]],                                 \
-      constant ScaledMMParams<>&p [[buffer(8)]]
+      constant ScaledMMParams<>&params [[buffer(8)]]
 
 #define SCALED_MM_BLOCKWISE_ARGS                                          \
+  const ScaledMMParams<> p = params;                                      \
   const ScaledMMBlockwiseArgs<T> args {                                   \
     a, b, scale_a, scale_b, {                                             \
       nullptr, nullptr, out, tensor_scale_a, tensor_scale_b, bias, {}, {} \
     }                                                                     \
   }
+
+// scaled_mm_tile_run for the block-scaled recipes
+template <typename F, typename T, typename S>
+inline void scaled_mm_blockwise_tile_run(
+    thread const ScaledMMBlockwiseArgs<T>& args,
+    thread const ScaledMMParams<>& p,
+    uint row_start,
+    uint col_start,
+    uint tid,
+    uint sg,
+    threadgroup S* a_tile,
+    threadgroup S* b_tile,
+    threadgroup float* c_tile) {
+  scaled_mm_accumulate(a_tile, b_tile, c_tile, p.k, sg, [&](uint k) {
+    scaled_mm_blockwise_load_tiles<F>(
+        args, p, row_start, col_start, k, tid, a_tile, b_tile);
+  });
+  scaled_mm_store_tile(c_tile, row_start, col_start, tid, args.store, p);
+}
 
 template <typename T, typename F>
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
@@ -394,13 +426,8 @@ kernel void scaled_mm_blockwise(
   threadgroup S b_tile[tile * tile];
   threadgroup float c_tile[tile * tile];
   SCALED_MM_BLOCKWISE_ARGS;
-  const uint row_start = group.y * tile;
-  const uint col_start = group.x * tile;
-  scaled_mm_accumulate(a_tile, b_tile, c_tile, p.k, sg, [&](uint k) {
-    scaled_mm_blockwise_load_tiles<F>(
-        args, p, row_start, col_start, k, tid, a_tile, b_tile);
-  });
-  scaled_mm_store_tile(c_tile, row_start, col_start, tid, args.store, p);
+  scaled_mm_blockwise_tile_run<F>(
+      args, p, group.y * tile, group.x * tile, tid, sg, a_tile, b_tile, c_tile);
 }
 
 #define REGISTER_SCALED_MM_BLOCKWISE(NAME, FORMAT, T)           \
@@ -428,20 +455,15 @@ REGISTER_SCALED_MM_BLOCKWISE_WITH_OUT_T(half);
 REGISTER_SCALED_MM_BLOCKWISE_WITH_OUT_T(bfloat);
 
 // Every SIMD group computes one output column; its lanes take turns
-// streaming scaled_mm_few_rows_lane_chunk elements of K.
-template <typename T, uint32_t rows>
-[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
-kernel void scaled_mm_few_rows(
-    device const float8_e4m3fn* a [[buffer(0)]],
-    device const float8_e4m3fn* b [[buffer(1)]],
-    device T* out [[buffer(2)]],
-    device const float* scale_a [[buffer(3)]],
-    device const float* scale_b [[buffer(4)]],
-    device const uchar* bias [[buffer(5)]],
-    constant ScaledMMParams<>& p [[buffer(6)]],
-    uint group [[threadgroup_position_in_grid]],
-    uint sg [[simdgroup_index_in_threadgroup]],
-    uint lane [[thread_index_in_simdgroup]]) {
+// streaming scaled_mm_few_rows_lane_chunk elements of K. Computes rows rows of
+// the output starting at row_start.
+template <uint32_t rows, typename T>
+inline void scaled_mm_few_rows_run(
+    thread const ScaledMMArgs<T>& args,
+    thread const ScaledMMParams<>& p,
+    uint row_start,
+    uint col,
+    uint lane) {
   using load_t = uint4;
   constexpr uint words = sizeof(load_t) / sizeof(uint);
   static_assert(
@@ -454,9 +476,8 @@ kernel void scaled_mm_few_rows(
       scaled_mm_alignment % scaled_mm_simdgroups == 0,
       "N must be a whole number of threadgroups");
   constexpr auto chunk = scaled_mm_few_rows_lane_chunk;
-  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, {}, {}};
-  const uint col = group * scaled_mm_simdgroups + sg;
-  const auto b_col = b + col * p.b_col_stride;
+  const auto a = args.a + row_start * p.a_row_stride;
+  const auto b_col = args.b + col * p.b_col_stride;
   float4 accum[rows] = {};
   for (uint base = lane * chunk; base < p.k;
        base += c10::metal::simdgroup_size * chunk) {
@@ -483,9 +504,28 @@ kernel void scaled_mm_few_rows(
     const auto value = simd_sum(dot(accum[r], float4(1))) *
         (scaled_mm_decode_scale * scaled_mm_decode_scale);
     if (lane == 0) {
-      scaled_mm_store(value, r, col, args, p);
+      scaled_mm_store(value, row_start + r, col, args, p);
     }
   }
+}
+
+template <typename T, uint32_t rows>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_mm_few_rows(
+    device const float8_e4m3fn* a [[buffer(0)]],
+    device const float8_e4m3fn* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    device const float* scale_a [[buffer(3)]],
+    device const float* scale_b [[buffer(4)]],
+    device const uchar* bias [[buffer(5)]],
+    constant ScaledMMParams<>& params [[buffer(6)]],
+    uint group [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  const ScaledMMParams<> p = params;
+  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, {}, {}};
+  scaled_mm_few_rows_run<rows>(
+      args, p, 0, group * scaled_mm_simdgroups + sg, lane);
 }
 
 #define REGISTER_SCALED_MM_FEW_ROWS(T, ROWS)                             \
@@ -521,27 +561,26 @@ REGISTER_SCALED_MM_FEW_ROWS_WITH_OUT_T(float8_e4m3fn);
 // scaled_mm_few_rows for the block-scaled recipes. Every lane step covers
 // scaled_mm_blockwise_chunk values of K, decoding B's chunk once for all rows
 // of A and applying the scales once per block.
-template <typename T, typename F, uint32_t rows>
-[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
-kernel void scaled_mm_blockwise_few_rows(
-    SCALED_MM_BLOCKWISE_BUFFERS,
-    uint group [[threadgroup_position_in_grid]],
-    uint sg [[simdgroup_index_in_threadgroup]],
-    uint lane [[thread_index_in_simdgroup]]) {
+template <typename F, uint32_t rows, typename T>
+inline void scaled_mm_blockwise_few_rows_run(
+    thread const ScaledMMBlockwiseArgs<T>& args,
+    thread const ScaledMMParams<>& p,
+    uint row_start,
+    uint col,
+    uint lane) {
   constexpr auto chunk = scaled_mm_blockwise_chunk;
   constexpr uint blocks = chunk / F::block;
   static_assert(chunk % F::block == 0, "a chunk must hold whole blocks");
   static_assert(
       F::chunk_bytes * F::values_per_byte == chunk,
       "decode_chunk must decode scaled_mm_blockwise_chunk values");
-  SCALED_MM_BLOCKWISE_ARGS;
-  const uint col = group * scaled_mm_simdgroups + sg;
   if (col >= p.n) {
     return;
   }
-  const uint k_blocks = p.k / F::block;
-  const auto b_col = b + col * p.b_col_stride;
-  const auto b_scales = scale_b + ulong(col) * k_blocks;
+  const auto a = args.a + row_start * p.a_row_stride;
+  const auto a_scales = args.scale_a + ulong(row_start) * p.k_blocks;
+  const auto b_col = args.b + col * p.b_col_stride;
+  const auto b_scales = args.scale_b + ulong(col) * p.k_blocks;
   float accum[rows] = {};
   for (uint c = lane; c < p.k / chunk; c += c10::metal::simdgroup_size) {
     float bv[chunk];
@@ -560,7 +599,7 @@ kernel void scaled_mm_blockwise_few_rows(
         }
         const uint kb = c * blocks + j;
         accum[r] +=
-            F::apply_scales(dot, scale_a[r * k_blocks + kb], b_scales[kb]);
+            F::apply_scales(dot, a_scales[r * p.k_blocks + kb], b_scales[kb]);
       }
     }
   }
@@ -568,9 +607,21 @@ kernel void scaled_mm_blockwise_few_rows(
   for (uint r = 0; r < rows; ++r) {
     const auto value = simd_sum(accum[r]);
     if (lane == 0) {
-      scaled_mm_store(value, r, col, args.store, p);
+      scaled_mm_store(value, row_start + r, col, args.store, p);
     }
   }
+}
+
+template <typename T, typename F, uint32_t rows>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_mm_blockwise_few_rows(
+    SCALED_MM_BLOCKWISE_BUFFERS,
+    uint group [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  SCALED_MM_BLOCKWISE_ARGS;
+  scaled_mm_blockwise_few_rows_run<F, rows>(
+      args, p, 0, group * scaled_mm_simdgroups + sg, lane);
 }
 
 #define REGISTER_SCALED_MM_BLOCKWISE_FEW_ROWS(NAME, FORMAT, T, ROWS)          \
@@ -612,7 +663,7 @@ inline void scaled_mm_store_accum(
     uint row_start,
     uint col_start,
     thread const ScaledMMArgs<T>& args,
-    constant ScaledMMParams<>& p) {
+    thread const ScaledMMParams<>& p) {
   for (uint16_t i = 0; i < accum.get_capacity(); ++i) {
     if (accum.is_valid_element(i)) {
       const auto coord = accum.get_multidimensional_index(i);
@@ -642,7 +693,7 @@ inline void scaled_mm_mpp_run(
     uint row_start,
     uint col_start,
     thread const ScaledMMArgs<T>& args,
-    constant ScaledMMParams<>& p,
+    thread const ScaledMMParams<>& p,
     LoadTiles load_tiles) {
   constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
       tile,
@@ -669,6 +720,25 @@ inline void scaled_mm_mpp_run(
   scaled_mm_store_accum(accum, row_start, col_start, args, p);
 }
 
+// scaled_mm_tile_run with the MMA done by MPP
+template <typename T>
+inline void scaled_mm_mpp_tile_run(
+    thread const ScaledMMArgs<T>& args,
+    thread const ScaledMMParams<>& p,
+    uint row_start,
+    uint col_start,
+    uint tid) {
+  constexpr auto tile = scaled_mm_tile;
+  using tile_t =
+      tensor<threadgroup half, extents<int, tile, tile>, tensor_inline>;
+  tile_t aa(args.a_tile, extents<int, tile, tile>());
+  tile_t bb(args.b_tile, extents<int, tile, tile>());
+  scaled_mm_mpp_run<tile, tile, false>(
+      aa, bb, row_start, col_start, args, p, [&](uint k) {
+        scaled_mm_load_tiles(args, p, row_start, col_start, k, tid);
+      });
+}
+
 template <typename T>
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
 kernel void scaled_mm_mpp(
@@ -678,23 +748,15 @@ kernel void scaled_mm_mpp(
     device const float* scale_a [[buffer(3)]],
     device const float* scale_b [[buffer(4)]],
     device const uchar* bias [[buffer(5)]],
-    constant ScaledMMParams<>& p [[buffer(6)]],
+    constant ScaledMMParams<>& params [[buffer(6)]],
     uint2 group [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]) {
   constexpr auto tile = scaled_mm_tile;
   threadgroup half a_tile[tile * tile];
   threadgroup half b_tile[tile * tile];
-  using tile_t =
-      tensor<threadgroup half, extents<int, tile, tile>, tensor_inline>;
-  tile_t aa(a_tile, extents<int, tile, tile>());
-  tile_t bb(b_tile, extents<int, tile, tile>());
+  const ScaledMMParams<> p = params;
   const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, a_tile, b_tile};
-  const uint row_start = group.y * tile;
-  const uint col_start = group.x * tile;
-  scaled_mm_mpp_run<tile, tile, false>(
-      aa, bb, row_start, col_start, args, p, [&](uint k) {
-        scaled_mm_load_tiles(args, p, row_start, col_start, k, tid);
-      });
+  scaled_mm_mpp_tile_run(args, p, group.y * tile, group.x * tile, tid);
 }
 
 #define REGISTER_SCALED_MM_MPP_WITH_OUT_T(T)                                \
@@ -785,33 +847,31 @@ struct ScaledMMBlockwiseRowLoader {
   }
 };
 
-// scaled_mm_blockwise with the MMA done by MPP on 64x64 output tiles. Each
-// thread decodes one row of A or column of B per K step with vector loads, so
-// the host routes only operands aligned for them here.
-template <typename T, typename F>
-[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
-kernel void scaled_mm_blockwise_mpp(
-    SCALED_MM_BLOCKWISE_BUFFERS,
-    uint2 group [[threadgroup_position_in_grid]],
-    uint tid [[thread_index_in_threadgroup]]) {
+// Pads each staged row by 16 bytes to spread the threads' row stores over the
+// banks
+template <typename S>
+constexpr constant int scaled_mm_blockwise_mpp_pitch =
+    scaled_mm_blockwise_step + 16 / sizeof(S);
+
+template <typename F, typename T, typename S>
+inline void scaled_mm_blockwise_mpp_tile_run(
+    thread const ScaledMMBlockwiseArgs<T>& args,
+    thread const ScaledMMParams<>& p,
+    uint row_start,
+    uint col_start,
+    uint tid,
+    threadgroup S* a_tile,
+    threadgroup S* b_tile) {
   constexpr auto tile = scaled_mm_blockwise_tile;
   constexpr uint step = scaled_mm_blockwise_step;
-  using S = typename F::stage_t;
-  // 16 bytes of padding per row spread the threads' row stores over the banks
-  constexpr int pitch = step + 16 / sizeof(S);
+  constexpr int pitch = scaled_mm_blockwise_mpp_pitch<S>;
   static_assert(
       scaled_mm_threads == 2 * tile, "a thread per row of A and column of B");
-  threadgroup S a_tile[tile * pitch];
-  threadgroup S b_tile[tile * pitch];
-  SCALED_MM_BLOCKWISE_ARGS;
-  const uint row_start = group.y * tile;
-  const uint col_start = group.x * tile;
   const bool is_b = tid >= tile;
   const uint outer = (is_b ? col_start : row_start) + tid % tile;
-  const uint k_blocks = (p.k + F::block - 1) / F::block;
   ScaledMMBlockwiseRowLoader<F, step, S> loader{
       is_b ? args.b + outer * p.b_col_stride : args.a + outer * p.a_row_stride,
-      (is_b ? args.scale_b : args.scale_a) + ulong(outer) * k_blocks,
+      (is_b ? args.scale_b : args.scale_a) + ulong(outer) * p.k_blocks,
       outer < (is_b ? p.n : p.m),
       p.k,
       {},
@@ -830,6 +890,24 @@ kernel void scaled_mm_blockwise_mpp(
         loader.store(k, dst);
         loader.fetch(k + step);
       });
+}
+
+// scaled_mm_blockwise with the MMA done by MPP on 64x64 output tiles. Each
+// thread decodes one row of A or column of B per K step with vector loads, so
+// the host routes only operands aligned for them here.
+template <typename T, typename F>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_mm_blockwise_mpp(
+    SCALED_MM_BLOCKWISE_BUFFERS,
+    uint2 group [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]]) {
+  constexpr auto tile = scaled_mm_blockwise_tile;
+  using S = typename F::stage_t;
+  threadgroup S a_tile[tile * scaled_mm_blockwise_mpp_pitch<S>];
+  threadgroup S b_tile[tile * scaled_mm_blockwise_mpp_pitch<S>];
+  SCALED_MM_BLOCKWISE_ARGS;
+  scaled_mm_blockwise_mpp_tile_run<F>(
+      args, p, group.y * tile, group.x * tile, tid, a_tile, b_tile);
 }
 
 #define REGISTER_SCALED_MM_BLOCKWISE_MPP(NAME, FORMAT, T)           \
@@ -861,30 +939,25 @@ REGISTER_SCALED_MM_BLOCKWISE_MPP_WITH_OUT_T(bfloat);
 // in threadgroup memory. A must be row-major and B column-major (both
 // K-contiguous), which is the layout cuBLASLt requires too.
 template <typename T>
-[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
-kernel void scaled_mm_native(
-    device float8_e4m3fn* a [[buffer(0)]],
-    device float8_e4m3fn* b [[buffer(1)]],
-    device T* out [[buffer(2)]],
-    device const float* scale_a [[buffer(3)]],
-    device const float* scale_b [[buffer(4)]],
-    device const uchar* bias [[buffer(5)]],
-    constant ScaledMMParams<>& p [[buffer(6)]],
-    uint2 group [[threadgroup_position_in_grid]]) {
+inline void scaled_mm_native_tile_run(
+    thread const ScaledMMArgs<T>& args,
+    thread const ScaledMMParams<>& p,
+    uint row_start,
+    uint col_start) {
   constexpr auto tile = scaled_mm_native_tile;
-  // MPP rejects const-qualified element types, hence non-const a and b
   using fp8_tensor =
       tensor<device metal_fp8_e4m3_format, dextents<int32_t, 2>, tensor_inline>;
-  const auto operand = [&](device float8_e4m3fn* data, uint rows, int64_t ld) {
+  // MPP rejects const-qualified element types
+  const auto operand = [&](device const float8_e4m3fn* data,
+                           uint rows,
+                           int64_t ld) {
     return fp8_tensor(
-        reinterpret_cast<device uchar*>(data),
+        const_cast<device uchar*>(reinterpret_cast<device const uchar*>(data)),
         dextents<int32_t, 2>(p.k, rows),
         array<int32_t, 2>{1, int32_t(ld)});
   };
-  const uint row_start = group.y * tile;
-  const uint col_start = group.x * tile;
-  auto a_tile = operand(a, p.m, p.a_row_stride).slice(0, row_start);
-  auto b_tile = operand(b, p.n, p.b_col_stride).slice(0, col_start);
+  auto a_tile = operand(args.a, p.m, p.a_row_stride).slice(0, row_start);
+  auto b_tile = operand(args.b, p.n, p.b_col_stride).slice(0, col_start);
   // A single run over all of K, so the default multiply mode needs no zeroed
   // accumulator
   constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
@@ -896,8 +969,24 @@ kernel void scaled_mm_native(
       decltype(b_tile),
       float>();
   op.run(a_tile, b_tile, accum);
-  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, {}, {}};
   scaled_mm_store_accum(accum, row_start, col_start, args, p);
+}
+
+template <typename T>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_mm_native(
+    device float8_e4m3fn* a [[buffer(0)]],
+    device float8_e4m3fn* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    device const float* scale_a [[buffer(3)]],
+    device const float* scale_b [[buffer(4)]],
+    device const uchar* bias [[buffer(5)]],
+    constant ScaledMMParams<>& params [[buffer(6)]],
+    uint2 group [[threadgroup_position_in_grid]]) {
+  constexpr auto tile = scaled_mm_native_tile;
+  const ScaledMMParams<> p = params;
+  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, {}, {}};
+  scaled_mm_native_tile_run(args, p, group.y * tile, group.x * tile);
 }
 
 #define REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(T)              \
@@ -934,10 +1023,11 @@ kernel void scaled_mm_native_mxfp8(
     device const float* tensor_scale_a [[buffer(5)]],
     device const float* tensor_scale_b [[buffer(6)]],
     device const uchar* bias [[buffer(7)]],
-    constant ScaledMMParams<>& p [[buffer(8)]],
+    constant ScaledMMParams<>& params [[buffer(8)]],
     uint2 group [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]) {
   constexpr auto tile = scaled_mm_native_tile;
+  const ScaledMMParams<> p = params;
   using scales_t = tensor_blockwise<
       tensor_plane_scales,
       device metal_fp8_ue8m0_format,
@@ -948,7 +1038,6 @@ kernel void scaled_mm_native_mxfp8(
       dextents<int32_t, 2>,
       tensor_inline,
       scales_t>;
-  const uint k_blocks = p.k / mxfp8_format::block;
   // Each tile gets its own tensors, starting at its first row or column with
   // 64-bit offsets: MPP indexes a tensor in 32 bits, so slicing one that spans
   // the whole matrix wraps once the offset passes 2^31.
@@ -961,7 +1050,7 @@ kernel void scaled_mm_native_mxfp8(
         data + start * ld,
         dextents<int32_t, 2>(p.k, min(tile, size - start)),
         array<int32_t, 2>{1, int32_t(ld)},
-        scales_t(scales + ulong(start) * k_blocks));
+        scales_t(scales + ulong(start) * p.k_blocks));
   };
   const uint row_start = group.y * tile;
   const uint col_start = group.x * tile;
@@ -987,10 +1076,10 @@ kernel void scaled_mm_native_mxfp8(
     const uint start = side ? col_start : row_start;
     const uint rows = min(tile, (side ? p.n : p.m) - start);
     const auto scales = reinterpret_cast<device const packed_uchar4*>(
-        (side ? scale_b : scale_a) + ulong(start) * k_blocks);
-    for (uint i = tid; i < rows * k_blocks / 4; i += scaled_mm_threads) {
+        (side ? scale_b : scale_a) + ulong(start) * p.k_blocks);
+    for (uint i = tid; i < rows * p.k_blocks / 4; i += scaled_mm_threads) {
       if (any(uchar4(scales[i]) == 0xff)) {
-        has_nan[side * tile + 4 * i / k_blocks] = true;
+        has_nan[side * tile + 4 * i / p.k_blocks] = true;
       }
     }
   }
@@ -1030,3 +1119,327 @@ REGISTER_SCALED_MM_NATIVE_MXFP8_WITH_OUT_T(bfloat);
 
 #endif // __METAL_VERSION__ >= 410
 #endif // C10_METAL_HAS_MPP
+
+// Every _scaled_grouped_mm recipe on MPS produces BFloat16. The layout is a
+// runtime parameter: it only changes how a tile finds its group, once per
+// threadgroup, so templating on it would multiply the kernels for no speedup.
+// Narrows p to this threadgroup's group and returns that group, the tile's
+// first row and column and the group's first K index. The jagged dimension
+// keeps its global indices, so only the batched operands need offsetting.
+// Returns false for the padding tiles of the jagged modes.
+template <uint tile_m, uint tile_n>
+inline bool scaled_grouped_mm_tile(
+    device const int32_t* offsets,
+    constant ScaledGroupedMMParams& params,
+    uint3 tgid,
+    uint tid,
+    threadgroup uint32_t* tile_info,
+    thread ScaledMMParams<>& p,
+    thread uint& group,
+    thread uint& row_start,
+    thread uint& col_start,
+    thread uint& k_begin) {
+  p = params.mm;
+  group = tgid.z;
+  row_start = tgid.y * tile_m;
+  col_start = tgid.x * tile_n;
+  k_begin = 0;
+  if (params.mode == ScaledGroupedMMMode::rows) {
+    uint rows;
+    if (!grouped_mm_group_tile_broadcast<tile_m>(
+            offsets,
+            params.groups,
+            p.m,
+            tgid.y,
+            tid,
+            tile_info,
+            group,
+            row_start,
+            rows)) {
+      return false;
+    }
+    p.m = row_start + rows;
+  } else if (params.mode == ScaledGroupedMMMode::k) {
+    const uint k_end = grouped_mm_offset(offsets[group], p.k);
+    k_begin =
+        group == 0 ? 0 : min(grouped_mm_offset(offsets[group - 1], p.k), k_end);
+    p.k = k_end - k_begin;
+  }
+  return true;
+}
+
+template <typename T>
+inline ScaledMMArgs<T> scaled_grouped_mm_args(
+    device const float8_e4m3fn* a,
+    device const float8_e4m3fn* b,
+    device T* out,
+    device const float* scale_a,
+    device const float* scale_b,
+    constant ScaledGroupedMMParams& params,
+    thread const ScaledMMParams<>& p,
+    uint group,
+    uint k_begin,
+    threadgroup half* a_tile,
+    threadgroup half* b_tile) {
+  return {
+      a + group * params.a_batch_stride + k_begin * p.a_col_stride,
+      b + group * params.b_batch_stride + k_begin * p.b_row_stride,
+      out + group * params.out_batch_stride,
+      scale_a + group * params.scale_a_batch_stride,
+      scale_b + group * params.scale_b_batch_stride,
+      nullptr,
+      a_tile,
+      b_tile};
+}
+
+// Both operands are K-contiguous and the host requires groups of K to be whole
+// blocks, so k_begin is a whole number of bytes and of scales.
+template <typename F, typename T>
+inline ScaledMMBlockwiseArgs<T> scaled_grouped_mm_blockwise_args(
+    device const uchar* a,
+    device const uchar* b,
+    device T* out,
+    device const uchar* scale_a,
+    device const uchar* scale_b,
+    device const float* tensor_scale_a,
+    device const float* tensor_scale_b,
+    constant ScaledGroupedMMParams& params,
+    uint group,
+    uint k_begin) {
+  return {
+      a + group * params.a_batch_stride + k_begin / F::values_per_byte,
+      b + group * params.b_batch_stride + k_begin / F::values_per_byte,
+      scale_a + group * params.block_scale_a_batch_stride + k_begin / F::block,
+      scale_b + group * params.block_scale_b_batch_stride + k_begin / F::block,
+      {nullptr,
+       nullptr,
+       out + group * params.out_batch_stride,
+       tensor_scale_a + group * params.scale_a_batch_stride,
+       tensor_scale_b + group * params.scale_b_batch_stride,
+       nullptr,
+       {},
+       {}}};
+}
+
+#define SCALED_GROUPED_MM_BUFFERS                  \
+  device const float8_e4m3fn *a [[buffer(0)]],     \
+      device const float8_e4m3fn *b [[buffer(1)]], \
+      device bfloat *out [[buffer(2)]],            \
+      device const float *scale_a [[buffer(3)]],   \
+      device const float *scale_b [[buffer(4)]],   \
+      device const int32_t *offsets [[buffer(5)]], \
+      constant ScaledGroupedMMParams &params [[buffer(6)]]
+
+#define SCALED_GROUPED_MM_BLOCKWISE_BUFFERS                                 \
+  device const uchar *a [[buffer(0)]], device const uchar *b [[buffer(1)]], \
+      device bfloat *out [[buffer(2)]],                                     \
+      device const uchar *scale_a [[buffer(3)]],                            \
+      device const uchar *scale_b [[buffer(4)]],                            \
+      device const float *tensor_scale_a [[buffer(5)]],                     \
+      device const float *tensor_scale_b [[buffer(6)]],                     \
+      device const int32_t *offsets [[buffer(7)]],                          \
+      constant ScaledGroupedMMParams &params [[buffer(8)]]
+
+// Resolves the tile, or returns from the kernel for a padding tile
+#define SCALED_GROUPED_MM_TILE(TILE)         \
+  threadgroup uint32_t tile_info[3];         \
+  ScaledMMParams<> p;                        \
+  uint group, row_start, col_start, k_begin; \
+  if (!scaled_grouped_mm_tile<TILE, TILE>(   \
+          offsets,                           \
+          params,                            \
+          tgid,                              \
+          tid,                               \
+          tile_info,                         \
+          p,                                 \
+          group,                             \
+          row_start,                         \
+          col_start,                         \
+          k_begin)) {                        \
+    return;                                  \
+  }
+
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_grouped_mm(
+    SCALED_GROUPED_MM_BUFFERS,
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint sg [[simdgroup_index_in_threadgroup]]) {
+  constexpr auto tile = scaled_mm_tile;
+  threadgroup half a_tile[tile * tile];
+  threadgroup half b_tile[tile * tile];
+  threadgroup float c_tile[tile * tile];
+  SCALED_GROUPED_MM_TILE(tile);
+  const auto args = scaled_grouped_mm_args(
+      a, b, out, scale_a, scale_b, params, p, group, k_begin, a_tile, b_tile);
+  scaled_mm_tile_run(args, p, row_start, col_start, tid, sg, c_tile);
+}
+
+template <typename F>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_grouped_mm_blockwise(
+    SCALED_GROUPED_MM_BLOCKWISE_BUFFERS,
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint sg [[simdgroup_index_in_threadgroup]]) {
+  constexpr auto tile = scaled_mm_tile;
+  using S = typename F::stage_t;
+  threadgroup S a_tile[tile * tile];
+  threadgroup S b_tile[tile * tile];
+  threadgroup float c_tile[tile * tile];
+  SCALED_GROUPED_MM_TILE(tile);
+  const auto args = scaled_grouped_mm_blockwise_args<F>(
+      a,
+      b,
+      out,
+      scale_a,
+      scale_b,
+      tensor_scale_a,
+      tensor_scale_b,
+      params,
+      group,
+      k_begin);
+  scaled_mm_blockwise_tile_run<F>(
+      args, p, row_start, col_start, tid, sg, a_tile, b_tile, c_tile);
+}
+
+// Decode-sized 2d x 3d: a threadgroup per row of A, which finds its group
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_grouped_mm_few_rows(
+    SCALED_GROUPED_MM_BUFFERS,
+    uint2 tgid [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  const uint group = grouped_mm_find_group(offsets, params.groups, tgid.y);
+  if (group == params.groups) {
+    return;
+  }
+  const ScaledMMParams<> p = params.mm;
+  const auto args = scaled_grouped_mm_args<bfloat>(
+      a, b, out, scale_a, scale_b, params, p, group, 0, nullptr, nullptr);
+  scaled_mm_few_rows_run<1>(
+      args, p, tgid.y, tgid.x * scaled_mm_simdgroups + sg, lane);
+}
+
+template <typename F>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_grouped_mm_blockwise_few_rows(
+    SCALED_GROUPED_MM_BLOCKWISE_BUFFERS,
+    uint2 tgid [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  const uint group = grouped_mm_find_group(offsets, params.groups, tgid.y);
+  if (group == params.groups) {
+    return;
+  }
+  const ScaledMMParams<> p = params.mm;
+  const auto args = scaled_grouped_mm_blockwise_args<F>(
+      a,
+      b,
+      out,
+      scale_a,
+      scale_b,
+      tensor_scale_a,
+      tensor_scale_b,
+      params,
+      group,
+      0);
+  scaled_mm_blockwise_few_rows_run<F, 1>(
+      args, p, tgid.y, tgid.x * scaled_mm_simdgroups + sg, lane);
+}
+
+#if C10_METAL_HAS_MPP
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_grouped_mm_mpp(
+    SCALED_GROUPED_MM_BUFFERS,
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]]) {
+  constexpr auto tile = scaled_mm_tile;
+  threadgroup half a_tile[tile * tile];
+  threadgroup half b_tile[tile * tile];
+  SCALED_GROUPED_MM_TILE(tile);
+  const auto args = scaled_grouped_mm_args(
+      a, b, out, scale_a, scale_b, params, p, group, k_begin, a_tile, b_tile);
+  scaled_mm_mpp_tile_run(args, p, row_start, col_start, tid);
+}
+
+template <typename F>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_grouped_mm_blockwise_mpp(
+    SCALED_GROUPED_MM_BLOCKWISE_BUFFERS,
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]]) {
+  constexpr auto tile = scaled_mm_blockwise_tile;
+  using S = typename F::stage_t;
+  threadgroup S a_tile[tile * scaled_mm_blockwise_mpp_pitch<S>];
+  threadgroup S b_tile[tile * scaled_mm_blockwise_mpp_pitch<S>];
+  SCALED_GROUPED_MM_TILE(tile);
+  const auto args = scaled_grouped_mm_blockwise_args<F>(
+      a,
+      b,
+      out,
+      scale_a,
+      scale_b,
+      tensor_scale_a,
+      tensor_scale_b,
+      params,
+      group,
+      k_begin);
+  scaled_mm_blockwise_mpp_tile_run<F>(
+      args, p, row_start, col_start, tid, a_tile, b_tile);
+}
+#endif // C10_METAL_HAS_MPP
+
+#define SCALED_GROUPED_MM_BLOCKWISE_SIGNATURE                        \
+  device const uchar*, device const uchar*, device bfloat*,          \
+      device const uchar*, device const uchar*, device const float*, \
+      device const float*, device const int32_t*,                    \
+      constant ScaledGroupedMMParams&
+
+#define REGISTER_SCALED_GROUPED_MM_BLOCKWISE(NAME, FORMAT)                \
+  template [[host_name("scaled_grouped_mm_" #NAME)]] kernel void          \
+      scaled_grouped_mm_blockwise<FORMAT>(                                \
+          SCALED_GROUPED_MM_BLOCKWISE_SIGNATURE, uint3, uint, uint);      \
+  template [[host_name("scaled_grouped_mm_few_rows_" #NAME)]] kernel void \
+  scaled_grouped_mm_blockwise_few_rows<FORMAT>(                           \
+      SCALED_GROUPED_MM_BLOCKWISE_SIGNATURE, uint2, uint, uint)
+
+REGISTER_SCALED_GROUPED_MM_BLOCKWISE(mxfp8, mxfp8_format);
+REGISTER_SCALED_GROUPED_MM_BLOCKWISE(nvfp4, nvfp4_format);
+
+#if C10_METAL_HAS_MPP
+#define REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(NAME, FORMAT)       \
+  template [[host_name("scaled_grouped_mm_mpp_" #NAME)]] kernel void \
+  scaled_grouped_mm_blockwise_mpp<FORMAT>(                           \
+      SCALED_GROUPED_MM_BLOCKWISE_SIGNATURE, uint3, uint)
+
+REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(mxfp8, mxfp8_format);
+REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(nvfp4, nvfp4_format);
+#endif // C10_METAL_HAS_MPP
+
+#if C10_METAL_HAS_MPP && __METAL_VERSION__ >= 410
+// scaled_mm_native per group, for K-contiguous operands
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_grouped_mm_native(
+    SCALED_GROUPED_MM_BUFFERS,
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]]) {
+  constexpr auto tile = scaled_mm_native_tile;
+  SCALED_GROUPED_MM_TILE(tile);
+  const auto args = scaled_grouped_mm_args<bfloat>(
+      a, b, out, scale_a, scale_b, params, p, group, k_begin, nullptr, nullptr);
+  if (p.k != 0) {
+    scaled_mm_native_tile_run(args, p, row_start, col_start);
+    return;
+  }
+  // matmul2d writes no accumulator for an empty group of K
+  for (uint i = tid; i < tile * tile; i += scaled_mm_threads) {
+    const uint row = row_start + i / tile;
+    const uint col = col_start + i % tile;
+    if (row < p.m && col < p.n) {
+      scaled_mm_store(0.0f, row, col, args, p);
+    }
+  }
+}
+
+#endif // C10_METAL_HAS_MPP && __METAL_VERSION__ >= 410

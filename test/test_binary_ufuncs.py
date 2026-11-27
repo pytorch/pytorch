@@ -27,8 +27,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyNativeDeviceTypes,
-    onlyOn,
     OpDTypes,
     ops,
     precisionOverride,
@@ -1399,7 +1397,6 @@ class TestBinaryUfuncsDevice(TestCase):
             a += b
 
     # TODO: refactor this test into a more generic one, it's parked here currently
-    @onlyNativeDeviceTypes
     def test_out_resize_warning(self, device):
         a = torch.tensor((1, 2, 3), device=device, dtype=torch.float32)
         b = torch.tensor((4, 5, 6), device=device, dtype=torch.float32)
@@ -1437,7 +1434,6 @@ class TestBinaryUfuncsDevice(TestCase):
 
     # Verifies that the inplace dunders (like idiv) actually are in place
     @expectedFailureMeta  # UserWarning not triggered
-    @onlyNativeDeviceTypes
     def test_inplace_dunders(self, device):
         t = torch.randn((1,), device=device)
         expected = t.data_ptr()
@@ -1919,7 +1915,6 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(cpu_out, device_out)
 
     @skipIfTorchDynamo()
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_complex_scalar_pow_tensor(self, device, dtype):
         complexes = [0.5j, 1.0 + 1.0j, -1.5j, 2.2 - 1.6j, 1 + 0j]
@@ -1950,7 +1945,6 @@ class TestBinaryUfuncsDevice(TestCase):
                 self._test_pow(device, base, first_exp)
                 self._test_pow(device, base, second_exp)
 
-    @onlyNativeDeviceTypes
     @skipMeta
     def test_pow_scalar_type_promotion(self, device):
         # Test against a scalar and non-scalar input
@@ -2119,7 +2113,6 @@ class TestBinaryUfuncsDevice(TestCase):
         _scalar_helper(lambda a, b: math.floor(a / b), operator.floordiv)
         _scalar_helper(lambda a, b: math.floor(a / b), torch.floor_divide)
 
-    @onlyNativeDeviceTypes
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_idiv_and_ifloordiv_vs_python(self, device):
         for a, b in product(range(-10, 10), range(-10, 10)):
@@ -3059,7 +3052,7 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertTrue(torch.all(fn(x, 0.0).isnan()))
             self.assertTrue(torch.all(fn(x, zero).isnan()))
 
-    @onlyNativeDeviceTypes  # Check Issue https://github.com/pytorch/pytorch/issues/48130
+    # Check Issue https://github.com/pytorch/pytorch/issues/48130
     @skipCUDAIfNotRocm  # NVIDIA CUDA reaches source-level UB for these inputs.
     @dtypes(*integral_types())
     @dtypesIfXPU(*set(integral_types()) - {torch.int64})
@@ -3088,7 +3081,6 @@ class TestBinaryUfuncsDevice(TestCase):
                     value = 255 if dtype == torch.uint8 else -1
                     self.assertTrue(torch.all(fn(x, zero) == value))
 
-    @onlyNativeDeviceTypes
     @skipCUDAIfNotRocm  # NVIDIA CUDA reaches source-level UB for these inputs.
     @dtypes(*integral_types())
     def test_fmod_remainder_overflow(self, device, dtype):
@@ -3244,7 +3236,6 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertEqual(actual1, expected, exact_dtype=False)
             self.assertEqual(actual2, expected, exact_dtype=False)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_gcd(self, device, dtype):
         # Tests gcd(0, 0), gcd(0, a) cases
@@ -3269,7 +3260,6 @@ class TestBinaryUfuncsDevice(TestCase):
             expected = np.gcd(a.cpu().numpy(), b.cpu().numpy())
             self.assertEqual(actual, expected)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int16, torch.int32, torch.int64)
     def test_lcm(self, device, dtype):
         # Tests lcm(0, 0), lcm(0, a) cases
@@ -3286,7 +3276,6 @@ class TestBinaryUfuncsDevice(TestCase):
         expected = np.lcm(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, exact_dtype=False)
 
-    @onlyNativeDeviceTypes
     @dtypesIfCPU(torch.float32, torch.float64, torch.float16)
     @dtypes(torch.float32, torch.float64)
     def test_nextafter(self, device, dtype):
@@ -3311,7 +3300,6 @@ class TestBinaryUfuncsDevice(TestCase):
         expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16)
     def test_nextafter_bfloat16(self, device, dtype):
         nan = float("nan")
@@ -3475,7 +3463,6 @@ class TestBinaryUfuncsDevice(TestCase):
                     )  # all casts to complex128 are safe
                     compare_with_numpy_bin_op(torch_op, numpy_op, a, b, out=out)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_signed_shift(self, device, dtype):
         "Ensure that signed integer bit shifting works as expected."
@@ -3491,7 +3478,6 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(a >> 1, expected_r)
         self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
-    @onlyNativeDeviceTypes
     @dtypes(*get_all_int_dtypes())
     def test_shift_limits(self, device, dtype):
         "Ensure that integer bit shifting works as expected with out-of-limits shift values."
@@ -3551,7 +3537,6 @@ class TestBinaryUfuncsDevice(TestCase):
                         msg=f">> {shift}",
                     )
 
-    @onlyNativeDeviceTypes
     @dtypes(
         *list(
             product(
@@ -4832,7 +4817,7 @@ class TestBinaryUfuncsDevice(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
-    @onlyOn(("cuda", "xpu"))
+    @onlyAccelerator
     @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.
@@ -5003,10 +4988,7 @@ generate_not_implemented_tests(TestBinaryUfuncsDevice)
 
 
 instantiate_device_type_tests(
-    TestChebyshevNanPropagationDevice,
-    globals(),
-    only_for=("cpu", "cuda", "xpu"),
-    allow_xpu=True,
+    TestChebyshevNanPropagationDevice, globals(), allow_xpu=True
 )
 instantiate_device_type_tests(TestBinaryUfuncsDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")

@@ -44,9 +44,9 @@ TEST(OptionalDeviceGuard, ResetDeviceDifferentDeviceType) {
   ASSERT_EQ(g.original_device(), Device(DeviceType::HIP, 0));
 }
 
-// -- ensureCUDADeviceGuardSet -------------------------------------------
+// -- ensureDeviceGuardSet -------------------------------------------
 
-// Regression test: ensureCUDADeviceGuardSet() used to store a thread-local
+// Regression test: ensureDeviceGuardSet() used to store a thread-local
 // FakeGuardImpl* in the global device_guard_impl_registry.  When the owning
 // thread exited its TLS was freed, leaving a dangling pointer that the next
 // thread to call deviceCount() would dereference (segfault).
@@ -54,10 +54,10 @@ TEST(OptionalDeviceGuard, ResetDeviceDifferentDeviceType) {
 // The fix is a function-local static, which has program lifetime.  We verify
 // that the pointer in the registry is still valid (and returns the expected
 // deviceCount) after the threads that triggered guard installation have exited.
-TEST(EnsureCUDADeviceGuard, NoUseAfterFreeWhenThreadsExit) {
+TEST(EnsureDeviceGuardSet, NoUseAfterFreeWhenThreadsExit) {
   // Simulate "CUDA compiled, no devices visible": a guard that is non-null but
   // returns deviceCount() == 0, which is the condition that triggers fake guard
-  // installation in ensureCUDADeviceGuardSet().
+  // installation in ensureDeviceGuardSet().
   struct ZeroDeviceGuardImpl final : public DeviceGuardImplInterface {
     DeviceType type() const override {
       return DeviceType::CUDA;
@@ -94,12 +94,12 @@ TEST(EnsureCUDADeviceGuard, NoUseAfterFreeWhenThreadsExit) {
   static ZeroDeviceGuardImpl zero_impl;
   device_guard_impl_registry[cuda_idx].store(&zero_impl);
 
-  // Phase 1: threads call ensureCUDADeviceGuardSet(), detect deviceCount()==0,
-  // and install a FakeGuardImpl in the global registry.
+  // Phase 1: threads call ensureDeviceGuardSet(DeviceType::CUDA), detect
+  // deviceCount()==0, and install a FakeGuardImpl in the global registry.
   {
     std::vector<std::thread> threads;
     for (int i = 0; i < 4; i++) {
-      threads.emplace_back(ensureCUDADeviceGuardSet);
+      threads.emplace_back([] { ensureDeviceGuardSet(DeviceType::CUDA); });
     }
     for (auto& t : threads) {
       t.join();

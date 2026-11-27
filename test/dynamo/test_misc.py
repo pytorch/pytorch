@@ -102,7 +102,6 @@ from torch.testing._internal.common_utils import (
     IS_S390X,
     parametrize,
     recover_orig_fp32_precision,
-    scoped_load_inline,
     set_default_dtype,
     skipIfCppFakeTensor,
     skipIfHpu,
@@ -114,10 +113,6 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest,
 )
 from torch.utils._sympy.numbers import int_oo
-
-
-if IS_FBCODE:
-    from caffe2.test.dynamo import _pybind11_enum_test
 
 
 pytree_modules = {
@@ -230,23 +225,6 @@ class UserDefineSetAttr:
             return None
 
 
-@functools.cache
-@scoped_load_inline
-def _load_pybind11_enum_mod(*, load_inline):
-    cpp_source = """
-    #include <torch/extension.h>
-
-    enum class E { A = 0, B = 1 };
-
-    PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-        py::enum_<E>(m, "E")
-            .value("A", E::A)
-            .value("B", E::B);
-    }
-    """
-    return load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
-
-
 class MiscTests(torch._inductor.test_case.TestCase):
     def test_storage_offset_scalar_output(self):
         def fn(x):
@@ -302,13 +280,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertEqual(len(entries), 0)
 
     def test_pybind11_enum_conversion(self):
-        if IS_FBCODE:
-            # fbcode's Python runtime lacks the shared libs load_inline needs, so
-            # we use the Buck-prebuilt fixture instead of the load_inline argument.
-            mod = _pybind11_enum_test
-        else:
-            mod = _load_pybind11_enum_mod()
-        e = mod.E.A
+        ProfilerActivity = torch._C._profiler.ProfilerActivity
+        e = ProfilerActivity.CPU
         self.assertEqual(
             torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
         )
@@ -317,7 +290,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(
             torch.compile(lambda x: [10, 20][x], backend="eager", fullgraph=True)(
-                mod.E.B
+                ProfilerActivity.XPU
             ),
             20,
         )
@@ -3039,6 +3012,89 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNone(opt_fn(v, v))
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
+
+    def test_setattr_readonly_function_closure(self):
+        def make_f():
+            a = 12
+
+            def f():
+                return a
+
+            return f
+
+        def try_readonly(f):
+            results = []
+            try:
+                f.__closure__ = f.__closure__
+            except AttributeError:
+                results.append("set")
+            try:
+                del f.__closure__
+            except AttributeError:
+                results.append("del")
+            try:
+                f.__globals__ = {}
+            except AttributeError:
+                results.append("globals")
+            try:
+                f.__builtins__ = {}
+            except AttributeError:
+                results.append("builtins")
+            return results
+
+        def nested(x):
+            return x + 1, try_readonly(make_f())
+
+        def sourced(x, f):
+            return x + 1, try_readonly(f)
+
+        x = torch.ones(1)
+        for fn, args in ((nested, (x,)), (sourced, (x, make_f()))):
+            ref = fn(*args)
+            res = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            self.assertEqual(ref, res)
+            self.assertEqual(res[1], ["set", "del", "globals", "builtins"])
+
+    def test_setattr_writable_function_attributes(self):
+        def make_g():
+            def g():
+                pass
+
+            return g
+
+        def fn(x, g):
+            g.foo = 1
+            g.__annotations__ = {"x": int}
+            return x + g.foo
+
+        x = torch.ones(1)
+        g_ref, g_res = make_g(), make_g()
+        ref = fn(x, g_ref)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x, g_res)
+        self.assertEqual(ref, res)
+        self.assertEqual(g_res.foo, 1)
+        self.assertEqual(g_res.__annotations__, {"x": int})
+
+    def test_setattr_readonly_names_on_lru_cache_wrapper(self):
+        @functools.lru_cache
+        def g():
+            return 1
+
+        def fn(x):
+            try:
+                g.__closure__ = None
+                ok = True
+            except AttributeError:
+                ok = False
+            return x + 1, ok
+
+        # The lru_cache wrapper is not a FunctionType, so eager allows the write.
+        # Replaying it onto the wrapper's __dict__ is tracked in #202350.
+        x = torch.ones(1)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(ref, res)
+        self.assertTrue(res[1])
 
     # Asserting on the graph break counters rather than on the compiled result:
     # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method
@@ -6798,6 +6854,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         expected = fn()
         actual = opt_fn()
         self.assertTrue(same(expected, actual))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_captured_arg_closure_after_graph_break(self):
+        # x is an argument and a cell; in the resume function it is a freevar.
+        def fn(x, pe):
+            y = x + 1
+            torch._dynamo.graph_break()
+            pe = (p[:, -x.shape[1] :] * y.sum() for p in pe)
+            return [p + 1 for p in pe]
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.randn(2, 3)
+        pe = (torch.randn(2, 5), torch.randn(2, 5))
+        self.assertEqual(opt_fn(x, pe), fn(x, pe))
         self.assertEqual(cnts.frame_count, 2)
 
     def test_closure_out_of_scope_cell_with_cond(self):
@@ -14137,6 +14208,59 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 raise AssertionError(f"Expected frame_count 1, got {cnt.frame_count}")
         finally:
             torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+
+    def _restore_deterministic_state(self):
+        # torch.use_deterministic_algorithms would also overwrite Inductor's
+        # flag, so restore the two separately.
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        prior_inductor = torch._inductor.config.deterministic
+
+        def restore():
+            torch._C._set_deterministic_algorithms(prior, warn_only=prior_warn_only)
+            torch._inductor.config.deterministic = prior_inductor
+
+        self.addCleanup(restore)
+
+    def test_inductor_deterministic_survives_compile(self):
+        # Deterministic mode set through Inductor alone stays on after frames
+        # compile, and does not turn on deterministic algorithms.
+        self._restore_deterministic_state()
+        torch.use_deterministic_algorithms(False)
+        with torch._inductor.config.patch(deterministic=True):
+            for fn in (lambda x: x + 1, lambda x: x * 2):
+                torch.compile(fn, backend="eager")(torch.randn(4))
+            self.assertTrue(torch._inductor.config.deterministic)
+            self.assertFalse(torch.are_deterministic_algorithms_enabled())
+
+    def test_inductor_deterministic_in_backward_compile(self):
+        # The backward is compiled lazily, after the frame's compile finished;
+        # it must still be compiled in deterministic mode.
+        self._restore_deterministic_state()
+        torch.use_deterministic_algorithms(False)
+        seen = []
+
+        def record(graph):
+            seen.append(torch._inductor.config.deterministic)
+
+        with torch._inductor.config.patch(
+            deterministic=True, post_grad_custom_post_pass=record
+        ):
+            x = torch.randn(4, requires_grad=True)
+            torch.compile(lambda x: (x.sin() * 2).sum(), backend="inductor")(
+                x
+            ).backward()
+        self.assertGreaterEqual(len(seen), 2)  # forward and backward
+        self.assertTrue(all(seen), seen)
+
+    def test_set_deterministic_debug_mode_sets_inductor_flag(self):
+        # An alternative interface to torch.use_deterministic_algorithms, which
+        # also sets Inductor's flag.
+        self._restore_deterministic_state()
+        torch.set_deterministic_debug_mode("warn")
+        self.assertTrue(torch._inductor.config.deterministic)
+        torch.set_deterministic_debug_mode("default")
+        self.assertFalse(torch._inductor.config.deterministic)
 
     def test_deterministic_algorithms_warn_only_compile_time_value(self):
         prior = torch.are_deterministic_algorithms_enabled()

@@ -1796,7 +1796,7 @@ class MultiProcContinuousTest(TestCase):
     _processes_spawned: bool = False
 
     @classmethod
-    def backend_str(cls) -> str | None:
+    def backend_str(cls, device) -> str | None:
         """
         ProcessGroup backend str.
         To be customized by sub test classes, e.g. "nccl".
@@ -1805,8 +1805,8 @@ class MultiProcContinuousTest(TestCase):
         return None
 
     # Please override if you intend to test on specific device type
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         curr_device = torch.accelerator.current_accelerator()
         if curr_device is None:
             return "cpu"
@@ -1831,8 +1831,11 @@ class MultiProcContinuousTest(TestCase):
         os.environ["LOCAL_RANK"] = str(rank)
         store = c10d.FileStore(rdvz_file, world_size)
         # create nccl processgroup with opts
+        device = cls.device_type
+        if isinstance(device, property):
+            device = device.fget(cls)
         c10d.init_process_group(
-            backend=cls.backend_str(),
+            backend=cls.backend_str(device),
             world_size=world_size,
             rank=rank,
             store=store,
@@ -1874,7 +1877,10 @@ class MultiProcContinuousTest(TestCase):
 
         # Initialize the process group
         # Some tests override _init_pg and oversubscribe before per-test skips run.
-        backend = cls.backend_str()
+        device = cls.device_type
+        if isinstance(device, property):
+            device = device.fget(cls)
+        backend = cls.backend_str(device)
         is_nccl = backend in ("nccl", "nccl2", "nccl-lazy")
         if is_nccl and world_size > torch.accelerator.device_count():
             os.environ["NCCL_MULTI_RANK_GPU_ENABLE"] = "1"
@@ -2034,28 +2040,23 @@ class MultiProcContinuousTest(TestCase):
         if cls.__dict__.get("_processes_spawned", False):
             return
 
-        # Handle method, property, and string attribute for device_type
-        # (instantiate_device_type_tests sets device_type as a string attribute,
-        # making this compatible as a drop-in replacement for MultiProcessTestCase)
-        device_type_attr = cls.__dict__.get("device_type", cls.device_type)
-        if isinstance(device_type_attr, classmethod):
-            device_type = device_type_attr.__func__(cls)
-        elif isinstance(device_type_attr, property):
+        # device_type is a string attribute on instantiated classes and a
+        # property on legacy test bases (instantiate_device_type_tests sets
+        # it as a class attribute, making this a drop-in replacement for
+        # MultiProcessTestCase).
+        device_type = cls.device_type
+        if isinstance(device_type, property):
             # Note: fget expects an instance but we pass cls since no instance
-            # exists yet. This works because DTensorTestMixin.device_type only
-            # accesses class-level attributes (world_size, module constants).
-            device_type = device_type_attr.fget(cls)
-        elif callable(device_type_attr):
-            device_type = device_type_attr()
-        else:
-            device_type = device_type_attr
+            # exists yet. This works because device_type properties only
+            # access class-level attributes.
+            device_type = device_type.fget(cls)
 
         # Get world_size (handles both class variable and property)
         cls.world_size = cls._get_world_size(device_type)
 
         # Check if the specified backend is available before spawning processes.
         # is_backend_available covers OOT/third-party backends too.
-        backend = cls.backend_str() if callable(cls.backend_str) else cls.backend_str
+        backend = cls.backend_str(device_type)
         if backend is not None and not c10d.is_backend_available(backend):
             raise unittest.SkipTest(f"Backend '{backend}' is not available")
 
@@ -2121,8 +2122,11 @@ class MultiProcContinuousTest(TestCase):
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK
 
-        # If this test class hits an exception in one test, skip the rest of tests
-        if self.__class__.poison_pill:
+        # If this test class hits an exception in one test, skip the rest of tests.
+        # Check the class's own dict: a subclass must not inherit the pill from a
+        # base test class that already ran, else one failure in the base class
+        # skips every test in the subclass (see _ensure_processes_spawned).
+        if self.__class__.__dict__.get("poison_pill", False):
             raise unittest.SkipTest(f"Previous test failed, skipping {self.id()}")
 
         # Enqueue "current test" to all workers

@@ -437,13 +437,13 @@ See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
     input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
-    kernel_size: size of the pooling region. Can be a single number or a
+    kernel_size: size of the pooling region. Can be a single number, a single-element tuple or a
       tuple `(kT, kH, kW)`
-    stride: stride of the pooling operation. Can be a single number or a
+    stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`. Should be at most half
-      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
+      single number, a single-element tuple or a tuple `(padT, padH, padW)`.
+      Should be at most half of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
       Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
@@ -5105,7 +5105,8 @@ def interpolate(  # noqa: F811
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for resizing are: `nearest`, `linear` (3D-only),
-    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `lanczos` (4D-only, CPU only), `area`, `nearest-exact`
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `lanczos` (4D-only, CPU only), `area`, `nearest-exact`,
+    `inter-area` (4D-only, CPU only)
 
     Args:
         input (Tensor): the input tensor
@@ -5115,7 +5116,8 @@ def interpolate(  # noqa: F811
             its length has to match the number of spatial dimensions; `input.dim() - 2`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
-            ``'trilinear'`` | ``'lanczos'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
+            ``'trilinear'`` | ``'lanczos'`` | ``'area'`` | ``'nearest-exact'`` | ``'inter-area'``.
+            Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
             If set to ``True``, the input and output tensors are aligned by the
@@ -5152,6 +5154,15 @@ def interpolate(  # noqa: F811
         and ``align_corners=False``, the result matches PIL's ``Image.LANCZOS`` resampling filter.
 
     .. note::
+        Mode ``mode='inter-area'`` matches OpenCV's ``cv2.resize`` with ``interpolation=cv2.INTER_AREA``.
+        With ``size``, it matches ``cv2.resize(x, (w, h))``. With ``scale_factor``, it is used like OpenCV's
+        ``fx`` / ``fy`` (unless ``recompute_scale_factor=True``), but the output size is
+        ``floor(input_size * scale_factor)`` as for the other modes, where OpenCV rounds to the nearest.
+        It only supports 4-D input and CPU, and doesn't support ``align_corners``, ``antialias``,
+        or autograd (backward or forward-mode AD).
+        For ``uint8`` inputs, rounding can cause differences from OpenCV.
+
+    .. note::
         Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation
         algorithms and fixes known issues with ``mode='nearest'``. This mode is introduced to keep
         backward compatibility.
@@ -5179,7 +5190,7 @@ def interpolate(  # noqa: F811
             antialias=antialias,
         )
 
-    if mode in ("nearest", "area", "nearest-exact"):
+    if mode in ("nearest", "area", "nearest-exact", "inter-area"):
         if align_corners is not None:
             raise ValueError(
                 "align_corners option can only be set with the "
@@ -5307,6 +5318,10 @@ def interpolate(  # noqa: F811
     if input.dim() == 5 and mode == "nearest-exact":
         # pyrefly: ignore [bad-argument-type]
         return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
+
+    if input.dim() == 4 and mode == "inter-area":
+        # pyrefly: ignore [bad-argument-type]
+        return torch._C._nn._upsample_inter_area2d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "area":
         if output_size is None:
@@ -5449,10 +5464,15 @@ def interpolate(  # noqa: F811
         raise NotImplementedError("Got 5D input, but linear mode needs 3D input")
     if input.dim() == 5 and mode == "bilinear":
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
+    if input.dim() == 3 and mode == "inter-area":
+        raise NotImplementedError("Got 3D input, but inter-area mode needs 4D input")
+    if input.dim() == 5 and mode == "inter-area":
+        raise NotImplementedError("Got 5D input, but inter-area mode needs 4D input")
 
     raise NotImplementedError(
         "Input Error: Only 3D, 4D and 5D input Tensors supported"
         f" (got {input.dim()}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | lanczos | area | nearest-exact"
+        " | inter-area (4D only)"
         f" (got {mode})"
     )
 
@@ -6203,7 +6223,7 @@ def normalize(
     input: Tensor,
     p: float = 2.0,
     dim: int = 1,
-    eps: float = 1e-12,
+    eps: float | None = None,
     out: Tensor | None = None,
 ) -> Tensor:
     r"""Perform :math:`L_p` normalization of inputs over specified dimension.
@@ -6220,7 +6240,10 @@ def normalize(
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int or tuple of ints): the dimension to reduce. Default: 1
-        eps (float): small value to avoid division by zero. Default: 1e-12
+        eps (float, optional): small value to avoid division by zero. If not specified,
+            uses the machine epsilon of the norm's dtype, ``torch.finfo(dtype).eps``.
+            The norm's dtype can differ from the input's, e.g. it is real for complex
+            inputs and float32 under CUDA or XPU autocast. Default: ``None``
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
@@ -6228,11 +6251,14 @@ def normalize(
         return handle_torch_function(
             normalize, (input, out), input, p=p, dim=dim, eps=eps, out=out
         )
+    norm = input.norm(p, dim, keepdim=True)
+    if eps is None:
+        eps = torch.finfo(norm.dtype).eps
     if out is None:
-        denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
+        denom = norm.clamp_min(eps).expand_as(input)
         return input / denom
     else:
-        denom = input.norm(p, dim, keepdim=True).clamp_min_(eps).expand_as(input)
+        denom = norm.clamp_min_(eps).expand_as(input)
         return torch.div(input, denom, out=out)
 
 
