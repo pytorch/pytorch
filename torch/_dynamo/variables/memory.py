@@ -37,23 +37,42 @@ def _get_device_index_for(device_type: str, device: Any) -> int:
     raise RuntimeError(f"mempool ops do not support device type {device_type}")
 
 
+def pool_device_type(value: Any) -> str:
+    """Map a MemPool instance to the device type of its registered interface."""
+    from torch._dynamo.device_interface import (
+        DeviceInterface,
+        get_registered_device_interfaces,
+    )
+
+    for device_type, candidate in get_registered_device_interfaces():
+        # Skip interfaces without the mempool contract.
+        if not candidate.supports_mempool():
+            continue
+        if isinstance(value, candidate.get_mempool_type()):
+            return device_type
+    raise RuntimeError(f"expected a MemPool object, got {type(value).__qualname__}")
+
+
 def _get_mempool_and_iface(
-    mempool_index: int,
+    mempool_index: int, device_type: str
 ) -> tuple[type["DeviceInterface"], Any]:
-    """Fetch the mempool object at ``mempool_index`` and the device interface
-    that manages it, raising if the object is not a valid mempool or if no
-    accelerator is available."""
-    mempool = get_external_object_by_index(mempool_index)
-    acc = torch.accelerator.current_accelerator()
-    if acc is None:
-        raise RuntimeError("No accelerator available for mempool operations")
+    """Fetch the mempool at ``mempool_index`` and its device interface.
+
+    ``device_type`` is known at trace time (``MemPoolVariable`` carries it) and
+    travels inside the marker ops, so this needs neither a pool-type cache nor
+    a registry scan.
+    """
     from torch._dynamo.device_interface import get_interface_for_device
 
-    iface = get_interface_for_device(acc.type)
+    iface = get_interface_for_device(device_type)
+    if not iface.supports_mempool():
+        raise RuntimeError(f"mempool ops do not support device type {device_type}")
+    mempool = get_external_object_by_index(mempool_index)
     if not isinstance(mempool, iface.get_mempool_type()):
         raise RuntimeError(
-            f"use_mem_pool expected a {iface.get_mempool_type().__qualname__} "
-            f"object at index {mempool_index}"
+            f"use_mem_pool expected a "
+            f"{iface.get_mempool_type().__qualname__} object at "
+            f"index {mempool_index}, got {type(mempool).__qualname__}"
         )
     return iface, mempool
 
@@ -63,14 +82,14 @@ def _get_mempool_and_iface(
 # user pool, while begin/end keep the pool lifetime visible as ordered FX
 # side-effects for non-Inductor backends.
 @custom_op("mempool::begin", mutates_args=())
-def begin_mempool(device_index: int, mempool_index: int) -> None:
-    iface, mempool = _get_mempool_and_iface(mempool_index)
-    torch.cuda.memory._check_mem_pool_device(mempool, device_index)
+def begin_mempool(device_index: int, mempool_index: int, device_type: str) -> None:
+    iface, mempool = _get_mempool_and_iface(mempool_index, device_type)
+    iface.check_mem_pool_device(mempool, device_index)
     iface.begin_allocate_current_thread_to_pool(device_index, mempool.id)
 
 
 @begin_mempool.register_fake
-def _(device_index: int, mempool_index: int) -> None:
+def _(device_index: int, mempool_index: int, device_type: str) -> None:
     pass
 
 
@@ -78,14 +97,14 @@ has_side_effect(torch.ops.mempool.begin.default)
 
 
 @custom_op("mempool::end", mutates_args=())
-def end_mempool(device_index: int, mempool_index: int) -> None:
-    iface, mempool = _get_mempool_and_iface(mempool_index)
+def end_mempool(device_index: int, mempool_index: int, device_type: str) -> None:
+    iface, mempool = _get_mempool_and_iface(mempool_index, device_type)
     iface.end_allocate_current_thread_to_pool(device_index, mempool.id)
     iface.release_pool(device_index, mempool.id)
 
 
 @end_mempool.register_fake
-def _(device_index: int, mempool_index: int) -> None:
+def _(device_index: int, mempool_index: int, device_type: str) -> None:
     pass
 
 
@@ -163,7 +182,8 @@ class MemPoolContextVariable(ContextWrappingVariable):
         tx: "InstructionTranslatorBase",
         mempool: VariableTracker,
         device: VariableTracker | None = None,
-        device_type: str = "cuda",
+        *,
+        device_type: str,
         **kwargs: Any,
     ) -> "MemPoolContextVariable":
         if not isinstance(mempool, MemPoolVariable):
@@ -194,11 +214,11 @@ class MemPoolContextVariable(ContextWrappingVariable):
             )
         else:
             unimplemented(
-                gb_type=f"torch.{device_type}.use_mem_pool with non-constant device",
+                gb_type="torch.cuda.use_mem_pool with non-constant device",
                 context=f"device={device}",
                 explanation=(
                     "Dynamo requires the device argument to "
-                    f"torch.{device_type}.use_mem_pool to be a Python constant."
+                    "torch.cuda.use_mem_pool to be a Python constant."
                 ),
                 hints=[],
             )
@@ -220,7 +240,7 @@ class MemPoolContextVariable(ContextWrappingVariable):
         tx.output.create_proxy(
             "call_function",
             torch.ops.mempool.begin,
-            (self.device_index, self.mempool.user_object_index),
+            (self.device_index, self.mempool.user_object_index, self.device_type),
             {},
         )
         return ConstantVariable.create(None)
@@ -231,7 +251,7 @@ class MemPoolContextVariable(ContextWrappingVariable):
         tx.output.create_proxy(
             "call_function",
             torch.ops.mempool.end,
-            (self.device_index, self.mempool.user_object_index),
+            (self.device_index, self.mempool.user_object_index, self.device_type),
             {},
         )
         self.cleanup_assert()
@@ -249,11 +269,10 @@ class MemPoolContextVariable(ContextWrappingVariable):
         # the compiled begin/end marker ops balanced around each compiled
         # segment.
         unimplemented(
-            gb_type=f"torch.{self.device_type}.use_mem_pool graph break",
+            gb_type="torch.cuda.use_mem_pool graph break",
             context=str(self),
             explanation=(
-                f"Dynamo doesn't support graph breaks inside "
-                f"torch.{self.device_type}.use_mem_pool."
+                "Dynamo doesn't support graph breaks inside torch.cuda.use_mem_pool."
             ),
             hints=[],
         )

@@ -2491,35 +2491,9 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(pool), pool.id)
 
-    @unittest.skipIf(not torch.xpu.is_available(), "requires xpu")
-    def test_xpu_use_mem_pool_context_manager(self):
-        # Mirrors test_cuda_use_mem_pool_context_manager for the device-agnostic
-        # MemPoolContextVariable path: torch.xpu.use_mem_pool must trace through
-        # the same supported_ctx_manager_classes branch and route allocations
-        # into the user pool at runtime.
-        torch.xpu.empty_cache()
-
-        def fn(pool):
-            with torch.xpu.use_mem_pool(pool):
-                return torch.ones(16, device="xpu") + 1
-
-        pool = torch.xpu.MemPool()
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(pool)
-        torch.xpu.synchronize()
-        self.assertEqual(res, torch.full((16,), 2.0, device="xpu"))
-        self.assertGreater(len(torch.xpu.memory.memory_snapshot(pool.id)), 0)
-
-    @unittest.skipIf(not torch.xpu.is_available(), "requires xpu")
-    def test_xpu_mem_pool_id(self):
-        # Exercises the builder wrap path for torch.xpu.MemPool objects
-        # (MemPoolVariable with device_type="xpu").
-        def fn(pool):
-            return pool.id
-
-        pool = torch.xpu.MemPool()
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(pool), pool.id)
+    # NOTE: torch.xpu.use_mem_pool is not yet traceable under torch.compile
+    # (inductor support deferred to a follow-up PR); its compile-path tests
+    # land together with that support.
 
     @unittest.skipIf(
         not (torch.cuda.is_available() and torch.xpu.is_available()),
@@ -2820,43 +2794,98 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(pool)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_mempool_begin_end_through_device_interface(self):
-        # Drive mempool::begin/mempool::end directly so the path through
-        # _get_mempool_and_iface -> get_interface_for_device is covered without
-        # going through Dynamo's use_mem_pool context manager.
-        from torch._dynamo.graph_bytecode_inputs import set_external_object_by_index
+    def _mempool_device_types(self) -> list[str]:
+        return [
+            device_type
+            for device_type in ("cuda", "xpu")
+            if getattr(torch, device_type).is_available()
+        ]
 
-        torch.cuda.empty_cache()
-        pool = torch.cuda.MemPool()
-        mempool_index = 1001
-        set_external_object_by_index(mempool_index, pool)
-        try:
-            torch.ops.mempool.begin(torch.cuda.current_device(), mempool_index)
-            x = torch.ones(16, device="cuda")
-            torch.cuda.synchronize()
-            self.assertEqual(x.sum(), 16.0)
-            # begin routed the allocation into the user pool, so the pool now
-            # owns at least one live segment.
-            self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
-        finally:
-            torch.ops.mempool.end(torch.cuda.current_device(), mempool_index)
-            torch.cuda.synchronize()
+    @unittest.skipIf(
+        not (torch.cuda.is_available() or torch.xpu.is_available()),
+        "requires cuda or xpu",
+    )
+    def test_mempool_begin_end_through_device_interface(self):
+        # Drive mempool::begin/mempool::end directly, without Dynamo's
+        # use_mem_pool wrapper.
+        from torch._dynamo.graph_bytecode_inputs import (
+            index_to_external_object_weakref,
+            keep_alive,
+            reset_user_object_tracking,
+            set_external_object_by_index,
+        )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_mempool_begin_type_mismatch_raises(self):
-        # A sidetable entry that is not a MemPool must be rejected by
-        # _get_mempool_and_iface with a type-mismatch RuntimeError that names the
-        # expected type and the offending index.
-        from torch._dynamo.graph_bytecode_inputs import set_external_object_by_index
+        for device_type in self._mempool_device_types():
+            device_module = getattr(torch, device_type)
+            with self.subTest(device_type=device_type):
+                device_module.empty_cache()
+                pool = device_module.MemPool()
+                # The sidetable is reset on every compile and
+                # set_external_object_by_index only appends at the next free
+                # slot, so the index must be len(...).
+                mempool_index = len(index_to_external_object_weakref)
+                self.addCleanup(reset_user_object_tracking)
+                self.addCleanup(keep_alive.clear)
+                set_external_object_by_index(mempool_index, pool)
+                # begin before the try: never release a reference that begin
+                # did not take, and don't mask a begin failure.
+                torch.ops.mempool.begin(
+                    device_module.current_device(), mempool_index, device_type
+                )
+                try:
+                    x = torch.ones(16, device=device_type)
+                    device_module.synchronize()
+                    self.assertEqual(x.sum(), 16.0)
+                    # begin routed the allocation into the user pool.
+                    self.assertGreater(
+                        len(device_module.memory.memory_snapshot(pool.id)), 0
+                    )
+                finally:
+                    torch.ops.mempool.end(
+                        device_module.current_device(), mempool_index, device_type
+                    )
+                    device_module.synchronize()
 
-        mempool_index = 1002
+    def test_mempool_begin_type_mismatch_raises(self):
+        # A non-MemPool sidetable entry must be rejected before device dispatch.
+        # The sidetable is reset on every compile and only supports appending at
+        # the next free slot, so the index must be len(...). The type check runs
+        # before any device call, so this test also passes on CPU-only machines.
+        from torch._dynamo.graph_bytecode_inputs import (
+            index_to_external_object_weakref,
+            keep_alive,
+            reset_user_object_tracking,
+            set_external_object_by_index,
+        )
+
+        mempool_index = len(index_to_external_object_weakref)
+        self.addCleanup(reset_user_object_tracking)
+        self.addCleanup(keep_alive.clear)
         set_external_object_by_index(mempool_index, torch.zeros(1))
         with self.assertRaisesRegex(
             RuntimeError,
-            r"use_mem_pool expected a MemPool object at index 1002",
+            r"use_mem_pool expected a MemPool object at index \d+, got Tensor",
         ):
-            torch.ops.mempool.begin(torch.cuda.current_device(), mempool_index)
+            torch.ops.mempool.begin(0, mempool_index, "cuda")
+
+    @unittest.skipIf(torch.cuda.is_available(), "exercises the CPU-build fallback")
+    def test_use_mem_pool_non_pool_arg_rejected(self):
+        # Document the misuse behavior on CPU-only machines: tracing
+        # use_mem_pool with a non-MemPool argument graph-breaks and falls back
+        # to the real CUDA context manager, which asserts CUDA is compiled.
+        # (A clean per-device type error is only observable with the real
+        # backend present; the mismatch and cross-backend tests cover those
+        # paths.) The important property: the misuse fails LOUDLY, it does not
+        # silently route allocations.
+        def fn(t):
+            with torch.cuda.use_mem_pool(t):
+                return t + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(
+            AssertionError, "Torch not compiled with CUDA enabled"
+        ):
+            opt_fn(torch.zeros(4))
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):

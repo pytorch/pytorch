@@ -295,7 +295,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .memory import MemPoolVariable
+from .memory import MemPoolVariable, pool_device_type
 from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
@@ -1992,13 +1992,12 @@ class VariableBuilder:
                 "call_function", get_external_object_by_index, (index,), {}
             )
             set_example_value(mempool_proxy.node, value)
-            device_type = "cuda" if isinstance(value, torch.cuda.MemPool) else "xpu"
             var = MemPoolVariable(
                 mempool_proxy,
                 value,
                 source=self.source,
                 user_object_index=index,
-                device_type=device_type,
+                device_type=pool_device_type(value),
             )
             return self.tx.output.side_effects.track_object_existing(value, var)
         elif isinstance(value, (torch._C._SDPAParams)):
