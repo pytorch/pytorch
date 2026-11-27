@@ -4681,7 +4681,7 @@ class TestOpInfoSampleFunctions(TestCase):
                 self.assertEqual(tensor.requires_grad, requires_grad)
 
 
-    @parametrize("op_name", ["addcmul", "addcdiv", "clamp"])
+    @parametrize("op_name", ["addcmul", "addcdiv", "clamp", "where"])
     @parametrize("requires_grad", [False, True])
     @dtypes(torch.float32, torch.float64)
     def test_ternary_reference_input_gradients(self, device, dtype, op_name, requires_grad):

@@ -1335,7 +1335,15 @@ class OpDecompositions:
             small = ops.mul(ops.mul(ops.exp(abs_x), abs_x), chbevl)
         large_z = ops.sub(ops.truediv(ops.constant(32.0, dtype), abs_x), two)
         large = ops.truediv(
-            ops.mul(ops.exp(abs_x), OpDecompositions._chbevl(large_z, b, dtype)),
+            ops.mul(
+                ops.exp(abs_x),
+                OpDecompositions._chbevl(
+                    large_z,
+                    b,
+                    dtype,
+                    fuse_final=not (modified_bessel and dtype == torch.float64),
+                ),
+            ),
             ops.sqrt(abs_x),
         )
         magnitude = ops.where(ops.le(abs_x, ops.constant(8.0, dtype)), small, large)

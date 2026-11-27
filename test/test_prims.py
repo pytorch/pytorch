@@ -395,6 +395,30 @@ instantiate_device_type_tests(
 class TestRefs(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    def _assert_scalar_pow_fake_layout(self, device, dtype, base, layout):
+        exponent = make_tensor((7, 5), device=device, dtype=dtype, low=1, high=3).t()
+        if layout == "empty":
+            exponent = exponent[:0]
+        elif layout == "singleton":
+            exponent = exponent[:1]
+        expected = torch.pow(base, exponent)
+        with FakeTensorMode() as mode:
+            actual = torch.pow(base, mode.from_tensor(exponent))
+        self.assertEqual(actual.size(), expected.size())
+        self.assertEqual(actual.stride(), expected.stride())
+        self.assertEqual(actual.dtype, expected.dtype)
+
+    @dtypes(torch.int32, torch.float16, torch.bfloat16, torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @parametrize("base", [1, 2, 3, -2, 0.5])
+    @parametrize("layout", ["transpose", "empty", "singleton"])
+    def test_scalar_pow_fake_layout(self, device, dtype, base, layout):
+        self._assert_scalar_pow_fake_layout(device, dtype, base, layout)
+
+    @dtypes(torch.int32, torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @parametrize("layout", ["transpose", "empty", "singleton"])
+    def test_complex_scalar_pow_fake_layout(self, device, dtype, layout):
+        self._assert_scalar_pow_fake_layout(device, dtype, 2 + 1j, layout)
+
     @dtypes(torch.float32)
     def test_constant_pad_nd_memory_format(self, device, dtype):
         # Test memory format is preserved in unambiguous cases

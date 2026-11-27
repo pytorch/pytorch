@@ -1690,6 +1690,8 @@ def _cuda_complex_activation_backward_math(
 ):
     """Native complex activation arithmetic; masks describe its iteration schedule."""
     gr, gi, yr, yi = grad.real, grad.imag, output.real, output.imag
+    if output.dtype == torch.complex32:
+        gr, gi, yr, yi = gr.float(), gi.float(), yr.float(), yi.float()
 
     def multiply(ar, ai, br, bi, mask, *, gradient=False):
         ac, bd, ad, bc = ar * br, ai * bi, ar * bi, ai * br
@@ -1715,7 +1717,7 @@ def _cuda_complex_activation_backward_math(
         sr, si = multiply(yr, yi, yr, yi, derivative_fused)
         dr, di = 1 - sr, 0 - si
     real, imag = multiply(gr, gi, dr, -di, fused, gradient=True)
-    return torch.complex(real, imag)
+    return torch.complex(real, imag).to(output.dtype)
 
 
 def _strict_complex_activation_backward(grad, output, *, sigmoid):
@@ -1723,7 +1725,7 @@ def _strict_complex_activation_backward(grad, output, *, sigmoid):
         is_strict_cuda_triton(output.device)
         and grad.device == output.device
         and grad.dtype == output.dtype
-        and output.dtype in (torch.complex64, torch.complex128)
+        and output.dtype in (torch.complex32, torch.complex64, torch.complex128)
     ):
         return None
     if has_free_unbacked_symbols(
