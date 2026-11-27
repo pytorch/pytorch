@@ -19,13 +19,13 @@ from torch._inductor.virtualized import NullHandler, V
 from torch.autograd import DeviceType
 from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import requires_triton
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -99,7 +99,7 @@ class FakeProfilerEvent:
         self.cpu_children = cpu_children or []
 
 
-class TestBenchGeneric(TestCase):
+class TestBench(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_do_bench_profile_result_uses_linked_device_events(self):
@@ -208,25 +208,23 @@ class TestBenchCuda(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        x = torch.rand(1024, 10).to(cls.device_type).half()
-        w = torch.rand(512, 10).to(cls.device_type).half()
+        x = torch.rand(1024, 10).to("cuda").half()
+        w = torch.rand(512, 10).to("cuda").half()
         cls._bench_fn = staticmethod(
             functools.partial(torch.nn.functional.linear, x, w)
         )
 
-    @requires_triton()
+    @requires_cuda_and_triton
     def test_benchmarker(self):
         res = benchmarker.benchmark_gpu(self._bench_fn)
         log.warning("do_bench result: %s", res)
         self.assertGreater(res, 0)
 
+    @skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_do_bench_using_profiling(self):
         res = do_bench_using_profiling(self._bench_fn)
         log.warning("do_bench_using_profiling result: %s", res)
         self.assertGreater(res, 0)
-
-
-instantiate_device_type_tests(TestBenchCuda, globals(), only_for="cuda")
 
 
 class TestStrideOrder(TestCase):
