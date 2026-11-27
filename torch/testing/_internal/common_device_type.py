@@ -29,6 +29,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
+    _omit_skipped_tests,
     _TestParametrizer,
     _uses_default_test_setup,
     add_skip_condition,
@@ -361,6 +362,8 @@ class DeviceTypeTestBase(TestCase):
     )
     device_type: str = "generic_device_type"
 
+    _device_base: ClassVar[type["DeviceTypeTestBase"] | None] = None
+
     # When True, @onlyOn-based decorators (@onlyCUDA, @onlyMPS, etc.) will not
     # skip tests for this device type. This is a pragmatic short-term solution to
     # allow PrivateUse1 backends to run tests that are currently gated behind
@@ -644,7 +647,9 @@ class DeviceTypeTestBase(TestCase):
         except Exception:
             # For CUDATestBase, XPUTestBase, XLATestBase, and possibly others, the primary device won't be available
             # until setUpClass() sets it. Call that manually here if needed.
-            if hasattr(cls, "setUpClass"):
+            if cls._device_base is not None:
+                cls._device_base.setUpClass()
+            else:
                 cls.setUpClass()
             return cls.get_primary_device()
 
@@ -1426,6 +1431,7 @@ def instantiate_device_type_tests(
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
         if base in (*native, LazyTestBase) and static_device:
             device_type_test_class._device_type_at_collection = base.device_type
+        device_type_test_class._device_base = base
 
         # Arrange for setUpClass and tearDownClass methods defined both in the test template
         # class and in the generic base to be called. This allows device-parameterized test
@@ -1473,6 +1479,8 @@ def instantiate_device_type_tests(
                 # classmethod descriptors.
                 nontest = generic_test_class.__dict__[name]
                 setattr(device_type_test_class, name, nontest)
+
+        _omit_skipped_tests(device_type_test_class)
 
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding

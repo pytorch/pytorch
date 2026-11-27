@@ -21,30 +21,33 @@ DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
   registerDeviceGuard(type, impl);
 }
 
-namespace {
-
 // A non-null registry entry means the backend is compiled in;
 // deviceCount() == 0 means no device is visible, so swap in a no-op guard.
 // This lets us trace device kernels under FakeTensorMode without touching
 // a physical device.
-template <DeviceType T>
-void ensureDeviceGuardSet() {
-  constexpr std::size_t idx = static_cast<std::size_t>(T);
-  const DeviceGuardImplInterface* p = device_guard_impl_registry[idx].load();
-  if (p && p->deviceCount() == 0) {
-    static FakeGuardImpl<T> fake_guard;
-    device_guard_impl_registry[idx].store(&fake_guard);
+void ensureDeviceGuardSet(DeviceType type) {
+  auto& slot = device_guard_impl_registry[static_cast<size_t>(type)];
+  const DeviceGuardImplInterface* p = slot.load();
+  if (!p || p->deviceCount() != 0) {
+    return;
+  }
+
+  switch (type) {
+#define CASE(D, _)                                  \
+  case DeviceType::D: {                             \
+    static FakeGuardImpl<DeviceType::D> fake_guard; \
+    slot.store(&fake_guard);                        \
+    break;                                          \
+  }
+    C10_FORALL_BACKEND_DEVICE_TYPES(CASE, unused)
+#undef CASE
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unsupported device type: ", type);
   }
 }
 
-} // namespace
-
 void ensureCUDADeviceGuardSet() {
-  ensureDeviceGuardSet<DeviceType::CUDA>();
-}
-
-void ensureXPUDeviceGuardSet() {
-  ensureDeviceGuardSet<DeviceType::XPU>();
+  ensureDeviceGuardSet(DeviceType::CUDA);
 }
 
 } // namespace c10::impl
