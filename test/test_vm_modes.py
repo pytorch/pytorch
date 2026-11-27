@@ -9119,6 +9119,240 @@ def {name}(x):
     return modes_work(y * k)
 """
 
+# What keeps the object alive until the trace of the call has let go of
+# everything it held, so that its callback runs behind every comparison the
+# trace makes while its body is over: by name, what the object is, where
+# the test puts it, what the call is handed beside x, and how the call
+# drops it.
+MODES_UNFRAMED_HELD = {
+    "by_the_copy_of_an_argument": (
+        "torch.ones(4, 8)",
+        "ARG[0]",
+        "ARG",
+        "held[0] = None",
+    ),
+    "by_the_record_of_a_write": (
+        "Plain()",
+        "H['h']",
+        None,
+        "H['h'].n = 1.0\n    H['h'] = None",
+    ),
+    "by_an_entry_of_the_reads": (
+        "Plain()",
+        "H['h']",
+        None,
+        "j = H['h'].poke()\n    H['h'] = None",
+    ),
+}
+MODES_UNFRAMED_LATE_ORDERS = {
+    "read_then_dropped": "k = {read}\n    {drop}",
+    "dropped_then_read": "{drop}\n    k = {read}",
+}
+MODES_UNFRAMED_LATE_PROGRAM = """
+class Plain:
+    def poke(self):
+        return 1.0
+
+
+H = {{'h': None}}
+W = {{}}
+ARG = [None]
+
+
+def thunk(f, *args):
+    return functools.partial(next, iter(functools.partial(f, *args), W))
+
+
+{state}
+
+
+def before(call):
+    {reset}
+    {where} = {made}
+    W['w'] = weakref.ref({where}, {callback})
+
+
+def state():
+    return {read_state}
+
+
+def {name}({parameters}):
+    y = modes_work(x)
+    {body}
+    return modes_work(y * k)
+"""
+# How the refusal of the trace's last comparison ends.
+MODES_UNFRAMED_PARTED = "when its trace has let go of everything it held"
+# More kinds of state for that comparison, as MODES_UNFRAMED has them.
+# `thunk(f, *args)` is a C callable that takes the dead weak reference,
+# calls f(*args) and raises nothing.
+MODES_UNFRAMED_MORE = {
+    "bases": (
+        "class Base:\n    pass\n\n\nclass Marked:\n    pass\n\n\n"
+        "class Based(Base):\n    pass\n\n\nO = Based()",
+        "thunk(setattr, Based, '__bases__', (Marked,))",
+        "Based.__bases__ = (Base,)",
+        "2.0 + float(isinstance(O, Marked))",
+        "Based.__bases__[0].__name__",
+    ),
+    "tensor_key": (
+        "T = torch.ones(3)\nS = {'t': T}",
+        "thunk(T.requires_grad_)",
+        "T.requires_grad_(False)",
+        "2.0 + float(S['t'].requires_grad)",
+        "T.requires_grad",
+    ),
+    "cell": (
+        "def make():\n    c = 2.0\n\n    def get():\n        return c\n\n"
+        "    def put(v):\n        nonlocal c\n        c = v\n\n"
+        "    return get, put\n\n\nGET, PUT = make()\nCELL = GET.__closure__[0]",
+        "functools.partial(setattr, CELL, 'cell_contents')",
+        "PUT(2.0)",
+        "2.0 + float(type(GET()) is float)",
+        "type(GET()).__name__",
+    ),
+    "function_defaults": (
+        "def scale(k=2.0):\n    return k",
+        "thunk(setattr, scale, '__defaults__', (3.0,))",
+        "scale.__defaults__ = (2.0,)",
+        "scale()",
+        "scale.__defaults__[0]",
+    ),
+}
+# A call that itself writes where it read, by what its write leaves there:
+# the state, what puts it back before each call, the read (it binds k), the
+# write, and the state as it is compared. Such a call's trace finds its own
+# write at its last comparison, and stays a region.
+MODES_UNFRAMED_OWN = {
+    "a_float": ("S = {'a': 2.0}", "pass", "k = S['a']", "S['a'] = 5.0 - k", "S['a']"),
+    "a_str": (
+        "S = {'a': 'x'}",
+        "pass",
+        "k = float(len(S['a']))",
+        "S['a'] = 'yy' if S['a'] == 'x' else 'x'",
+        "S['a']",
+    ),
+    "none_or_a_bool": (
+        "S = {'a': None}",
+        "pass",
+        "k = 2.0 if S['a'] is None else 3.0",
+        "S['a'] = True if S['a'] is None else None",
+        "S['a']",
+    ),
+    "an_instance": (
+        "S = {'a': A}",
+        "pass",
+        "k = S['a'].k",
+        "S['a'] = B if S['a'] is A else A",
+        "S['a'].k",
+    ),
+    "a_module": (
+        "S = {'a': MA}",
+        "pass",
+        "k = float(S['a'].in_features)",
+        "S['a'] = MB if S['a'] is MA else MA",
+        "S['a'].in_features",
+    ),
+    "a_list": (
+        "S = {'a': LA}",
+        "pass",
+        "k = S['a'][0]",
+        "S['a'] = LB if S['a'] is LA else LA",
+        "S['a'][0]",
+    ),
+    # (w is a float the call is handed: under the trace, a stand-in.)
+    "a_float_the_call_computed": (
+        "S = {'a': 2.0}",
+        "S['a'] = 2.0",
+        "k = S['a']",
+        "S['a'] = k + w",
+        "S['a']",
+    ),
+    "nothing": (
+        "S = {'a': 2.0}",
+        "S['a'] = 2.0",
+        "k = S['a']",
+        "del S['a']",
+        "list(S)",
+    ),
+    "an_item_of_a_list": ("S = [2.0]", "pass", "k = S[0]", "S[0] = 5.0 - k", "S[0]"),
+    "an_attribute": (
+        "S = Plain()\nS.a = A",
+        "pass",
+        "k = S.a.k",
+        "S.a = B if S.a is A else A",
+        "S.a.k",
+    ),
+    "a_slot": (
+        "class Slots:\n    __slots__ = ('a',)\n\n\nS = Slots()\nS.a = A",
+        "pass",
+        "k = S.a.k",
+        "S.a = B if S.a is A else A",
+        "S.a.k",
+    ),
+    "a_list_read_whole": (
+        "S = [2.0]",
+        "del S[1:]",
+        "k = sum(S)",
+        "S.append(1.0)",
+        "list(S)",
+    ),
+    "a_dict_read_whole": (
+        "S = {'a': 2.0}",
+        "S.pop('n', None)",
+        "k = sum(S.values())",
+        "S['n'] = 1.0",
+        "list(S.items())",
+    ),
+    "a_set_read_whole": (
+        "S = {1}",
+        "S.discard(7)",
+        "k = 2.0 + float(5 in S)",
+        "S.add(7)",
+        "sorted(S)",
+    ),
+    "the_length_of_a_list": (
+        "S = [2.0]",
+        "del S[1:]",
+        "k = float(len(S))",
+        "S.append(1.0)",
+        "len(S)",
+    ),
+    "the_length_of_a_dict": (
+        "S = {'a': 2.0}",
+        "S.pop('n', None)",
+        "k = float(len(S))",
+        "S['n'] = 1.0",
+        "len(S)",
+    ),
+}
+MODES_UNFRAMED_OWN_PROGRAM = """
+class Plain:
+    pass
+
+
+A, B = Plain(), Plain()
+A.k, B.k = 2.0, 3.0
+LA, LB = [2.0], [3.0]
+MA, MB = torch.nn.Linear(2, 2), torch.nn.Linear(3, 3)
+{setup}
+
+
+def before(call):
+    {reset}
+
+
+def state():
+    return {read_state}
+
+
+def {name}(x, w):
+    y = modes_work(x)
+    {read}
+    {write}
+    return modes_work(y * k)
+"""
+
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmUnframedDeaths(TestCase):
@@ -9174,6 +9408,97 @@ class TestVmUnframedDeaths(TestCase):
         # interpreter makes behind it, in the traced call alone.
         late = 1 if order == "dropped_then_read" else 0
         self.assertLessEqual(differing, late, msg=source)
+
+    @parametrize("held", list(MODES_UNFRAMED_HELD))
+    @parametrize("what", [*MODES_UNFRAMED, *MODES_UNFRAMED_MORE])
+    @parametrize("order", list(MODES_UNFRAMED_LATE_ORDERS))
+    @isolated
+    def test_read_changed_behind_the_comparisons_gives_no_region(
+        self, device, held, what, order
+    ):
+        # The trace itself holds the object until its gate: the callback
+        # runs when everything is compared already, and the gate's own
+        # comparison is what finds the change.
+        kinds = {**MODES_UNFRAMED, **MODES_UNFRAMED_MORE}
+        state, callback, reset, read, read_state = kinds[what]
+        made, where, handed, drop = MODES_UNFRAMED_HELD[held]
+        name = f"{what}_{held}_{order}"
+        source = MODES_UNFRAMED_LATE_PROGRAM.format(
+            name=name,
+            state=state,
+            callback=callback,
+            reset=reset,
+            read_state=read_state,
+            made=made,
+            where=where,
+            parameters="x" if handed is None else "x, held",
+            body=MODES_UNFRAMED_LATE_ORDERS[order].format(read=read, drop=drop),
+        )
+        names = {
+            "weakref": weakref,
+            "functools": functools,
+            "operator": operator,
+            "torch": torch,
+            "modes_work": modes_work,
+            "ModesHolder": ModesHolder,
+        }
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES["effects"])
+        differing = 0
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results = []
+            for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                space["before"](call)
+                more = () if handed is None else (space[handed],)
+                results.append(fn(x, *more))
+            differing += int(not torch.equal(*results))
+            self.assertEqual(mine["state"](), theirs["state"](), msg=source)
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        why = [str(r.get("why") or "") for r in rows if r["state"] == "refused"]
+        said = [r for r in why if MODES_UNFRAMED_PARTED in r]
+        self.assertTrue(said, msg=f"{rows}\n{source}")
+        # The traced call computes with the state of before the callback
+        # where the interpreter's read is behind the drop: that one call.
+        late = 1 if order == "dropped_then_read" else 0
+        self.assertLessEqual(differing, late, msg=source)
+
+    @parametrize("left", list(MODES_UNFRAMED_OWN))
+    @isolated
+    def test_what_the_call_itself_wrote_is_no_change_behind_the_comparisons(
+        self, device, left
+    ):
+        setup, reset, read, write, read_state = MODES_UNFRAMED_OWN[left]
+        name = f"own_write_leaves_{left}"
+        source = MODES_UNFRAMED_OWN_PROGRAM.format(
+            name=name,
+            setup=setup,
+            reset=reset,
+            read=read,
+            write=write,
+            read_state=read_state,
+        )
+        names = {"torch": torch, "modes_work": modes_work}
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES["effects"])
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results = []
+            for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                space["before"](call)
+                results.append(fn(x, 1.5))
+            self.assertEqual(*results, atol=0, rtol=0, msg=f"call {call}\n{source}")
+            self.assertEqual(mine["state"](), theirs["state"](), msg=source)
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        said = [r for r in rows if MODES_UNFRAMED_PARTED in str(r.get("why") or "")]
+        self.assertFalse(said, msg=f"{said}\n{source}")
+        self.assertGreater(region_runs(compiled), 0, msg=f"{rows}\n{source}")
 
 
 instantiate_device_type_tests(TestVmUnframedDeaths, globals())

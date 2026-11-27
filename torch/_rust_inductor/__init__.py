@@ -2820,10 +2820,12 @@ def _dropped(func, why: str) -> None:
 
 
 def _unmade(func, why: str) -> None:
-    """The region whose function is ``func`` is not handed over: code that
-    no instruction of the traced body called ran under its trace (see
-    exec/foreign.rs, which is the one place that decides it, when the trace
-    has let go of everything it held)."""
+    """The region whose function is ``func`` is not handed over, for ``why``:
+    code that no instruction of the traced body called ran under its trace
+    (exec/foreign.rs), or what the region would ask at its next entry is
+    not what is there once the trace has let go of everything it held
+    (exec/region.rs, Variant::parted). Decided at the trace's gate, in
+    exec/region.rs's trace, and nowhere else."""
     record = func.record
     record.state = "refused"
     record.why = why

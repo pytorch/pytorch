@@ -111,7 +111,7 @@ pub fn _rules_dump() -> String {
     for (kind, taken, why) in callees::KINDS {
         match taken {
             Taken::Later(family) => out += &format!("default\tcallees\t{kind}\tlater:{family}\t{why}\n"),
-            Taken::Stop(stop) => out += &format!("default\tcallees\t{kind}\tstop\t{stop}\n"),
+            Taken::Stop(_) => out += &format!("default\tcallees\t{kind}\tstop\t{why}\n"),
             _ => {}
         }
     }

@@ -453,6 +453,32 @@ impl Variant {
         run(spec, self.word, args)
     }
 
+    // THE GATE'S QUESTION (asked by `trace`, once, behind every release of
+    // the trace): whether a call that came now, in the state the traced
+    // body leaves behind, would be turned away by nothing but what the
+    // body itself changed. What `enter` asks of the thread and of the
+    // reads, in a mode that runs nothing, releases nothing and counts no
+    // miss: the thread's state and word; that the objects it is found by
+    // live; every read against what is there (reads::Reads::parted, which
+    // lets an entry the run itself wrote to be what its writes left). None:
+    // yes. Some(why): the trace is no region. What `enter` asks of the
+    // call's ARGUMENTS (facts, checks, quick checks, the function's own) is
+    // not asked: the next call brings its own, and they are compared with
+    // the trace's START, which the body's own writes and operators in
+    // place have left behind.
+    pub unsafe fn parted(&self) -> Option<String> {
+        use super::reads::PARTED;
+        match super::ambient::state() {
+            Err(why) => return Some(format!("the thread is not neutral {PARTED}: {why}")),
+            Ok(word) if word != self.word => return Some(format!("the state of the thread is another than its trace began under {PARTED}")),
+            Ok(_) => {}
+        }
+        if self.pins.iter().chain(&self.home).any(Pin::dead) {
+            return Some(format!("an object it is found by is gone {PARTED}: no call enters it again"));
+        }
+        self.spec.reads.get().parted()
+    }
+
     // Whether it can never run again: an object it is found by died (a
     // module whose dict was a namespace of its frame too), or one its reads
     // expect to find (see reads.rs).
@@ -866,20 +892,37 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
         drop(args);
         made
     };
-    // THE GATE. Every frame that ran since the body's first instruction
-    // and that no instruction of the body called was seen by now, whatever
-    // let go of the object it ran for; nothing the trace held is released
-    // behind this line. Such a frame is code of the program's that the
-    // region would leave out: no region. (What the comparisons of
-    // _region_settled and _region_reads rest on: nothing the program's ran
-    // behind them unseen.)
-    let foreign = super::foreign::gate();
-    match (made?, foreign) {
-        (Some(made), Some(why)) => {
-            py.import("torch._rust_inductor")?.call_method1("_unmade", (made.variant.spec.func.clone_ref(py), why))?;
-            Ok(None)
-        }
-        (made, _) => Ok(made),
+    // THE GATE: nothing the trace held is released behind this line, so it
+    // is the one moment at which what a region will ask at its next entry
+    // can be compared with what IS. WHAT A REGION RESTS ON, from here:
+    //   1. No frame ran since the body's first instruction that no
+    //      instruction of the body called, whatever let go of the object it
+    //      ran for (foreign.rs). Such a frame is code of the program's that
+    //      the region would leave out.
+    //   2. With everything let go of, the thread is in the state the trace
+    //      began in, the objects the region is found by live, and each of
+    //      its reads is as it was read or as the run's own recorded writes
+    //      left it (Variant::parted). Code that a death runs WITHOUT a
+    //      frame (a C callable as the callback of a weak reference) is seen
+    //      by nothing; what it changed of what the region checks is found
+    //      here, whenever the object died: under the body, where the
+    //      comparisons of _region_settled found it too, or behind them,
+    //      when the trace let go of what it still held.
+    // What neither gives: code a death runs without a frame that changes
+    // nothing the region checks; what such code does to the call's
+    // arguments (Variant::parted says why they are not asked); a death the
+    // REGION puts off, by what it counts itself (its constants, the
+    // objects its writes are made on).
+    let why = super::foreign::gate();
+    match made? {
+        Some(made) => match why.or_else(|| made.variant.parted()) {
+            Some(why) => {
+                py.import("torch._rust_inductor")?.call_method1("_unmade", (made.variant.spec.func.clone_ref(py), why))?;
+                Ok(None)
+            }
+            None => Ok(Some(made)),
+        },
+        None => Ok(None),
     }
 }
 

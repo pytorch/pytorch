@@ -184,6 +184,9 @@ struct Item {
     // How many writes the run had recorded when this was read (see wrote.rs);
     // the same of every `after` below.
     after: usize,
+    // What the run's own recorded writes since the read left here, if one
+    // was to it (see Left): the same of every `left` below.
+    left: Option<Left>,
 }
 
 struct Whole {
@@ -192,6 +195,9 @@ struct Whole {
     // Where it was read (for describe).
     at: String,
     after: usize,
+    // What it holds once the run's own writes since the read are made on
+    // what was read, if there were any.
+    left: Option<Vec<Left>>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -210,6 +216,9 @@ struct Group {
     whole: Option<Whole>,
     len: Option<isize>,
     len_after: usize,
+    // The length once the run's own writes since it was read have grown it,
+    // if they did.
+    len_left: Option<isize>,
     // Read whole (or measured) after the traced run changed it.
     late: bool,
     late_at: String,
@@ -246,6 +255,7 @@ struct Read {
     // Where an attribute was read, for the refusal if it can't be checked.
     at: String,
     after: usize,
+    left: Option<Left>,
 }
 
 // A Python function a frame of which ran under the traced body: the code
@@ -314,6 +324,38 @@ impl Entries {
         let groups: usize = self.groups.iter().map(|g| g.items.len() + g.whole.as_ref().map_or(0, |w| w.items.len()) + usize::from(g.len.is_some())).sum();
         let asked = self.mros.len() + usize::from(self.abc.is_some());
         groups + self.typed.len() + self.classes.iter().map(|c| c.names.len()).sum::<usize>() + self.reads.len() + self.functions.len() + self.dicted.len() + asked + self.keyed.len()
+    }
+
+    // The body is over: every entry the run itself wrote to since it read
+    // there is given what those writes left (see Left), from the log, as
+    // `settled` answers it for each kind. (Every pin is counted: none is
+    // dead.)
+    unsafe fn leave(&mut self, log: &wrote::Log) {
+        for g in &mut self.groups {
+            let (h, kind) = (g.holder.as_ptr(), g.kind);
+            for i in &mut g.items {
+                i.left = Left::since(i.put(log, h, kind));
+            }
+            if let Some(w) = &mut g.whole {
+                let was: Vec<*mut PyObject> = w.items.iter().map(|p| p.as_ptr()).collect();
+                let made = match kind {
+                    Holder::Dict => log.dict(h, w.after, was.clone()),
+                    Holder::List => log.list(h, w.after, was.clone()),
+                    Holder::Set => log.set(h, w.after, was.clone()),
+                };
+                w.left = match made {
+                    Some(made) if made == was => None,
+                    Some(made) => Some(made.into_iter().map(|m| Left::of(m)).collect()),
+                    // Writes the log cannot make on what was read.
+                    None => Some(vec![Left::Unplaced]),
+                };
+            }
+            let grew = log.grew(h, g.len_after);
+            g.len_left = g.len.filter(|_| grew != 0).map(|n| n + grew);
+        }
+        for r in &mut self.reads {
+            r.left = Left::since(r.put(log));
+        }
     }
 }
 
@@ -568,6 +610,86 @@ unsafe fn left(now: *mut PyObject, put: *mut PyObject) -> bool {
     put == now || (!put.is_null() && !now.is_null() && exact_scalar(now) && exact::same(now, put))
 }
 
+// What a recorded write of the run left where the run had read before. An
+// entry is given it when the body is over (_region_settled, where the log
+// of the writes still is) and asked for it at the trace's gate
+// (Reads::parted), where the log is gone and everything the trace held is
+// let go of. It counts no reference to an object whose death can run code:
+// an entry that kept what the run wrote alive would put the object's death
+// behind the gate.
+enum Left {
+    // The write took the item out.
+    Nothing,
+    // An exact int, float, str or bytes, None or a bool: the object itself
+    // (no finalizer, no weak reference, nothing in it to change).
+    Exact(Py<PyAny>),
+    // A weak reference to what the write put. Dead at the gate: the object
+    // is not what is there.
+    Weak(Py<PyAny>),
+    // What the write put is of a class that takes no weak reference (an
+    // exact list, dict or tuple, a cell, an instance with __slots__): its
+    // address and its class. NOT EXACT: an object of that class made at
+    // that address once the written one died passes for it.
+    At(usize, usize),
+    // A write the log cannot place: nothing is what it left.
+    Unplaced,
+}
+
+impl Left {
+    unsafe fn of(put: *mut PyObject) -> Left {
+        if put.is_null() {
+            return Left::Nothing;
+        }
+        if exact_scalar(put) || ffi::PyBytes_CheckExact(put) != 0 || put == ffi::Py_None() || ffi::PyBool_Check(put) != 0 {
+            return Left::Exact(own(put));
+        }
+        // The trace's stand-in for a float (scalars.rs): what the write
+        // leaves to the program is the float it stands for, which
+        // _region_writes puts in its place before the gate.
+        if super::scalars::stand_in(put) {
+            let plain = ffi::PyFloat_FromDouble(ffi::PyFloat_AS_DOUBLE(put));
+            if !plain.is_null() {
+                return Left::Exact(Py::from_owned_ptr(Python::assume_attached(), plain));
+            }
+            ffi::PyErr_Clear();
+            return Left::Unplaced;
+        }
+        let weak = ffi::PyWeakref_NewRef(put, std::ptr::null_mut());
+        if weak.is_null() {
+            ffi::PyErr_Clear();
+            return Left::At(put as usize, ffi::Py_TYPE(put) as usize);
+        }
+        Left::Weak(Py::from_owned_ptr(Python::assume_attached(), weak))
+    }
+
+    // For what the log says of an item: None, no write was to it.
+    unsafe fn since(put: Since) -> Option<Left> {
+        match put {
+            Since::Nothing => None,
+            Since::Put(put) => Some(Left::of(put)),
+            Since::Unplaced => Some(Left::Unplaced),
+        }
+    }
+
+    // Whether `now` (NULL: nothing there) is what the write left, as
+    // `left` answers it while the written object is counted.
+    unsafe fn is(&self, now: *mut PyObject) -> bool {
+        match self {
+            Left::Nothing => now.is_null(),
+            Left::Exact(put) => left(now, put.as_ptr()),
+            Left::Weak(weak) => {
+                let put = ffi::PyWeakref_GetObject(weak.as_ptr());
+                !now.is_null() && put != ffi::Py_None() && put == now
+            }
+            Left::At(at, class) => !now.is_null() && now as usize == *at && ffi::Py_TYPE(now) as usize == *class,
+            Left::Unplaced => false,
+        }
+    }
+}
+
+// How a refusal at the trace's gate ends (see Reads::parted).
+pub(super) const PARTED: &str = "when its trace has let go of everything it held";
+
 // What a tuple or a frozenset holds (borrowed), or None for anything else:
 // the two builtin containers whose items cannot be bound anew, so that what
 // leads to one leads to what it holds, and no entry is of one.
@@ -741,6 +863,17 @@ impl Item {
         }
     }
 
+    // At the trace's gate: whether the item is what the run's own last
+    // write to it left (see Left), or with no such write, as it was read.
+    // `settled`'s answer, asked again without the log.
+    unsafe fn parted(&self, holder: *mut PyObject, kind: Holder) -> bool {
+        let now = self.now(holder, kind);
+        match &self.left {
+            Some(left) => left.is(now),
+            None => same(now, self.want, self.value.as_ref()),
+        }
+    }
+
     // For a refusal: what the item was to be, and what is there.
     unsafe fn differs(&self, log: &wrote::Log, holder: *mut PyObject, kind: Holder) -> String {
         let was = match (self.put(log, holder, kind), self.want) {
@@ -778,9 +911,46 @@ impl Whole {
         // A set's members are in no order.
         now.len() == made.len() && if kind == Holder::Set { made.iter().all(|m| now.iter().any(|n| left(*n, *m))) } else { now.iter().zip(&made).all(|(n, m)| left(*n, *m)) }
     }
+
+    // At the trace's gate: `settled`'s answer without the log.
+    unsafe fn parted(&self, holder: *mut PyObject, kind: Holder) -> bool {
+        let Some(left) = &self.left else { return self.holds(holder, kind) };
+        if !ordered_ok(holder, kind) {
+            return false;
+        }
+        let now = snapshot(holder, kind);
+        // A set's members are in no order.
+        now.len() == left.len() && if kind == Holder::Set { left.iter().all(|m| now.iter().any(|n| m.is(*n))) } else { now.iter().zip(left).all(|(n, m)| m.is(*n)) }
+    }
+}
+
+// For a refusal: what an entry expected by a pin that may have died.
+unsafe fn expected(want: Want, value: Option<&Pin>, left: Option<&Left>) -> String {
+    match (left, want, value) {
+        (Some(_), _, _) => "what the run's own write left".into(),
+        (None, Want::Absent, _) => "nothing".into(),
+        (None, Want::Present, _) => "something".into(),
+        (None, _, Some(v)) if !v.dead() => shown(v.as_ptr()),
+        _ => "an object that is gone".into(),
+    }
 }
 
 impl Group {
+    // At the trace's gate (Reads::parted), of the holder `h`: what of the
+    // group is neither as it was read nor as the run's own writes left it,
+    // as a refusal says it. None: nothing.
+    unsafe fn parted(&self, h: *mut PyObject) -> Option<String> {
+        let (kind, of) = (self.kind, type_name(h));
+        if let Some(i) = self.items.iter().find(|i| !i.parted(h, kind)) {
+            return Some(format!("item {} of a {of}, which was {} and is {} {PARTED}", shown(i.key.as_ptr()), expected(i.want, i.value.as_ref(), i.left.as_ref()), shown(i.now(h, kind))));
+        }
+        if let Some(w) = self.whole.as_ref().filter(|w| !w.parted(h, kind)) {
+            return Some(format!("a {of} whole{}, which holds something else {PARTED}", w.at));
+        }
+        let n = size(h, kind);
+        self.len.map(|was| self.len_left.unwrap_or(was)).filter(|was| n != *was).map(|was| format!("the length of a {of}, which was {was} and is {n} {PARTED}"))
+    }
+
     unsafe fn holds(&self) -> bool {
         let h = self.holder.as_ptr();
         self.len.is_none_or(|n| size(h, self.kind) == n) && self.items.iter().all(|i| i.holds(h, self.kind)) && self.whole.as_ref().is_none_or(|w| w.holds(h, self.kind))
@@ -844,16 +1014,50 @@ impl Read {
     // answer for a read the run makes again (Trace::given, cell) and for
     // the end of the body (_region_settled).
     unsafe fn settled(&self, log: &wrote::Log, now: *mut PyObject) -> bool {
-        let obj = self.obj.as_ptr();
-        let put = match &self.name {
-            None => log.cell(obj, self.after).map_or(Since::Nothing, Since::Put),
-            Some(name) => log.slot(obj, self.after, name.as_ptr()),
-        };
-        match put {
+        match self.put(log) {
             Since::Nothing => same(now, self.want, self.value.as_ref()),
             Since::Put(put) => left(now, put),
             Since::Unplaced => false,
         }
+    }
+
+    // What the run's own stores since the read say of the cell or the slot.
+    unsafe fn put(&self, log: &wrote::Log) -> Since {
+        let obj = self.obj.as_ptr();
+        match &self.name {
+            None => log.cell(obj, self.after).map_or(Since::Nothing, Since::Put),
+            Some(name) => log.slot(obj, self.after, name.as_ptr()),
+        }
+    }
+
+    // At the trace's gate (Reads::parted), of an object that lives: None
+    // if the cell or the slot holds what the run's own last store left
+    // (see Left) or, with no such store, what was read (`settled`'s answer
+    // without the log); else what it holds instead, as a refusal says it.
+    // A slot is asked as `holds` asks it.
+    unsafe fn parted(&self) -> Option<String> {
+        let obj = self.obj.as_ptr();
+        let now = match &self.name {
+            None => PyCell_Get_borrowed(obj),
+            Some(name) => ffi::PyObject_GenericGetAttr(obj, name.as_ptr()),
+        };
+        if now.is_null() {
+            ffi::PyErr_Clear();
+        }
+        let ok = match &self.left {
+            Some(left) => left.is(now),
+            None => same(now, self.want, self.value.as_ref()),
+        };
+        let was = expected(self.want, self.value.as_ref(), self.left.as_ref());
+        let what = match &self.name {
+            None => format!("a cell that held {was} and holds {} {PARTED}", shown(now)),
+            Some(name) => format!(".{} of a {}, which was {was} and is {} {PARTED}", text(name.as_ptr()), type_name(obj), shown(now)),
+        };
+        if self.name.is_some() {
+            // (The slot holds it too.)
+            ffi::Py_XDECREF(now);
+        }
+        (!ok).then_some(what)
     }
 
     unsafe fn holds(&self) -> bool {
@@ -887,7 +1091,7 @@ impl Trace {
         let i = match self.group_of.get(&(holder as usize)) {
             Some(i) => *i,
             None => {
-                self.entries.groups.push(Group { holder: counted(holder), kind, version: Cell::new(0), items: vec![], whole: None, len: None, len_after: 0, late: false, late_at: String::new(), root: false });
+                self.entries.groups.push(Group { holder: counted(holder), kind, version: Cell::new(0), items: vec![], whole: None, len: None, len_after: 0, len_left: None, late: false, late_at: String::new(), root: false });
                 self.group_of.insert(holder as usize, self.entries.groups.len() - 1);
                 self.entries.groups.len() - 1
             }
@@ -932,7 +1136,7 @@ impl Trace {
             return;
         }
         self.count += 1;
-        self.group(holder, kind).items.push(Item { key: own(key), want, value, after });
+        self.group(holder, kind).items.push(Item { key: own(key), want, value, after, left: None });
     }
 
     unsafe fn dict_item(&mut self, d: *mut PyObject, key: *mut PyObject, present_only: bool) {
@@ -986,7 +1190,7 @@ impl Trace {
         self.count += items.len() + 1;
         let items = items.into_iter().map(|x| counted(x)).collect();
         let after = self.wrote.len();
-        self.group(holder, kind).whole = Some(Whole { items, at: place(), after });
+        self.group(holder, kind).whole = Some(Whole { items, at: place(), after, left: None });
     }
 
     unsafe fn length(&mut self, holder: *mut PyObject, kind: Holder) {
@@ -1373,7 +1577,7 @@ impl Trace {
                     if self.seen.insert((obj as usize, n as usize)) {
                         self.count += 1;
                         self.read_at.insert((obj as usize, n as usize), self.entries.reads.len());
-                        self.entries.reads.push(Read { obj: counted(obj), name: Some(own(n)), want: Want::Is, value: Some(counted(v)), at: place(), after: self.wrote.len() });
+                        self.entries.reads.push(Read { obj: counted(obj), name: Some(own(n)), want: Want::Is, value: Some(counted(v)), at: place(), after: self.wrote.len(), left: None });
                     }
                     if ffi::PyDict_Check(v) != 0 {
                         self.whole(v, Holder::Dict);
@@ -1413,7 +1617,7 @@ impl Trace {
         if self.seen.insert(at) {
             self.count += 1;
             self.read_at.insert(at, self.entries.reads.len());
-            self.entries.reads.push(Read { obj: counted(obj), name: Some(own(name)), want, value: held, at: place(), after });
+            self.entries.reads.push(Read { obj: counted(obj), name: Some(own(name)), want, value: held, at: place(), after, left: None });
         } else if let Some(r) = self.read_at.get(&at).and_then(|i| self.entries.reads.get_mut(*i)).filter(|r| r.obj.as_ptr() == obj && r.name.as_ref().is_some_and(|n| n.as_ptr() == name)) {
             let stale = (!r.settled(&self.wrote, value)).then(|| format!("was {}", shown(r.value.as_ref().map_or(std::ptr::null_mut(), |v| v.as_ptr()))));
             valued((&mut r.want, &mut r.value, &mut r.after), want, held, after);
@@ -1812,7 +2016,7 @@ pub unsafe fn cell(cell: *mut PyObject, value: *mut PyObject) {
         if t.seen.insert((cell as usize, 0)) {
             t.count += 1;
             t.read_at.insert((cell as usize, 0), t.entries.reads.len());
-            t.entries.reads.push(Read { obj: counted(cell), name: None, want: want_of(value), value: Some(counted(value)), at: String::new(), after: t.wrote.len() });
+            t.entries.reads.push(Read { obj: counted(cell), name: None, want: want_of(value), value: Some(counted(value)), at: String::new(), after: t.wrote.len(), left: None });
         } else if let Some(r) = t.read_at.get(&(cell as usize, 0)).and_then(|i| t.entries.reads.get(*i)).filter(|r| r.name.is_none() && r.obj.as_ptr() == cell) {
             // A later read is to find what the first found, or what the
             // run's own last store since put there (see Trace::item).
@@ -2382,6 +2586,76 @@ impl Reads {
         false
     }
 
+    // THE GATE'S QUESTION of the reads (asked by region::Variant::parted,
+    // where the trace has let go of everything it held): what `check`
+    // compares (but for abc's counter: see below), in its order, each
+    // entry against what is there now. An
+    // entry the run itself wrote to since the read is to be what those
+    // writes left (see Left); every other is to be as it was read. (The
+    // thread's state is the caller's to ask.) None: every one is. Some(what is not), as a refusal says it: the trace is
+    // no region. And none either if an object the entries expect to find
+    // died: no call enters such a region again. Nothing is dropped and
+    // nothing counted here, and what was read from a holder that died is
+    // nothing to compare, as in `check`.
+    pub unsafe fn parted(&self) -> Option<String> {
+        let e = &*self.entries.get();
+        let unexplained = |what: String| Some(format!("it read {what}, and no write the run recorded explains it"));
+        let class = |c: &Pin| std::ffi::CStr::from_ptr((*(c.as_ptr() as *mut ffi::PyTypeObject)).tp_name).to_string_lossy().into_owned();
+        if let Some(t) = e.typed.iter().find(|t| t.obj.live().is_some_and(|o| !t.class.is(ffi::Py_TYPE(o) as *mut PyObject))) {
+            return unexplained(format!("the class of a {}, which is another {PARTED}", type_name(t.obj.as_ptr())));
+        }
+        for c in e.classes.iter().filter(|c| !c.class.dead()) {
+            if let Some((i, now)) = c.differing().next() {
+                return unexplained(c.differs(i, now, PARTED));
+            }
+        }
+        if let Some(m) = e.mros.iter().find(|m| !m.class.dead() && !m.holds()) {
+            return unexplained(format!("the bases of {}, which are others {PARTED}", class(&m.class)));
+        }
+        // NOT asked here: abc's counter of registrations (e.abc). It only
+        // grows, so a region whose trace read it before it moved is entered
+        // by no later call (`check` compares it), and it moves under the
+        // trace's own work behind the body (a lowering imports modules
+        // that register classes): the place is traced again instead.
+        for g in &e.groups {
+            let Some(h) = g.holder.live() else { continue };
+            // (The owner of a __dict__ has none now, or another.)
+            let what = if h.is_null() { Some(format!("the __dict__ of an object, which has another {PARTED}")) } else { g.parted(h) };
+            if what.is_some() {
+                return what.and_then(unexplained);
+            }
+        }
+        for r in e.reads.iter().filter(|r| !r.obj.dead()) {
+            if let Some(what) = r.parted() {
+                return unexplained(what);
+            }
+        }
+        if let Some(f) = e.functions.iter().find(|f| !f.func.dead() && !f.holds()) {
+            return unexplained(format!("the code and the defaults of {}, which are others {PARTED}", text((*(f.func.as_ptr() as *mut ffi::PyFunctionObject)).func_qualname)));
+        }
+        if let Some(d) = e.dicted.iter().find(|d| d.obj.live().is_some_and(|o| !d.dict.is(tr_instance_dict(o)))) {
+            return unexplained(format!("the __dict__ of a {}, which is another dict {PARTED}", type_name(d.obj.as_ptr())));
+        }
+        for c in &*self.consts.get() {
+            let t = tffi::tensor_by_type(c.obj.as_ptr() as usize).as_ref();
+            if t.is_none() || !c.key.holds(c.obj.as_ptr()) {
+                return unexplained(format!("the class, shape, dtype, device or requires_grad of a constant, which is another {PARTED}"));
+            }
+            if let (Some(t), Some(version)) = (t, c.unwritten)
+                && (tffi::tensor_version(t) != version || !tffi::tensor_is_cow(t))
+            {
+                return unexplained(format!("a constant that was to stay unwritten, which was written {PARTED}"));
+            }
+        }
+        if let Some(k) = e.keyed.iter().find(|k| k.obj.live().is_some_and(|o| !k.key.holds(o))) {
+            return unexplained(format!("the class, shape, dtype, device or requires_grad of a {} read from state, which is another {PARTED}", type_name(k.obj.as_ptr())));
+        }
+        if expects_dead(e) {
+            return Some(format!("an object its reads expect to find is gone {PARTED}: no call enters it again"));
+        }
+        None
+    }
+
     // What a constant fails on, if one does: the metadata of the trace, or,
     // under torch.vm.Unwritten, not having been written to. For a lowering
     // bound to the constants, and for the check of how the region's tensors
@@ -2448,7 +2722,7 @@ impl Reads {
         let i = match e.groups.iter().position(|g| g.holder.is(holder.as_ptr())) {
             Some(i) => i,
             None => {
-                e.groups.push(Group { holder: unsafe { Pin::weak(holder.as_ptr()) }, kind: Holder::Dict, version: Cell::new(0), items: vec![], whole: None, len: None, len_after: 0, late: false, late_at: String::new(), root: false });
+                e.groups.push(Group { holder: unsafe { Pin::weak(holder.as_ptr()) }, kind: Holder::Dict, version: Cell::new(0), items: vec![], whole: None, len: None, len_after: 0, len_left: None, late: false, late_at: String::new(), root: false });
                 e.groups.len() - 1
             }
         };
@@ -2458,7 +2732,7 @@ impl Reads {
         if has || whole {
             return false;
         }
-        g.items.push(Item { key: key.clone().unbind(), want: Want::Is, value: Some(unsafe { Pin::weak(value.as_ptr()) }), after: 0 });
+        g.items.push(Item { key: key.clone().unbind(), want: Want::Is, value: Some(unsafe { Pin::weak(value.as_ptr()) }), after: 0, left: None });
         g.version.set(0);
         true
     }
@@ -2758,6 +3032,9 @@ pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
         }
         t.restored.extend(restored);
         t.stale.extend(stale);
+        // What the run's own writes left where it had read, for the trace's
+        // gate, which asks every comparison made here again (Reads::parted).
+        unsafe { t.entries.leave(&log) };
         Some(log)
     });
     drop(log);

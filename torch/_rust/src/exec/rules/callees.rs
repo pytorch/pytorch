@@ -9,9 +9,8 @@
 // name, to the family of rules that will take calls of it; until that family
 // is written the code that decided before the table decides. A callable of
 // none of the kinds written down here has a kind of its own, the last of the
-// list, and a name it is left under as the others are: the code that decided
-// before decides for it too, as it did before the kinds were told apart.
-// No rule is to be written for that name: what is left under it is to stop.
+// list, and that kind is a STOP: no rule says what a call of it runs, and
+// none is to be written.
 //
 // What it is given
 //   - by rules::said, a callee (never NULL) that no family answered for;
@@ -28,11 +27,11 @@
 //     for a report and for the day those callees stop a trace; it licenses
 //     nothing;
 //   - before ready() ran, a C function of torch is told as any builtin and
-//     a partial, a bound slot wrapper or an instance as "anything else":
-//     nothing is looked up lazily. No trace runs then (rules::ready is called where a function
-//     goes onto the executor), and the doors for tests call it first;
-//   - of() is Later for every kind today, the last one too: no callee stops
-//     a trace for its kind.
+//     a partial, a bound slot wrapper or an instance as "anything else",
+//     which stops: nothing is looked up lazily. No trace runs then
+//     (rules::ready is called where a function goes onto the executor), and
+//     the doors for tests call it first;
+//   - of() is Later for every kind but the last, which is a Stop.
 // What it may not assume
 //   - that a kind says what the call does: a builtin may call back into
 //     Python, a class may have any `__new__`. The kind only names who is to
@@ -63,12 +62,8 @@ pub const KINDS: &[(&str, Taken, &str)] = &[
     ("functools.partial", Taken::Later("callees: partials"), "A call of an exact functools.partial is a call of what it holds, with the arguments it holds in front: the kind of that callable decides."),
     ("an instance of a class with a Python __call__", Taken::Later("callees: instances"), "The class of the object has a Python function under __call__ (a module, an object with __call__): a call enters that function's frame."),
     ("an instance of a class with a C __call__", Taken::Later("callees: C callables"), "The class of the object has a slot of C code under __call__ (a cached function, a staticmethod object, an operator.itemgetter): as a builtin, a fact of each class."),
-    ("anything else", Taken::Later(NO_KIND), "An object whose class has under __call__ neither a Python function nor a slot of C code (a builtin, a partial, a classmethod object), or nothing at all: no kind above says what a call of it runs, and none is to. It is left to the code that decided before the table, as every callee without a line was."),
+    ("anything else", Taken::Stop("it is a call of an object whose class has under __call__ neither a Python function nor a slot of C code, or nothing at all: no rule says what that call runs"), "An object whose class has under __call__ neither a Python function nor a slot of C code (a builtin, a partial, a staticmethod, a classmethod object), or nothing at all: no kind above says what a call of it runs, and no rule is to be written for it."),
 ];
-
-// What a callee of the last kind is left under: no family to come, a stop
-// to come.
-pub const NO_KIND: &str = "callees: of no listed kind";
 
 struct Made {
     // What identifies the C functions of torch's namespaces (see key).

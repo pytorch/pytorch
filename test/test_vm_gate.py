@@ -5020,7 +5020,7 @@ class TestVmRulesOps(TestCase):
         defaults, unheard = {}, []
         callables = collections.defaultdict(list)
         for _, callee, kind, answer in rules_callables():
-            if answer in RULES_CALLEES:
+            if answer in RULES_CALLEES or RULES_CALLEE_KINDS.get(kind) == answer:
                 callables[kind].append({"callee": callee, "operands": [callee]})
         for line in torch._rust._rules_dump().splitlines():
             parts = line.split("\t")
@@ -5054,6 +5054,15 @@ class TestVmRulesOps(TestCase):
                     self.assertTrue(callables[kind], kind)
                     if answer.startswith("later:"):
                         left[answer.partition(":")[2]] += callables[kind]
+                        continue
+                    # A kind that stops: every object of it is a stop, here
+                    # and under a call taken at another's word.
+                    self.assertEqual(answer, "stop")
+                    for ask in callables[kind]:
+                        said = torch._rust._rules_hear(**ask)
+                        self.assertEqual(said[0], "stop", msg=str(ask))
+                        word = torch._rust._rules_hear(**ask, at_a_word=True)
+                        self.assertEqual(word, said)
                     continue
                 how, family, what, *rest = parts
                 self.assertIn(family, RULES_FAMILIES)
@@ -16455,9 +16464,9 @@ class TestVmRulesTorchUndo(TestCase):
 instantiate_device_type_tests(TestVmRulesTorchUndo, globals())
 # The kinds of callee that no family of rules has a line for (the exact type
 # of the callee tells the kind: rules/callees.rs), each with what a call of
-# one answers where no family lists the callee: the name it is left under.
-# No kind stops a trace yet: the last one is what none of the others is, and
-# is left to the code that decided before the table as the others are.
+# one answers where no family lists the callee: the name it is left under,
+# or a stop. The last kind is what none of the others is: no rule says what
+# a call of such an object runs, and it stops a trace.
 RULES_CALLEE_KINDS = {
     "function": "later:callees: python functions",
     "method": "later:callees: bound methods",
@@ -16470,7 +16479,7 @@ RULES_CALLEE_KINDS = {
     "functools.partial": "later:callees: partials",
     "an instance of a class with a Python __call__": "later:callees: instances",
     "an instance of a class with a C __call__": "later:callees: C callables",
-    "anything else": "later:callees: of no listed kind",
+    "anything else": "stop",
 }  # fmt: skip
 RULES_CALLEES = tuple(
     answer.partition(":")[2]
@@ -16611,11 +16620,11 @@ def rules_callables():
         ("a cached function", functools.lru_cache(None)(rules_fn), c_call, "callees: C callables"),
         ("an itemgetter", operator.itemgetter(0), c_call, "callees: C callables"),
         ("a numpy ufunc", numpy.sqrt, c_call, "callees: C callables"),
-        ("an instance whose class has a builtin under __call__", RulesBuiltinCall(), "anything else", "callees: of no listed kind"),
-        ("an instance whose class has a partial under __call__", RulesPartialCall(), "anything else", "callees: of no listed kind"),
-        ("an instance whose class has a staticmethod under __call__", RulesStaticCall(), "anything else", "callees: of no listed kind"),
-        ("a classmethod object", vars(RulesHolder)["of_class"], "anything else", "callees: of no listed kind"),
-        ("an object that is not callable", 3, "anything else", "callees: of no listed kind"),
+        ("an instance whose class has a builtin under __call__", RulesBuiltinCall(), "anything else", "stop"),
+        ("an instance whose class has a partial under __call__", RulesPartialCall(), "anything else", "stop"),
+        ("an instance whose class has a staticmethod under __call__", RulesStaticCall(), "anything else", "stop"),
+        ("a classmethod object", vars(RulesHolder)["of_class"], "anything else", "stop"),
+        ("an object that is not callable", 3, "anything else", "stop"),
         ("a C function of torch with a row", torch.sin, torch_c, "row"),
         ("a C method of tensors with a row, bound", torch.ones(2).cos, torch_c, "row"),
         ("a C function of torch that stops", torch.nonzero, torch_c, "stop"),
@@ -16896,8 +16905,8 @@ class TestVmRulesCallees(TestCase):
     lists answers by its line: a row, a stop, or the family it is left to.
     Every other callee is told by its exact type, as CPython tells what a
     call of it runs, and is left by name to the rules of its kind; an object
-    of none of the kinds has a name of its own. No callee answers nothing:
-    what the table does not decide, it says who decides."""
+    of none of the kinds stops a trace. No callee answers nothing: what the
+    table does not decide, it says who decides."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -16911,9 +16920,16 @@ class TestVmRulesCallees(TestCase):
                 plain = hear(callee=callee, operands=[callee, x])
                 word = hear(callee=callee, operands=[callee, x], at_a_word=True)
                 if answer in ("row", "stop"):
-                    # A line of a family, with its sentence or its reason.
+                    # A line of a family, or the stop of a kind, with its
+                    # sentence or its reason.
                     self.assertEqual((plain[0], word[0]), (answer, answer))
                     self.assertGreater(len(plain[1]), 20)
+                    if RULES_CALLEE_KINDS[kind] == answer:
+                        # Told by its kind, which stops, here and under a
+                        # call taken at another's word.
+                        self.assertIn("no rule says what that call runs", plain[1])
+                        self.assertEqual(word, plain)
+                        kinds.add(kind)
                     continue
                 self.assertEqual(plain, ("older", answer))
                 self.assertEqual(word, ("unheard", answer))
@@ -16971,9 +16987,9 @@ class TestVmRulesCallees(TestCase):
         self.assertEqual(kind_of(shadowed), "anything else")
 
 
-# The families whose rows' `before` functions the dump cannot name yet (the
-# family has no list of them): empty when every family has one.
-RULES_BEFORE_UNNAMED = ("torch",)
+# The families whose rows' `before` functions the dump cannot name (a
+# function that is on no family's list): none.
+RULES_BEFORE_UNNAMED = ()
 # The rows whose `before` tests values, by (what, operands): how the table
 # is asked about an instruction the row is for.
 RULES_ROW_ASKS = {
@@ -16986,6 +17002,9 @@ RULES_ROW_ASKS = {
 RULES_REFUSED = {
     "import_name": ({"opcode": opcode.opmap["IMPORT_NAME"], "operands": [1, None], "names": ["math"], "frame": True}, "a relative import"),
     "import_from": ({"opcode": opcode.opmap["IMPORT_FROM"], "operands": [math], "names": ["no_such_name"], "frame": True}, "no_such_name"),
+    "plain_call": ({"callee": torch.sin, "operands": [torch.sin, object()]}, "it is handed a object"),
+    "formed_call": ({"callee": torch.Tensor.chunk, "operands": [torch.Tensor.chunk, torch.ones(2), torch.ones(2)]}, "called on (0:T 1:T)"),
+    "writing_call": ({"callee": torch.Tensor.add_, "operands": [torch.Tensor.add_]}, "it writes operand 0 of the calls measured"),
 }  # fmt: skip
 # The callees of torch whose lines per form of operands are not heard: the
 # callee as a whole is left to a name, which is answered before any operand
@@ -17217,8 +17236,8 @@ class TestVmRulesDump(TestCase):
         for name, (_, _, _, family, says) in named.items():
             with self.subTest(before=name):
                 self.assertEqual(used[name], {family})
-                self.assertIn("Refuses ", says)
-                self.assertIn("Records ", says)
+                self.assertRegex(says, r"\b[Rr]efuses\b")
+                self.assertRegex(says, r"\b[Rr]ecords\b")
                 ask, why = RULES_REFUSED[name]
                 refused = hear(**ask)
                 self.assertEqual(refused[0], "stop")

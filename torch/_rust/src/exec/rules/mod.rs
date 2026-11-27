@@ -287,11 +287,11 @@ pub const DEFAULTS: &[(&str, &str, &str)] = &[
 ];
 
 // The `before` functions of the families' rows, for the dump: by family,
-// the function, its name, and what it refuses and what it records. (The
-// torch family has no such list yet: the dump shows its functions as
-// UNNAMED.)
+// the function, its name, and what it refuses and what it records. A row's
+// function that is on no family's list is shown as UNNAMED, and a test
+// fails for it.
 pub type Says = (Before, &'static str, &'static str);
-pub const BEFORES: &[(&str, &[Says])] = &[("imports", imports::BEFORES)];
+pub const BEFORES: &[(&str, &[Says])] = &[("imports", imports::BEFORES), ("torch", torch::BEFORES)];
 
 // The name of a row's `before` for the dump: "-" where it has none, UNNAMED
 // for a function that is on no family's list.
@@ -352,7 +352,6 @@ pub const UNHEARD: &[(&str, &str)] = &[
     ("callees: slot wrappers", "as a builtin: its operands go to the executor's hooks, and the word alone says that it writes nothing"),
     ("callees: C callables", "as a builtin: its operands go to the executor's hooks, and the word alone says what the C code behind the object does"),
     ("callees: torch, unswept", "a C callable of torch that was not measured runs as an operator the trace sees; nothing but the word says that it writes or draws nothing. Listed because it ran so before the list was written, not because that is right"),
-    (callees::NO_KIND, "a call of an object of none of the kinds of callable the rules tell apart: nothing stands in for a rule there, and the word alone says what the call runs. Listed because every callee without a line ran so before the kinds were told apart, not because that is right: it is to stop, here and outside such a call"),
 ];
 
 // What license() answers as the trace of today's engine hears it
