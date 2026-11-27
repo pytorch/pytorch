@@ -11199,7 +11199,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # FIXME: fix all the skipped ones below!
             test_namespace(torch.randn(1),  # noqa: F821
                            'as_strided_',
-                           re.compile('^clamp_(min|max)_?$'),
                            'is_distributed',
                            'is_nonzero',
                            'is_same_size',
