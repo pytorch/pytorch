@@ -205,24 +205,20 @@ class TestBench(TestCase):
 class TestBenchCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
+    def _bench_fn(self):
         x = torch.rand(1024, 10).to("cuda").half()
         w = torch.rand(512, 10).to("cuda").half()
-        cls._bench_fn = staticmethod(
-            functools.partial(torch.nn.functional.linear, x, w)
-        )
+        return functools.partial(torch.nn.functional.linear, x, w)
 
     @requires_cuda_and_triton
     def test_benchmarker(self):
-        res = benchmarker.benchmark_gpu(self._bench_fn)
+        res = benchmarker.benchmark_gpu(self._bench_fn())
         log.warning("do_bench result: %s", res)
         self.assertGreater(res, 0)
 
     @skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_do_bench_using_profiling(self):
-        res = do_bench_using_profiling(self._bench_fn)
+        res = do_bench_using_profiling(self._bench_fn())
         log.warning("do_bench_using_profiling result: %s", res)
         self.assertGreater(res, 0)
 
