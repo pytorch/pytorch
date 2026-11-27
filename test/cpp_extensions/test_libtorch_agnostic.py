@@ -1144,7 +1144,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(result[1], t2 * t2)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @onlyCPU
     def test_device(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -1196,6 +1196,14 @@ class TestLibtorchAgnostic(TestCase):
             RuntimeError, "Device index 129 is out of range for int8_t"
         ):
             libtorch_agnostic.ops.test_device_set_index(cuda_device, 129)
+
+        if not _torchVersionLessThan(2, 16):
+            import libtorch_agn_2_16
+
+            self.assertEqual(
+                libtorch_agn_2_16.ops.test_device_set_index(torch.device("mtia"), 1),
+                torch.device("mtia:1"),
+            )
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCUDA
