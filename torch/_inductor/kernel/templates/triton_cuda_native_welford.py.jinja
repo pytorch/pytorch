@@ -1,0 +1,33 @@
+{% if FINAL %}
+{{def_kernel("X", "PARTIAL")}}
+{% else %}
+{{def_kernel("X")}}
+    PARTIAL = X
+{% endif %}
+    output = tl.program_id(0).to(tl.int64)
+    cta = tl.program_id(1)
+    mean = tl.full((), 0, ACC_TYPE)
+    m2 = tl.full((), 0, ACC_TYPE)
+    count = tl.full((), 0, ACC_TYPE)
+    active = False
+    {% for plan in PLANS %}
+    {% if loop.first %}if{% elif not loop.last %}elif{% else %}else:{% endif %}{% if not loop.last or loop.first %} X.to(tl.uint64) % {{plan[0] * ITEMSIZE}} == 0:{% endif %}
+        active = cta < {{plan[7]}}
+        if active:
+            mean, m2, count = triton_helpers.cuda_native_welford(
+                X, PARTIAL, output, cta, SHAPE, INS, OUTS, RDIMS, N, M,
+                {{plan[1]}}, {{plan[2]}}, {{plan[5]}}, {{plan[6]}}, {{plan[7]}}, {{plan[8]}}, FINAL, {{plan[3]}}, MAX_CTAS)
+    {% endfor %}
+    {% if FINAL %}
+    component = tl.arange(0, 2)
+    if X.dtype.element_ty == tl.float16:
+        mean = mean.to(tl.float16).to(ACC_TYPE)
+    variance = triton_helpers.cuda_bn_divide(m2, count)
+    value = tl.where(component == 0, mean, variance)
+    {{store_output(("component", "output"), "value", "active", val_shape=("2",))}}
+    {% else %}
+    component = tl.arange(0, 4)
+    value = tl.where(component == 0, mean, tl.where(component == 1, m2, count))
+    mask = active & (component < 3)
+    {{store_output(("component", "output", "cta"), "value", "mask", val_shape=("4",))}}
+    {% endif %}
