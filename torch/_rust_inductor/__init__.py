@@ -2824,6 +2824,18 @@ def _dropped(func, why: str) -> None:
     stats["refused"] += 1
 
 
+def _unmade(func, why: str) -> None:
+    """The region whose function is ``func`` is not handed over: code that
+    no instruction of the traced body called ran under its trace (see
+    exec/foreign.rs, which is the one place that decides it, when the trace
+    has let go of everything it held)."""
+    record = func.record
+    record.state = "refused"
+    record.why = why
+    record.reads = None
+    stats["refused"] += 1
+
+
 def _span_holds(checks, args) -> bool:
     same = _rust()._same
     for kind, i, want in checks:
@@ -3052,6 +3064,12 @@ def _trace_region(
     if "__init__" in Backward.__dict__:
         raise AssertionError("expected BackwardCFunction to inherit __init__")
 
+    # Whatever of the program's the tracer holds from before the body ran is
+    # counted by the engine until the trace's gate (exec/foreign.rs): an
+    # object the body lets go of dies there, where the code its death runs
+    # is seen, and not somewhere in this function.
+    keep = _rust()._region_keep
+    keep((args, given, checks, plan, example))
     pinned = {c[1] for c in checks if c[0] == "is"}
     unpinned = _old_containers([a for i, a in enumerate(args) if i not in pinned])
     # By id: whether only args the guard pins hold it.
@@ -3080,6 +3098,7 @@ def _trace_region(
     # What was there before the run for sure: the arguments, and what a
     # tuple or a list among them holds.
     roots = [*args, *(i for a in args if isinstance(a, (tuple, list)) for i in a)]
+    keep((old, unpinned, tuple(as_given), roots))
     in_vm = block_pipeline is not None
     _skip_tracer_frames()
     # The trace records below autocast: the graph holds the casts autocast
@@ -3115,7 +3134,9 @@ def _trace_region(
             )
         try:
             _rust()._region_own(_writes.own(_tracer()))
+            _rust()._region_callbacks(_writes.callbacks(_tracer()))
             before = _contents(call_args)
+            keep((call_args, restore, before))
             scalar_args = (
                 _ScalarArgs(_tracer().graph) if in_vm else contextlib.nullcontext()
             )
@@ -3126,9 +3147,17 @@ def _trace_region(
                         outs = _region_body(*call_args)
                 finally:
                     _trace_backups = None
+            # The tensors fx lifted out of the body as constants are the
+            # program's too (the tracer's root module holds them). The
+            # tracer's own modules are not kept: what their death runs (a
+            # table of Dynamo's takes them out) is no code of the program's.
+            root = _tracer().root
+            lifted = [v for v in vars(root).values() if isinstance(v, torch.Tensor)]
+            keep((lifted, list(root.parameters()), list(root.buffers())))
             # The executor goes on from where the body left off: what it did
             # stands even if no region comes of it.
             result["repeatable"] = not backups
+            keep(list(backups.values()))
             backups.clear()
             as_given.clear()
             # In this order (exec/reads.rs): the record of the run's writes

@@ -8069,5 +8069,332 @@ class TestVmOwnWrites(TestCase):
 instantiate_device_type_tests(TestVmOwnWrites, globals())
 
 
+# Code that runs under a traced call because an object died, called by no
+# instruction of the call. `MODES_FOREIGN_CHANGES`: what that code changes
+# (the state, the change, how the state reads); the call reads none of it.
+# `MODES_FOREIGN_DROPS`: how the object comes to die (`setup`, what the
+# program does before each call, the lines of the call, its parameters and
+# its extra arguments), the pass lists under which it dies inside a traced
+# block (a store ends a block under the default list: there the object dies
+# between two blocks, in the program's own run), and `left_out`: the planner
+# leaves the instruction out of every traced block whatever the code does.
+# `MODES_FOREIGN`: the refusal of a trace such code ran under.
+# `MODES_FOREIGN_OUTSIDE`: how the planner says that an instruction is in no
+# block that is traced, because the runs before the trace entered such code
+# under it (code that first runs once a function of the process is traced
+# is unknown to it: a process with one program is where a trace runs over
+# the death).
+MODES_FOREIGN = "a frame that is not the body's ran under it"
+MODES_FOREIGN_OUTSIDE = ("indirectly", "its code is unknown", "it hasn't run")
+
+MODES_FOREIGN_PROGRAM = """
+{state}
+
+
+def change():
+    {change}
+
+
+{setup}
+
+
+def before(call):
+    {before}
+
+
+def state():
+    return {read}
+
+
+def {name}({params}):
+    y = modes_work(x)
+    {body}
+    return modes_work(y * 2.0)
+"""
+
+MODES_FOREIGN_CHANGES = {
+    "global": ("G = 2.0", "global G\n    G = 5.0 - G", "G"),
+    "item": ("S = {'a': 2.0}", "S['a'] = 5.0 - S['a']", "S['a']"),
+    "attribute": ("O = ModesHolder()", "O.k = 5.0 - O.k", "O.k"),
+    "slot": (
+        "class Slotted:\n    __slots__ = ('k',)\n\n\nO = Slotted()\nO.k = 2.0",
+        "O.k = 5.0 - O.k",
+        "O.k",
+    ),
+    "class_attribute": (
+        "class Counted:\n    k = 2.0",
+        "Counted.k = 5.0 - Counted.k",
+        "Counted.k",
+    ),
+    "class": (
+        "class One:\n    pass\n\n\nclass Two:\n    pass\n\n\nO = One()",
+        "O.__class__ = Two if type(O) is One else One",
+        "type(O).__name__",
+    ),
+    "bases": (
+        "class One:\n    pass\n\n\nclass Two:\n    pass\n\n\nclass Based(One):\n    pass",
+        "Based.__bases__ = (Two,) if Based.__bases__ == (One,) else (One,)",
+        "Based.__bases__[0].__name__",
+    ),
+    "tensor_key": (
+        "T = torch.ones(3)",
+        "T.requires_grad_(not T.requires_grad)",
+        "T.requires_grad",
+    ),
+    "nothing": ("N = 0", "pass", "N"),
+}
+
+MODES_FOREIGN_DEL = (
+    "class Dropped:\n    w = 1.0\n\n    def __del__(self):\n        change()"
+)
+MODES_FOREIGN_HELD = "class Plain:\n    pass\n\n\nH = {'h': None}\nW = {}"
+MODES_FOREIGN_STORE = ("effects",)
+
+MODES_FOREIGN_DROPS = {
+    "finalizer": {"setup": MODES_FOREIGN_DEL, "body": "Dropped()"},
+    "init_stores": {
+        "setup": "class Dropped:\n    def __init__(self):\n        self.w = 1.0\n\n    def __del__(self):\n        change()",
+        "body": "Dropped()",
+    },
+    "poked": {
+        "setup": "class Dropped:\n    def poke(self):\n        self.w = 1.0\n\n    def __del__(self):\n        change()",
+        "body": "Dropped().poke()",
+        "passes": MODES_FOREIGN_STORE,
+    },
+    "callee_frame": {
+        "setup": MODES_FOREIGN_DEL
+        + "\n\n\ndef inner():\n    held = Dropped()\n    return 1.0",
+        "body": "inner()",
+    },
+    "cell": {
+        "setup": MODES_FOREIGN_DEL
+        + "\n\n\ndef inner():\n    held = Dropped()\n    again = lambda: held\n    return 1.0",
+        "body": "inner()",
+    },
+    # Held by the record of the call's read of it, past the drop.
+    "read_then_dropped": {"setup": MODES_FOREIGN_DEL, "body": "w = Dropped().w"},
+    # Held by the record of the store that replaced it.
+    "replaced_by_a_store": {
+        "setup": MODES_FOREIGN_DEL + "\n\n\nH = {'h': None}",
+        "before": "H['h'] = Dropped()",
+        "body": "H['h'] = None",
+        "passes": MODES_FOREIGN_STORE,
+    },
+    # Held by the record of the call's own store of it, which a second
+    # store replaced (a dataclass: a region could make it again).
+    "stored_then_replaced": {
+        "setup": "@dataclasses.dataclass\nclass Dropped:\n    w: float\n\n    def __del__(self):\n        change()\n\n\nH = {'h': None}",
+        "body": "H['h'] = Dropped(1.0)\n    H['h'] = None",
+        "passes": MODES_FOREIGN_STORE,
+    },
+    "weakref_callback": {
+        "setup": MODES_FOREIGN_HELD,
+        "before": "H['h'] = Plain()\n    W['w'] = weakref.ref(H['h'], lambda w: change())",
+        "body": "H['h'] = None",
+        "passes": MODES_FOREIGN_STORE,
+    },
+    "weakref_finalize": {
+        "setup": MODES_FOREIGN_HELD,
+        "before": "H['h'] = Plain()\n    weakref.finalize(H['h'], change)",
+        "body": "H['h'] = None",
+        "passes": MODES_FOREIGN_STORE,
+        # (weakref.finalize takes its record out of a dict.)
+        "left_out": True,
+    },
+    "generator_closed": {
+        "setup": "def gen():\n    try:\n        yield 1.0\n        yield 2.0\n    finally:\n        change()",
+        "body": "next(gen())",
+        # (A generator the planner has not seen run to its end.)
+        "left_out": True,
+    },
+    # Held by the copies the tracer takes of an argument before the call.
+    "argument_item": {
+        "setup": MODES_FOREIGN_DEL,
+        "params": "x, held",
+        "args": "[Dropped()]",
+        "body": "held[0] = None",
+        "passes": MODES_FOREIGN_STORE,
+    },
+    "argument_nested": {
+        "setup": MODES_FOREIGN_DEL,
+        "params": "x, held",
+        "args": "{'l': [Dropped()]}",
+        "body": "held['l'] = None",
+        "passes": MODES_FOREIGN_STORE,
+    },
+}
+
+# The frames that are let through, each with what is not: the tracer's own
+# table of tensors takes the entry of a tensor that died out with a
+# weak-reference callback, and the executor calls an empty function of its
+# own (named `t`) for the interpreter to do what is pending, a collection
+# for one. `setup`, before each call, the call; `refused`: whether the
+# frame that runs is the program's.
+MODES_FOREIGN_TABLES = {
+    # A collection is pending whenever the loop goes round.
+    "the_executors": (
+        "import gc",
+        "gc.set_threshold(1, 1, 1)",
+        "for _ in range(3):\n        y = y + 1.0",
+        False,
+    ),
+    # A function of the program with the name of the executor's.
+    "same_name_as_the_executors": (
+        MODES_FOREIGN_HELD + "\n\n\ndef t(k):\n    change()",
+        "H['h'] = Plain()\n    W['w'] = weakref.ref(H['h'], t)",
+        "H['h'] = None",
+        True,
+    ),
+    # Tensors of the call's own die between two instructions.
+    "the_tracers": ("", "pass", "y = y + 1.0\n    y = y * 1.0", False),
+    # A function of the program with the name of the tracer's callback.
+    "same_name": (
+        MODES_FOREIGN_HELD + "\n\n\ndef remove(k):\n    change()",
+        "H['h'] = Plain()\n    W['w'] = weakref.ref(H['h'], remove)",
+        "H['h'] = None",
+        True,
+    ),
+    # A table of the program's of the tracer's class: the same code, and a
+    # function object of its own.
+    "same_code": (
+        "from torch.utils.weak import WeakTensorKeyDictionary\n\n\nH = {'h': None}\nW = WeakTensorKeyDictionary()",
+        "H['h'] = torch.ones(3)\n    W[H['h']] = 1",
+        "H['h'] = None",
+        True,
+    ),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmForeignFrames(TestCase):
+    """Code that runs under a traced call and that no instruction of the call
+    called (a finalizer, a weak reference's callback, a generator closed
+    where it was suspended) is in no region: the trace it ran under is
+    refused, whatever let go of the object and whatever the code changes.
+    Every program computes what the interpreter computes and leaves the
+    state the interpreter leaves."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def reasons(self, device, passes, programs, args=None):
+        # `programs`: {name: source}. Call by call over all of them, so that
+        # the code of each has run when the first of them is traced (code
+        # that runs for the first time later is left to the interpreter).
+        names = {
+            "torch": torch,
+            "weakref": weakref,
+            "dataclasses": dataclasses,
+            "modes_work": modes_work,
+            "ModesHolder": ModesHolder,
+        }
+        spaces = {}
+        for name, source in programs.items():
+            mine, theirs = dict(names), dict(names)
+            exec(source, mine)
+            exec(source, theirs)
+            compiled = vm(mine[name], passes=MODES_OWN_PASSES[passes])
+            spaces[name] = (mine, theirs, compiled)
+        for call in range(12):
+            for name, (mine, theirs, compiled) in spaces.items():
+                torch.manual_seed(call)
+                x = torch.randn(4, 8, device=device)
+                results = []
+                for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                    space["before"](call)
+                    more = () if args is None else (eval(args, space),)
+                    results.append(fn(x, *more))
+                where = f"{name}, call {call}:\n{programs[name]}"
+                self.assertEqual(*results, atol=0, rtol=0, msg=where)
+                self.assertEqual(mine["state"](), theirs["state"](), msg=where)
+        out = {}
+        for name, (_, _, compiled) in spaces.items():
+            rows = [r for r in vm.regions(compiled) if r["function"] == name]
+            why = [str(r.get("why") or r.get("reason") or "") for r in rows]
+            out[name] = (why, region_runs(compiled))
+        return out
+
+    @parametrize("drop", list(MODES_FOREIGN_DROPS))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_code_run_by_a_death_gives_no_region(self, device, drop, passes):
+        how = MODES_FOREIGN_DROPS[drop]
+        programs = {
+            f"{drop}_{changed}": MODES_FOREIGN_PROGRAM.format(
+                name=f"{drop}_{changed}",
+                state=state,
+                change=change,
+                read=read,
+                setup=how["setup"],
+                before=how.get("before", "pass"),
+                params=how.get("params", "x"),
+                body=how["body"],
+            )
+            for changed, (state, change, read) in MODES_FOREIGN_CHANGES.items()
+        }
+        found = self.reasons(device, passes, programs, how.get("args"))
+        if passes not in how.get("passes", MODES_OWN_PASSES):
+            return
+        for name, (reasons, _) in found.items():
+            # The death is under no trace that became a region: its trace
+            # was refused, or the planner left the instruction out of every
+            # traced block.
+            refused = any(MODES_FOREIGN in r for r in reasons)
+            outside = any(o in r for r in reasons for o in MODES_FOREIGN_OUTSIDE)
+            with self.subTest(program=name):
+                self.assertTrue(refused or outside, msg=f"{reasons}\n{programs[name]}")
+
+    @parametrize("drop", list(MODES_FOREIGN_DROPS))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_code_that_changes_nothing_is_refused_all_the_same(
+        self, device, drop, passes
+    ):
+        # Alone in its process, and with nothing the planner could hold
+        # against the code: only the refusal stands between it and a region.
+        how = MODES_FOREIGN_DROPS[drop]
+        if passes not in how.get("passes", MODES_OWN_PASSES):
+            self.skipTest("a store ends a block under the default passes")
+        state, change, read = MODES_FOREIGN_CHANGES["nothing"]
+        source = MODES_FOREIGN_PROGRAM.format(
+            name=drop,
+            state=state,
+            change=change,
+            read=read,
+            setup=how["setup"],
+            before=how.get("before", "pass"),
+            params=how.get("params", "x"),
+            body=how["body"],
+        )
+        reasons, _ = self.reasons(device, passes, {drop: source}, how.get("args"))[drop]
+        said = MODES_FOREIGN_OUTSIDE if how.get("left_out") else (MODES_FOREIGN,)
+        refused = any(o in r for r in reasons for o in said)
+        self.assertTrue(refused, msg=f"{reasons}\n{source}")
+
+    @parametrize("table", list(MODES_FOREIGN_TABLES))
+    @isolated
+    def test_only_the_tracers_own_callback_is_let_through(self, device, table):
+        setup, before, body, refused = MODES_FOREIGN_TABLES[table]
+        state, change, read = MODES_FOREIGN_CHANGES["item"]
+        source = MODES_FOREIGN_PROGRAM.format(
+            name=table,
+            state=state,
+            change=change,
+            read=read,
+            setup=setup,
+            before=before,
+            params="x",
+            body=body,
+        )
+        reasons, runs = self.reasons(device, "effects", {table: source})[table]
+        said = (MODES_FOREIGN, *MODES_FOREIGN_OUTSIDE)
+        found = any(o in r for r in reasons for o in said)
+        self.assertEqual(found, refused, msg=f"{reasons}\n{source}")
+        if not refused:
+            self.assertGreater(runs, 0, msg=source)
+
+
+instantiate_device_type_tests(TestVmForeignFrames, globals())
+
+
 if __name__ == "__main__":
     run_tests()

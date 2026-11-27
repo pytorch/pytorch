@@ -402,6 +402,7 @@ pub fn frame_entered() {
 
 // Starts the reads of a trace on this thread.
 pub fn begin() {
+    super::foreign::begin();
     // Looked up here, outside the executor: not a read of the body's.
     builtins();
     super::made::clear();
@@ -2260,6 +2261,8 @@ impl Reads {
     /// about was found only by what is dropped, and is neither an input of
     /// the trace (the guard's to compare) nor a result of it.
     fn forget(&self, holders: Vec<Bound<'_, PyAny>>) -> Option<&'static str> {
+        // (Called before the trace's gate: see foreign.rs.)
+        let _releasing = super::foreign::Releasing::start();
         let e = unsafe { &mut *self.entries.get() };
         let given = |o: &Pin| holders.iter().any(|h| o.is(h.as_ptr()));
         e.groups.retain(|g| !given(&g.holder));
@@ -2363,6 +2366,9 @@ pub fn _region_known(obj: &Bound<'_, PyAny>, given: Vec<Bound<'_, PyAny>>) -> bo
 /// asked about, those are the guard's to compare or the graph's to make.
 #[pyfunction]
 pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
+    // What the stores replaced, and the log of the writes below, are let go
+    // of here: a frame that runs for it is seen (foreign.rs).
+    let _releasing = super::foreign::Releasing::start();
     // The run stands: what its stores replaced is let go of first. The
     // finalizer of an object that dies of it is the last thing the run's
     // own writes set off, and what it changes is compared below.
@@ -2437,6 +2443,10 @@ pub fn _region_read_misses() -> u64 {
 #[pyfunction]
 #[pyo3(signature = (given=vec![]))]
 pub fn _region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(Option<Py<Reads>>, Option<String>)> {
+    // The entries that go here (swept, dropped, held weakly from now on)
+    // and the rest of the trace's records let go of what they counted: a
+    // frame that runs for it is seen (foreign.rs).
+    let _releasing = super::foreign::Releasing::start();
     let Some(t) = TRACE.take() else { return Ok((None, None)) };
     if let Some(why) = t.refused {
         return Ok((None, Some(why)));

@@ -317,6 +317,9 @@ pub fn _region_body<'py>(py: Python<'py>, args: &Bound<'py, PyTuple>) -> PyResul
     };
     match outs {
         Ok(outs) => {
+            // (Counted until the trace's gate, like everything the tracer's
+            // Python code is handed: foreign.rs.)
+            outs.iter().for_each(|o| unsafe { super::foreign::keep(*o) });
             let items: Vec<Bound<'py, PyAny>> = outs
                 .into_iter()
                 .map(|o| unsafe { Bound::from_owned_ptr_or_opt(py, o) }.unwrap_or_else(|| null.clone()))
@@ -763,20 +766,47 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     super::backward::ready();
     super::writes::begin();
     super::hist::begin();
-    let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span, types, asked)));
-    super::reads::end();
-    TRACING.set(false);
-    BODY.set(None);
-    // A refusal is asked about until the next trace begins (see refused):
-    // what it keeps then is its text, not the frames it was raised through
-    // and the tensors in them.
-    REFUSAL.with_borrow(|e| {
-        if let Some(e) = e {
-            ffi::PyException_SetTraceback(e.as_ptr(), ffi::Py_None());
-            ffi::PyException_SetContext(e.as_ptr(), std::ptr::null_mut());
+    let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, &args, unread.to_vec(), span, types, asked)));
+    let made = {
+        // What the trace still holds goes here (the reads of a trace that
+        // came to nothing, the tracer's result but for what the region
+        // keeps), where a frame run by a release is seen (foreign.rs).
+        let _releasing = super::foreign::Releasing::start();
+        super::reads::end();
+        TRACING.set(false);
+        BODY.set(None);
+        // A refusal is asked about until the next trace begins (see refused):
+        // what it keeps then is its text, not the frames it was raised through
+        // and the tensors in them.
+        REFUSAL.with_borrow(|e| {
+            if let Some(e) = e {
+                ffi::PyException_SetTraceback(e.as_ptr(), ffi::Py_None());
+                ffi::PyException_SetContext(e.as_ptr(), std::ptr::null_mut());
+            }
+        });
+        let made = r.and_then(|r| traced(name, r, n_args, span, f));
+        drop(args);
+        made
+    };
+    // THE GATE. Every frame that ran since the body's first instruction
+    // and that no instruction of the body called was seen by now, whatever
+    // let go of the object it ran for; nothing the trace held is released
+    // behind this line. Such a frame is code of the program's that the
+    // region would leave out: no region. (What the comparisons of
+    // _region_settled and _region_reads rest on: nothing the program's ran
+    // behind them unseen.)
+    let foreign = super::foreign::gate();
+    match (made?, foreign) {
+        (Some(made), Some(why)) => {
+            py.import("torch._rust_inductor")?.call_method1("_unmade", (made.variant.spec.func.clone_ref(py), why))?;
+            Ok(None)
         }
-    });
-    let r = r?;
+        (made, _) => Ok(made),
+    }
+}
+
+// The region the tracer's result `r` is (None: no region).
+unsafe fn traced(name: &str, r: Bound<'_, PyAny>, n_args: usize, span: bool, f: *mut Frame) -> PyResult<Option<Traced>> {
     if r.is_none() {
         return Ok(None);
     }

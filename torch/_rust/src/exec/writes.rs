@@ -610,6 +610,9 @@ pub(super) fn let_go() {
 /// run made, filled and let go of).
 #[pyfunction]
 pub fn _region_writes(py: Python<'_>) -> PyResult<Vec<(Py<PyAny>, Py<PyAny>, Py<pyo3::types::PyTuple>)>> {
+    // The records of writes nothing can see, and the entries swept with
+    // them, go here: a frame that runs for it is seen (foreign.rs).
+    let _releasing = super::foreign::Releasing::start();
     // (Already done where the reads were compared first; the counts below
     // are of the records without what the stores replaced.)
     let_go();
@@ -634,6 +637,15 @@ pub fn _region_writes(py: Python<'_>) -> PyResult<Vec<(Py<PyAny>, Py<PyAny>, Py<
             break;
         }
         ws.retain(|w| !dead.contains(&(w.target.as_ptr() as usize)));
+    }
+    // What the tracer's Python code is handed stays counted until the
+    // trace's gate (a value the run stored and then replaced is held by its
+    // record alone).
+    for w in &ws {
+        unsafe {
+            super::foreign::keep(w.target.as_ptr());
+            w.args.iter().for_each(|a| super::foreign::keep(a.as_ptr()));
+        }
     }
     ws.into_iter().map(|w| Ok((w.how, w.target, pyo3::types::PyTuple::new(py, w.args)?.unbind()))).collect()
 }

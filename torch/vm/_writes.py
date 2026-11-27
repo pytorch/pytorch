@@ -66,6 +66,16 @@ def own(tracer) -> list[Any]:
     return out
 
 
+def callbacks(tracer) -> list[Any]:
+    """The function objects the make_fx trace's own tables run when a tensor
+    they hold weakly dies (the entry is taken out): a frame of one of them
+    under the traced body is the trace's, not code of the program's that no
+    instruction called (``torch._rust._region_callbacks``)."""
+    return [
+        v._remove for v in vars(tracer).values() if isinstance(v, WeakIdKeyDictionary)
+    ]
+
+
 def _stored(how: str, target, key):
     """What the write ``how`` left in ``target`` under ``key``, read without
     running code of the target's class."""

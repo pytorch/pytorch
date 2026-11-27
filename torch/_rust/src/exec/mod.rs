@@ -14,6 +14,7 @@ mod covered;
 pub mod effects;
 pub mod exact;
 pub mod ffi;
+pub mod foreign;
 pub mod graph;
 pub mod hist;
 pub mod joint;
@@ -873,6 +874,10 @@ unsafe extern "C" fn eval_frame(
     // is taken whoever runs the frame now.
     let gen_frame = tr_frame_owned_by_generator(frame) != 0;
     let own = gen_frame && own::take(frame);
+    // A frame under a trace that no instruction of the traced body called
+    // (foreign.rs): the trace is no region, unless the frame is one of the
+    // trace's own callbacks (the guard lives while it runs).
+    let _callback = if foreign::judged(ACTIVE.get() != 0) { foreign::entered(frame) } else { None };
     if ACTIVE.get() == 0 {
         return prev(tstate, frame, throwflag);
     }

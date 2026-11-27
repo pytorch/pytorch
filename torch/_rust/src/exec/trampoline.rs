@@ -117,6 +117,11 @@ pub unsafe fn eval_breaker() -> bool {
     })
 }
 
+// Whether `func` (borrowed) is the empty function eval_breaker calls.
+pub fn is_breaker(func: *mut pyo3::ffi::PyObject) -> bool {
+    TRAMPOLINES.get().is_some_and(|t| t.breaker.as_ptr() == func)
+}
+
 // Runs the intrinsic on `args`; NULL with an exception set on failure.
 pub unsafe fn call(opcode: u8, arg: u32, args: &[*mut pyo3::ffi::PyObject]) -> *mut pyo3::ffi::PyObject {
     Python::attach(|py| {
