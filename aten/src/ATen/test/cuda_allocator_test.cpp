@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/core/CachingDeviceAllocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 
@@ -35,6 +36,8 @@ TEST(TestTorchUnique, UniqueComparisonTest) {
   auto custom_allocator =
       torch::cuda::CUDAPluggableAllocator::createCustomAllocator(logging_malloc, logging_free);
   torch::cuda::CUDAPluggableAllocator::changeCurrentAllocator(custom_allocator);
+  EXPECT_EQ(c10::GetAllocator(at::kCUDA), custom_allocator.get());
+  EXPECT_EQ(c10::getDeviceAllocator(at::kCUDA), custom_allocator.get());
   // Run the command 3 times; the first 2 will pass and the third invocation will have
   // different sizes in alloc and free if the test fails.
   for (int i = 0; i < 3; ++i) {

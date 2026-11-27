@@ -80,29 +80,71 @@ void check_gpu_arch(hipStream_t stream) {
 }
 
 std::tuple<bool, int, int>
-calculate_swa(std::optional<int64_t> window_size_left,
-              std::optional<int64_t> window_size_right,
+calculate_swa(int window_size_left,
+              int window_size_right,
               int max_seqlen_q,
               int max_seqlen_k,
-              bool is_causal) {
+              bool is_causal,
+              bool is_varlen) {
+  // Every negative window size is treated as -1. A lone -1 side is not
+  // unbounded: FA2 substitutes max_seqlen_k for it (left = -1 with right = 0
+  // is plain causal instead), and so does the AOTriton >= 0.15 branch below.
 #if AOTRITON_V3_API  // SWA is exposed through V3 API
-  bool needs_swa = false;
   using aotriton::v3::flash::WindowValue;
-  // Default values when std::optional window_size_left/right have no value
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+  // Normalize the window exactly as the CUDA build does (FA2, flash_api.cpp:
+  // mha_fwd, mha_varlen_fwd, mha_bwd, mha_varlen_bwd and set_params_fprop), so
+  // both mask the same keys. Below, any negative side counts as -1. In varlen,
+  // max_seqlen_k is used here, while the diagonal is placed per sequence.
+  int left = window_size_left;
+  int right = window_size_right;
+  if (left >= max_seqlen_k) { left = -1; }
+  if (right >= max_seqlen_k) { right = -1; }
+  if (is_causal) { right = 0; }
+  if (left < 0 && right < 0) {
+    return std::make_tuple(false, 0, 0);
+  }
+  if (left < 0 && right == 0) {
+    // Bottom-right causal; a window only if the caller did not say is_causal.
+    return std::make_tuple(!is_causal,
+                           static_cast<int>(WindowValue::BottomRightAligned),
+                           static_cast<int>(WindowValue::BottomRightAligned));
+  }
+  // FA2 stands in max_seqlen_k for the unbounded side. That is not unbounded on
+  // the right: the first rows of a sequence with seqlen_q > max_seqlen_k + 1
+  // lose keys, and a right side >= max_seqlen_k is dropped above even where it
+  // did exclude keys. The CUDA build behaves so, hence this build too.
+  if (left < 0) { left = max_seqlen_k; }
+  if (right < 0) { right = max_seqlen_k; }
+  auto [window_left, window_right] =
+      sdp::aotriton_adapter::bottom_right_window(left,
+                                                 right,
+                                                 max_seqlen_q,
+                                                 max_seqlen_k,
+                                                 is_varlen);
+  return std::make_tuple(true, window_left, window_right);
+#else
+  bool needs_swa = false;
+  // Default values for an unbounded (negative) side
   int window_left = max_seqlen_q;
   int window_right = max_seqlen_k;
   if (is_causal) {
     window_left = WindowValue::BottomRightAligned;
     window_right = WindowValue::BottomRightAligned;
   }
-  if (window_size_left.has_value() || window_size_right.has_value()) {
+  if (window_size_left >= 0 || window_size_right >= 0) {
     needs_swa = true;
-    window_left = window_size_left.value_or(window_left);
-    window_right = window_size_right.value_or(window_right);
+    if (window_size_left >= 0) {
+      window_left = window_size_left;
+    }
+    if (window_size_right >= 0) {
+      window_right = window_size_right;
+    }
   }
   return std::make_tuple(needs_swa, window_left, window_right);
+#endif
 #else
-  if (window_size_left.has_value() || window_size_right.has_value()) {
+  if (window_size_left >= 0 || window_size_right >= 0) {
     TORCH_WARN_ONCE("Current AOTriton does not support sliding window attention (SWA)."
                     " Both window_size_left and window_size_right will be ignored."
                     " Re-compile PyTorch with AOTriton >= 0.10b to enable SWA support.");
@@ -157,8 +199,8 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
             const float p_dropout,
             const float softmax_scale,
             bool is_causal,
-            std::optional<int64_t> window_size_left,
-            std::optional<int64_t> window_size_right,
+            int window_size_left,
+            int window_size_right,
             const bool return_softmax,
             const std::optional<at::Generator>& gen_) {
   auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -238,7 +280,8 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
                                                               window_size_right,
                                                               seqlen_q,
                                                               seqlen_k,
-                                                              is_causal);
+                                                              is_causal,
+                                                              false);
 #if AOTRITON_V3_API
   const bool uses_swa = needs_swa;
 #else
@@ -329,8 +372,8 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
                const float softmax_scale,
                const bool zero_tensors,
                bool is_causal,
-               std::optional<int64_t> window_size_left,
-               std::optional<int64_t> window_size_right,
+               int window_size_left,
+               int window_size_right,
                const bool return_softmax,
                const std::optional<at::Generator>& gen_) {
   const bool paged_KV = block_table_.has_value();
@@ -443,7 +486,8 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
                                                               window_size_right,
                                                               max_seqlen_q,
                                                               max_seqlen_k,
-                                                              is_causal);
+                                                              is_causal,
+                                                              true);
 #if AOTRITON_V3_API
   const bool uses_swa = needs_swa;
 #else
@@ -535,6 +579,11 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
       params.cu_seqlens_k = mk_input_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
     }
 #endif
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+    if (needs_swa) {
+      params.varlen_bits = sdp::aotriton_adapter::with_bottom_right_diagonal(params.varlen_bits);
+    }
+#endif
     params.window_left = window_left;
     params.window_right = window_right;
     AT_CUDA_CHECK(aotriton::v3::flash::attn_fwd(
@@ -562,8 +611,8 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
         const float p_dropout,         // probability to drop
         const float softmax_scale,
         const bool is_causal,
-        std::optional<int64_t> window_size_left,
-        std::optional<int64_t> window_size_right,
+        int window_size_left,
+        int window_size_right,
         const bool deterministic,
         const at::Tensor& philox_seed,
         const at::Tensor& philox_offset) {
@@ -651,7 +700,8 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
                                                               window_size_right,
                                                               seqlen_q,
                                                               seqlen_k,
-                                                              is_causal);
+                                                              is_causal,
+                                                              false);
 #if AOTRITON_V3_API
   const bool uses_swa = needs_swa;
 #else
@@ -742,8 +792,8 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const float softmax_scale,
                const bool zero_tensors,
                const bool is_causal,
-               std::optional<int64_t> window_size_left,
-               std::optional<int64_t> window_size_right,
+               int window_size_left,
+               int window_size_right,
                const bool deterministic,
                const at::Tensor& philox_seed,
                const at::Tensor& philox_offset)
@@ -859,7 +909,8 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
                                                               window_size_right,
                                                               max_seqlen_q,
                                                               max_seqlen_k,
-                                                              is_causal);
+                                                              is_causal,
+                                                              true);
 #if AOTRITON_V3_API
   const bool uses_swa = needs_swa;
 #else
@@ -908,6 +959,11 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     params.varlen_bits = mk_varlen_bits_packed();
 #else
     params.varlen_type = VarlenType::CompactVarlen;
+#endif
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+    if (needs_swa) {
+      params.varlen_bits = sdp::aotriton_adapter::with_bottom_right_diagonal(params.varlen_bits);
+    }
 #endif
     params.window_left = window_left;
     params.window_right = window_right;

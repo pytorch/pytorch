@@ -2278,13 +2278,13 @@ static void triangular_solve_out_impl(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == clone_input.scalar_type());
 
   // if 'result' has no elements we can modify it
-  if (result.numel() == 0) {
+  if (result.numel() == 0 && !result.sizes().equals(other.sizes())) {
     result.resize_(other.mT().sizes(), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);  // make 'result' to have Fortran contiguous memory layout
   }
 
   // if 'clone_input' has no elements we can modify it
-  if (clone_input.numel() == 0) {
+  if (clone_input.numel() == 0 && !clone_input.sizes().equals(input.sizes())) {
     clone_input.resize_(input.mT().sizes(), MemoryFormat::Contiguous);
     clone_input.transpose_(-2, -1);  // make 'clone_input' to have Fortran contiguous memory layout
   }

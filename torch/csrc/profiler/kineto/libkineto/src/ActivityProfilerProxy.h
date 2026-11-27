@@ -59,6 +59,8 @@ class ActivityProfilerProxy : public ActivityProfilerInterface {
 
   void toggleCollectionDynamic(const bool enable) override;
 
+  void stopCollection() override;
+
   void startTrace() override;
   std::unique_ptr<ActivityTraceInterface> stopTrace() override;
 

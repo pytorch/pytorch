@@ -37,7 +37,6 @@ from torch._guards import CompileContext, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger, trace_structured
-from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
@@ -586,10 +585,10 @@ def _aot_stage2c_make_inference_function(
 
 
 def collect_fw_donated_buffer_idxs(
-    fw_ins: list[FakeTensor | None],
-    user_fw_outs: list[FakeTensor | None],
-    bw_outs: list[FakeTensor | None],
-    saved_tensors: list[FakeTensor | None],
+    fw_ins: list[Tensor | None],
+    user_fw_outs: list[Tensor | None],
+    bw_outs: list[Tensor | None],
+    saved_tensors: list[Tensor | None],
 ) -> list[int]:
     """
     Checks if the saved tensors are donated buffers, which means a saved tensor is not
