@@ -81,7 +81,7 @@ _HALIDE_COMPILE_OPTIONS = {
 }
 
 
-def _compile_softmax_with_halide(device):
+def _compile_softmax_with_halide(device=None):
     @torch.compile(backend="inductor", options=_HALIDE_COMPILE_OPTIONS)
     def halide(a, b):
         return torch.softmax(a, -1) + torch.softmax(b, -1)
@@ -251,7 +251,7 @@ class HalideTestsGeneric(TestCase):
         self.assertEqual(c, a + b)
 
     def test_compile_options(self):
-        _, (code,) = _compile_softmax_with_halide("cpu")
+        _, (code,) = _compile_softmax_with_halide()
         self.assertIn("@hl.generator", code)
 
     def test_inplace_add_broadcast_input_alias(self):
