@@ -32,6 +32,18 @@ TorchOp: TypeAlias = torch._ops.OpOverload | types.BuiltinFunctionType | Callabl
 
 logger = logging.getLogger(__name__)
 
+# onnxscript torchlib functions that are not registered, so that the exporter uses
+# PyTorch's builtin decomposition instead. onnxscript lowers these ops to
+# Log(Exp(a) + Exp(b)) (or the base 2 version), which overflows to inf for large
+# inputs, e.g. logaddexp(100, 100) in float32. The decompositions in torch._refs
+# are numerically stable. Remove an entry once onnxscript drops the registration.
+_SKIPPED_ONNXSCRIPT_TORCHLIB_OPS = frozenset(
+    {
+        "aten::logaddexp",
+        "aten::logaddexp2",
+    }
+)
+
 
 @dataclasses.dataclass
 class OnnxDecompMeta:
@@ -170,6 +182,8 @@ class ONNXRegistry:
 
         for torchlib_meta in torchlib_ops:
             qualified_name = torchlib_meta.qualified_name
+            if qualified_name in _SKIPPED_ONNXSCRIPT_TORCHLIB_OPS:
+                continue
             overload_func = torchlib_meta.function
             try:
                 # NOTE: This is heavily guarded with try-except because we don't want
