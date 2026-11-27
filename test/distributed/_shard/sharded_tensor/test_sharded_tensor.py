@@ -40,7 +40,6 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed.remote_device import _remote_device
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
@@ -3598,11 +3597,6 @@ class TestCreateTensorNoProcessGroupMode(TestCase):
             local_shards=st_local_shards,
             sharded_tensor_metadata=st_metadata,
         )
-
-
-instantiate_device_type_tests(
-    TestShardedTensorEnumerable, globals(), except_for="cpu", allow_xpu=True
-)
 
 
 if __name__ == "__main__":
