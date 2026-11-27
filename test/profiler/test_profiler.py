@@ -514,7 +514,7 @@ instantiate_device_type_tests(TestProfilerCUDA, globals(), only_for=("cuda",))
 
 
 class TestProfilerAtExit(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_profiler_left_running_at_exit(self, device):
         # With GPU tracing still on at exit, BLAS libraries' static destructors
@@ -550,9 +550,7 @@ x = torch.randn(64, 64, device=device)
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
 
-instantiate_device_type_tests(
-    TestProfilerAtExit, globals(), allow_xpu=True
-)
+instantiate_device_type_tests(TestProfilerAtExit, globals(), allow_xpu=True)
 
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
