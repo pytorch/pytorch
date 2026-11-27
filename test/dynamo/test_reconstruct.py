@@ -14,11 +14,12 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.utils._triton import (
     has_triton_experimental_host_tma,
     has_triton_package,
@@ -46,6 +47,8 @@ def _force_tensor_descriptor_support():
 
 @instantiate_parametrized_tests
 class ReconstructTest(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextlib.contextmanager
     def register_bytecode_hook(self, fn):
         def hook(code, out_code):
@@ -526,33 +529,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(3)
         self.assertEqual(gn(inp), inp + 3)
-
-    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
-    @unittest.skipIf(
-        not has_triton_experimental_host_tma(),
-        "Test requires triton.tools.experimental_descriptor API",
-    )
-    def test_tma_experimental_reconstruct(self):
-        import triton
-
-        def create_tma(tensor):
-            tma = triton.tools.experimental_descriptor.create_2d_tma_descriptor(
-                tensor.data_ptr(),
-                tensor.size(0),
-                tensor.size(1),
-                32,
-                32,
-                tensor.element_size(),
-            )
-            return tensor + 1, tma
-
-        x = torch.randn(128, 128, device=GPU_TYPE)
-        backend = torch._dynamo.testing.EagerAndRecordGraphs()
-
-        ref = create_tma(x)
-        res = torch.compile(create_tma, backend=backend)(x)
-        self.assertEqual(len(backend.graphs), 1)
-        self.assertEqual(ref[1].desc, res[1].desc)
 
     @unittest.skipIf(not has_triton_package(), "requires Triton")
     @_force_tensor_descriptor_support()
@@ -1776,6 +1752,37 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3), obj, holder)
         self.assertIs(holder.obj, obj)
+
+
+class ReconstructTestCUDA(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @unittest.skipIf(
+        not has_triton_experimental_host_tma(),
+        "Test requires triton.tools.experimental_descriptor API",
+    )
+    def test_tma_experimental_reconstruct(self):
+        import triton
+
+        def create_tma(tensor):
+            tma = triton.tools.experimental_descriptor.create_2d_tma_descriptor(
+                tensor.data_ptr(),
+                tensor.size(0),
+                tensor.size(1),
+                32,
+                32,
+                tensor.element_size(),
+            )
+            return tensor + 1, tma
+
+        x = torch.randn(128, 128, device="cuda")
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        ref = create_tma(x)
+        res = torch.compile(create_tma, backend=backend)(x)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(ref[1].desc, res[1].desc)
 
 
 if __name__ == "__main__":
