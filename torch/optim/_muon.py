@@ -422,10 +422,6 @@ def _multi_tensor_muon(
     else:
         updates = list(muon_momentum_bufs)
 
-    for u in updates:
-        if u.ndim != 2:
-            raise ValueError("Muon update must be a 2D matrix")
-
     updates = _multi_tensor_zeropower_via_newtonschulz(
         updates, ns_coefficients, ns_steps, eps
     )
