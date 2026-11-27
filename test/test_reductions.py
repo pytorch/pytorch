@@ -307,7 +307,7 @@ class TestReductionsDevice(TestCase):
         See discussion here https://github.com/pytorch/pytorch/issues/61901
         """
         t = make_tensor((0, 2, 3), dtype=torch.float, device=device)
-        for dim in [0] + [[0, 2]] if op.supports_multiple_dims else []:
+        for dim in [0] + ([[0, 2]] if op.supports_multiple_dims else []):
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             if op.identity is not None:
                 # Reducing along empty slice should return identity
@@ -328,7 +328,7 @@ class TestReductionsDevice(TestCase):
         """Tests that reducing a nonempty slice of an empty tensor returns an
         empty tensor with the dimensions reduced."""
         t = make_tensor((0, 2, 3), dtype=torch.float, device=device)
-        for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
+        for dim in [1] + ([[1, 2]] if op.supports_multiple_dims else []):
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             result = op(t, *args, dim=dim, **kwargs)
             self.assertEqual(result.shape, _reduced_shape(t.shape, dim=dim))

@@ -759,6 +759,21 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
     return _idx
 
 
+# Mirrors zero_numel_check_dims in aten/src/ATen/native/ReduceOpsUtils.h.
+# `> 0` rather than `!= 0` so unbacked sizes get narrowed to >= 1.
+def zero_numel_check_dims(a: TensorLikeType, dim: int, fn_name: str) -> None:
+    if a.ndim == 0:
+        torch._check_index(
+            dim == 0 or dim == -1,
+            lambda: f"{fn_name}: Expected reduction dim -1 or 0 for scalar but got {dim}",
+        )
+    else:
+        torch._check_index(
+            a.shape[dim] > 0,
+            lambda: f"{fn_name}: Expected reduction dim {dim} to have non-zero size.",
+        )
+
+
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
 @overload

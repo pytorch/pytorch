@@ -1144,7 +1144,7 @@ def meta_max(self):
 @register_meta([aten.max.dim, aten.max.dim_max])
 @out_wrapper("max", "max_values", exact_dtype=True)
 def meta_max_dim(self, dim, keepdim=False):
-    zero_numel_check_dims(self, maybe_wrap_dim(dim, self.dim()), "max()")
+    utils.zero_numel_check_dims(self, maybe_wrap_dim(dim, self.dim()), "max()")
     dim = utils.reduction_dims(self.shape, (dim,))
     output_shape = _compute_reduction_shape(self, dim, keepdim)
     return (
@@ -1162,7 +1162,7 @@ def meta_min(self):
 @register_meta([aten.min.dim, aten.min.dim_min])
 @out_wrapper("min", "min_indices", exact_dtype=True)
 def meta_min_dim(self, dim, keepdim=False):
-    zero_numel_check_dims(self, maybe_wrap_dim(dim, self.dim()), "min()")
+    utils.zero_numel_check_dims(self, maybe_wrap_dim(dim, self.dim()), "min()")
     dim = utils.reduction_dims(self.shape, (dim,))
     output_shape = _compute_reduction_shape(self, dim, keepdim)
     return (
@@ -4848,25 +4848,33 @@ def meta_median(input):
     return input.new_empty(output_shape)
 
 
-@register_meta(
-    [
-        aten.median.dim,
-        aten.median.dim_values,
-        aten.nanmedian.dim,
-        aten.nanmedian.dim_values,
-        aten.mode.default,
-        aten.mode.values,
-    ]
-)
-@out_wrapper("values", "indices")
-def meta_median_mode_dim(input, dim=-1, keepdim=False):
-    zero_numel_check_dims(input, maybe_wrap_dim(dim, input.dim()), "median()/mode()")
+def _median_mode_dim(input, dim, keepdim, fn_name):
+    utils.zero_numel_check_dims(input, maybe_wrap_dim(dim, input.dim()), fn_name)
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
     return (
         input.new_empty(output_shape),
         input.new_empty(output_shape, dtype=torch.long),
     )
+
+
+@register_meta(
+    [
+        aten.median.dim,
+        aten.median.dim_values,
+        aten.nanmedian.dim,
+        aten.nanmedian.dim_values,
+    ]
+)
+@out_wrapper("values", "indices")
+def meta_median_dim(input, dim=-1, keepdim=False):
+    return _median_mode_dim(input, dim, keepdim, "median()")
+
+
+@register_meta([aten.mode.default, aten.mode.values])
+@out_wrapper("values", "indices")
+def meta_mode(input, dim=-1, keepdim=False):
+    return _median_mode_dim(input, dim, keepdim, "mode()")
 
 
 @register_meta(aten.logical_not_.default)
@@ -8180,24 +8188,11 @@ def mkldnn_rnn_layer(
     return output, hy, cy, workspace
 
 
-def zero_numel_check_dims(self, dim, fn_name):
-    if self.ndim == 0:
-        torch._check_index(
-            dim == 0 or dim == -1,
-            lambda: f"{fn_name}: Expected reduction dim -1 or 0 for scalar but got {dim}",
-        )
-    else:
-        torch._check_index(
-            self.size(dim) != 0,
-            lambda: f"{fn_name}: Expected reduction dim {dim} to have non-zero size.",
-        )
-
-
 # From aten/src/ATen/native/ReduceOps.cpp
 def check_argmax_argmin(name, self, dim):
     if dim is not None:
         dim = maybe_wrap_dim(dim, self.dim())
-        zero_numel_check_dims(self, dim, name)
+        utils.zero_numel_check_dims(self, dim, name)
     else:
         torch._check(
             self.numel() != 0,
