@@ -2537,11 +2537,8 @@ class VariableBuilder:
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
-                install_guard(
-                    AttrSource(self.source, "__objclass__").make_guard(
-                        GuardBuilder.BUILTIN_MATCH
-                    )
-                )
+                owner_source = AttrSource(self.source, "__objclass__")
+                install_guard(owner_source.make_guard(GuardBuilder.BUILTIN_MATCH))
                 if isinstance(
                     value.__self__,
                     (types.GetSetDescriptorType, types.MemberDescriptorType),
