@@ -3332,11 +3332,15 @@ class TestConvolutionNNDevice(NNTestCase):
             .item()
         )
         if self.device_type != "cpu":
-            # Accelerator backends may use algorithms such as FFT that don't guarantee a diff of 0
-            self.assertEqual(maxdiff0, 0, atol=2e-3, rtol=1e-5)
-            self.assertEqual(maxdiff1, 0, atol=2e-3, rtol=1e-5)
-            self.assertEqual(maxdiff2, 0, atol=2e-3, rtol=1e-5)
-            self.assertEqual(maxdiff3, 0, atol=2e-3, rtol=1e-5)
+            # Accelerator backends may use algorithms such as FFT that don't guarantee a diff of 0.
+            # MIOpen runs the full call as batch-256 problems and each slice as a batch-1024
+            # problem, picks a solver per shape, and its solvers differ by up to 3 fp16 ulp here
+            # (round-toward-zero asm iGEMM, Winograd approximation error).
+            atol = 2e-2 if TEST_WITH_ROCM else 2e-3
+            self.assertEqual(maxdiff0, 0, atol=atol, rtol=1e-5)
+            self.assertEqual(maxdiff1, 0, atol=atol, rtol=1e-5)
+            self.assertEqual(maxdiff2, 0, atol=atol, rtol=1e-5)
+            self.assertEqual(maxdiff3, 0, atol=atol, rtol=1e-5)
         else:
             self.assertEqual(maxdiff0, 0)
             self.assertEqual(maxdiff1, 0)
