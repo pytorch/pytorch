@@ -1776,6 +1776,51 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(updated_x, x_clone + y)
         self.assertEqual(out, updated_x * y)
 
+    def test_foreach_inplace_on_intermediates(self):
+        @nested_compile_region
+        def gn(x, y):
+            a = (x @ y).clone()
+            b = (x + 0.1).clone()
+            torch._foreach_mul_([a, b], 1.5)
+            torch._foreach_add_([a, b], 0.25)
+            return a + b
+
+        def fn(x, y):
+            return gn(gn(x, y), y)
+
+        x = torch.randn(16, 32)
+        y = torch.randn(32, 32)
+        with torch.no_grad():
+            res = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+        self.assertEqual(res, fn(x, y))
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_foreach_input_mutation(self):
+        @nested_compile_region
+        def gn(x, y, z):
+            torch._foreach_mul_([x, y], 2.0)
+            torch._foreach_add_([x, y], [z, z], alpha=0.5)
+            return x * y
+
+        def fn(x, y, z):
+            return gn(x, y, z)
+
+        x, y, z = torch.randn(8), torch.randn(8), torch.randn(8)
+        x_clone, y_clone = x.clone(), y.clone()
+        backend = InductorAndRecordGraphs()
+        res = torch.compile(fn, backend=backend, fullgraph=True)(x, y, z)
+        self.assertEqual(res, fn(x_clone, y_clone, z))
+        self.assertEqual(x, x_clone)
+        self.assertEqual(y, y_clone)
+
+        schema = find_hop_schema(
+            backend.graphs[0], torch.ops.higher_order.invoke_subgraph
+        )
+        self.assertExpectedInline(
+            str(schema[0]),
+            """invoke_subgraph(Any subgraph, str identifier, Tensor(a2!) arg0, Tensor(a3!) arg1, Tensor arg2) -> ((Tensor))""",
+        )
+
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
 
