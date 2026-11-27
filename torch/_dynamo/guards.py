@@ -357,9 +357,8 @@ def _native_method_metadata(
         owner = receiver if is_cls else type(receiver)
         if type(owner) is not type or not type_is_immutable(owner):
             return None
-        descr = inspect.getattr_static(owner, value.__name__, None)
         kind = types.ClassMethodDescriptorType if is_cls else types.MethodDescriptorType
-        if type(descr) is not kind:
+        if type(inspect.getattr_static(owner, value.__name__, None)) is not kind:
             return None
         if not is_cls:
             expected = NativeMethodMetadata(owner, value.__name__, id(receiver))
