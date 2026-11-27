@@ -815,6 +815,36 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertEqual(compiled(x), x)
         self.assertEqual(counter.frame_count, 2)
 
+    def test_partial_guard_does_not_create_partial_dict(self):
+        # Pickling the guards must not create a guarded partial's __dict__:
+        # the guard on its dict state would be rebuilt from the changed value.
+        ctx = DiskDynamoStore()
+
+        def fn(inner, x):
+            return x + 1, functools.partial(inner).func is inner
+
+        x = torch.randn(3)
+        captured = functools.partial(torch.add, 1)
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        self.assertEqual(compiled_fn(captured, x), fn(captured, x))
+        self.assertIsNone(functools.partial.__reduce__(captured)[2][3])
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+            fresh = functools.partial(torch.add, 1)
+            self.assertEqual(compiled_fn(fresh, x), fn(fresh, x))
+            with_dict = functools.partial(torch.add, 1)
+            with_dict.tag = 7
+            with self.assertRaisesRegex(RuntimeError, "partial.__reduce__"):
+                compiled_fn(with_dict, x)
+
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
         # stand-in for a dynamic-shape cuda capture, whose first meta value is a

@@ -144,6 +144,7 @@ from ..source import (
     DictSubclassGetItemSource,
     DynamicScalarSource,
     FloatTensorSource,
+    FunctoolsPartialStateSource,
     GetItemSource,
     GlobalSource,
     GradSource,
@@ -1781,8 +1782,48 @@ class VariableBuilder:
             )
             # Preserve cache_hash for SAC context_fn caching
             original_cache_hash = getattr(value, "cache_hash", None)
+            # CPython's partial_new unwraps value in partial(value, ...) only if
+            # value's instance dict was never created. Subclasses qualify too,
+            # before 3.13 only if they keep partial's __call__. Reading
+            # value.__dict__ would create the dict, so read the state from
+            # partial's own __reduce__, whose dict slot is None while it is
+            # unset. CPython merges the native fields, so subclasses that
+            # override func, args or keywords are not flattened.
+            flattenable = False
+            dict_state_source = None
+            native_fields = None
+            value_type = type(value)
+            if all(
+                getattr(value_type, name) is getattr(functools.partial, name)
+                for name in ("func", "args", "keywords")
+            ) and (
+                sys.version_info >= (3, 13)
+                or value_type.__call__ is functools.partial.__call__
+            ):
+                state = functools.partial.__reduce__(value)[2]
+                state_source = FunctoolsPartialStateSource(self.get_source())
+                flattenable = state[3] is None
+                dict_state_source = GetItemSource(state_source, 3)
+                native_keywords = VariableBuilder(
+                    self.tx, GetItemSource(state_source, 2)
+                )(state[2])
+                if not isinstance(native_keywords, ConstDictVariable):
+                    raise AssertionError("Expected dict for partial's native keywords")
+                native_fields = (
+                    VariableBuilder(self.tx, GetItemSource(state_source, 0))(state[0]),
+                    VariableBuilder(self.tx, GetItemSource(state_source, 1))(
+                        state[1]
+                    ).unpack_var_sequence(self.tx),
+                    native_keywords.keys_as_python_constant(),
+                )
             return FunctoolsPartialVariable(
-                func_obj, args, keywords, original_cache_hash=original_cache_hash
+                func_obj,
+                args,
+                keywords,
+                original_cache_hash=original_cache_hash,
+                flattenable=flattenable,
+                dict_state_source=dict_state_source,
+                native_fields=native_fields,
             )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.

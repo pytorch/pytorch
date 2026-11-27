@@ -3526,6 +3526,9 @@ class InstructionTranslatorBase(
                 self.push(result)
                 return
         except Unsupported:
+            # A constant partial is a fresh object, so its dict read loses the effect.
+            if isinstance(obj, FunctoolsPartialVariable) and attr == "__dict__":
+                raise
             if not obj.is_python_constant():
                 raise
             if isinstance(
