@@ -4131,6 +4131,38 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
 
         self.assertEqual(actual, expected)
 
+    def test_sdpa_broadcast_inputs(self, device):
+        # Batch rules fold the vmap dim into the leading dim of every input. With the vmap
+        # size equal to the number of heads, an input of lower rank or with broadcast batch
+        # dims that is not expanded first gets it folded into its heads and mixes examples.
+        V, B, H, L, S, D = 4, 2, 4, 8, 6, 16
+        q4, kv4 = (B, H, L, D), (B, H, S, D)
+        # (query, key and value, mask, enable_gqa) shapes
+        cases = {
+            "mask_1LS": (q4, kv4, (1, L, S), False),
+            "mask_LS": (q4, kv4, (L, S), False),
+            "mask_B1LS": (q4, kv4, (B, 1, L, S), False),
+            "3d_query": ((H, L, D), kv4, None, False),
+            "broadcast_batch": ((1, H, L, D), kv4, None, False),
+            "3d_gqa": ((H, L, D), (2, S, D), None, True),
+            "5d_mask_HLS": ((3, *q4), (3, *kv4), (H, L, S), False),
+        }
+        for name, (q, kv, mask, enable_gqa) in cases.items():
+            shapes = [q, kv, kv] + ([mask] if mask else [])
+            args = [torch.randn(V, *s, device=device) for s in shapes]
+
+            def fn(q, k, v, mask=None):
+                return F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=mask, enable_gqa=enable_gqa
+                )
+
+            for in_dims in [(0,) * len(args), (0, None, None, 0)[: len(args)]]:
+                with self.subTest(name, in_dims=in_dims):
+                    inputs = [
+                        a if d is not None else a[0] for a, d in zip(args, in_dims)
+                    ]
+                    self._vmap_test(fn, inputs, in_dims=in_dims)
+
     @onlyAccelerator
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     @parametrize("randomness", ["error", "same", "different"])
@@ -6836,7 +6868,8 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestVmapBatchedGradientDevice,
     globals(),
-    only_for=only_for,
+    only_for=only_for + ("mps",),
+    allow_mps=True,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
