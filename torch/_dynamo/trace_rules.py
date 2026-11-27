@@ -59,14 +59,20 @@ from .utils import (
     unwrap_if_wrapper,
 )
 from .variables import (
+    BoolBuiltinVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
+    BytesBuiltinVariable,
+    ComplexBuiltinVariable,
     DictBuiltinVariable,
+    FloatBuiltinVariable,
+    FrozenSetBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     GetAttrBuiltinVariable,
     HasAttrBuiltinVariable,
     InspectSignatureVariable,
+    IntBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
     LocalGeneratorFunctionVariable,
@@ -77,9 +83,12 @@ from .variables import (
     PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
     SetAttrBuiltinVariable,
+    SetBuiltinVariable,
     SkipFunctionVariable,
     SparseTensorCreationSkipVariable,
+    StrBuiltinVariable,
     TorchInGraphFunctionVariable,
+    TupleBuiltinVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -1179,6 +1188,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._nn._test_warn_in_autograd",
         "torch._C._nn._upsample_bicubic2d_aa",
         "torch._C._nn._upsample_bilinear2d_aa",
+        "torch._C._nn._upsample_inter_area2d",
         "torch._C._nn._upsample_lanczos2d_aa",
         "torch._C._nn._upsample_nearest_exact1d",
         "torch._C._nn._upsample_nearest_exact2d",
@@ -3583,6 +3593,8 @@ MOD_INLINELIST = [
     "torch.return_types",
     "torch.sparse",
     "torch.testing",
+    "torch.testing._creation",
+    "torch.testing._internal.common_utils",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._cxx_pytree",
@@ -3604,7 +3616,10 @@ if torch.distributed.is_available():
 # Modules in MOD_INLINELIST where nested graph breaks should be suppressed.
 # These are large internal modules that are inlined for correctness but whose
 # internal operations are not worth compiling as separate NGB subgraphs.
-NGB_SUPPRESS_INLINELIST: set[str] = set()
+NGB_SUPPRESS_INLINELIST: set[str] = {
+    "torch.testing._creation",
+    "torch.testing._internal.common_utils",
+}
 
 if torch.distributed.is_available():
     NGB_SUPPRESS_INLINELIST.add("torch.distributed")
@@ -4160,13 +4175,22 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES = {
+    bool: BoolBuiltinVariable,
     bytearray: ByteArrayBuiltinVariable,
+    bytes: BytesBuiltinVariable,
+    complex: ComplexBuiltinVariable,
     dict: DictBuiltinVariable,
+    float: FloatBuiltinVariable,
+    frozenset: FrozenSetBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
     hasattr: HasAttrBuiltinVariable,
+    int: IntBuiltinVariable,
     iter: IterBuiltinVariable,
     list: ListBuiltinVariable,
+    set: SetBuiltinVariable,
     setattr: SetAttrBuiltinVariable,
+    str: StrBuiltinVariable,
+    tuple: TupleBuiltinVariable,
 }
 
 

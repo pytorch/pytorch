@@ -333,39 +333,13 @@ class AutotuneCache:
         found_by_coordesc: bool = False,
         triton_cache_hash: str | None = None,
     ) -> None:
-        data: dict[str, JsonDataTy] = {
-            # pyrefly: ignore [missing-attribute]
-            **config.kwargs,
-            # pyrefly: ignore [missing-attribute]
-            "num_warps": config.num_warps,
-            # pyrefly: ignore [missing-attribute]
-            "num_stages": config.num_stages,
-            "configs_hash": self.configs_hash,
-            "found_by_coordesc": found_by_coordesc,
-            "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
-            "triton_cache_hash": triton_cache_hash,
-        }
-        # Two configs can differ only in their register cap, so a cache entry
-        # without it would reload as the uncapped one.
-        if (maxnreg := getattr(config, "maxnreg", None)) is not None:
-            data["maxnreg"] = maxnreg
-        # Likewise in their cluster shape.
-        if (ctas_per_cga := config_ctas_per_cga(config)) is not None:
-            data["ctas_per_cga"] = list(ctas_per_cga)
-        # Save extra_options if present on the config. This allows third-party
-        # backends to store custom tuned options alongside the standard config.
-        if extra_options := getattr(config, "extra_options", None):
-            data["extra_options"] = extra_options
-        if HAS_WARP_SPEC:
-            data.update(
-                {
-                    "num_consumer_groups": getattr(config, "num_consumer_groups", 0),
-                    "num_buffers_warp_spec": getattr(
-                        config, "num_buffers_warp_spec", 0
-                    ),
-                }
-            )
-
+        data = _serialize_best_config(
+            config,
+            self.configs_hash,
+            time_taken_ns,
+            found_by_coordesc,
+            triton_cache_hash,
+        )
         self._record_artifact(data)
 
         if local_cache := self.local_cache:
@@ -676,6 +650,50 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
     return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
         "pytorch/remote_cache:autotune_memcache_version"
     )
+
+
+def _serialize_best_config(
+    config: Config,
+    configs_hash: str,
+    time_taken_ns: int,
+    found_by_coordesc: bool,
+    triton_cache_hash: str | None,
+) -> dict[str, JsonDataTy]:
+    """
+    Build the autotune cache entry for `config`. _load_cached_autotuning reads it
+    back.
+    """
+    data: dict[str, JsonDataTy] = {
+        # pyrefly: ignore [missing-attribute]
+        **config.kwargs,
+        # pyrefly: ignore [missing-attribute]
+        "num_warps": config.num_warps,
+        # pyrefly: ignore [missing-attribute]
+        "num_stages": config.num_stages,
+        "configs_hash": configs_hash,
+        "found_by_coordesc": found_by_coordesc,
+        "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
+        "triton_cache_hash": triton_cache_hash,
+    }
+    # Two configs can differ only in their register cap, so a cache entry
+    # without it would reload as the uncapped one.
+    if (maxnreg := getattr(config, "maxnreg", None)) is not None:
+        data["maxnreg"] = maxnreg
+    # Likewise in their cluster shape.
+    if (ctas_per_cga := config_ctas_per_cga(config)) is not None:
+        data["ctas_per_cga"] = list(ctas_per_cga)
+    # Save extra_options if present on the config. This allows third-party
+    # backends to store custom tuned options alongside the standard config.
+    if extra_options := getattr(config, "extra_options", None):
+        data["extra_options"] = extra_options
+    if HAS_WARP_SPEC:
+        data.update(
+            {
+                "num_consumer_groups": getattr(config, "num_consumer_groups", 0),
+                "num_buffers_warp_spec": getattr(config, "num_buffers_warp_spec", 0),
+            }
+        )
+    return data
 
 
 def _reconstruct_triton_config(

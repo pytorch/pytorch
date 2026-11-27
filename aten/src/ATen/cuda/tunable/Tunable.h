@@ -13,6 +13,7 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
 
+#include <atomic>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -130,16 +131,16 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     void ClearAll();
 
-    void InitRealtimeAppend(
+    void CloseRealtimeAppend();
+  private:
+    void InitRealtimeAppendLocked(
         const std::string& filename,
         const std::unordered_map<std::string, std::string>& validators);
 
-    void AppendResultLine(const std::string& op_sig,
+    void AppendResultLineLocked(const std::string& op_sig,
                          const std::string& param_sig,
                          const ResultEntry& result);
 
-    void CloseRealtimeAppend();  // For clean shutdown
-  private:
     std::mutex lock_;
     std::mutex realtime_file_mutex_;
     std::unique_ptr<std::ofstream> realtime_out_;
@@ -284,9 +285,9 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool GetLogOkay() const;
     std::ostream& GetLog() const;
 
-    bool enable_;
-    bool tuning_enable_;
-    bool record_untuned_enable_;
+    std::atomic<bool> enable_;
+    std::atomic<bool> tuning_enable_;
+    std::atomic<bool> record_untuned_enable_;
     bool manager_initialized_;
     bool numerics_check_enable_;
     int max_tuning_duration_ms_;
@@ -299,6 +300,7 @@ class TORCH_CUDA_CPP_API TuningContext {
     mutable TuningResultsManager manager_;
     mutable c10::once_flag manager_init_once_;
     TuningResultsValidator validator_;
+    mutable std::mutex filename_mutex_;
     std::string filename_;
     std::ofstream untuned_file_;
     size_t results_count_from_input_file_;

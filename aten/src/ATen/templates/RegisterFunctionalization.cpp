@@ -19,6 +19,8 @@
 // See Note [functionalizating copy_() and not preserving strides]
 #include <ATen/ops/to_ops.h>
 #include <ATen/ops/expand_copy_ops.h>
+// needed for out ops that keep out's strides, see OUT_OPS_PRESERVING_OUT_STRIDES
+#include <ATen/ops/copy_ops.h>
 
 $ops_headers
 #endif

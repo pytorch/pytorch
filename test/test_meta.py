@@ -2789,6 +2789,38 @@ class TestMetaKernelRegistrations(TestCase):
             )
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("dtype", (torch.int32, torch.int64, torch.float8_e4m3fn, torch.float8_e5m2))
+    def test_adaptive_avg_pool2d_backward_unsupported_dtype(self, dtype):
+        x = torch.empty(1, 1, 5, 5, dtype=dtype)
+        grad_output = torch.empty(1, 1, 3, 3, dtype=dtype)
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, x)
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output.to("meta"), x.to("meta"))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize(
+        "input_size,grad_size",
+        [
+            ((3, 7, 9), (2, 3, 3, 4)),
+            ((2, 3, 7, 9), (3, 3, 4)),
+            ((1, 2, 3, 7, 9), (2, 3, 3, 4)),
+        ],
+    )
+    def test_adaptive_avg_pool2d_backward_mismatched_ranks(self, input_size, grad_size):
+        x = torch.empty(input_size)
+        grad_output = torch.empty(grad_size)
+        error = (
+            f"Expected dimensions {len(input_size)}"
+            if len(input_size) in (3, 4)
+            else "Expected 3D or 4D tensor"
+        )
+        with self.assertRaisesRegex(ValueError, error):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, x)
+        with self.assertRaisesRegex(ValueError, error):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output.to("meta"), x.to("meta"))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_fill_tensor_dim_check(self):
         x_cpu = torch.randn(3, 4)
         value_cpu = torch.randn(2, 3)
@@ -3010,8 +3042,8 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
 
-instantiate_device_type_tests(TestMeta, globals())
-instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for="cuda")
+instantiate_device_type_tests(TestMeta, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 
 def print_op_str_if_not_supported(op_str):

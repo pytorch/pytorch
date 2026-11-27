@@ -32,7 +32,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     decorateIf,
-    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -725,10 +724,7 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
         # BUG: manually extracting FakeTensors causes mode mismatch
         fake_args = [n.meta["val"] for n in placeholders]
-        error_message = expectedIfCppFakeTensor(
-            "Mixing fake modes", "fake mode.*doesn't match"
-        )
-        with self.assertRaisesRegex(Exception, error_message):
+        with self.assertRaisesRegex(Exception, "fake mode.*doesn't match"):
             compile_fx_inner(gm, fake_args)
 
         # FIX: _get_compile_args returns concrete args for real mode
