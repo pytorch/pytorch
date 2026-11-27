@@ -3897,11 +3897,6 @@ def _upsample_nearest(
         # convert output to correct memory format, if necessary
         memory_format = utils.suggest_memory_format(input)
 
-        # following "heuristic: only use channels_last path when it's faster than the contiguous path"
-        n_channels = input.shape[1]
-        if result.ndim == 4 and input.device.type == "cuda" and n_channels < 4:
-            memory_format = torch.contiguous_format
-
         result = result.contiguous(memory_format=memory_format)
     return result
 
