@@ -9424,6 +9424,16 @@ for dtype in (torch.int32, torch.int64):
         x = torch.randn([16, 16], device=self.device)
         self.assertEqual(cfn(x), fn(x))
 
+    def test_float_pow_symint_exponent(self):
+        # Bias correction as in Adam-like optimizers: FloatPow(0.95, ToFloat(s0))
+        def fn(x):
+            return torch.lerp(x, x * 2, 0.05 / (1.0 - 0.95 ** x.shape[0]))
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+        for n in (8, 13):
+            x = torch.randn(n, device=self.device)
+            self.assertEqual(cfn(x), fn(x))
+
     def test_glu(self):
         def fn(x):
             return aten.glu(x, -1), aten.glu(x, 1), aten.glu(x, 2)
