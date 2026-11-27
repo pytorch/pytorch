@@ -48,12 +48,14 @@ void inner_product_forward_binary(
     dnnl::prop_kind prop_kind = dnnl::prop_kind::forward);
 
 // Ported from ideep::inner_product_forward::expected_weights_desc.
+// The packed layout can depend on `attr` (e.g. fpmath or accumulation mode).
 MkldnnMemory::desc inner_product_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     const dnnl::memory::dims& src_dims = dnnl::memory::dims(),
     dnnl::memory::data_type dtype = dnnl::memory::data_type::f32,
     dnnl::memory::data_type x_dtype = dnnl::memory::data_type::f32,
-    dnnl::prop_kind prop_kind = dnnl::prop_kind::forward);
+    dnnl::prop_kind prop_kind = dnnl::prop_kind::forward,
+    const Attr& attr = Attr());
 
 // Ported from ideep::inner_product_backward_data::compute.
 void inner_product_backward_data(
