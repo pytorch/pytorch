@@ -323,10 +323,9 @@ class TestProcessGroupHooksAccelerator(
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_hooks_fire_for_all_collectives(self, device):
-        torch.accelerator.set_device_index(self.rank)
-        self._check_hooks_fire_for_all_collectives(
-            torch.device(self.device_type, self.rank)
-        )
+        device = torch.device(torch.device(device).type, self.rank)
+        torch.accelerator.set_device_index(device.index)
+        self._check_hooks_fire_for_all_collectives(device)
 
 
 instantiate_device_type_tests(
