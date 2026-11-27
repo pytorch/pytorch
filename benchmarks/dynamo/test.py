@@ -1,6 +1,8 @@
 import collections
 import contextlib
+import copy
 import functools
+import gc
 import importlib
 import importlib.util
 import io
@@ -13,6 +15,7 @@ from contextlib import nullcontext, redirect_stdout
 from unittest import mock
 
 import torch
+from torch._dynamo.testing import collect_results, reset_rng_state
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 from . import common
@@ -80,6 +83,104 @@ class TestDynamoBenchmark(TestCase):
 
         self.assertTrue(runner.copy_counts)
         self.assertEqual(max(runner.copy_counts), 1)
+
+    def test_check_accuracy_preserves_fp64_rng_and_clears_optimizer(self) -> None:
+        live_copied_params = weakref.WeakSet()
+        deepcopy_snapshots = []
+        rng_draws = []
+
+        reset_rng_state()
+        expected_reset_draw = torch.rand(1).item()
+        torch.manual_seed(99)
+        expected_pre_eager_draw = torch.rand(1).item()
+
+        runner_ref = []
+
+        class TrackingModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2, bias=False)
+
+            def __deepcopy__(self, memo):
+                gc.collect()
+                deepcopy_snapshots.append(
+                    (len(live_copied_params), runner_ref[0].optimizer is not None)
+                )
+                model_copy = object.__new__(type(self))
+                torch.nn.Module.__init__(model_copy)
+                model_copy.linear = copy.deepcopy(self.linear, memo)
+                memo[id(self)] = model_copy
+                live_copied_params.add(model_copy.linear.weight)
+                return model_copy
+
+            def forward(self, inputs):
+                return self.linear(inputs).sum()
+
+        class AccuracyRunner(common.BenchmarkRunner):
+            def pick_grad(self, name, is_training):
+                return torch.enable_grad()
+
+            def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
+                return 1e-2, self.args.cosine
+
+            def init_optimizer(self, name, device, params):
+                self.optimizer = torch.optim.Adam(params, lr=0.01)
+
+            def _write_accuracy_row(self, status, dynamo_start_stats, tag):
+                pass
+
+        runner = AccuracyRunner()
+        runner_ref.append(runner)
+        runner.args = parse_args(
+            ["-dcpu", "--backend=eager", "--accuracy", "--training", "--iterations=2"]
+        )
+
+        iter_idx = [0]
+
+        def model_iter_fn(mod, inputs, collect_outputs=True):
+            if iter_idx[0] % runner.args.iterations == 0:
+                rng_draws.append((mod.linear.weight.dtype, torch.rand(1).item()))
+            iter_idx[0] += 1
+            runner.optimizer_zero_grad(mod)
+            loss = mod(*inputs)
+            loss.backward()
+            runner.optimizer_step()
+            if collect_outputs:
+                return collect_results(mod, None, loss, inputs)
+            return None
+
+        runner.model_iter_fn = model_iter_fn
+
+        model = TrackingModel()
+        torch.manual_seed(99)
+        with (
+            mock.patch.object(common, "current_device", "cpu"),
+            mock.patch.object(common, "empty_gpu_cache"),
+        ):
+            status = runner.check_accuracy(
+                "model",
+                model,
+                (torch.ones(1, 2),),
+                lambda fn: fn,
+                None,
+                None,
+            )
+
+        self.assertEqual(status, "pass")
+        self.assertIsNone(runner.optimizer)
+        self.assertEqual(
+            deepcopy_snapshots,
+            [(0, False), (1, False), (1, False), (2, False)],
+        )
+        self.assertEqual(
+            rng_draws,
+            [
+                (torch.float32, expected_reset_draw),
+                (torch.float32, expected_reset_draw),
+                (torch.float64, expected_pre_eager_draw),
+                (torch.float32, expected_reset_draw),
+            ],
+        )
 
     def test_timm_auto_install_uses_no_deps(self) -> None:
         module_name = "benchmarks.dynamo._timm_models_install_test"

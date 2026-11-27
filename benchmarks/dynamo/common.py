@@ -2237,37 +2237,6 @@ class BenchmarkRunner:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
         with self.pick_grad(name, self.args.training):
-            # Collect the fp64 reference outputs to be used later for accuracy checking.
-            fp64_outputs = None
-            model_fp64 = None
-            inputs_fp64 = None
-            try:
-                model_fp64, inputs_fp64 = cast_to_fp64(
-                    self.deepcopy_and_maybe_parallelize(model),
-                    clone_inputs(example_inputs),
-                )
-                self.init_optimizer(name, current_device, model_fp64.parameters())
-                fp64_outputs = self.run_n_iterations(
-                    model_fp64, inputs_fp64, self.model_iter_fn
-                )
-                fp64_outputs = tree_map(
-                    lambda x: x.to(torch.float64)
-                    if isinstance(x, torch.Tensor) and x.is_floating_point()
-                    else x,
-                    fp64_outputs,
-                )
-            except Exception:
-                log.warning(
-                    "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
-                    name,
-                    exc_info=True,
-                )
-                self.args.cosine = True
-                fp64_outputs = None
-            finally:
-                del model_fp64, inputs_fp64
-                empty_gpu_cache(current_device)
-
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
             )
@@ -2275,6 +2244,19 @@ class BenchmarkRunner:
             # Cast the model to float16/float32 as necessary
             model, example_inputs = self.maybe_cast(model, example_inputs)
             accuracy_status = "pass"
+
+            cpu_rng_state = torch.get_rng_state()
+            dev_type = torch.device(current_device).type if current_device else "cpu"
+            dev_mod = getattr(torch, dev_type, None) if dev_type != "cpu" else None
+            has_dev_rng = (
+                dev_mod is not None
+                and hasattr(dev_mod, "is_available")
+                and dev_mod.is_available()
+                and hasattr(dev_mod, "get_rng_state")
+            )
+            dev_rng_state = dev_mod.get_rng_state() if has_dev_rng else None
+            py_rng_state = random.getstate()
+            np_rng_state = np.random.get_state()
 
             # Get results of native pytorch
             reset_rng_state()
@@ -2296,6 +2278,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                self.optimizer = None
                 empty_gpu_cache(current_device)
 
             # Rerun native pytorch
@@ -2318,6 +2301,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                self.optimizer = None
                 empty_gpu_cache(current_device)
 
             # Two eager runs should have exactly same result, within tolerance.
@@ -2349,6 +2333,47 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             correct_rerun_result = None
+
+            # Collect the fp64 reference outputs using the pre-eager RNG state.
+            fp64_outputs = None
+            model_fp64 = None
+            inputs_fp64 = None
+            torch.set_rng_state(cpu_rng_state)
+            if dev_rng_state is not None:
+                dev_mod.set_rng_state(dev_rng_state)
+            random.setstate(py_rng_state)
+            np.random.set_state(np_rng_state)
+            try:
+                model_fp64, inputs_fp64 = cast_to_fp64(
+                    self.deepcopy_and_maybe_parallelize(model),
+                    clone_inputs(example_inputs),
+                )
+                self.init_optimizer(name, current_device, model_fp64.parameters())
+                fp64_outputs = self.run_n_iterations(
+                    model_fp64, inputs_fp64, self.model_iter_fn
+                )
+                fp64_outputs = tree_map(
+                    lambda x: x.to(torch.float64)
+                    if isinstance(x, torch.Tensor) and x.is_floating_point()
+                    else x,
+                    fp64_outputs,
+                )
+            except Exception:
+                log.warning(
+                    "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
+                    name,
+                    exc_info=True,
+                )
+                self.args.cosine = True
+                fp64_outputs = None
+            finally:
+                del model_fp64, inputs_fp64
+                self.optimizer = None
+                empty_gpu_cache(current_device)
+
+            tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
+                self.args.training, current_device, name
+            )
 
             # Support multiple accuracy check runs for flaky models
             accuracy_check_runs = self.get_accuracy_check_runs(name)
@@ -2401,6 +2426,7 @@ class BenchmarkRunner:
                     )
                 finally:
                     del model_copy
+                    self.optimizer = None
 
                 if name in self.skip_accuracy_check_as_eager_non_deterministic:
                     return record_status(
