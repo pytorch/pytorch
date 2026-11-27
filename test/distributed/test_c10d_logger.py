@@ -14,10 +14,7 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import DistributedTestBase, with_comms
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -76,7 +73,6 @@ class C10dErrorLoggerTestDevice(DistributedTestBase):
         except Exception:
             pass
 
-    @onlyAccelerator
     @with_comms(barrier_on_success=True)
     def test_exception_logger(self, device) -> None:
         device_type = torch.device(device).type
