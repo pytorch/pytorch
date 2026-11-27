@@ -112,6 +112,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.utils._sympy.numbers import int_oo
 
 
@@ -321,8 +322,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "cuda or xpu needed")
     def test_assume_32_bit_indexing(self):
-        device = torch.accelerator.current_accelerator().type
-
         @torch.compile(backend="inductor")
         def func(a, b):
             # Multiple concat operations
@@ -346,8 +345,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
             return cumsum.sum()
 
-        a = torch.rand(100, 30, device=device)
-        b = torch.rand(100, 30, device=device)
+        a = torch.rand(100, 30, device=GPU_TYPE)
+        b = torch.rand(100, 30, device=GPU_TYPE)
 
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(a, 1)
