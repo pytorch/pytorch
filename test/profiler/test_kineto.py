@@ -61,6 +61,7 @@ instantiate_device_type_tests(
     SimpleKinetoInitializationTest,
     globals(),
     except_for="cpu",
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
