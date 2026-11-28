@@ -84,7 +84,6 @@
   "test/distributed/elastic/rendezvous/rendezvous_backend_test.py",
   "test/distributed/elastic/rendezvous/static_rendezvous_test.py",
   "test/distributed/elastic/rendezvous/utils_test.py",
-  "test/distributed/elastic/test_control_plane.py",
   "test/distributed/flight_recorder/test_fr_analysis.py",
   "test/distributed/flight_recorder/test_loader.py",
   "test/distributed/fsdp/test_checkpoint_wrapper.py",
