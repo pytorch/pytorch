@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import logging
 from collections import deque
 
 import torch
@@ -11,6 +12,8 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
+from .. import config as inductor_config
+from ..autotune_process import use_pipelined_autotuning
 from ..codegen.common import BackendFeature, has_backend_feature
 from ..heuristics.template.triton import mm_allow_tf32
 from ..ir import (
@@ -32,11 +35,15 @@ from ..pattern_matcher import (
 )
 from ..select_algorithm import (
     autotune_select_algorithm,
+    NoValidChoicesError,
     SymbolicGridFn,
     TritonTemplate,
     TritonTemplateCaller,
 )
 from ..utils import ceildiv, is_bf16x9_matmul, is_gpu
+
+
+log = logging.getLogger(__name__)
 
 
 B2B_GEMM_PASS = PatternMatcherPass(
@@ -97,16 +104,21 @@ b2b_gemm_left_template = TritonTemplate(
     for _ in range(num_o_block):
         c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
         c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
-        c = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_O * BLOCK_SIZE_P
+        c = tl.load(c_ptrs, mask=c_mask, other=0.0)  # BLOCK_SIZE_O * BLOCK_SIZE_P
+        if not XPU_NATIVE_DOT:
+            c = c.to(tl.float32)
         acc_ab = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_O), dtype=tl.float32)
         offs_n = tl.arange(0, BLOCK_SIZE_N)
         for __ in range(num_n_block):
             a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
             a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
-            a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+            a = tl.load(a_ptrs, mask=a_mask, other=0.0)  # BLOCK_SIZE_M * BLOCK_SIZE_N
             b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
             b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
-            b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
+            b = tl.load(b_ptrs, mask=b_mask, other=0.0)  # BLOCK_SIZE_N * BLOCK_SIZE_O
+            if not XPU_NATIVE_DOT:
+                a = a.to(tl.float32)
+                b = b.to(tl.float32)
             acc_ab += tl.dot(a, b, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_INNER)
             offs_n += BLOCK_SIZE_N
         # apply the subgraph
@@ -115,7 +127,13 @@ b2b_gemm_left_template = TritonTemplate(
             output_name="post_subgraph_acc_ab",
             inner_mm="acc_ab"
         ) | indent_except_first(2) }}
-        acc += tl.dot(post_subgraph_acc_ab, c, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
+        # Only XPU (XPU_NATIVE_DOT) keeps fp16 native operands so tl.dot can use
+        # the matrix units; bf16 and other devices use fp32 because casting the
+        # intermediate to bf16 loses too much precision.
+        if c.dtype == tl.float16:
+            acc += tl.dot(post_subgraph_acc_ab.to(tl.float16), c, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
+        else:
+            acc += tl.dot(post_subgraph_acc_ab, c.to(tl.float32), out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
         offs_o += BLOCK_SIZE_O
 
     # store preparation
@@ -176,16 +194,21 @@ b2b_gemm_right_template = TritonTemplate(
     for _ in range(num_n_block):
         a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
         a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
-        a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+        a = tl.load(a_ptrs, mask=a_mask, other=0.0)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+        if not XPU_NATIVE_DOT:
+            a = a.to(tl.float32)
         acc_bc = tl.zeros((BLOCK_SIZE_N, BLOCK_SIZE_P), dtype=tl.float32)
         offs_o = tl.arange(0, BLOCK_SIZE_O)
         for __ in range(num_o_block):
             b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
             b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
-            b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
+            b = tl.load(b_ptrs, mask=b_mask, other=0.0)  # BLOCK_SIZE_N * BLOCK_SIZE_O
             c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
             c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
-            c = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_O * BLOCK_SIZE_P
+            c = tl.load(c_ptrs, mask=c_mask, other=0.0)  # BLOCK_SIZE_O * BLOCK_SIZE_P
+            if not XPU_NATIVE_DOT:
+                b = b.to(tl.float32)
+                c = c.to(tl.float32)
             acc_bc += tl.dot(b, c, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_INNER)
             offs_o += BLOCK_SIZE_O
         # apply the subgraph
@@ -194,7 +217,11 @@ b2b_gemm_right_template = TritonTemplate(
             output_name="post_subgraph_acc_bc",
             inner_mm="acc_bc"
         ) | indent_except_first(2) }}
-        acc += tl.dot(a, post_subgraph_acc_bc, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
+        # Same XPU fp16 native-operand choice as the left-associative template.
+        if a.dtype == tl.float16:
+            acc += tl.dot(a, post_subgraph_acc_bc.to(tl.float16), out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
+        else:
+            acc += tl.dot(a.to(tl.float32), post_subgraph_acc_bc, out_dtype=tl.float32, allow_tf32=ALLOW_TF32_OUTER)
         offs_n += BLOCK_SIZE_N
 
     # store preparation
@@ -408,6 +435,16 @@ def is_b2b_gemm_good_on(
     # example values above; it does not prove symbolic extent agreement.
     if 0 in (M, N, O, P) or N != B_N or B_O != O:
         return False
+    # On XPU the fused kernel falls behind normal lowering once the serial N*O
+    # reduction grows, and the opaque subgraph would block scheduler fusion, so
+    # leave those cases to the normal lowering.
+    if (
+        inductor_config.xpu_b2b_gemm_fused_max_n_o >= 0
+        and fake_tensors[0].device.type == "xpu"
+        and all(t.dtype in (torch.float16, torch.bfloat16) for t in fake_tensors)
+        and N * O > inductor_config.xpu_b2b_gemm_fused_max_n_o
+    ):
+        return False
     ratios = []
     if is_left_assoc:
         for config in b2b_gemm_configs:
@@ -569,6 +606,12 @@ def tuned_b2b_gemm(
     *,
     layout=None,
 ) -> torch._inductor.ir.TensorBox:
+    """Choose B2B GEMM candidates and autotune the fused template.
+
+    XPU 16-bit inputs load native operands. When the fused-selection policy is
+    enabled (threshold >= 0), only fused candidates are built, with the
+    unoptimized choice as a fallback; otherwise both choices are autotuned.
+    """
     # call .realize() to get rid of Pointwise
     A.realize()
     B.realize()
@@ -592,6 +635,17 @@ def tuned_b2b_gemm(
     inner_m, inner_n, inner_k = (M, O, N) if is_left_assoc else (N, P, O)
     allow_tf32_inner = mm_allow_tf32(inner_m, inner_n, inner_k, device_type)
     allow_tf32_outer = mm_allow_tf32(M, P, O if is_left_assoc else N, device_type)
+    is_16bit = inner_dtype in (torch.float16, torch.bfloat16) and outer_dtype in (
+        torch.float16,
+        torch.bfloat16,
+    )
+    # Only XPU uses native 16-bit operands; other devices keep the fp32 upcast.
+    native_dot = device_type == "xpu" and is_16bit
+    # is_b2b_gemm_good_on keeps XPU 16-bit shapes below the N*O threshold, where
+    # the fused kernel wins end-to-end, so build only fused candidates and skip
+    # the autotune mis-ranking. A negative threshold disables the policy.
+    fused_only = native_dot and inductor_config.xpu_b2b_gemm_fused_max_n_o >= 0
+
     for config in b2b_gemm_configs:
         if is_left_assoc:
             b2b_gemm_left_template.maybe_append_choice(
@@ -601,6 +655,7 @@ def tuned_b2b_gemm(
                 subgraphs=[subgraph_buffer],
                 ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
                 ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
+                XPU_NATIVE_DOT=native_dot,
                 **config,
             )
         else:
@@ -611,9 +666,28 @@ def tuned_b2b_gemm(
                 subgraphs=[subgraph_buffer],
                 ALLOW_TF32_INNER=inner_dtype != torch.float32 or allow_tf32_inner,
                 ALLOW_TF32_OUTER=outer_dtype != torch.float32 or allow_tf32_outer,
+                XPU_NATIVE_DOT=native_dot,
                 **config,
             )
-    # add the unoptimized choice to mitigate performance degradation
+    # Fall back to the two-kernel choice if every fused candidate fails. Force
+    # eager selection so the failure surfaces here rather than in a deferred
+    # MultiTemplateBuffer. Pipelined autotuning cannot select eagerly, so there
+    # keep the unoptimized choice in the candidate set instead.
+    if fused_only and not use_pipelined_autotuning():
+        try:
+            node, _ = autotune_select_algorithm(
+                "b2b_gemm",
+                choices,
+                [A, B, C],
+                layout,
+                return_multi_template=False,
+            )
+            return node
+        except NoValidChoicesError:
+            log.debug(
+                "b2b_gemm: all fused candidates failed, using the unoptimized choice"
+            )
+            choices = []
     choices.append(
         _make_unoptimized_b2b_gemm_choice(is_left_assoc, subgraph, [A, B, C], layout)
     )
