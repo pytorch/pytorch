@@ -226,6 +226,20 @@ def unwrap_maybe_dynamic_int(x: torch.Tensor | int) -> int:
     return x
 
 
+def accumulate_grads(
+    old_var: torch.Tensor | None, new_var: torch.Tensor | None
+) -> torch.Tensor | None:
+    # Compiled autograd captures the InputBuffer accumulation with proxies, which
+    # are always defined, but a node can still return an undefined gradient when
+    # the graph runs (e.g. _convolution_double_backward on an empty input).
+    # Mirror eager InputBuffer::add and skip the undefined side.
+    if old_var is None:
+        return new_var
+    if new_var is None:
+        return old_var
+    return torch.add(old_var, new_var)
+
+
 def call_accumulate_grad(
     variable: torch.Tensor,
     variable_grad: torch.Tensor | None,
