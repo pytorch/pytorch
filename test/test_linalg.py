@@ -12690,6 +12690,39 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         torch._int_mm(a_int8, b_int8, out=c_int32_result)
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
+    @parametrize("m", range(1, 8))
+    @parametrize("broadcast_a", [False, True])
+    def test__int_mm_cpu_signed_unit_k_stride(self, device, m, broadcast_a):
+        k, n = 33, 7
+        values = torch.tensor([-128, 127, -1, 0, 1], dtype=torch.int8, device=device)
+        rows = 1 if broadcast_a else m
+        a_storage = torch.empty((rows, k + 2), dtype=torch.int8, device=device)
+        w_storage = torch.empty((n, k + 2), dtype=torch.int8, device=device)
+        a = a_storage[:, 1 : k + 1]
+        w = w_storage[:, 1 : k + 1]
+        a.copy_(values[torch.arange(rows * k, device=device).reshape(rows, k) % 5])
+        w.copy_(values[torch.arange(n * k, device=device).reshape(n, k) % 5])
+        # Two maximal positive products exceed the range of a signed int16.
+        a[:, :2] = -128
+        w[:, :2] = -128
+        a = a.expand(m, k)
+        b = w.t()
+        expected = (a.to(torch.int64)[:, :, None] * b.to(torch.int64)).sum(dim=1)
+        expected = expected.to(torch.int32)
+
+        # Exercise the fallback even on hosts that would select oneDNN.
+        with torch.backends.mkldnn.flags(enabled=False):
+            self.assertEqual(torch._int_mm(a, b), expected)
+            sentinel = -123456789
+            out_storage = torch.full(
+                (m * n + 2,), sentinel, dtype=torch.int32, device=device
+            )
+            out = out_storage[1:-1].view(m, n)
+            self.assertIs(torch._int_mm(a, b, out=out), out)
+            self.assertEqual(out, expected)
+            self.assertEqual(out_storage[0].item(), sentinel)
+            self.assertEqual(out_storage[-1].item(), sentinel)
+
     @parametrize("k", [16, 32])
     @parametrize("n", [16, 32])
     @parametrize("x_dtype", [torch.int8, torch.uint8])

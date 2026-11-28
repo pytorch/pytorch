@@ -10,6 +10,10 @@
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
+#if defined(CPU_CAPABILITY_AVX2)
+#include <immintrin.h>
+#endif
+
 #if (defined(_WIN32) || defined(_WIN64))
 #define RESTRICT __restrict
 #else
@@ -431,8 +435,56 @@ void int8pack_mm_kernel(
   }
 }
 
+bool int_mm_fallback_kernel(
+    const Tensor& a,
+    const Tensor& b,
+    Tensor& out) {
+#if defined(CPU_CAPABILITY_AVX2)
+  const auto* a_data = a.const_data_ptr<int8_t>();
+  const auto* b_data = b.const_data_ptr<int8_t>();
+  auto* c_data = out.data_ptr<int32_t>();
+  const int64_t m = a.size(0);
+  const int64_t k = a.size(1);
+  const int64_t n = b.size(1);
+  const int64_t lda = a.stride(0);
+  const int64_t ldb = b.stride(1);
+  at::parallel_for(0, m * n, 1, [&](int64_t begin, int64_t end) {
+    for (int64_t i = begin; i < end; ++i) {
+      const auto* x = a_data + (i / n) * lda;
+      const auto* y = b_data + (i % n) * ldb;
+      __m256i accum = _mm256_setzero_si256();
+      int64_t j = 0;
+      for (; j + 16 <= k; j += 16) {
+        const auto ax = _mm256_cvtepi8_epi16(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + j)));
+        const auto by = _mm256_cvtepi8_epi16(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + j)));
+        // Pairwise products are accumulated in int32, not saturated to int16.
+        accum = _mm256_add_epi32(accum, _mm256_madd_epi16(ax, by));
+      }
+      __m128i sum = _mm_add_epi32(
+          _mm256_castsi256_si128(accum), _mm256_extracti128_si256(accum, 1));
+      sum = _mm_hadd_epi32(sum, sum);
+      sum = _mm_hadd_epi32(sum, sum);
+      int32_t value = _mm_cvtsi128_si32(sum);
+      for (; j < k; ++j) {
+        value += static_cast<int32_t>(x[j]) * static_cast<int32_t>(y[j]);
+      }
+      c_data[i] = value;
+    }
+  });
+  return true;
+#else
+  (void)a;
+  (void)b;
+  (void)out;
+  return false;
+#endif
+}
+
 } // anonymous namespace
 
 ALSO_REGISTER_AVX512_DISPATCH(int8pack_mm_stub, &int8pack_mm_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(int_mm_fallback_stub, &int_mm_fallback_kernel)
 
 } // at::native
