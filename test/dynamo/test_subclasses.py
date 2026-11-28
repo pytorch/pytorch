@@ -567,6 +567,50 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
     def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
         _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles)
 
+    def test_torch_function_subclass_returning_notimplemented(self):
+        # A __torch_function__ subclass may legally return NotImplemented for
+        # operators/attributes it does not handle. Dynamo's input wrapping
+        # reads introspection attributes (is_nested, layout, ...) on the
+        # example tensor; that bookkeeping must not go through the subclass's
+        # __torch_function__, otherwise merely passing such a tensor to
+        # torch.compile crashes with "Multiple dispatch failed for
+        # 'torch.Tensor.is_nested.__get__'". (Issue #205850.)
+        handled = {torch.sin, torch.cos, torch.add, torch.Tensor.sum}
+
+        class SemiImplemented(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func not in handled:
+                    return NotImplemented
+                if kwargs is None:
+                    kwargs = {}
+                with torch._C.DisableTorchFunctionSubclass():
+                    out = func(
+                        *[
+                            a.as_subclass(torch.Tensor)
+                            if isinstance(a, torch.Tensor)
+                            else a
+                            for a in args
+                        ],
+                        **kwargs,
+                    )
+                return (
+                    out.as_subclass(SemiImplemented)
+                    if isinstance(out, torch.Tensor)
+                    else out
+                )
+
+        x = torch.randn(4).as_subclass(SemiImplemented)
+
+        def f(x):
+            return torch.sin(x)
+
+        eager_out = f(x)
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend="eager")(x)
+        with torch._C.DisableTorchFunctionSubclass():
+            self.assertTrue(torch.equal(compiled, eager_out))
+
     def test_no_call_to_new(self):
         class BadNewTorchFunction(torch.Tensor):
             def __new__(cls, *args, **kwargs):
