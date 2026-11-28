@@ -1359,6 +1359,18 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   Tensor other = iter.input(1);
   Tensor out = iter.output();
 
+  // Comparison and logical ops compute in the common dtype, which CPU casts a scalar to first. Casting a double
+  // scalar straight to it, rather than to float below, casts it the way CPU does and, when the tensor already has that
+  // dtype, selects a no-cast kernel.
+  if (natural == kBool) {
+    if (input.scalar_type() == kDouble) {
+      input = input.to(iter.common_dtype());
+    }
+    if (other.scalar_type() == kDouble) {
+      other = other.to(iter.common_dtype());
+    }
+  }
+
   convert_double_scalar(input);
   convert_double_scalar(other);
 
@@ -1510,6 +1522,13 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other}, mpsStream);
       [computeEncoder setComputePipelineState:binaryPSO];
       bind_iter_tensors(computeEncoder, iter);
+      // bind_iter_tensors bound the iterator's own inputs; rebind the scalars converted above
+      if (!input.is_same(iter.input(0))) {
+        mtl_setBuffer(computeEncoder, input, 1);
+      }
+      if (!other.is_same(iter.input(1))) {
+        mtl_setBuffer(computeEncoder, other, 2);
+      }
       if (output_cast_needed) {
         // Strided castout path: shape/strides + (ndim, in_a_type, in_b_type,
         // out_type). The kernel reads inputs at runtime types and stores at
@@ -1522,9 +1541,6 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
         const auto sizes = dimDividers(iter.shape());
         mtl_setArgs<3>(computeEncoder, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       } else if (use_scalar_kernel) {
-        // Rebind the scalar in case we promoted it above; harmless when we
-        // didn't, since this matches what bind_iter_tensors already did.
-        mtl_setBuffer(computeEncoder, scalar_on_lhs ? input : other, scalar_on_lhs ? 1 : 2);
         if (cast_needed) {
           std::array<uint32_t, 4> sizes_types = {static_cast<uint32_t>(c10::elementSize(input.scalar_type())),
                                                  static_cast<uint32_t>(c10::elementSize(other.scalar_type())),
