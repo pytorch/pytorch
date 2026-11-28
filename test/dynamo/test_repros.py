@@ -2488,6 +2488,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(2, requires_grad=True)
         opt_fn(x, b, y)
 
+    def test_getitem_list_of_scalar_tensors(self):
+        # https://github.com/pytorch/pytorch/issues/205667
+        def fn(x, a, b):
+            return (
+                x[[a, b], :],
+                x[:, (a, 2)],
+                x[[a == 0, a == 1, b == 2], :],
+                x.__getitem__(([b, a], slice(None))),
+            )
+
+        x = torch.arange(12.0).reshape(3, 4)
+        a, b = torch.tensor(0), torch.tensor(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
+
     def test_torch_tensor_ops(self):
         def fn(x):
             return torch.Tensor.abs_(x)
