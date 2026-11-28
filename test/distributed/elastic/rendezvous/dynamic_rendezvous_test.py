@@ -1400,6 +1400,56 @@ class DynamicRendezvousHandlerTest(TestCase):
         self.assertEqual(rdzv_info.rank, 0)
         self.assertEqual(handler._shared_tcp_store_server, self._tcp_store_mock)
 
+    def test_share_store_creates_fresh_tcp_store_per_round(self):
+        handler = self._create_handler()
+
+        mock_server_round0 = Mock(spec=dist.TCPStore)
+        type(mock_server_round0).port = PropertyMock(return_value=1111)
+        mock_server_round1 = Mock(spec=dist.TCPStore)
+        type(mock_server_round1).port = PropertyMock(return_value=2222)
+
+        with patch.object(
+            handler,
+            "_create_tcp_store_server",
+            side_effect=[mock_server_round0, mock_server_round1],
+        ) as mock_create_server, patch.object(
+            RendezvousStoreInfo, "build", wraps=RendezvousStoreInfo.build
+        ) as mock_build_info:
+            rdzv_info0 = handler.next_rendezvous()
+            self.assertEqual(handler._shared_tcp_store_server, mock_server_round0)
+            mock_build_info.assert_called_with(
+                0,
+                mock_build_info.call_args[0][1],
+                local_addr=handler._this_node.addr,
+                server_port=1111,
+            )
+
+            rdzv_info1 = handler.next_rendezvous()
+            self.assertEqual(handler._shared_tcp_store_server, mock_server_round1)
+            mock_build_info.assert_called_with(
+                0,
+                mock_build_info.call_args[0][1],
+                local_addr=handler._this_node.addr,
+                server_port=2222,
+            )
+            self.assertEqual(mock_create_server.call_count, 2)
+
+    def test_share_store_releases_tcp_store_when_rank_changes_from_zero(self):
+        self._max_nodes = 2
+        other_node = _NodeDesc("aaa_node", 1, 1)
+        self._state.participants[other_node] = 0
+        self._state.last_heartbeats[other_node] = datetime.now(timezone.utc)
+
+        handler = self._create_handler()
+        handler._shared_tcp_store_server = self._tcp_store_mock
+
+        shared_store_info = RendezvousStoreInfo(TEST_ADDR, TEST_PORT)
+        with patch.object(RendezvousStoreInfo, "build", return_value=shared_store_info):
+            rdzv_info = handler.next_rendezvous()
+
+        self.assertEqual(rdzv_info.rank, 1)
+        self.assertIsNone(handler._shared_tcp_store_server)
+
     @patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay")
     def test_next_rendezvous_skews_the_first_join_attempt(self, mock_delay) -> None:
         for round, expected_call_count in [(0, True), (1, False)]:
