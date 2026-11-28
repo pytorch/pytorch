@@ -799,9 +799,9 @@
     {
       "Gb_type": "Specialization-dependent super method error",
       "Context": "dict.{name}",
-      "Explanation": "CPython specialization can change the receiver named in the argument error.",
+      "Explanation": "The arguments to this direct super() call are invalid. CPython specialization can change the receiver named in its TypeError.",
       "Hints": [
-        "Bind the method before calling it."
+        "To catch TypeError, bind the method first."
       ]
     }
   ],

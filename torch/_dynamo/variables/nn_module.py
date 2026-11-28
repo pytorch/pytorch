@@ -58,6 +58,7 @@ from ..source import (
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
+    TypeSource,
     UnspecializedNNModuleSource,
 )
 from ..utils import (
@@ -89,7 +90,13 @@ from .base import (
 from .functions import invoke_and_store_as_constant
 from .hashable import HashableTracker
 from .lazy import LazyVariableTracker
-from .object_protocol import generic_getitem, generic_is_true, pysequence_contains
+from .object_protocol import (
+    generic_getitem,
+    generic_is_true,
+    mro_attr_source,
+    mro_lookup,
+    pysequence_contains,
+)
 from .user_defined import (
     can_guard_class_function_code,
     UserDefinedNNModuleHooksDictVariable,
@@ -553,7 +560,7 @@ class NNModuleVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import VariableBuilder
 
-        source = self.source and AttrSource(self.source, name)
+        source: Source | None = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
         # NB: We look up attributes in __dict__ directly, bypassing any custom
@@ -561,9 +568,6 @@ class NNModuleVariable(VariableTracker):
         # fallback (via _custom_getattr_fallback) for attributes not found here.
         base_dict = object.__getattribute__(base, "__dict__")
         object_member = True
-        all_class_attribute_names = set()
-        for x in inspect.getmro(base.__class__):
-            all_class_attribute_names.update(x.__dict__.keys())
 
         if not self.source:
             unimplemented(
@@ -580,7 +584,39 @@ class NNModuleVariable(VariableTracker):
 
         out = None
         subobj = base_dict.get(name, NO_SUCH_SUBOBJ)
-        if subobj is NO_SUCH_SUBOBJ and name not in all_class_attribute_names:
+        cls, cls_source = type(base), TypeSource(self.source)
+        class_attr = mro_lookup(cls, name)
+        if istype(class_attr, property):
+            # A property's AttributeError skips the instance dict and invokes __getattr__.
+            attr_source = mro_attr_source(tx, cls, cls_source, name, raw_metadata=True)
+            prop = VariableTracker.build(tx, class_attr, attr_source, realize=True)
+            getter = prop.tp_getattro_impl(tx, "fget").realize()
+            if not getter.is_constant_none():
+                try:
+                    return getter.call_function(tx, [self], {})
+                except ObservedAttributeError:
+                    handle_observed_exception(tx)
+            hook = mro_lookup(cls, "__getattr__")
+            hook_source = mro_attr_source(
+                tx, cls, cls_source, "__getattr__", raw_metadata=True
+            )
+            fallback = VariableTracker.build(tx, hook, hook_source, realize=True)
+            if hook is not torch.nn.Module.__getattr__:
+                if hasattr(type(hook), "__get__"):
+                    fallback = fallback.tp_descr_get_impl(
+                        tx, self, VariableTracker.build(tx, cls, cls_source)
+                    )
+                return fallback.call_function(tx, [VariableTracker.build(tx, name)], {})
+            subobj = NO_SUCH_SUBOBJ
+        elif subobj is NO_SUCH_SUBOBJ and class_attr is not NO_SUCH_SUBOBJ:
+            subobj = class_attr
+            object_member = False
+        else:
+            # A new property would take precedence over the instance dict or registry.
+            attr_source = mro_attr_source(tx, cls, cls_source, name, raw_metadata=True)
+            if attr_source is not None:
+                install_guard(attr_source.make_guard(GuardBuilder.TYPE_MATCH))
+        if subobj is NO_SUCH_SUBOBJ:
             for field in ("_parameters", "_buffers", "_modules"):
                 if field not in base_dict:
                     continue
@@ -607,13 +643,10 @@ class NNModuleVariable(VariableTracker):
                 )
                 if present:
                     subobj = registry[name]
+                    if istype(class_attr, property):
+                        source = DictGetItemSource(registry_source, name)
                     break
-        if subobj is NO_SUCH_SUBOBJ and out is None:
-            try:
-                subobj = inspect.getattr_static(base, name)
-                object_member = False
-            except AttributeError:
-                # see if we can fallback to __getattr__, which is not checked by getattr_static
+            else:
                 result = self._custom_getattr_fallback(
                     base=base, tx=tx, name=name, obj_source=self.source
                 )
@@ -650,18 +683,7 @@ class NNModuleVariable(VariableTracker):
             return out
 
         else:
-            if istype(subobj, property):
-                if self.source:
-                    # Read the class attribute to reach the property
-                    source = AttrSource(AttrSource(self.source, "__class__"), name)
-                    # Get the getter function
-                    source = AttrSource(source, "fget")
-                # A builder would eagerly resolve this source through the metaclass.
-                return VariableBuilder.create_internal_user_function(
-                    subobj.fget,  # pyrefly: ignore[bad-argument-type]
-                    source=source,
-                ).call_function(tx, [self], {})
-            elif istype(subobj, classmethod):
+            if istype(subobj, classmethod):
                 return variables.UserMethodVariable(
                     VariableBuilder.create_internal_user_function(
                         subobj.__func__,
