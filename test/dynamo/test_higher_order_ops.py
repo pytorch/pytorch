@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     munge_exc,
     parametrize,
-    skipIfXpu,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
@@ -7254,7 +7253,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             for arg, cloned_arg in zip(args, cloned_args):
                 self.assertEqual(arg.grad, cloned_arg.grad)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
     @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function(self):
@@ -7274,7 +7272,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
     @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function_with_kwargs(self):
@@ -7298,7 +7295,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
     @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout(self):
@@ -7325,7 +7321,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
     @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout_inductor(self):
@@ -7376,7 +7371,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
     @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
