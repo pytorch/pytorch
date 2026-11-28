@@ -336,6 +336,35 @@ class TestScatterGatherDevice(TestCase):
             ref_cpu = torch.gather(src.cpu(), dim=1, index=ind.cpu())
             self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
 
+    @dtypes(torch.bool, torch.bfloat16, torch.float32, torch.long, torch.cdouble)
+    def test_gather_element_index(self, device, dtype):
+        # Gathers that the vectorized row gathers do not take; gfx1250 runs them
+        # as batched row or element gathers. Fleet shapes, scaled down: a 1-D
+        # index_select (int64 and int32 index), a 3-D gather from strided rows
+        # (row stride 259) with the index expanded along the last dim, a gather
+        # from an expanded input, and a long tie-heavy gather that strides over
+        # the element-gather grid.
+        def check(src, dim, idx):
+            self.assertEqual(torch.gather(src, dim, idx), torch.gather(src.cpu(), dim, idx.cpu()), atol=0, rtol=0)
+
+        src = make_tensor((3457,), device=device, dtype=dtype)
+        idx = torch.randint(3457, (3456,), device=device)
+        for index in (idx, idx.int()):
+            self.assertEqual(torch.index_select(src, 0, index), torch.index_select(src.cpu(), 0, index.cpu()), atol=0, rtol=0)
+        check(src, 0, idx)
+        # Index constant along the last dim: gfx1250 copies these by rows (bool,
+        # whose rows are only 1-byte aligned here, by elements), with in rows
+        # aligned to the element size only (and offset by one element in the
+        # second case).
+        base = make_tensor((6, 250, 259), device=device, dtype=dtype)
+        idx = torch.randint(250, (6, 40, 1), device=device).expand(6, 40, 128)
+        check(base[..., :128], 1, idx)
+        check(base[..., 1:129], 1, idx)
+        check(make_tensor((1, 8684), device=device, dtype=dtype).expand(18, 8684), 1, torch.randint(8684, (18, 8684), device=device))
+        check(make_tensor((24, 2400), device=device, dtype=dtype), 1, torch.randint(2400, (24, 1200), device=device))
+        n = (1 << 20) + 5
+        check(make_tensor((16,), device=device, dtype=dtype), 0, torch.randint(16, (n,), device=device))
+
     @dtypes(torch.bool)
     def test_gather_bool(self, device, dtype):
         src = torch.tensor(((False, True), (True, True)), device=device, dtype=dtype)
@@ -905,6 +934,96 @@ class TestScatterGatherDevice(TestCase):
                 res = inp.clone().scatter_add_(d, idx, src)
             self.assertEqual(res, ref)
 
+
+def _row_sized_gather_rows(device, row_bytes):
+    # A row count above both gfx1250 row-sized gather launch thresholds: 4 rows
+    # and 6144 16-byte vectors per multiprocessor.
+    cus = torch.cuda.get_device_properties(device).multi_processor_count
+    return max(4 * cus, 6144 * 16 * cus // row_bytes) + 7
+
+
+class TestScatterGatherCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @dtypes(torch.bfloat16, torch.float32)
+    @parametrize("row_elems", [1536, 3072, 8192, 16400])
+    def test_gather_many_wide_rows(self, device, dtype, row_elems):
+        # Enough rows that gfx1250 launches one block per row with fewer threads.
+        rows = _row_sized_gather_rows(device, row_elems * dtype.itemsize)
+        src = make_tensor((512, row_elems), device=device, dtype=dtype)
+        idx = torch.randint(512, (rows,), device=device)
+        ref = src.cpu()[idx.cpu()]
+        self.assertEqual(torch.gather(src, 0, idx[:, None].expand(rows, row_elems)), ref, atol=0, rtol=0)
+        self.assertEqual(src[idx], ref, atol=0, rtol=0)
+        # Two slices per index, as in a beam-search cache reorder.
+        src3 = src.view(256, 2, row_elems)
+        idx3 = torch.randint(256, (rows, 1, 1), device=device)
+        ref3 = torch.gather(src3.cpu(), 0, idx3.cpu().expand(rows, 2, row_elems))
+        self.assertEqual(torch.gather(src3, 0, idx3.expand(rows, 2, row_elems)), ref3, atol=0, rtol=0)
+
+    @dtypes(torch.bfloat16, torch.float32)
+    @parametrize("row_elems", [128, 1536, 8192])
+    @parametrize("index_step", [2, 3])
+    def test_gather_strided_index(self, device, dtype, row_elems, index_step):
+        # The index steps by `index_step` elements along the gathered dim, as in
+        # gather(src, 0, idx[::step, None].expand(-1, D)). On gfx1250 the wide
+        # rows at the larger row count take the strided-index vectorized gather;
+        # 128-element rows and 64 rows take the batched row gather.
+        many_rows = _row_sized_gather_rows(device, row_elems * dtype.itemsize)
+        for rows in (64, many_rows):
+            src = make_tensor((1024, row_elems), device=device, dtype=dtype)
+            idx_full = torch.randint(1024, (rows * index_step,), device=device)
+            ref = torch.gather(src.cpu(), 0, idx_full.cpu()[::index_step, None].expand(rows, row_elems))
+            idx = idx_full[::index_step, None].expand(rows, row_elems)
+            self.assertEqual(torch.gather(src, 0, idx), ref, atol=0, rtol=0)
+
+    @dtypes(torch.bool, torch.bfloat16, torch.float32)
+    def test_gather_copies_bits(self, device, dtype):
+        # Every gather path copies elements bit for bit: NaN payloads, signed
+        # zeros and bool bytes other than 0 and 1 come through unchanged. The CPU
+        # reference gathers the same bits as integers (CPU gathers of bool and
+        # bfloat16 normalize them).
+        int_dtype = {torch.bool: torch.uint8, torch.bfloat16: torch.int16, torch.float32: torch.int32}[dtype]
+        info = torch.iinfo(int_dtype)
+
+        def make(*shape):
+            return torch.randint(info.min, info.max, shape, dtype=int_dtype, device=device).view(dtype)
+
+        def check(src, dim, idx, shape=None):
+            # idx is expanded to shape on each side, so the CPU copy stays compact.
+            shape = shape or idx.shape
+            ref = torch.gather(src.view(int_dtype).cpu(), dim, idx.cpu().expand(shape))
+            self.assertEqual(torch.gather(src, dim, idx.expand(shape)).view(int_dtype).cpu(), ref, atol=0, rtol=0)
+
+        rows = _row_sized_gather_rows(device, 1536 * dtype.itemsize)
+        src = make(1024, 1536)
+        idx = torch.randint(1024, (2 * rows, 1), device=device)
+        check(src, 0, idx[:rows], (rows, 1536))
+        check(src, 0, idx[::2], (rows, 1536))
+        check(src, 0, idx[:128:2], (64, 1536))
+        check(make(24, 2400), 1, torch.randint(2400, (24, 1200), device=device))
+        check(make(64, 300, 40), 1, torch.randint(300, (64, 100, 1), device=device), (64, 100, 40))
+
+    def test_gather_row_sized_launch_edges(self, device):
+        # Row counts one below, at and one above the gfx1250 row-sized launch
+        # thresholds (4 rows and 6144 16-byte vectors per multiprocessor), and
+        # sources offset by 1, 4 and 8 elements, with a contiguous and a strided
+        # index.
+        cus = torch.cuda.get_device_properties(device).multi_processor_count
+        for row_elems, rows in ((16384, 4 * cus), (8192, 6144 * cus // 1024)):
+            src = make_tensor((1200, row_elems), device=device, dtype=torch.bfloat16)
+            for r in (rows - 1, rows, rows + 1):
+                idx = torch.randint(1200, (r, 1), device=device)
+                ref = torch.gather(src.cpu(), 0, idx.cpu().expand(r, row_elems))
+                self.assertEqual(torch.gather(src, 0, idx.expand(r, row_elems)), ref, atol=0, rtol=0)
+        base = make_tensor((4096 * 1536 + 8,), device=device, dtype=torch.bfloat16)
+        rows = 64 * cus + 7
+        for offset in (1, 4, 8):
+            src = base[offset:offset + 4096 * 1536].view(4096, 1536)
+            for step in (1, 2):
+                idx = torch.randint(4096, (step * rows, 1), device=device)[::step]
+                ref = torch.gather(src.cpu(), 0, idx.cpu().expand(rows, 1536))
+                self.assertEqual(torch.gather(src, 0, idx.expand(rows, 1536)), ref, atol=0, rtol=0)
 
 
 # ---------------------------------------------------------------------------
@@ -1590,6 +1709,7 @@ instantiate_parametrized_tests(TestScatterAddOverrideCorrectness)
 
 instantiate_parametrized_tests(TestScatterGather)
 instantiate_device_type_tests(TestScatterGatherDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestScatterGatherCUDA, globals(), only_for="cuda")
 
 if __name__ == '__main__':
     run_tests()
