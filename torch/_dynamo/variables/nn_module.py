@@ -247,6 +247,17 @@ def guard_to_detect_forward_partial_monkeypatching(
         )
 
 
+_FORWARD_PARTIAL_BOUND_OBJECT_GUARD = functools.partial(
+    GuardBuilder.ID_MATCH,
+    recompile_hint=(
+        "This module's forward was replaced with a functools.partial, and Dynamo "
+        "checks that each object bound into it is the same object as during "
+        "compilation. A new partial that binds a different object, even an equal "
+        "one, recompiles. Reuse the same bound object to avoid this."
+    ),
+)
+
+
 def guard_to_detect_forward_partial_value(
     module_source: Source,
     mod: torch.nn.Module,
@@ -265,7 +276,7 @@ def guard_to_detect_forward_partial_value(
     elif is_safe_constant(value):
         install_guard(value_source.make_guard(GuardBuilder.CONSTANT_MATCH))
     else:
-        install_guard(value_source.make_guard(GuardBuilder.ID_MATCH))
+        install_guard(value_source.make_guard(_FORWARD_PARTIAL_BOUND_OBJECT_GUARD))
 
 
 class NNModuleVariable(VariableTracker):

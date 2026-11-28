@@ -2470,6 +2470,61 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 self.assertTrue(same(layer(x), run(layer, x)))
         self.assertEqual(cnt.frame_count, 1)
 
+    @parametrize(
+        "bind_as, guarded_source",
+        [
+            ("arg", "layer.forward.args[1]"),
+            ("keyword", "layer.forward.keywords['box']"),
+        ],
+        name_fn=lambda bind_as, guarded_source: bind_as,
+    )
+    def test_partial_monkeypatched_forward_bound_object_recompile_hint(
+        self, bind_as, guarded_source
+    ):
+        class Box:
+            def __init__(self, value):
+                self.value = value
+
+        def new_forward(module, *args, box=None):
+            *bound, x = args
+            box = bound[0] if bound else box
+            return module.lin(x) + box.value
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(2, 2)
+
+        def patch_forward(layer, box):
+            if bind_as == "arg":
+                layer.forward = partial(new_forward, layer, box)
+            else:
+                layer.forward = partial(new_forward, layer, box=box)
+
+        def run(layer, x):
+            return layer(x)
+
+        failures = []
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(run)
+        layer = Layer()
+        x = torch.randn(2)
+        # Keep both boxes alive so the replacement cannot reuse the original's id.
+        boxes = [Box(1), Box(1)]
+        patch_forward(layer, boxes[0])
+        self.assertEqual(compiled(layer, x), run(layer, x))
+        self.assertEqual(failures, [])
+
+        patch_forward(layer, boxes[1])
+        self.assertEqual(compiled(layer, x), run(layer, x))
+        self.assertEqual(len(failures), 1)
+        self.assertIn(f"___check_obj_id({guarded_source}", failures[0])
+        self.assertIn(
+            "(HINT: This module's forward was replaced with a functools.partial, and Dynamo checks that each object bound into it is the same object as during compilation. A new partial that binds a different object, even an equal one, recompiles. Reuse the same bound object to avoid this.)",
+            failures[0],
+        )
+
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
