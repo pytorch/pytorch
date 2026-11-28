@@ -2,7 +2,6 @@
 
 import contextlib
 from concurrent.futures import Future
-from unittest import skipIf
 from unittest.mock import call, Mock, patch, PropertyMock
 
 import sympy
@@ -62,6 +61,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     skipCUDAIf,
+    skipIf,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -74,7 +74,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import IS_BIG_GPU
+from torch.testing._internal.inductor_utils import HAS_TRITON, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -2705,7 +2705,7 @@ class TestSchedulerAccelerator(TestCase):
         node.is_reduction.return_value = False
         return node
 
-    @xfailIfNoAcceleratorTriton
+    @skipIf(not HAS_TRITON, "requires triton")
     @inductor_config.patch({"triton.coalesce_tiling_analysis": False})
     def test_candidate_tilings_cache_cleared_after_codegen(self, device):
         # The cache is keyed on scheduler nodes; leaving entries behind keeps
@@ -3220,7 +3220,7 @@ class TestScoreFusionMemory(TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @xfailIfNoAcceleratorTriton
+    @skipIf(not HAS_TRITON, "requires triton")
     @inductor_config.patch("score_fusion_memory_threshold", 1)
     @inductor_config.patch("min_overlap_ratio", 0.5)
     def test_exact_same_reads_should_fuse(self, device) -> None:
@@ -3251,7 +3251,7 @@ class TestScoreFusionMemory(TestCase):
         # Should fuse into 1 kernel since both ops read exact same buffer
         self.assertEqual(metrics.generated_kernel_count, 1)
 
-    @xfailIfNoAcceleratorTriton
+    @skipIf(not HAS_TRITON, "requires triton")
     @inductor_config.patch("score_fusion_memory_threshold", 1)
     @inductor_config.patch("min_overlap_ratio", 0.5)
     def test_split_cat_large_overlap_should_fuse(self, device) -> None:
@@ -3285,7 +3285,7 @@ class TestScoreFusionMemory(TestCase):
         # Should fuse into 1 kernel since all ops read from the same underlying buffer
         self.assertEqual(metrics.generated_kernel_count, 1)
 
-    @xfailIfNoAcceleratorTriton
+    @skipIf(not HAS_TRITON, "requires triton")
     @inductor_config.patch("score_fusion_memory_threshold", 1)
     def test_partial_overlap_below_threshold(self, device) -> None:
         """
