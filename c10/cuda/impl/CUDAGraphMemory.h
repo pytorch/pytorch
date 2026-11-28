@@ -14,7 +14,12 @@ struct AllocationContext {
 
 // Tracks active conditional captures and the capture responsible for each
 // allocation. Surviving allocations move to the parent when a child ends.
-class CaptureTracker {
+// Not thread-safe: callers serialize access per device (the native allocator
+// holds its device mutex). A capture begun with a registration ends by its
+// id; the count-only captureBegin() and captureEnd() pair with each other.
+// Nested conditional captures end innermost first, or all together when
+// their root ends.
+class C10_CUDA_API CaptureTracker {
  public:
   void captureBegin();
   void captureBegin(const CaptureRegistration& registration);
@@ -22,6 +27,11 @@ class CaptureTracker {
   size_t captureEnd(CaptureId_t capture_id);
   bool hasActiveCaptures() const {
     return active_captures_ != 0;
+  }
+  // A root's end can end several captures, so a backend that counts ended
+  // captures compares this before and after.
+  int activeCaptureCount() const {
+    return active_captures_;
   }
   AllocationContext allocationContext(cudaStream_t request_stream) const;
   cudaStream_t reuseStream(cudaStream_t stream) const;
@@ -44,6 +54,7 @@ class CaptureTracker {
       CaptureId_t free_capture_id) const;
   int eraseCaptureTree(CaptureId_t root_capture_id);
 
+  // Registered captures (the nodes of capture_tree_) plus count-only ones.
   int active_captures_{0};
   ska::flat_hash_map<CaptureId_t, CaptureTreeNode> capture_tree_;
   ska::flat_hash_map<cudaStream_t, cudaStream_t> reuse_stream_aliases_;

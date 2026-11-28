@@ -2,6 +2,8 @@
 
 #include <c10/util/Exception.h>
 
+#include <algorithm>
+
 namespace c10::cuda::CUDAGraphMemory {
 
 void CaptureTracker::captureBegin() {
@@ -9,13 +11,19 @@ void CaptureTracker::captureBegin() {
 }
 
 void CaptureTracker::captureBegin(const CaptureRegistration& registration) {
-  TORCH_INTERNAL_ASSERT(registration.capture_id != 0);
-  TORCH_INTERNAL_ASSERT(!capture_tree_.count(registration.capture_id));
+  TORCH_CHECK(
+      registration.capture_id != 0,
+      "A capture registration needs a nonzero capture id");
+  TORCH_CHECK(
+      !capture_tree_.count(registration.capture_id),
+      "Capture ",
+      registration.capture_id,
+      " is already registered");
 
   CaptureId_t root_capture_id = registration.capture_id;
   if (registration.parent_capture_id.has_value()) {
     auto parent_it = capture_tree_.find(*registration.parent_capture_id);
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         parent_it != capture_tree_.end(),
         "Conditional capture parent is not active");
     root_capture_id = parent_it->second.root_capture_id;
@@ -36,19 +44,31 @@ void CaptureTracker::captureBegin(const CaptureRegistration& registration) {
 }
 
 void CaptureTracker::captureEnd() {
-  TORCH_INTERNAL_ASSERT(
-      active_captures_ > 0, "captureEnd called with no active capture");
+  TORCH_CHECK(active_captures_ > 0, "captureEnd called with no active capture");
+  TORCH_CHECK(
+      static_cast<size_t>(active_captures_) > capture_tree_.size(),
+      "captureEnd called with only registered captures active; they end by "
+      "capture id");
   --active_captures_;
 }
 
 size_t CaptureTracker::captureEnd(CaptureId_t capture_id) {
   auto capture_it = capture_tree_.find(capture_id);
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       capture_it != capture_tree_.end(),
       "Capture is not registered or has already ended");
   const CaptureTreeNode ended_capture = capture_it->second;
 
   if (ended_capture.parent_capture_id.has_value()) {
+    const bool has_nested_capture = std::any_of(
+        capture_tree_.begin(), capture_tree_.end(), [&](const auto& entry) {
+          return entry.second.parent_capture_id == capture_id;
+        });
+    TORCH_CHECK(
+        !has_nested_capture,
+        "Conditional capture ",
+        capture_id,
+        " cannot end while a capture nested in it is active");
     auto parent_it = capture_tree_.find(*ended_capture.parent_capture_id);
     TORCH_INTERNAL_ASSERT(
         parent_it != capture_tree_.end(),
@@ -63,7 +83,7 @@ size_t CaptureTracker::captureEnd(CaptureId_t capture_id) {
         ended_capture.invalid_capture_free_count;
     reuse_stream_aliases_.erase(ended_capture.primary_stream);
     capture_tree_.erase(capture_it);
-    captureEnd();
+    --active_captures_;
   } else {
     const int erased_active_captures =
         eraseCaptureTree(ended_capture.root_capture_id);
@@ -105,7 +125,7 @@ void CaptureTracker::recordAllocation(
 }
 
 void CaptureTracker::recordFree(const void* block, cudaStream_t free_stream) {
-  TORCH_INTERNAL_ASSERT(hasActiveCaptures());
+  TORCH_CHECK(hasActiveCaptures(), "recordFree called with no active capture");
   auto allocation_it = block_allocation_captures_.find(block);
   if (allocation_it == block_allocation_captures_.end()) {
     return;

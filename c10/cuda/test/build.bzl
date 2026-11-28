@@ -28,6 +28,17 @@ def define_targets(rules, gtest_deps):
     )
 
     rules.cc_test(
+        name = "graph_memory_test",
+        srcs = [
+            "impl/CUDAGraphMemoryTest.cpp",
+        ],
+        target_compatible_with = rules.requires_cuda_enabled(),
+        deps = [
+            "//c10/cuda",
+        ] + gtest_deps,
+    )
+
+    rules.cc_test(
         name = "expandable_segment_reserve_test",
         srcs = [
             "impl/CUDACachingAllocatorReserveTest.cpp",
