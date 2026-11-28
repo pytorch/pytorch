@@ -159,7 +159,7 @@ static std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
 // e.g. reducing dim 1 of a [2, 3, 4, 5] tensor gives outer=2, dim=3, inner=20
 enum class ReductionKernel {
   Generic, // fallback for any layout, one threadgroup per output
-  Innermost, // inner == 1, contiguous: one simdgroup per outer (row)
+  Innermost, // inner == 1, contiguous rows: one simdgroup per outer (row)
   InnermostChunk, // Innermost with dim <= 256, several rows per simdgroup
   Outer, // inner > 1: threadgroups of 32 columns x 32 threads splitting `dim`
   OuterSmallDim, // inner > 1 and short dim (<= 256): one thread reduces a whole column
@@ -387,9 +387,13 @@ static ReductionPlan select_reduction_plan(const Tensor& input, const Tensor& ou
         return select_outer_reduction(*layout, is_arg, input.numel());
       }
     } else if (num_reduced <= 1 && input.is_contiguous()) {
-      // Innermost dim, which also covers the flattened dim=None argmax/argmin
-      // view. Strided innermost reductions stay on the generic kernel below.
+      // Innermost dim, which also covers the flattened dim=None argmax/argmin view.
       return select_inner_reduction(plan.layout, is_arg, input.numel());
+    } else if (num_reduced == 1) {
+      // Innermost dim of a view with contiguous rows that are not adjacent, e.g. x[::2] or x[:, :k]
+      if (auto layout = outer_reduction_layout(input, reduced_dim); layout && layout->strides[0] == 1) {
+        return select_inner_reduction(*layout, is_arg, input.numel());
+      }
     } else if (input.is_contiguous() && reduced_dims_adjacent) {
       return select_reduction_plan(
           input.flatten(first_reduced, reduced_dim), output.flatten(first_reduced, reduced_dim), is_arg);
@@ -546,12 +550,17 @@ static void encode_reduction(MPSStream* stream,
                                             plan.num_segments,
                                             layout.dim_size};
         mtl_setArgs(encoder, input, output, sizes);
+        mtl_setArgs<6>(encoder, layout.strides);
       } else if (plan.kernel == ReductionKernel::InnermostChunk) {
         const std::array<uint32_t, 4> sizes{layout.outer_size, layout.dim_size, plan.lanes, plan.num_segments};
-        mtl_setArgs(encoder, input, output, sizes, op.param);
+        // vec4 loads need every row start 4-element aligned, including the offset of the view itself
+        auto strides = layout.strides;
+        strides[3] = plan.lanes < c10::metal::simdgroup_size && plan.num_segments == 1 &&
+            ((strides[2] | input.storage_offset()) & 3) == 0;
+        mtl_setArgs(encoder, input, output, sizes, op.param, strides);
       } else {
         const std::array<uint32_t, 2> sizes{layout.outer_size, layout.dim_size};
-        mtl_setArgs(encoder, input, output, sizes, op.param);
+        mtl_setArgs(encoder, input, output, sizes, op.param, layout.strides);
       }
       break;
     }

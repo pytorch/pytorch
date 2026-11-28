@@ -598,8 +598,9 @@ kernel void reduction_narrow(
   }
 }
 
-// Specialized kernel for reducing the innermost dim of a contiguous tensor.
-// Input [M, N] -> output [M], each SIMD group reduces one row of N elements.
+// Specialized kernel for reducing the innermost dim of a tensor whose rows are
+// contiguous, strides.z elements apart. Input [M, N] -> output [M], each SIMD
+// group reduces one row of N elements.
 // Multiple SIMD groups per TG handle different rows for occupancy.
 // No shared memory needed since simd_reduce suffices for intra-row collapse.
 template <typename OP, typename TI, typename TO, uint NCHAINS = SUM_NCHAINS>
@@ -608,6 +609,8 @@ kernel void reduction_innermost(
     device TO* output [[buffer(1)]],
     constant uint2& sizes [[buffer(2)]], // [M, N]
     constant float& param [[buffer(3)]], // >0 divides accumulator before cast
+    // [dim_stride, inner_stride, outer_stride, unused]
+    constant uint4& strides [[buffer(4)]],
     device TO* mean [[buffer(5)]],
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
@@ -623,7 +626,7 @@ kernel void reduction_innermost(
   if (row >= M)
     return;
 
-  device const TI* row_ptr = input + row * N;
+  device const TI* row_ptr = input + row * strides.z;
 
   metal::array<TA, NCHAINS> acc;
   for (uint j = 0; j < NCHAINS; j++)
@@ -758,6 +761,8 @@ kernel void reduction_innermost_chunk(
     device TO* output [[buffer(1)]],
     constant uint4& sizes [[buffer(2)]], // [rows, row_len, lanes, segs]
     constant float& param [[buffer(3)]],
+    // [dim_stride, inner_stride, outer_stride, vec4 loads allowed]
+    constant uint4& strides [[buffer(4)]],
     device TO* mean [[buffer(5)]],
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
@@ -781,18 +786,17 @@ kernel void reduction_innermost_chunk(
   const uint seg_len = ceil_div(row_len, segs_per_row);
   const uint seg_begin = seg * seg_len;
   const uint seg_end = min(seg_begin + seg_len, row_len);
-  const uint row_base = row * row_len;
+  const uint row_base = row * strides.z;
   metal::array<TA, 4> acc;
   for (uint j = 0; j < 4; j++) {
     acc[j] = OP::identity();
   }
-  // Quads only pay off for the short-row lane counts (up to 10% for 2-byte
-  // dtypes); at 32 lanes per row (split-K, combine passes) chained scalar
-  // loads measure equal or ahead. A single segment per row with an
-  // element-4 aligned row length makes every row start aligned, so the
-  // decision is simdgroup-uniform.
-  const bool quads_ok = lanes_per_row < c10::metal::simdgroup_size &&
-      segs_per_row == 1 && (row_len & 3u) == 0;
+  // The host allows quads only for the short-row lane counts (up to 10% for
+  // 2-byte dtypes; at 32 lanes per row, split-K and combine passes, chained
+  // scalar loads measure equal or ahead), a single segment per row and
+  // element-4 aligned row starts (row stride and view offset), so the decision
+  // is simdgroup-uniform.
+  const bool quads_ok = strides.w != 0;
   uint k = chunk_quads<OP>(
       input,
       row_base,
@@ -1315,7 +1319,7 @@ kernel void arg_reduction(
 // (indices come from idx_in, so ties break on the lowest source index).
 enum ArgMode : uint { ARG_PLAIN = 0, ARG_SPLIT_P1 = 1, ARG_COMBINE = 2 };
 
-// Inner-dim arg-reduction: input is logically [M, N] contiguous, reduce N
+// Inner-dim arg-reduction: input is [M, N] with contiguous rows, reduce N
 // (innermost). One SIMD group (32 lanes) per row, multiple SIMD groups per
 // TG for occupancy. Lane L scans positions {L, L+32, L+64, ...} of its row
 // with strict-improvement updates (so the lane's stored idx is the lowest
@@ -1330,6 +1334,8 @@ kernel void arg_reduction_innermost(
     device const int* idx_in [[buffer(3)]],
     device TI* val_out [[buffer(4)]],
     device int* idx_out [[buffer(5)]],
+    // [dim_stride, inner_stride, outer_stride, unused]
+    constant uint4& strides [[buffer(6)]],
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
@@ -1347,7 +1353,7 @@ kernel void arg_reduction_innermost(
   const uint num_segs = split ? sizes.z : 1;
   const uint seg_off = split ? (row % num_segs) * sizes.y : 0;
   const uint span = split ? min(seg_off + sizes.y, sizes.w) - seg_off : sizes.y;
-  const uint row_base = split ? (row / num_segs) * sizes.w : row * sizes.y;
+  const uint row_base = (split ? row / num_segs : row) * strides.z;
   device const TI* row_ptr = input + row_base + seg_off;
 
   TA best_val = Op::identity();
