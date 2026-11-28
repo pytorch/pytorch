@@ -11,6 +11,7 @@ import onnx
 import onnx_ir as ir
 
 from torch.onnx._internal.exporter import _ir_builder
+from torch.onnx._internal.exporter._torchlib.ops import common
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -43,6 +44,7 @@ class TestGraphBuilder(common_utils.TestCase):
         self.assertTrue(all(value.dtype == ir.DataType.FLOAT for value in parts))
         typed_parts = op.Split(result, output_types=[self.x.type], axis=0)
         self.assertIsInstance(typed_parts, tuple)
+
         self.assertEqual(len(typed_parts), 1)
         self.assertEqual(len(op.builder.call("Identity", result)), 1)
         with self.assertRaisesRegex(ValueError, "optional/variadic outputs"):
@@ -59,6 +61,20 @@ class TestGraphBuilder(common_utils.TestCase):
             op.NotAnOnnxOperator(result)
         with self.assertRaises(AttributeError):
             op._private
+
+    @parametrize("metadata", ["dtype", "shape"])
+    def test_required_metadata_reports_missing_input(self, metadata):
+        require = getattr(common, f"require_{metadata}")
+        op = _ir_builder.TranslationContext(self.builder)
+        with self.assertRaisesRegex(ValueError, "Handle omitted optional inputs"):
+            require(op, None)
+        value = ir.Value(name="missing")
+        with self.assertRaisesRegex(ValueError, "Set ir.Value"):
+            require(op, value)
+        value.type = ir.TensorType(ir.DataType.FLOAT)
+        value.shape = ir.Shape(["batch", None])
+        expected = value.dtype if metadata == "dtype" else value.shape
+        self.assertEqual(require(op, value), expected)
 
     @parametrize("outputs", [True, -1, 1.5])
     def test_context_invalid_output_count(self, outputs):
