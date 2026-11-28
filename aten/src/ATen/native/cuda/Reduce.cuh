@@ -337,8 +337,20 @@ struct ReduceJitOp {
   }
 };
 
-template <typename scalar_t, typename ops_t, typename index_t, typename out_scalar_t=scalar_t, int vt0=4, int input_vec_size=vt0>
+// Note [global_reduce prefetch]
+// When each output is split across blocks, the last block to finish combines
+// their partials in global_reduce. Outside the block_x_reduce case, each thread
+// loads global_reduce_prefetch of its partials before combining them, so that
+// their loads overlap. This holds on CUDA; the jiterator copy in
+// reduction_template.cuh always gets the default depth, passed in by
+// launch_jitted_reduce_kernel.
+// ROCm <= 7.13 always loads 4 at a time, later ROCm has its own loop, and the
+// jiterator on ROCm loads one at a time.
+constexpr int default_global_reduce_prefetch = 4;
+
+template <typename scalar_t, typename ops_t, typename index_t, typename out_scalar_t=scalar_t, int vt0=4, int input_vec_size=vt0, int global_reduce_prefetch=default_global_reduce_prefetch>
 struct ReduceOp {
+  static_assert(global_reduce_prefetch >= 1);
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename std::decay<typename traits::template arg<0>::type>::type;
 
@@ -843,33 +855,34 @@ struct ReduceOp {
           }
         }
       } else {
-#if defined(USE_ROCM) && ROCM_VERSION <= 71300
+#if !defined(USE_ROCM) || ROCM_VERSION <= 71300
+        // See Note [global_reduce prefetch]
+#ifdef USE_ROCM
+        constexpr int prefetch = 4;
+#else
+        constexpr int prefetch = global_reduce_prefetch;
+#endif
         index_t input_offset = threadIdx.y;
         index_t step = blockDim.y;
-        #define PRFCH 4
-        for (; input_offset < config.ctas_per_output; input_offset += step*PRFCH) {
-         arg_vec_t next[PRFCH];
-         #pragma unroll
-         for (int u = 0; (u < PRFCH) && (input_offset + u*step < config.ctas_per_output); u++) {
-          index_t idx = config.staging_memory_offset(input_offset + u*step);
-          next[u] = reduce_buffer[idx];
-         }
-         for (int u = 0; (u < PRFCH) && (input_offset + u*step < config.ctas_per_output); u++) {
+        for (; input_offset < config.ctas_per_output; input_offset += step * prefetch) {
+          arg_vec_t next[prefetch];
           #pragma unroll
-          for (int i = 0; i < output_vec_size; i++) {
-            value[i] = ops.combine(value[i], next[u][i]);
+          for (int u = 0; (u < prefetch) && (input_offset + u * step < config.ctas_per_output); u++) {
+            index_t idx = config.staging_memory_offset(input_offset + u * step);
+            next[u] = reduce_buffer[idx];
           }
-         }
+          #pragma unroll
+          for (int u = 0; (u < prefetch) && (input_offset + u * step < config.ctas_per_output); u++) {
+            #pragma unroll
+            for (int i = 0; i < output_vec_size; i++) {
+              value[i] = ops.combine(value[i], next[u][i]);
+            }
+          }
         }
 #else
-#if defined(USE_ROCM)
         int input_offset = threadIdx.y;
         int step = blockDim.y;
         #pragma unroll
-#else
-        index_t input_offset = threadIdx.y;
-        index_t step = blockDim.y;
-#endif
         for (; input_offset < config.ctas_per_output; input_offset += step) {
           index_t idx = config.staging_memory_offset(input_offset);
           arg_vec_t next = reduce_buffer[idx];
@@ -972,8 +985,13 @@ inline void launch_jitted_reduce_kernel(
     if (!fn_ptr->function) {
       int max_threads_codegen =
           max_reduce_threads(desc.f_inputs_type) / config.output_vec_size;
+#ifdef USE_ROCM
+      constexpr int global_reduce_prefetch = 1;
+#else
+      constexpr int global_reduce_prefetch = default_global_reduce_prefetch;
+#endif
       auto code = at::cuda::jit::generate_reduction_code(
-          desc, vt0, true, false, config.output_vec_size, max_threads_codegen);
+          desc, vt0, true, false, config.output_vec_size, max_threads_codegen, global_reduce_prefetch);
 
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_" + desc.name);
     }
@@ -1195,7 +1213,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   return config;
 };
 
-template <typename scalar_t, typename out_scalar_t, int vt0=4, int input_vec_size=vt0, typename ops_t, typename ident_t=double>
+template <typename scalar_t, typename out_scalar_t, int vt0=4, int input_vec_size=vt0, int global_reduce_prefetch=default_global_reduce_prefetch, typename ops_t, typename ident_t=double>
 inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
                               AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
@@ -1247,7 +1265,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       int64_t sub_iter_base_idx = sub_iter.view_offsets()[0];
 
-      gpu_reduce_kernel<scalar_t, out_scalar_t, vt0, input_vec_size>(sub_iter, ops, ident,
+      gpu_reduce_kernel<scalar_t, out_scalar_t, vt0, input_vec_size, global_reduce_prefetch>(sub_iter, ops, ident,
           acc_buf_ptr, sub_iter_base_idx);
     }
     return;
@@ -1279,7 +1297,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   AT_ASSERT(can_use_32bit_indexing);
   auto output_calc = make_output_calculator<uint32_t>(iter);
   auto input_calc = make_input_calculator<uint32_t>(iter);
-  auto reduce = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t, vt0, input_vec_size>(
+  auto reduce = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t, vt0, input_vec_size, global_reduce_prefetch>(
       ops,
       config,
       input_calc,
