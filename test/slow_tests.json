@@ -241,7 +241,7 @@
   "test_sort_stable_cuda (__main__.GPUTests)": 126.56412506103516,
   "test_sort_transpose_cpu (__main__.CpuTritonTests)": 376.54832967122394,
   "test_svd_lowrank_cuda_complex128 (__main__.TestLinalgDeviceCUDA)": 327.46799723307294,
-  "test_tensorwise_scaling_acceptable_input_dims_M_1024_K_1024_N_2048_persistent_matmul_False_cpu (__main__.TestFP8LoweringCPU)": 75.4329337477684,
+  "test_tensorwise_scaling_acceptable_input_dims_M_1024_K_1024_N_2048_persistent_matmul_False_cpu (__main__.TestFP8LoweringAcceleratorCPU)": 75.4329337477684,
   "test_terminate_handler_on_crash (__main__.TestTorch)": 207.00677956475153,
   "test_terminate_signal (__main__.ForkTest)": 232.13122049967447,
   "test_terminate_signal (__main__.ParallelForkServerShouldWorkTest)": 232.00266604953342,
