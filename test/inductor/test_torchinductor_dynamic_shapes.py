@@ -433,18 +433,20 @@ if not TEST_WITH_ASAN:
 @contextlib.contextmanager
 def _record_launches():
     """Record (index dtype, size_hints) for every Triton kernel launched inside the
-    block. The index dtype ("i32" or "i64") is the type of the kernel's numel args."""
+    block. The index dtype is "i64" if any of the kernel's numel args (xnumel_0, ...
+    in a combo kernel, which has no size_hints) is int64, else "i32"; a combo
+    kernel's int64 version keeps sub-kernels that fit int32 at int32."""
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
-    launched: list[tuple[str, dict[str, int]]] = []
+    launched: list[tuple[str, dict[str, int] | None]] = []
     run = CachingAutotuner.run
 
     def recording_run(self, *args, **kwargs):
         signature = self.triton_meta["signature"]
-        dtypes = {t for name, t in signature.items() if name.endswith("numel")}
+        dtypes = {t for name, t in signature.items() if "numel" in name}
         if dtypes:
-            (dtype,) = dtypes
-            launched.append((dtype, dict(self.size_hints)))
+            dtype = "i64" if "i64" in dtypes else "i32"
+            launched.append((dtype, self.size_hints and dict(self.size_hints)))
         return run(self, *args, **kwargs)
 
     with unittest.mock.patch.object(CachingAutotuner, "run", recording_run):
@@ -1459,22 +1461,162 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertNotIn("2147483647", str(entry.guard_manager))
 
     @onlyAccelerator
-    def test_dual_index_dtype_foreach_cat_keeps_guard(self, device):
-        """A concat of more than config.max_pointwise_cat_inputs graph inputs is a
-        foreach combo kernel, which dual_index_dtype_kernels does not cover: it keeps a
-        single int32 kernel and its size guard. Flip this if combo kernels get covered."""
+    @parametrize("op", ["cat", "foreach_add"])
+    @parametrize("split", [False, True])
+    def test_dual_index_dtype_foreach(self, device, op, split):
+        """test_dual_index_dtype_pointwise for foreach combo kernels: a concat of more
+        than config.max_pointwise_cat_inputs graph inputs, and a foreach op. The combo
+        kernel is built with int32 and with int64 indexing. With split, the nodes are
+        split into combo kernels of 2 nodes and one single-node partition, which is
+        built as a regular kernel."""
+        n = config.max_pointwise_cat_inputs + 1
+        # Each node reads one buffer and writes one.
+        patches = {"combo_kernel_max_num_args": 4} if split else {}
+
+        def fn(*xs):
+            return torch.cat(xs) if op == "cat" else torch._foreach_add(list(xs), 1.0)
+
+        def inputs(rows):
+            return [torch.randn(rows, 64, device=device) for _ in range(n)]
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        with (
+            config.patch(dual_index_dtype_kernels=True, **patches),
+            _lowered_int32_limit(),
+        ):
+            # rows != 64 on the first call, so duck sizing does not tie rows to columns.
+            args = inputs(100)
+            actual, (code, *_) = run_and_get_code(compiled, *args)
+            self.assertEqual(actual, fn(*args))
+            # Each sub-kernel's buffers (an input and its output, or its slice of the
+            # concat output, passed as a view) have rows * 64 elements.
+            for rows in [512, 3, 300, 400, 64]:
+                self._assert_dual_launch(compiled, fn, inputs(rows), rows * 64)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertIn("triton_for_fused", code)
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("2147483647", str(entry.guard_manager))
+
+    @onlyAccelerator
+    @config.patch(combo_kernels=True)
+    def test_dual_index_dtype_combo_kernels(self, device):
+        """test_dual_index_dtype_foreach for config.combo_kernels, which combines
+        independent kernels of different sizes into one combo kernel."""
+
+        def fn(a, b, c):
+            return a * 2, b + 1, c.sin()
+
+        def inputs(scale):
+            shapes = [(10 * scale, 64), (7 * scale, 48), (3 * scale, 80)]
+            return [torch.randn(shape, device=device) for shape in shapes]
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        with config.patch(dual_index_dtype_kernels=True), _lowered_int32_limit():
+            args = inputs(10)
+            actual, (code, *_) = run_and_get_code(compiled, *args)
+            self.assertEqual(actual, fn(*args))
+            # The largest buffers are a and a * 2: 10 * scale * 64 elements.
+            for scale in [200, 1, 50, 150]:
+                self._assert_dual_launch(compiled, fn, inputs(scale), 640 * scale)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertIn("ComboKernelGrid", code)
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("2147483647", str(entry.guard_manager))
+
+    @onlyAccelerator
+    @config.patch(combo_kernels=True)
+    def test_dual_index_dtype_combo_kernels_static_and_dynamic(self, device):
+        """test_dual_index_dtype_combo_kernels for a combo kernel mixing dynamic and
+        static sub-kernels: it dispatches on the dynamic ones' sizes, and every
+        sub-kernel computes the right result in both versions."""
+
+        def fn(a, b, c):
+            return a * 2, b + 1, c.sin()
+
+        def inputs(scale):
+            a = torch.randn(10 * scale, 64, device=device)
+            b = torch.randn(7 * scale, 48, device=device)
+            torch._dynamo.mark_dynamic(a, 0)
+            torch._dynamo.mark_dynamic(b, 0)
+            return a, b, torch.randn(30, 80, device=device)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter)
+        with config.patch(dual_index_dtype_kernels=True), _lowered_int32_limit():
+            args = inputs(10)
+            actual, (code, *_) = run_and_get_code(compiled, *args)
+            self.assertEqual(actual, fn(*args))
+            # The largest buffers are a and a * 2: 10 * scale * 64 elements.
+            for scale in [200, 1, 50, 150]:
+                self._assert_dual_launch(compiled, fn, inputs(scale), 640 * scale)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertIn("ComboKernelGrid", code)
+
+    @onlyAccelerator
+    @serialTest()
+    @largeTensorTest("6GB")
+    @parametrize("dual", [False, True])
+    def test_dual_index_dtype_foreach_cat_past_int32(self, device, dual):
+        """A concat of more than config.max_pointwise_cat_inputs graph inputs (a
+        foreach combo kernel) whose output passes 2**31 elements while every input
+        fits int32: each copy writes its slice through its own offset pointer, so the
+        int32 version runs, correctly, and no guard fails."""
+        n = config.max_pointwise_cat_inputs + 1
 
         def fn(*xs):
             return torch.cat(xs)
 
+        def small(rows):
+            return torch.randint(-3, 3, (rows, 2**15), dtype=torch.int8, device=device)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        with config.patch(dual_index_dtype_kernels=dual):
+            args = [small(rows) for rows in range(10, 10 + n)]
+            self.assertEqual(compiled(*args), fn(*args))
+            # n * 2**28 elements in the output, 2**28 in each input.
+            xs = [small(2**13) for _ in range(n)]
+            with _record_launches() as launched:
+                actual = compiled(*xs)
+            if dual:
+                self.assertEqual([dtype for dtype, _ in launched], ["i32"])
+            for i, x in enumerate(xs):
+                self.assertTrue(torch.equal(actual[i * 2**13 : (i + 1) * 2**13], x))
+        self.assertEqual(counter.frame_count, 1)
+
+    @onlyAccelerator
+    @parametrize("dual", [False, True])
+    def test_dual_index_dtype_foreach_past_int32(self, device, dual):
+        """test_dual_index_dtype_past_int32 for a foreach combo kernel: a concat of
+        one input past 2**31 elements and small ones, after compiling on small inputs
+        of distinct sizes (each its own symbol)."""
         n = config.max_pointwise_cat_inputs + 1
-        xs = [torch.randn(64, 64, device=device) for _ in range(n)]
-        with config.patch(dual_index_dtype_kernels=True):
-            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), *xs)
-        self.assertEqual(actual, fn(*xs))
-        self.assertIn("triton_for_fused", code)
-        (entry,) = _debug_get_cache_entry_list(fn.__code__)
-        self.assertIn("2147483647", str(entry.guard_manager))
+
+        def fn(*xs):
+            return torch.cat(xs)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+
+        def small(rows):
+            return torch.randint(-3, 3, (rows, 2**15), dtype=torch.int8, device=device)
+
+        others = [small(rows) for rows in range(11, 10 + n)]
+        with config.patch(dual_index_dtype_kernels=dual):
+            args = [small(10), *others]
+            self.assertEqual(compiled(*args), fn(*args))
+            # 2**31 + 2**15 elements: past the int32 range.
+            big = small(2**16 + 1)
+            with _record_launches() as launched:
+                actual = compiled(big, *others)
+            if dual:
+                self.assertEqual([dtype for dtype, _ in launched], ["i64"])
+            self.assertTrue(torch.equal(actual[: big.shape[0]], big))
+            self.assertEqual(actual[big.shape[0] :], torch.cat(others))
+        # Without dual kernels, the int32 kernel's size guard fails and recompiles.
+        self.assertEqual(counter.frame_count, 1 if dual else 2)
 
     @onlyAccelerator
     @torch._dynamo.config.patch(

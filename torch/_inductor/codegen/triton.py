@@ -9735,7 +9735,7 @@ class TritonScheduling(SIMDScheduling):
             )
 
             # pyrefly: ignore [bad-assignment]
-            for src_code, kernel, node_group in kernel_code_list:
+            for src_codes, kernel, node_group in kernel_code_list:
                 fused_node_lists = [node.get_nodes() for node in node_group]
                 names = [n.get_name() for nodes in fused_node_lists for n in nodes]
 
@@ -9748,8 +9748,9 @@ class TritonScheduling(SIMDScheduling):
                     file_list.append(path)
                     continue
 
-                if src_code is None:
-                    raise AssertionError("src_code must not be None")
+                if src_codes is None:
+                    raise AssertionError("src_codes must not be None")
+                (src_code,) = src_codes
                 src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
                 mod = PyCodeCache.load(src_code)
 

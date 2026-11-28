@@ -3033,6 +3033,20 @@ def _int64_kernel_hint_overrides(
     return None
 
 
+class _DualIndexDtypePlan(NamedTuple):
+    """How to build the int32 and int64 versions of one launch: a kernel, or the
+    sub-kernels of a combo kernel (see SIMDScheduling._dual_index_dtype_plan)."""
+
+    # The int32 version is valid when this holds.
+    int32_condition: sympy.Expr
+    # Per (sub-)kernel: whether its int32 fit is unknown. Those get int32 indexing in
+    # the int32 version and int64 indexing in the int64 version; the others are
+    # built the same in both, with the index dtype chosen from their sizes.
+    unknown: list[bool]
+    # The hints to build the int64 version with.
+    int64_hints: dict[sympy.Symbol, int] | None
+
+
 class SIMDScheduling(BaseScheduling):
     """
     Single Instruction Multiple Data parent class used for fusion across
@@ -4794,12 +4808,46 @@ class SIMDScheduling(BaseScheduling):
         Process a kernel by generating code for its node schedule and updating graph state.
         """
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        self._apply_kernel_graph_effects(kernel, node_schedule, only_gen_src_code)
+
+    def _apply_kernel_graph_effects(
+        self,
+        kernel: Any,
+        node_schedule: list[NodeScheduleEntry],
+        only_gen_src_code: bool,
+    ) -> None:
+        """The graph-state part of process_kernel: allocate the nodes' outputs in the
+        wrapper (mark_run, which applies kernel's in-place reuses) and record the
+        buffers kernel removed. Applied once per launch, so when several versions of a
+        kernel are built, they are built without it and then this runs for one of
+        them (_check_same_graph_effects)."""
         if not only_gen_src_code:
             with V.set_kernel_handler(kernel):
                 for node in NodeScheduleMarker.only_nodes(node_schedule):
                     node.mark_run()
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+
+    def _dual_index_dtype_plan(
+        self, features: list[SIMDKernelFeatures]
+    ) -> _DualIndexDtypePlan | None:
+        """For one launch of the kernels of features (a kernel, or the sub-kernels
+        of a combo kernel): how to build its int32 and int64 versions, or None if a
+        single version suffices. That is the case when every kernel's int32 conditions
+        are empty or None: select_index_dtype then picks int32 or int64 without a
+        guard."""
+        if not self._should_build_int32_and_int64():
+            return None
+        conditions = [f.int32_index_conditions() for f in features]
+        unknown = [bool(conds) for conds in conditions]
+        if not any(unknown):
+            return None
+        all_conditions = [c for conds in conditions if conds for c in conds]
+        return _DualIndexDtypePlan(
+            sympy.And(*all_conditions),
+            unknown,
+            _int64_kernel_hint_overrides(all_conditions),
+        )
 
     def _collect_config_patches(self, node_schedule: list[Any]) -> dict[str, Any]:
         """Collect and merge config_patches from all operations in the node schedule.
@@ -4910,17 +4958,14 @@ class SIMDScheduling(BaseScheduling):
         """
         node_schedule = kernel_features.node_schedule
         final_kernel: SIMDKernel | MultiKernelBase
-        # Empty or None conditions: select_index_dtype picks int32 or int64 without a
-        # guard, so a single kernel suffices.
-        if self._should_build_int32_and_int64() and (
-            int32_conditions := kernel_features.int32_index_conditions()
-        ):
-            int64_hints = _int64_kernel_hint_overrides(int32_conditions)
+        if (plan := self._dual_index_dtype_plan([kernel_features])) is not None:
             build = functools.partial(
                 self._create_node_schedule_kernel, kernel_features
             )
             int32_kernel = build(torch.int32)
-            int64_kernel = build(torch.int64, optimization_hint_overrides=int64_hints)
+            int64_kernel = build(
+                torch.int64, optimization_hint_overrides=plan.int64_hints
+            )
             keep = self._union_must_keep_buffers([int32_kernel, int64_kernel])
             if keep is not None:
                 # Rebuild only the kernels that remove a buffer in keep; a discarded
@@ -4933,17 +4978,14 @@ class SIMDScheduling(BaseScheduling):
                     discarded += len(leaf_kernels(int64_kernel))
                     int64_kernel = build(
                         torch.int64,
-                        optimization_hint_overrides=int64_hints,
+                        optimization_hint_overrides=plan.int64_hints,
                         must_keep_buffers=keep,
                     )
                 # pyrefly: ignore [bad-assignment]
                 metrics.generated_kernel_count -= discarded
             self._check_same_graph_effects([int32_kernel, int64_kernel])
             final_kernel = ConditionalMultiKernel(
-                [
-                    (sympy.And(*int32_conditions), int32_kernel),
-                    (sympy.true, int64_kernel),
-                ]
+                [(plan.int32_condition, int32_kernel), (sympy.true, int64_kernel)]
             )
         else:
             final_kernel = self._create_node_schedule_kernel(kernel_features)
@@ -5467,29 +5509,83 @@ class SIMDScheduling(BaseScheduling):
         node_info: NodeInfo,
         only_gen_src_code: bool,
         is_first_combo_launch: bool,
-    ) -> tuple[str, TritonKernel]:
-        kernel_kwargs: dict[str, Any] = {}
-        if (
-            node_info.features.indexing_node_schedule
-            is not node_info.features.node_schedule
-        ):
-            kernel_kwargs["override_cooperative_reduction"] = False
-        self.kernel_type.apply_feature_required_overrides(
-            node_info.features, kernel_kwargs
+    ) -> tuple[list[str], Any]:
+        """A single-node partition of a combo kernel, built as a regular kernel.
+        Returns the kernel to launch (with config.dual_index_dtype_kernels, possibly a
+        ConditionalMultiKernel over an int32 and an int64 version) and the sources of
+        its leaf_kernels."""
+
+        def create(
+            index_dtype: torch.dtype | None = None,
+            hints: dict[sympy.Symbol, int] | None = None,
+            must_keep_buffers: OrderedSet[str] | None = None,
+        ) -> Any:
+            kernel_kwargs: dict[str, Any] = {}
+            if (
+                node_info.features.indexing_node_schedule
+                is not node_info.features.node_schedule
+            ):
+                kernel_kwargs["override_cooperative_reduction"] = False
+            if index_dtype is not None:
+                kernel_kwargs["override_index_dtype"] = index_dtype
+            if hints is not None:
+                kernel_kwargs["optimization_hint_overrides"] = hints
+            self.kernel_type.apply_feature_required_overrides(
+                node_info.features, kernel_kwargs
+            )
+            apply_grid_split_kernel_kwargs(node_info.features, kernel_kwargs)
+            kernel = self.kernel_type(
+                node_info.tiling,
+                features=node_info.features,
+                tiling_scores=node_info.tiling_scores,
+                **kernel_kwargs,
+            )
+            kernel._from_combo_codegen = True
+            kernel._is_first_combo_launch = is_first_combo_launch
+            if must_keep_buffers is not None:
+                kernel.must_keep_buffers.update(must_keep_buffers)
+            return kernel
+
+        plan = (
+            None
+            if only_gen_src_code
+            else self._dual_index_dtype_plan([node_info.features])
         )
-        apply_grid_split_kernel_kwargs(node_info.features, kernel_kwargs)
-        kernel = self.kernel_type(
-            node_info.tiling,
-            features=node_info.features,
-            tiling_scores=node_info.tiling_scores,
-            **kernel_kwargs,
+        if plan is None:
+            kernel = create()
+            self.process_kernel(kernel, node_info.node_schedule, only_gen_src_code)
+            with V.set_kernel_handler(kernel):
+                return [kernel.codegen_kernel()], kernel
+
+        sizevars = V.graph.sizevars
+        versions = [(torch.int32, None), (torch.int64, plan.int64_hints)]
+
+        def build(must_keep_buffers: OrderedSet[str] | None) -> list[Any]:
+            kernels = []
+            for index_dtype, hints in versions:
+                with sizevars.optimization_hint_overrides(hints):
+                    kernel = create(index_dtype, hints, must_keep_buffers)
+                    self.codegen_node_schedule_with_kernel(
+                        node_info.node_schedule, kernel
+                    )
+                kernels.append(kernel)
+            return kernels
+
+        kernels = build(None)
+        if (keep := self._union_must_keep_buffers(kernels)) is not None:
+            kernels = build(keep)
+        self._check_same_graph_effects(kernels)
+        self._apply_kernel_graph_effects(kernels[0], node_info.node_schedule, False)
+        src_codes = []
+        for kernel, (_, hints) in zip(kernels, versions, strict=True):
+            with (
+                V.set_kernel_handler(kernel),
+                sizevars.optimization_hint_overrides(hints),
+            ):
+                src_codes.append(kernel.codegen_kernel())
+        return src_codes, ConditionalMultiKernel(
+            [(plan.int32_condition, kernels[0]), (sympy.true, kernels[1])]
         )
-        kernel._from_combo_codegen = True
-        kernel._is_first_combo_launch = is_first_combo_launch
-        self.process_kernel(kernel, node_info.node_schedule, only_gen_src_code)
-        with V.set_kernel_handler(kernel):
-            src_code = kernel.codegen_kernel()
-        return src_code, kernel
 
     def _probe_subkernel_heuristic(self, node_info: NodeInfo) -> tuple[list[Any], Any]:
         from ..runtime.triton_heuristics import (
@@ -5780,6 +5876,35 @@ class SIMDScheduling(BaseScheduling):
         only_gen_src_code: bool,
     ) -> Any:
         """Build a ComboKernel and its sub-kernels from a list of partition nodes."""
+        kernel = self._create_combo_kernel(
+            fusion_pns,
+            node_schedule_map,
+            enable_autotune,
+            mixed_sizes,
+            per_subkernel_blocks,
+        )
+        for sub_kernel, pn in zip(kernel.sub_kernels, fusion_pns, strict=True):
+            self._apply_kernel_graph_effects(
+                sub_kernel, node_schedule_map[pn].node_schedule, only_gen_src_code
+            )
+        return kernel
+
+    def _create_combo_kernel(
+        self,
+        fusion_pns: list[Any],
+        node_schedule_map: dict[Any, NodeInfo],
+        enable_autotune: bool,
+        mixed_sizes: bool,
+        per_subkernel_blocks: bool,
+        index_dtypes: list[torch.dtype | None] | None = None,
+        hint_overrides: dict[sympy.Symbol, int] | None = None,
+        must_keep_buffers: list[OrderedSet[str] | None] | None = None,
+    ) -> Any:
+        """The build part of _build_combo_kernel, without its graph effects
+        (_apply_kernel_graph_effects). index_dtypes forces each sub-kernel's index
+        dtype (None: chosen from its sizes); hint_overrides replaces the hints the
+        build reads; must_keep_buffers are buffers each sub-kernel must write
+        (_union_must_keep_buffers)."""
         from .triton_combo_kernel import ComboKernel
 
         kernel = ComboKernel(
@@ -5788,22 +5913,75 @@ class SIMDScheduling(BaseScheduling):
             mixed_sizes=mixed_sizes,
             per_subkernel_blocks=per_subkernel_blocks,
         )
-        for pn in fusion_pns:
-            node_info = node_schedule_map[pn]
-            subkernel = ComboKernel.create_triton_kernel(
-                node_info.tiling,
-                features=node_info.features,
-                optimize_mask=not mixed_sizes,
-                triton_kernel_cls=self.kernel_type,
-                tiling_scores=node_info.tiling_scores,
-                per_subkernel_blocks=per_subkernel_blocks,
-            )
-            self.process_kernel(
-                kernel.create_sub_kernel(subkernel),
-                node_info.node_schedule,
-                only_gen_src_code,
-            )
+        with V.graph.sizevars.optimization_hint_overrides(hint_overrides):
+            for i, pn in enumerate(fusion_pns):
+                node_info = node_schedule_map[pn]
+                subkernel = ComboKernel.create_triton_kernel(
+                    node_info.tiling,
+                    features=node_info.features,
+                    optimize_mask=not mixed_sizes,
+                    triton_kernel_cls=self.kernel_type,
+                    tiling_scores=node_info.tiling_scores,
+                    per_subkernel_blocks=per_subkernel_blocks,
+                    override_index_dtype=index_dtypes[i] if index_dtypes else None,
+                    optimization_hint_overrides=hint_overrides,
+                )
+                if must_keep_buffers and (keep := must_keep_buffers[i]) is not None:
+                    subkernel.must_keep_buffers.update(keep)
+                self.codegen_node_schedule_with_kernel(
+                    node_info.node_schedule, kernel.create_sub_kernel(subkernel)
+                )
         return kernel
+
+    def _build_dual_combo_kernel(
+        self,
+        fusion_pns: list[Any],
+        node_schedule_map: dict[Any, NodeInfo],
+        enable_autotune: bool,
+        mixed_sizes: bool,
+        plan: _DualIndexDtypePlan,
+    ) -> tuple[list[str], ConditionalMultiKernel]:
+        """The int32 and int64 versions of a combo kernel, per plan, and their
+        sources. Both are built before the graph effects are applied, once: the
+        sub-kernels of a combo kernel are independent, so they do not depend on each
+        other's effects."""
+        versions = [(torch.int32, None), (torch.int64, plan.int64_hints)]
+
+        def build(keep: list[OrderedSet[str] | None] | None) -> list[Any]:
+            return [
+                self._create_combo_kernel(
+                    fusion_pns,
+                    node_schedule_map,
+                    enable_autotune,
+                    mixed_sizes,
+                    per_subkernel_blocks=False,
+                    index_dtypes=[dtype if u else None for u in plan.unknown],
+                    hint_overrides=hints,
+                    must_keep_buffers=keep,
+                )
+                for dtype, hints in versions
+            ]
+
+        kernels = build(None)
+        keep = [
+            self._union_must_keep_buffers([k.sub_kernels[i] for k in kernels])
+            for i in range(len(fusion_pns))
+        ]
+        if any(k is not None for k in keep):
+            kernels = build(keep)
+        for i, pn in enumerate(fusion_pns):
+            self._check_same_graph_effects([k.sub_kernels[i] for k in kernels])
+            self._apply_kernel_graph_effects(
+                kernels[0].sub_kernels[i], node_schedule_map[pn].node_schedule, False
+            )
+        MultiKernelBase.merge_workspaces_inplace(kernels)
+        src_codes = []
+        for kernel, (_, hints) in zip(kernels, versions):
+            with V.graph.sizevars.optimization_hint_overrides(hints):
+                src_codes.append(kernel.codegen_kernel())
+        return src_codes, ConditionalMultiKernel(
+            [(plan.int32_condition, kernels[0]), (sympy.true, kernels[1])]
+        )
 
     @staticmethod
     def _combo_launch_candidates(winners: list[Any]) -> list[Any]:
@@ -5826,7 +6004,7 @@ class SIMDScheduling(BaseScheduling):
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
         per_subkernel_blocks: bool = False,
-    ) -> list[tuple[str | None, Any, Any]]:
+    ) -> list[tuple[list[str] | None, Any, Any]]:
         """
         Generate kernel code for combo kernel partitions.
 
@@ -5834,7 +6012,9 @@ class SIMDScheduling(BaseScheduling):
         kernel code for each partition. Single-node partitions are generated as
         regular kernels, while multi-node partitions use ComboKernel.
 
-        Returns a list of (src_code, kernel, node_group) tuples.
+        Returns a list of (src_codes, kernel, node_group) tuples: src_codes are the
+        sources of leaf_kernels(kernel), in order (two with
+        config.dual_index_dtype_kernels, where kernel is a ConditionalMultiKernel).
         """
         from .triton import TritonKernel
         from .triton_combo_kernel import ComboKernel
@@ -5929,11 +6109,11 @@ class SIMDScheduling(BaseScheduling):
                     # Skip code generation - caller has cached benchmark results
                     kernel_code_list.append((None, None, node_group))
                 else:
-                    src_code, kernel = self._codegen_standalone_kernel(
+                    src_codes, kernel = self._codegen_standalone_kernel(
                         node_info, only_gen_src_code, not kernel_code_list
                     )
                     # pyrefly: ignore [bad-argument-type]
-                    kernel_code_list.append((src_code, kernel, node_group))
+                    kernel_code_list.append((src_codes, kernel, node_group))
             else:
                 # Compile-time subkernel autotuning is not vetted for deterministic mode.
                 deterministic_compile_time_fallback = (
@@ -5979,18 +6159,18 @@ class SIMDScheduling(BaseScheduling):
                         )
                         src_code = kernel.codegen_kernel()
                         # pyrefly: ignore [bad-argument-type]
-                        kernel_code_list.append((src_code, kernel, fusable_pns))
+                        kernel_code_list.append(([src_code], kernel, fusable_pns))
                     else:
                         # Fewer than two tunable sub-kernels: emit them all standalone.
                         carve_out = list(group)
                     for pn in carve_out:
-                        co_src, co_kernel = self._codegen_standalone_kernel(
+                        co_srcs, co_kernel = self._codegen_standalone_kernel(
                             node_schedule_map[pn],
                             only_gen_src_code,
                             not kernel_code_list,
                         )
                         # pyrefly: ignore [bad-argument-type]
-                        kernel_code_list.append((co_src, co_kernel, [pn]))
+                        kernel_code_list.append((co_srcs, co_kernel, [pn]))
                     continue
                 # Use heuristic block sizes when autotuning is disabled or when
                 # deterministic mode prevents compile-time subkernel benchmarking.
@@ -6026,7 +6206,29 @@ class SIMDScheduling(BaseScheduling):
                 else:
                     fusion_pns = list(node_group)
 
-                if len(fusion_pns) >= 2:
+                plan = None
+                if len(fusion_pns) >= 2 and not only_gen_src_code:
+                    if not per_subkernel_blocks:
+                        features = [node_schedule_map[pn].features for pn in fusion_pns]
+                        plan = self._dual_index_dtype_plan(features)
+                    elif config.dual_index_dtype_kernels:
+                        # TODO: support it (its no-bench and compile-time autotuning
+                        # paths pick configs from the example's sizes).
+                        log.debug(
+                            "dual_index_dtype_kernels: single kernel for "
+                            "combo_kernel_per_subkernel_blocks"
+                        )
+                if plan is not None:
+                    src_codes, kernel = self._build_dual_combo_kernel(
+                        fusion_pns,
+                        node_schedule_map,
+                        enable_autotune,
+                        mixed_sizes,
+                        plan,
+                    )
+                    # pyrefly: ignore [bad-argument-type]
+                    kernel_code_list.append((src_codes, kernel, fusion_pns))
+                elif len(fusion_pns) >= 2:
                     kernel = self._build_combo_kernel(
                         fusion_pns,
                         node_schedule_map,
@@ -6046,16 +6248,16 @@ class SIMDScheduling(BaseScheduling):
 
                     src_code = kernel.codegen_kernel()
                     # pyrefly: ignore [bad-argument-type]
-                    kernel_code_list.append((src_code, kernel, fusion_pns))
+                    kernel_code_list.append(([src_code], kernel, fusion_pns))
 
                 for pn in carve_out_pns:
-                    co_src_code, co_kernel = self._codegen_standalone_kernel(
+                    co_srcs, co_kernel = self._codegen_standalone_kernel(
                         node_schedule_map[pn],
                         only_gen_src_code,
                         not kernel_code_list,
                     )
                     # pyrefly: ignore [bad-argument-type]
-                    kernel_code_list.append((co_src_code, co_kernel, [pn]))
+                    kernel_code_list.append((co_srcs, co_kernel, [pn]))
         # pyrefly: ignore [bad-return]
         return kernel_code_list
 
@@ -6077,9 +6279,16 @@ class SIMDScheduling(BaseScheduling):
             per_subkernel_blocks=per_subkernel_blocks,
         )
 
-        for src_code, kernel, _ in kernel_code_list:
-            kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
+        for src_codes, kernel, _ in kernel_code_list:
+            if src_codes is None:
+                raise AssertionError("src_codes must not be None")
+            for src_code, leaf in zip(src_codes, leaf_kernels(kernel), strict=True):
+                leaf.kernel_name = self.define_kernel(
+                    src_code, [combo_kernel_node], leaf
+                )
+            kernel_name = kernel.kernel_name
             self.codegen_comment(combo_kernel_node.snodes, kernel_name)
+            self._record_other_choices_provenance(kernel, combo_kernel_node.snodes)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             with V.graph.wrapper_code.kernel_profile_scope(
                 kernel_name, combo_kernel_node.snodes
