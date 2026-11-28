@@ -584,6 +584,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten._unsafe_view,
             aten.upsample_linear1d,
             aten.upsample_bilinear2d.out,
+            aten.upsample_trilinear3d.default,
             aten.upsample_trilinear3d.out,
             aten.upsample_nearest2d_backward,
             aten.view_as_complex,
