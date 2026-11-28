@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 import torch.export
 import torch.fx
@@ -7,8 +9,15 @@ from torch.onnx._internal.exporter import _decomp, _registration
 from torch.onnx._internal.fx import passes
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
 def decompose_with_registry(
-    exported_program: torch.export.ExportedProgram, registry: _registration.ONNXRegistry
+    exported_program: torch.export.ExportedProgram,
+    registry: _registration.ONNXRegistry,
+    *,
+    decomp_table_hook: Callable[[dict], dict] | None = None,
 ) -> torch.export.ExportedProgram:
     """Decompose the exported program with the given registry.
 
@@ -16,6 +25,8 @@ def decompose_with_registry(
     """
     onnx_registered_ops = set(_decomp.get_onnx_implemented_overloads(registry))
     decomp_table = _decomp.create_onnx_friendly_decomposition_table(onnx_registered_ops)
+    if decomp_table_hook is not None:
+        decomp_table = decomp_table_hook(decomp_table)
     return exported_program.run_decompositions(decomp_table)
 
 

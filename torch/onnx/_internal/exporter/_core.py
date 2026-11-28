@@ -38,6 +38,7 @@ from torch.onnx._internal.exporter import (
     _onnx_program,
     _registration,
     _reporting,
+    _specialization,
     _tensors,
     _type_casting,
     _verification,
@@ -1053,9 +1054,13 @@ def _prepare_exported_program_for_export(
         ),
     ):
         # Decompose the graph given the implemented torch ops in ONNX
+        specialization_snapshot = _specialization.snapshot(exported_program, registry)
         exported_program = _fx_passes.decompose_with_registry(
-            exported_program, registry
+            exported_program,
+            registry,
+            decomp_table_hook=_specialization.attribution_hook(specialization_snapshot),
         )
+        _specialization.warn_if_specialized(exported_program, specialization_snapshot)
 
         graph_module = exported_program.graph_module
         # Include explicit type promotion nodes
