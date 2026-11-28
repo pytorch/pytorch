@@ -162,6 +162,7 @@ class _PipelineStageBase(ABC):
         device: torch.device,
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
+        reshard_after_backward: bool = False,
     ):
         """
         Args:
@@ -175,6 +176,9 @@ class _PipelineStageBase(ABC):
                 for deferred weight updates in F/I/W zero-bubble
                 schedules. If ``None``, a runner is generated
                 automatically via autograd graph traversal.
+            reshard_after_backward: Whether an FSDP-wrapped submodule frees its
+                unsharded parameters after each microbatch backward. See
+                :class:`PipelineStage`.
         """
         super().__init__()
         if stage_index >= num_stages:
@@ -182,7 +186,13 @@ class _PipelineStageBase(ABC):
                 f"Stage index {stage_index} is out of range of {num_stages}"
             )
 
+        if reshard_after_backward and dw_builder is not None:
+            raise ValueError(
+                "reshard_after_backward=True is not supported with dw_builder: "
+                "the dw_runner would run after FSDP resharded the parameters"
+            )
         self.submod = submodule
+        self._reshard_after_backward = reshard_after_backward
         self.stage_index = stage_index
         self.num_stages = num_stages
         self.device = device
@@ -1124,7 +1134,11 @@ class _PipelineStageBase(ABC):
 
         # If submod is a FSDP or replicate module
         elif isinstance(self.submod, FSDPModule):
-            self.submod.set_reshard_after_backward(False)
+            if self._reshard_after_backward and backward_type != "full":
+                raise ValueError(
+                    "Pipeline FSDP backward resharding requires full backward"
+                )
+            self.submod.set_reshard_after_backward(self._reshard_after_backward)
             self.submod.set_requires_gradient_sync(False)
             result = perform_backward(backward_type)()
 
@@ -1907,6 +1921,13 @@ class PipelineStage(_PipelineStageBase):
             zero-bubble (F/I/W) schedules.
         get_mesh: `GetMeshCallback` used during
             dynamic DTensor inference. Ignored in fully static DTensor mode.
+        reshard_after_backward: Whether an FSDP-wrapped submodule frees its
+            unsharded parameters after each microbatch backward, overriding the
+            module's own setting during pipeline backward. ``False`` (default)
+            keeps them for later microbatches; ``True`` lowers memory at the cost
+            of re-all-gathering, saving the most together with
+            ``reshard_after_forward=True``. Gradient reduction stays deferred.
+            Not supported with split input/weight backward or ``dw_builder``.
     """
 
     def __init__(
@@ -1922,8 +1943,17 @@ class PipelineStage(_PipelineStageBase):
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
         get_mesh: GetMeshCallback | None = None,
+        reshard_after_backward: bool = False,
     ):
-        super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
+        super().__init__(
+            submodule,
+            stage_index,
+            num_stages,
+            device,
+            group,
+            dw_builder,
+            reshard_after_backward=reshard_after_backward,
+        )
 
         self._mesh_cache = _MeshCache(get_mesh_cb=get_mesh)
         self._inference_mode: InferenceMode | None = None
