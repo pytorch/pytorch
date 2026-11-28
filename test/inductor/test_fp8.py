@@ -1580,11 +1580,14 @@ class TestFP8LoweringAccelerator(TestCase):
     @skipCPUIf(True, "cuda/xpu only")
     @requires_capabilities(Capability.dtype.fp8)
     @skipIf(not has_triton_tma_device(), "Need device-side TMA support in Triton")
-    @skipIf(
-        _get_torch_cuda_version() < (12, 9),
-        "cuBLAS blockwise scaling added in CUDA 12.9",
+    @xfailIf(
+        torch.accelerator.is_available()
+        and torch.accelerator.current_accelerator().type == "cuda"
+        and torch.get_device_module(
+            torch.accelerator.current_accelerator()
+        ).get_device_capability()
+        != (9, 0)
     )
-    @xfailIf(torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0))
     @parametrize(
         "shape",
         (
@@ -1608,6 +1611,8 @@ class TestFP8LoweringAccelerator(TestCase):
         scaling_block_sizes: tuple[int, int, int, int],
         device,
     ):
+        if torch.device(device).type == "cuda" and _get_torch_cuda_version() < (12, 9):
+            self.skipTest("cuBLAS blockwise scaling added in CUDA 12.9")
         if torch.device(device).type == "xpu" and use_fast_accum:
             self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
@@ -1776,13 +1781,15 @@ class TestFP8LoweringAccelerator(TestCase):
 
         # On gfx120x, autotuned kernels have issues with small M
         compile_mode = "max-autotune"
-        if (
-            torch.version.hip is not None
-            and M < 16
-            and torch.cuda.is_available()
-            and "gfx120" in torch.cuda.get_device_properties(0).gcnArchName
-        ):
-            compile_mode = "default"
+        if torch.device(device).type == "cuda":
+            device_mod = torch.get_device_module(device)
+            if (
+                torch.version.hip is not None
+                and M < 16
+                and device_mod.is_available()
+                and "gfx120" in device_mod.get_device_properties(0).gcnArchName
+            ):
+                compile_mode = "default"
 
         with config.patch({"triton.enable_persistent_tma_matmul": persistent_matmul}):
             linear_compiled = torch.compile(
@@ -2146,13 +2153,15 @@ class TestFP8LoweringAccelerator(TestCase):
 
         # On gfx120x, autotuned kernels have issues with small M
         compile_mode = "max-autotune"
-        if (
-            torch.version.hip is not None
-            and M < 16
-            and torch.cuda.is_available()
-            and "gfx120" in torch.cuda.get_device_properties(0).gcnArchName
-        ):
-            compile_mode = "default"
+        if torch.device(device).type == "cuda":
+            device_mod = torch.get_device_module(device)
+            if (
+                torch.version.hip is not None
+                and M < 16
+                and device_mod.is_available()
+                and "gfx120" in device_mod.get_device_properties(0).gcnArchName
+            ):
+                compile_mode = "default"
 
         with config.patch({"triton.enable_persistent_tma_matmul": persistent_matmul}):
             linear_compiled = torch.compile(
