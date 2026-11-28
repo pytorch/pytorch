@@ -3528,6 +3528,306 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(dst_storage[[0, 25]], torch.tensor([-1.0, -1.0]))
 
     @onlyCPU
+    @skipIfTorchDynamo("checks native allocations")
+    @skipIfTorchInductor("checks native allocations")
+    @skipIfCrossRef
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @parametrize("arena_factor,shared_out", ((1, False), (2, False), (2, True), (4, False)))
+    def test_copy_out_no_storage_clone(self, device, arena_factor, shared_out):
+        n = 1024
+        arena = torch.zeros(n * arena_factor + 2, device=device)
+        inp = arena[1:n + 1]
+        src = torch.full((n,), 7.0, device=device)
+        out_base = arena if shared_out else torch.zeros(n + 2, device=device)
+        out = out_base[n + 1:2 * n + 1] if shared_out else out_base[1:n + 1]
+        metadata = (out.data_ptr(), out.untyped_storage().data_ptr(), out.shape, out.stride(), out.storage_offset())
+        torch.ops.aten.copy.out(inp, src, False, out=out)
+        out.fill_(float("nan"))
+
+        # A dispatch mode only sees copy.out, not the composite's allocations.
+        with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], profile_memory=True) as prof:
+            result = torch.ops.aten.copy.out(inp, src, False, out=out)
+        allocated = sum(max(0, e.self_cpu_memory_usage) for e in prof.events())
+        self.assertEqual(allocated, 0)
+        self.assertIs(result, out)
+        self.assertEqual(out, src)
+        self.assertEqual(inp, torch.zeros_like(inp))
+        self.assertEqual(out_base[[0, -1]], torch.zeros(2, device=device))
+        self.assertEqual(metadata, (out.data_ptr(), out.untyped_storage().data_ptr(), out.shape, out.stride(), out.storage_offset()))
+
+    @onlyCUDA
+    @parametrize("arena_factor,shared_out", ((1, False), (4, False), (4, True)))
+    def test_copy_out_no_storage_clone_cuda_memory(self, device, arena_factor, shared_out):
+        n = 1 << 18
+        arena = torch.zeros(n * arena_factor + 2, device=device)
+        inp = arena[1:n + 1]
+        src = torch.full((n,), 7.0, device=device)
+        out = arena[n + 1:2 * n + 1] if shared_out else torch.zeros(n, device=device)
+        torch.cuda.synchronize(device)
+        torch.cuda.reset_peak_memory_stats(device)
+        before = torch.cuda.memory_allocated(device)
+        self.assertIs(torch.ops.aten.copy.out(inp, src, False, out=out), out)
+        torch.cuda.synchronize(device)
+        self.assertEqual(torch.cuda.max_memory_allocated(device), before)
+        self.assertEqual(out, src)
+        self.assertEqual(inp, torch.zeros_like(inp))
+
+    @onlyCPU
+    @skipIfTorchDynamo("checks native allocations")
+    @skipIfTorchInductor("checks native allocations")
+    @skipIfCrossRef
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @parametrize("partial", (False, True))
+    def test_copy_out_external_alias(self, device, partial):
+        n = 1024
+        array = np.arange(2 * n, dtype=np.float32)
+        src = torch.from_numpy(array[:n])
+        offset = n // 2 if partial else 0
+        out = torch.from_numpy(array[offset:offset + n])
+        self.assertNotEqual(src.untyped_storage()._cdata, out.untyped_storage()._cdata)
+        inp = torch.zeros(n, device=device)
+        expected = src.clone()
+        expected_array = torch.from_numpy(array.copy())
+        expected_array[offset:offset + n].copy_(expected)
+        with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], profile_memory=True) as prof:
+            result = torch.ops.aten.copy.out(inp, src, out=out)
+        self.assertGreater(sum(max(0, e.self_cpu_memory_usage) for e in prof.events()), 0)
+        self.assertIs(result, out)
+        self.assertEqual(out, expected)
+        self.assertEqual(torch.from_numpy(array), expected_array)
+        self.assertEqual(inp, torch.zeros_like(inp))
+
+    @onlyCPU
+    @skipIfTorchDynamo("checks native allocations")
+    @skipIfTorchInductor("checks native allocations")
+    @skipIfCrossRef
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_copy_out_shared_file_mappings(self, device):
+        def check_mapping(filename):
+            n = 1024
+            storage_a = storage_b = src = out = backing_a = backing_b = result = None
+            try:
+                storage_a = torch.UntypedStorage.from_file(filename, shared=True, nbytes=n * 8)
+                storage_b = torch.UntypedStorage.from_file(filename, shared=True, nbytes=n * 8)
+                src = torch.empty(0, device=device).set_(storage_a, 0, (n,), (1,))
+                out = torch.empty(0, device=device).set_(storage_b, n // 2, (n,), (1,))
+                self.assertFalse(storage_a.resizable())
+                self.assertFalse(storage_b.resizable())
+                self.assertNotEqual(storage_a._cdata, storage_b._cdata)
+                if abs(src.data_ptr() - out.data_ptr()) < src.nbytes:
+                    self.skipTest("File mappings do not have disjoint virtual addresses")
+
+                backing_a = torch.empty(0, device=device).set_(storage_a, 0, (2 * n,), (1,))
+                backing_b = torch.empty(0, device=device).set_(storage_b, 0, (2 * n,), (1,))
+                backing_a.copy_(torch.arange(2 * n, device=device))
+                expected = src.clone()
+                expected_backing = backing_a.clone()
+                expected_backing[n // 2:n // 2 + n].copy_(expected)
+                inp = torch.zeros(n, device=device)
+                metadata = (out.data_ptr(), out.untyped_storage().data_ptr(), out.shape, out.stride(), out.storage_offset())
+                with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], profile_memory=True) as prof:
+                    result = torch.ops.aten.copy.out(inp, src, out=out)
+                self.assertGreater(sum(max(0, e.self_cpu_memory_usage) for e in prof.events()), 0)
+                self.assertEqual(id(result), id(out))
+                self.assertEqual(out.clone(), expected)
+                self.assertEqual(backing_a.clone(), expected_backing)
+                self.assertEqual(backing_b.clone(), expected_backing)
+                self.assertEqual(inp, torch.zeros_like(inp))
+                self.assertEqual(metadata, (out.data_ptr(), out.untyped_storage().data_ptr(), out.shape, out.stride(), out.storage_offset()))
+            finally:
+                del src, out, backing_a, backing_b, storage_a, storage_b, result
+
+        with TemporaryDirectoryName() as directory:
+            check_mapping(os.path.join(directory, "copy_out.bin"))
+
+    @onlyNativeDeviceTypes
+    @parametrize("layout", ("contiguous", "transpose", "gapped", "expanded", "empty"))
+    @parametrize("self_dtype,src_dtype", ((torch.float32, torch.float32), (torch.float32, torch.float64),
+                                         (torch.float16, torch.float32), (torch.int64, torch.float32),
+                                         (torch.complex64, torch.complex128), (torch.bool, torch.bool)))
+    @parametrize("non_blocking", (False, True))
+    def test_copy_out_layout_and_conversion(self, device, layout, self_dtype, src_dtype, non_blocking):
+        base = torch.zeros(16, dtype=self_dtype, device=device)
+        out_base = torch.empty_like(base)
+        if layout == "contiguous":
+            inp, out = base[1:7].view(2, 3), out_base[1:7].view(2, 3)
+        elif layout == "transpose":
+            inp, out = base[1:7].view(2, 3).t(), out_base[1:7].view(2, 3).t()
+        elif layout == "gapped":
+            inp, out = base[1:13:2].view(2, 3), out_base[1:13:2].view(2, 3)
+        elif layout == "expanded":
+            inp = base[1:4].view(1, 3).expand(2, 3)
+            out = out_base[1:7].view(2, 3)
+        else:
+            inp, out = base[1:1].view(0, 3), out_base[1:1].view(0, 3)
+        src = make_tensor(inp.shape, device=device, dtype=src_dtype)
+        expected = torch.ops.aten.copy.default(inp, src, non_blocking)
+        before = base.clone()
+        metadata = (out.data_ptr(), out.untyped_storage().data_ptr(), out.shape, out.stride(), out.storage_offset())
+        result = torch.ops.aten.copy.out(inp, src, non_blocking, out=out)
+        self.assertIs(result, out)
+        self.assertEqual(out, expected)
+        self.assertEqual(base, before)
+        self.assertEqual(metadata, (out.data_ptr(), out.untyped_storage().data_ptr(), out.shape, out.stride(), out.storage_offset()))
+
+    @onlyNativeDeviceTypes
+    @parametrize("src_shape", ((), (3,), (1, 3), (2, 1)))
+    def test_copy_out_broadcast(self, device, src_shape):
+        inp = torch.zeros((2, 3), device=device)
+        src = make_tensor(src_shape, device=device, dtype=torch.float64)
+        out = torch.empty_like(inp)
+        expected = torch.ops.aten.copy.default(inp, src)
+        self.assertIs(torch.ops.aten.copy.out(inp, src, out=out), out)
+        self.assertEqual(out, expected)
+        self.assertEqual(inp, torch.zeros_like(inp))
+
+    @onlyNativeDeviceTypes
+    @parametrize("out_shape", ((0,), (1,), (3, 2)))
+    def test_copy_out_resize(self, device, out_shape):
+        inp = torch.zeros((2, 3), device=device)
+        src = torch.ones_like(inp)
+        out = torch.empty(out_shape, device=device)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self.assertIs(torch.ops.aten.copy.out(inp, src, out=out), out)
+        self.assertEqual(len(caught), int(out_shape != (0,)))
+        if caught:
+            self.assertIn("resized", str(caught[0].message))
+        self.assertEqual(out, src)
+
+    @onlyNativeDeviceTypes
+    def test_copy_out_validation_order(self, device):
+        inp = torch.zeros((2, 3), dtype=torch.int64, device=device)
+        src = torch.full((2, 3), 1.9, device=device)
+        out = torch.empty(1, device=device)
+        with self.assertWarnsRegex(UserWarning, "resized"):
+            with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+                torch.ops.aten.copy.out(inp, src, out=out)
+        self.assertEqual(out.shape, inp.shape)
+
+        out = torch.empty(1, device=device)
+        with self.assertRaisesRegex(RuntimeError, "must match"):
+            torch.ops.aten.copy.out(inp, src[:, :2], out=out)
+        self.assertEqual(out.shape, (1,))
+
+        out = torch.empty((1, 3), device=device).expand(2, 3)
+        with self.assertRaisesRegex(RuntimeError, "more than one element"):
+            torch.ops.aten.copy.out(inp.to(out.dtype), src, out=out)
+
+    @onlyNativeDeviceTypes
+    @parametrize("alias", ("self", "self_partial", "src", "src_partial", "self_src", "disjoint"))
+    def test_copy_out_aliases(self, device, alias):
+        base = torch.arange(24, dtype=torch.float32, device=device)
+        inp, src = base[:6], base[12:18]
+        if alias == "self":
+            out = inp
+        elif alias == "self_partial":
+            out = base[3:9]
+        elif alias == "src":
+            out = src
+        elif alias == "src_partial":
+            out = base[15:21]
+        elif alias == "self_src":
+            src, out = inp, inp
+        else:
+            out = base[6:12]
+        expected = torch.ops.aten.copy.default(inp, src)
+        expected_base = base.clone()
+        expected_base[out.storage_offset():out.storage_offset() + out.numel()].copy_(expected)
+        metadata = (out.data_ptr(), out.stride(), out.storage_offset())
+        self.assertIs(torch.ops.aten.copy.out(inp, src, out=out), out)
+        self.assertEqual(out, expected)
+        self.assertEqual(base, expected_base)
+        self.assertEqual(metadata, (out.data_ptr(), out.stride(), out.storage_offset()))
+
+    @onlyCPU
+    def test_copy_out_bool_alias(self, device):
+        raw = torch.tensor([0, 2, 3, 255], dtype=torch.uint8, device=device)
+        src = raw.view(torch.bool)
+        inp = torch.empty_like(src)
+        torch.ops.aten.copy.out(inp, src, out=src)
+        self.assertEqual(raw, torch.tensor([0, 1, 1, 1], dtype=torch.uint8, device=device))
+
+    @onlyNativeDeviceTypes
+    @parametrize("math_view", ("conj", "neg", "conj_neg"))
+    @parametrize("arg", ("self", "src", "out"))
+    def test_copy_out_math_views(self, device, math_view, arg):
+        inp = torch.zeros((2, 3), dtype=torch.complex64, device=device)
+        src = make_tensor(inp.shape, dtype=inp.dtype, device=device)
+        out = torch.empty_like(inp)
+        tensors = {"self": inp, "src": src, "out": out}
+        view = tensors[arg]
+        if math_view in ("conj", "conj_neg"):
+            view = view.conj()
+        if math_view in ("neg", "conj_neg"):
+            view = view._neg_view()
+        tensors[arg] = view
+        inp, src, out = tensors["self"], tensors["src"], tensors["out"]
+        expected = torch.ops.aten.copy.default(inp, src)
+        metadata = (out.data_ptr(), out.stride(), out.storage_offset(), out.is_conj(), out.is_neg())
+        self.assertIs(torch.ops.aten.copy.out(inp, src, out=out), out)
+        self.assertEqual(out, expected)
+        self.assertEqual(inp, torch.zeros_like(inp))
+        self.assertEqual(metadata, (out.data_ptr(), out.stride(), out.storage_offset(), out.is_conj(), out.is_neg()))
+
+    @onlyNativeDeviceTypes
+    @parametrize("grad_arg", ("self", "src", "out"))
+    def test_copy_out_autograd(self, device, grad_arg):
+        inp = torch.zeros(3, device=device)
+        src = torch.ones_like(inp)
+        out = torch.empty_like(inp)
+        {"self": inp, "src": src, "out": out}[grad_arg].requires_grad_()
+        if grad_arg == "out":
+            with self.assertRaisesRegex(RuntimeError, "out=.*don't support automatic differentiation"):
+                torch.ops.aten.copy.out(inp, src, out=out)
+        else:
+            result = torch.ops.aten.copy.out(inp, src, out=out)
+            self.assertEqual(result, src)
+            with self.assertRaisesRegex(RuntimeError, "derivative for aten::copy is not implemented"):
+                result.sum().backward()
+
+    @onlyNativeDeviceTypes
+    @parametrize("grad_arg", ("self", "src", "out"))
+    def test_copy_out_forward_ad(self, device, grad_arg):
+        inp = torch.zeros(3, device=device)
+        src = torch.ones_like(inp)
+        out = torch.full_like(inp, -1)
+        with torch.autograd.forward_ad.dual_level():
+            tensors = {"self": inp, "src": src, "out": out}
+            tensors[grad_arg] = torch.autograd.forward_ad.make_dual(tensors[grad_arg], torch.ones_like(inp))
+            inp, src, out = tensors["self"], tensors["src"], tensors["out"]
+            version = out._version
+            with self.assertRaisesRegex(NotImplementedError, "Trying to use forward AD with aten::copy"):
+                torch.ops.aten.copy.out(inp, src, out=out)
+            self.assertEqual(torch.autograd.forward_ad.unpack_dual(out).primal, torch.full_like(inp, -1))
+            self.assertEqual(out._version, version)
+
+    @onlyNativeDeviceTypes
+    def test_copy_out_subclass(self, device):
+        inp = TwoTensor(torch.zeros(3, device=device), torch.zeros(3, device=device))
+        src = TwoTensor(torch.ones(3, device=device), torch.full((3,), 2.0, device=device))
+        out = TwoTensor(torch.empty(3, device=device), torch.empty(3, device=device))
+        self.assertIs(torch.ops.aten.copy.out(inp, src, out=out), out)
+        self.assertEqual(out.a, src.a)
+        self.assertEqual(out.b, src.b)
+        self.assertEqual(inp.a, torch.zeros_like(inp.a))
+        self.assertEqual(inp.b, torch.zeros_like(inp.b))
+
+    @onlyNativeDeviceTypes
+    def test_copy_out_functionalization(self, device):
+        def fn(inp, src, out):
+            torch.ops.aten.copy.out(inp, src, out=out)
+            return out * 2
+
+        inp = torch.zeros(16, device=device)[1:7].view(2, 3)
+        src = make_tensor(inp.shape, dtype=inp.dtype, device=device)
+        out = torch.empty_like(inp)
+        result = torch.func.functionalize(fn)(inp, src, out)
+        self.assertEqual(result, src * 2)
+        self.assertEqual(out, src)
+        self.assertEqual(inp, torch.zeros_like(inp))
+
+    @onlyCPU
     def test_copy_same_dtype_non_standard_bool_values(self, device):
         src = torch.tensor([0, 2, 3, 255], dtype=torch.uint8, device=device).view(
             torch.bool

@@ -1774,7 +1774,12 @@
     CompositeExplicitAutograd: copy_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: copy_sparse_compressed_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: copy_nested_
-  autogen: copy.out
+
+- func: copy.out(Tensor self, Tensor src, bool non_blocking=False, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: copy_out
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch:
