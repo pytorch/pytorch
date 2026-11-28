@@ -550,9 +550,7 @@ def mark_compile_region(
         options: Optional config to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
-        max_reuse_entries: Maximum number of reuse cache entries per function
-            before raising an error. If this limit is hit, guards keep failing
-            across invocations and hierarchical compilation is not effective.
+        max_reuse_entries: Cache entry limit; see :func:`torch.compiler.nested_compile_region`.
     """
 
     def wrap(func):

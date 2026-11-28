@@ -33,6 +33,7 @@ from torch._C._dynamo import (
 )
 
 from .. import config, graph_break_hints, polyfills, variables
+from ..current_scope_id import current_scope_id
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
@@ -82,6 +83,41 @@ if TYPE_CHECKING:
     from ..symbolic_convert import InstructionTranslatorBase
 
 
+def _nested_region_identity(
+    left: VariableTracker, right: VariableTracker, a: Source | None, b: Source | None
+) -> ConstantVariable | None:
+    from ..symbolic_convert import InstructionTranslator
+
+    tx = InstructionTranslator.current_tx()
+    tracer = tx.output.current_tracer
+    if not tracer.in_nested_compile_region:
+        return None
+    from .dicts import ConstDictVariable
+    from .lists import BaseListVariable, SliceVariable
+    from .sets import BaseSetVariable
+
+    left, right = left.realize(), right.realize()
+    kind = type(left)
+    if kind is not type(right):
+        return None
+    families = (BaseListVariable, ConstDictVariable, BaseSetVariable, SliceVariable)
+    container = isinstance(left, families)
+    tracer.has_container_identity |= container
+    if a is None or b is None or a == b or any(map(is_constant_source, (a, b))):
+        return None
+    if container or kind is variables.UserFunctionVariable:
+        # Containers can be reconstructed and function VTs can unwrap decorators.
+        same = tx.output.resolve_source_value(a) is tx.output.resolve_source_value(b)
+    elif kind is VariableTracker or isinstance(left, variables.UserDefinedVariable):
+        same = left.value is right.value
+    else:
+        return None
+    check = GuardBuilder.DUPLICATE_INPUT if same else GuardBuilder.NOT_DUPLICATE_INPUT
+    install_guard(a.make_guard(partial(check, source_b=b)))
+    tracer.traced_sources.add(a)
+    return ConstantVariable.create(same)
+
+
 def vt_identity_compare(
     left: VariableTracker,
     right: VariableTracker,
@@ -93,6 +129,7 @@ def vt_identity_compare(
     Returns ConstantVariable(True/False) if determinable, else None.
     Mirrors the logic in BuiltinVariable's handle_is handler.
     """
+    a, b = left.source, right.source
     # Binding equality permits fresh wrappers; identity observations do not.
     if guard_identity:
         left, right = left.unwrap(), right.unwrap()
@@ -110,6 +147,10 @@ def vt_identity_compare(
                 if arg.source is not None:
                     arg.get_id(tx)
                     install_guard(arg.source.make_guard(GuardBuilder.ID_MATCH))
+    if current_scope_id() > 1:
+        result = _nested_region_identity(left, right, a, b)
+        if result is not None:
+            return result
     if left is right:
         return ConstantVariable.create(True)
 
