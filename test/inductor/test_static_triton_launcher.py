@@ -633,6 +633,145 @@ class TestStaticTritonLauncherUnit(TestCase):
                 static_kernel, _ = self._can_statically_launch("kernel", filenames)
                 self.assertIsNone(static_kernel)
 
+    class _FakeLaunchHooks:
+        """Stands in for triton.magnon.static.LaunchHooks: loads the ACF, A/B-launches it once."""
+
+        def __init__(self, keep_acf, ready=True):
+            self.keep_acf = keep_acf
+            self.is_ready = ready
+            self.calls = []
+
+        def ready(self):
+            return self.is_ready
+
+        def first_launch(self, grid, call_args, *, plain, launch, load_cubin):
+            self.calls.append((grid, call_args, plain))
+            acf = load_cubin("/tmp/acf.cubin")
+            launch(acf, list(call_args.values()))
+            return acf if self.keep_acf else None
+
+    def _compile_iq_kernel(self, hooks):
+        kernel = self._global_scratch_kernel(global_scratch_size=None)
+        kernel.module = 10
+        kernel._ciq = hooks
+        kernel._compile_iq_arg_names = ["out"]
+        kernel.C_impl = SimpleNamespace(
+            _launch_kernel=mock.Mock(),
+            _load_kernel=mock.Mock(return_value=(20, 2, 0, 0)),
+            _unload_kernel=mock.Mock(),
+        )
+        kernel._current_device = lambda: 0
+        return kernel
+
+    @skipIfRocm
+    def test_compile_iq_first_launch_adopts_acf(self):
+        hooks = self._FakeLaunchHooks(keep_acf=True)
+        kernel = self._compile_iq_kernel(hooks)
+        kernel.run(2, 3, 1, 4, 5)
+        kernel.run(2, 3, 1, 4, 6)
+
+        self.assertEqual(hooks.calls, [((2, 3, 1), {"out": 5}, 1)])
+        self.assertIsNone(kernel._ciq)
+        # The A/B launch and both real launches use the ACF function.
+        launched = [c.args[0] for c in kernel.C_impl._launch_kernel.call_args_list]
+        self.assertEqual(launched, [2, 2, 2])
+        self.assertEqual((kernel.module, kernel.function), (20, 2))
+        # The plain module stays loaded until close().
+        kernel.C_impl._unload_kernel.assert_not_called()
+        kernel.close()
+        unloads = kernel.C_impl._unload_kernel.call_args_list
+        self.assertEqual(sorted(c.args[0] for c in unloads), [10, 20])
+
+    @skipIfRocm
+    def test_compile_iq_first_launch_keeps_plain(self):
+        kernel = self._compile_iq_kernel(self._FakeLaunchHooks(keep_acf=False))
+        kernel.run(2, 3, 1, 4, 5)
+
+        launched = [c.args[0] for c in kernel.C_impl._launch_kernel.call_args_list]
+        self.assertEqual(launched, [2, 1])  # the A/B launch, then the real one
+        self.assertEqual((kernel.module, kernel.function), (10, 1))
+        kernel.C_impl._unload_kernel.assert_called_once_with(20)
+
+    @skipIfRocm
+    def test_compile_iq_first_launch_waits_until_ready(self):
+        from torch._inductor.runtime.triton_heuristics import (
+            _compile_iq_first_launch_pending,
+        )
+
+        hooks = self._FakeLaunchHooks(keep_acf=False, ready=False)
+        kernel = self._compile_iq_kernel(hooks)
+        launcher = SimpleNamespace(_compile_result=SimpleNamespace(kernel=kernel))
+        kernel.run(2, 3, 1, 4, 5)
+        self.assertEqual(hooks.calls, [])
+        # The fast launcher would bake in the plain function before the hook runs.
+        self.assertTrue(_compile_iq_first_launch_pending(launcher))
+
+        hooks.is_ready = True
+        kernel.run(2, 3, 1, 4, 6)
+        self.assertEqual(len(hooks.calls), 1)
+        self.assertFalse(_compile_iq_first_launch_pending(launcher))
+        self.assertFalse(_compile_iq_first_launch_pending(SimpleNamespace()))
+
+    @skipIfRocm
+    @parametrize("fail_in", ["ready", "first_launch"])
+    def test_compile_iq_first_launch_fails_open(self, fail_in):
+        hooks = self._FakeLaunchHooks(keep_acf=True)
+        setattr(hooks, fail_in, mock.Mock(side_effect=RuntimeError("magnon")))
+        kernel = self._compile_iq_kernel(hooks)
+        kernel.run(2, 3, 1, 4, 5)
+        kernel.run(2, 3, 1, 4, 6)
+
+        self.assertIsNone(kernel._ciq)
+        self.assertEqual(getattr(hooks, fail_in).call_count, 1)
+        launched = [c.args[0] for c in kernel.C_impl._launch_kernel.call_args_list]
+        self.assertEqual(launched, [1, 1])
+        self.assertEqual((kernel.module, kernel.function), (10, 1))
+
+    @skipIfRocm
+    def test_compile_iq_first_launch_fails_open_after_loading_acf(self):
+        hooks = self._FakeLaunchHooks(keep_acf=True)
+        kernel = self._compile_iq_kernel(hooks)
+        kernel.C_impl._launch_kernel.side_effect = [RuntimeError("acf launch"), None]
+        kernel.run(2, 3, 1, 4, 5)
+
+        self.assertIsNone(kernel._ciq)
+        self.assertEqual((kernel.module, kernel.function), (10, 1))
+        kernel.C_impl._unload_kernel.assert_called_once_with(20)
+
+    @skipIfRocm
+    def test_static_launch_fails_open_when_compile_iq_hooks_raise(self):
+        magnon = SimpleNamespace(__path__=[])
+        magnon_static = SimpleNamespace(
+            make_launch_hooks=mock.Mock(side_effect=RuntimeError("magnon"))
+        )
+        modules = {"triton.magnon": magnon, "triton.magnon.static": magnon_static}
+        with (
+            mock.patch.dict(sys.modules, modules),
+            torch._inductor.config.patch(compile_iq_static_hooks=True),
+        ):
+            static_kernel, _ = self._can_statically_launch("kernel", ["kernel.cubin"])
+        self.assertIsNotNone(static_kernel)
+        self.assertIsNone(static_kernel._ciq)
+
+    @skipIfRocm
+    @parametrize("enabled", [False, True])
+    def test_static_launch_attaches_compile_iq_hooks(self, enabled):
+        hooks = object()
+        magnon = SimpleNamespace(__path__=[])
+        magnon_static = SimpleNamespace(make_launch_hooks=mock.Mock(return_value=hooks))
+        modules = {"triton.magnon": magnon, "triton.magnon.static": magnon_static}
+        with (
+            mock.patch.dict(sys.modules, modules),
+            torch._inductor.config.patch(compile_iq_static_hooks=enabled),
+        ):
+            static_kernel, _ = self._can_statically_launch("kernel", ["kernel.cubin"])
+        self.assertIs(static_kernel._ciq, hooks if enabled else None)
+
+    def test_xpu_does_not_attach_compile_iq_hooks(self):
+        kernel = object.__new__(StaticallyLaunchedXpuKernel)
+        kernel.attach_compile_iq_hooks(object())
+        self.assertIsNone(kernel._ciq)
+
 
 class StaticLauncherTestMixin:
     """Helpers for statically launching a freshly compiled kernel."""

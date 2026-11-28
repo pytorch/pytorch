@@ -1,5 +1,6 @@
 import functools
 import inspect
+import logging
 import os
 from collections import OrderedDict
 from functools import cached_property
@@ -15,6 +16,9 @@ from .triton_compat import (
     OutOfResources,
 )
 from .triton_helpers import get_constexprs
+
+
+log = logging.getLogger(__name__)
 
 
 def _max_tmem_columns(arch: int | str | None) -> int:
@@ -131,6 +135,15 @@ class StaticallyLaunchedTritonKernel:
         raise NotImplementedError
 
     supports_global_scratch = False
+
+    # fbtriton compile_iq (see attach_compile_iq_hooks). Class-level defaults, so kernels
+    # unpickled from a cache written before these existed still launch.
+    # Pending triton.magnon.static.LaunchHooks; cleared by the first launch.
+    _ciq: Any = None
+    # run()'s arg names, set by make_launcher.
+    _compile_iq_arg_names: list[str] | None = None
+    # Plain module after an ACF twin replaced it.
+    _compile_iq_plain_module: int | None = None
 
     @staticmethod
     def supports_launch_pdl(target: Any) -> bool:
@@ -299,12 +312,30 @@ class StaticallyLaunchedTritonKernel:
     def _current_device(self) -> int:
         raise NotImplementedError
 
+    def attach_compile_iq_hooks(self, kernel: CompiledKernel) -> None:
+        """Run fbtriton's compile_iq collection and ACF apply (TRITON_COMPILE_IQ_COLLECT /
+        TRITON_COMPILE_IQ_APPLY) on this kernel's first launch. Triton does both in its own
+        launcher, which static launch bypasses. Unsupported by default."""
+
+    def _compile_iq_first_launch(
+        self,
+        grid_x: int,
+        grid_y: int,
+        grid_z: int,
+        stream: int,
+        args: tuple[object, ...],
+    ) -> None:
+        raise NotImplementedError
+
     def close(self) -> None:
         # Clear Python-visible handles first so repeated cleanup is harmless even if
         # the driver reports an error while unloading.
         modules = list(self.modules.values())
         if self.module is not None:
             modules.append(self.module)
+        if self._compile_iq_plain_module is not None:
+            modules.append(self._compile_iq_plain_module)
+            self._compile_iq_plain_module = None
         self.module = None
         self.function = None
         self.modules = {}
@@ -438,6 +469,7 @@ class StaticallyLaunchedTritonKernel:
         state = self.__dict__.copy()
         state["function"] = None
         state["module"] = None
+        state["_compile_iq_plain_module"] = None
         state["functions"] = {}
         state["modules"] = {}
         # Cubin paths aren't consistent across processes, so we clear
@@ -477,6 +509,9 @@ class StaticallyLaunchedTritonKernel:
     ) -> None:
         """Actually run the kernel at runtime. This function is the hot codepath."""
 
+        if self._ciq is not None:
+            self._compile_iq_first_launch(grid_x, grid_y, grid_z, stream, args)
+
         if self.device_agnostic:
             # The loaded function is device-bound; pick (loading on demand) the one for
             # the current device so a shared kernel launches on whatever device the
@@ -492,7 +527,18 @@ class StaticallyLaunchedTritonKernel:
         # Assert load_kernel() has been called and args match
         if function is None:
             raise AssertionError("load_kernel() must be called before run()")
+        self._launch_with(function, grid_x, grid_y, grid_z, stream, args)
 
+    def _launch_with(
+        self,
+        function: Any,
+        grid_x: int,
+        grid_y: int,
+        grid_z: int,
+        stream: int,
+        args: tuple[object, ...],
+    ) -> None:
+        """Launch a loaded function handle of this kernel with run()'s args."""
         # TODO: actually, if the args *don't* match, we probably should
         # throw an exception. But if inductor is the only one calling this
         # thing, it should always match.
@@ -582,6 +628,86 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
                 "Expected either 'hsaco' (ROCm) or 'cubin' (CUDA) in kernel.asm"
             )
         super().__init__(kernel)
+
+    def attach_compile_iq_hooks(self, kernel: CompiledKernel) -> None:
+        if is_rocm():
+            return
+        try:
+            from triton.magnon.static import make_launch_hooks
+        except ImportError:
+            return
+        try:
+            self._ciq = make_launch_hooks(kernel)
+        except Exception:
+            log.warning(
+                "compile_iq: could not attach launch hooks to %s",
+                self.name,
+                exc_info=True,
+            )
+
+    def _compile_iq_first_launch(
+        self,
+        grid_x: int,
+        grid_y: int,
+        grid_z: int,
+        stream: int,
+        args: tuple[object, ...],
+    ) -> None:
+        """Once the hooks are ready, collect this kernel's compile_iq task and run the
+        plain-vs-ACF A/B before its first real launch; on an ACF win the ACF twin becomes the
+        live function. Fail-open: on any compile_iq error the plain function stays live."""
+        hooks = self._ciq
+        try:
+            if not hooks.ready():
+                return
+        except Exception:
+            self._ciq = None
+            log.warning(
+                "compile_iq: launch hooks failed for %s", self.name, exc_info=True
+            )
+            return
+        self._ciq = None
+        names = self._compile_iq_arg_names
+        call_args = (
+            dict(zip(names, args))
+            if names is not None and len(names) == len(args)
+            else None
+        )
+        loaded: list[int] = []
+
+        def load_cubin(path: str) -> int:
+            module, function, _, _ = self.C_impl._load_kernel(
+                path, self.name, self.shared, self._current_device()
+            )
+            loaded.append(module)
+            return function
+
+        def launch(function: int, launch_args: list[object]) -> None:
+            self._launch_with(
+                function, grid_x, grid_y, grid_z, stream, tuple(launch_args)
+            )
+
+        acf = None
+        try:
+            acf = hooks.first_launch(
+                (grid_x, grid_y, grid_z),
+                call_args,
+                plain=self.function,
+                launch=launch,
+                # Device-agnostic kernels keep one function per device; the A/B swaps one.
+                load_cubin=None if self.device_agnostic else load_cubin,
+            )
+        except Exception:
+            log.warning(
+                "compile_iq: first launch failed for %s", self.name, exc_info=True
+            )
+        finally:
+            if acf is not None and loaded:
+                # Keep the plain module until close(): a caller may still hold its handle.
+                self._compile_iq_plain_module = self.module
+                self.module, self.function = loaded.pop(), acf
+            for module in loaded:
+                self.C_impl._unload_kernel(module)
 
     def load_kernel(self, device: int) -> None:
         # Match Triton's load-time check so _make_launchers can retry num_stages=1.

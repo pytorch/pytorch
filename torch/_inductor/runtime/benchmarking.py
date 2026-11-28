@@ -18,7 +18,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch.utils._debug_mode import DebugMode
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._triton import triton_compile_iq_collect_enabled
+from torch.utils._triton import triton_compile_iq_enabled
 
 
 log = logging.getLogger(__name__)
@@ -174,18 +174,19 @@ def may_ban_benchmarking() -> None:
 def _triton_benchmarking_context() -> Callable[
     [], contextlib.AbstractContextManager[Any]
 ]:
-    # fbtriton's compile_iq collector skips launches inside this context, so it only collects
-    # the autotune winner. Only looked up when collection is enabled. The result is cached, so
-    # TRITON_COMPILE_IQ_COLLECT is read once per process.
-    if triton_compile_iq_collect_enabled():
+    # fbtriton's compile_iq skips launches inside this context, so it only collects the autotune
+    # winner and runs the ACF A/B only for it. Only looked up when collection or apply is
+    # enabled. The result is cached, so the compile_iq env vars are read once per process.
+    if triton_compile_iq_enabled():
         try:
             from triton.magnon.collector import benchmarking
 
             return benchmarking
         except ImportError as e:
             log.warning(
-                "TRITON_COMPILE_IQ_COLLECT is enabled but triton.magnon.collector.benchmarking "
-                "is unavailable (%s); compile_iq will also collect autotune candidates.",
+                "TRITON_COMPILE_IQ_COLLECT/APPLY is enabled but "
+                "triton.magnon.collector.benchmarking is unavailable (%s); compile_iq will "
+                "also act on autotune candidates.",
                 e,
             )
     return contextlib.nullcontext

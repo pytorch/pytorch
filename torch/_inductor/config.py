@@ -69,19 +69,27 @@ def lite_mode_default(lite_value: bool, default: bool) -> bool:
     return default
 
 
+def compile_iq_static_hooks_default() -> bool:
+    """Whether fbtriton's compile_iq is on and serves the static launcher (triton.magnon.static)."""
+    from torch.utils import _triton
+
+    return triton_compile_iq_enabled() and _triton.has_triton_compile_iq_static()
+
+
 def static_cuda_launcher_default() -> bool:
     STATIC_CUDA_LAUNCHER_VERSION = 2
 
-    if triton_compile_iq_enabled():
-        # fbtriton's compile_iq collect/apply hooks run in Triton's launcher, which the static
-        # launcher bypasses.
+    if triton_compile_iq_enabled() and not compile_iq_static_hooks_default():
+        # This fbtriton's compile_iq collect/apply hooks run only in Triton's launcher, which the
+        # static launcher bypasses. Newer builds expose triton.magnon.static, which the static
+        # launcher calls itself (see compile_iq_static_hooks).
         if os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1":
             import logging
 
             log = logging.getLogger(__name__)
             log.warning(
                 "Ignoring TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER=1: TRITON_COMPILE_IQ_COLLECT "
-                "and TRITON_COMPILE_IQ_APPLY require Triton's launcher."
+                "and TRITON_COMPILE_IQ_APPLY require Triton's launcher on this Triton build."
             )
         return False
     elif "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
@@ -1782,6 +1790,13 @@ quiesce_async_compile_time: int = Config(
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
+
+# Whether statically launched CUDA kernels carry fbtriton's compile_iq hooks, so that
+# TRITON_COMPILE_IQ_COLLECT / TRITON_COMPILE_IQ_APPLY still collect tasks and apply tuned ACFs
+# on a kernel's first launch (see triton.magnon.static). Read from the environment at import.
+# Being part of the FX graph cache key, it keeps kernels cached without hooks out of
+# compile_iq runs.
+compile_iq_static_hooks: bool = compile_iq_static_hooks_default()
 
 # Alias of use_static_cuda_launcher, used by both CUDA/XPU.
 use_static_triton_launcher: bool = Config(
