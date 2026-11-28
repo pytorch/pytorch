@@ -26,8 +26,17 @@ def update_submodules() -> None:
     run_cmd(["git", "submodule", "update", "--init", "--recursive"])
 
 
+# Deliberately not the `build` directory used by `pip install -e .` (see
+# `build-dir` in pyproject.toml): CMake takes CC/CXX and the USE_* cache
+# variables below from the environment only when it creates the cache, so
+# reusing the developer's build directory would silently keep their compiler
+# and overwrite their cache variables. Must match the `--build_dir` passed to
+# the CLANGTIDY linters in .lintrunner.toml.
+BUILD_DIR = "build_lint"
+
+
 def gen_compile_commands() -> None:
-    """Configure cmake to produce build/compile_commands.json for clang-tidy.
+    """Configure cmake to produce compile_commands.json for clang-tidy.
 
     Configure-only invocation; does not run the build step. The repo-level
     cmake/EnvVarForwarding.cmake forwards BUILD_*/USE_* environment
@@ -38,7 +47,7 @@ def gen_compile_commands() -> None:
     os.environ["USE_PRECOMPILED_HEADERS"] = "1"
     os.environ["CC"] = "clang"
     os.environ["CXX"] = "clang++"
-    run_cmd(["cmake", "-S", ".", "-B", "build", "-G", "Ninja"])
+    run_cmd(["cmake", "-S", ".", "-B", BUILD_DIR, "-G", "Ninja"])
 
 
 def run_autogen() -> None:
@@ -50,7 +59,7 @@ def run_autogen() -> None:
             "-s",
             "aten/src/ATen",
             "-d",
-            "build/aten/src/ATen",
+            f"{BUILD_DIR}/aten/src/ATen",
             "--per-operator-headers",
         ]
     )
