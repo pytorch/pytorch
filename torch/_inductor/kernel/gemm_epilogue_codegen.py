@@ -8,6 +8,8 @@ import operator
 from collections.abc import Callable
 from typing import Any, cast
 
+import sympy
+
 import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLArg,
@@ -436,6 +438,20 @@ class GemmEpilogueCuteDSLKernel:
 
 class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
     """Normalize ATen spellings before emitting CuTeDSL expressions."""
+
+    @staticmethod
+    def index_expr(expr: Any, dtype: torch.dtype) -> Any:
+        # GemmEpilogueCuteDSLKernel takes no symbolic size arguments, so only a
+        # constant can be emitted. Declining lets the caller skip the fusion.
+        if not (isinstance(expr, int) or getattr(expr, "is_Integer", False)):
+            raise NotImplementedError(
+                f"CuTeDSL GEMM epilogue cannot emit symbolic index_expr {expr}"
+            )
+        return CuteDSLOpOverrides.index_expr(expr, dtype)
+
+    @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> CuteDSLArg:
+        return GemmEpilogueCuteDSLOpOverrides.index_expr(expr, dtype)
 
     @staticmethod
     def add(a: Any, b: Any, *, alpha: Any = 1) -> Any:

@@ -3800,13 +3800,13 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
                       size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
         )
     torch._check_value(
+        self.ndim == 3 or self.ndim == 4,
+        lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
+    )
+    torch._check_value(
         self.ndim == ndim,
         lambda: f"adaptive_avg_pool2d_backward(): Expected dimensions {self.ndim} "
         f"for `grad_output` but got dimensions {ndim}",
-    )
-    torch._check_value(
-        ndim == 3 or ndim == 4,
-        lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
     )
     for i in range(ndim - 2):
         torch._check_value(
@@ -3817,6 +3817,10 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
     torch._check_value(
         self.dtype == grad_out.dtype,
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
+    )
+    torch._check_not_implemented(
+        self.dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16],
+        lambda: f"adaptive_avg_pool2d_backward not implemented for '{self.dtype}'",
     )
     memory_format = torch.contiguous_format
     if is_channels_last(self):
@@ -6899,6 +6903,22 @@ def meta__scaled_dot_product_efficient_attention(
     is_causal: bool = False,
     scale: float | None = None,
 ):
+    # See Note [Seed and Offset]:
+    seed = torch.empty((), dtype=torch.long, device="meta")
+    offset = torch.empty((), dtype=torch.long, device="meta")
+
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+
+    if (maybe_get_fake_device(query) or query.device).type == "mps":
+        # The Metal kernels broadcast batch dims and write an unpadded logsumexp.
+        batch_shape = torch.broadcast_shapes(
+            *(t.shape[:-3] for t in (query, key, value))
+        )
+        rows = (*batch_shape, *query.shape[-3:-1])
+        lse_rows = rows if compute_log_sumexp else (*rows[:-1], 0)
+        out = query.new_empty((*rows, value.size(-1)))
+        return out, query.new_empty(lse_rows, dtype=torch.float), seed, offset
+
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
@@ -6926,10 +6946,6 @@ def meta__scaled_dot_product_efficient_attention(
 
     res = res.transpose(1, 2)
 
-    # See Note [Seed and Offset]:
-    seed = torch.empty((), dtype=torch.long, device="meta")
-    offset = torch.empty((), dtype=torch.long, device="meta")
-
     return res, logsum_exp, seed, offset
 
 
@@ -6953,6 +6969,14 @@ def meta__scaled_dot_product_efficient_backward(
     is_causal: bool = False,
     scale: float | None = None,
 ):
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+
+    if (maybe_get_fake_device(query) or query.device).type == "mps":
+        return tuple(
+            t.new_empty(t.shape) if t is not None and needed else None
+            for t, needed in zip((query, key, value, attn_bias), grad_input_mask)
+        )
+
     batch_size = query.size(0)
     num_heads_q = query.size(1)
     num_heads_k = key.size(1)
@@ -7215,6 +7239,7 @@ def meta__flash_attention_backward(
     scale: float | None = None,
     window_size_left: int | None = None,
     window_size_right: int | None = None,
+    grad_logsumexp: Tensor | None = None,
 ):
     grad_query = torch.empty_like(query)
     grad_key = torch.empty_like(key)
@@ -8563,10 +8588,14 @@ def meta_histc(input, bins=100, min=0, max=0):
 @register_meta(
     [
         aten._upsample_bilinear2d_aa.default,
+        aten._upsample_bilinear2d_aa.out,
         aten._upsample_bicubic2d_aa.default,
+        aten._upsample_bicubic2d_aa.out,
         aten._upsample_lanczos2d_aa.default,
+        aten._upsample_lanczos2d_aa.out,
     ]
 )
+@out_wrapper(exact_dtype=True, preserve_memory_format=True)
 def meta_upsample_bimode2d_aa(
     input,
     output_size,
@@ -8582,7 +8611,7 @@ def meta_upsample_bimode2d_aa(
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     return input.new_empty(full_output_size).to(
-        memory_format=utils.suggest_memory_format(input)
+        memory_format=utils.upsample_output_memory_format(input)
     )
 
 
@@ -8616,6 +8645,43 @@ but got grad_output_size({i}) = {grad_output.size(i)}""",
         )
     return grad_output.new_empty(input_size).to(
         memory_format=utils.suggest_memory_format(grad_output)
+    )
+
+
+@register_meta([aten._upsample_inter_area2d.default, aten._upsample_inter_area2d.out])
+@out_wrapper(exact_dtype=True, preserve_memory_format=True)
+def meta_upsample_inter_area2d(input, output_size, scales_h=None, scales_w=None):
+    full_output_size = upsample_common_check(
+        input.size(), output_size, num_spatial_dims=2
+    )
+    for axis, in_size, out_size, scale in zip(
+        ("height", "width"), input.shape[2:], output_size, (scales_h, scales_w)
+    ):
+        if scale is None or scale <= 0:
+            continue
+        scaled_size = in_size * scale
+        expected_size = None
+        if math.isfinite(scale) and (
+            not isinstance(scaled_size, utils.FloatWithoutSymFloat)
+            or math.isfinite(scaled_size)
+        ):
+            # Use the same symbolic expression as upsample_compute_output_size.
+            expected_size = (
+                in_size * int(scale)
+                if int(scale) == scale
+                else torch.sym_int(scaled_size)
+            )
+        torch._check(
+            expected_size == out_size,
+            lambda: f"_upsample_inter_area2d: the output size must be floor(input size * scale) for {axis}, "
+            f"but got input size {in_size}, output size {out_size} and scale {scale}",
+        )
+    torch._check(
+        input.numel() != 0 or all(size > 0 for size in input.shape[1:]),
+        lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.shape}",
+    )
+    return input.new_empty(full_output_size).to(
+        memory_format=utils.suggest_memory_format(input)
     )
 
 

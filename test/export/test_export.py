@@ -4173,6 +4173,13 @@ def forward(self, add_tensor):
         self.assertEqual(ep.module()(x, y), model(x, y))
 
     def test_non_strict_export_distribution_validation(self):
+        prev_validate_args = torch.distributions.Distribution._validate_args
+        torch.distributions.Distribution.set_default_validate_args(True)
+        self.addCleanup(
+            torch.distributions.Distribution.set_default_validate_args,
+            prev_validate_args,
+        )
+
         class SquashedNormal(torch.distributions.TransformedDistribution):
             def __init__(self, loc, scale, tanh_transform_clamp=(-0.99, 0.99)):
                 self.loc = loc
@@ -8415,7 +8422,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
             self.assertTrue(torch.allclose(er, r))
 
-    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureCppRuntimeNonStrict
     def test_more_multidimensional_slicing(self):
         # Inputs: a 3d tensor t and a 1d tensor x of indices into t

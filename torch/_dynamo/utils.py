@@ -3264,6 +3264,7 @@ deque_methods = {
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 int_methods = {method for method in int.__dict__.values() if callable(method)}
 float_methods = {method for method in float.__dict__.values() if callable(method)}
+complex_methods = {method for method in complex.__dict__.values() if callable(method)}
 
 # EnumType is the metaclass for Enum classes
 enum_type_methods = {
@@ -3527,6 +3528,18 @@ def check_positional(
         raise_type_error(
             tx, f"{funcname} expected {rel}{max_args} argument{s}, got {nargs}"
         )
+
+
+def check_num_args(
+    tx: InstructionTranslatorBase, args: list[VariableTracker], n: int
+) -> None:
+    # Mirrors CPython check_num_args (Objects/typeobject.c), used by the
+    # slot wrappers (wrap_binaryfunc, wrap_delitem, ...).
+    from torch._dynamo.exc import raise_type_error
+
+    if len(args) != n:
+        s = "" if n == 1 else "s"
+        raise_type_error(tx, f"expected {n} argument{s}, got {len(args)}")
 
 
 def no_positional(

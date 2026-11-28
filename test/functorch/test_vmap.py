@@ -54,6 +54,7 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
+    expectedFailureCUDA,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
@@ -4131,6 +4132,56 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
 
         self.assertEqual(actual, expected)
 
+    # CUDA memory efficient attention rejects the mask after the batch rule folds a vmap
+    # dim into a broadcast one, as the copy that makes leaves its unaligned stride (S = 6)
+    _xfail_unaligned_mask = (
+        [expectedFailureCUDA]
+        if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION and not TEST_WITH_ROCM
+        else []
+    )
+
+    @parametrize("unbatched_kv", [False, True])
+    @parametrize(
+        "case",
+        [
+            subtest("mask_1LS", decorators=_xfail_unaligned_mask),
+            subtest("mask_LS", decorators=_xfail_unaligned_mask),
+            "mask_B1LS",
+            "3d_query",
+            "broadcast_batch",
+            "3d_gqa",
+            "5d_mask_HLS",
+        ],
+    )
+    def test_sdpa_broadcast_inputs(self, device, case, unbatched_kv):
+        # Batch rules fold the vmap dim into the leading dim of every input. With the vmap
+        # size equal to the number of heads, an input of lower rank or with broadcast batch
+        # dims that is not expanded first gets it folded into its heads and mixes examples.
+        V, B, H, L, S, D = 4, 2, 4, 8, 6, 16
+        q4, kv4 = (B, H, L, D), (B, H, S, D)
+        # (query, key and value, mask, enable_gqa) shapes
+        q, kv, mask, enable_gqa = {
+            "mask_1LS": (q4, kv4, (1, L, S), False),
+            "mask_LS": (q4, kv4, (L, S), False),
+            "mask_B1LS": (q4, kv4, (B, 1, L, S), False),
+            "3d_query": ((H, L, D), kv4, None, False),
+            "broadcast_batch": ((1, H, L, D), kv4, None, False),
+            "3d_gqa": ((H, L, D), (2, S, D), None, True),
+            "5d_mask_HLS": ((3, *q4), (3, *kv4), (H, L, S), False),
+        }[case]
+        shapes = [q, kv, kv] + ([mask] if mask else [])
+        args = [torch.randn(V, *s, device=device) for s in shapes]
+        in_dims = (0, None, None, 0) if unbatched_kv else (0, 0, 0, 0)
+        in_dims = in_dims[: len(args)]
+        inputs = [a if d is not None else a[0] for a, d in zip(args, in_dims)]
+
+        def fn(q, k, v, mask=None):
+            return F.scaled_dot_product_attention(
+                q, k, v, attn_mask=mask, enable_gqa=enable_gqa
+            )
+
+        self._vmap_test(fn, inputs, in_dims=in_dims)
+
     @onlyAccelerator
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     @parametrize("randomness", ["error", "same", "different"])
@@ -6836,7 +6887,8 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestVmapBatchedGradientDevice,
     globals(),
-    only_for=only_for,
+    only_for=only_for + ("mps",),
+    allow_mps=True,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
