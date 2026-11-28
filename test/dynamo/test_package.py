@@ -817,9 +817,9 @@ print(eval(f"bbmod.{name}.{path}") is code)
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_caching_precompile_keeps_aotautograd_guard_roots(self):
-        # The guard filter drops every Dynamo guard on y, but AOTAutograd's
-        # StorageOverlapPartition guard still reads it, so y must stay in the
-        # saved scope.
+        # The guard filter drops every Dynamo guard, but AOTAutograd's
+        # StorageOverlapPartition guard still reads x and y, so they must stay
+        # in the saved scope.
         def fn(x, y):
             y.add_(1)
             return x + y
@@ -830,11 +830,16 @@ print(eval(f"bbmod.{name}.{path}") is code)
         )
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
+        compiled = torch.compile(fn, backend="inductor", options=opts)
         x, y = torch.randn(4), torch.zeros(4)
         with torch.compiler.set_stance("fail_on_recompile"):
-            out = torch.compile(fn, backend="inductor", options=opts)(x, y)
-        self.assertEqual(out, x + 1)
-        self.assertEqual(y, torch.ones(4))
+            out = compiled(x, y)
+            self.assertEqual(out, x + 1)
+            self.assertEqual(y, torch.ones(4))
+            # The reloaded partition guard rejects overlapping inputs.
+            base = torch.zeros(8)
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                compiled(base[:4], base[2:6])
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A

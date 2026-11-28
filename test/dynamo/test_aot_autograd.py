@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import operator
+import random
 import re
 import unittest
 from textwrap import dedent
@@ -1802,6 +1803,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(opt_out, ref_out)
         self.assertEqual(base, base_ref)
         self.assertEqual(compiler.frame_count, 2)
+        (failure,) = guard_failures[f.__code__]
+        self.assertIn("___check_storage_overlap_partition", failure)
 
     @parametrize("tiled", [False, True])
     @torch.no_grad()
@@ -1900,6 +1903,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(field, ref_field)
         self.assertEqual(alias_base, ref_base)
         self.assertEqual(compiler.frame_count, 2)
+        (failure,) = guard_failures[f.__code__]
+        self.assertIn("___check_storage_overlap_partition", failure)
 
     def test_input_mutation_storage_overlap_uses_single_partition_guard(self):
         # One relational guard covers all the inputs, rather than one per input.
@@ -1977,6 +1982,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(opt_out, ref_out)
         self.assertEqual(mod.buffer, ref_mod.buffer)
         self.assertEqual(compiler.frame_count, 2)
+        (failure,) = guard_failures[Module.forward.__code__]
+        self.assertIn("___check_storage_overlap_partition", failure)
 
     def test_input_mutation_storage_overlap_guards_assume_constant_result_tensor(self):
         # get_const()'s result reaches AOTAutograd as an input with a ConstantSource.
@@ -2005,17 +2012,20 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             names - const_names, {"L['x']", "L['y']", "L['index']", "L['src']"}
         )
 
-    def test_input_mutation_storage_overlap_skips_synthetic_local_inputs(self):
-        # nn.Parameter(x) becomes a graph input with a SyntheticLocalSource,
-        # which guards can't read.
+    def test_input_mutation_storage_overlap_skips_dynamo_created_inputs(self):
+        # nn.Parameter(x) and random.random() become graph inputs whose sources
+        # (SyntheticLocalSource, RandomValueSource) guards can't read.
         def f(x, y):
             p = torch.nn.Parameter(x)
-            y.add_(1)
+            y.add_(random.random())
             return p * y + x
 
         compiler = _AOTGuardCapture()
         x, y, y_ref = torch.randn(4), torch.zeros(4), torch.zeros(4)
-        self.assertEqual(torch.compile(f, backend=compiler)(x, y), f(x, y_ref))
+        random.seed(0)
+        out = torch.compile(f, backend=compiler)(x, y)
+        random.seed(0)
+        self.assertEqual(out, f(x, y_ref))
         self.assertEqual(y, y_ref)
 
         (partition_guard,) = compiler.partition_guards()

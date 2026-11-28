@@ -20,7 +20,12 @@ from torch._C._dynamo.guards import (
     compute_overlapping_tensor_groups,
     compute_overlapping_tensors,
 )
-from torch._dynamo.source import ConstantSource, GlobalSource
+from torch._dynamo.source import (
+    ConstantSource,
+    get_global_source_name,
+    get_local_source_name,
+    GlobalSource,
+)
 from torch._environment import is_fbcode
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._guards import ChainedSource, Source, StorageOverlap, StorageOverlapPartition
@@ -536,26 +541,18 @@ def add_input_mutation_storage_overlap_partition_guard(
     aot_config: AOTConfig,
     fwd_inputs: list[Any],
     input_info: list[InputAliasInfo],
-    use_partition_guard: bool,
 ) -> None:
-    if not use_partition_guard:
-        return
-
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is None:
         return
 
-    if not aot_config.aot_autograd_arg_pos_to_source:
+    arg_sources = aot_config.aot_autograd_arg_pos_to_source
+    # AOTDedupeWrapper drops duplicated inputs but not their sources, so the
+    # positions no longer line up.
+    if not arg_sources or len(arg_sources) != len(fwd_inputs):
         return
-    if len(aot_config.aot_autograd_arg_pos_to_source) != len(fwd_inputs):
-        raise AssertionError(
-            f"expected a source slot per input, got {len(aot_config.aot_autograd_arg_pos_to_source)} != {len(fwd_inputs)}"
-        )
 
-    sources = [
-        None if s is None else _guardable_source(s)
-        for s in aot_config.aot_autograd_arg_pos_to_source
-    ]
+    sources = [None if s is None else _guardable_source(s) for s in arg_sources]
     tensor_indices: list[int] = []
     selected_sources: list[Source] = []
     seen_sources: set[Source] = set()
@@ -565,9 +562,10 @@ def add_input_mutation_storage_overlap_partition_guard(
             not isinstance(inpt, Tensor)
             or source is None
             or source in seen_sources
-            # Guards can't read a SyntheticLocalSource (e.g. nn.Parameter(x)
-            # built in the frame), which doesn't exist until after they run.
-            or not source.subguards_allowed()
+            # Guards only see the frame's locals and globals, not values Dynamo
+            # creates, such as nn.Parameter(x) built in the frame or
+            # random.random() results.
+            or not (get_local_source_name(source) or get_global_source_name(source))
         ):
             continue
         tensor_indices.append(i)
