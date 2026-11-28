@@ -6600,6 +6600,16 @@
       ]
     }
   ],
+  "GB4570": [
+    {
+      "Gb_type": "torch.scan: improper reverse",
+      "Context": "str(reverse_var)",
+      "Explanation": "Expected reverse to be a constant bool.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0334": [
     {
       "Gb_type": "wrap_with_autocast: unexpected freevars",
