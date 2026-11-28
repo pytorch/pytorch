@@ -3682,6 +3682,29 @@ class TestDistributionsDevice(DistributionsTestCase):
 
         self._check_log_prob(Laplace(loc, scale), ref_log_prob)
 
+    def test_gumbel_cdf_icdf_tails(self):
+        # cdf must be defined on the whole real line (the support of Gumbel)
+        d = Gumbel(
+            torch.tensor(0.0, dtype=torch.double), torch.tensor(1.0, dtype=torch.double)
+        )
+        x = torch.tensor([-10.0, -1.0, 0.0, 3.0, 100.0], dtype=torch.double)
+        expected = torch.exp(-torch.exp(-x))
+        self.assertEqual(d.cdf(x), expected)
+        self.assertEqual(d.icdf(d.cdf(x[1:4])), x[1:4])
+        self.assertEqual(
+            Gumbel(0.0, 1.0).cdf(torch.tensor([-10.0, 100.0])), torch.tensor([0.0, 1.0])
+        )
+
+    def test_generalized_pareto_float64(self):
+        t = lambda v: torch.tensor(v, dtype=torch.double)  # noqa: E731
+        for c in (0.0, 0.5):
+            d = GeneralizedPareto(t(0.0), t(1.0), t(c))
+            lp = d.log_prob(t(1.0))
+            sf = d.log_survival_function(t(1.0))
+            self.assertEqual(lp.dtype, torch.double)
+            self.assertEqual(sf.dtype, torch.double)
+            self.assertTrue(torch.isfinite(lp) and torch.isfinite(sf))
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @set_default_dtype_if_supported(torch.double)
     def test_laplace_sample(self):
