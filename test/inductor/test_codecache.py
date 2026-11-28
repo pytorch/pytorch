@@ -24,6 +24,7 @@ from typing_extensions import override
 from unittest import mock
 
 import torch
+import torch.distributed as dist
 from torch._dynamo import reset
 from torch._dynamo.device_interface import DeviceInterface
 from torch._dynamo.package import DynamoCache
@@ -3880,6 +3881,7 @@ class _TestCustomPartitionerFn(CustomPartitionerFn):
         return self._uuid
 
 
+@instantiate_parametrized_tests
 class TestFxGraphCacheHashing(TestCase):
     def test_hash_aten_c_shim_ops(self):
         from torch._inductor.codegen.common import get_device_op_overrides
@@ -3907,6 +3909,44 @@ class TestFxGraphCacheHashing(TestCase):
     def _fx_graph_cache_key(self, gm, example_inputs):
         details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
         return FxGraphCachePickler(gm).get_key(details)
+
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    @parametrize("compile_on_one_rank", [False, True])
+    @parametrize(
+        "bucketing,overlap,rank_in_key",
+        [
+            ("none", False, False),
+            ("all", False, True),
+            ("only_fsdp", False, True),
+            ("none", True, True),
+        ],
+    )
+    def test_distributed_rank_affects_cache_key(
+        self, bucketing, overlap, rank_in_key, compile_on_one_rank
+    ):
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        with torch._subclasses.FakeTensorMode():
+            example_inputs = [torch.empty(4, device="cuda:0")]
+        with (
+            config.patch(
+                {
+                    "bucket_all_gathers_fx": bucketing,
+                    "aten_distributed_optimizations.enable_overlap_scheduling": overlap,
+                }
+            ),
+            torch.compiler.config.patch(compile_on_one_rank=compile_on_one_rank),
+            mock.patch.object(dist, "is_initialized", return_value=True),
+            mock.patch.object(dist, "get_rank", return_value=0) as get_rank,
+        ):
+            if compile_on_one_rank and rank_in_key:
+                with self.assertRaises(AssertionError) as error:
+                    self._fx_graph_cache_key(gm, example_inputs)
+                self.assertIn("compile_on_one_rank", str(error.exception))
+                return
+            key0 = self._fx_graph_cache_key(gm, example_inputs)
+            get_rank.return_value = 1
+            key1 = self._fx_graph_cache_key(gm, example_inputs)
+            self.assertEqual(key0 != key1, rank_in_key)
 
     def _no_input_factory_graph(self, device=None):
         graph = torch.fx.Graph()

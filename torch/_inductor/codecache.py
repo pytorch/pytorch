@@ -1776,6 +1776,31 @@ class FxGraphHashDetails:
                 ):
                     self.cudagraph_annotation = annotation
 
+        # All-gather bucketing and overlap scheduling bake process-group rank
+        # into offsets after cache lookup. Hash global rank because the groups
+        # to bucket are still unknown. Ranks sharing a cache can have the same
+        # device index across nodes or with CUDA_VISIBLE_DEVICES per rank.
+        # This also splits keys for graphs without collectives because
+        # AOTAutogradCacheDetails hashes the Dynamo graph before DTensor ops
+        # expand into collectives.
+        # Overlap scheduling pre-buckets FSDP all-gathers by default.
+        # reorder_for_compute_comm_overlap only reorders scheduler nodes.
+        # Custom post-grad passes: https://github.com/pytorch/pytorch/issues/192042
+        if (
+            (
+                config.bucket_all_gathers_fx != "none"
+                or config.aten_distributed_optimizations.enable_overlap_scheduling
+            )
+            and dist.is_available()
+            and dist.is_initialized()
+        ):
+            if self.compile_on_one_rank:
+                raise AssertionError(
+                    "All-gather bucketing and overlap scheduling bake the rank into "
+                    "the graph, which compile_on_one_rank doesn't support yet"
+                )
+            self.distributed_rank = dist.get_rank()
+
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
