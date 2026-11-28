@@ -808,18 +808,23 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
 
     def _reduce_tensor_subclass(
         self, tensor: torch.Tensor
-    ) -> tuple[Callable[..., Any], tuple[Any]]:
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+        non_leaf_retains_grad = (
+            tensor.requires_grad and not tensor.is_leaf and tensor.retains_grad
+        )
         if hasattr(tensor, "_stable_hash_for_caching"):
-            return (_ident, (tensor._stable_hash_for_caching(),))
+            h = tensor._stable_hash_for_caching()
+            return (_ident, (h, True) if non_leaf_retains_grad else (h,))
         if is_traceable_wrapper_subclass(tensor):
             warn_once(
                 f"{type(tensor).__name__} does not implement _stable_hash_for_caching. "
                 "For PT2-compatible tensor subclasses, it is recommended to implement "
                 "_stable_hash_for_caching(self) -> str for stable AOT autograd caching."
             )
-            return (_ident, (self._default_stable_hash_for_caching(tensor),))
+            h = self._default_stable_hash_for_caching(tensor)
+            return (_ident, (h, True) if non_leaf_retains_grad else (h,))
         return self._reduce_tensor(tensor)
 
     def _collect_inner_tensor_hashes(
@@ -902,11 +907,15 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             ),
         )
 
-    def _reduce_tensor(self, t: torch.Tensor) -> tuple[Callable[..., Any], tuple[Any]]:
+    def _reduce_tensor(
+        self, t: torch.Tensor
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
         """
         Reduce the tensor to a stable key for caching.
         """
         metadata = extract_tensor_metadata_for_cache_key(t)
+        if t.requires_grad and not t.is_leaf and t.retains_grad:
+            return (_ident, (metadata, True))
         return (_ident, (metadata,))
 
 

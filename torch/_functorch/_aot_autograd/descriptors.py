@@ -206,6 +206,7 @@ handle them:
     TangentAOTInput):
 
     * InputMutationAOTOutput (can be eliminated if mutations are non-differentiable)
+    * InputMutationGradAOTOutput (pure in-graph gradient for a non-leaf mutated input with retain_grad())
     * IntermediateBaseAOTOutput (can be eliminated by cloning outputs of graph)
     * MetadataMutationAOTOutput (uhh, just don't mutate metadata?)
 
@@ -655,6 +656,19 @@ class GradAOTOutput(DifferentiableAOTOutput):
 
     def expr(self) -> str:
         return f"__grad({self.grad_of.expr()})"
+
+    def is_grad(self) -> bool:
+        return True
+
+
+@dataclasses.dataclass(frozen=True)
+class InputMutationGradAOTOutput(AOTOutput):
+    """An output representing the pure in-graph gradient for a non-leaf mutated input with retain_grad()"""
+
+    grad_of: AOTInput
+
+    def expr(self) -> str:
+        return f"__mut_grad({self.grad_of.expr()})"
 
     def is_grad(self) -> bool:
         return True
