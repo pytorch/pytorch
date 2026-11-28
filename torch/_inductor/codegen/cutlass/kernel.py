@@ -220,13 +220,22 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         kernel_name: str,
         runtime_arg_info: list["ArgInfo"],
         runtime_arg_values: list[Any],
-        device_type: str = "cuda",  # type: ignore[assignment]
+        device_type: str,
     ) -> None:
         """
         Initializes a new instance of the CUTLASSTemplateKernel class.
 
         Args:
             kernel_name (str): The name of the kernel.
+            runtime_arg_info: Declarations of the runtime args appended to the
+                generated kernel signature.
+            runtime_arg_values: Values for ``runtime_arg_info``, in the same order.
+            device_type (str): Device of the output layout, e.g. ``"cuda"`` or
+                ``"xpu"``. Deliberately required: defaulting it to ``"cuda"`` would
+                silently pick the CUDA flavor of the trailing kernel arguments (see
+                ``_EXTRA_CPP_ARGS`` below), so a non-CUDA backend would end up with
+                a ``cudaStream_t`` in its generated signature and would only fail
+                when that generated C++ is compiled.
         """
         super().__init__()
         self.kernel_name = kernel_name

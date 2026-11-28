@@ -122,9 +122,12 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         name_to_buffer: dict[str, Buffer],
         size_hint_fn: Callable[[Expr | int], int],
         kernel_schedule: Any | None = None,
-        device_type: str = "cuda",
+        *,
+        device_type: str,
         **kwargs: dict[str, Any],
     ) -> tuple[str, str, str, EVTArgRenames]:
+        # device_type is required: a silent "cuda" default would select the
+        # "sm"-prefixed emitter below for every non-CUDA backend.
         arch = int(cutlass_arch(device_type))
         if device_type == "cuda" and arch < 90:
             raise AssertionError("For CUDA, only SM90+ is supported for EVT")
