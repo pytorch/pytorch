@@ -546,6 +546,16 @@ class PContext(abc.ABC):
             signal_list = signals_to_handle.split(",")
 
             for sig_name in signal_list:
+                if IS_WINDOWS and sig_name.strip() in [
+                    "SIGHUP",
+                    "SIGQUIT",
+                    "SIGUSR1",
+                    "SIGUSR2",
+                ]:
+                    logger.info(
+                        "Signal %s is not supported on Windows, skipping", sig_name
+                    )
+                    continue
                 try:
                     sig = getattr(signal, sig_name.strip())
                     signal.signal(sig, _terminate_process_handler)
@@ -556,22 +566,6 @@ class PContext(abc.ABC):
                         sig_name,
                         exc_info=True,
                     )
-                except RuntimeError:
-                    if IS_WINDOWS and sig_name.strip() in [
-                        "SIGHUP",
-                        "SIGQUIT",
-                        "SIGUSR1",
-                        "SIGUSR2",
-                    ]:
-                        logger.info(
-                            "Signal %s is not supported on Windows, skipping", sig_name
-                        )
-                    else:
-                        logger.warning(
-                            "Failed to register signal handler for %s",
-                            sig_name,
-                            exc_info=True,
-                        )
         else:
             logger.warning(
                 "Failed to register signal handlers since torchelastic is running on a child thread. "
