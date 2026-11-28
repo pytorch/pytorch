@@ -73,6 +73,8 @@ from .descriptors import (
 from .functional_utils import gen_alias_from_base
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
+    _use_storage_overlap_partition_guard,
+    add_input_mutation_storage_overlap_partition_guard,
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
@@ -2257,6 +2259,8 @@ def merge_view_inputs(
     if not [info for info in mutated_input_info if info.mutates_data]:
         # Return early when there are no mutations.
         return fwd_inputs, fwd_inputs_descs, None
+    # Read once, so the two overlap guards below agree on it.
+    use_partition_guard = _use_storage_overlap_partition_guard()
 
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
     # pyrefly: ignore [implicit-any]
@@ -2301,7 +2305,7 @@ def merge_view_inputs(
         # I don't bother with that case for now: here, we only bail out earlier if we detect that **every** pair
         # of tensors in the current group that shares a storage is non-overlapping.
         aliased_input_indices_no_false_sharing = compute_overlapping_inputs(
-            aot_config, fwd_inputs, aliased_input_indices
+            aot_config, fwd_inputs, aliased_input_indices, use_partition_guard
         )
         if len(aliased_input_indices_no_false_sharing) <= 1:
             other_args.extend(
@@ -2418,6 +2422,10 @@ def merge_view_inputs(
             # We store just enough info here so that we can regenerate the view later.
             # Regeneration: curr_view._view_func(args[base_idx])
             inner_calling_convention_meta[curr_view_idx] = (base_idx, curr_view)
+    if use_partition_guard:
+        add_input_mutation_storage_overlap_partition_guard(
+            aot_config, fwd_inputs, mutated_input_info
+        )
     if len(base_args) == 0:
         if len(other_args) != len(fwd_inputs):
             raise AssertionError(
