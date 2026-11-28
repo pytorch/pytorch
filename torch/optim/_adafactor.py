@@ -82,6 +82,8 @@ class Adafactor(Optimizer):
         for p in group["params"]:
             if p.grad is None:
                 continue
+            if p.numel() == 0:
+                continue
             if torch.is_complex(p):
                 raise RuntimeError("Adafactor does not support complex parameters")
             if p.grad.is_sparse:
