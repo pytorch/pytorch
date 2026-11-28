@@ -301,6 +301,20 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(
       x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.mT().matmul(x1)};
 }
 
+// Forward-mode counterpart of _euclidean_dist_backward: with
+// result_ij = |x1_i - x2_j|, d result_ij = <x1_i - x2_j, dx1_i - dx2_j> /
+// result_ij, taking the subgradient 0 where result_ij == 0.
+Tensor _euclidean_dist_jvp(
+    const Tensor& x1,
+    const Tensor& x2,
+    const Tensor& dx1,
+    const Tensor& dx2,
+    const Tensor& res) {
+  auto num = (x1 * dx1).sum(-1, true) + (x2 * dx2).sum(-1).unsqueeze(-2) -
+      dx1.matmul(x2.mT()) - x1.matmul(dx2.mT());
+  return (num / res).masked_fill(res == 0, 0);
+}
+
 // Double backward for _cdist_backward, whose first backward is
 //   grad_x1_ik = sum_j grad_output_ij * sgn(diff)|diff|^(p-1) / cdist_ij^(p-1),
 // diff_ijk = x1_ik - x2_jk. cdist is an independent input here; its x1/x2
