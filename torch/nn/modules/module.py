@@ -265,12 +265,14 @@ def register_module_forward_hook(
         hook(module, input, output) -> None or modified output
 
     The input contains only the positional arguments given to the module.
-    Keyword arguments won't be passed to the hooks and only to the ``forward``.
+    With ``with_kwargs=True``, the hook also receives the keyword arguments:
+    ``hook(module, input, kwargs, output)``.
     You can optionally modify the output of the module by returning a new value
     that will replace the output from the :func:`forward` function.
 
     Parameters:
         hook (Callable): The user defined hook to be registered.
+        with_kwargs (bool): Pass keyword arguments to the hook. Default: ``False``.
         always_call (bool): If ``True`` the ``hook`` will be run regardless of
             whether an exception is raised while calling the Module.
             Default: ``False``
@@ -283,7 +285,12 @@ def register_module_forward_hook(
     ``register_forward_hook``.
     """
     handle = RemovableHandle(
-        _global_forward_hooks, extra_dict=_global_forward_hooks_always_called
+        _global_forward_hooks,
+        extra_dict=(
+            [_global_forward_hooks_with_kwargs, _global_forward_hooks_always_called]
+            if with_kwargs
+            else _global_forward_hooks_always_called
+        ),
     )
     _global_forward_hooks[handle.id] = hook
     if with_kwargs:
@@ -1899,7 +1906,10 @@ class Module:
             for hook_id, hook in _global_forward_hooks.items():
                 if hook_id in _global_forward_hooks_always_called and hook_id not in called_always_called_hooks:  # type: ignore[possibly-undefined]
                     try:
-                        hook_result = hook(self, args, result)  # type: ignore[possibly-undefined]
+                        if hook_id in _global_forward_hooks_with_kwargs:
+                            hook_result = hook(self, args, kwargs, result)  # type: ignore[possibly-undefined]
+                        else:
+                            hook_result = hook(self, args, result)  # type: ignore[possibly-undefined]
                         if hook_result is not None:
                             result = hook_result
                     except Exception as e:

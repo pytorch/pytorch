@@ -947,6 +947,7 @@ class TestStateDictHooks(TestCase):
                 m._register_state_dict_hook(fn)
 
 
+@instantiate_parametrized_tests
 class TestModuleGlobalHooks(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1239,25 +1240,37 @@ class TestModuleGlobalHooks(TestCase):
         self.assertTrue(local_backward_called and global_backward_called)
 
     @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_module_global_hooks_with_kwargs(self):
+    @parametrize_test("always_call", [False, True])
+    def test_module_global_hooks_with_kwargs(self, always_call):
+        observed = []
+
         def kwarg_global_forward_hook(
             module: nn.Module,
             args: tuple[torch.Tensor],
             kwargs: dict[str, Any],
-            out: torch.Tensor,
+            out: torch.Tensor | None,
         ) -> Any:
-            out = out + kwargs["bias"]
-            return out
+            observed.append((kwargs["bias"], out))
+            return None if out is None else out + kwargs["bias"]
 
         model = KwargModel()
-        nn.modules.module.register_module_forward_hook(
-            kwarg_global_forward_hook,
-            with_kwargs=True,
+        hooks = nn.modules.module
+        handle = hooks.register_module_forward_hook(
+            kwarg_global_forward_hook, with_kwargs=True, always_call=always_call
         )
+        self.addCleanup(handle.remove)
         x: torch.Tensor = torch.randn(10, 20)
         bias: torch.Tensor = torch.randn(10, 20)
         out = model(x, bias=bias)
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
+        observed.clear()
+        with self.assertRaisesRegex(TypeError, "positional argument: 'x'"):
+            model(bias=bias)
+        self.assertEqual(observed, [(bias, None)] if always_call else [])
+        handle.remove()
+        self.assertNotIn(handle.id, hooks._global_forward_hooks_with_kwargs)
+        self.assertNotIn(handle.id, hooks._global_forward_hooks_always_called)
+        self.assertEqual(model(x, bias=bias), x + bias)
 
 
 class TestModuleHookNN(NNTestCase):
