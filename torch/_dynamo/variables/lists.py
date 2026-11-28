@@ -549,7 +549,7 @@ class BaseListVariable(VariableTracker):
 
         # CPython has a series of checks to optimize list.extend for different data types
         # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
-        from .dicts import ConstDictVariable
+        from .dicts import ConstDictVariable, DictViewVariable, OrderedDictVariable
         from .sets import (
             DictKeySetVariable,
             FrozensetVariable,
@@ -558,13 +558,19 @@ class BaseListVariable(VariableTracker):
         )
         from .user_defined import UserDefinedObjectVariable
 
+        iterable = args[0]
+        if isinstance(iterable, OrderedDictVariable) or (
+            isinstance(iterable, DictViewVariable) and iterable.is_ordered
+        ):
+            # An ordered key lookup can run user code between appends.
+            iterable = generic_getiter(tx, iterable)
         sz = len(self.items)
-        if istype(args[0], (ListVariable, TupleVariable)):
-            self.items.extend(args[0].items)
-        elif isinstance(args[0], UserDefinedObjectVariable):
-            self.items.extend(unpack_iterable(tx, args[0]))
+        if istype(iterable, (ListVariable, TupleVariable)):
+            self.items.extend(iterable.items)
+        elif isinstance(iterable, UserDefinedObjectVariable):
+            self.items.extend(unpack_iterable(tx, iterable))
         elif isinstance(
-            args[0],
+            iterable,
             (
                 ConstDictVariable,
                 SetVariable,
@@ -573,18 +579,18 @@ class BaseListVariable(VariableTracker):
                 OrderedSetVariable,
             ),
         ):
-            if isinstance(args[0], ConstDictVariable):
-                args[0].install_dict_order_guard(tx)
-            items = [item.vt for item in args[0].items]
+            if isinstance(iterable, ConstDictVariable):
+                iterable.install_dict_order_guard(tx)
+            items = [item.vt for item in iterable.items]
             self.items.extend(items)
-        elif isinstance(args[0], ConstantVariable):
-            items = unpack_iterable(tx, args[0])
+        elif isinstance(iterable, ConstantVariable):
+            items = unpack_iterable(tx, iterable)
             self.items.extend(items)
         else:
             # Use the native append, matching CPython's internal list_extend
             # which bypasses a subclass's overridden append (e.g. immutable_list).
             unpack_and_apply_fn(
-                tx, args[0], lambda item: self.list_append(tx, [item], {})
+                tx, iterable, lambda item: self.list_append(tx, [item], {})
             )
 
         if len(self.items) > sz:
