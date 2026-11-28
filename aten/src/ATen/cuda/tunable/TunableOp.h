@@ -57,6 +57,9 @@ class TunableOp {
       if (!ctx->IsTunableOpEnabled()) {
         result = ResultEntry::Default();
       }
+      else if (at::IsManagedTunableOp()) {
+        result = LookupServingTunableOpResult(Signature(), params->Signature());
+      }
       else {
         auto& mgr = ctx->GetTuningResultsManager();
         const auto op_sig = Signature();
