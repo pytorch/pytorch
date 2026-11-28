@@ -479,20 +479,22 @@ def _set_name(
     vt: VariableTracker,
     tx: "InstructionTranslatorBase",
     value: "VariableTracker | None",
-) -> None:
+) -> VariableTracker:
     if value is None or not issubclass(maybe_get_python_type(value), str):
         raise_type_error(tx, "__name__ must be set to a string object")
     store_attr_mutation(tx, vt, "__name__", value)
+    return ConstantVariable.create(None)
 
 
 def _set_qualname(
     vt: VariableTracker,
     tx: "InstructionTranslatorBase",
     value: "VariableTracker | None",
-) -> None:
+) -> VariableTracker:
     if value is None or not issubclass(maybe_get_python_type(value), str):
         raise_type_error(tx, "__qualname__ must be set to a string object")
     store_attr_mutation(tx, vt, "__qualname__", value)
+    return ConstantVariable.create(None)
 
 
 class BaseUserFunctionVariable(VariableTracker):
@@ -867,9 +869,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # func_set_annotations: deletion and None both clear the slot, so the
         # next read lazily rebuilds an empty dict; any other non-dict is a
         # TypeError.
-        if value is not None and value.is_constant_match(None):
-            value = None
-        if value is not None and not issubclass(maybe_get_python_type(value), dict):
+        if value is None or value.is_constant_match(None):
+            value = variables.ConstDictVariable({}, mutation_type=ValueMutationNew())
+        elif not issubclass(maybe_get_python_type(value), dict):
             raise_type_error(tx, "__annotations__ must be set to a dict object")
         store_attr_mutation(tx, self, "__annotations__", value)
         return ConstantVariable.create(None)
@@ -897,7 +899,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     }
 
     tp_getset = {
-        "__get__": GetSet(_get_dunder_get, readonly_setter),
         "__name__": GetSet(
             getset_load_or_build(lambda vt: vt.fn.__name__, "__name__"),
             _set_name,
@@ -923,11 +924,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             _set_kwdefaults,
         ),
         "__annotations__": GetSet(_get_annotations, _set_annotations),
-        "__type_params__": GetSet(
+    }
+
+    if sys.version_info >= (3, 12):
+        tp_getset["__type_params__"] = GetSet(
             getset_load_or_build(lambda vt: vt.fn.__type_params__, "__type_params__"),
             _set_type_params,
-        ),
-    }
+        )
 
     def tp_descr_get_impl(
         self,
@@ -2442,11 +2445,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self,
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
-    ) -> None:
+    ) -> VariableTracker:
         # func_set_type_params: del (NULL) is rejected too.
         if value is None or not issubclass(maybe_get_python_type(value), tuple):
             raise_type_error(tx, "__type_params__ must be set to a tuple")
         store_attr_mutation(tx, self, "__type_params__", value)
+        return ConstantVariable.create(None)
 
     def _get_closure(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         c = self.closure
@@ -2487,8 +2491,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         ),
         "__kwdefaults__": GetSet(_get_kwdefaults, _set_kwdefaults),
         "__annotations__": GetSet(_get_annotations, _set_annotations),
-        "__type_params__": GetSet(_get_type_params, _set_type_params),
     }
+
+    if sys.version_info >= (3, 12):
+        tp_getset["__type_params__"] = GetSet(_get_type_params, _set_type_params)
 
     if sys.version_info >= (3, 14):
         tp_getset["__annotate__"] = GetSet(_get_annotate, _set_annotate)
@@ -3556,6 +3562,15 @@ class FunctionWrapperVariable(WrapperUserFunctionVariable):
     """A wrapper that is itself a function (torch.compile, script_if_tracing)."""
 
     _cpython_type = types.FunctionType
+
+    tp_members = {
+        "__closure__": Member(
+            getset_load_or_build(lambda vt: vt.wrapper_obj.__closure__, "__closure__"),
+            readonly_setter,
+        ),
+        "__globals__": Member(unmodeled_get, readonly_setter),
+        "__builtins__": Member(unmodeled_get, readonly_setter),
+    }
 
     tp_getset = {
         "__name__": GetSet(

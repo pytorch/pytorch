@@ -66,6 +66,7 @@ from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     GetSet,
+    graph_break_on_unsupported_attr_mutation,
     graph_break_on_untracked_vt,
     maybe_get_python_type,
     NO_SUCH_SUBOBJ,
@@ -2913,16 +2914,15 @@ def object_generic_setattr_str(
                         "reload it from.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
-            if obj.is_tensor() or isinstance(obj, variables.PythonModuleVariable):
+            if obj.is_tensor() or isinstance(
+                obj,
+                (variables.PythonModuleVariable, variables.BaseUserFunctionVariable),
+            ):
                 # handle_traced_output leaves aliased Tensor outputs untracked
                 # (repeated objects, returned inputs): replaying onto them as
-                # new objects would be wrong.
-                unimplemented(
-                    gb_type="setattr() on unsupported type",
-                    context=f"setattr({obj}, {name}, {value})",
-                    explanation=f"setattr() is not supported on type {obj.python_type_name()}",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+                # new objects would be wrong. Existing untracked functions
+                # likewise cannot be replayed as new functions.
+                graph_break_on_unsupported_attr_mutation(obj, name, value)
             se.track_attribute_mutation_new(obj)
 
         if value is None:

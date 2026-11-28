@@ -2257,12 +2257,12 @@ class VariableBuilder:
             value, "_torchdynamo_inline", False
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            wrapper_cls = (
-                FunctionWrapperVariable
-                if isinstance(value, types.FunctionType)
-                else WrapperUserFunctionVariable
-            )
-            return wrapper_cls(
+            if isinstance(value, types.FunctionType):
+                result = FunctionWrapperVariable(
+                    value, "_torchdynamo_inline", source=self.source
+                )
+                return self.tx.output.side_effects.track_object_existing(value, result)
+            return WrapperUserFunctionVariable(
                 value,
                 "_torchdynamo_inline",
                 source=self.source,

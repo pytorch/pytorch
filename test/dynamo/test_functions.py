@@ -114,6 +114,10 @@ def func_with_default(a, b, some_default_arg=True):
         return a - b
 
 
+def function_without_closure():
+    return None
+
+
 def make_test(fn=None, expected_frame_count=1):
     if fn is None:
         return lambda fn: make_test(fn, expected_frame_count=expected_frame_count)
@@ -2360,6 +2364,206 @@ partial_fn = functools.partial(fn, scale=2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_function_closure_is_readonly_for_nested_and_sourced_functions(self):
+        def fn(x):
+            captured = x
+
+            def nested():
+                return captured
+
+            def check(target, delete):
+                try:
+                    if delete:
+                        delattr(target, "__closure__")
+                    else:
+                        target.__closure__ = target.__closure__
+                except AttributeError as exc:
+                    return type(exc), str(exc)
+                return None, ""
+
+            return (
+                x + 1,
+                check(nested, False),
+                check(nested, True),
+                check(function_without_closure, False),
+                check(function_without_closure, True),
+            )
+
+        counter = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            expected = fn(x)
+            actual = opt_fn(x)
+            self.assertEqual(expected, actual)
+            self.assertEqual(
+                actual[1:],
+                ((AttributeError, "readonly attribute"),) * 4,
+            )
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_function_closure_setattr_error_survives_graph_break(self):
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            try:
+                function_without_closure.__closure__ = None
+            except AttributeError as exc:
+                result = type(exc), str(exc)
+            else:
+                result = None, ""
+            return x + 1, result
+
+        counter = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=counter)
+        x = torch.ones(2)
+        expected = fn(x)
+        actual = opt_fn(x)
+        self.assertEqual(expected, actual)
+        self.assertEqual(actual[1], (AttributeError, "readonly attribute"))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("delete", [False, True])
+    def test_lru_cache_wrapper_closure_is_writable(self, delete):
+        def fn(x, wrapped):
+            if delete:
+                del wrapped.__closure__
+                return x + 1
+            wrapped.__closure__ = 3
+            return x + wrapped.__closure__
+
+        def make_wrapper():
+            wrapped = functools.lru_cache(function_without_closure)
+            wrapped.__closure__ = 1
+            return wrapped
+
+        x = torch.ones(2)
+        eager = make_wrapper()
+        traced = make_wrapper()
+        expected = fn(x, eager)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x, traced)
+        self.assertEqual(actual, expected)
+        if delete:
+            self.assertNotIn("__closure__", traced.__dict__)
+        else:
+            self.assertEqual(traced.__closure__, 3)
+        self.assertIsNone(function_without_closure.__closure__)
+
+    @parametrize("script", [False, True])
+    def test_function_wrapper_closure_is_readonly(self, script):
+        if script:
+            wrapped = torch.jit.script_if_tracing(function_without_closure)
+        else:
+            wrapped = torch.compile(function_without_closure, backend="eager")
+
+        def fn(x, target):
+            errors = []
+            try:
+                target.__closure__ = None
+            except AttributeError as exc:
+                errors.append(str(exc))
+            try:
+                delattr(target, "__closure__")
+            except AttributeError as exc:
+                errors.append(str(exc))
+            target.__name__ = "updated_wrapper"
+            return x + 1, errors, target.__name__
+
+        x = torch.ones(2)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x, wrapped)
+        self.assertEqual(wrapped.__name__, "updated_wrapper")
+        self.assertEqual(actual, fn(x, wrapped))
+        self.assertEqual(actual[1], ["readonly attribute"] * 2)
+        self.assertEqual(function_without_closure.__name__, "function_without_closure")
+
+    def test_sourced_function_attribute_writes(self):
+        def fn(x, target):
+            types.FunctionType.__dict__["__name__"].__set__(target, "new_name")
+            target.__get__ = 3
+            return x + target.__get__, target.__name__
+
+        def target():
+            pass
+
+        x = torch.ones(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, target),
+            (x + 3, "new_name"),
+        )
+        self.assertEqual(target.__name__, "new_name")
+        self.assertEqual(target.__dict__, {"__get__": 3})
+
+    @unittest.skipIf(sys.version_info >= (3, 12), "3.12+ defines __type_params__")
+    def test_function_type_params_is_instance_attribute_on_311(self):
+        def fn(x, target):
+            target.__type_params__ = 3
+            return x + target.__type_params__
+
+        def target():
+            pass
+
+        x = torch.ones(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, target), x + 3
+        )
+        self.assertEqual(target.__dict__, {"__type_params__": 3})
+
+    def test_existing_method_function_write_is_not_lost(self):
+        class A:
+            def m(self):
+                pass
+
+        def fn(x):
+            x = x + 1
+            A().m.__func__.__doc__ = "new doc"
+            return x + 1
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), x + 2)
+        self.assertEqual(A.m.__doc__, "new doc")
+
+    @parametrize("delete", [False, True])
+    def test_sourced_function_annotations_clear(self, delete):
+        def fn(x, target):
+            if delete:
+                delattr(target, "__annotations__")
+            else:
+                target.__annotations__ = None
+            return x + 1, target.__annotations__
+
+        def target(x: int):
+            pass
+
+        x = torch.ones(2)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, target)
+        self.assertEqual(result, (x + 1, {}))
+        self.assertIs(result[1], target.__annotations__)
+
+    def test_function_member_setters_preserve_success_and_type_errors(self):
+        def fn(x):
+            def nested():
+                "original doc"
+
+            nested.__doc__ = "updated doc"
+            try:
+                function_without_closure.__annotations__ = 1
+            except TypeError as exc:
+                error = type(exc), str(exc)
+            else:
+                error = None, ""
+            return x + 1, nested.__doc__, error
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        expected = fn(x)
+        actual = opt_fn(x)
+        self.assertEqual(expected, actual)
+        self.assertEqual(actual[1], "updated doc")
+        self.assertEqual(
+            actual[2],
+            (TypeError, "__annotations__ must be set to a dict object"),
+        )
 
     @parametrize("wrapped", (False, True))
     def test_inspect_signature_skip_function(self, wrapped):

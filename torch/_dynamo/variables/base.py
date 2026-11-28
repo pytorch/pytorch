@@ -540,6 +540,19 @@ def graph_break_on_untracked_vt(
     )
 
 
+def graph_break_on_unsupported_attr_mutation(
+    obj: VariableTracker,
+    name: str,
+    value: VariableTracker | None,
+) -> None:
+    unimplemented(
+        gb_type="setattr() on unsupported type",
+        context=f"setattr({obj}, {name}, {value})",
+        explanation=f"setattr() is not supported on type {obj.python_type_name()}",
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
+
+
 def store_attr_mutation(
     tx: InstructionTranslatorBase,
     item: VariableTracker,
@@ -556,6 +569,8 @@ def store_attr_mutation(
         if item.source is not None:
             # ref: https://github.com/pytorch/pytorch/pull/196865/
             graph_break_on_untracked_vt(item, name, value)
+        if isinstance(item, variables.BaseUserFunctionVariable):
+            graph_break_on_unsupported_attr_mutation(item, name, value)
         se.track_attribute_mutation_new(item)
     value_to_store = variables.DeletedVariable() if value is None else value
     se.store_attr(item, name, value_to_store)
@@ -595,19 +610,18 @@ def getset_load_or_build(
     return getter
 
 
-def getset_set(name: str) -> Callable[..., None]:
+def getset_set(name: str) -> Setter:
     """Setter for a GetSet/Member whose value is an already-built VT."""
 
     def setter(
         vt: VariableTracker,
         tx: InstructionTranslatorBase,
         value: VariableTracker | None,
-    ) -> None:
+    ) -> VariableTracker:
         if value is None:
-            from .constant import ConstantVariable
-
-            value = ConstantVariable.create(None)
+            value = variables.ConstantVariable.create(None)
         store_attr_mutation(tx, vt, name, value)
+        return variables.ConstantVariable.create(None)
 
     return setter
 
