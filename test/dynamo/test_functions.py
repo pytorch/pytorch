@@ -352,14 +352,28 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, obj), (x + 3, 0))
         self.assertEqual(counter.frame_count, 2)
 
-    @parametrize("kind", ["plain", "getattr", "getattribute"])
-    @parametrize("destination", ["instance", "class", "base"])
+    @parametrize(
+        "kind, destination",
+        [
+            (kind, dst)
+            for kind in ("plain", "getattr", "getattribute")
+            for dst in ("instance", "class", "base")
+        ]
+        + [
+            ("slot", "instance"),
+            ("slot_getattr", "instance"),
+            ("module", "instance"),
+            ("module", "registry"),
+        ],
+    )
     def test_defaulted_attribute_absence_invalidation(self, kind, destination):
         class Base:
-            pass
+            __slots__ = ()
 
         class Input(Base):
-            if kind == "getattr":
+            if kind.startswith("slot"):
+                __slots__ = ("scale", "reads")
+            if kind in ("getattr", "slot_getattr"):
 
                 def __getattr__(self, name):
                     if name == "scale":
@@ -370,76 +384,50 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 def __getattribute__(self, name):
                     return super().__getattribute__(name)
 
-        obj = Input()
-        target = {"instance": obj, "class": Input, "base": Base}[destination]
-        self._check_defaulted_attribute_invalidation(
-            obj, lambda: setattr(target, "scale", 3), reads=int(kind == "getattr")
-        )
-
-    @parametrize("fallback", [False, True])
-    def test_defaulted_attribute_slot_invalidation(self, fallback):
-        class Input:
-            __slots__ = ("scale", "reads")
-            if fallback:
-
-                def __getattr__(self, name):
-                    if name == "scale":
-                        self.reads += 1
-                    raise AttributeError(name)
-
-        obj = Input()
-        self._check_defaulted_attribute_invalidation(
-            obj, lambda: setattr(obj, "scale", 3), reads=int(fallback)
-        )
-
-    @parametrize("registry", [False, True])
-    def test_defaulted_attribute_module_invalidation(self, registry):
-        obj = torch.nn.Identity()
+        obj = torch.nn.Identity() if kind == "module" else Input()
 
         def mutate():
-            if registry:
+            if destination == "registry":
                 obj.register_buffer("scale", torch.tensor(3))
             else:
-                obj.scale = 3
+                target = {"instance": obj, "class": Input, "base": Base}[destination]
+                target.scale = 3
 
-        self._check_defaulted_attribute_invalidation(obj, mutate)
+        reads = int(kind in ("getattr", "slot_getattr"))
+        self._check_defaulted_attribute_invalidation(obj, mutate, reads=reads)
 
-    def test_defaulted_attribute_custom_metadata_invalidation(self):
+    @parametrize("kind", ["metadata", "dict_property", "bases"])
+    def test_defaulted_attribute_type_invalidation(self, kind):
         class Meta(type):
-            def __getattribute__(cls, name):
-                return 0 if name == "__dictoffset__" else super().__getattribute__(name)
+            if kind == "metadata":
 
-        class Input(metaclass=Meta):
-            pass
+                def __getattribute__(cls, name):
+                    if name == "__dictoffset__":
+                        return 0
+                    return super().__getattribute__(name)
 
-        obj = Input()
-        self._check_defaulted_attribute_invalidation(
-            obj, lambda: setattr(obj, "scale", 3)
-        )
-
-    def test_defaulted_attribute_dict_property_invalidation(self):
-        class Input:
-            @property
-            def __dict__(self):
-                raise AttributeError("__dict__")
-
-        self._check_defaulted_attribute_invalidation(
-            Input(), lambda: setattr(Input, "scale", 3)
-        )
-
-    def test_defaulted_attribute_bases_invalidation(self):
         class Base:
             pass
 
-        class Input(Base):
-            pass
+        class Input(Base, metaclass=Meta):
+            if kind == "dict_property":
+
+                @property
+                def __dict__(self):
+                    raise AttributeError("__dict__")
 
         class Other:
             scale = 3
 
-        self._check_defaulted_attribute_invalidation(
-            Input(), lambda: setattr(Input, "__bases__", (Base, Other))
-        )
+        obj = Input()
+
+        def mutate():
+            if kind == "bases":
+                Input.__bases__ = (Base, Other)
+            else:
+                (obj if kind == "metadata" else Input).scale = 3
+
+        self._check_defaulted_attribute_invalidation(obj, mutate)
 
     @parametrize("replace_dict", [False, True])
     def test_defaulted_attribute_deleted_while_tracing(self, replace_dict):
@@ -462,24 +450,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         obj.scale = Input.scale = 3
         self.assertEqual(compiled(x, obj), x + 3)
-        self.assertEqual(counter.frame_count, 2)
-
-    def test_slotted_class_missing_attribute_guard(self):
-        class Slotted:
-            __slots__ = ()
-
-        def fn(x, obj):
-            try:
-                return x + obj.extra
-            except AttributeError:
-                return x + 1
-
-        x, obj = torch.ones(1), Slotted()
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        self.assertEqual(compiled(x, obj), x + 1)
-        with patch.object(Slotted, "extra", 7, create=True):
-            self.assertEqual(compiled(x, obj), x + 7)
         self.assertEqual(counter.frame_count, 2)
 
     @parametrize("on_class", [False, True])
@@ -527,25 +497,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x), x + 1)
         self.assertEqual(counter.frame_count, frames)
 
-    def test_missing_attribute_on_constant_result(self):
-        class Input:
-            pass
-
-        @torch._dynamo.assume_constant_result
-        def make_input():
-            return Input()
-
-        def fn(x):
-            obj = make_input()
-            fallback = getattr(obj, "missing", 3)
-            try:
-                obj.missing
-            except AttributeError as error:
-                return x + fallback, error.name, error.obj is obj
-
-        x = torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
     def test_missing_attribute_does_not_repeat_source_getter(self):
         watching = False
         reads = []
@@ -585,86 +536,89 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         referent = x + 2
-        ref = weakref.ref(referent)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, ref), fn(x, ref)
-        )
+        self._check_reuse(fn, [weakref.ref(referent)], frames=1)
 
-    @parametrize("kind", ["size", "pointer", "format", "weakref", "frame"])
+    @parametrize(
+        "kind",
+        ["size", "pointer", "format", "weakref", "frame", "constant", "descriptor"],
+    )
     def test_sourceless_missing_attribute(self, kind):
+        @torch._dynamo.assume_constant_result
+        def make_input():
+            return MyCls()
+
         def fn(x):
+            if kind == "descriptor":
+                return x + 1, hasattr([].__len__, "__wrapped__")
             if kind == "size":
-                value = x.size(0)
+                obj = x.size(0)
             elif kind == "pointer":
-                value = x.data_ptr()
+                obj = x.data_ptr()
             elif kind == "format":
-                value = str.format("{}", x.size(0))
+                obj = str.format("{}", x.size(0))
             elif kind == "weakref":
-                value = weakref.ref(x)
+                obj = weakref.ref(x)
+            elif kind == "constant":
+                obj = make_input()
             else:
                 try:
                     raise ValueError
                 except ValueError as exc:
-                    value = traceback.extract_tb(exc.__traceback__)[-1]
-            missing = hasattr(value, "foo")
-            default = getattr(value, "foo", None)
+                    obj = traceback.extract_tb(exc.__traceback__)[-1]
+            missing = hasattr(obj, "foo")
+            default = getattr(obj, "foo", 3)
             try:
-                value.foo
+                obj.foo
             except AttributeError as error:
-                return x + 1, missing, default, error.name
+                return (
+                    x + default,
+                    missing,
+                    error.name,
+                    kind != "constant" or error.obj is obj,
+                )
 
         x = torch.ones(3)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(x), fn(x)
-        )
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(compiled(x), fn(x))
 
-    def test_sourceless_descriptor_missing_attribute(self):
-        def fn(x):
-            return x + 1, hasattr([].__len__, "__wrapped__")
-
-        x = torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    def _check_lookup_hook_invalidation(self, obj, target, name, getter):
-        def fn(x, obj):
-            return x + getattr(obj, "value", 1)
-
-        x = torch.ones(1)
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        self.assertEqual(compiled(x, obj), x + 1)
-        setattr(target, name, getter)
-        self.assertEqual(compiled(x, obj), x + 7)
-        self.assertEqual(counter.frame_count, 2)
-
-    @parametrize("name", ["__getattr__", "__getattribute__"])
+    @parametrize("method", ["__getattr__", "__getattribute__", "replace", "value"])
     @parametrize("inherited", [False, True])
-    @parametrize("slotted", [False, True])
-    def test_defaulted_getattr_guards_added_lookup_hook(self, name, inherited, slotted):
+    @parametrize("slots", [None, (), ("value",)])
+    def test_defaulted_getattr_guards_lookup_hook(self, method, inherited, slots):
         class Base:
             __slots__ = ()
 
         class Input(Base):
-            if slotted:
-                __slots__ = ("value",)
+            if slots is not None:
+                __slots__ = slots
 
-        def getter(self, key):
-            if name == "__getattr__" or key == "value":
-                return 7
-            return object.__getattribute__(self, key)
-
-        self._check_lookup_hook_invalidation(
-            Input(), Base if inherited else Input, name, getter
-        )
-
-    def test_defaulted_getattr_guards_replaced_lookup_hook(self):
-        class Input:
-            __getattribute__ = object.__getattribute__
+                def __iter__(self):
+                    return iter((1,))
 
         def getter(self, key):
             return 7 if key == "value" else object.__getattribute__(self, key)
 
-        self._check_lookup_hook_invalidation(Input(), Input, "__getattribute__", getter)
+        def fn(x, obj):
+            default = getattr(obj, "value", 1)
+            if slots:
+                return x + default
+            try:
+                return x + obj.value, default, hasattr(obj, "value")
+            except AttributeError:
+                return x + default
+
+        obj, owner = Input(), Base if inherited else Input
+        if method == "replace":
+            method = "__getattribute__"
+            owner.__getattribute__ = object.__getattribute__
+        compiled, counter = self._check_reuse(fn, [obj], frames=1)
+        if method == "value":
+            Input.value = 7
+        else:
+            setattr(owner, method, getter)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("base_lookup", ["unbound", "super"])
     def test_getattr_delegating_to_base_lookup(self, base_lookup):
@@ -692,8 +646,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_defaulted_getattr_reads_property_once(self):
         class Input:
-            def __init__(self):
-                self.reads = 0
+            reads = 0
 
             @property
             def value(self):
@@ -7971,7 +7924,7 @@ class GraphModule(torch.nn.Module):
             methods.append([].count)
         self._check_method_bindings(fn, methods, capture, (1, 1, 2, 2, 3))
         if capture in ("aot", "cache"):
-            self._refuses_capture(fn, [1].count, capture, "binding prebound builtin")
+            self._refuses_capture(fn, [1].count, capture, "pass the receiver")
 
     def test_export_calls_instance_bound_builtin(self):
         class Model(torch.nn.Module):
@@ -8049,10 +8002,7 @@ class GraphModule(torch.nn.Module):
 
         self._check_fallback(fresh, (None,), "unstable receiver")
 
-    @parametrize(
-        "bind",
-        [None, lambda s: s.upper, lambda s: str.__dict__["upper"].__get__(s, str)],
-    )
+    @parametrize("bind", [None, lambda s: s.upper, lambda s: str.upper.__get__(s)])
     def test_bound_method_constant_receiver_hash(self, bind):
         fn = lambda x, s: (x + 1, hash(bind(s) if bind else s))
         a, b = ("".join(("hello", "world")) for _ in range(2))
@@ -9142,13 +9092,11 @@ class GraphModule(torch.nn.Module):
 
         def fn(offset, pair):
             x, obj, day, amount = pair
-            key, field = re.IGNORECASE, Field()
+            key, field, n = re.IGNORECASE, Field(), x.shape[0]
             comptime(lookup_member)
             spec = "{.name[0]:>4} {!r} {!s} {} {!r} {} {!a}"
-            text = spec.format(key, x, x, re.RegexFlag(4), x.shape[0], x.shape, [x])
-            mixed = "{:>{}} {} {o} {o!r} {o!s} {o!a}".format(
-                key, x.shape[0], obj, o=obj
-            )
+            text = spec.format(key, x, x, re.RegexFlag(4), n, x.shape, [x])
+            mixed = "{:>{}} {} {o} {o!r} {o!s} {o!a}".format(key, n, obj, o=obj)
             field.calls = day.calls = calls = []
             rendered = "{0} {2} {1!r:{1}} {1!s:{1}} {1!a:{1}}".format(key, field, day)
             spec = "{0:{1.shape[0]}} {1} {1.shape[0]} {2!s} {2:%Y} {3:.1f} {4}"
@@ -9160,17 +9108,27 @@ class GraphModule(torch.nn.Module):
                     errors.append(template.format(key, obj=field))
                 except (ValueError, IndexError, TypeError) as exc:
                     errors.append((type(exc), exc.args))
+            clocks = str.format("{0} {1:%H:%M} {2:%H:%M %Z} {2}", key, stamp, clock)
             output = (format(torch._C.DispatchKey.CPU), text, mixed, native, errors)
-            return x + offset, output, rendered, tuple(calls)
+            return x + offset, output, rendered, tuple(calls), clocks, format(day, "%Y")
 
         class OpaqueRepr:
             __repr__ = torch.compiler.disable(Field.__repr__)
 
-        day = Day(2020, 1, 1)
-        inputs = [
-            (torch.arange(n), MyCls(), day, decimal.Decimal("1.25")) for n in (2, 4)
-        ]
+        day, stamp = Day(2020, 1, 1), datetime.datetime.min
+        clock = datetime.time(13, 45, tzinfo=datetime.UTC)
+        amount = decimal.Decimal("1.25")
+        inputs = [(torch.arange(n), MyCls(), day, amount) for n in (2, 4)]
         run, _ = self._check_reuse(fn, inputs, frames=1, dynamic=True)
+
+        class Name(str):
+            __slots__ = ()
+            replace = unittest.mock.Mock(side_effect=AssertionError)
+
+        clock = clock.replace(tzinfo=datetime.timezone(clock.utcoffset(), Name("Z")))
+        with self.assertRaisesRegex(Unsupported, "tzinfo callback"):
+            run(torch.ones(1), inputs[-1])
+        clock = clock.replace(tzinfo=None)
         day.strftime = lambda spec: "custom"
         with self.assertRaisesRegex(Unsupported, "instance overrides strftime"):
             run(torch.ones(1), inputs[-1])
@@ -9178,19 +9136,19 @@ class GraphModule(torch.nn.Module):
         def ordered(x, first, second):
             y = x + 1
             text = str.format("{} {} {}", re.IGNORECASE, first, second)
-            return y, text, str.format("{} {}", re.IGNORECASE, y.sin)
+            return y, text, str.format("{} {} {}", re.IGNORECASE, y.sin, y.split)
 
-        field = Field()
+        field, x = Field(), torch.ones(1)
         for item in (Field(), OpaqueRepr()):
-            run = torch.compile(
-                ordered, backend="eager", fullgraph=isinstance(item, Field)
-            )
+            fullgraph = isinstance(item, Field)
+            run = torch.compile(ordered, backend="eager", fullgraph=fullgraph)
             for pair in (([item], field), (field, [item])):
                 field.calls = item.calls = []
-                expected = ordered(torch.ones(1), *pair)[1]
+                expected = ordered(x, *pair)[1]
                 field.calls.clear()
-                y, text, method = run(torch.ones(1), *pair)
-                self.assertEqual((text, method), (expected, f"{re.IGNORECASE} {y.sin}"))
+                y, text, method = run(x, *pair)
+                self.assertEqual(text, expected)
+                self.assertEqual(method, f"{re.IGNORECASE} {y.sin} {y.split}")
                 calls = ["width", "repr"] if pair[0] is field else ["repr", "width"]
                 self.assertEqual(field.calls, calls)
 
@@ -9224,16 +9182,16 @@ class GraphModule(torch.nn.Module):
             Label.__float__ = lambda self: 42.0
             return x + 1, render(member)
 
-        self._check_fallback(
-            fn, (Label(),), r"pending class mutation: __(str|repr|format)__"
-        )
         slot = "__format__" if render is str.format else "__repr__"
+        error = r"pending class mutation: __(str|repr|format)__"
+        self._check_fallback(fn, (Label(),), error)
         delattr(Label, slot)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.ones(1)
-        self.assertEqual(compiled(x, Stable()), fn(x, Stable()))
+        result = compiled(x, Stable())
         observe = repr if slot == "__repr__" else format
         self.assertEqual(observe(Label()), "changed")
+        self.assertEqual(result, fn(x, Stable()))
         self._check_reuse(fn, (re.IGNORECASE,), frames=1)
         if render is str.format:
             for base in (int, float, str):
