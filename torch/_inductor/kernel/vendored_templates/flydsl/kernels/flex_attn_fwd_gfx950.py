@@ -12,10 +12,12 @@ from flydsl.expr.typing import Vector as Vec
 from .flex_attn_utils import (
     fast_exp2,
     is_sliding_window_mask_program,
+    make_capture_buffers,
     make_global_view,
     make_mask_buffers,
     make_mask_evaluator,
     make_qk_shared_layout,
+    make_score_evaluator,
     make_value_shared_layout,
     schedule_fwd_pv_pipeline,
     schedule_fwd_qk_pipeline,
@@ -145,8 +147,9 @@ def _make_forward_launch(kernel, *, grid, num_threads, mask_buffer_count, waves_
             grid=grid, block=(num_threads, 1, 1), stream=stream
         )
 
-    # Each JIT entry point exposes only its live mask buffers. The internal
-    # placeholder slots alias kv_num_blocks and must remain unused above count.
+    # Each JIT entry point exposes only its live mask and score buffers. The
+    # internal placeholder slots alias kv_num_blocks and must remain unused
+    # above count.
     if mask_buffer_count == 0:
 
         @flyc.jit
@@ -359,6 +362,10 @@ def build_flex_attn_fwd_module(
     mask_program_output: int = 0,
     mask_buffer_shapes=(),
     mask_buffer_strides=(),
+    score_program=(),
+    score_program_output: int = 0,
+    score_buffer_shapes=(),
+    score_buffer_strides=(),
     q_stride=None,
     k_stride=None,
     v_stride=None,
@@ -378,11 +385,18 @@ def build_flex_attn_fwd_module(
     if num_kv_heads <= 0 or num_q_heads % num_kv_heads:
         raise ValueError("FlyDSL forward requires Hq % Hkv == 0")
 
+    score_program = tuple(score_program)
+    score_program_output = int(score_program_output)
+    # The identity score_mod lowers to an empty program returning the score slot.
+    has_score_mod = bool(score_program) or score_program_output != 0
     paired_ctas = batch_size * num_q_heads * (seq_q // 256)
     min_kv_blocks = 64 if mask_buffer_shapes else 16
     # Pair sparse rows only when enough CTAs and KV work amortize the merge.
+    # score_mod's per-element work outweighs the paired pipeline's gains on
+    # gfx950 (alibi forward measured 375 us unpaired vs 1103 us paired).
     paired = (
-        seq_q % 256 == 0
+        not has_score_mod
+        and seq_q % 256 == 0
         and sparse_q_block_size == 128
         and sparse_kv_block_size == 128
         and paired_ctas >= _FOUR_WAVE_PREFILL_MIN_CTAS
@@ -445,8 +459,10 @@ def build_flex_attn_fwd_module(
         raise ValueError("FlyDSL forward requires non-empty index storage")
     if len(mask_buffer_shapes) != len(mask_buffer_strides):
         raise ValueError("mask buffer shape/stride descriptors must match")
-    if len(mask_buffer_shapes) > 4:
-        raise ValueError("FlyDSL forward supports at most four mask buffers")
+    if len(score_buffer_shapes) != len(score_buffer_strides):
+        raise ValueError("score buffer shape/stride descriptors must match")
+    if len(mask_buffer_shapes) + len(score_buffer_shapes) > 4:
+        raise ValueError("FlyDSL forward supports at most four captured buffers")
 
     batch_size = int(batch_size)
     num_q_heads = int(num_q_heads)
@@ -525,6 +541,9 @@ def build_flex_attn_fwd_module(
     v_stride = tuple(v_stride or contiguous_stride(num_kv_heads, seq_kv, v_head_dim))
     o_stride = tuple(o_stride or contiguous_stride(num_q_heads, seq_q, v_head_dim))
     scale_log2 = float(scale) * _LOG2E
+    # Without score_mod, Q is pre-scaled into log2 units. score_mod must see the
+    # FP32-scaled score that backward recomputes, so keep Q exact in that case.
+    query_prescale = 1.0 if has_score_mod else scale_log2
     output_stats_in_log2 = bool(output_stats_in_log2)
     mask_program = tuple(mask_program)
     mask_program_output = int(mask_program_output)
@@ -535,6 +554,14 @@ def build_flex_attn_fwd_module(
         1 + sum((size - 1) * stride for size, stride in zip(shape, strides))
         for shape, strides in zip(mask_buffer_shapes, mask_buffer_strides)
     )
+    score_buffer_shapes = tuple(tuple(shape) for shape in score_buffer_shapes)
+    score_buffer_strides = tuple(tuple(stride) for stride in score_buffer_strides)
+    score_buffer_sizes = tuple(
+        1 + sum((size - 1) * stride for size, stride in zip(shape, strides))
+        for shape, strides in zip(score_buffer_shapes, score_buffer_strides)
+    )
+    # Score captures follow the mask captures in the kernel's buffer slots.
+    capture_buffer_count = mask_buffer_count + len(score_buffer_shapes)
     mask_load_width = 4
     vector_mask_loads = []
     for slot, instruction in enumerate(() if paired else mask_program, 4):
@@ -883,6 +910,7 @@ def build_flex_attn_fwd_module(
                 batch_size * num_q_heads * seq_q,
                 1,
             )
+            # Slots [0, mask count) hold mask captures; score captures follow.
             mask_buffers = make_mask_buffers(
                 make_global_view,
                 mask_buffer_count,
@@ -914,6 +942,24 @@ def build_flex_attn_fwd_module(
                 load_i32,
                 batch,
                 query_head,
+            )
+            evaluate_score = make_score_evaluator(
+                score_program,
+                score_program_output,
+                score_buffer_strides,
+                make_capture_buffers(
+                    make_global_view,
+                    score_buffer_sizes,
+                    mask_buffer_count,
+                    mask_buffer_0,
+                    mask_buffer_1,
+                    mask_buffer_2,
+                    mask_buffer_3,
+                ),
+                lambda view, index: view[index],
+                batch,
+                query_head,
+                query_pos,
             )
 
             mask_vector_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Int32)
@@ -1196,7 +1242,7 @@ def build_flex_attn_fwd_module(
 
             # Cache scaled Q once so its LDS reads do not compete with K/V staging.
             query_scale = Vec.from_elements(
-                [_f32(scale_log2)],
+                [_f32(query_prescale)],
                 fx.Float32,
             ).broadcast_to(values_per_thread)
             query_register_packs = []
@@ -1598,9 +1644,12 @@ def build_flex_attn_fwd_module(
                                     keep = keep & element_keep
 
                         keep_values.append(keep)
-                        score_values.append(
-                            keep.select(_f32(raw[element]), _f32(_NEG_BIG))
-                        )
+                        score = _f32(raw[element])
+                        if const_expr(has_score_mod):
+                            score = evaluate_score(
+                                score * _f32(scale), query_pos, key_pos
+                            ) * _f32(_LOG2E)
+                        score_values.append(keep.select(score, _f32(_NEG_BIG)))
 
                 max_levels = score_values
                 for level in fx.range_constexpr(5):
@@ -2905,6 +2954,6 @@ def build_flex_attn_fwd_module(
             else (heads_per_group, num_query_chunks, total_heads // heads_per_group)
         ),
         num_threads=num_threads,
-        mask_buffer_count=mask_buffer_count,
+        mask_buffer_count=capture_buffer_count,
         waves_per_eu=waves_per_eu,
     )

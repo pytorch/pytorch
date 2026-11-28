@@ -31,6 +31,10 @@ _launcher = LazyFlyDSLLauncher(
         mask_program_output=MASK_PROGRAM_OUTPUT,
         mask_buffer_shapes=MASK_BUFFER_SHAPES,
         mask_buffer_strides=MASK_BUFFER_STRIDES,
+        score_program=SCORE_PROGRAM,
+        score_program_output=SCORE_PROGRAM_OUTPUT,
+        score_buffer_shapes=SCORE_BUFFER_SHAPES,
+        score_buffer_strides=SCORE_BUFFER_STRIDES,
         q_stride=Q_STRIDE,
         k_stride=K_STRIDE,
         v_stride=V_STRIDE,
@@ -55,6 +59,9 @@ def _run_flydsl_forward(
 {% for index in range(MASK_BUFFER_COUNT) %}
     mask_buffer_{{index}},
 {% endfor %}
+{% for index in range(SCORE_BUFFER_COUNT) %}
+    score_buffer_{{index}},
+{% endfor %}
     output,
     stream,
 ):
@@ -70,6 +77,9 @@ def _run_flydsl_forward(
         full_kv_indices,
 {% for index in range(MASK_BUFFER_COUNT) %}
         mask_buffer_{{index}},
+{% endfor %}
+{% for index in range(SCORE_BUFFER_COUNT) %}
+        score_buffer_{{index}},
 {% endfor %}
         output,
         stream,
@@ -90,6 +100,9 @@ def _run_flydsl_forward(
 {% for index in range(MASK_BUFFER_COUNT) %}
 {% set _ = kernel_args.append("mask_buffer_" ~ index) %}
 {% endfor %}
+{% for index in range(SCORE_BUFFER_COUNT) %}
+{% set _ = kernel_args.append("score_buffer_" ~ index) %}
+{% endfor %}
 {{def_kernel(*kernel_args)}}
     output = {{get_output()}}
     return _run_flydsl_forward(
@@ -104,6 +117,9 @@ def _run_flydsl_forward(
         full_kv_indices,
 {% for index in range(MASK_BUFFER_COUNT) %}
         mask_buffer_{{index}},
+{% endfor %}
+{% for index in range(SCORE_BUFFER_COUNT) %}
+        score_buffer_{{index}},
 {% endfor %}
         output,
         stream,

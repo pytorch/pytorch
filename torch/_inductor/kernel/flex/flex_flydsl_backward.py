@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -11,10 +12,26 @@ from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
 from ...codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ...codegen.flydsl.flydsl_utils import runtime_available
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
-from ...lowering import empty_strided
+from ...lowering import (
+    constant_pad_nd,
+    empty_strided,
+    full,
+    permute,
+    slice_,
+    to_dtype,
+    view,
+)
 from ...select_algorithm import autotune_select_algorithm
 from ...virtualized import V
 from ..vendored_templates.flydsl.kernels.flex_attn_bwd_utils import (
+    CAPTURE_GRAD_FULL,
+    CAPTURE_GRAD_INVARIANT,
+    CAPTURE_GRAD_KEY,
+    CAPTURE_GRAD_QUERY,
+    CAPTURE_GRAD_RELATIVE,
+    CAPTURE_GRAD_UNUSED,
+    capture_grad_reduction_shape,
+    capture_grad_workspace_shape,
     choose_dq_partitions,
     classify_mask_traversal,
     MASK_TRAVERSAL_BLOCK_LIST,
@@ -34,6 +51,12 @@ from .flex_flydsl_attention import (
     _get_block_mask_metadata,
     _get_flydsl_common_config,
     _get_mask_program_config,
+    _kernel_capture_buffers,
+)
+from .flex_flydsl_score import (
+    classify_capture_gradient,
+    FlyDSLCaptureGrad,
+    FlyDSLScoreProgram,
 )
 
 
@@ -42,6 +65,8 @@ flex_flydsl_backward_template = FlyDSLTemplate(
 )
 
 _METADATA_BLOCK_SIZE = 128
+# Workspace slots for trainable score captures in the backward kernel.
+_MAX_CAPTURE_GRADS = 2
 
 
 def _get_flydsl_flex_attention_backward_config(
@@ -207,6 +232,118 @@ def _get_flydsl_flex_attention_backward_config(
     )
 
 
+def _score_mod_capture_grad_mask(
+    joint_graph: Subgraph | None, capture_count: int
+) -> list[bool] | None:
+    """Which captured score_mod tensors need gradients, or None if unknown."""
+    if joint_graph is None:
+        return [False] * capture_count
+    outputs = [
+        node for node in joint_graph.graph_module.graph.nodes if node.op == "output"
+    ]
+    if len(outputs) != 1:
+        return None
+    joint_outputs = outputs[0].args[0]
+    if not isinstance(joint_outputs, (tuple, list)):
+        return [False] * capture_count
+    # Outputs are (score, b, h, q_idx, kv_idx, *captured buffer gradients).
+    capture_outputs = list(joint_outputs[5:])
+    if len(capture_outputs) > capture_count:
+        return None
+    capture_outputs += [None] * (capture_count - len(capture_outputs))
+    return [output is not None for output in capture_outputs]
+
+
+def _get_capture_grads(
+    config: dict[str, Any], needs_grad: list[bool]
+) -> tuple[list[FlyDSLCaptureGrad | None] | None, str]:
+    """Classify every trainable score capture, or explain the Triton fallback."""
+    program = FlyDSLScoreProgram(
+        instructions=config["SCORE_PROGRAM"],
+        output=config["SCORE_PROGRAM_OUTPUT"],
+        buffer_shapes=config["SCORE_BUFFER_SHAPES"],
+        buffer_strides=config["SCORE_BUFFER_STRIDES"],
+    )
+    captures: list[FlyDSLCaptureGrad | None] = []
+    for buffer_index, trainable in enumerate(needs_grad):
+        if not trainable:
+            captures.append(None)
+            continue
+        capture, reason = classify_capture_gradient(
+            program,
+            buffer_index,
+            batch=config["BATCH_SIZE"],
+            heads=config["NUM_HEADS"],
+            sequence_length=config["SEQ_LEN"],
+        )
+        if capture is None:
+            return None, f"FlyDSL flex bwd {reason}"
+        captures.append(capture)
+    accumulated = [
+        capture
+        for capture in captures
+        if capture is not None and capture.kind != CAPTURE_GRAD_UNUSED
+    ]
+    if len(accumulated) > _MAX_CAPTURE_GRADS:
+        return None, (
+            f"FlyDSL flex bwd supports at most {_MAX_CAPTURE_GRADS} trainable "
+            "score_mod captures"
+        )
+    return captures, ""
+
+
+def _capture_keeps(capture) -> tuple[bool, bool]:
+    """Whether the capture is indexed by batch and by head."""
+    names = [dim[0] for dim in capture.dims]
+    return "b" in names, "h" in names
+
+
+def _finish_capture_grad(capture, reduced, buffer, *, batch, heads, sequence):
+    """Lay out a capture's reduced gradient in the buffer's shape and dtype.
+
+    All sums ran in the kernel in a fixed order; this is pure data movement,
+    so the gradient is bitwise reproducible across runs and recompilations.
+    """
+    shape = [V.graph.sizevars.guard_int(size) for size in buffer.get_size()]
+    if capture.kind == CAPTURE_GRAD_UNUSED:
+        gradient = full(shape, 0.0, dtype=torch.float32, device=buffer.get_device())
+    elif capture.kind == CAPTURE_GRAD_FULL:
+        gradient = view(reduced, shape)
+    else:
+        names = [dim[0] for dim in capture.dims]
+        # Reduced layout is [B or 1, H or 1, columns]; drop collapsed axes.
+        axes = [name for name in ("b", "h") if name in names]
+        *leading, columns = capture_grad_reduction_shape(
+            capture.kind, batch, heads, sequence, *_capture_keeps(capture)
+        )
+        sizes = [size for name, size in zip(("b", "h"), leading) if name in names]
+        if capture.kind != CAPTURE_GRAD_INVARIANT:
+            axes.append(
+                {
+                    CAPTURE_GRAD_KEY: "kv",
+                    CAPTURE_GRAD_QUERY: "q",
+                    CAPTURE_GRAD_RELATIVE: "rel",
+                }[capture.kind]
+            )
+            sizes.append(columns)
+        gradient = view(reduced, sizes)
+        if capture.kind == CAPTURE_GRAD_RELATIVE:
+            # Column c holds table entry c - (sequence - 1) + offset.
+            extent = shape[names.index("rel")]
+            start = sequence - 1 - capture.dims[names.index("rel")][2]
+            pad_left = max(0, -start)
+            pad_right = max(0, start + extent - (2 * sequence - 1))
+            if pad_left or pad_right:
+                gradient = constant_pad_nd(gradient, [pad_left, pad_right])
+            start += pad_left
+            gradient = slice_(gradient, len(axes) - 1, start, start + extent)
+        gradient = permute(gradient, [axes.index(name) for name in names])
+        gradient = view(gradient, shape)
+    if buffer.get_dtype() != torch.float32:
+        gradient = to_dtype(gradient, buffer.get_dtype())
+    return gradient
+
+
 def _empty_gradient(source, size, *, dtype, device):
     return empty_strided(
         size=size,
@@ -229,6 +366,7 @@ def create_flydsl_flex_attention_backward_kernel(
     sparse_kv_block_size: int,
     fw_subgraph: Subgraph | None = None,
     mask_graph: Subgraph | None = None,
+    joint_graph: Subgraph | None = None,
     score_mod_other_buffers: list[TensorBox] | None = None,
     mask_mod_other_buffers: list[TensorBox] | None = None,
     kv_num_blocks: TensorBox | None = None,
@@ -244,6 +382,11 @@ def create_flydsl_flex_attention_backward_kernel(
         return None
     if fw_subgraph is None or mask_graph is None:
         raise AssertionError("FlyDSL backward requires the original mod graphs")
+    capture_needs_grad = _score_mod_capture_grad_mask(
+        joint_graph, len(score_mod_other_buffers or ())
+    )
+    if capture_needs_grad is None:
+        return None
 
     block_mask_is_dense = (
         sparse_q_block_size == _LARGE_SPARSE_BLOCK_SIZE
@@ -312,6 +455,17 @@ def create_flydsl_flex_attention_backward_kernel(
     )
     if config is None:
         return None
+    capture_grads: list[FlyDSLCaptureGrad | None] = [None] * len(
+        score_mod_other_buffers
+    )
+    if any(capture_needs_grad):
+        captures, _ = _get_capture_grads(config, capture_needs_grad)
+        if captures is None:
+            return None
+        capture_grads = captures
+        # Only the block-list pipeline accumulates capture gradients; dense
+        # metadata is a valid (complete) block list.
+        config["BLOCK_MASK_IS_DENSE"] = False
     if (
         kv_num_blocks is None
         or kv_indices is None
@@ -371,6 +525,66 @@ def create_flydsl_flex_attention_backward_kernel(
     )
     if traversal != MASK_TRAVERSAL_BLOCK_LIST:
         kv_chunks = q_chunks = 1
+    # Zero-initialized private workspaces, in kernel slot order.
+    accumulated_captures = [
+        (index, capture)
+        for index, capture in enumerate(capture_grads)
+        if capture is not None and capture.kind != CAPTURE_GRAD_UNUSED
+    ]
+    capture_workspaces = []
+    capture_reduced = []
+    for index, capture in accumulated_captures:
+        workspace_shape = capture_grad_workspace_shape(
+            capture.kind,
+            bh,
+            s,
+            dq_partitions,
+            [
+                V.graph.sizevars.guard_int(size)
+                for size in score_mod_other_buffers[index].get_size()
+            ],
+        )
+        (workspace,) = maybe_realize(
+            # 1-D so Inductor cannot pad the strides the kernel indexes densely.
+            [
+                full(
+                    [math.prod(workspace_shape)],
+                    0.0,
+                    dtype=torch.float32,
+                    device=device,
+                )
+            ]
+        )
+        capture_workspaces.append(workspace)
+        # Full captures are written in place and leave their reduction unused.
+        reduced_shape = (
+            [1]
+            if capture.kind == CAPTURE_GRAD_FULL
+            else list(
+                capture_grad_reduction_shape(
+                    capture.kind, b, h, s, *_capture_keeps(capture)
+                )
+            )
+        )
+        capture_reduced.append(
+            empty_strided(
+                [math.prod(reduced_shape)], [1], dtype=torch.float32, device=device
+            )
+        )
+    config["CAPTURE_GRADS"] = tuple(
+        (
+            capture.kind,
+            capture.load_slot,
+            capture.dims[[dim[0] for dim in capture.dims].index("rel")][1]
+            if capture.kind == CAPTURE_GRAD_RELATIVE
+            else 1,
+        )
+        for _, capture in accumulated_captures
+    )
+    config["CAPTURE_REDUCTIONS"] = tuple(
+        _capture_keeps(capture) for _, capture in accumulated_captures
+    )
+    config["CAPTURE_GRAD_COUNT"] = len(accumulated_captures)
     (
         partial_kv_counts,
         partial_kv_indices,
@@ -435,13 +649,26 @@ def create_flydsl_flex_attention_backward_kernel(
         if len(mask_mod_other_buffers or ()) != mask_buffer_count:
             raise AssertionError("mask_mod capture count changed during lowering")
         input_nodes.extend(mask_mod_other_buffers or ())
+    score_buffer_count = config["SCORE_BUFFER_COUNT"]
+    if score_buffer_count:
+        if len(score_mod_other_buffers or ()) != score_buffer_count:
+            raise AssertionError("score_mod capture count changed during lowering")
+        input_nodes.extend(_kernel_capture_buffers(score_mod_other_buffers or ()))
+    for workspace, reduced in zip(capture_workspaces, capture_reduced):
+        input_nodes.extend((workspace, reduced))
 
     choices: list[Any] = []
     error = flex_flydsl_backward_template.maybe_append_choice(
         choices,
         input_nodes=input_nodes,
         layout=output_layout,
-        mutated_inputs=[grad_key, grad_value, *scratch_buffers],
+        mutated_inputs=[
+            grad_key,
+            grad_value,
+            *scratch_buffers,
+            *capture_workspaces,
+            *capture_reduced,
+        ],
         SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
         SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
         **config,
@@ -462,4 +689,25 @@ def create_flydsl_flex_attention_backward_kernel(
         },
         return_multi_template=False,
     )
-    return (template_output, grad_key, grad_value, tuple())
+    if not any(capture_needs_grad):
+        return (template_output, grad_key, grad_value, tuple())
+    results = {
+        index: workspace if capture.kind == CAPTURE_GRAD_FULL else reduced
+        for (index, capture), workspace, reduced in zip(
+            accumulated_captures, capture_workspaces, capture_reduced
+        )
+    }
+    captured_grads = tuple(
+        None
+        if capture is None
+        else _finish_capture_grad(
+            capture,
+            results.get(index),
+            score_mod_other_buffers[index],
+            batch=b,
+            heads=h,
+            sequence=s,
+        )
+        for index, capture in enumerate(capture_grads)
+    )
+    return (template_output, grad_key, grad_value, captured_grads)
