@@ -7893,11 +7893,104 @@ from user code:
         (result,) = compiled.compiled_results
         self.assertFalse(result._has_global_guards)
 
-    def test_aot_compile_module_key_order_only_global_is_not_read_live(self):
-        # A global certified by nothing but a guard_on_key_order entry. Iterating
+    def _roundtrip(self, module, fresh, guard_filter, *args):
+        options = {"guard_filter_fn": guard_filter}
+        model = torch.compile(module, backend="eager", fullgraph=True, options=options)
+        model._aot_compile([ModelInput(args=args, kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        state = load_guards_state(captured._artifacts.guards_state).output_graph
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        return model, AOTCompiledModel.deserialize(fresh, data), state
+
+    @parametrize("retain", [False, True])
+    @parametrize("inner_type", [dict, set])
+    def test_dictionary_order_follows_filter(self, retain, inner_type):
+        class Module(torch.nn.Module):
+            def forward(self, x, direct, outer):
+                return x + next(iter(direct)) + len(outer) + next(iter(outer["inner"]))
+
+        def guard_filter(entries):
+            drop = ("['inner']",) if retain else ("['inner']", "direct")
+            kept = [not any(name in e.name for name in drop) for e in entries]
+            portable = torch.compiler.keep_portable_guards_unsafe(entries)
+            self.assertTrue(any(k and not p for k, p in zip(kept, portable)))
+            return kept
+
+        x, direct = torch.ones(1), {2: None, 3: None}
+        nested = {"inner": inner_type({4: None, 5: None})}
+        args = (x, direct, nested)
+        model, loaded, state = self._roundtrip(Module(), Module(), guard_filter, *args)
+        expected = {"L['direct']"} if retain else set()
+        if inner_type is dict:
+            expected.add("L['outer']['inner']")
+        self.assertEqual({src.name for src in state.guard_on_key_order}, expected)
+        self.assertEqual("direct" in state.local_scope, retain)
+        reordered = dict(reversed(direct.items()))
+        no_match = "No AOT compiled graph matched"
+        for compiled in (model, loaded):
+            self.assertEqual(compiled(*args), x + 7)
+            if retain:
+                with self.assertRaisesRegex(RuntimeError, no_match):
+                    compiled(x, reordered, nested)
+            else:
+                self.assertEqual(compiled(x, reordered, nested), x + 7)
+            if inner_type is dict:
+                with self.assertRaisesRegex(RuntimeError, no_match):
+                    compiled(x, direct, {"inner": {4: None}})
+
+    @parametrize(
+        "member,bystander", [("mapping", False), ("mapping", True), ("weight", False)]
+    )
+    def test_implicit_module_order_alias(self, member, bystander):
+        global AOT_IMPLICIT_ORDER_ROOT
+
+        self._hide_leaked_dynamo_globals()
+
+        class Module(torch.nn.Linear):
+            def __init__(self):
+                super().__init__(1, 1)
+                self.mapping = {"a": 1, "b": threading.Lock() if bystander else 2}
+
+            def forward(self, x):
+                return x + len(tuple(AOT_IMPLICIT_ORDER_ROOT)) + hasattr(self, member)
+
+        module = Module()
+        attr = "mapping" if member == "mapping" else "_parameters"
+        AOT_IMPLICIT_ORDER_ROOT = getattr(module, attr)
+
+        def guard_filter(entries):
+            return [e.guard_type in ("HASATTR", "TENSOR_MATCH") for e in entries]
+
+        x = torch.ones(1)
+        changed = Module()
+        model, loaded, state = self._roundtrip(module, changed, guard_filter, x)
+        (captured,) = model.forward.compiled_results
+        names = {src.name for src in state.guard_on_key_order}
+        self.assertEqual(names, {"G['AOT_IMPLICIT_ORDER_ROOT']"})
+        self.assertIn("AOT_IMPLICIT_ORDER_ROOT", state.global_scope)
+        self.assertEqual(model(x), x + 3)
+        self.assertEqual(loaded(x), x + 3)
+        if member == "mapping":
+            changed.mapping["c"] = 3
+        else:
+            changed._parameters = dict(reversed(tuple(changed._parameters.items())))
+            # This filter keeps only the parameter guard's global alias.
+            self.assertEqual(captured(changed, x), changed(x))
+            self.assertEqual(loaded(x), changed(x))
+            AOT_IMPLICIT_ORDER_ROOT = changed._parameters
+        with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+            captured(changed, x)
+        with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
+            loaded(x)
+
+    @parametrize("retain_order", [False, True])
+    @patch(f"{__name__}.AOT_KEY_ORDER_GLOBAL", None, create=True)
+    def test_aot_compile_module_captured_global_is_not_read_live(self, retain_order):
+        # The input module optionally retains an alias to the dictionary. Iterating
         # a module-level dict roots its TYPE_MATCH and its key-order check at the
         # same GlobalSource, the default filter drops the guard for being global,
-        # and guard_filter_fn never prunes the key-order set -- so no kept guard
+        # and only the alias can retain the order check. Neither outcome
         # checks these tensors and the pick must leave the name alone. Reading it
         # live would serve values nothing ever compared against.
         from torch._dynamo.source import get_global_source_name
@@ -7909,7 +8002,9 @@ from user code:
         saved = dict(AOT_KEY_ORDER_GLOBAL)
 
         class KeyOrderGlobalModule(torch.nn.Module):
-            def forward(self, x):
+            def forward(self, x, holder=None):
+                if holder is not None and not hasattr(holder, "mapping"):
+                    return x
                 out = x
                 for k in AOT_KEY_ORDER_GLOBAL:
                     out = out + AOT_KEY_ORDER_GLOBAL[k]
@@ -7917,7 +8012,10 @@ from user code:
 
         x = torch.randn(4)
         model = torch.compile(KeyOrderGlobalModule(), fullgraph=True, backend="eager")
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        holder = torch.nn.Module()
+        holder.mapping = AOT_KEY_ORDER_GLOBAL
+        args = (x, holder) if retain_order else (x,)
+        model._aot_compile([ModelInput(args=args, kwargs={}, contexts=[])])
         (captured,) = model.forward.compiled_results
         output_graph = load_guards_state(captured._artifacts.guards_state).output_graph
         guards = output_graph.guards
@@ -7925,11 +8023,11 @@ from user code:
         ko_sources = output_graph.guard_on_key_order
         key_order = {get_global_source_name(source) for source in ko_sources}
         self.assertNotIn("AOT_KEY_ORDER_GLOBAL", own)
-        self.assertIn("AOT_KEY_ORDER_GLOBAL", key_order)
-        # Armed and not vacuous: the name is in the serialized global_scope that
-        # arms the pick, and the graph carries the value the narrowing keeps
-        # serving instead.
-        self.assertIn("AOT_KEY_ORDER_GLOBAL", output_graph.global_scope)
+        self.assertEqual("AOT_KEY_ORDER_GLOBAL" in key_order, retain_order)
+        self.assertEqual(
+            "AOT_KEY_ORDER_GLOBAL" in output_graph.global_scope, retain_order
+        )
+        # Captured tensor inputs survive without a kept guard on the global itself.
         used_globals = captured._artifacts.runtime_env.used_globals
         self.assertIn("AOT_KEY_ORDER_GLOBAL", used_globals)
 
@@ -7944,11 +8042,18 @@ from user code:
         reloaded._load_aot_compiled_module(data)
         (result,) = reloaded.forward.compiled_results
         self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
-        self.assertTrue(result._has_global_guards)
-        actual = reloaded(x)
+        self.assertEqual(result._has_global_guards, retain_order)
+        actual = reloaded(*args)
         self.assertEqual(actual, expected)
         live = x + AOT_KEY_ORDER_GLOBAL["a"] + AOT_KEY_ORDER_GLOBAL["b"]
         self.assertNotEqual(actual.tolist(), live.tolist())
+        if retain_order:
+            mod.forward = functools.partial(KeyOrderGlobalModule.forward, mod)
+            with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+                fallback = AOTCompiledModel.deserialize(mod, data)
+            self.assertIn("live dictionary key order", "\n".join(logs.output))
+            AOT_KEY_ORDER_GLOBAL["a"] = AOT_KEY_ORDER_GLOBAL.pop("a")
+            self.assertEqual(fallback(*args), expected)
 
     def _assert_forward_refused(self, mod, namespace, reason):
         # Both halves of a refusal, each on the artifact that can show it: the
