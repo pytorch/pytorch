@@ -109,6 +109,7 @@ def remove_dupe_metadata(
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
+                replay_under_no_grad=o.replay_under_no_grad,
             )
             for o in m.output_info
         ],
@@ -277,6 +278,7 @@ def create_synthetic_base_metadata(
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
+                replay_under_no_grad=o.replay_under_no_grad,
             )
         )
 
