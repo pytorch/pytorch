@@ -13,6 +13,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -117,6 +118,47 @@ class UnsupportedRecordingTypedMetadataVisitor final
 };
 
 } // namespace
+
+TEST(MetadataFieldTest, ComparesNames) {
+  static_assert(std::is_aggregate_v<MetadataField<int64_t>>);
+  static_assert(kCount == MetadataField<double>{"count"});
+  static_assert(MetadataField<double>{"count"} == kCount);
+  static_assert(kCount != kLabel);
+  static_assert(MetadataField<int64_t>{} == MetadataField<double>{""});
+
+  MetadataField<int64_t> same{"count"};
+  const MetadataField<double> otherType{"count"};
+  const MetadataField<int64_t> different{"other"};
+  EXPECT_EQ(kCount, same);
+  EXPECT_EQ(same, kCount);
+  EXPECT_TRUE(same == otherType);
+  EXPECT_TRUE(otherType == same);
+  EXPECT_FALSE(same != otherType);
+  EXPECT_FALSE(otherType != same);
+  EXPECT_TRUE(same != different);
+  EXPECT_TRUE(different != same);
+  EXPECT_TRUE(otherType != different);
+  EXPECT_TRUE(different != otherType);
+}
+
+TEST(MetadataFieldTest, ComparesNameContentsAndLengths) {
+  const char firstName[] = "count";
+  const char secondName[] = "count";
+  const MetadataField<int64_t> first{firstName};
+  const MetadataField<double> second{secondName};
+  EXPECT_NE(first.name.data(), second.name.data());
+  EXPECT_EQ(first, second);
+
+  const MetadataField<int64_t> empty{};
+  const MetadataField<double> emptyLiteral{""};
+  EXPECT_EQ(empty, emptyLiteral);
+  EXPECT_NE(first, MetadataField<double>{"cou"});
+
+  const char nameWithNull[] = {'c', 'o', 'u', 'n', 't', '\0', 'x'};
+  const MetadataField<int64_t> withNull{
+      std::string_view{nameWithNull, sizeof(nameWithNull)}};
+  EXPECT_NE(first, withNull);
+}
 
 TEST(TypedMetadataVisitorTest, VisitsTypedFields) {
   RecordingTypedMetadataVisitor recorder;
