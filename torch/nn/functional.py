@@ -2066,6 +2066,11 @@ def rrelu(
     Randomized leaky ReLU.
 
     See :class:`~torch.nn.RReLU` for more details.
+
+    Args:
+        training (bool, optional): If ``True``, sample a slope uniformly from
+            ``lower`` to ``upper`` for each negative input element. If ``False``,
+            use ``(lower + upper) / 2`` as the slope. Default: ``False``.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
