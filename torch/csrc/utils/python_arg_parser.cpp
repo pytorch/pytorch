@@ -1129,7 +1129,8 @@ auto FunctionParameter::_check(
     case ParameterType::GENERATOR:
       return THPGenerator_Check(obj);
     case ParameterType::BOOL:
-      return PyBool_Check(obj);
+      // This will induce a guard
+      return PyBool_Check(obj) || torch::is_symbool(py::handle(obj));
     case ParameterType::STORAGE:
       return isStorage(obj);
     case ParameterType::PYOBJECT:
