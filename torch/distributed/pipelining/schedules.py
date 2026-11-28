@@ -316,6 +316,9 @@ class _PipelineSchedule(ABC):
         # Derived
         self._has_backward = self._loss_fn is not None
         self._p2p_initialized = False
+        self._batch_p2p_fn: Callable[[list[dist.P2POp]], list[dist.Work]] = (
+            _default_batch_p2p
+        )
         self._post_metadata_inference_cleanups: OrderedDict[int, Callable[[], None]] = (
             OrderedDict()
         )
@@ -326,6 +329,35 @@ class _PipelineSchedule(ABC):
         # ``step``.
         self._loss_kwarg_mbs: list[dict[str, Any]] | None = None
         logger.info("Using %s", self.__class__.__name__)
+
+    def set_custom_batch_p2p(
+        self,
+        fn: Callable[[list[dist.P2POp]], list[dist.Work]] | None,
+    ) -> None:
+        """Set the function used for batched pipeline P2P communication.
+
+        Configure all participating ranks before the first step or between steps.
+        The schedule groups operations before calling ``fn``, preserving the default
+        batching and submission order.
+
+        Args:
+            fn: Function that submits a nonempty batch of P2P ops from one process
+                group and returns a nonempty list of Work handles covering the batch.
+                Pass ``None`` to restore the default.
+        """
+        if fn is not None and not callable(fn):
+            raise TypeError("Custom batch P2P must be callable or None")
+        self._batch_p2p_fn = _default_batch_p2p if fn is None else fn
+
+    def _batch_p2p(
+        self, ops: list[dist.P2POp], desc: str | None = None
+    ) -> list[dist.Work]:
+        return _batch_p2p(ops, desc=desc, batch_p2p_fn=self._batch_p2p_fn)
+
+    def _sorted_batch_p2p(
+        self, ops: list[dist.P2POp], desc: str | None = None
+    ) -> dict[int, list[dist.Work]]:
+        return _sorted_batch_p2p(ops, desc=desc, batch_p2p_fn=self._batch_p2p_fn)
 
     def _maybe_compute_loss(
         self, stage, output, target_mbs, mb_index, loss_kwargs=None
@@ -911,7 +943,7 @@ class _PipelineSchedule(ABC):
         )
 
 
-def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.Work]:
+def _default_batch_p2p(p2p_ops: list[dist.P2POp]) -> list[dist.Work]:
     """
     Wrapper over batch_isend_irecv that avoids coalescing for homogeneous
     batches (all-send or all-recv).  Coalescing serializes ops on a single
@@ -919,6 +951,29 @@ def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.
     could otherwise overlap.  Mixed batches still use batch_isend_irecv for
     deadlock avoidance.
     """
+    op_types = {p.op for p in p2p_ops}
+    if op_types == {dist.isend}:
+        send_works = [
+            p.op(p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer)
+            for p in p2p_ops
+        ]
+        return [work for work in send_works if work is not None]
+    if op_types == {dist.irecv}:
+        recv_works = [
+            p.op(p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer)
+            for p in p2p_ops
+        ]
+        return [work for work in recv_works if work is not None]
+
+    return dist.batch_isend_irecv(p2p_ops)
+
+
+def _batch_p2p(
+    p2p_ops: list[dist.P2POp],
+    desc: str | None = None,
+    *,
+    batch_p2p_fn: Callable[[list[dist.P2POp]], list[dist.Work]] = _default_batch_p2p,
+) -> list[dist.Work]:
     if len(p2p_ops) == 0:
         return []
     desc_str = f"{desc}, " if desc else ""
@@ -940,24 +995,10 @@ def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.
         # ``fwd_sends + bwd_recvs`` vs ``bwd_sends + fwd_recvs``); sorting keeps
         # every rank issuing the two communicators in the same order.
         for _, group_ops in sorted(ops_by_group.items()):
-            works += _batch_p2p(group_ops, desc=desc)
+            works += _batch_p2p(group_ops, desc=desc, batch_p2p_fn=batch_p2p_fn)
         return works
 
-    op_types = {p.op for p in p2p_ops}
-    if op_types == {dist.isend}:
-        send_works = [
-            p.op(p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer)
-            for p in p2p_ops
-        ]
-        return [work for work in send_works if work is not None]
-    if op_types == {dist.irecv}:
-        recv_works = [
-            p.op(p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer)
-            for p in p2p_ops
-        ]
-        return [work for work in recv_works if work is not None]
-
-    return dist.batch_isend_irecv(p2p_ops)
+    return batch_p2p_fn(p2p_ops)
 
 
 def _build_recv_ops(
@@ -994,7 +1035,10 @@ def _build_recv_ops(
 
 
 def _sorted_batch_p2p(
-    p2p_ops: list[dist.P2POp], desc: str | None = None
+    p2p_ops: list[dist.P2POp],
+    desc: str | None = None,
+    *,
+    batch_p2p_fn: Callable[[list[dist.P2POp]], list[dist.Work]] = _default_batch_p2p,
 ) -> dict[int, list[dist.Work]]:
     """
     Sorts the list of P2P ops by the peer rank, and then calls
@@ -1015,7 +1059,7 @@ def _sorted_batch_p2p(
 
     # Call batch_isend_irecv per peer, in sorted order of the peers (to avoid hangs)
     for peer, ops in sorted(ops_by_peer.items()):
-        work_by_peer[peer] = _batch_p2p(ops, desc=desc)
+        work_by_peer[peer] = _batch_p2p(ops, desc=desc, batch_p2p_fn=batch_p2p_fn)
 
     return work_by_peer
 
@@ -1344,14 +1388,14 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
         for i in range(self._n_microbatches):
             with record_function(f"Forward {i}"):
                 ops = self._stage.get_fwd_recv_ops(i)
-                works = _sorted_batch_p2p(ops, desc="fwd_recv")
+                works = self._sorted_batch_p2p(ops, desc="fwd_recv")
                 for work in works.values():
                     _wait_batch_p2p(work)
 
                 self._stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
 
                 ops = self._stage.get_fwd_send_ops(i)
-                works = _sorted_batch_p2p(ops, desc="fwd_send")
+                works = self._sorted_batch_p2p(ops, desc="fwd_send")
                 pending_fwd_sends.append((i, ops, list(works.values())))
                 del ops, works
 
@@ -1403,7 +1447,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
         for i in range(self._n_microbatches):
             with record_function(f"Forward {i}"):
                 ops = self._stage.get_fwd_recv_ops(i)
-                works = _sorted_batch_p2p(ops, desc="fwd_recv")
+                works = self._sorted_batch_p2p(ops, desc="fwd_recv")
                 for work in works.values():
                     _wait_batch_p2p(work)
 
@@ -1412,7 +1456,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 )  # type: ignore[index]
 
                 ops = self._stage.get_fwd_send_ops(i)
-                works = _sorted_batch_p2p(ops, desc="fwd_send")
+                works = self._sorted_batch_p2p(ops, desc="fwd_send")
                 fwd_sends_to_wait.append((i, ops, list(works.values())))
                 del ops, works
 
@@ -1436,7 +1480,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
         for i in range(self._n_microbatches):
             with record_function(f"Backward {i}"):
                 ops = self._stage.get_bwd_recv_ops(i)
-                works = _sorted_batch_p2p(ops, desc="bwd_recv")
+                works = self._sorted_batch_p2p(ops, desc="bwd_recv")
                 for work in works.values():
                     _wait_batch_p2p(work)
 
@@ -1448,7 +1492,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 )
 
                 ops = self._stage.get_bwd_send_ops(i)
-                works = _sorted_batch_p2p(ops, desc="bwd_send")
+                works = self._sorted_batch_p2p(ops, desc="bwd_send")
                 bwd_sends_to_wait.extend(works.values())
 
             logger.debug("[%s] Backwarded microbatch %s", self._stage.stage_index, i)
@@ -1571,7 +1615,7 @@ or equal to the number of stages ({self._num_stages})."
         for _ in range(warmup_chunks):
             # Receive activations
             fwd_recvs = self._stage.get_fwd_recv_ops(fwd_mb_index)
-            _wait_batch_p2p(_batch_p2p(fwd_recvs, desc="fwd_recv"))
+            _wait_batch_p2p(self._batch_p2p(fwd_recvs, desc="fwd_recv"))
 
             # Compute
             output = self._stage.forward_one_chunk(
@@ -1597,7 +1641,7 @@ or equal to the number of stages ({self._num_stages})."
             fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
             if fwd_mb_index != warmup_chunks - 1:
                 # Safe to fire
-                send_work = _batch_p2p(fwd_sends, desc="fwd_send")
+                send_work = self._batch_p2p(fwd_sends, desc="fwd_send")
             # otherwise:
             #   The last forward send is left for fuse with first 1B in 1B1F below
 
@@ -1616,7 +1660,7 @@ or equal to the number of stages ({self._num_stages})."
             bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
 
             # Now, we need to fire the fwd_sends and bwd_recvs together
-            send_work = _batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv")
+            send_work = self._batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv")
             _wait_and_release_fwd_send(
                 self._stage,
                 fwd_mb_index - 1,
@@ -1645,7 +1689,9 @@ or equal to the number of stages ({self._num_stages})."
             fwd_recvs = self._stage.get_fwd_recv_ops(fwd_mb_index)
 
             # Fuse it with bwd_sends above
-            _wait_batch_p2p(_batch_p2p(bwd_sends + fwd_recvs, desc="bwd_send_fwd_recv"))
+            _wait_batch_p2p(
+                self._batch_p2p(bwd_sends + fwd_recvs, desc="bwd_send_fwd_recv")
+            )
 
             # Now do the fwd
             output = self._stage.forward_one_chunk(
@@ -1666,13 +1712,13 @@ or equal to the number of stages ({self._num_stages})."
             fwd_mb_index += 1
 
         # Remember we still have some bwd_sends left over after the break? Now it is time to fire it
-        send_work = _batch_p2p(bwd_sends, desc="bwd_send")
+        send_work = self._batch_p2p(bwd_sends, desc="bwd_send")
 
         # Cooldown
         while bwd_mb_index < self._n_microbatches:
             # prepare bwd recv ops
             bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
-            _wait_batch_p2p(_batch_p2p(bwd_recvs, desc="bwd_recv"))
+            _wait_batch_p2p(self._batch_p2p(bwd_recvs, desc="bwd_recv"))
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
@@ -1687,7 +1733,7 @@ or equal to the number of stages ({self._num_stages})."
 
             # Get the bwd send ops, fire it
             bwd_sends = self._stage.get_bwd_send_ops(bwd_mb_index)
-            send_work = _batch_p2p(bwd_sends, desc="bwd_send")
+            send_work = self._batch_p2p(bwd_sends, desc="bwd_send")
             bwd_mb_index += 1
 
         # Wait for the last backward send to finish
@@ -3229,7 +3275,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
                 # do the communication
                 ops.extend(_build_recv_ops(recv_requests))
-                work = _batch_p2p(ops)
+                work = self._batch_p2p(ops)
                 _wait_batch_p2p(work)
                 work.clear()
                 ops.clear()
@@ -3645,14 +3691,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 pending_sends.register(
                     key,
                     ops,
-                    _batch_p2p(ops),
+                    self._batch_p2p(ops),
                     partial(stage.release_fwd_send_outputs, mb_index),
                 )
             elif comp_type == SEND_B:
                 key = (SEND_B, stage_idx, mb_index)
                 pending_sends.check_can_register(key)
                 ops = stage.get_bwd_send_ops(mb_index)
-                pending_sends.register(key, ops, _batch_p2p(ops))
+                pending_sends.register(key, ops, self._batch_p2p(ops))
             elif comp_type in (WAIT_SEND_F, WAIT_SEND_B):
                 send_type = SEND_F if comp_type == WAIT_SEND_F else SEND_B
                 key = (send_type, stage_idx, mb_index)
@@ -3662,7 +3708,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     raise AssertionError(
                         f"Recv twice for {stage_idx=} {mb_index=} without executing forward"
                     )
-                self.fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                self.fwd_recv_ops[(stage_idx, mb_index)] = self._batch_p2p(
                     stage.get_fwd_recv_ops(mb_index)
                 )
             elif comp_type == RECV_B:
@@ -3670,7 +3716,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     raise AssertionError(
                         f"Recv twice for {stage_idx=} {mb_index=} without executing backward"
                     )
-                self.bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
+                self.bwd_recv_ops[(stage_idx, mb_index)] = self._batch_p2p(
                     stage.get_bwd_recv_ops(mb_index)
                 )
             elif comp_type == UNSHARD:
