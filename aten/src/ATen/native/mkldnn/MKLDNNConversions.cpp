@@ -49,6 +49,13 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
     TORCH_CHECK(mkldnn_tensor.scalar_type() == data_type,
             "For uint8, int8, float8 mkldnn_tensor input, we should not change the data type.");
   }
+  if (data_type == mkldnn_tensor.scalar_type() && !stensor.is_empty() && stensor.is_public_format()) {
+    auto view = at::from_blob(
+        stensor.get_data_handle(), dims, stensor.get_strides(), mkldnn_tensor.options().layout(c10::kStrided));
+    if (!view.is_contiguous()) {
+      return view.contiguous();
+    }
+  }
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   Tensor cpu_tensor = at::empty(
     std::vector<int64_t>(dims.begin(), dims.end()),
