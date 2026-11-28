@@ -1,6 +1,8 @@
 # Owner(s): ["module: cuda"]
 
 import importlib
+import subprocess
+import sys
 import unittest
 import unittest.mock
 
@@ -12,7 +14,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
-    TEST_CUDA,
     TestCase,
 )
 
@@ -109,6 +110,28 @@ class TestGpuTraceDevice(TestCase):
         event.synchronize()
         self.mock.assert_called_once_with(event._as_parameter_.value)
 
+    # A subprocess lets us register before XPU creates its stream pool.
+    def test_stream_creation_callback(self, device):
+        script = """
+import importlib
+import sys
+import torch
+from unittest.mock import MagicMock
+
+torch._C._activate_gpu_trace()
+device = torch.device(sys.argv[1])
+gpu_trace = importlib.import_module(f"torch.{device.type}._gpu_trace")
+mock = MagicMock()
+gpu_trace.register_callback_for_stream_creation(mock)
+device_module = torch.get_device_module(device)
+stream = device_module.Stream(device=device)
+if torch.version.hip:
+    with device_module.stream(stream):
+        torch.ones(5, device=device)
+mock.assert_called()
+"""
+        subprocess.run([sys.executable, "-c", script, str(device)], check=True)
+
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5238")
     def test_memcpy_synchronization(self, device):
         self.gpu_trace.register_callback_for_stream_synchronization(self.mock)
@@ -127,32 +150,6 @@ class TestGpuTraceDevice(TestCase):
         tensor = torch.empty(10, 4, device=device)
         self.mock.assert_called_once_with(tensor.data_ptr())
         other.assert_called_once_with(tensor.data_ptr())
-
-
-@unittest.skipUnless(TEST_CUDA, "CUDA required")
-@torch.testing._internal.common_utils.markDynamoStrictTest
-class TestGpuTraceCUDA(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    def setUp(self):
-        super().setUp()
-        torch._C._activate_gpu_trace()
-        self.mock = unittest.mock.MagicMock()
-
-    def test_stream_creation_callback(self):
-        import torch.cuda._gpu_trace as gpu_trace
-
-        gpu_trace.register_callback_for_stream_creation(self.mock)
-
-        # see Note [HIP Lazy Streams]
-        if torch.version.hip:
-            user_stream = torch.cuda.Stream()
-            with torch.cuda.stream(user_stream):
-                torch.ones(5, device="cuda")
-        else:
-            torch.cuda.Stream()
-
-        self.mock.assert_called()
 
 
 instantiate_device_type_tests(
