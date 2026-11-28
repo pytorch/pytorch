@@ -57,6 +57,13 @@ class PyHandleCache {
     return r;
   }
 
+  // Drop the cached handle so the next ptr_or() re-runs its slow accessor.
+  // Callers must use this whenever the C++ object outlives the Python object
+  // it was caching, which would otherwise leave a dangling borrowed pointer.
+  void reset() {
+    data_.store(nullptr, std::memory_order_release);
+  }
+
  private:
   mutable std::atomic<PyObject*> data_{nullptr};
 };
