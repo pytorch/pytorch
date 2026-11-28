@@ -66,6 +66,7 @@ from ..source import (
 from ..utils import (
     check_positional,
     check_unspec_or_constant_args,
+    extract_fake_example_value,
     istype,
     no_keywords,
     proxy_args_kwargs,
@@ -107,6 +108,7 @@ if TYPE_CHECKING:
 
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._subclasses.fake_tensor import FakeTensor
 
 
 class SuperVariable(VariableTracker):
@@ -1290,7 +1292,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         value_type: type | None = None,
         inference: bool = False,
         saved_tensors: Any | None = None,
-        non_differentiable: Any | None = None,
+        non_differentiable: list[VariableTracker] | None = None,
         dirty_tensors: list[VariableTracker] | None = None,
         output_grad_dtypes: tuple[torch.dtype | None, ...] | None = None,
         **kwargs: Any,
@@ -1300,6 +1302,10 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.saved_tensors = saved_tensors
         self.non_differentiable = non_differentiable
         self.dirty_tensors = dirty_tensors
+        # Fake values of the tensors passed to the last
+        # ctx.mark_non_differentiable call in the forward or backward being
+        # traced, or None if there was none.
+        self.non_differentiable_fakes: list[FakeTensor] | None = None
         self.output_grad_dtypes = output_grad_dtypes
 
     # _FunctionBase.needs_input_grad is a writable getset. apply() seeds it as an
@@ -1371,7 +1377,22 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         no_keywords(tx, "mark_non_differentiable", kwargs)
-        self.non_differentiable = proxy_args_kwargs(args, {})[0]
+        if getattr(self, "proxy", None) is None:
+            unimplemented(
+                gb_type="Unsupported autograd.Function context `mark_non_differentiable`",
+                context=f"call_method {self} mark_non_differentiable",
+                explanation="Dynamo only supports tracing "
+                "ctx.mark_non_differentiable inside autograd.Function.apply.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        # Take the fake values now, because a marked intermediate can lose its
+        # proxy later (see taint_filtered_vt).
+        self.non_differentiable_fakes = [
+            extract_fake_example_value(arg.as_proxy().node)
+            for arg in args
+            if arg.is_tensor()
+        ]
+        self.non_differentiable = args
         return variables.ConstantVariable.create(None)
 
     def mark_dirty(
@@ -1477,10 +1498,17 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
             )
+        # The arguments of the last ctx.mark_dirty / ctx.mark_non_differentiable
+        # call in the forward or backward being traced, or None if there was
+        # none.
         if name == "dirty_tensors":
             if self.dirty_tensors is None:
                 return variables.ConstantVariable.create(None)
             return variables.TupleVariable(list(self.dirty_tensors))
+        if name == "non_differentiable":
+            if self.non_differentiable is None:
+                return variables.ConstantVariable.create(None)
+            return variables.TupleVariable(list(self.non_differentiable))
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
 

@@ -2302,6 +2302,702 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(res3.requires_grad)
         res1.sum().backward()
 
+    def _check_marks_match_eager(self, func_cls):
+        # Runs func_cls.apply in eager and compiled, compares outputs,
+        # requires_grad, grad_fn presence, whether each output is a view and
+        # input gradients, and returns the eager outputs and the Dynamo graph.
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return func_cls.apply(x)
+
+        x_ref = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        x_res = x_ref.detach().clone().requires_grad_(True)
+        refs = func_cls.apply(x_ref)
+        ress = fn(x_res)
+        self.assertEqual(type(refs), type(ress))
+        if not isinstance(refs, tuple):
+            refs, ress = (refs,), (ress,)
+        self.assertEqual(len(refs), len(ress))
+        for ref, res in zip(refs, ress):
+            self.assertEqual(ref, res)
+            if isinstance(ref, torch.Tensor):
+                self.assertEqual(ref.requires_grad, res.requires_grad)
+                self.assertEqual(ref.grad_fn is None, res.grad_fn is None)
+                self.assertEqual(ref._is_view(), res._is_view())
+        for x, outs in ((x_ref, refs), (x_res, ress)):
+            diff_outs = [
+                o for o in outs if isinstance(o, torch.Tensor) and o.requires_grad
+            ]
+            if diff_outs:
+                sum(o.sum() for o in diff_outs).backward()
+        self.assertEqual(x_ref.grad, x_res.grad)
+        self.assertEqual(cnt.frame_count, 1)
+        graph = torch._dynamo.testing.normalize_gm(
+            cnt.graphs[0].print_readable(print_output=False)
+        )
+        return refs, graph
+
+    def test_mark_single_output_non_differentiable(self):
+        # https://github.com/pytorch/pytorch/issues/205009
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.mark_non_differentiable(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        (ref,), actual_graph = self._check_marks_match_eager(MyFunction)
+        self.assertFalse(ref.requires_grad)
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3]"):
+        l_x_ = L_x_
+
+        bwd_body_0 = self.bwd_body_0
+        fwd_body_0 = self.fwd_body_0
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [0], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
+        getitem: "f32[3]" = autograd_function_apply[0];  autograd_function_apply = None
+        return (getitem,)
+
+    class bwd_body_0(torch.nn.Module):
+        def forward(self, grad: "f32[3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (None,)
+
+    class fwd_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            out: "f32[3]" = l_x_ * 2;  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return ((out,), ())
+""",
+        )
+
+    def test_mark_non_differentiable_in_backward_single_output(self):
+        # https://github.com/pytorch/pytorch/issues/205009
+        # A single-tensor output, with ctx.mark_non_differentiable called only
+        # in backward, where it has no effect in eager.
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                out = grad * 2
+                ctx.mark_non_differentiable(out)
+                return out
+
+        (ref,), actual_graph = self._check_marks_match_eager(MyFunction)
+        self.assertTrue(ref.requires_grad)
+        self.assertIn("non_differentiable_idx = []", actual_graph)
+
+    def test_mark_non_differentiable_in_forward_and_backward(self):
+        # A mark made in backward must not replace the marks made in forward.
+        from torch.autograd import Function
+
+        class SingleOutput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.mark_non_differentiable(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                out = grad * 2
+                ctx.mark_non_differentiable(out)
+                return out
+
+        class MultiOutput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out1 = x * 2
+                out2 = x * 3
+                ctx.mark_non_differentiable(out1)
+                return out1, out2
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                out = grad2 * 3
+                ctx.mark_non_differentiable(out)
+                return out
+
+        (ref,), actual_graph = self._check_marks_match_eager(SingleOutput)
+        self.assertFalse(ref.requires_grad)
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3]"):
+        l_x_ = L_x_
+
+        bwd_body_0 = self.bwd_body_0
+        fwd_body_0 = self.fwd_body_0
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [0], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
+        getitem: "f32[3]" = autograd_function_apply[0];  autograd_function_apply = None
+        return (getitem,)
+
+    class bwd_body_0(torch.nn.Module):
+        def forward(self, grad: "f32[3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            out: "f32[3]" = grad * 2;  grad = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (out,)
+
+    class fwd_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            out: "f32[3]" = l_x_ * 2;  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return ((out,), ())
+""",
+        )
+
+        (ref1, ref2), actual_graph = self._check_marks_match_eager(MultiOutput)
+        self.assertFalse(ref1.requires_grad)
+        self.assertTrue(ref2.requires_grad)
+        self.assertIn("non_differentiable_idx = [0]", actual_graph)
+
+    def test_mark_saved_tensor_non_differentiable_in_backward(self):
+        # Forward saves its output without marking it. Marking the saved tensor
+        # in backward must not make the forward output non-differentiable.
+        from torch.autograd import Function
+
+        class SingleOutput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                ctx.mark_non_differentiable(*ctx.saved_tensors)
+                return grad * 2
+
+        class MultiOutput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out1 = x * 2
+                out2 = x * 3
+                ctx.save_for_backward(out1)
+                return out1, out2
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                ctx.mark_non_differentiable(*ctx.saved_tensors)
+                return grad1 * 2 + grad2 * 3
+
+        (ref,), actual_graph = self._check_marks_match_eager(SingleOutput)
+        self.assertTrue(ref.requires_grad)
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3]"):
+        l_x_ = L_x_
+
+        bwd_body_0 = self.bwd_body_0
+        fwd_body_0 = self.fwd_body_0
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
+        getitem: "f32[3]" = autograd_function_apply[0];  autograd_function_apply = None
+        return (getitem,)
+
+    class bwd_body_0(torch.nn.Module):
+        def forward(self, grad: "f32[3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            mul: "f32[3]" = grad * 2;  grad = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (mul,)
+
+    class fwd_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            out: "f32[3]" = l_x_ * 2;  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return ((out,), ())
+""",
+        )
+
+        (ref1, ref2), actual_graph = self._check_marks_match_eager(MultiOutput)
+        self.assertTrue(ref1.requires_grad)
+        self.assertTrue(ref2.requires_grad)
+        self.assertIn("non_differentiable_idx = []", actual_graph)
+
+    def test_mark_returned_input_non_differentiable(self):
+        # A returned input is replaced by an alias in the traced forward. The
+        # mark on the input has to follow it.
+        from torch.autograd import Function
+
+        class SingleOutput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.mark_non_differentiable(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        class MultiOutput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.mark_non_differentiable(x)
+                return x * 2, x
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 * 2
+
+        (ref,), actual_graph = self._check_marks_match_eager(SingleOutput)
+        self.assertFalse(ref.requires_grad)
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3]"):
+        l_x_ = L_x_
+
+        bwd_body_0 = self.bwd_body_0
+        fwd_body_0 = self.fwd_body_0
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [0], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
+        getitem: "f32[3]" = autograd_function_apply[0];  autograd_function_apply = None
+        return (getitem,)
+
+    class bwd_body_0(torch.nn.Module):
+        def forward(self, grad: "f32[3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (grad,)
+
+    class fwd_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+
+            alias: "f32[3]" = l_x_.detach();  l_x_ = None
+            return ((alias,), ())
+""",
+        )
+
+        (ref1, ref2), actual_graph = self._check_marks_match_eager(MultiOutput)
+        self.assertTrue(ref1.requires_grad)
+        self.assertFalse(ref2.requires_grad)
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3]"):
+        l_x_ = L_x_
+
+        bwd_body_0 = self.bwd_body_0
+        fwd_body_0 = self.fwd_body_0
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [1], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
+        getitem: "f32[3]" = autograd_function_apply[0]
+        getitem_1: "f32[3]" = autograd_function_apply[1];  autograd_function_apply = None
+        return (getitem, getitem_1)
+
+    class bwd_body_0(torch.nn.Module):
+        def forward(self, grad1: "f32[3]", grad2: "f32[3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            mul: "f32[3]" = grad1 * 2;  grad1 = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (mul,)
+
+    class fwd_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            out: "f32[3]" = l_x_ * 2
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+
+            alias: "f32[3]" = l_x_.detach();  l_x_ = None
+            return ((out, alias), ())
+""",
+        )
+
+    def test_mark_non_differentiable_after_non_tensor_output(self):
+        # non_differentiable_idx indexes the traced forward's tensor outputs,
+        # which skip the non-tensor output.
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out1 = x * 2
+                out2 = x * 3
+                ctx.mark_non_differentiable(out2)
+                return 5, out1, out2
+
+            @staticmethod
+            def backward(ctx, grad0, grad1, grad2):
+                return grad1 * 2
+
+        (ref0, ref1, ref2), actual_graph = self._check_marks_match_eager(MyFunction)
+        self.assertEqual(ref0, 5)
+        self.assertTrue(ref1.requires_grad)
+        self.assertFalse(ref2.requires_grad)
+        self.assertIn("non_differentiable_idx = [1]", actual_graph)
+
+    def test_mark_dirty_after_non_tensor_output(self):
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                x.mul_(2)
+                ctx.mark_dirty(x)
+                return 5, x
+
+            @staticmethod
+            def backward(ctx, grad0, grad1):
+                return grad1 * 2
+
+        def fn(x):
+            y = x.clone()
+            n, out = MyFunction.apply(y)
+            return n, out, y
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x_ref = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        x_res = x_ref.detach().clone().requires_grad_(True)
+        ref, res = fn(x_ref), compiled(x_res)
+        self.assertEqual(ref, res)
+        ref[2].sum().backward()
+        res[2].sum().backward()
+        self.assertEqual(x_ref.grad, x_res.grad)
+        graph = torch._dynamo.testing.normalize_gm(
+            cnt.graphs[0].print_readable(print_output=False)
+        )
+        self.assertIn("dirty_idx = [0]", graph)
+
+    def test_mark_dirty_returned_through_inplace_op(self):
+        # A dirty input returned through another in-place op graph breaks, so
+        # the input's requires_grad and grad_fn afterwards match eager.
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.mark_dirty(a)
+                return a.add_(b)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, grad
+
+        def fn(x, y):
+            out = MyFunction.apply(x, y)
+            return out, x.requires_grad, x.grad_fn is not None
+
+        y = torch.randn(3, requires_grad=True)
+        x_ref, x_res = torch.randn(3), torch.randn(3)
+        x_res.copy_(x_ref)
+        ref = fn(x_ref, y)
+        res = torch.compile(fn, backend="aot_eager")(x_res, y)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref[1:], (True, True))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "mark_dirty input not returned"
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(torch.randn(3), y)
+
+    def test_mark_non_differentiable_through_inplace_output(self):
+        # A marked tensor returned through an in-place op is still the marked
+        # tensor, so the output is non-differentiable.
+        from torch.autograd import Function
+
+        class SingleOutput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.mark_non_differentiable(out)
+                return out.mul_(3)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        class MultiOutput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.mark_non_differentiable(out)
+                return out.mul_(3), x * 4
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad2 * 4
+
+        (ref,), actual_graph = self._check_marks_match_eager(SingleOutput)
+        self.assertFalse(ref.requires_grad)
+        self.assertIn("non_differentiable_idx = [0]", actual_graph)
+
+        (ref1, ref2), actual_graph = self._check_marks_match_eager(MultiOutput)
+        self.assertFalse(ref1.requires_grad)
+        self.assertTrue(ref2.requires_grad)
+        self.assertIn("non_differentiable_idx = [0]", actual_graph)
+
+    def test_mark_non_differentiable_aliased_intermediate(self):
+        # The marked intermediate is not an output, only a view of it is, so
+        # no output is marked, as in eager. The append is an outside side
+        # effect, which makes Dynamo filter the aliasing intermediate out of
+        # the forward graph's outputs.
+        from torch.autograd import Function
+
+        appended = []
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                idx = x * 2
+                ctx.mark_non_differentiable(idx)
+                appended.append(1)
+                return idx.view(-1), x * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad2 * 3
+
+        (ref1, ref2), actual_graph = self._check_marks_match_eager(MyFunction)
+        self.assertTrue(ref1.requires_grad)
+        self.assertTrue(ref2.requires_grad)
+        self.assertIn("non_differentiable_idx = []", actual_graph)
+
+    def test_mark_non_tensor_argument(self):
+        # Eager raises for a non-tensor argument. Dynamo graph breaks, so the
+        # error comes from eager, and fullgraph=True reports the graph break.
+        from torch.autograd import Function
+
+        class NonDifferentiable(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.mark_non_differentiable(5)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        class Dirty(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.mark_dirty(5)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        cases = [
+            (NonDifferentiable, "mark_non_differentiable only accepts variable"),
+            (Dirty, "mark_dirty can only accept variables"),
+        ]
+        for func_cls, msg in cases:
+            with self.subTest(func_cls.__name__):
+                torch._dynamo.reset()
+                x = torch.randn(3, requires_grad=True)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    func_cls.apply(x)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    torch.compile(lambda x: func_cls.apply(x), backend="eager")(x)
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported, "non-tensor argument"
+                ):
+                    torch.compile(
+                        lambda x: func_cls.apply(x), backend="eager", fullgraph=True
+                    )(x)
+
+    def test_mark_non_tensor_argument_not_in_final_marks(self):
+        # Eager checks only the marks left at the end of forward, so a
+        # non-tensor argument to a replaced mark or to a mark made in backward
+        # is not an error, and fullgraph=True compiles.
+        from torch.autograd import Function
+
+        class NonDifferentiableReplaced(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.mark_non_differentiable(5)
+                ctx.mark_non_differentiable(out)
+                return out, x * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad2 * 3
+
+        class DirtyReplaced(Function):
+            @staticmethod
+            def forward(ctx, x):
+                x.mul_(2)
+                ctx.mark_dirty(5)
+                ctx.mark_dirty(x)
+                return x, x * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 * 2 + grad2 * 3
+
+        class MarkedInBackward(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2, x * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                ctx.mark_non_differentiable(5)
+                ctx.mark_dirty(5)
+                return grad1 * 2 + grad2 * 3
+
+        for func_cls in (NonDifferentiableReplaced, DirtyReplaced, MarkedInBackward):
+            with self.subTest(func_cls.__name__):
+                torch._dynamo.reset()
+
+                def fn(x):
+                    return func_cls.apply(x.clone())
+
+                compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+                x_ref = torch.randn(3, requires_grad=True)
+                x_res = x_ref.detach().clone().requires_grad_(True)
+                ref, res = fn(x_ref), compiled(x_res)
+                self.assertEqual(ref, res)
+                for r, c in zip(ref, res):
+                    self.assertEqual(r.requires_grad, c.requires_grad)
+                torch.autograd.backward([t.sum() for t in ref if t.requires_grad])
+                torch.autograd.backward([t.sum() for t in res if t.requires_grad])
+                self.assertEqual(x_ref.grad, x_res.grad)
+
+    def test_mark_non_differentiable_in_forward_traced_alone(self):
+        # The graph break in forward makes Dynamo trace forward as its own
+        # frame, where ctx.mark_non_differentiable graph breaks so the mark
+        # runs in eager and applies.
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.mark_non_differentiable(out)
+                torch._dynamo.graph_break()
+                return out, x * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad2 * 3
+
+        def fn(x):
+            return MyFunction.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        ref = fn(x)
+        res = torch.compile(fn, backend="aot_eager")(x)
+        self.assertEqual(ref, res)
+        self.assertEqual([t.requires_grad for t in ref], [t.requires_grad for t in res])
+        self.assertFalse(res[0].requires_grad)
+
+    def test_mark_returned_input_without_grad_non_differentiable(self):
+        # A returned marked input that does not require grad comes back as a
+        # view of the input, not as a detached alias.
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.mark_non_differentiable(y)
+                return x * 2, y
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 * 2, None
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y):
+            return MyFunction.apply(x, y)
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3)
+        ref = MyFunction.apply(x, y)[1]
+        res = fn(x, y)[1]
+        self.assertEqual(ref, res)
+        self.assertFalse(ref.requires_grad)
+        self.assertFalse(res.requires_grad)
+        self.assertTrue(ref._is_view())
+        self.assertTrue(res._is_view())
+
+    def test_marks_cleared_in_backward(self):
+        # Eager clears ctx.non_differentiable and ctx.dirty_tensors after
+        # forward, so backward reads None.
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.mark_non_differentiable(out)
+                return out, x * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                if ctx.non_differentiable is not None or ctx.dirty_tensors is not None:
+                    raise AssertionError("marks are still set in backward")
+                return grad2 * 3
+
+        (ref1, ref2), _ = self._check_marks_match_eager(MyFunction)
+        self.assertFalse(ref1.requires_grad)
+        self.assertTrue(ref2.requires_grad)
+
+        class Dirty(Function):
+            @staticmethod
+            def forward(ctx, x):
+                x.mul_(2)
+                ctx.mark_dirty(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                if ctx.dirty_tensors is not None:
+                    raise AssertionError("dirty_tensors is still set in backward")
+                return grad * 2
+
+        def fn(x):
+            return Dirty.apply(x.clone())
+
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x_ref = torch.randn(3, requires_grad=True)
+        x_res = x_ref.detach().clone().requires_grad_(True)
+        fn(x_ref).sum().backward()
+        compiled(x_res).sum().backward()
+        self.assertEqual(x_ref.grad, x_res.grad)
+
     def test_default_values(self):
         from torch.autograd import Function
 
