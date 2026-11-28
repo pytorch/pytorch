@@ -4,6 +4,7 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
+#include <ideep.hpp>
 #include <ATen/native/mkldnn/detail/Conv.h>
 #include <ATen/native/mkldnn/detail/Deconv.h>
 #include <ATen/native/mkldnn/detail/Matmul.h>
@@ -470,7 +471,7 @@ at::Tensor _qconv_prepack_onednn(
 #define FP8E4M3_MAX 448.0
 
 #define CACHE_ONEDNN_CONTEXT_FLAG "ONEDNN_CACHE_CONTEXT_UNSAFE"
-#if DNNL_PREREQ(3, 9, 0)
+#if IDEEP_PREREQ(3, 9, 0, 0)
 #define ONEDNN_FP8_QCONV_SUPPORTED
 #endif
 
