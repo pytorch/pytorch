@@ -1355,7 +1355,7 @@ class TransferEvents {
 
             // If a parent was set we have to do some bookkeeping.
             auto parent = e->parent_.lock();
-            if (parent) {
+            if (parent != nullptr) {
               parent->children_.push_back(e);
               mark_finished(e);
             }

@@ -64,7 +64,8 @@ def _parse_custom_profiler_config(
     if experimental_config is None:
         return {}
     raw = getattr(experimental_config, "custom_profiler_config", None)
-    if not raw:
+    has_custom_config = bool(raw)
+    if not has_custom_config:
         return {}
     try:
         parsed = json.loads(raw)
