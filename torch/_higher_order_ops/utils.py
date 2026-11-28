@@ -1694,3 +1694,157 @@ def create_fn_remove_none(
         return filter_with_masks(leaves, mask)
 
     return wrapped, mask
+
+
+def _matches_memory_format(
+    t: torch.Tensor, target_fmt: torch.memory_format, shape_env: Any
+) -> bool:
+    from torch._inductor.ir import get_stride_order
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if not guard_or_false(t.storage_offset() == 0):
+        return False
+    if not t.is_contiguous(memory_format=target_fmt):
+        return False
+    if any(guard_or_false(s == 0) for s in t.stride()):
+        return False
+    if target_fmt == torch.contiguous_format:
+        expected_order = list(reversed(range(t.ndim)))
+    elif target_fmt == torch.channels_last and t.ndim == 4:
+        expected_order = [3, 0, 2, 1]
+    elif target_fmt == torch.channels_last_3d and t.ndim == 5:
+        expected_order = [4, 0, 3, 2, 1]
+    else:
+        return False
+    try:
+        return list(get_stride_order(t.stride(), shape_env)) == expected_order
+    except Exception:
+        return False
+
+
+def _can_merge_branch_layouts(
+    vals: Sequence[torch.Tensor], shape_env: Any
+) -> bool:
+    from torch._higher_order_ops.cond import _bound_stride
+    from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
+
+    v0 = vals[0]
+    for v in vals[1:]:
+        if SymIntEqByExpr(v.storage_offset()) != SymIntEqByExpr(v0.storage_offset()):
+            return False
+        try:
+            _bound_stride(
+                v0.size(),
+                v.size(),
+                v0.stride(),
+                v.stride(),
+                list(v0.size()),
+                shape_env,
+            )
+        except (RuntimeError, AssertionError):
+            return False
+    return True
+
+
+def align_bw_branch_outputs(
+    branch_gms: Sequence[torch.fx.GraphModule],
+    operands: Sequence[Any],
+    grads_tensor_masks: Sequence[bool],
+) -> None:
+    """Align incompatible backward gradient layouts across branch GraphModules."""
+    from torch._guards import active_fake_mode
+    from torch._prims_common import suggest_memory_format
+
+    if len(branch_gms) < 2:
+        return
+
+    out_nodes = []
+    branch_outs = []
+    for gm in branch_gms:
+        nodes = gm.graph.find_nodes(op="output")
+        if not nodes or not isinstance(nodes[0].args[0], (list, tuple)):
+            return
+        out_nodes.append(nodes[0])
+        branch_outs.append(list(nodes[0].args[0]))
+
+    num_outs = len(branch_outs[0])
+    if num_outs == 0 or any(len(outs) != num_outs for outs in branch_outs):
+        return
+
+    diff_operands = [op for op, keep in zip(operands, grads_tensor_masks) if keep]
+    modified = [False] * len(branch_gms)
+
+    for idx in range(num_outs):
+        slot_nodes = [outs[idx] for outs in branch_outs]
+        if not all(isinstance(n, torch.fx.Node) for n in slot_nodes):
+            continue
+        vals = [n.meta.get("val") for n in slot_nodes]
+        if not all(isinstance(v, torch.Tensor) for v in vals):
+            continue
+
+        fake_mode = next(
+            (maybe_get_fake_mode(v) for v in vals if maybe_get_fake_mode(v) is not None),
+            None,
+        )
+        if fake_mode is None:
+            fake_mode = active_fake_mode()
+        shape_env = fake_mode.shape_env if fake_mode is not None else None
+
+        if _can_merge_branch_layouts(vals, shape_env):
+            continue
+
+        primal = diff_operands[idx] if idx < len(diff_operands) else None
+        target_fmt = (
+            suggest_memory_format(primal)
+            if isinstance(primal, torch.Tensor)
+            else torch.contiguous_format
+        )
+
+        for branch_idx, (gm, out_node, outs, arg_node, val) in enumerate(
+            zip(branch_gms, out_nodes, branch_outs, slot_nodes, vals)
+        ):
+            val_fake_mode = maybe_get_fake_mode(val)
+            val_shape_env = val_fake_mode.shape_env if val_fake_mode is not None else shape_env
+            if _matches_memory_format(val, target_fmt, val_shape_env):
+                continue
+            with gm.graph.inserting_before(out_node):
+                clone_node = gm.graph.call_function(
+                    torch.ops.aten.clone.default,
+                    args=(arg_node,),
+                    kwargs={"memory_format": target_fmt},
+                )
+            with (
+                suspend_functionalization(),
+                disable_functional_mode(),
+                disable_proxy_modes_tracing(),
+                ExitStack() as stack,
+            ):
+                stack.enter_context(
+                    torch.utils._python_dispatch._disable_current_modes()
+                )
+                stack.enter_context(torch.no_grad())
+                if val_fake_mode is not None:
+                    stack.enter_context(val_fake_mode)
+                clone_val = torch.ops.aten.clone.default(
+                    val, memory_format=target_fmt
+                )
+            clone_node.meta["val"] = clone_val
+            if "tensor_meta" in arg_node.meta:
+                clone_node.meta["tensor_meta"] = _extract_tensor_metadata(clone_val)
+            for meta_key in ("stack_trace", "nn_module_stack"):
+                if meta_key in arg_node.meta:
+                    clone_node.meta[meta_key] = arg_node.meta[meta_key]
+            outs[idx] = clone_node
+            modified[branch_idx] = True
+
+    for branch_idx, is_mod in enumerate(modified):
+        if is_mod:
+            orig_args0 = out_nodes[branch_idx].args[0]
+            new_args0 = (
+                tuple(branch_outs[branch_idx])
+                if isinstance(orig_args0, tuple)
+                else branch_outs[branch_idx]
+            )
+            out_nodes[branch_idx].args = (new_args0,)
+            branch_gms[branch_idx].graph.lint()
+            branch_gms[branch_idx].recompile()
