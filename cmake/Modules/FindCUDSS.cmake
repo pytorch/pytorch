@@ -13,7 +13,7 @@
 include(FindPackageHandleStandardArgs)
 
 set(CUDSS_ROOT $ENV{CUDSS_ROOT_DIR} CACHE PATH "Folder containing NVIDIA CUDSS")
-if (DEFINED $ENV{CUDSS_ROOT_DIR})
+if (NOT "$ENV{CUDSS_ROOT_DIR}" STREQUAL "")
   message(WARNING "CUDSS_ROOT_DIR is deprecated. Please set CUDSS_ROOT instead.")
 endif()
 list(APPEND CUDSS_ROOT $ENV{CUDSS_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR})
