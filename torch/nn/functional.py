@@ -18,13 +18,13 @@ from torch._C import (
 from torch._jit_internal import (
     _overload,
     boolean_dispatch,
-    BroadcastingList1,
     BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
     BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
     unused as _jit_unused,
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
+from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
 from torch.nn.modules.utils import _list_with_default, _pair, _single, _triple
 from torch.overrides import (
     handle_torch_function,
@@ -457,8 +457,8 @@ Args:
 
 def fractional_max_pool2d_with_indices(
     input: Tensor,
-    kernel_size: BroadcastingList2[int],
-    output_size: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
+    kernel_size: _size_2_t,
+    output_size: Optional[_size_2_t] = None,  # noqa: UP045
     output_ratio: Optional[BroadcastingList2[float]] = None,  # noqa: UP045
     return_indices: bool = False,
     _random_samples: Tensor | None = None,
@@ -518,10 +518,12 @@ def fractional_max_pool2d_with_indices(
                 "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."
             )
         _output_ratio = _pair(output_ratio)
-        output_size = [
+        _output_size = [
             int(input.size(-2) * _output_ratio[0]),
             int(input.size(-1) * _output_ratio[1]),
         ]
+    else:
+        _output_size = output_size
 
     if _random_samples is None:
         n_batch = 1 if input.dim() == 3 else input.size(0)
@@ -529,14 +531,14 @@ def fractional_max_pool2d_with_indices(
             n_batch, input.size(-3), 2, dtype=input.dtype, device=input.device
         )
     return torch._C._nn.fractional_max_pool2d(
-        input, kernel_size, output_size, _random_samples
+        input, kernel_size, _output_size, _random_samples
     )
 
 
 def _fractional_max_pool2d(
     input: Tensor,
-    kernel_size: BroadcastingList2[int],
-    output_size: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
+    kernel_size: _size_2_t,
+    output_size: Optional[_size_2_t] = None,  # noqa: UP045
     output_ratio: Optional[BroadcastingList2[float]] = None,  # noqa: UP045
     return_indices: bool = False,
     _random_samples: Tensor | None = None,
@@ -570,8 +572,8 @@ fractional_max_pool2d = boolean_dispatch(
 
 def fractional_max_pool3d_with_indices(
     input: Tensor,
-    kernel_size: BroadcastingList3[int],
-    output_size: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
+    kernel_size: _size_3_t,
+    output_size: Optional[_size_3_t] = None,  # noqa: UP045
     output_ratio: Optional[BroadcastingList3[float]] = None,  # noqa: UP045
     return_indices: bool = False,
     _random_samples: Tensor | None = None,
@@ -634,11 +636,13 @@ def fractional_max_pool3d_with_indices(
         if output_ratio is None:
             raise AssertionError("output_ratio is unexpectedly None")
         _output_ratio = _triple(output_ratio)
-        output_size = [
+        _output_size = [
             int(input.size(-3) * _output_ratio[0]),
             int(input.size(-2) * _output_ratio[1]),
             int(input.size(-1) * _output_ratio[2]),
         ]
+    else:
+        _output_size = output_size
 
     if _random_samples is None:
         n_batch = 1 if input.dim() == 4 else input.size(0)
@@ -646,14 +650,14 @@ def fractional_max_pool3d_with_indices(
             n_batch, input.size(-4), 3, dtype=input.dtype, device=input.device
         )
     return torch._C._nn.fractional_max_pool3d(
-        input, kernel_size, output_size, _random_samples
+        input, kernel_size, _output_size, _random_samples
     )
 
 
 def _fractional_max_pool3d(
     input: Tensor,
-    kernel_size: BroadcastingList3[int],
-    output_size: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
+    kernel_size: _size_3_t,
+    output_size: Optional[_size_3_t] = None,  # noqa: UP045
     output_ratio: Optional[BroadcastingList3[float]] = None,  # noqa: UP045
     return_indices: bool = False,
     _random_samples: Tensor | None = None,
@@ -687,10 +691,10 @@ fractional_max_pool3d = boolean_dispatch(
 
 def max_pool1d_with_indices(
     input: Tensor,
-    kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
-    padding: BroadcastingList1[int] = 0,
-    dilation: BroadcastingList1[int] = 1,
+    kernel_size: _size_1_t,
+    stride: Optional[_size_1_t] = None,  # noqa: UP045
+    padding: _size_1_t = 0,
+    dilation: _size_1_t = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
 ) -> tuple[Tensor, Tensor]:
@@ -740,10 +744,10 @@ def max_pool1d_with_indices(
 
 def _max_pool1d(
     input: Tensor,
-    kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
-    padding: BroadcastingList1[int] = 0,
-    dilation: BroadcastingList1[int] = 1,
+    kernel_size: _size_1_t,
+    stride: Optional[_size_1_t] = None,  # noqa: UP045
+    padding: _size_1_t = 0,
+    dilation: _size_1_t = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
 ) -> Tensor:
@@ -777,10 +781,10 @@ max_pool1d = boolean_dispatch(
 
 def max_pool2d_with_indices(
     input: Tensor,
-    kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
-    padding: BroadcastingList2[int] = 0,
-    dilation: BroadcastingList2[int] = 1,
+    kernel_size: _size_2_t,
+    stride: Optional[_size_2_t] = None,  # noqa: UP045
+    padding: _size_2_t = 0,
+    dilation: _size_2_t = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
 ) -> tuple[Tensor, Tensor]:
@@ -830,10 +834,10 @@ def max_pool2d_with_indices(
 
 def _max_pool2d(
     input: Tensor,
-    kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
-    padding: BroadcastingList2[int] = 0,
-    dilation: BroadcastingList2[int] = 1,
+    kernel_size: _size_2_t,
+    stride: Optional[_size_2_t] = None,  # noqa: UP045
+    padding: _size_2_t = 0,
+    dilation: _size_2_t = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
 ) -> Tensor:
@@ -867,10 +871,10 @@ max_pool2d = boolean_dispatch(
 
 def max_pool3d_with_indices(
     input: Tensor,
-    kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
-    padding: BroadcastingList3[int] = 0,
-    dilation: BroadcastingList3[int] = 1,
+    kernel_size: _size_3_t,
+    stride: Optional[_size_3_t] = None,  # noqa: UP045
+    padding: _size_3_t = 0,
+    dilation: _size_3_t = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
 ) -> tuple[Tensor, Tensor]:
@@ -927,10 +931,10 @@ def max_pool3d_with_indices(
 
 def _max_pool3d(
     input: Tensor,
-    kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
-    padding: BroadcastingList3[int] = 0,
-    dilation: BroadcastingList3[int] = 1,
+    kernel_size: _size_3_t,
+    stride: Optional[_size_3_t] = None,  # noqa: UP045
+    padding: _size_3_t = 0,
+    dilation: _size_3_t = 1,
     ceil_mode: bool = False,
     return_indices: bool = False,
 ) -> Tensor:
@@ -1023,10 +1027,10 @@ def _unpool_output_size(
 def max_unpool1d(
     input: Tensor,
     indices: Tensor,
-    kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
-    padding: BroadcastingList1[int] = 0,
-    output_size: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
+    kernel_size: _size_1_t,
+    stride: Optional[_size_1_t] = None,  # noqa: UP045
+    padding: _size_1_t = 0,
+    output_size: Optional[list[int]] = None,  # noqa: UP045
 ) -> Tensor:
     r"""Compute a partial inverse of :class:`MaxPool1d`.
 
@@ -1043,29 +1047,31 @@ def max_unpool1d(
             padding=padding,
             output_size=output_size,
         )
-    kernel_size = _single(kernel_size)
+    _kernel_size = _single(kernel_size)
     if stride is not None:
         _stride = _single(stride)
     else:
-        _stride = kernel_size
-    padding = _single(padding)
-    output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
-    if isinstance(output_size, list):
-        output_size = output_size + [1]
+        _stride = _kernel_size
+    _padding = _single(padding)
+    _output_size = _unpool_output_size(
+        input, _kernel_size, _stride, _padding, output_size
+    )
+    if isinstance(_output_size, list):
+        _output_size = _output_size + [1]
     else:
-        output_size = output_size + (1,)
+        _output_size = _output_size + (1,)
     return torch._C._nn.max_unpool2d(
-        input.unsqueeze(-1), indices.unsqueeze(-1), output_size
+        input.unsqueeze(-1), indices.unsqueeze(-1), _output_size
     ).squeeze(-1)
 
 
 def max_unpool2d(
     input: Tensor,
     indices: Tensor,
-    kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
-    padding: BroadcastingList2[int] = 0,
-    output_size: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
+    kernel_size: _size_2_t,
+    stride: Optional[_size_2_t] = None,  # noqa: UP045
+    padding: _size_2_t = 0,
+    output_size: Optional[list[int]] = None,  # noqa: UP045
 ) -> Tensor:
     r"""Compute a partial inverse of :class:`MaxPool2d`.
 
@@ -1082,23 +1088,25 @@ def max_unpool2d(
             padding=padding,
             output_size=output_size,
         )
-    kernel_size = _pair(kernel_size)
+    _kernel_size = _pair(kernel_size)
     if stride is not None:
         _stride = _pair(stride)
     else:
-        _stride = kernel_size
-    padding = _pair(padding)
-    output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
-    return torch._C._nn.max_unpool2d(input, indices, output_size)
+        _stride = _kernel_size
+    _padding = _pair(padding)
+    _output_size = _unpool_output_size(
+        input, _kernel_size, _stride, _padding, output_size
+    )
+    return torch._C._nn.max_unpool2d(input, indices, _output_size)
 
 
 def max_unpool3d(
     input: Tensor,
     indices: Tensor,
-    kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
-    padding: BroadcastingList3[int] = 0,
-    output_size: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
+    kernel_size: _size_3_t,
+    stride: Optional[_size_3_t] = None,  # noqa: UP045
+    padding: _size_3_t = 0,
+    output_size: Optional[list[int]] = None,  # noqa: UP045
 ) -> Tensor:
     r"""Compute a partial inverse of :class:`MaxPool3d`.
 
@@ -1115,21 +1123,23 @@ def max_unpool3d(
             padding=padding,
             output_size=output_size,
         )
-    kernel_size = _triple(kernel_size)
+    _kernel_size = _triple(kernel_size)
     if stride is not None:
         _stride = _triple(stride)
     else:
-        _stride = kernel_size
-    padding = _triple(padding)
-    output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
-    return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
+        _stride = _kernel_size
+    _padding = _triple(padding)
+    _output_size = _unpool_output_size(
+        input, _kernel_size, _stride, _padding, output_size
+    )
+    return torch._C._nn.max_unpool3d(input, indices, _output_size, _stride, _padding)
 
 
 def lp_pool3d(
     input: Tensor,
     norm_type: int | float,
-    kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
+    kernel_size: _size_3_t,
+    stride: Optional[_size_3_t] = None,  # noqa: UP045
     ceil_mode: bool = False,
 ) -> Tensor:
     r"""
@@ -1187,8 +1197,8 @@ def lp_pool3d(
 def lp_pool2d(
     input: Tensor,
     norm_type: int | float,
-    kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
+    kernel_size: _size_2_t,
+    stride: Optional[_size_2_t] = None,  # noqa: UP045
     ceil_mode: bool = False,
 ) -> Tensor:
     r"""
@@ -1245,7 +1255,7 @@ def lp_pool1d(
     input: Tensor,
     norm_type: int | float,
     kernel_size: int,
-    stride: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
+    stride: Optional[_size_1_t] = None,  # noqa: UP045
     ceil_mode: bool = False,
 ) -> Tensor:
     r"""Apply a 1D power-average pooling over an input signal composed of several input planes.
@@ -1300,7 +1310,7 @@ def lp_pool1d(
 
 def adaptive_max_pool1d_with_indices(
     input: Tensor,
-    output_size: BroadcastingList1[int],
+    output_size: _size_1_t,
     return_indices: bool = False,
 ) -> tuple[Tensor, Tensor]:
     r"""
@@ -1328,7 +1338,7 @@ def adaptive_max_pool1d_with_indices(
 
 def _adaptive_max_pool1d(
     input: Tensor,
-    output_size: BroadcastingList1[int],
+    output_size: _size_1_t,
     return_indices: bool = False,
 ) -> Tensor:
     if has_torch_function_unary(input):
@@ -1355,7 +1365,7 @@ adaptive_max_pool1d = boolean_dispatch(
 
 def adaptive_max_pool2d_with_indices(
     input: Tensor,
-    output_size: BroadcastingList2[int],
+    output_size: _size_2_t,
     return_indices: bool = False,
 ) -> tuple[Tensor, Tensor]:
     r"""adaptive_max_pool2d(input, output_size, return_indices=False)
@@ -1378,14 +1388,13 @@ def adaptive_max_pool2d_with_indices(
             output_size,
             return_indices=return_indices,
         )
-    # pyrefly: ignore [bad-argument-type]
-    output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_max_pool2d(input, output_size)
+    _output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_max_pool2d(input, _output_size)
 
 
 def _adaptive_max_pool2d(
     input: Tensor,
-    output_size: BroadcastingList2[int],
+    output_size: _size_2_t,
     return_indices: bool = False,
 ) -> Tensor:
     if has_torch_function_unary(input):
@@ -1412,7 +1421,7 @@ adaptive_max_pool2d = boolean_dispatch(
 
 def adaptive_max_pool3d_with_indices(
     input: Tensor,
-    output_size: BroadcastingList3[int],
+    output_size: _size_3_t,
     return_indices: bool = False,
 ) -> tuple[Tensor, Tensor]:
     r"""
@@ -1436,14 +1445,13 @@ def adaptive_max_pool3d_with_indices(
             output_size,
             return_indices=return_indices,
         )
-    # pyrefly: ignore [bad-argument-type]
-    output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_max_pool3d(input, output_size)
+    _output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_max_pool3d(input, _output_size)
 
 
 def _adaptive_max_pool3d(
     input: Tensor,
-    output_size: BroadcastingList3[int],
+    output_size: _size_3_t,
     return_indices: bool = False,
 ) -> Tensor:
     if has_torch_function_unary(input):
@@ -1484,7 +1492,7 @@ Args:
 )
 
 
-def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
+def adaptive_avg_pool2d(input: Tensor, output_size: _size_2_t) -> Tensor:
     r"""Apply a 2D adaptive average pooling over an input signal composed of several input planes.
 
     See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
@@ -1495,12 +1503,11 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
     """
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
-    # pyrefly: ignore [bad-argument-type]
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
-def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
+def adaptive_avg_pool3d(input: Tensor, output_size: _size_3_t) -> Tensor:
     r"""Apply a 3D adaptive average pooling over an input signal composed of several input planes.
 
     See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
@@ -1511,7 +1518,6 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
     """
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
-    # pyrefly: ignore [bad-argument-type]
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
 
@@ -5331,10 +5337,12 @@ def interpolate(  # noqa: F811
     if input.dim() == 4 and mode == "area":
         if output_size is None:
             raise AssertionError("output_size is unexpectedly None")
+        # pyrefly: ignore [bad-argument-type]
         return adaptive_avg_pool2d(input, output_size)
     if input.dim() == 5 and mode == "area":
         if output_size is None:
             raise AssertionError("output_size is unexpectedly None")
+        # pyrefly: ignore [bad-argument-type]
         return adaptive_avg_pool3d(input, output_size)
 
     if input.dim() == 3 and mode == "linear":
@@ -6269,10 +6277,10 @@ def assert_int_or_pair(arg: list[int], arg_name: str, message: str) -> None:
 
 def unfold(
     input: Tensor,
-    kernel_size: BroadcastingList2[int],
-    dilation: BroadcastingList2[int] = 1,
-    padding: BroadcastingList2[int] = 0,
-    stride: BroadcastingList2[int] = 1,
+    kernel_size: _size_2_t,
+    dilation: _size_2_t = 1,
+    padding: _size_2_t = 0,
+    stride: _size_2_t = 1,
 ) -> Tensor:
     r"""Extract sliding local blocks from a batched input tensor.
 
@@ -6307,11 +6315,11 @@ def unfold(
 
 def fold(
     input: Tensor,
-    output_size: BroadcastingList2[int],
-    kernel_size: BroadcastingList2[int],
-    dilation: BroadcastingList2[int] = 1,
-    padding: BroadcastingList2[int] = 0,
-    stride: BroadcastingList2[int] = 1,
+    output_size: _size_2_t,
+    kernel_size: _size_2_t,
+    dilation: _size_2_t = 1,
+    padding: _size_2_t = 0,
+    stride: _size_2_t = 1,
 ) -> Tensor:
     r"""Combine an array of sliding local blocks into a large containing tensor.
 
