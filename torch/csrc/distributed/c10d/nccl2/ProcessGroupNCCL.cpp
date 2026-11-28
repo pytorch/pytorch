@@ -646,15 +646,6 @@ void ProcessGroupNCCL::finalize() {
     throw std::move(ncclException);
   }
 
-  if (memPool_) {
-    try {
-      deregisterMemPool(memPool_.get());
-    } catch (const std::exception& error) {
-      TC_LOG(ERROR, this) << "Failed to deregister tensor allocation pool: "
-                          << error.what();
-    }
-  }
-
   event_pool_->clear();
 
   barrier_buffer_.clear();

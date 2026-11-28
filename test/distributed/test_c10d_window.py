@@ -176,58 +176,41 @@ class AbstractWindowTest:
         win_b.tensor_deregister()
         win_a.tensor_deregister()
 
-    def test_symmetric_mem_pool_teardown(self):
-        # register_mem_pool(symm=True) gives the pool's existing and new
-        # segments symmetric windows; deregister_mem_pool tears them down.
+    def test_symmetric_mem_pool(self):
+        # Every segment of a backend.allocator(symm=True) pool gets a symmetric
+        # window as it is allocated, so any of its tensors can be a put source,
+        # and loses it when the pool frees the segment.
         self._init_backend()
-        # Probe before register_mem_pool: allocating from a symm=True pool
-        # raises, rather than skips, without a symmetric-memory transport.
-        # The probe's segment belongs to pool, so deregister_mem_pool(pool)
-        # also tears it down.
-        pool = self._make_pool()
-        self._probe_window_support(pool)
-        # A window outside the symm pool, to check put's source validation
-        # after deregister_mem_pool.
-        other_pool = self._make_pool()
-        self.backend.register_mem_pool(other_pool)
-        with torch.cuda.use_mem_pool(other_pool):
-            other_buf = torch.zeros(1, device=self.device)
-        other_win = dist._new_window(other_buf)
+        # Probe on a plain pool: allocating from a symm pool raises, rather
+        # than skips, without a symmetric-memory transport.
+        self._probe_window_support(self._make_pool())
         next_rank = (self.rank + 1) % self.world_size
         prev_rank = (self.rank - 1) % self.world_size
-        # Allocations of at least 10 MiB get their own segments. This one
-        # exists before symm=True, so registration upgrades it.
+        pool = torch.cuda.MemPool(self.backend.allocator(symm=True))
+        pool_id = pool.id
         with torch.cuda.use_mem_pool(pool):
-            old_seg = torch.full((3 << 20,), float(self.rank), device=self.device)
-        self.backend.register_mem_pool(pool, symm=True)
-        # Reuses the probe's segment.
-        with torch.cuda.use_mem_pool(pool):
-            win_buf = torch.zeros(2 * self.world_size, device=self.device)
+            win_buf = torch.zeros(self.world_size, device=self.device)
+            # At least 10 MiB, so it gets its own segment.
+            src = torch.full((3 << 20,), float(self.rank), device=self.device)
         win = dist._new_window(win_buf)
-        # A new segment, which symm=True registers as it is allocated.
-        with torch.cuda.use_mem_pool(pool):
-            new_seg = torch.full((3 << 20,), float(self.rank), device=self.device)
         opts = PutOptions()
         opts.timeout = timedelta(seconds=60)
-        win.put(old_seg[:1], next_rank, self.rank, False, opts=opts)
-        win.put(new_seg[:1], next_rank, self.world_size + self.rank, False)
-        win.wait_signal(prev_rank, False)
+        win.put(src[:1], next_rank, self.rank, False, opts=opts)
         win.wait_signal(prev_rank, False)
         torch.cuda.synchronize()
         self.assertEqual(win_buf[prev_rank].item(), prev_rank)
-        self.assertEqual(win_buf[self.world_size + prev_rank].item(), prev_rank)
-        win.tensor_deregister()
-        del win, win_buf
-        self.backend.deregister_mem_pool(pool)
         # put validates its source locally, so this raises on every rank
         # without communicating.
-        unregistered = "not in a registered symmetric window"
-        with self.assertRaisesRegex(RuntimeError, unregistered):
-            other_win.put(new_seg[:1], next_rank, 0, False)
-        other_win.tensor_deregister()
-        self.backend.deregister_mem_pool(other_pool)
-        del old_seg, new_seg, pool, other_win, other_buf, other_pool
+        unregistered = torch.zeros(1, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "not in a registered symmetric"):
+            win.put(unregistered, next_rank, 0, False)
+        win.tensor_deregister()
+        # Every rank frees the pool here, so its destruction tears the windows
+        # down at the same point.
+        del win, win_buf, src, pool
         torch.cuda.synchronize()
+        segments = torch.cuda.memory_snapshot()
+        self.assertFalse(any(s["segment_pool_id"] == pool_id for s in segments))
 
     def test_put_dtypes_and_sizes(self):
         self._init_backend()

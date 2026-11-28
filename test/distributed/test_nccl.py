@@ -1575,14 +1575,11 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         if cta_policy is not None:
             opts.config.cta_policy = cta_policy
         pg = c10d.new_group(backend="nccl", pg_options=opts)
-        # register_mem_pool needs a live communicator.
+        # Bring the communicator up before profiling.
         c10d.all_reduce(torch.ones(1, device=self.device), group=pg)
         nccl_backend = c10d.get_backend_impl(pg, self.device)
-        pool = torch.cuda.MemPool(nccl_backend.mem_allocator)
-        # Register while the pool is still empty: segments it allocates later
-        # must be window registered as well.
-        nccl_backend.register_mem_pool(pool, symm=True)
-        return pg, nccl_backend, pool
+        pool = torch.cuda.MemPool(nccl_backend.allocator(symm=True))
+        return pg, pool
 
     def _profile_gpu_events(self, fn: Callable[[], None]) -> list[str]:
         from torch._C._autograd import DeviceType
@@ -1598,46 +1595,38 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @requires_nccl_version((2, 28), "NCCL symmetric kernels need nccl 2.28")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_mem_pool_all_reduce_symk(self):
-        pg, nccl_backend, pool = self._symm_mem_pool_group()
-        try:
-            with torch.cuda.use_mem_pool(pool):
-                t = torch.full(
-                    (1024 * 1024,), self.rank, dtype=torch.bfloat16, device=self.device
-                )
-            gpu_events = self._profile_gpu_events(lambda: c10d.all_reduce(t, group=pg))
-            self.assertEqual(t, torch.full_like(t, sum(range(self.world_size))))
-            self.assertTrue(any("ncclSymk" in n for n in gpu_events), gpu_events)
-        finally:
-            nccl_backend.deregister_mem_pool(pool)
+        pg, pool = self._symm_mem_pool_group()
+        with torch.cuda.use_mem_pool(pool):
+            t = torch.full(
+                (1024 * 1024,), self.rank, dtype=torch.bfloat16, device=self.device
+            )
+        gpu_events = self._profile_gpu_events(lambda: c10d.all_reduce(t, group=pg))
+        self.assertEqual(t, torch.full_like(t, sum(range(self.world_size))))
+        self.assertTrue(any("ncclSymk" in n for n in gpu_events), gpu_events)
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 28), "NCCL copy-engine collectives need nccl 2.28")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_mem_pool_all_gather_copy_engine(self):
-        pg, nccl_backend, pool = self._symm_mem_pool_group(
-            c10d.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
-        )
+        pg, pool = self._symm_mem_pool_group(c10d.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO)
         numel = 1024 * 1024
-        try:
-            with torch.cuda.use_mem_pool(pool):
-                inp = torch.full(
-                    (numel,), self.rank, dtype=torch.bfloat16, device=self.device
-                )
-                out = torch.empty(
-                    numel * self.world_size, dtype=torch.bfloat16, device=self.device
-                )
-            gpu_events = self._profile_gpu_events(
-                lambda: c10d.all_gather_into_tensor(out, inp, group=pg)
+        with torch.cuda.use_mem_pool(pool):
+            inp = torch.full(
+                (numel,), self.rank, dtype=torch.bfloat16, device=self.device
             )
-            for rank, chunk in enumerate(out.chunk(self.world_size)):
-                self.assertEqual(chunk, torch.full_like(chunk, rank))
-            # With zero CTAs on symmetric buffers NCCL offloads the whole
-            # collective to the copy engine: memcpys only, no NCCL kernel.
-            self.assertFalse(any("nccl" in n for n in gpu_events), gpu_events)
-            self.assertTrue(any("Memcpy" in n for n in gpu_events), gpu_events)
-        finally:
-            nccl_backend.deregister_mem_pool(pool)
+            out = torch.empty(
+                numel * self.world_size, dtype=torch.bfloat16, device=self.device
+            )
+        gpu_events = self._profile_gpu_events(
+            lambda: c10d.all_gather_into_tensor(out, inp, group=pg)
+        )
+        for rank, chunk in enumerate(out.chunk(self.world_size)):
+            self.assertEqual(chunk, torch.full_like(chunk, rank))
+        # With zero CTAs on symmetric buffers NCCL offloads the whole
+        # collective to the copy engine: memcpys only, no NCCL kernel.
+        self.assertFalse(any("nccl" in n for n in gpu_events), gpu_events)
+        self.assertTrue(any("Memcpy" in n for n in gpu_events), gpu_events)
 
 
 @requires_cuda_p2p_access()
