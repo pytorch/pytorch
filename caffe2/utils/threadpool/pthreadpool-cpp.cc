@@ -82,14 +82,17 @@ void PThreadPool::run(
 }
 
 PThreadPool* pthreadpool(size_t thread_count) {
+#if defined(WIN32)
+  // Keep the Windows singleton alive to avoid worker joins during DLL shutdown.
+  static auto* const threadpool = new PThreadPool(thread_count);
+  return threadpool;
+#else
   static auto threadpool =
     std::make_unique<PThreadPool>(thread_count);
-#if !(defined(WIN32))
   static std::once_flag flag;
   std::call_once(flag, []() {
     pthread_atfork(nullptr, nullptr, child_atfork);
   });
-#endif
   if (leak_corrupted_threadpool) [[unlikely]] {
     leak_corrupted_threadpool = false;
     if (auto leaked = threadpool.release()) {
@@ -99,6 +102,7 @@ PThreadPool* pthreadpool(size_t thread_count) {
     }
   }
   return threadpool.get();
+#endif
 }
 
 PThreadPool* pthreadpool() {

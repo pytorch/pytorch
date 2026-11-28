@@ -10125,6 +10125,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_parallel_info(self):
         torch.__config__.parallel_info()
 
+    @unittest.skipIf(not IS_WINDOWS, "Windows pthreadpool shutdown regression")
+    def test_set_num_threads_exit(self):
+        subprocess.run(
+            [sys.executable, "-c", "import torch; torch.set_num_threads(2)"],
+            check=True,
+            timeout=10,
+        )
+
     def test_get_cpu_capability(self):
         # This method is primarily exposed for torchvision's resize
         torch.backends.cpu.get_cpu_capability()
