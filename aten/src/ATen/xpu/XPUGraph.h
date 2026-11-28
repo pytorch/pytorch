@@ -82,8 +82,10 @@ struct TORCH_XPU_API XPUGraph {
   void register_generator_state(const at::Generator& generator) {
     impl_->register_generator_state(generator);
   }
-  void capture_begin(MempoolId_t pool = {0, 0}) {
-    impl_->capture_begin(pool);
+  void capture_begin(
+      MempoolId_t pool = {0, 0},
+      GraphCaptureMode capture_mode = GraphCaptureMode::Default) {
+    impl_->capture_begin(pool, capture_mode);
   }
   void capture_end() {
     impl_->capture_end();
