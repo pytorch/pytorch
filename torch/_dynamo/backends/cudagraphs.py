@@ -28,6 +28,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import torch
+import torch._inductor.graph_tree_backend as tree_backend
 import torch.fx
 from torch._dynamo import config
 from torch._dynamo.backends.common import aot_autograd
@@ -124,10 +125,21 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
             return mut_skip
 
     # This backend never partitions, whatever Inductor's graph_partition says.
+    device_node_mapping = get_device_node_mapping(aot_model)
     if skip := check_multiple_devices_or_any_cpu_nodes(
-        get_device_node_mapping(aot_model), cpu_nodes_partitioned_out=False
+        device_node_mapping, cpu_nodes_partitioned_out=False
     ):
         return skip
+
+    device = next(iter(device_node_mapping))
+    # XPU doesn't support cond node currently
+    if device.type != "cuda":
+        for node in aot_model.graph.nodes:
+            if node.target in (
+                torch.ops.higher_order.cond,
+                torch.ops.higher_order.while_loop,
+            ):
+                return format_default_skip_message(f"incompatible op ({node.name})")
 
     if node := get_first_incompatible_cudagraph_node(aot_model):
         return format_default_skip_message(f"incompatible op ({node.name})")
@@ -137,8 +149,11 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
 
 def get_device_index(gm: torch.fx.GraphModule) -> int:
     device = next(iter(get_device_node_mapping(gm)))
-    if device.type != "cuda":
-        raise AssertionError(f"Expected CUDA device, got {device.type}")
+    expected_device_type = tree_backend.get_device_type()
+    if device.type != expected_device_type:
+        raise AssertionError(
+            f"Expected {expected_device_type} device, got {device.type}"
+        )
     return device.index
 
 
@@ -262,7 +277,9 @@ class CudagraphsBackend:
 
 # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
 # for debugging and can serve as a perf baseline.
-register_backend(name="cudagraphs", compiler_fn=CudagraphsBackend())
+_cudagraphs_backend = CudagraphsBackend()
+register_backend(name="cudagraphs", compiler_fn=_cudagraphs_backend)
+register_backend(name="acceleratorgraphs", compiler_fn=_cudagraphs_backend)
 
 
 def cudagraphs_inner(

@@ -3820,6 +3820,8 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
             "variant", ("default", "no_graph_partition", "no_keep_output_stride")
         )
         def test_clone_live_output_on_new_generation(self, device, variant):
+            from torch._inductor.graph_tree_backend import get_allocator_interface
+
             @torch.compile(mode="reduce-overhead")
             def foo(x):
                 return x * x * x
@@ -3835,16 +3837,17 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
                 ]
                 live_outputs = []
                 free_calls = 0
-                orig_free = torch._C._free_And_Remove_DeleterFn
+                allocator = get_allocator_interface()
+                orig_free = allocator.free_and_remove_deleter
 
                 def spy_free(storage_ptr):
                     nonlocal free_calls
-                    self.assertTrue(torch._C._has_Standard_Deleter(storage_ptr))
+                    self.assertTrue(allocator.has_standard_deleter(storage_ptr))
                     free_calls += 1
                     return orig_free(storage_ptr)
 
                 with unittest.mock.patch.object(
-                    torch._C, "_free_And_Remove_DeleterFn", spy_free
+                    allocator, "free_and_remove_deleter", spy_free
                 ):
                     out = self.run_next_generation(foo, inputs[0])
                     expected = out.detach().clone()
@@ -3856,12 +3859,12 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
                     record_old_data_ptr = record_out.untyped_storage().data_ptr()
                     self.save_live_outputs(live_outputs, record_out)
                     self.assertEqual(free_calls, 1)
-                    self.assertTrue(torch._C._has_Standard_Deleter(cdata(out)))
+                    self.assertTrue(allocator.has_standard_deleter(cdata(out)))
 
                     replay_out = self.replay_next_generation(foo, inputs[2])
                     node = self.curr_node()
                     self.assertEqual(free_calls, 2)
-                    self.assertTrue(torch._C._has_Standard_Deleter(cdata(record_out)))
+                    self.assertTrue(allocator.has_standard_deleter(cdata(record_out)))
                     self.assertIs(replay_out, node.cached_tensor_outputs[0])
                     self.assertTrue(torch._C._is_cached_tensor(replay_out))
                     replay_old_data_ptr = replay_out.untyped_storage().data_ptr()
@@ -3870,7 +3873,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
                     next_out = self.replay_next_generation(foo, inputs[3])
                     self.save_live_outputs(live_outputs, next_out)
                     self.assertEqual(free_calls, 2)
-                    self.assertTrue(torch._C._has_Standard_Deleter(cdata(replay_out)))
+                    self.assertTrue(allocator.has_standard_deleter(cdata(replay_out)))
 
             self.assertEqual(out, expected)
             self.assertEqual(out + out, expected + expected)
