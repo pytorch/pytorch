@@ -74,6 +74,7 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     type_qualified_name,
+    ValueMutationNew,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -2861,7 +2862,11 @@ def generic_hasattr_str(
                 and inspect.getattr_static(obj.value, name, NO_SUCH_SUBOBJ)
                 is NO_SUCH_SUBOBJ
             )
-            if obj.source and not found_by_user_getattr:
+            if (
+                obj.source
+                and not is_constant_source(obj.source)
+                and not found_by_user_getattr
+            ):
                 install_guard(
                     obj.source.make_guard(
                         functools.partial(GuardBuilder.HASATTR, attr=name)
@@ -2872,7 +2877,7 @@ def generic_hasattr_str(
         tx.exn_vt_stack.clear_current_exception()
         # No CPython analogue. A False answer rests on the attribute staying
         # absent, and nothing else guards that.
-        if obj.source:
+        if obj.source and not is_constant_source(obj.source):
             install_guard(
                 obj.source.make_guard(
                     functools.partial(GuardBuilder.HASATTR, attr=name)
@@ -3032,6 +3037,12 @@ def object_generic_setattr_str(
                         "reload it from.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
+            if type(obj) is variables.OrderedDictVariable and not isinstance(
+                obj.mutation_type, ValueMutationNew
+            ):
+                obj.unsupported_instance_state(
+                    "attribute mutation on an input OrderedDict"
+                )
             if obj.is_tensor() or isinstance(obj, variables.PythonModuleVariable):
                 # handle_traced_output leaves aliased Tensor outputs untracked
                 # (repeated objects, returned inputs): replaying onto them as

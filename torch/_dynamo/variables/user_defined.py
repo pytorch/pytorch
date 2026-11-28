@@ -138,7 +138,13 @@ from .constant import (
     IntConstantVariable,
     StrConstantVariable,
 )
-from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
+from .dicts import (
+    ConstDictVariable,
+    NNModuleHooksDictVariable,
+    NNModuleHooksOrderedDictVariable,
+    OrderedDictVariable,
+    pydict_check,
+)
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -3543,6 +3549,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
+            if isinstance(self, ConstDictVariable) and isinstance(
+                method, types.MethodDescriptorType
+            ):
+                result = self.call_method_descriptor(tx, method, args, kwargs)
+                if result is not None:
+                    return result
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
             )
@@ -4241,6 +4253,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             _is_method_type(type_attr)
             or getattr(type_attr, "_torchdynamo_disable", False)
         ):
+            if isinstance(self, NNModuleHooksDictVariable) and can_use_mro_source:
+                # Hook registries bypass the builder. Guard the method selected for dispatch.
+                selected = self.get_source_by_walking_mro(tx, name)
+                if not isinstance(type_attr, types.FunctionType):
+                    install_guard(selected.make_guard(GuardBuilder.ID_MATCH))
+                elif can_guard_class_function_code(tx, type_attr):
+                    install_guard(selected.make_guard(GuardBuilder.CLOSURE_MATCH))
             return variables.CallMethodVariable(self, name, source=source)
 
         if isinstance(type_attr, staticmethod):
@@ -5256,7 +5275,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
     def __init__(
         self,
         value: object,
-        items: dict[VariableTracker, VariableTracker] | None = None,
+        items: dict[VariableTracker, VariableTracker]
+        | dict[HashableTracker, VariableTracker]
+        | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, items=items if items is not None else {}, **kwargs)
@@ -5331,6 +5352,18 @@ class UserDefinedOrderedDictVariable(UserDefinedDictVariable, OrderedDictVariabl
         *UserDefinedDictVariable._nonvar_fields,
         *OrderedDictVariable._nonvar_fields,
     }
+
+
+class UserDefinedNNModuleHooksDictVariable(
+    UserDefinedDictVariable, NNModuleHooksDictVariable
+):
+    """Preserve subclass protocols while deferring local hook-ID specialization."""
+
+
+class UserDefinedNNModuleHooksOrderedDictVariable(
+    UserDefinedOrderedDictVariable, NNModuleHooksOrderedDictVariable
+):
+    """Ordered hook storage with the subclass's attributes and overrides."""
 
 
 # TODO: move to dicts.py alongside ConstDictVariable.

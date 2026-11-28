@@ -1546,6 +1546,13 @@ def is_from_closure_source(source: Source) -> bool:
     return False
 
 
+def get_item_source_base(source: Source) -> Source:
+    """Find the owner retaining a chain of dictionary and sequence items."""
+    while isinstance(source, (DictGetItemSource, GetItemSource)):
+        source = source.base
+    return source
+
+
 @functools.lru_cache
 def is_from_source(source: Source, target: Source) -> bool:
     if source == target:

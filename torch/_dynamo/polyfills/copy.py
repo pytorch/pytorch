@@ -4,7 +4,8 @@ Python polyfills for copy
 
 from __future__ import annotations
 
-from typing import TypeVar
+import copy
+from typing import Any, TypeVar
 
 from ..decorators import substitute_in_graph
 
@@ -73,3 +74,11 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
     dictitems = iter(obj.items()) if isinstance(obj, dict) else None
 
     return (func, newargs, state, listitems, dictitems)
+
+
+_legacy_deepcopy_atomic = getattr(copy, "_deepcopy_atomic", None)
+
+
+def is_deepcopy_atomic(item: Any) -> bool:
+    table = copy._deepcopy_dispatch  # pyrefly: ignore[missing-attribute]
+    return type(table) is dict and table.get(type(item)) is _legacy_deepcopy_atomic
