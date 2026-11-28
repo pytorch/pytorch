@@ -387,8 +387,10 @@ class Conv1d(_ConvNd):
 
 class Conv2d(_ConvNd):
     __doc__ = (
-        r"""Applies a 2D convolution over an input signal composed of several input
-    planes.
+        r"""Creates a 2D convolution layer.
+
+    Creating the layer initializes its weights and optional bias. Calling the
+    layer on an input tensor, as in ``layer(input)``, applies the convolution.
 
     In the simplest case, the output value of the layer with input size
     :math:`(N, C_{\text{in}}, H, W)` and output :math:`(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})`
