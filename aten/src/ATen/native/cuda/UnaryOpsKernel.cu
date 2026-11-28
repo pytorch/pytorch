@@ -5,6 +5,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Math.h>
 #include <ATen/native/TensorIterator.h>
@@ -19,6 +20,20 @@
 #include <c10/util/complex.h>
 
 namespace at::native {
+
+void bitwise_count_kernel_cuda(TensorIteratorBase& iter) {
+  if (iter.input_dtype() == ScalarType::Bool) {
+    gpu_kernel(iter, []GPU_LAMBDA(bool a) -> uint8_t {
+      return a ? 1 : 0;
+    });
+  } else {
+    AT_DISPATCH_V2(iter.input_dtype(), "bitwise_count_cuda", AT_WRAP([&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> uint8_t {
+        return calc_bitwise_count(a);
+      });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
+  }
+}
 
 void bitwise_not_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
@@ -276,6 +291,7 @@ void frexp_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda)
+REGISTER_DISPATCH(bitwise_count_stub, &bitwise_count_kernel_cuda)
 REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda)
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda)
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda)

@@ -11941,6 +11941,22 @@ def reference_sgn(x):
     return out
 
 
+def reference_bitwise_count(x):
+    # np.bitwise_count (NumPy >= 2.0) counts the set bits of |x| and returns uint8
+    if hasattr(np, "bitwise_count"):
+        return np.bitwise_count(x)
+    counts = np.frompyfunc(lambda v: abs(int(v)).bit_count(), 1, 1)(np.asarray(x))
+    return np.asarray(counts, dtype=np.uint8)
+
+
+def error_inputs_bitwise_count(op_info, device, **kwargs):
+    x = torch.tensor([1, 2], device=device)
+    yield ErrorInput(SampleInput(x.float()), error_type=NotImplementedError,
+                     error_regex="only supports integral and boolean inputs")
+    yield ErrorInput(SampleInput(x, kwargs={'out': torch.empty(2, dtype=torch.int32, device=device)}),
+                     error_regex="does not support non-uint8 outputs")
+
+
 def reference_sigmoid(x):
     # 'scipy.special.expit' not supported for the input types
     if x.dtype in [np.complex64, np.complex128]:
@@ -13326,6 +13342,11 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
            ),
            sample_inputs_func=sample_inputs_block_diag),
+    UnaryUfuncInfo('bitwise_count',
+                   ref=reference_bitwise_count,
+                   dtypes=integral_types_and(torch.bool, torch.uint16, torch.uint32, torch.uint64),
+                   error_inputs_func=error_inputs_bitwise_count,
+                   supports_autograd=False),
     UnaryUfuncInfo('bitwise_not',
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
