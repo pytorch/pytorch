@@ -170,6 +170,11 @@ def get_split_k(B: int, H: int, Mk: int, device: torch.device) -> int:
     # Before we have runtime workload evening, assign 2 splits per SM.
     split_k = max(split_k, 1)
 
+    # XPU: at most one split per KV tile of the default decode BLOCK_N (64). A fixed
+    # BLOCK_N keeps SPLIT_KV independent of the autotune search space.
+    if device.type == "xpu" and isinstance(Mk, (int, sympy.Integer)):
+        split_k = max(min(split_k, ceildiv(int(Mk), 64)), 1)
+
     return split_k
 
 
@@ -308,7 +313,14 @@ def create_flex_decoding_kernel(*args, **kwargs):
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
 
-    set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
+    set_head_dim_values(
+        kernel_options,
+        qk_head_dim,
+        v_head_dim,
+        V.graph.sizevars,
+        # Splitting 128 + x is slower than padding to 256 for GQA decode.
+        allow_head_dim_tiling=device.type == "xpu" and not 128 < head_dim < 256,
+    )
 
     # Mark SPARSE_Q_BLOCK_SIZE as static: the default BLOCK_M below depends on it.
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)

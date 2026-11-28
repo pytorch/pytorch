@@ -533,7 +533,22 @@ def flex_attention(
             empty(0, device=query.get_device()) for _ in range(2)
         )
 
-    set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
+    set_head_dim_values(
+        kernel_options,
+        qk_head_dim,
+        v_head_dim,
+        V.graph.sizevars,
+        # Tiling does not speed up bf16 above 512 and slows 576 + 512 down.
+        allow_head_dim_tiling=query.get_device().type == "xpu"
+        and not (
+            query.get_dtype() == torch.bfloat16
+            and V.graph.sizevars.guard_int(qk_head_dim) > 512
+        ),
+    )
+
+    # Decided before the configs are chosen, so that the XPU choice sees it.
+    if query.get_device().type == "xpu" and not can_use_tma(query, key, value):
+        kernel_options["USE_TMA"] = kernel_options["fwd_USE_TMA"] = False
 
     choices: list[Any] = []
 
