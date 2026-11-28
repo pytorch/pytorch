@@ -1851,7 +1851,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         # CUDA sharded tensor should return a new ShardedTensor, but same
         # local shards(no movements)
         st_cuda = sharded_tensor.zeros(spec, h, w)
-        new_st_cuda = st_cuda.to(device_type)
+        new_st_cuda = st_cuda.to(torch.device(device_type, self.rank))
         self.assertTrue(st_cuda is not new_st_cuda)
         self.assertTrue(st_cuda.local_tensor() is new_st_cuda.local_tensor())
 
