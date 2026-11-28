@@ -2889,6 +2889,16 @@ class SchedulerDonatedBuffer(SchedulerBuffer):
     defining_op: BaseSchedulerNode | None = None
 
 
+class _SetUnion:
+    """Membership in any of several sets, without materializing their union."""
+
+    def __init__(self, *sets: Any) -> None:
+        self._sets = sets
+
+    def __contains__(self, item: object) -> bool:
+        return any(item in s for s in self._sets)
+
+
 class BaseSchedulerNode:
     """
     One unit of work the scheduler orders, fuses and then hands to a backend.
@@ -3261,11 +3271,19 @@ class BaseSchedulerNode:
             return
 
         # NOTE remove V.graph.removed_operations once deps issue is fixed
-        inconsequential_nodes = (
-            self.ancestors
-            | V.graph.removed_operations
-            | self.scheduler.completed_operations
-        )
+        if config.fast_compile_py:
+            # Only membership is needed, so skip building the union.
+            inconsequential_nodes: Any = _SetUnion(
+                self.ancestors,
+                V.graph.removed_operations,
+                self.scheduler.completed_operations,
+            )
+        else:
+            inconsequential_nodes = (
+                self.ancestors
+                | V.graph.removed_operations
+                | self.scheduler.completed_operations
+            )
 
         def single_index_in_fused_node(buf_to_be_inplaced: SchedulerBuffer) -> bool:
             # Inside of NodeUser, we track that the read and write are equivalent

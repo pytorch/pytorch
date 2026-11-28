@@ -103,6 +103,59 @@ class EnableReduction(NodeScheduleMarker):
                 yield node  # type: ignore[misc]
 
 
+def _dep_overflows_int32(
+    index: sympy.Expr,
+    var_names: tuple[sympy.Symbol, ...],
+    sizes: tuple[sympy.Expr, ...],
+) -> bool:
+    """One dep of ``SIMDKernelFeatures.any_index_expr_overflows_int32``. Memoized
+    only when every free symbol of ``index`` is a loop variable: ``bound_sympy``
+    also reads the current ShapeEnv's range of any other symbol."""
+    if index.free_symbols <= set(var_names):
+        return _dep_overflows_int32_memo(index, var_names, sizes)
+    return _dep_overflows_int32_uncached(index, var_names, sizes)
+
+
+def _dep_overflows_int32_uncached(
+    index: sympy.Expr,
+    var_names: tuple[sympy.Symbol, ...],
+    sizes: tuple[sympy.Expr, ...],
+) -> bool:
+    from torch.utils._sympy.numbers import int_oo
+    from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
+    int32_max = sympy.Integer(2**31 - 1)
+    int32_min = sympy.Integer(-(2**31))
+    try:
+        const_part = index.xreplace(dict.fromkeys(index.free_symbols, sympy.S.Zero))
+        if isinstance(const_part, sympy.Expr) and (
+            const_part > int32_max or const_part < int32_min
+        ):
+            return True
+    except (ZeroDivisionError, TypeError, ValueError):
+        pass
+    if any(getattr(s, "free_symbols", None) for s in sizes):
+        return False
+    try:
+        var_ranges = {
+            var: ValueRanges(0, max(int(size) - 1, 0))
+            for var, size in zip(var_names, sizes)
+        }
+        upper = bound_sympy(index, var_ranges).upper
+        return (
+            isinstance(upper, sympy.Expr)
+            and not upper.has(int_oo, sympy.oo)
+            and bool(upper > int32_max)
+        )
+    except (ZeroDivisionError, TypeError, ValueError):
+        return False
+
+
+_dep_overflows_int32_memo = functools.lru_cache(maxsize=1 << 16)(
+    _dep_overflows_int32_uncached
+)
+
+
 class SIMDKernelFeatures:
     """
     An ordered schedule of nodes that will become a single kernel. A separately
@@ -271,6 +324,17 @@ class SIMDKernelFeatures:
         """
         from torch.utils._sympy.numbers import int_oo
         from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
+        if config.fast_compile_py:
+            # The same deps recur across kernel candidates.
+            return any(
+                _dep_overflows_int32(dep.index, tuple(dep.var_names), tuple(dep.size))
+                for node in self.indexing_scheduler_nodes()
+                for dep in itertools.chain(
+                    node.read_writes.reads, node.read_writes.writes
+                )
+                if isinstance(dep, MemoryDep) and isinstance(dep.index, sympy.Expr)
+            )
 
         int32_max = sympy.Integer(2**31 - 1)
         int32_min = sympy.Integer(-(2**31))

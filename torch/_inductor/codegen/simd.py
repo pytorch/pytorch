@@ -1266,8 +1266,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         simp_index = self.simplify_indexing(index)
 
         singleton_replacements = {}
+        fast = config.fast_compile_py
         for tree in self.active_range_trees():
-            if not V.graph.sizevars.statically_known_equals(tree.numel, 1):
+            numel = tree.numel
+            if fast and isinstance(numel, (int, sympy.Integer)):
+                # Integer numels skip building sympy.Eq.
+                if numel != 1:
+                    continue
+            elif not V.graph.sizevars.statically_known_equals(numel, 1):
                 continue
             # Any active loop var ranging over a singleton extent is
             # semantically equal to zero. Canonicalizing those symbols here is

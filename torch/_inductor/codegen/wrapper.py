@@ -6272,7 +6272,12 @@ class PythonWrapperCodegen(CodeGen):
         old_name = old.get_name()
         new_name = new.get_name()
         del_line = ";"
-        if old_name not in V.graph.get_output_names() and delete_old:
+        outputs = (
+            V.graph.output_names_set()
+            if config.fast_compile_py
+            else V.graph.get_output_names()
+        )
+        if old_name not in outputs and delete_old:
             del_line = f"; {self.make_buffer_free(old)}"
 
         if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():

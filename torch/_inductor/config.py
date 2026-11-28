@@ -1767,6 +1767,12 @@ def decide_compile_worker_mode() -> str:
 # Options: "auto" (detect nogil), "process" (force multiprocessing), "thread" (force threading)
 compile_worker_mode: str = decide_compile_worker_mode()
 
+# Faster equivalents of four compile-time Python hot spots: the per-kernel
+# int32-overflow check, output-name lookups in in-place buffer reuse, the
+# in-place membership check in the scheduler, and singleton range trees in
+# prepare_indexing. The generated code is unchanged.
+fast_compile_py: bool = False
+
 # Whether to quiesce the Triton-compile subprocess pool at the end of each compilation.
 quiesce_async_compile_pool: bool = Config(
     justknob="pytorch/inductor:quiesce_async_compile_pool",
