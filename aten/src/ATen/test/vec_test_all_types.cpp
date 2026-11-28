@@ -1921,13 +1921,16 @@ namespace {
       CACHE_ALIGN VT x_b3[N];
       auto seed = TestSeed();
       ValueGen<RT> generator(RT(-1), RT(1), seed);
+      // The reduced float reductions compute in float, so build the reference
+      // from the rounded inputs; otherwise the input rounding error summed over
+      // N terms can exceed the tolerance when the result cancels to near zero.
       for (const auto i : c10::irange(N)) {
-        x_f1[i] = generator.get();
-        x_f2[i] = generator.get();
-        x_f3[i] = generator.get();
-        x_b1[i] = VT(x_f1[i]);
-        x_b2[i] = VT(x_f2[i]);
-        x_b3[i] = VT(x_f3[i]);
+        x_b1[i] = VT(generator.get());
+        x_b2[i] = VT(generator.get());
+        x_b3[i] = VT(generator.get());
+        x_f1[i] = RT(x_b1[i]);
+        x_f2[i] = RT(x_b2[i]);
+        x_f3[i] = RT(x_b3[i]);
       }
       float atol = 0.01f;
       float rtol = 0.01f;
