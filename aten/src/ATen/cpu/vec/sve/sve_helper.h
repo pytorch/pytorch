@@ -104,8 +104,29 @@ struct SveVecBool {
       return svptrue_b64();
     }
   }
+  // Bit i is set when lane i is false. The false lanes are packed to one
+  // predicate bit per byte and expanded to 0/1 bytes. Multiplying each 64-bit
+  // element by 0x0102040810204080 gathers its 8 bytes into its top byte, and
+  // the table lookup moves those top bytes into the low 64 bits.
   int64_t zero_mask() const {
-    return Vectorized<T>(*this).zero_mask();
+    static_assert(VECTOR_WIDTH <= 64);
+    svbool_t z = ~*this;
+    if constexpr (sizeof(T) == 8) {
+      z = svuzp1_b32(z, svpfalse_b());
+    }
+    if constexpr (sizeof(T) >= 4) {
+      z = svuzp1_b16(z, svpfalse_b());
+    }
+    if constexpr (sizeof(T) >= 2) {
+      z = svuzp1_b8(z, svpfalse_b());
+    }
+    const svuint64_t gathered = svmul_n_u64_x(
+        svptrue_b64(),
+        svreinterpret_u64_u8(svdup_n_u8_z(z, 1)),
+        0x0102040810204080);
+    const vls_uint64_t packed = svreinterpret_u64_u8(
+        svtbl_u8(svreinterpret_u8_u64(gathered), svindex_u8(7, 8)));
+    return packed[0];
   }
 };
 
