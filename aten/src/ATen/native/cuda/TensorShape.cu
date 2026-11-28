@@ -7,6 +7,9 @@
 #include <ATen/native/TensorShape.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/TypeCast.h>
+#include <ATen/native/cuda/MemoryAccess.cuh>
+
+#include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -44,9 +47,27 @@ namespace detail {
 static constexpr int64_t BLOCK_SIZE = 128;
 static constexpr int64_t BYTES_PER_THREAD = 16;
 static constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;
+// 16-byte dst vectors each thread converts per step in the vectorized cast.
+static constexpr int64_t CAST_VECS_PER_THREAD = 2;
+// The same, on SM 10.7 for calls at or above a tuned size, see
+// get_cast_vecs_per_thread.
+static constexpr int64_t SM107_WIDE_CAST_VECS_PER_THREAD = 4;
+static_assert(
+    SM107_WIDE_CAST_VECS_PER_THREAD != CAST_VECS_PER_THREAD,
+    "kernels with SM107_WIDE_CAST_VECS_PER_THREAD compile to a stub outside "
+    "SM 10.x, so the default must use a different value");
 
 static __host__ __device__ inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
+}
+
+// Whether the mixed-dtype copy (bf16 -> fp32 in FSDP) vectorizes a chunk of
+// `chunk_bytes` dst bytes. The host sizes the grid with the same test, so a
+// vectorized chunk gets cast_vecs_per_thread times fewer blocks.
+static __host__ __device__ inline bool is_vectorized_cast(int64_t chunk_bytes) {
+  // Tuned: smaller chunks are faster with the per-element loop.
+  constexpr int64_t kMinVectorizedCastBytes = 8 * 1024;
+  return chunk_bytes >= kMinVectorizedCastBytes;
 }
 
 template <typename T>
@@ -287,10 +308,113 @@ static inline std::vector<int64_t> get_chunk_cat_out_sizes(
   return view_sizes;
 }
 
+// Returns dst element i of a chunk: src element i cast to dst_t, or zero
+// padding past the `actual_num_elems` src elements (src is not read there).
+template <typename dst_t, typename src_t>
+static __device__ inline dst_t cast_or_pad(
+    const src_t* src_ptr,
+    int64_t actual_num_elems,
+    int64_t i) {
+  return i < actual_num_elems
+      ? static_cast_with_inter_type<dst_t, src_t>::apply(src_ptr[i])
+      : static_cast_with_inter_type<dst_t, int>::apply(0);
+}
+
+// Returns dst elements [first_elem, first_elem + vec_size) as one 16-byte
+// vector. Reads src with one vector load when that range has no padding and
+// src is aligned for it, else element by element.
+template <typename dst_t, typename src_t>
+static __device__ inline uint4 cast_or_pad_vec(
+    const src_t* src_ptr,
+    int64_t first_elem,
+    int64_t actual_num_elems) {
+  constexpr int64_t vec_size = BYTES_PER_THREAD / sizeof(dst_t);
+  using src_vec_t = memory::aligned_vector<src_t, vec_size>;
+  uint4 dst_vec;
+  dst_t* dst_elems = reinterpret_cast<dst_t*>(&dst_vec);
+  const src_t* src_vec_ptr = src_ptr + first_elem;
+  if (first_elem + vec_size <= actual_num_elems &&
+      is_aligned<src_vec_t>(src_vec_ptr)) {
+    const src_vec_t src_vec = *reinterpret_cast<const src_vec_t*>(src_vec_ptr);
+#pragma unroll
+    for (int64_t j = 0; j < vec_size; ++j) {
+      dst_elems[j] =
+          static_cast_with_inter_type<dst_t, src_t>::apply(src_vec.val[j]);
+    }
+  } else {
+#pragma unroll
+    for (int64_t j = 0; j < vec_size; ++j) {
+      dst_elems[j] =
+          cast_or_pad<dst_t>(src_ptr, actual_num_elems, first_elem + j);
+    }
+  }
+  return dst_vec;
+}
+
+// Vectorized version of the per-element cast in copy_chunk_with_pad. The dst
+// chunk is split into
+//   head [0, body_begin): elements before the first 16-byte aligned address,
+//   body [body_begin, body_end): 16-byte vectors, stored with stream_store128,
+//   tail [body_end, max_num_elems): the rest, less than one vector.
+// Each thread converts `vecs_per_thread` vectors per step and issues all their
+// loads before any store, to keep more bytes in flight. Only called for chunks
+// is_vectorized_cast accepts, so head and tail lie inside the chunk.
+template <int64_t vecs_per_thread, typename dst_t, typename src_t>
+static __device__ inline void cast_chunk_with_pad_vectorized(
+    dst_t* dst_ptr,
+    const src_t* src_ptr,
+    int64_t max_num_elems,
+    int64_t actual_num_elems,
+    int64_t thread_idx,
+    int64_t num_threads) {
+  constexpr int64_t vec_size = BYTES_PER_THREAD / sizeof(dst_t);
+  int64_t head_bytes, body_bytes;
+  get_aligned_region(
+      reinterpret_cast<char*>(dst_ptr),
+      max_num_elems * sizeof(dst_t),
+      BYTES_PER_THREAD,
+      head_bytes,
+      body_bytes);
+  const int64_t body_begin = head_bytes / sizeof(dst_t);
+  const int64_t num_vecs = body_bytes / BYTES_PER_THREAD;
+  const int64_t body_end = body_begin + num_vecs * vec_size;
+  for (int64_t first_vec = thread_idx; first_vec < num_vecs;
+       first_vec += num_threads * vecs_per_thread) {
+    uint4 vecs[vecs_per_thread];
+#pragma unroll
+    for (int64_t u = 0; u < vecs_per_thread; ++u) {
+      const int64_t v = first_vec + u * num_threads;
+      if (v < num_vecs) {
+        vecs[u] = cast_or_pad_vec<dst_t>(
+            src_ptr, body_begin + v * vec_size, actual_num_elems);
+      }
+    }
+#pragma unroll
+    for (int64_t u = 0; u < vecs_per_thread; ++u) {
+      const int64_t v = first_vec + u * num_threads;
+      if (v < num_vecs) {
+        stream_store128(dst_ptr + body_begin + v * vec_size, vecs[u]);
+      }
+    }
+  }
+  // Head and tail are shorter than a vector, so one pass of threads suffices.
+  if (thread_idx < body_begin) {
+    dst_ptr[thread_idx] =
+        cast_or_pad<dst_t>(src_ptr, actual_num_elems, thread_idx);
+  }
+  const int64_t tail_idx = body_end + thread_idx;
+  if (tail_idx < max_num_elems) {
+    dst_ptr[tail_idx] = cast_or_pad<dst_t>(src_ptr, actual_num_elems, tail_idx);
+  }
+}
+
 // Copy `max_chunk_size` bytes from `src` to `dst` by `num_threads`, and pad
 // zero when `src` size (i.e., actual_chunk_size) is less than `max_chunk_size`.
-// Assume elements of src and dst have the same data type.
-template <typename dst_t, typename src_t>
+// src elements are cast to dst_t when the two types differ, with
+// `cast_vecs_per_thread` vectors per thread per step (0: per element only).
+// torch/csrc/distributed/fsdp/ChunkCat.cu has a copy of this function without
+// the vectorized cast.
+template <typename dst_t, typename src_t, int64_t cast_vecs_per_thread>
 __device__ __inline__ void copy_chunk_with_pad(
     dst_t* dst_ptr,
     src_t* src_ptr,
@@ -299,9 +423,21 @@ __device__ __inline__ void copy_chunk_with_pad(
     int64_t thread_idx,
     int64_t num_threads) {
   // Supports type cast
-  if (!std::is_same_v<dst_t, src_t>) {
+  if constexpr (!std::is_same_v<dst_t, src_t>) {
     const int64_t max_num_elems = max_chunk_size / sizeof(dst_t);
     const int64_t actual_num_elems = actual_chunk_size / sizeof(src_t);
+    if constexpr (cast_vecs_per_thread > 0) {
+      if (is_vectorized_cast(max_chunk_size)) {
+        cast_chunk_with_pad_vectorized<cast_vecs_per_thread>(
+            dst_ptr,
+            src_ptr,
+            max_num_elems,
+            actual_num_elems,
+            thread_idx,
+            num_threads);
+        return;
+      }
+    }
     int64_t elem_index = thread_idx;
     while (elem_index < actual_num_elems) {
       dst_ptr[elem_index] =
@@ -378,7 +514,7 @@ __device__ __inline__ void copy_chunk_with_pad(
 // path for split_with_sizes_copy.out]. In addition, chunk_cat_cuda supports
 // padding via copy_chunk_with_pad when src chunk size is less than dst chunk
 // size.
-template <typename dst_t, typename src_t>
+template <typename dst_t, typename src_t, int64_t cast_vecs_per_thread>
 static __global__ void chunk_cat_cuda_kernel(
     src_t** src,
     dst_t* dst,
@@ -391,6 +527,17 @@ static __global__ void chunk_cat_cuda_kernel(
     int64_t slice_size,
     int64_t chunk_size,
     int64_t dst_to_src_ratio) {
+  if constexpr (cast_vecs_per_thread == SM107_WIDE_CAST_VECS_PER_THREAD) {
+#if __CUDA_ARCH__ / 100 != 10
+    // Only launched on SM 10.7, which can run sm_100 code, so archs outside
+    // SM 10.x compile a stub.
+    CUDA_KERNEL_ASSERT(
+        false &&
+        "chunk_cat_cuda_kernel with SM107_WIDE_CAST_VECS_PER_THREAD "
+        "supports only sm_10x");
+    return;
+#endif
+  }
   const int64_t slice_idx = blockIdx.z;
   const int64_t chunk_idx = blockIdx.y;
   const int64_t tensor_idx = block_idx_to_tensor_idx[blockIdx.x];
@@ -413,7 +560,7 @@ static __global__ void chunk_cat_cuda_kernel(
           actual_tensor_sizes[tensor_idx] -
               chunk_idx * pad_tensor_chunk_sizes[tensor_idx] /
                   dst_to_src_ratio));
-  copy_chunk_with_pad<dst_t, src_t>(
+  copy_chunk_with_pad<dst_t, src_t, cast_vecs_per_thread>(
       reinterpret_cast<dst_t*>(dst_addr),
       reinterpret_cast<src_t*>(src_addr),
       pad_tensor_chunk_sizes[tensor_idx],
@@ -474,6 +621,32 @@ static inline int64_t get_chunk_size(
   return chunk_size;
 }
 
+// Vectors per thread per step for the vectorized chunks of a mixed-dtype call.
+static int64_t get_cast_vecs_per_thread(
+    TensorList tensors,
+    int64_t dim,
+    int64_t num_chunks,
+    int64_t dst_elem_size) {
+#ifdef USE_ROCM
+  return CAST_VECS_PER_THREAD;
+#else
+  const cudaDeviceProp* prop =
+      at::cuda::getDeviceProperties(tensors[0].device().index());
+  if (prop->major != 10 || prop->minor != 7) {
+    return CAST_VECS_PER_THREAD;
+  }
+  // Tuned on SM 10.7 with SM107_WIDE_CAST_VECS_PER_THREAD = 4 and
+  // CAST_VECS_PER_THREAD = 2: the wide one was faster at and above this size,
+  // slower below.
+  constexpr int64_t kMinSm107WideCastBytes = 8 * 1024 * 1024;
+  const int64_t out_bytes =
+      get_chunk_size(tensors, dim, num_chunks, dst_elem_size) * num_chunks *
+      get_leading_dim(tensors[0].sizes(), dim);
+  return out_bytes >= kMinSm107WideCastBytes ? SM107_WIDE_CAST_VECS_PER_THREAD
+                                             : CAST_VECS_PER_THREAD;
+#endif
+}
+
 // Get metadata for chunk_cat.
 std::tuple<
     int64_t,
@@ -492,7 +665,8 @@ get_chunk_cat_metadata(
     int64_t dim,
     int64_t num_chunks,
     int64_t dst_elem_size,
-    int64_t src_elem_size) {
+    int64_t src_elem_size,
+    int64_t cast_vecs_per_thread) {
   TORCH_CHECK(
       dst_elem_size % src_elem_size == 0,
       "get_chunk_cat_metadata error: only support dst_elem_size % src_elem_size == 0");
@@ -525,9 +699,16 @@ get_chunk_cat_metadata(
         pad_size_along_dim * trailing_numel * dst_elem_size / num_chunks;
     pad_tensor_chunk_sizes.push_back(pad_tensor_chunk_size);
     chunk_size += pad_tensor_chunk_size;
-    // Number of blocks required to process this tensor chunk.
+    // Number of blocks required to process this tensor chunk. A vectorized
+    // cast writes cast_vecs_per_thread vectors per thread per step, so it
+    // needs that many times fewer blocks.
+    const bool vectorized_cast = cast_vecs_per_thread > 0 &&
+        detail::is_vectorized_cast(pad_tensor_chunk_size);
+    const int64_t bytes_per_block = vectorized_cast
+        ? detail::BYTES_PER_BLOCK * cast_vecs_per_thread
+        : detail::BYTES_PER_BLOCK;
     const int64_t num_blocks =
-        detail::div_up(pad_tensor_chunk_size, detail::BYTES_PER_BLOCK);
+        detail::div_up(pad_tensor_chunk_size, bytes_per_block);
     num_blocks_per_tensor_chunk.push_back(num_blocks);
     start_block_idx_per_tensor_chunk.push_back(
         start_block_idx_per_tensor_chunk.back() + num_blocks);
@@ -563,6 +744,13 @@ void _chunk_cat_out_cuda_contiguous(
     int64_t dst_elem_size,
     int64_t src_elem_size) {
   const auto device = tensors[0].device();
+  // The vectorized cast's vectors per thread set the grid, so they are chosen
+  // before the metadata, from the inputs.
+  int64_t cast_vecs_per_thread = 0;
+  if constexpr (!std::is_same_v<dst_t, src_t>) {
+    cast_vecs_per_thread =
+        get_cast_vecs_per_thread(tensors, dim, num_chunks, dst_elem_size);
+  }
   // `get_chunk_cat_metadata` must return vectors and `pack_vecs` cannot be
   // moved into `get_chunk_cat_metadata`. Otherwise `packed` would point to
   // vectors allocated inside `get_chunk_cat_metadata` which become out of local
@@ -580,7 +768,12 @@ void _chunk_cat_out_cuda_contiguous(
        pad_tensor_chunk_sizes,
        num_blocks_per_tensor_chunk] =
           get_chunk_cat_metadata(
-              tensors, dim, num_chunks, dst_elem_size, src_elem_size);
+              tensors,
+              dim,
+              num_chunks,
+              dst_elem_size,
+              src_elem_size,
+              cast_vecs_per_thread);
   auto packed = pack_vecs(
       {&srcs,
        &block_idx_to_tensor_idx,
@@ -595,23 +788,38 @@ void _chunk_cat_out_cuda_contiguous(
   at::native::resize_output(out, view_sizes);
   dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
   dim3 threads(detail::BLOCK_SIZE, 1, 1);
-  detail::chunk_cat_cuda_kernel<<<
-      blocks,
-      threads,
-      0,
-      at::cuda::getCurrentCUDAStream()>>>(
-      /*srcs=*/reinterpret_cast<src_t**>(packed.second[0]),
-      reinterpret_cast<dst_t*>(out.data_ptr()),
-      /*block_idx_to_tensor_idx=*/packed.second[1],
-      /*tensor_idx_to_start_tensor_bytes=*/packed.second[2],
-      /*start_block_idx_per_tensor_chunk=*/packed.second[3],
-      /*actual_tensor_sizes=*/packed.second[4],
-      /*pad_tensor_chunk_sizes=*/packed.second[5],
-      /*num_blocks_per_tensor_chunk=*/packed.second[6],
-      slice_size,
-      chunk_size,
-      dst_elem_size / src_elem_size);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  auto launch = [&](auto kernel) {
+    kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+        /*srcs=*/reinterpret_cast<src_t**>(packed.second[0]),
+        reinterpret_cast<dst_t*>(out.data_ptr()),
+        /*block_idx_to_tensor_idx=*/packed.second[1],
+        /*tensor_idx_to_start_tensor_bytes=*/packed.second[2],
+        /*start_block_idx_per_tensor_chunk=*/packed.second[3],
+        /*actual_tensor_sizes=*/packed.second[4],
+        /*pad_tensor_chunk_sizes=*/packed.second[5],
+        /*num_blocks_per_tensor_chunk=*/packed.second[6],
+        slice_size,
+        chunk_size,
+        dst_elem_size / src_elem_size);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  };
+  // Calls whose chunks are all below the threshold launch the kernel without
+  // the vector code: its setup alone slows those latency-bound calls down.
+  if constexpr (std::is_same_v<dst_t, src_t>) {
+    launch(chunk_cat_cuda_kernel<dst_t, src_t, 0>);
+  } else if (!std::any_of(
+                 pad_tensor_chunk_sizes.begin(),
+                 pad_tensor_chunk_sizes.end(),
+                 is_vectorized_cast)) {
+    launch(chunk_cat_cuda_kernel<dst_t, src_t, 0>);
+#ifndef USE_ROCM
+  } else if (cast_vecs_per_thread == SM107_WIDE_CAST_VECS_PER_THREAD) {
+    launch(
+        chunk_cat_cuda_kernel<dst_t, src_t, SM107_WIDE_CAST_VECS_PER_THREAD>);
+#endif
+  } else {
+    launch(chunk_cat_cuda_kernel<dst_t, src_t, CAST_VECS_PER_THREAD>);
+  }
 }
 
 } // namespace detail
