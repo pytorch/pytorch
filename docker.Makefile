@@ -92,50 +92,41 @@ DOCKER_PUSH               = docker push $(DOCKER_FULL_NAME):$(DOCKER_TAG)
 .PHONY: all
 all: devel-image
 
+DEVEL_TAG                 = $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-devel
+ifeq ("$(CUDA_VERSION_SHORT)","cpu")
+RUNTIME_TAG               = $(PYTORCH_VERSION)-runtime
+else
+RUNTIME_TAG               = $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-runtime
+endif
+
+devel-image devel-push print-devel-image-ref: DOCKER_TAG := $(DEVEL_TAG)
+runtime-image runtime-push print-runtime-image-ref: DOCKER_TAG := $(RUNTIME_TAG)
+
+.PHONY: print-devel-image-ref print-runtime-image-ref
+print-devel-image-ref print-runtime-image-ref:
+	@printf '%s\n' '$(DOCKER_FULL_NAME):$(DOCKER_TAG)'
+
 .PHONY: devel-image
 devel-image: BASE_IMAGE := $(BASE_DEVEL)
 devel-image: BUILD_TYPE := dev
-devel-image: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-devel
 devel-image:
 	$(DOCKER_BUILD)
 
 .PHONY: devel-push
 devel-push: BASE_IMAGE := $(BASE_DEVEL)
-devel-push: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-devel
 devel-push:
 	$(DOCKER_PUSH)
 
-ifeq ("$(CUDA_VERSION_SHORT)","cpu")
-
 .PHONY: runtime-image
 runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
 runtime-image: BUILD_TYPE := official
-runtime-image: DOCKER_TAG := $(PYTORCH_VERSION)-runtime
 runtime-image:
 	$(DOCKER_BUILD)
 
 .PHONY: runtime-push
 runtime-push: BASE_IMAGE := $(BASE_RUNTIME)
-runtime-push: DOCKER_TAG := $(PYTORCH_VERSION)-runtime
 runtime-push:
 	$(DOCKER_PUSH)
-
-else
-
-.PHONY: runtime-image
-runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
-runtime-image: BUILD_TYPE := official
-runtime-image: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-runtime
-runtime-image:
-	$(DOCKER_BUILD)
-
-.PHONY: runtime-push
-runtime-push: BASE_IMAGE := $(BASE_RUNTIME)
-runtime-push: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-runtime
-runtime-push:
-	$(DOCKER_PUSH)
-
-endif
 
 .PHONY: clean
 clean:
