@@ -105,6 +105,117 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(params, opt_params)
 
+    def test_init_group_with_int_step(self):
+        class IntStepOptimizer(torch.optim.Optimizer):
+            def __init__(self, params, lr=1e-2):
+                super().__init__(params, {"lr": lr})
+
+            def _init_group(self, group):
+                for p in group["params"]:
+                    if not self.state[p]:
+                        self.state[p]["step"] = 0
+
+            def step(self):
+                for group in self.param_groups:
+                    self._init_group(group)
+                    for p in group["params"]:
+                        if p.grad is not None:
+                            self.state[p]["step"] += 1
+                            p.data.add_(p.grad, alpha=-group["lr"])
+
+        for warm_start in (False, True):
+            with self.subTest(warm_start=warm_start):
+                torch._dynamo.reset()
+                p_eager = Parameter(torch.ones(4, 4))
+                p_compiled = Parameter(torch.ones(4, 4))
+                p_eager.grad = torch.ones_like(p_eager)
+                p_compiled.grad = torch.ones_like(p_compiled)
+
+                opt_eager = IntStepOptimizer([p_eager])
+                opt_compiled = IntStepOptimizer([p_compiled])
+                cnts = torch._dynamo.testing.CompileCounter()
+                compiled_step = torch.compile(
+                    opt_compiled.step, backend=cnts, fullgraph=True
+                )
+
+                if warm_start:
+                    # Warm up eagerly so state["step"] is an int before tracing
+                    opt_eager.step()
+                    opt_compiled.step()
+                for _ in range(5):
+                    opt_eager.step()
+                    compiled_step()
+
+                expected_step = 6 if warm_start else 5
+                self.assertEqual(p_compiled, p_eager)
+                self.assertIs(type(opt_compiled.state[p_compiled]["step"]), int)
+                self.assertEqual(
+                    opt_compiled.state[p_compiled]["step"],
+                    opt_eager.state[p_eager]["step"],
+                )
+                self.assertEqual(opt_compiled.state[p_compiled]["step"], expected_step)
+                self.assertEqual(cnts.frame_count, 2)
+
+    def test_init_group_list_args_with_int_step(self):
+        class ListIntStepOptimizer(torch.optim.Optimizer):
+            def __init__(self, params, lr=1e-2, mutate_in_init=False):
+                super().__init__(params, {"lr": lr})
+                self.mutate_in_init = mutate_in_init
+
+            def _init_group(self, group, params, steps):
+                for p in group["params"]:
+                    params.append(p)
+                    state = self.state[p]
+                    if not state:
+                        state["step"] = 0
+                    if self.mutate_in_init:
+                        state["step"] += 1
+                    steps.append(state["step"])
+
+            def step(self):
+                for group in self.param_groups:
+                    params = []
+                    steps = []
+                    self._init_group(group, params, steps)
+                    for p, step in zip(params, steps):
+                        if not self.mutate_in_init:
+                            step += 1
+                            self.state[p]["step"] = step
+                        if p.grad is not None:
+                            p.data.add_(p.grad, alpha=-group["lr"] * step)
+
+        for mutate_in_init in (False, True):
+            with self.subTest(mutate_in_init=mutate_in_init):
+                torch._dynamo.reset()
+                p_eager = Parameter(torch.ones(4, 4))
+                p_compiled = Parameter(torch.ones(4, 4))
+                p_eager.grad = torch.ones_like(p_eager)
+                p_compiled.grad = torch.ones_like(p_compiled)
+
+                opt_eager = ListIntStepOptimizer(
+                    [p_eager], mutate_in_init=mutate_in_init
+                )
+                opt_compiled = ListIntStepOptimizer(
+                    [p_compiled], mutate_in_init=mutate_in_init
+                )
+                cnts = torch._dynamo.testing.CompileCounter()
+                compiled_step = torch.compile(
+                    opt_compiled.step, backend=cnts, fullgraph=True
+                )
+
+                for _ in range(5):
+                    opt_eager.step()
+                    compiled_step()
+
+                self.assertEqual(p_compiled, p_eager)
+                self.assertIs(type(opt_compiled.state[p_compiled]["step"]), int)
+                self.assertEqual(
+                    opt_compiled.state[p_compiled]["step"],
+                    opt_eager.state[p_eager]["step"],
+                )
+                self.assertEqual(opt_compiled.state[p_compiled]["step"], 5)
+                self.assertEqual(cnts.frame_count, 3)
+
     def test_stock_optimizer_init_group_after_disable_patch(self):
         # TorchPatcher wraps stock Optimizer._init_group with compiler.disable.
         # Compiling the inner step must still constant-fold _init_group via
