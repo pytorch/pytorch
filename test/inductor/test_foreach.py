@@ -10,15 +10,23 @@ from torch._higher_order_ops import foreach_map
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
+from torch.testing._internal.inductor_utils import (
+    clone_preserve_strides_offset,
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    requires_triton,
+)
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._pytree import tree_flatten
 
 
@@ -188,28 +196,72 @@ foreach_map_un_ops = parametrize(
 decomp_ops = parametrize("op", compose_ops, name_fn=lambda f: f.__name__)
 
 
-def gen_args(op):
+def gen_args(op, device):
     if op in un_ops_under_test:
         return (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
     elif op in bin_ops_under_test:
         return (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
     else:
         return (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
         )
+
+
+def check_model_on_device(
+    self,
+    model,
+    example_inputs,
+    kwargs=None,
+    *,
+    device,
+    check_lowp=True,
+    **check_model_kwargs,
+):
+    """Device-aware port of test_torchinductor.check_model_gpu.
+
+    check_model_gpu places the inputs and runs the extra fp16 check on the
+    process-wide GPU_TYPE. Tests in this file get their device injected, so
+    keep both behaviours but apply them to that device.
+    """
+    kwargs = kwargs or {}
+    if hasattr(model, "to"):
+        model = model.to(device=device)
+    example_inputs = tuple(
+        clone_preserve_strides_offset(x, device=device) for x in example_inputs
+    )
+    with torch._inductor.config.patch("triton.cudagraphs", False):
+        check_model(self, model, example_inputs, kwargs, **check_model_kwargs)
+        if check_lowp:
+
+            def downcast_fn(x):
+                if not isinstance(x, torch.Tensor) or x.dtype != torch.float:
+                    return x
+                return torch.empty_strided(
+                    x.size(), x.stride(), device=device, dtype=torch.half
+                ).copy_(x)
+
+            if hasattr(model, "to"):
+                model = model.to(torch.half)
+            check_model(
+                self,
+                model,
+                tuple(map(downcast_fn, example_inputs)),
+                kwargs,
+                **check_model_kwargs,
+            )
 
 
 @instantiate_parametrized_tests
@@ -244,7 +296,7 @@ class ForeachTests(TestCase):
 
         self.check_model_gpu(
             fn,
-            gen_args(op),
+            gen_args(op, GPU_TYPE),
         )
 
     def _test_single_scalar(self, op):
@@ -270,14 +322,6 @@ class ForeachTests(TestCase):
                 torch.rand(20, 20, device=GPU_TYPE),
             ),
         )
-
-    # called in test_gpu_cpp_wrapper.py
-    @requires_gpu
-    def test_foreach_cpp_wrapper_cuda(self):
-        self._test_single_list(op=torch._foreach_add)
-
-    # called in test_gpu_cpp_wrapper.py
-    test_foreach_cpp_wrapper_xpu = test_foreach_cpp_wrapper_cuda
 
     @requires_gpu
     @all_ops
@@ -320,7 +364,7 @@ class ForeachTests(TestCase):
 
         self.check_model_gpu(
             fn,
-            gen_args(op),
+            gen_args(op, GPU_TYPE),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -595,7 +639,7 @@ class ForeachTests(TestCase):
 
         self.check_model_gpu(
             fn,
-            gen_args(op),
+            gen_args(op, GPU_TYPE),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -642,7 +686,7 @@ class ForeachTests(TestCase):
                 return op([a0, a1], [b0, b1], [c0, c1])
 
         self.check_model_gpu(
-            fn, gen_args(op), reference_in_float=False, check_lowp=False
+            fn, gen_args(op, GPU_TYPE), reference_in_float=False, check_lowp=False
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -702,7 +746,7 @@ class ForeachTests(TestCase):
 
         self.check_model_gpu(
             fn,
-            gen_args(op),
+            gen_args(op, GPU_TYPE),
             reference_in_float=False,
             check_lowp=False,
         )
@@ -807,46 +851,6 @@ class ForeachTests(TestCase):
                 ComboKernel._update_partition(state, 1, i, is_dynamic)
         state.finalize()
         self.assertEqual(state.partitions, [[0, 1, 2, 3, 4], [5, 6]])
-
-    @requires_gpu
-    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
-    @torch._dynamo.config.patch("assume_static_by_default", False)
-    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
-    @torch._inductor.config.patch("cpp_wrapper", True)
-    def test_enable_dynamic_shapes_cpp_wrapper_cuda(self, op=torch._foreach_add):
-        def fn(a0, a1, b0, b1):
-            return op([a0, a1], [b0, b1])
-
-        inputs = (
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-            torch.rand(10, 10, device=GPU_TYPE),
-            torch.rand(20, 20, device=GPU_TYPE),
-        )
-
-        self.check_model_gpu(fn, inputs)
-
-    # called in test_gpu_cpp_wrapper.py
-    test_enable_dynamic_shapes_cpp_wrapper_xpu = (
-        test_enable_dynamic_shapes_cpp_wrapper_cuda
-    )
-
-    @unittest.skipIf(IS_FBCODE, "cpp compile not supported in fbcode")
-    @bin_ops
-    def test_cpu_cpp_fallback(self, op):
-        def fn(a0, a1, b0, b1):
-            return op([a0, a1], [b0, b1])
-
-        inputs = (
-            torch.rand(10, 10, device="cpu"),
-            torch.rand(20, 20, device="cpu"),
-            torch.rand(10, 10, device="cpu"),
-            torch.rand(20, 20, device="cpu"),
-        )
-
-        self.check_model_cpu(fn, inputs)
-
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu
     @decomp_ops
@@ -1575,79 +1579,6 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
-    @requires_cuda_and_triton
-    @config.patch({"emulate_precision_casts": True})
-    def test_foreach_addcmul_fma_bitwise_equal(self):
-        """Test that _foreach_addcmul with FMA lowering produces bitwise equal results to eager."""
-        self_tensors = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
-        ]
-        tensor1_list = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
-        ]
-        tensor2_list = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
-        ]
-
-        # ROCm may have small numerical differences
-        # For some reason ROCm isn't bitwise equivalent between eager and compiled
-        atol = 1e-5 if TEST_WITH_ROCM else 0
-        rtol = 1e-5 if TEST_WITH_ROCM else 0
-
-        # Test with default value=1
-        eager_result = torch._foreach_addcmul(self_tensors, tensor1_list, tensor2_list)
-
-        @torch.compile
-        def fn(s, t1, t2):
-            return torch._foreach_addcmul(s, t1, t2)
-
-        compiled_result = fn(self_tensors, tensor1_list, tensor2_list)
-        for eager, compiled in zip(eager_result, compiled_result):
-            self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
-
-        # Test with value != 1
-        eager_result2 = torch._foreach_addcmul(
-            self_tensors, tensor1_list, tensor2_list, value=2.5
-        )
-
-        @torch.compile
-        def fn2(s, t1, t2):
-            return torch._foreach_addcmul(s, t1, t2, value=2.5)
-
-        compiled_result2 = fn2(self_tensors, tensor1_list, tensor2_list)
-        for eager, compiled in zip(eager_result2, compiled_result2):
-            self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
-
-    @requires_cuda_and_triton
-    @config.patch({"emulate_precision_casts": True})
-    def test_foreach_addcmul_uses_fma_instruction(self):
-        """Test that _foreach_addcmul generates code using FMA instruction."""
-        from torch._inductor.utils import run_and_get_code
-
-        self_tensors = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
-        ]
-        tensor1_list = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
-        ]
-        tensor2_list = [
-            torch.randn(64, 64, device=GPU_TYPE),
-            torch.randn(32, 32, device=GPU_TYPE),
-        ]
-
-        @torch.compile
-        def fn(s, t1, t2):
-            return torch._foreach_addcmul(s, t1, t2, value=2.0)
-
-        _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
-        code = " ".join(code)
-        self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
-
     @requires_gpu
     def test_foreach_sub(self):
         def fn(a, b):
@@ -1682,8 +1613,123 @@ class ForeachTests(TestCase):
         actual = torch.compile(fn)(*args_clone)
         self.assertEqual(actual, expected)
 
-    @requires_cuda_and_triton
-    def test_foreach_pow_int_fallback(self):
+
+@instantiate_parametrized_tests
+class ForeachTestsCpu(TestCase):
+    hw_classification = HardwareClassification.CPU
+    check_model_cpu = check_model
+    check_kernel_count = True
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._inductor.metrics.reset()
+
+    @unittest.skipIf(IS_FBCODE, "cpp compile not supported in fbcode")
+    @bin_ops
+    def test_cpu_cpp_fallback(self, op):
+        def fn(a0, a1, b0, b1):
+            return op([a0, a1], [b0, b1])
+
+        inputs = (
+            torch.rand(10, 10, device="cpu"),
+            torch.rand(20, 20, device="cpu"),
+            torch.rand(10, 10, device="cpu"),
+            torch.rand(20, 20, device="cpu"),
+        )
+
+        self.check_model_cpu(fn, inputs)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+
+@requires_triton()
+class ForeachTestsCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._inductor.metrics.reset()
+
+    @config.patch({"emulate_precision_casts": True})
+    def test_foreach_addcmul_fma_bitwise_equal(self, device):
+        """Test that _foreach_addcmul with FMA lowering produces bitwise equal results to eager."""
+        self_tensors = [
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
+        ]
+        tensor1_list = [
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
+        ]
+        tensor2_list = [
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
+        ]
+
+        # ROCm may have small numerical differences
+        # For some reason ROCm isn't bitwise equivalent between eager and compiled
+        atol = 1e-5 if TEST_WITH_ROCM else 0
+        rtol = 1e-5 if TEST_WITH_ROCM else 0
+
+        # Test with default value=1
+        eager_result = torch._foreach_addcmul(self_tensors, tensor1_list, tensor2_list)
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2)
+
+        compiled_result = fn(self_tensors, tensor1_list, tensor2_list)
+        for eager, compiled in zip(eager_result, compiled_result):
+            self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
+
+        # Test with value != 1
+        eager_result2 = torch._foreach_addcmul(
+            self_tensors, tensor1_list, tensor2_list, value=2.5
+        )
+
+        @torch.compile
+        def fn2(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2, value=2.5)
+
+        compiled_result2 = fn2(self_tensors, tensor1_list, tensor2_list)
+        for eager, compiled in zip(eager_result2, compiled_result2):
+            self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
+
+    @config.patch({"emulate_precision_casts": True})
+    def test_foreach_addcmul_uses_fma_instruction(self, device):
+        """Test that _foreach_addcmul generates code using FMA instruction."""
+        from torch._inductor.utils import run_and_get_code
+
+        self_tensors = [
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
+        ]
+        tensor1_list = [
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
+        ]
+        tensor2_list = [
+            torch.randn(64, 64, device=device),
+            torch.randn(32, 32, device=device),
+        ]
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2, value=2.0)
+
+        _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
+        code = " ".join(code)
+        self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
+
+    def test_foreach_pow_int_fallback(self, device):
         from torch._inductor import scheduler
 
         def fn_inplace(t, e):
@@ -1702,8 +1748,8 @@ class ForeachTests(TestCase):
             create_foreach_nodes_calls += 1
             return orig_create_foreach_nodes(self)
 
-        t = [torch.tensor([2], device=GPU_TYPE, dtype=torch.int32)]
-        e = [torch.tensor(3, device=GPU_TYPE, dtype=torch.int32)]
+        t = [torch.tensor([2], device=device, dtype=torch.int32)]
+        e = [torch.tensor(3, device=device, dtype=torch.int32)]
         with mock.patch.object(
             scheduler.Scheduler, "create_foreach_nodes", create_foreach_nodes_spy
         ):
@@ -1716,6 +1762,72 @@ class ForeachTests(TestCase):
                 torch.compile(fn_outplace)([t[0].clone()], e),
             )
         self.assertGreaterEqual(create_foreach_nodes_calls, 2)
+
+
+@requires_triton()
+class ForeachCppWrapperTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    check_model = check_model_on_device
+    check_kernel_count = True
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._inductor.metrics.reset()
+
+    # called in test_gpu_cpp_wrapper.py
+    def test_foreach_cpp_wrapper(self, device):
+        self._test_single_list_gpu(op=torch._foreach_add, device=device)
+
+    def _test_single_list_gpu(self, op, device):
+        if op in un_ops_under_test:
+
+            def fn(a0, a1):
+                return op([a0, a1])
+
+        elif op in bin_ops_under_test:
+
+            def fn(a0, a1, b0, b1):
+                return op([a0, a1], [b0, b1])
+
+        else:
+
+            def fn(a0, a1, b0, b1, c0, c1):
+                return op([a0, a1], [b0, b1], [c0, c1])
+
+        self.check_model(
+            fn,
+            gen_args(op, device),
+            device=device,
+        )
+
+    # called in test_gpu_cpp_wrapper.py
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_enable_dynamic_shapes_cpp_wrapper(self, device, op=torch._foreach_add):
+        def fn(a0, a1, b0, b1):
+            return op([a0, a1], [b0, b1])
+
+        inputs = (
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+        )
+
+        self.check_model(fn, inputs, device=device)
+
+
+instantiate_device_type_tests(ForeachTestsCuda, globals(), only_for="cuda")
+
+instantiate_device_type_tests(
+    ForeachCppWrapperTests, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
