@@ -3784,6 +3784,38 @@ class TestPruneSkipsAtCollection(TestCase):
 
 
 class TestTestParametrizationDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_preserves_non_test_descriptors(self, device):
+        class TestParametrized(TestCase):
+            @staticmethod
+            def static_helper(x, y):
+                return x, y
+
+            @classmethod
+            def class_helper(cls):
+                return cls.device_type
+
+            def test_device_specific(self, device):
+                pass
+
+        device_type = torch.device(device).type
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(
+            TestParametrized, locals_dict, only_for=device_type
+        )
+
+        device_cls = locals_dict[f"TestParametrized{device_type.upper()}"]
+        self.assertIsInstance(
+            inspect.getattr_static(device_cls, "static_helper"), staticmethod
+        )
+        self.assertIsInstance(
+            inspect.getattr_static(device_cls, "class_helper"), classmethod
+        )
+        test = device_cls(f"test_device_specific_{device_type}")
+        self.assertEqual(test.static_helper(1, 2), (1, 2))
+        self.assertEqual(test.class_helper(), device_type)
+
     def test_unparametrized_names(self, device):
         # This test exists to protect against regressions in device / dtype test naming
         # due to parametrization logic.
