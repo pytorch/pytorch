@@ -1,8 +1,10 @@
 # Owner(s): ["module: dynamo"]
 
+import ast
 import asyncio
 import logging
 import operator
+import random
 import re
 import sys
 import time
@@ -1120,6 +1122,35 @@ from user code:
             ),
             expected,
         )
+
+    def test_data_dependent_branching_empty_partial_graph(self):
+        def fn():
+            # The random value becomes a placeholder without adding a body statement.
+            if random.randrange(2):
+                return 1
+            return 0
+
+        with self.assertRaisesRegex(Unsupported, "Data-dependent") as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+        partial_graph = cm.exception.partial_fx_graph
+        ast.parse(partial_graph)
+        self.assertIn("pass", partial_graph)
+
+    def test_data_dependent_branching_nonempty_partial_graph(self):
+        def fn(x):
+            x = x + 1
+            if x:
+                return x.sin()
+            return x.cos()
+
+        with self.assertRaisesRegex(Unsupported, "Data-dependent") as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1.0))
+
+        partial_graph = cm.exception.partial_fx_graph
+        ast.parse(partial_graph)
+        self.assertIn("+ 1", partial_graph)
+        self.assertIn("f32[][]cpu", partial_graph)
 
     def test_data_dependent_branching_fullgraph(self):
         def fn(x):

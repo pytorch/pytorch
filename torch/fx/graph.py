@@ -1072,12 +1072,6 @@ class CodeGen:
         if record_func:
             body.append("_rf.__exit__(None, None, None)\n")
 
-        if len(body) == 0:
-            # If the Graph has no non-placeholder nodes, no lines for the body
-            # have been emitted. To continue to have valid Python code, emit a
-            # single pass statement
-            body.append("pass\n")
-
         if len(wrapped_fns) > 0:
             wrap_name = add_global("wrap", torch.fx.wrap)
             wrap_stmts = "\n".join([f'{wrap_name}("{name}")' for name in wrapped_fns])
@@ -1111,6 +1105,11 @@ class CodeGen:
                 new_lines.append(line)
 
         code = "\n".join(new_lines).lstrip("\n")
+        if not any(
+            line.strip() and not line.lstrip().startswith("#") for line in new_lines
+        ):
+            # Placeholder-only graphs can contain comments but no executable statements.
+            code += "\npass"
         code = "\n".join("    " + line for line in code.split("\n"))
 
         fn_code = f"""
