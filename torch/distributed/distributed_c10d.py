@@ -2591,6 +2591,11 @@ def _get_split_source(
     parent's backend implementation, so a request for a different backend must
     create a fresh communicator instead. In particular, non-members must not
     issue a NOCOLOR split on the parent when members will create a fresh backend.
+
+    A split source must also expose ``perform_nocolor_split``, which
+    non-members call on the parent when they are excluded from the new group.
+    Backends without it (e.g. Gloo) fall back to creating a fresh
+    communicator.
     """
     split_from = None
     if pg.bound_device_id:
@@ -2632,6 +2637,8 @@ def _get_split_source(
         or requested_backend_name is None
         or parent_backend_name != requested_backend_name
     ):
+        return None
+    if not hasattr(split_from, "perform_nocolor_split"):
         return None
     return split_from
 
