@@ -44,6 +44,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool compiledWithMIOpen() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
   bool supportsDepthwiseConvolutionWithCuDNN() const override;
+  bool supportsGroupedDilatedConvolutionWithMIOpen() const override;
   bool supportsBFloat16ConvolutionWithCuDNNv8() const override;
   bool supportsBFloat16RNNWithCuDNN() const override;
   bool hasCUDART() const override;

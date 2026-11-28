@@ -162,6 +162,10 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
+  virtual bool supportsGroupedDilatedConvolutionWithMIOpen() const {
+    return false;
+  }
+
   virtual bool supportsBFloat16ConvolutionWithCuDNNv8() const {
     return false;
   }
