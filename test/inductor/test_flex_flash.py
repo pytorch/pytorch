@@ -44,6 +44,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     decorateIf,
     DeterministicGuard,
+    HardwareClassification,
     parametrize,
 )
 
@@ -914,6 +915,8 @@ GQA_MQA_BLOCK_MASK_CASES = [
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
 )
 class TestFlexFlash(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM8X
     @xfailIfSM120OrLater
@@ -2618,6 +2621,8 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
     plus backward, batch, and length variants.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     def _run_dynamic_test(
         self, seq_lens, score_mod=None, block_mask_factory=None, requires_grad=False
     ):
@@ -3216,7 +3221,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
 
 
-class TestHierarchicalIndex(InductorTestCase):
+class TestHierarchicalIndexGeneric(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_flash_attention_unavailable_message_has_install_link(self):
         message = _flash_attention_unavailable_message()
         self.assertIn("pip install --pre flash-attn-4", message)
@@ -3290,6 +3297,10 @@ class TestHierarchicalIndex(InductorTestCase):
         with self.assertRaises(AssertionError) as ctx:
             indexer([b])
         self.assertIn("Rank mismatch", str(ctx.exception))
+
+
+class TestHierarchicalIndexCuda(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM8X
