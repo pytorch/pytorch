@@ -12,9 +12,8 @@
 
 namespace {
 
-// Runs fn, turning a C++ exception into a Python RuntimeError. A Python error
-// that is already pending is left alone, so a conversion that leaks the Python
-// error indicator surfaces as a different exception type.
+// Runs fn, preserving a pending CPython exception on failure or setting a
+// RuntimeError from the C++ diagnostic when no Python error is pending.
 template <typename F>
 PyObject* call(F&& fn) {
   try {
@@ -69,6 +68,18 @@ PyObject* double_roundtrip(PyObject* /*self*/, PyObject* obj) {
   });
 }
 
+PyObject* double_error_message(PyObject* /*self*/, PyObject* obj) {
+  try {
+    torch::stable::double_from_pyobject(obj);
+  } catch (const std::exception& error) {
+    // Model a C++ caller handling the failure rather than propagating PyErr.
+    PyErr_Clear();
+    return PyUnicode_FromString(error.what());
+  }
+  PyErr_SetString(PyExc_ValueError, "expected double conversion to fail");
+  return nullptr;
+}
+
 PyMethodDef methods[] = {
     {"layout_roundtrip", layout_roundtrip, METH_O, nullptr},
     {"tensor_layout", tensor_layout, METH_O, nullptr},
@@ -76,6 +87,7 @@ PyMethodDef methods[] = {
     {"bool_roundtrip", bool_roundtrip, METH_O, nullptr},
     {"int64_roundtrip", int64_roundtrip, METH_O, nullptr},
     {"double_roundtrip", double_roundtrip, METH_O, nullptr},
+    {"double_error_message", double_error_message, METH_O, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyModuleDef moduledef = {

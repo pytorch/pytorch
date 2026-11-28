@@ -5,6 +5,8 @@
 
 #include <torch/csrc/PyObjectConversion.h>
 
+#include <c10/util/ScopeExit.h>
+
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -15,9 +17,24 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
+#include <utility>
+
 namespace torch::detail {
 
 namespace {
+
+// Give C++ error-code callers the CPython diagnostic without consuming the
+// pending Python exception that Python-facing callers propagate.
+template <typename F>
+auto with_python_error_message(F&& fn) {
+  try {
+    return std::forward<F>(fn)();
+  } catch (python_error& error) {
+    auto restore = c10::make_scope_exit([&] { error.restore(); });
+    error.persist();
+    throw;
+  }
+}
 
 struct ConcretePyObjectConversion final : PyObjectConversionInterface {
   bool is_tensor_pyobject(PyObject* obj) const override {
@@ -199,16 +216,18 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         THPUtils_checkLong(obj),
         "torch_int64_from_pyobject: expected int, got ",
         Py_TYPE(obj)->tp_name);
-    return THPUtils_unpackLong(obj);
+    return with_python_error_message([&] { return THPUtils_unpackLong(obj); });
   }
 
   PyObject* int64_to_pyobject(int64_t value) const override {
     TORCH_CHECK(
         PyGILState_Check(),
         "torch_int64_to_pyobject requires the GIL to be held");
-    PyObject* py = THPUtils_packInt64(value);
-    TORCH_CHECK_PYTHON(py != nullptr);
-    return py;
+    return with_python_error_message([&] {
+      PyObject* py = THPUtils_packInt64(value);
+      TORCH_CHECK_PYTHON(py != nullptr);
+      return py;
+    });
   }
 
   double double_from_pyobject(PyObject* obj) const override {
@@ -220,16 +239,19 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         THPUtils_checkDouble(obj),
         "torch_double_from_pyobject: expected float, got ",
         Py_TYPE(obj)->tp_name);
-    return THPUtils_unpackDouble(obj);
+    return with_python_error_message(
+        [&] { return THPUtils_unpackDouble(obj); });
   }
 
   PyObject* double_to_pyobject(double value) const override {
     TORCH_CHECK(
         PyGILState_Check(),
         "torch_double_to_pyobject requires the GIL to be held");
-    PyObject* py = PyFloat_FromDouble(value);
-    TORCH_CHECK_PYTHON(py != nullptr);
-    return py;
+    return with_python_error_message([&] {
+      PyObject* py = PyFloat_FromDouble(value);
+      TORCH_CHECK_PYTHON(py != nullptr);
+      return py;
+    });
   }
 };
 
