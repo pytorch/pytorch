@@ -63,7 +63,7 @@ TEST(XPUDeviceTest, PointerGetDevice) {
 
   ptr = sycl::malloc_host(8, context);
   // Host USM isn't bound to a device; which index is reported is up to
-  // implmentation.
+  // implementation.
   auto device_index = c10::xpu::get_device_idx_from_pointer(ptr);
   EXPECT_TRUE(device_index >= 0 && device_index < c10::xpu::device_count());
   sycl::free(ptr, context);
