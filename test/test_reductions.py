@@ -3850,6 +3850,18 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(result_eager.shape, result_compiled.shape)
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
+    @onlyCUDA
+    @dtypes(*floating_types_and(torch.float16, torch.bfloat16))
+    def test_cumsum_preserves_signed_zero_cuda(self, device, dtype):
+        # 1D scan (cub path)
+        x_1d = torch.full((4,), -0.0, device=device, dtype=dtype)
+        self.assertTrue(torch.signbit(torch.cumsum(x_1d, dim=0)).all())
+
+        # 2D outer scan (dim=0) and innermost scan (dim=1)
+        x_2d = torch.full((3, 4), -0.0, device=device, dtype=dtype)
+        for dim in (0, 1):
+            self.assertTrue(torch.signbit(torch.cumsum(x_2d, dim=dim)).all())
+
 class TestReductionsOnCPU(TestCase):
     hw_classification = HardwareClassification.CPU
 
