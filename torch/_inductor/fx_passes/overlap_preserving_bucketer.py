@@ -144,6 +144,7 @@ class OverlapPreservingBucketer:
         bucket_mode: BucketMode | None = None,
         bucket_exposed_first: bool | None = None,
         bucket_only_internode_comms: bool = False,
+        mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -158,10 +159,15 @@ class OverlapPreservingBucketer:
         self.collective_bucketing = collective_bucketing
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
+        self.mutation_deps = mutation_deps
 
         # Compute ancestors including original graph edges and hiding interval dependencies
         self.node_ancestors = self._compute_node_ancestors()
         self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
+        if mutation_deps is not None:
+            for node, deps in mutation_deps.items():
+                for dep in deps:
+                    self.aug_graph.add_extra_dep(n=node, dep=dep)
 
         # Build timelines and add constraints to aug_graph
         self.pg_to_timeline_head: dict[str, PGEvent | None] = self.build_timelines()
@@ -170,6 +176,9 @@ class OverlapPreservingBucketer:
     def _compute_node_ancestors(self) -> BitsetAncestors:
         """Compute ancestor sets including hiding interval deps using bitsets."""
         extra_inputs: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        if self.mutation_deps is not None:
+            for node, deps in self.mutation_deps.items():
+                extra_inputs[node].update(deps)
         for start, info in self.collective_info.items():
             if info.is_exposed:
                 continue
@@ -347,6 +356,10 @@ class OverlapPreservingBucketer:
             for node, deps in additional_deps.items():
                 filtered_node_deps: OrderedSet[fx.Node] = OrderedSet()
                 for dep in deps:
+                    if self.mutation_deps is not None and dep in self.mutation_deps.get(
+                        node, ()
+                    ):
+                        continue
                     if not (is_collective_or_wait(node) and is_collective_or_wait(dep)):
                         filtered_node_deps.add(dep)
                 if filtered_node_deps:
@@ -357,7 +370,9 @@ class OverlapPreservingBucketer:
                     preserve_node_ordering,
                 )
 
-                preserve_node_ordering(self.graph, filtered_deps)
+                preserve_node_ordering(
+                    self.graph, filtered_deps, mutation_deps=self.mutation_deps
+                )
 
     def bucket_collectives(self) -> None:
         """Run the full bucketing and dep application flow."""
@@ -694,6 +709,10 @@ class OverlapPreservingBucketer:
 
         return True
 
+    def _remove_timeline_dep(self, node: fx.Node, dep: fx.Node) -> None:
+        if self.mutation_deps is None or dep not in self.mutation_deps.get(node, ()):
+            self.aug_graph.remove_extra_dep(n=node, dep=dep)
+
     def remove_from_event(self, node: fx.Node) -> tuple[PGEvent | None, PGEvent | None]:
         """Remove node's possibly shared event and return its timeline neighbors."""
         event = self.node_to_event[node]
@@ -704,9 +723,9 @@ class OverlapPreservingBucketer:
 
         # Remove augmented graph dependency
         if prev_event:
-            self.aug_graph.remove_extra_dep(n=event.node, dep=prev_event.node)
+            self._remove_timeline_dep(event.node, prev_event.node)
         if next_event:
-            self.aug_graph.remove_extra_dep(n=next_event.node, dep=event.node)
+            self._remove_timeline_dep(next_event.node, event.node)
 
         # Add bypass dependency
         if prev_event and next_event:
@@ -732,7 +751,7 @@ class OverlapPreservingBucketer:
 
         # Remove bypass dependency
         if prev_event and next_event:
-            self.aug_graph.remove_extra_dep(n=next_event.node, dep=prev_event.node)
+            self._remove_timeline_dep(next_event.node, prev_event.node)
 
     def _try_timeline_position(
         self,
@@ -948,7 +967,7 @@ class OverlapPreservingBucketer:
 
         fused_convert_dtypes = []
         for n in old_starts:
-            if has_mergeable_all_gather_convert_dtype(n):
+            if has_mergeable_all_gather_convert_dtype(n, self.mutation_deps):
                 fused_convert_dtypes.append(n.args[0])
 
         # Find where to place the bucketed operations
@@ -966,6 +985,7 @@ class OverlapPreservingBucketer:
                 bucket,
                 insert_before=next_node,
                 mode=self.bucket_mode,
+                mutation_deps=self.mutation_deps,
             )
         elif is_all_reduce_tensor(bucket[0]):
             new_nodes, replacements = merge_all_reduce_bucket(
@@ -973,6 +993,7 @@ class OverlapPreservingBucketer:
                 bucket,
                 mode=self.bucket_mode,
                 insert_before=next_node,
+                mutation_deps=self.mutation_deps,
             )
         else:
             if not is_reduce_scatter(bucket[0]):
@@ -982,6 +1003,7 @@ class OverlapPreservingBucketer:
                 bucket,
                 insert_before=next_node,
                 mode=self.bucket_mode,
+                mutation_deps=self.mutation_deps,
             )
 
         # Identify the new wait(s) and their collective start in a single pass
@@ -1033,6 +1055,10 @@ class OverlapPreservingBucketer:
 
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
+        if self.mutation_deps is not None:
+            for node, deps in self.mutation_deps.items():
+                for dep in deps:
+                    self.aug_graph.add_extra_dep(n=node, dep=dep)
 
 
 def finalize_overlap_scheduling(
@@ -1047,6 +1073,7 @@ def finalize_overlap_scheduling(
     bucket_exposed_first: bool | None = None,
     bucket_only_internode_comms: bool = False,
     bucket_mode: BucketMode | None = None,
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> None:
     """
     Finalize overlap scheduling by applying deps and optionally bucketing.
@@ -1075,5 +1102,6 @@ def finalize_overlap_scheduling(
         bucket_exposed_first=bucket_exposed_first,
         bucket_only_internode_comms=bucket_only_internode_comms,
         bucket_mode=bucket_mode,
+        mutation_deps=mutation_deps,
     )
     bucketer.bucket_collectives()

@@ -23,6 +23,7 @@ from torch._inductor.fx_passes.bucketing import (
     get_full_bucket_key,
     is_wait_tensor,
 )
+from torch._inductor.fx_passes.control_dependencies import get_mutation_dependencies
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
 from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._inductor.pattern_matcher import stable_topological_sort
@@ -426,11 +427,20 @@ class OverlapScheduler:
         prioritize_bucketing_during_scheduling: bool = True,
         pge_profile_path: str | None = None,
         prioritize_fusion_regions: bool = False,
+        mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
     ):
         from torch._inductor.fx_passes.fusion_regions import contiguous_fusion_regions
 
         self.gm = gm
         self.graph = gm.graph
+        if mutation_deps is None and prioritize_fusion_regions:
+            mutation_deps = get_mutation_dependencies(gm)
+            if mutation_deps is None:
+                log.warning(
+                    "Mutation ordering metadata is unavailable; "
+                    "continuing overlap scheduling with data dependencies"
+                )
+        self.mutation_deps = mutation_deps
         self.prioritize_fusion_regions = prioritize_fusion_regions
         self.last_scheduled_node: fx.Node | None = None
         self.compute_overlap_multipler = compute_overlap_multipler
@@ -501,12 +511,14 @@ class OverlapScheduler:
             prioritize_fusion_regions=prioritize_fusion_regions,
         )
         # Build structures
-        stable_topological_sort(self.graph)
+        if self.mutation_deps is None:
+            stable_topological_sort(self.graph)
+        else:
+            from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+            _stable_topological_sort(self.graph, self.mutation_deps)
         self.nodes = list(self.graph.nodes)
-        self.node_idx = {n: i for i, n in enumerate(self.nodes)}
-        self._parent_lists: list[list[fx.Node]] = [
-            list(n._input_nodes) for n in self.nodes
-        ]
+        self._refresh_dependencies()
         self.node_ancestors: BitsetAncestors = self._collect_node_ancestors()
 
         # Identify collectives and compute nodes
@@ -579,8 +591,6 @@ class OverlapScheduler:
             self.reduce_scatter_nodes
         )
 
-        self.in_degree = Counter(user for node in self.nodes for user in node.users)
-
         # Two separate queues: on-path (domination-based) and off-path (node_idx-based)
         self.on_path_ready: list[tuple[object, fx.Node]] = []
         self.off_path_ready: list[tuple[object, fx.Node]] = []
@@ -601,6 +611,24 @@ class OverlapScheduler:
 
         self.last_on_path_node_idx = -1
 
+    def _refresh_dependencies(self) -> None:
+        mutation_deps = self.mutation_deps
+        self.node_idx = {n: i for i, n in enumerate(self.nodes)}
+        self._parent_lists: list[list[fx.Node]] = [
+            list(n.all_input_nodes) for n in self.nodes
+        ]
+        self._user_lists: list[list[fx.Node]] = [list(n.users) for n in self.nodes]
+        if mutation_deps is not None:
+            for node, deps in mutation_deps.items():
+                index = self.node_idx[node]
+                self._parent_lists[index] = list(
+                    OrderedSet((*self._parent_lists[index], *deps))
+                )
+                for dep in deps:
+                    if node not in dep.users:
+                        self._user_lists[self.node_idx[dep]].append(node)
+        self.in_degree = Counter(user for users in self._user_lists for user in users)
+
     def _add_to_ready_queue(self, node: fx.Node) -> None:
         if self.off_compute_path(node):
             score = self._compute_off_path_score(node)
@@ -616,7 +644,7 @@ class OverlapScheduler:
 
     def _collect_node_ancestors(self) -> BitsetAncestors:
         """Collect all ancestors for each node using int-bitset representation."""
-        return BitsetAncestors(self.nodes)
+        return BitsetAncestors(self.nodes, extra_inputs=self.mutation_deps)
 
     def _compute_baseline_memory(self) -> int:
         """
@@ -765,7 +793,11 @@ class OverlapScheduler:
                 domination_index[node] = target_node_index[node]
             else:
                 domination_index[node] = min(
-                    (domination_index[succ] for succ in node.users), default=sys.maxsize
+                    (
+                        domination_index[succ]
+                        for succ in self._user_lists[self.node_idx[node]]
+                    ),
+                    default=sys.maxsize,
                 )
 
         return domination_index
@@ -1083,8 +1115,7 @@ class OverlapScheduler:
         self._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
 
         while self.on_path_ready or self.off_path_ready:
-            if self._should_force_wait_for_memory():
-                self._force_oldest_wait()
+            if self._should_force_wait_for_memory() and self._force_oldest_wait():
                 continue
 
             nodes = self._get_next_nodes()
@@ -1133,6 +1164,7 @@ class OverlapScheduler:
             bucket_exposed_first=self.bucket_exposed_first,
             bucket_only_internode_comms=self.bucket_only_internode_comms,
             bucket_mode=self.bucket_mode,
+            mutation_deps=self.mutation_deps,
         )
 
         if self.log_final_collectives_estimations:
@@ -1217,7 +1249,9 @@ class OverlapScheduler:
         """Schedule a node."""
         if node in self.scheduled:
             raise AssertionError(f"node {node} already scheduled")
-        if not all(n in self.scheduled for n in node.all_input_nodes):
+        if not all(
+            n in self.scheduled for n in self._parent_lists[self.node_idx[node]]
+        ):
             raise AssertionError(f"node {node} has unscheduled input nodes")
         self.scheduled.add(node)
         self.last_scheduled_node = node
@@ -1230,7 +1264,7 @@ class OverlapScheduler:
             len(self.scheduled),
         )
 
-        for user in node.users:
+        for user in self._user_lists[self.node_idx[node]]:
             self.in_degree[user] -= 1
             if self.in_degree[user] == 0:
                 self._add_to_ready_queue(user)
@@ -1298,9 +1332,13 @@ class OverlapScheduler:
 
         return self.in_flight_bytes >= self.max_in_flight_bytes
 
-    def _force_oldest_wait(self) -> None:
+    def _force_oldest_wait(self) -> bool:
         """Schedule the oldest in flight wait"""
-        self._handle_wait(self._get_oldest_wait())
+        wait = self._get_oldest_wait()
+        if self.mutation_deps is not None and self.in_degree[wait] != 0:
+            return False
+        self._handle_wait(wait)
+        return True
 
     def _handle_collective_start(self, node: fx.Node) -> None:
         """Handle scheduling a collective start."""
@@ -1343,7 +1381,9 @@ class OverlapScheduler:
         # same process group
         group_name = get_group_name(coll_start)
         for coll_to_schedule in self._get_prior_in_flight_collectives(coll_start):
-            self._handle_wait(self.collective_info[coll_to_schedule].wait_node)
+            wait = self.collective_info[coll_to_schedule].wait_node
+            if self.mutation_deps is None or self.in_degree[wait] == 0:
+                self._handle_wait(wait)
 
         # If we are waiting on an exposed collective, use this time to
         # overlap on other PGs.
@@ -1513,7 +1553,8 @@ class OverlapScheduler:
                     break
                 if not self._wait_is_hidden(oldest_wait, overlap_node):
                     break
-                self._force_oldest_wait()
+                if not self._force_oldest_wait():
+                    break
 
             # Forcing a wait may recursively schedule this candidate.
             if collective not in self.unscheduled_collectives:
@@ -1783,6 +1824,7 @@ class OverlapScheduler:
             bucket_mode=self.bucket_mode,
             bucket_exposed_first=self.bucket_exposed_first,
             bucket_only_internode_comms=self.bucket_only_internode_comms,
+            mutation_deps=self.mutation_deps,
         )
         bucketer.bucket_collectives()
 
@@ -2001,6 +2043,7 @@ def schedule_overlap_bucketing(
     pre_bucketing_fsdp_collectives: bool = True,
     pre_bucketing_fsdp_collectives_bucket_cap_mb: float | None = None,
     prioritize_fusion_regions: bool = False,
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -2042,10 +2085,13 @@ def schedule_overlap_bucketing(
     if pre_bucketing_fsdp_collectives:
         from torch._inductor.fx_passes.fsdp import pre_bucket_fsdp_collectives
 
+        if mutation_deps is None and prioritize_fusion_regions:
+            mutation_deps = get_mutation_dependencies(gm)
         pre_bucket_fsdp_collectives(
             gm,
             mode=bucket_mode,
             bucket_cap_mb=pre_bucketing_fsdp_collectives_bucket_cap_mb,
+            mutation_deps=mutation_deps,
         )
 
     trace_structured(
@@ -2078,6 +2124,7 @@ def schedule_overlap_bucketing(
         bucket_mode=bucket_mode,
         pge_profile_path=pge_profile_path,
         prioritize_fusion_regions=prioritize_fusion_regions,
+        mutation_deps=mutation_deps,
     ).run()
     trace_structured(
         "artifact",
