@@ -52,6 +52,18 @@ void GeneratorImpl::philox_state(
       false, "philox_state is not supported in this Generator");
 }
 
+void GeneratorImpl::incref_pyobject() const noexcept {
+  pyobj_slot_.incref();
+}
+
+void GeneratorImpl::decref_pyobject() const noexcept {
+  pyobj_slot_.decref();
+}
+
+bool GeneratorImpl::try_incref_pyobject() const noexcept {
+  return pyobj_slot_.try_incref();
+}
+
 /**
  * Gets the device of a generator.
  */
