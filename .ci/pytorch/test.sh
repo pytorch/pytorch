@@ -1991,6 +1991,8 @@ test_libtorch_jit() {
     # cpp/test_jit times out under clang-21 ASAN+UBSAN; skip it for now and run
     # only cpp/test_lazy. TODO: re-enable once the timeout is root-caused.
     python test/run_test.py --cpp --verbose -i cpp/test_lazy -k "not CUDA"
+  elif [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy
   else
     # CUDA tests have already been skipped when CUDA is not available
     python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy -k "not CUDA"
@@ -2151,9 +2153,8 @@ test_distributed() {
         MPICMD="${MPIEXEC} -np 2 $TORCH_BIN_DIR/ProcessGroupMPITest"
         eval "$MPICMD"
       fi
-
-      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
     fi
+    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
     python test/run_test.py --cpp --verbose -i cpp/NCCLDevCommManagerTest
   fi
 }
