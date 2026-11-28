@@ -122,6 +122,9 @@ class TestHOPInfra(TestCase):
             "triton_kernel_wrapper_mutation",
             "cutedsl_kernel_wrapper_functional",  # Imports sympy, as Triton's does
             "cutedsl_kernel_wrapper_mutation",  # Imports sympy, as Triton's does
+            # FXIR runtime HOPs share the SymPy-dependent user-kernel helpers.
+            "compiled_kernel_wrapper_functional",
+            "compiled_kernel_wrapper_mutation",
             "wrap",  # Really weird failure -- importing this causes Dynamo to choke on checkpoint
             "control_deps",  # Inductor-internal ordering HOP, not a public torch.ops.higher_order API
         }

@@ -11,7 +11,7 @@ import sys
 import warnings
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import Any, cast, ClassVar, Literal, Optional
+from typing import Any, cast, ClassVar, Literal, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -88,6 +88,10 @@ from .cpp_utils import (
 
 
 _IS_WINDOWS = sys.platform == "win32"
+
+
+if TYPE_CHECKING:
+    from .wrapper import KernelCallLine
 
 
 @functools.cache
@@ -5135,6 +5139,16 @@ class CppScheduling(BaseScheduling):
     @classmethod
     def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
         return cls.backend_features
+
+    def get_fx_kernel_mutated_arg_indices(
+        self, line: "KernelCallLine"
+    ) -> tuple[int, ...]:
+        # cpp_argdefs() emits writable buffers as T* and inputs as const T*.
+        return tuple(
+            i
+            for i, arg_type in enumerate(line.arg_types)
+            if arg_type.endswith("*") and not arg_type.startswith("const ")
+        )
 
     def __init__(self, scheduler):
         super().__init__(scheduler)

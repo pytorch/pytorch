@@ -174,11 +174,15 @@ def reset() -> None:
 
         # Reset cudagraph trees unconditionally since they are global state
         # not tied to a specific backend instance
+        from torch._higher_order_ops.compiled_kernel_wrap import (
+            compiled_kernel_side_table,
+        )
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._higher_order_ops.wrap import inductor_code_side_table
 
         kernel_side_table.reset_table()
         inductor_code_side_table.reset_table()
+        compiled_kernel_side_table.reset_table()
         # CuTeDSL's table too, as Triton's, if anything has loaded it: importing it
         # here would register the cutedsl user-kernel DSL.
         cutedsl = sys.modules.get("torch._higher_order_ops.cutedsl_kernel_wrap")

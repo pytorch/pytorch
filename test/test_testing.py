@@ -4503,13 +4503,14 @@ class TestImports(TestCase):
         self.assertEqual(out.strip(), "True")
 
     def test_not_import_dynamo_from_user_kernel_hops(self) -> None:
-        # Importing the Triton and CuTeDSL user-kernel HOP modules, the CuTeDSL eager
-        # launcher and its compile lock imports neither torch._dynamo nor
-        # torch._inductor. A launch needs a GPU and cutlass:
+        # Importing the Triton, CuTeDSL and compiled kernel HOP modules, the CuTeDSL
+        # eager launcher and its compile lock imports neither torch._dynamo nor
+        # torch._inductor. A CuTeDSL launch needs a GPU and cutlass:
         # test/inductor/test_cutedsl_kernels.py checks one.
         out = self._check_python_output(
             "import sys;import torch._higher_order_ops.triton_kernel_wrap;"
             "import torch._higher_order_ops.cutedsl_kernel_wrap;"
+            "import torch._higher_order_ops.compiled_kernel_wrap;"
             "import torch._native.cutedsl.user_kernel;"
             "import torch._native.cutedsl.compile_lock;"
             "print(sorted({'torch._dynamo', 'torch._inductor'} & set(sys.modules)))"
