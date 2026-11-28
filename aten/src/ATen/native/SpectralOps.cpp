@@ -637,7 +637,13 @@ static Tensor fft_ihfftn_impl(
   const auto last_dim = desc.dim.back();
   auto tmp = at::_fft_r2c(x, last_dim, norm, /*onesided=*/true);
   if (desc.dim.size() == 1) {
-    return out.defined() ? at::conj_physical_out(tmp, out) : tmp.conj();
+    if (!out.defined()) {
+      return tmp.conj();
+    }
+    TORCH_CHECK(out.is_complex(), fname,
+                " expects a complex output tensor, but got ", out.scalar_type());
+    auto out_mut = out;
+    return at::conj_physical_outf(tmp, out_mut);
   }
 
   tmp = at::conj_physical(tmp);
