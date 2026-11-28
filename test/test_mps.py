@@ -49,6 +49,7 @@ import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import FakeTensorMode
 from itertools import product
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     IS_MACOS,
 )
 
@@ -14052,21 +14053,6 @@ class TestAdvancedIndexing(TestCaseMPS):
             else:
                 helper(dtype, accumulate, deterministic)
 
-    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
-    def test_index_put_accumulate_nondeterministic(self, dtype):
-        device = "mps"
-        t = torch.zeros(3, dtype=dtype, device=device)
-        idx = torch.tensor([0, 0, 1, 2, 2, 2], device=device)
-        src = torch.arange(idx.numel(), device=device, dtype=dtype)
-        try:
-            torch.use_deterministic_algorithms(True)
-            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
-                t.index_put_((idx,), src, accumulate=True)
-            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
-                torch.zeros(3, dtype=dtype, device=device).index_add_(0, idx, src)
-        finally:
-            torch.use_deterministic_algorithms(False)
-
     @parametrize("op", ["scatter_add_", "index_add_", "index_put_"])
     @parametrize("dtype", [torch.bool, torch.uint8])
     @parametrize("offset", [0, 1, 2, 3])
@@ -14322,6 +14308,18 @@ class TestNondeterministic(TestCaseMPS):
         values = torch.randn(10, device=device)
         return lambda: input.index_put(indices, values, accumulate=True)
 
+    def _case_put_accumulate(self, device):
+        input = torch.randn(4, device=device)
+        index = torch.zeros(16, dtype=torch.long, device=device)
+        source = torch.randn(16, device=device)
+        return lambda: input.put(index, source, accumulate=True)
+
+    def _case_index_add(self, device):
+        input = torch.randn(4, device=device)
+        index = torch.zeros(16, dtype=torch.long, device=device)
+        source = torch.randn(16, device=device)
+        return lambda: input.index_add(0, index, source)
+
     def _case_index_reduce(self, device):
         n = 16
         input = torch.randn(4, device=device)
@@ -14347,9 +14345,6 @@ class TestNondeterministic(TestCaseMPS):
         "embedding_bag_per_sample_weights_backward": (
             _case_embedding_bag_per_sample_weights_backward,
             "_embedding_bag_per_sample_weights_backward_mps",
-        ),
-        "index_put_accumulate": (
-            _case_index_put_accumulate, "index_put_with_accumulate_mps"
         ),
         "kthvalue": (
             _case_kthvalue, "kthvalue MPS"
@@ -14383,6 +14378,9 @@ class TestNondeterministic(TestCaseMPS):
         "upsample_nearest_exact_3d_backward": _case_upsample_nearest_exact_3d_backward,
         "scatter_reduce": _case_scatter_reduce,
         "scatter_reduce_strided": _case_scatter_reduce_strided,
+        "index_put_accumulate": _case_index_put_accumulate,
+        "put_accumulate": _case_put_accumulate,
+        "index_add": _case_index_add,
         "index_reduce": _case_index_reduce,
     }
 
@@ -15635,6 +15633,13 @@ class TestConsistency(TestCaseMPS):
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True
 
+    def test_deterministic_index_put_out_of_bounds(self, device):
+        with DeterministicGuard(True):
+            with self.assertRaises(torch.AcceleratorError):
+                x = torch.zeros(4, device=device)
+                x.index_put_((torch.tensor([0, 4], device=device),), torch.ones(2, device=device), accumulate=True)
+                torch.mps.synchronize()
+
     def test_index_put_out_of_bounds(self, device):
         x = torch.rand(10, 1, 10, device=device)
         with self.assertRaises(torch.AcceleratorError):
@@ -15786,6 +15791,40 @@ class TestComplex(TestCase):
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
 @skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
+    @largeTensorTest("3GB")
+    @largeMPSBufferTest((1 << 31) + 128)
+    @parametrize("accumulate", [False, True])
+    def test_index_put_deterministic_split(self, device, accumulate):
+        dtype = torch.float32 if accumulate else torch.uint8
+        source = [1e20, 1, -1e20, 3] if accumulate else [1, 2, 3, 4]
+        count = len(source)
+        # Span more than INT32_MAX bytes so TensorIterator splits into two pairs.
+        stride = (1 << 31) // ((count - 1) * dtype.itemsize) + 1
+        values = torch.empty_strided((count,), (stride,), dtype=dtype, device=device)
+        values.copy_(torch.tensor(source, dtype=dtype, device=device))
+        indices = torch.zeros(count, dtype=torch.long, device=device)
+        result = torch.zeros(1, dtype=dtype, device=device)
+        expected = torch.tensor([3 if accumulate else 4], dtype=dtype)
+        with DeterministicGuard(True):
+            result.index_put_((indices,), values, accumulate=accumulate)
+        self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
+
+    def test_nonzero_output_rounding(self, device):
+        destinations, updates = 257, 17
+        dtype = torch.float32
+        large = 2 / torch.finfo(dtype).eps
+        indices = torch.arange(destinations, device=device).repeat(updates)
+        values = torch.empty(indices.numel(), 2, device=device, dtype=dtype)[:, 1]
+        row = torch.tensor([1] * (updates - 2) + [-large, 3], device=device, dtype=dtype)
+        values.copy_(row.repeat_interleave(destinations))
+        result = torch.full((destinations, 2), large, device=device, dtype=dtype)
+        # Each +1 rounds away before -large cancels the initial value.
+        expected = torch.full((destinations, 2), large, dtype=dtype)
+        expected[:, 1] = 3
+        with DeterministicGuard(True):
+            result[:, 1].index_put_((indices,), values, accumulate=True)
+        self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
+
     exact_dtype = True
 
     @parametrize("shape, dtype", [((2, 3, 4, 5, 6), torch.complex64), ((32, 8192), torch.complex64),
