@@ -2252,6 +2252,8 @@ instantiate_parametrized_tests(PerEdgeScheduleTest)
 class NCCLLazyP2PInitializationTest(MultiProcContinuousTest):
     """Exercise shared-parent P2P initialization on lazy NCCL channels."""
 
+    hw_classification = HardwareClassification.CUDA
+
     world_size = 4
 
     @classmethod
