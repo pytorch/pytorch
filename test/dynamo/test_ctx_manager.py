@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTIO
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyOn,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -2482,14 +2483,52 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_mem_pool_id(self):
-        def fn(pool):
-            return pool.id
+    # NOTE: torch.xpu.use_mem_pool is not yet traceable under torch.compile
+    # (inductor support deferred to a follow-up PR); its compile-path tests
+    # land together with that support.
 
-        pool = torch.cuda.MemPool()
+    @unittest.skipIf(
+        not (torch.cuda.is_available() and torch.xpu.is_available()),
+        "requires cuda and xpu",
+    )
+    def test_use_mem_pool_cross_backend_rejected(self):
+        # A pool must match the use_mem_pool entry point's backend: tracing
+        # torch.cuda.use_mem_pool with an XPU pool is a type error, not a
+        # silent wrong-backend dispatch.
+        xpu_pool = torch.xpu.MemPool()
+
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda") + 1
+
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(pool), pool.id)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"torch.cuda.use_mem_pool\(\) got a torch.xpu.MemPool argument",
+        ):
+            opt_fn(xpu_pool)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_use_mem_pool_device_type_mismatch_on_single_device(self):
+        # The mismatch branch compares the wrapped pool's device type against
+        # the entry point's: patch pool_device_type to type a CUDA pool as
+        # XPU so the branch runs without dual hardware.
+        pool = torch.cuda.MemPool()
+
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda") + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with mock.patch(
+            "torch._dynamo.variables.builder.pool_device_type",
+            return_value="xpu",
+        ):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                r"torch.cuda.use_mem_pool\(\) got a torch.xpu.MemPool argument",
+            ):
+                opt_fn(pool)
 
     @requires_cuda_and_triton
     def test_cuda_use_mem_pool_context_manager_inductor(self):
@@ -2768,6 +2807,41 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
                 self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg),
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(pool)
+
+    def test_mempool_begin_type_mismatch_raises(self):
+        # A non-MemPool sidetable entry must be rejected before device dispatch.
+        # The sidetable is reset on every compile and only supports appending at
+        # the next free slot, so the index must be len(...). The type check runs
+        # before any device call, so this test also passes on CPU-only machines.
+        from torch._dynamo.graph_bytecode_inputs import (
+            index_to_external_object_weakref,
+            reset_user_object_tracking,
+            set_external_object_by_index,
+        )
+
+        mempool_index = len(index_to_external_object_weakref)
+        self.addCleanup(reset_user_object_tracking)
+        set_external_object_by_index(mempool_index, torch.zeros(1))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"use_mem_pool expected a torch.cuda.MemPool object at index \d+, got Tensor",
+        ):
+            torch.ops.mempool.begin(0, mempool_index, "cuda")
+
+    def test_use_mem_pool_non_pool_arg_rejected(self):
+        # Tracing use_mem_pool with a non-MemPool argument is a trace-time type
+        # error, raised before any device call: the misuse fails loudly instead
+        # of silently routing allocations.
+        def fn(t):
+            with torch.cuda.use_mem_pool(t):
+                return t + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"torch.cuda.use_mem_pool\(\) expected a torch.cuda.MemPool argument",
+        ):
+            opt_fn(torch.zeros(4))
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
@@ -4089,6 +4163,58 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
+
+    @onlyOn(["cuda", "xpu"])
+    def test_mempool_begin_end_through_device_interface(self, device):
+        # Drive mempool::begin/mempool::end directly, without Dynamo's
+        # use_mem_pool wrapper.
+        from torch._dynamo.graph_bytecode_inputs import (
+            index_to_external_object_weakref,
+            reset_user_object_tracking,
+            set_external_object_by_index,
+        )
+
+        device_type = torch.device(device).type
+        device_module = torch.get_device_module(device_type)
+        device_module.empty_cache()
+        pool = device_module.MemPool()
+        # The sidetable is reset on every compile and
+        # set_external_object_by_index only appends at the next free
+        # slot, so the index must be len(...).
+        mempool_index = len(index_to_external_object_weakref)
+        self.addCleanup(reset_user_object_tracking)
+        set_external_object_by_index(mempool_index, pool)
+        # begin before the try: never release a reference that begin
+        # did not take, and don't mask a begin failure.
+        torch.ops.mempool.begin(
+            device_module.current_device(), mempool_index, device_type
+        )
+        try:
+            x = torch.ones(16, device=device_type)
+            device_module.synchronize()
+            self.assertEqual(x.sum(), 16.0)
+            # begin routed the allocation into the user pool.
+            self.assertGreater(len(device_module.memory.memory_snapshot(pool.id)), 0)
+        finally:
+            torch.ops.mempool.end(
+                device_module.current_device(), mempool_index, device_type
+            )
+            device_module.synchronize()
+        # end must release the reference begin took (use_count back to 1).
+        self.assertEqual(pool.use_count(), 1)
+
+    @onlyOn(["cuda", "xpu"])
+    def test_mem_pool_id(self, device):
+        # Exercise builder's MemPool wrapping for each registered backend;
+        # the XPU arm runs in the ciflow/xpu jobs.
+        device_module = torch.get_device_module(torch.device(device).type)
+
+        def fn(pool):
+            return pool.id
+
+        pool = device_module.MemPool()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(pool), pool.id)
 
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):

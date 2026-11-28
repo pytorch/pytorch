@@ -159,7 +159,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .memory import CUDAMemPoolContextVariable, CUDAMemPoolVariable
+from .memory import MemPoolContextVariable, MemPoolVariable
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
@@ -271,8 +271,6 @@ __all__ = [
     "CreateTMADescriptorExperimentalVariable",
     "CreateTMADescriptorStableVariable",
     "CUDADeviceVariable",
-    "CUDAMemPoolContextVariable",
-    "CUDAMemPoolVariable",
     "CudagraphOverrideVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
@@ -300,6 +298,8 @@ __all__ = [
     "ListReverseIteratorVariable",
     "ListVariable",
     "MappingProxyVariable",
+    "MemPoolContextVariable",
+    "MemPoolVariable",
     "NameErrorVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",

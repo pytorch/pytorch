@@ -198,6 +198,68 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
+    def get_mempool_type() -> type:
+        """Return the MemPool class this device manages (e.g. ``torch.cuda.MemPool``)."""
+        raise NotImplementedError
+
+    @classmethod
+    def supports_mempool(cls) -> bool:
+        """
+        True when a subclass implements the mempool routing contract: the
+        ``get_mempool_type`` slot plus the begin/end/release ops.
+
+        Derived from the overrides (as with exposes_streams) instead of a
+        hand-set flag, so a backend missing one of the ops fails the gate
+        before ``begin`` takes a pool reference it could never release.
+        """
+        return all(
+            getattr(cls, name) is not getattr(DeviceInterface, name)
+            for name in (
+                "get_mempool_type",
+                "begin_allocate_current_thread_to_pool",
+                "end_allocate_current_thread_to_pool",
+                "release_pool",
+            )
+        )
+
+    @staticmethod
+    def check_mem_pool_device(mempool: Any, device_index: int) -> None:
+        """Validate that ``mempool`` belongs to ``device_index`` before routing.
+
+        Default: no-op, because most backends have device-local pools that need
+        no cross-device check. Backends whose pools can carry a custom allocator
+        pinned to another device (e.g. CUDA) should override this to reject the
+        mismatch, as torch.cuda.memory._check_mem_pool_device does.
+        """
+        return None
+
+    @staticmethod
+    def begin_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        """Route the current thread's allocations into pool ``mempool_id`` (a ``MemPool.id`` tuple).
+
+        Takes one reference on the pool; release it with ``release_pool``.
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def end_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        """Stop routing the current thread's allocations.
+
+        Must be called once per ``begin_allocate_current_thread_to_pool``, and
+        before ``release_pool``: stop routing first, then drop the reference.
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def release_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+        """Release the pool reference taken by ``begin_allocate_current_thread_to_pool``."""
+        raise NotImplementedError
+
+    @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         """
         Returns True if the device has Triton support, False otherwise, even if
@@ -517,6 +579,32 @@ class CudaInterface(DeviceInterface):
         # pick fused backends whose scaling/dropout numerics fail tight checks.
         return torch.version.hip is None
 
+    @staticmethod
+    def get_mempool_type() -> type:
+        return torch.cuda.MemPool
+
+    @staticmethod
+    def check_mem_pool_device(mempool: Any, device_index: int) -> None:
+        torch.cuda.memory._check_mem_pool_device(mempool, device_index)
+
+    @staticmethod
+    def begin_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        torch.cuda.memory._cuda_beginAllocateCurrentThreadToPool(
+            device_index, mempool_id
+        )
+
+    @staticmethod
+    def end_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        torch.cuda.memory._cuda_endAllocateToPool(device_index, mempool_id)
+
+    @staticmethod
+    def release_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+        torch.cuda.memory._cuda_releasePool(device_index, mempool_id)
+
 
 get_mtia_stream: Callable[[int], int] | None
 if torch.mtia._is_compiled():
@@ -737,6 +825,26 @@ class XpuInterface(DeviceInterface):
 
         if "intel" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'intel' backend")
+
+    @staticmethod
+    def get_mempool_type() -> type:
+        return torch.xpu.MemPool
+
+    @staticmethod
+    def begin_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        torch._C._xpu_beginAllocateCurrentThreadToPool(device_index, mempool_id)
+
+    @staticmethod
+    def end_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
+        torch._C._xpu_endAllocateToPool(device_index, mempool_id)
+
+    @staticmethod
+    def release_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+        torch._C._xpu_releasePool(device_index, mempool_id)
 
 
 @dataclass
