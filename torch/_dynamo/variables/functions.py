@@ -2276,6 +2276,12 @@ def invoke_and_store_as_constant(
     kwargs = {k: convert(v) for k, v in kwargs.items()}
     res = fn(*args, **kwargs)
     if isinstance(res, torch.Tensor):
+        # The constant tensor is installed as a per-process module global and
+        # a precompile package carries no binding for it, so a packaged frame
+        # fails on load with a NameError or an input count mismatch. Skip
+        # packaging for this frame instead of saving an entry that cannot be
+        # loaded.
+        tx.output.bypass_package("assume_constant_result tensor constant")
         # ConstantSource reconstructs with LOAD_GLOBAL. Unlike the non-tensor
         # branch of register_attr_or_module, the tensor branch does not install
         # its source name as a global.
