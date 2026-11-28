@@ -5747,6 +5747,27 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             torch.matmul(a, b, out=c)
 
     @dtypes(torch.float, torch.complex64)
+    def test_matmul_vector_matrix_out(self, device, dtype):
+        a = make_tensor((4,), device=device, dtype=dtype)
+        b = make_tensor((4, 3), device=device, dtype=dtype)
+        expected = a @ b
+
+        out = torch.empty(3, device=device, dtype=dtype)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            torch.matmul(a, b, out=out)
+        self.assertEqual(len(w), 0)
+        self.assertEqual(out, expected)
+
+        # A stepped out keeps its strides, and the elements between its entries are not touched.
+        base = torch.zeros(6, device=device, dtype=dtype)
+        out = base[::2]
+        torch.matmul(a, b, out=out)
+        self.assertEqual(out.stride(), (2,))
+        self.assertEqual(base[::2], expected)
+        self.assertEqual(base[1::2], torch.zeros(3, device=device, dtype=dtype))
+
+    @dtypes(torch.float, torch.complex64)
     def test_tensordot_out_kernel_errors_with_autograd(self, device, dtype):
         a = torch.empty((4, 2), device=device, dtype=dtype, requires_grad=True)
         b = torch.empty((2, 4), device=device, dtype=dtype, requires_grad=True)
