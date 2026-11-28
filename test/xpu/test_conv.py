@@ -1596,6 +1596,105 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(x_cow, x_copy)
         self.assertEqual(w_cow, w_copy)
 
+    def _conv_pointwise_inputs(self, device, dtype, c=32, hw=20):
+        torch.manual_seed(0)
+        cl = torch.channels_last
+        big = torch.randn(1, 2 * c, hw, hw, device=device, dtype=dtype)
+        x = torch.randn(1, c, hw, hw, device=device, dtype=dtype)
+        w = torch.randn(c, c, 3, 3, device=device, dtype=dtype) * 0.1
+        b = torch.randn(c, device=device, dtype=dtype) * 0.1
+        return big.contiguous(memory_format=cl), x.contiguous(memory_format=cl), w, b
+
+    def _conv_ref(self, x, w, b, other):
+        return F.conv2d(x.float(), w.float(), b.float(), padding=1) + other.float()
+
+    @onlyXPU
+    @dtypes(torch.float32, torch.float16)
+    @parametrize_test("other_kind", ["channel_slice", "nchw", "channel_broadcast"])
+    @parametrize_test("binary", ["add", "sum"])
+    def test_conv_pointwise_binary_other_layouts(
+        self, device, dtype, other_kind, binary
+    ):
+        # The binary operand may have a layout other than dst's; it must be read
+        # with its own strides. "sum" accumulates into dst, so it needs a full-size
+        # other.
+        big, x, w, b = self._conv_pointwise_inputs(device, dtype)
+        c = x.shape[1]
+        other = {
+            "channel_slice": big[:, c:],
+            "nchw": torch.randn(1, c, 20, 20, device=device, dtype=dtype),
+            "channel_broadcast": torch.randn(1, c, 1, 1, device=device, dtype=dtype),
+        }[other_kind]
+        args = (x, other, w, b, [1, 1], [1, 1], [1, 1], 1, binary, None, None, [], None)
+        if binary == "sum" and other_kind == "channel_broadcast":
+            with self.assertRaisesRegex(ValueError, "sum post-op needs the output"):
+                torch.ops.mkldnn._convolution_pointwise.binary(*args)
+            return
+        out = torch.ops.mkldnn._convolution_pointwise.binary(*args)
+        self.assertEqual(
+            out.float(), self._conv_ref(x, w, b, other), atol=2e-2, rtol=2e-2
+        )
+
+    @onlyXPU
+    @dtypes(torch.float32, torch.float16)
+    @parametrize_test("binary", ["add", "sum"])
+    def test_conv_pointwise_binary_inplace_channel_slice(self, device, dtype, binary):
+        # The in-place output is a channel slice: neighbouring channels must stay.
+        big, x, w, b = self._conv_pointwise_inputs(device, dtype)
+        c = x.shape[1]
+        before = big.clone()
+        expected = self._conv_ref(x, w, b, big[:, c:])
+        torch.ops.mkldnn._convolution_pointwise_.binary(
+            big[:, c:], x, w, b, [1, 1], [1, 1], [1, 1], 1, binary, None, None, [], None
+        )
+        self.assertEqual(big[:, c:].float(), expected, atol=2e-2, rtol=2e-2)
+        self.assertEqual(big[:, :c], before[:, :c])
+
+    @onlyXPU
+    @dtypes(torch.float32)
+    def test_conv1d_pointwise_binary_inplace(self, device, dtype):
+        x = torch.randn(1, 8, 10, device=device, dtype=dtype)
+        w = torch.randn(8, 8, 3, device=device, dtype=dtype)
+        other = torch.randn(1, 8, 10, device=device, dtype=dtype)
+        expected = F.conv1d(x, w, None, padding=1) + other
+        torch.ops.mkldnn._convolution_pointwise_.binary(
+            other, x, w, None, [1], [1], [1], 1, "add", None, None, [], None
+        )
+        self.assertEqual(other, expected)
+
+    @onlyXPU
+    @dtypes(torch.float32, torch.float16)
+    def test_conv_freezing_split_residual(self, device, dtype):
+        # Inductor freezing fuses `b + conv(b)` on a split slice into
+        # _convolution_pointwise.binary with a strided `other` (YOLO11 C2PSA).
+        import torch._inductor.config as inductor_config
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import run_and_get_code
+
+        class Block(nn.Module):
+            def __init__(self, c=64):
+                super().__init__()
+                self.cv1 = nn.Conv2d(c, 2 * c, 1)
+                self.conv = nn.Conv2d(c, c, 3, padding=1)
+
+            def forward(self, x):
+                a, b = self.cv1(x).split((x.shape[1], x.shape[1]), dim=1)
+                return torch.cat((a, b + self.conv(b)), 1)
+
+        torch._dynamo.reset()
+        counters.clear()
+        cl = torch.channels_last
+        m = Block().eval().to(device, dtype).to(memory_format=cl)
+        x = torch.randn(1, 64, 40, 40, device=device, dtype=dtype).to(memory_format=cl)
+        with inductor_config.patch(freezing=True), torch.inference_mode():
+            ref = m(x)
+            out, (code,) = run_and_get_code(torch.compile(m), x)
+        self.assertEqual(
+            counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_count"], 1
+        )
+        self.assertIn("torch.ops.mkldnn._convolution_pointwise.binary", code)
+        self.assertEqual(out.float(), ref.float(), atol=2e-2, rtol=2e-2)
+
 
 instantiate_device_type_tests(
     TestConvolutionNNDeviceType, globals(), only_for="xpu", allow_xpu=True

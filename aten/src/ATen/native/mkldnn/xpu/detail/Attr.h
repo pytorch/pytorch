@@ -346,13 +346,30 @@ class Attr {
         dnnl::memory binary_m;
         auto binary = ops_params_[i].binary_;
         auto md = ops_params_[i].meta_;
-        // query expected_md to achieve peak performance
+        // src1 was declared with format_tag::any; binding it with a different
+        // layout (e.g. a strided channel slice) would read it with wrong
+        // strides.
         auto expected_md = pd.query_md(
             dnnl::query::exec_arg_md,
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
 
-        binary_m = at::native::onednn::make_onednn_memory(
-            md, engine, binary.const_data_ptr());
+        if (md == expected_md) {
+          binary_m = at::native::onednn::make_onednn_memory(
+              md, engine, binary.const_data_ptr());
+        } else {
+          auto& stream = GpuStreamManager::Instance().get_stream();
+          at::Tensor reordered = at::empty(
+              {static_cast<int64_t>(expected_md.get_size())},
+              binary.options().dtype(at::kByte));
+          auto src_m = at::native::onednn::make_onednn_memory(
+              md, engine, binary.const_data_ptr());
+          binary_m = at::native::onednn::make_onednn_memory(
+              expected_md, engine, reordered.mutable_data_ptr());
+          // Same in-order queue as the primitive, so it runs after the
+          // producer of `binary` and before the primitive reads it.
+          dnnl::reorder(src_m, binary_m).execute(stream, src_m, binary_m);
+          reordered_binaries_.push_back(std::move(reordered));
+        }
 
         args.insert(
             {DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1, binary_m});
@@ -360,6 +377,8 @@ class Attr {
     }
   }
 
+  // reordered post-op operands, alive until the primitive has been submitted
+  std::vector<at::Tensor> reordered_binaries_;
   float q_scale_ = 1.0; // the scale used to quantize the fused result from fp32
                         // to int8, only works for int8 case
   int64_t q_zero_point_ = 0;
