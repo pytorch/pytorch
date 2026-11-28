@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest import mock
 
@@ -11,15 +12,22 @@ from torch._dynamo.device_interface import (
     MtiaInterface,
     XpuInterface,
 )
-from torch._inductor import config, ir
+from torch._inductor import config, ir, lowering
+from torch._inductor.codegen import common
 from torch._inductor.codegen.common import (
     _initialize_device_op_overrides,
     _uses_gpu_cpp_wrapper,
+    BackendFeature,
     device_op_overrides_dict,
     DeviceOpOverrides,
+    get_backend_features,
     register_device_op_overrides,
 )
+from torch._inductor.codegen.triton import TritonScheduling
+from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.scheduler import BaseScheduling
+from torch._inductor.virtualized import MockHandler, V
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -27,6 +35,94 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+
+
+@instantiate_parametrized_tests
+class TestScalarPrecisionBackendPolicy(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("device_type", ["cpu", "cuda", "xpu", "mps"])
+    @parametrize("upcast", [False, True])
+    def test_backend_contract(self, device_type, upcast):
+        with config.patch({"triton.codegen_upcast_to_fp32": upcast}):
+            features = get_backend_features(torch.device(device_type))
+        self.assertEqual(
+            BackendFeature.OPMATH_SCALAR_CASTING in features,
+            device_type == "cuda",
+        )
+
+    def test_cuda_contract_with_alternative_scheduling(self):
+        self.assertNotIn(
+            BackendFeature.OPMATH_SCALAR_CASTING,
+            TritonScheduling.backend_features,
+        )
+        common.init_backend_registration()
+        backend = common.device_codegens["cuda"]
+        with mock.patch.dict(
+            common.device_codegens,
+            {"cuda": replace(backend, scheduling=BaseScheduling)},
+        ):
+            self.assertIn(
+                BackendFeature.OPMATH_SCALAR_CASTING,
+                get_backend_features("cuda"),
+            )
+            expr = self._expression("cuda", torch.bfloat16, lowering.add, 0.01, True)
+            self.assertIn("ops.constant(0.01, torch.float32)", expr)
+            self.assertNotIn("ops.to_dtype(ops.constant(", expr)
+
+    def _expression(self, device_type, dtype, operation, other, barrier):
+        gm = torch.fx.symbolic_trace(lambda x: x + 0.01)
+        graph = GraphLowering(gm)
+        node = next(n for n in gm.graph.nodes if n.op == "call_function")
+        node.meta["low_precision_pointwise_barrier"] = barrier
+        with (
+            V.set_graph_handler(graph),
+            graph.set_current_node(node),
+            V.set_ops_handler(MockHandler()),
+        ):
+            device = torch.device(device_type)
+            layout = ir.FixedLayout(device, dtype, [1], [1])
+            x = ir.TensorBox.create(ir.InputBuffer(name="x", layout=layout))
+            if other == "tensor":
+                other = ir.Constant(value=0.01, dtype=dtype, device=device)
+            result = operation(x, other)
+            return str(result.data.data.inner_fn([0]))
+
+    @parametrize("device_type", ["cpu", "cuda", "xpu", "mps"])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("barrier", [False, True])
+    def test_scalar_and_tensor_inputs(self, device_type, dtype, barrier):
+        for operation in (lowering.add, lowering.sub):
+            with self.subTest(operation=operation):
+                expr = self._expression(device_type, dtype, operation, 0.01, barrier)
+                value = (
+                    torch.tensor(0.01, dtype=dtype).item()
+                    if device_type in ("cpu", "mps")
+                    else 0.01
+                )
+                constant_dtype = (
+                    torch.float32 if barrier and device_type == "cuda" else dtype
+                )
+                self.assertIn(f"ops.constant({value}, {constant_dtype})", expr)
+                if barrier:
+                    self.assertIn("ops.to_dtype(ops.load(x, 0)", expr)
+                    if device_type == "cuda":
+                        self.assertNotIn("ops.to_dtype(ops.constant(", expr)
+                    else:
+                        self.assertIn("ops.to_dtype(ops.constant(", expr)
+                tensor_expr = self._expression(
+                    device_type, dtype, operation, "tensor", barrier
+                )
+                self.assertIn(f"ops.constant(0.01, {dtype})", tensor_expr)
+                if barrier:
+                    self.assertIn("ops.to_dtype(ops.constant(", tensor_expr)
+
+    @parametrize("device_type", ["cpu", "cuda", "xpu", "mps"])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_comparisons_retain_scalar_rounding(self, device_type, dtype):
+        expr = self._expression(device_type, dtype, lowering.gt, 0.01, True)
+        rounded = torch.tensor(0.01, dtype=dtype).item()
+        self.assertIn(f"ops.constant({rounded}, {dtype})", expr)
 
 
 class TestMultiProcessorCount(TestCase):

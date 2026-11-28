@@ -539,6 +539,8 @@ class BackendFeature(Enum):
     TRITON_TEMPLATES = auto()
     REDUCE_TO_SINGLE_ELEMENT = auto()
     INDIRECT_INDEXING = auto()
+    # Opted-in ops cast Python scalars directly to the arithmetic compute dtype.
+    OPMATH_SCALAR_CASTING = auto()
 
 
 def get_backend_features(
@@ -558,7 +560,10 @@ def get_backend_features(
     if not scheduling_ctor:
         raise AssertionError(f"no scheduling registered for device {device_type}")
     scheduling = scheduling_ctor(None)
-    return scheduling.get_backend_features(device)
+    features = OrderedSet(scheduling.get_backend_features(device))
+    if device_type == "cuda":
+        features.add(BackendFeature.OPMATH_SCALAR_CASTING)
+    return features
 
 
 def has_backend_feature(

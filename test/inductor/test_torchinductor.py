@@ -99,6 +99,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
+    dtypesIfMPS,
     e4m3_type,
     expectedFailureXPU,
     instantiate_device_type_tests,
@@ -22195,10 +22196,18 @@ class _ScalarAddSubPrecisionTestBase(TorchTestCase):
             config.patch(implicit_fallbacks=False, force_disable_caches=True)
         )
 
+    def _check_supported_dtype(self, device, dtype):
+        if (
+            torch.device(device).type == "mps"
+            and dtype == torch.bfloat16
+            and not torch.backends.mps.is_macos_or_newer(14, 0)
+        ):
+            self.skipTest("MPS bfloat16 requires macOS 14 or newer")
+
     def _check_precision_configs(self, device, check):
         configs = (
             ((False, True),)
-            if torch.device(device).type == "cpu"
+            if torch.device(device).type in ("cpu", "mps")
             else ((False, False), (False, True), (True, False), (True, True))
         )
         for strict, upcast in configs:
@@ -22216,15 +22225,17 @@ class _ScalarAddSubPrecisionTestBase(TorchTestCase):
                 check()
 
 
-if RUN_CPU or (RUN_GPU and GPU_TYPE == "cuda"):
+if RUN_CPU or (RUN_GPU and GPU_TYPE == "cuda") or HAS_MPS:
 
     class ScalarAddSubPrecisionTest(_ScalarAddSubPrecisionTestBase):
         hw_classification = HardwareClassification.ACCELERATOR
 
         @dtypes(torch.bfloat16, torch.float16, torch.float32, torch.float64)
+        @dtypesIfMPS(torch.bfloat16, torch.float16, torch.float32)
         @parametrize("emulate,strict", [(False, False), (True, False), (True, True)])
         @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
         def test_literal(self, device, dtype, emulate, strict, op):
+            self._check_supported_dtype(device, dtype)
             x = torch.tensor(
                 [-2048, -256, -0.01, -0.009, 0, 0.009, 0.01, 0.1, 256, 2048],
                 device=device,
@@ -22256,6 +22267,7 @@ if RUN_CPU or (RUN_GPU and GPU_TYPE == "cuda"):
         @dtypes(torch.bfloat16, torch.float16)
         @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
         def test_rounding_and_tensor_constants(self, device, dtype, op):
+            self._check_supported_dtype(device, dtype)
             x = torch.linspace(-0.1, 0.1, 1024, device=device).to(dtype)
             divisor = torch.full_like(x, 6.324555320336759)
 
@@ -22293,6 +22305,7 @@ if RUN_CPU or (RUN_GPU and GPU_TYPE == "cuda"):
         @dtypes(torch.bfloat16, torch.float16)
         @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
         def test_gradients(self, device, dtype, op):
+            self._check_supported_dtype(device, dtype)
             x = torch.linspace(-0.1, 0.1, 1024, device=device).to(dtype)
 
             def fn(x):
@@ -22315,11 +22328,16 @@ if RUN_CPU or (RUN_GPU and GPU_TYPE == "cuda"):
 
             self._check_precision_configs(device, check)
 
-    _scalar_add_sub_devices = (("cpu",) if RUN_CPU else ()) + (
-        ("cuda",) if RUN_GPU and GPU_TYPE == "cuda" else ()
+    _scalar_add_sub_devices = (
+        (("cpu",) if RUN_CPU else ())
+        + ((GPU_TYPE,) if RUN_GPU and GPU_TYPE == "cuda" else ())
+        + (("mps",) if HAS_MPS else ())
     )
     instantiate_device_type_tests(
-        ScalarAddSubPrecisionTest, globals(), only_for=_scalar_add_sub_devices
+        ScalarAddSubPrecisionTest,
+        globals(),
+        only_for=_scalar_add_sub_devices,
+        allow_mps=True,
     )
 
 

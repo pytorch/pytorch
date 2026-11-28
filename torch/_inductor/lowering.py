@@ -633,6 +633,7 @@ def promote_constants(
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
     round_scalar_constants: bool = False,
     round_scalars_to_tensor_dtype: bool = False,
+    preserve_scalar_precision: bool = False,
 ) -> Sequence[_T | BaseView | BaseConstant]:
     """Convert raw Python scalars and sympy expressions in inputs to IR constants.
 
@@ -642,8 +643,8 @@ def promote_constants(
     scalar operands to the common dtype: always for comparison ops
     (override_return_dtype == torch.bool) and for callers passing
     round_scalar_constants (e.g. remainder); on CPU and MPS only for ops
-    passing round_scalars_to_tensor_dtype (e.g. add/sub, whose CUDA eager
-    kernels keep scalars at opmath precision).
+    passing round_scalars_to_tensor_dtype, unless preserve_scalar_precision
+    opts into the backend's OPMATH_SCALAR_CASTING contract.
     """
     if not (override_return_dtype is None or type_promotion_kind is None):
         raise AssertionError(
@@ -684,6 +685,10 @@ def promote_constants(
         or (
             round_scalars_to_tensor_dtype
             and ex.get_device_or_error().type in ("cpu", "mps")
+            and not (
+                preserve_scalar_precision
+                and V.graph.has_feature(ex, BackendFeature.OPMATH_SCALAR_CASTING)
+            )
         )
     ):
         _round_scalar = lambda v: torch.tensor(v, dtype=tensor_dtype).item()  # noqa: E731
@@ -823,7 +828,7 @@ def make_pointwise(
     triton_fallback: Callable[..., _T] | None = None,
     round_scalars_to_tensor_dtype: bool = False,
     force_output_cast: bool = False,
-    preserve_cuda_scalar_precision: bool = False,
+    preserve_scalar_precision: bool = False,
 ) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR.
@@ -832,10 +837,11 @@ def make_pointwise(
     emulating the rounding eager applies at the op's output; see
     emulate_lowp_output_cast.
 
-    preserve_cuda_scalar_precision keeps original CUDA bf16/fp16 arithmetic
-    scalars in FP32 at emulation boundaries. Enable it only for operations whose
-    eager CUDA kernels use opmath scalars; tensor constants retain input casts.
-    Generic alpha scaling retains its existing input casts.
+    preserve_scalar_precision avoids rounding original bf16/fp16 arithmetic
+    scalars before computation on backends declaring OPMATH_SCALAR_CASTING.
+    Emulation uses FP32 scalars; otherwise they use the backend compute dtype.
+    Tensor constants retain input casts. Generic alpha scaling is not routed
+    through the FP32 scalar bypass.
     """
 
     def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
@@ -854,7 +860,7 @@ def make_pointwise(
                 for index, inp in enumerate(inputs)
                 if isinstance(inp, (int, float, sympy.Basic))
             }
-            if preserve_cuda_scalar_precision
+            if preserve_scalar_precision
             else {}
         )
         current_node = (
@@ -865,6 +871,7 @@ def make_pointwise(
             inputs,
             override_return_dtype,
             round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
+            preserve_scalar_precision=preserve_scalar_precision,
         )
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -884,7 +891,7 @@ def make_pointwise(
                         ):
                             return make_pointwise(
                                 lambda a, b, scale: ops.fma(b, scale, a),
-                                preserve_cuda_scalar_precision=True,
+                                preserve_scalar_precision=True,
                             )(*original_inputs, alpha)
                         return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
 
@@ -937,7 +944,9 @@ def make_pointwise(
                         emulate_precision_casts
                         and inp_dtype in low_pr_fp
                         and inp_index in scalar_inputs
-                        and inp.get_device().type == "cuda"
+                        and V.graph.has_feature(
+                            inp, BackendFeature.OPMATH_SCALAR_CASTING
+                        )
                     ):
                         # Eager converts these arithmetic scalars directly to FP32.
                         # Bypass the promoted loader and tensor input-rounding casts.
@@ -1287,7 +1296,7 @@ def register_pointwise(
     use_fma_for_alpha=False,
     triton_fallback=None,
     round_scalars_to_tensor_dtype=False,
-    preserve_cuda_scalar_precision=False,
+    preserve_scalar_precision=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -1309,7 +1318,7 @@ def register_pointwise(
         use_fma_for_alpha=use_fma_for_alpha,
         triton_fallback=triton_fallback,
         round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
-        preserve_cuda_scalar_precision=preserve_cuda_scalar_precision,
+        preserve_scalar_precision=preserve_scalar_precision,
     )
     fn = register_lowering(
         aten_fn,
@@ -8759,7 +8768,7 @@ add = register_pointwise(
     use_fma_for_alpha=True,
     override_fn_when_input_bool="logical_or",
     round_scalars_to_tensor_dtype=True,
-    preserve_cuda_scalar_precision=True,
+    preserve_scalar_precision=True,
 )
 
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
@@ -9042,7 +9051,7 @@ sub = register_pointwise(
     aten.sub,
     allow_alpha=True,
     round_scalars_to_tensor_dtype=True,
-    preserve_cuda_scalar_precision=True,
+    preserve_scalar_precision=True,
 )
 
 
