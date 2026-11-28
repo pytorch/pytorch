@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <iostream>
 
@@ -59,7 +60,7 @@ void RemoveInplaceOps(Block* block) {
             static_cast<int>(newNode->inputs().size());
       }
 
-      for (int i = 0; i < additionalInputCount; ++i) {
+      for ([[maybe_unused]] const auto _ : c10::irange(additionalInputCount)) {
         auto noneNode = graph->createNone();
         noneNode->insertBefore(newNode);
         newNode->addInput(noneNode->output());

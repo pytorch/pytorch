@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/autograd_function_process.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 
 namespace torch::jit {
@@ -23,7 +24,7 @@ static void convertSubgraphToSubBlock(Block* block) {
       for (auto* n : subgraph->nodes()) {
         auto cloned_n = subblock->appendNode(graph->createClone(
             n, [&](Value* v) { return env.contains(v) ? env[v] : v; }));
-        for (size_t i = 0; i < n->outputs().size(); ++i) {
+        for (const auto i : c10::irange(n->outputs().size())) {
           env[n->outputs().at(i)] = cloned_n->outputs().at(i);
           auto it = std::find(
               subgraph->outputs().begin(),

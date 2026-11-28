@@ -5867,7 +5867,7 @@ void CompilationUnit::define_interface(
     // we need to make sure everything but the last element is just string
     // literals (aka comments) unless there is "pass" in between
     auto stmts_size = method_def.statements().size();
-    for (size_t i = 0; i < stmts_size - 1; i++) {
+    for (const auto i : c10::irange(stmts_size - 1)) {
       auto cur_statement = method_def.statements()[i];
       if (cur_statement.kind() == TK_EXPR_STMT) {
         auto expr = ExprStmt(cur_statement).expr();

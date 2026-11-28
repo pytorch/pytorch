@@ -829,7 +829,7 @@ struct PythonPrintImpl {
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
         indent();
         body_ << "def " << name << "():\n";
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
+        for (const auto i : c10::irange(node->inputs().size())) {
           assignValue(graph->inputs().at(i), node->inputs().at(i));
         }
         printBody(graph->block());
@@ -843,7 +843,7 @@ struct PythonPrintImpl {
         auto graph = node->g(attr::Subgraph);
         indent();
         body_ << "def " << name << "():\n";
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
+        for (const auto i : c10::irange(node->inputs().size())) {
           assignValue(graph->inputs().at(i), node->inputs().at(i));
         }
         printBody(graph->block());
@@ -884,7 +884,7 @@ struct PythonPrintImpl {
         indent();
         body_ << "def " << name << '(';
         assignValuesToTheirUniqueNames(graph->inputs());
-        for (size_t i = 0; i < graph->inputs().size(); ++i) {
+        for (const auto i : c10::irange(graph->inputs().size())) {
           Value* v = graph->inputs().at(i);
           if (i > 0) {
             body_ << ", ";
@@ -1136,7 +1136,7 @@ struct PythonPrintImpl {
       } break;
       case prim::CallFunction: {
         stmt << useOf(node->inputs().at(0)) << '(';
-        for (size_t i = 1; i < node->inputs().size(); i++) {
+        for (const auto i : c10::irange(1, node->inputs().size())) {
           stmt << useOf(node->inputs()[i]) << ", ";
         }
         stmt << ')';
@@ -1145,7 +1145,7 @@ struct PythonPrintImpl {
         const auto& self = node->inputs().at(0);
         const auto& methodName = node->s(attr::name);
         stmt << '(' << useOf(self) << ')' << '.' << methodName << '(';
-        for (size_t i = 1; i < node->inputs().size(); i++) {
+        for (const auto i : c10::irange(1, node->inputs().size())) {
           stmt << useOf(node->inputs()[i]) << ", ";
         }
         stmt << ')';
@@ -1263,7 +1263,8 @@ struct PythonPrintImpl {
           }
 
           // print out args
-          for (size_t i = num_schema_args - num_out; i < num_schema_args; i++) {
+          for (const auto i :
+               c10::irange(num_schema_args - num_out, num_schema_args)) {
             stmt << ", ";
             auto arg = schema.arguments().at(i);
             TORCH_INTERNAL_ASSERT(arg.is_out());

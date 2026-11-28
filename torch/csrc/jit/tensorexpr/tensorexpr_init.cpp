@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <utility>
 
 template <>
@@ -806,7 +807,7 @@ void initTensorExprBindings(PyObject* module) {
               stack.push_back(toTypeInferredIValue(obj));
             }
             auto g_inputs = self.graph()->inputs();
-            for (size_t i = 0; i < inputs.size(); ++i) {
+            for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
                 g_inputs[i]->setType(stack[i].type());
               }
@@ -823,7 +824,7 @@ void initTensorExprBindings(PyObject* module) {
               stack.push_back(toTypeInferredIValue(obj));
             }
             auto g_inputs = self.graph()->inputs();
-            for (size_t i = 0; i < inputs.size(); ++i) {
+            for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
                 g_inputs[i]->setType(stack[i].type());
               }

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
@@ -187,7 +188,7 @@ void annotateInputShapes(
   TORCH_INTERNAL_ASSERT(
       graph->inputs().size() == example_inputs.size(),
       buildErrorMessage("Given inputs do not match the fuser graph inputs."));
-  for (size_t idx = 0; idx < example_inputs.size(); idx++) {
+  for (const auto idx : c10::irange(example_inputs.size())) {
     if (auto t = example_inputs[idx]) {
       auto concrete_tensor_type = tensorTypeInCurrentExecutionContext(*t);
       graph->inputs().at(idx)->setType(concrete_tensor_type);
@@ -430,7 +431,7 @@ static bool trimGraphOnce(const std::shared_ptr<Graph>& graph) {
   std::unordered_set<Value*> outputs(
       graph->outputs().begin(), graph->outputs().end());
   bool changed = false;
-  for (size_t idx = 0; idx < ret->inputs().size(); idx++) {
+  for (const auto idx : c10::irange(ret->inputs().size())) {
     auto v = ret->inputs()[idx];
     if (graph_inputs.contains(v)) {
       continue;

@@ -317,7 +317,7 @@ class AtomicAddFuser : public IRMutator {
       : thread_local_bufs_(thread_local_bufs) {
     const std::vector<ExprPtr>& block_extents = metavars.gpu_block_extents();
     const std::vector<VarPtr>& block_vars = metavars.gpu_block_vars();
-    for (size_t i = 0; i < block_extents.size(); ++i) {
+    for (const auto i : c10::irange(block_extents.size())) {
       MetaVarExtent extent{block_extents[i], false};
       if (extent.expr->isConstant() && immediateEquals(extent.expr, 1)) {
         extent.trivial = true;
@@ -329,7 +329,7 @@ class AtomicAddFuser : public IRMutator {
 
     const std::vector<ExprPtr>& thread_extents = metavars.gpu_thread_extents();
     const std::vector<VarPtr>& thread_vars = metavars.gpu_thread_vars();
-    for (size_t i = 0; i < thread_extents.size(); ++i) {
+    for (const auto i : c10::irange(thread_extents.size())) {
       MetaVarExtent extent{thread_extents[i], false};
       if (extent.expr->isConstant() && immediateEquals(extent.expr, 1)) {
         extent.trivial = true;
@@ -638,7 +638,7 @@ std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
 bool GPUMetaVarRewriter::isFullExtent() {
   {
     auto& extents = cuda_analysis_->gpu_block_extents();
-    for (int i = 0; i < 3; ++i) {
+    for (const auto i : c10::irange(3)) {
       if (!exprEquals(current_block_reach_[i], extents[i])) {
         return false;
       }
@@ -647,7 +647,7 @@ bool GPUMetaVarRewriter::isFullExtent() {
 
   {
     auto& extents = cuda_analysis_->gpu_thread_extents();
-    for (int i = 0; i < 3; ++i) {
+    for (const auto i : c10::irange(3)) {
       if (!exprEquals(current_thread_reach_[i], extents[i])) {
         return false;
       }
@@ -901,7 +901,7 @@ void CudaCodeGen::Initialize() {
 #endif
   os() << "void " << func_name << '(';
   const std::vector<BufferArg> buffer_args = this->buffer_args();
-  for (size_t i = 0; i < buffer_args.size(); i++) {
+  for (const auto i : c10::irange(buffer_args.size())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -962,7 +962,7 @@ void CudaCodeGen::Initialize() {
   // Check that all block extents had been set.
   const std::vector<ExprPtr>& gpu_block_extents =
       metavar_rewriter_->gpu_block_extents();
-  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
+  for (const auto i : c10::irange(gpu_block_extents.size())) {
     TORCH_CHECK(
         gpu_block_extents[i], "Missing gpu_block_index: " + std::to_string(i));
   }
@@ -1119,7 +1119,7 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   std::vector<void*> extent_args;
   size_t raw_args_size = raw_args.size();
   extent_args.reserve(raw_args_size);
-  for (size_t i = 0; i < raw_args_size; ++i) {
+  for (const auto i : c10::irange(raw_args_size)) {
     if (arg_pos_in_extents_[i]) {
       extent_args.push_back(raw_args[i]);
     }
@@ -1224,7 +1224,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
 
   auto const& buffer_args = this->buffer_args();
   std::vector<void*> raw_args(buffer_args.size());
-  for (size_t i = 0; i < buffer_args.size(); i++) {
+  for (const auto i : c10::irange(buffer_args.size())) {
     auto const& bufferArg = buffer_args[i];
     auto const& callArg = args[i];
     raw_args[i] = argToPtr(bufferArg, callArg);
