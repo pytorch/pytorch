@@ -623,10 +623,13 @@ def l1_loss(
     size_average: bool | None = None,
     reduce: bool | None = None,
     reduction: str = "mean",
+    # for compat when using TorchRefsMode(strict=True)
+    weight: TensorLikeType | None = None,
 ) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.l1_loss
     """
+    torch._check(weight is None, lambda: "l1_loss reference does not support weight")
     if size_average is not None or reduce is not None:
         # TODO: Raise exception instead of converting value.  This is only for
         # primTorch since it can drop support for deprecated arguments.
