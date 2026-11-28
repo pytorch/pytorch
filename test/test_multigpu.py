@@ -522,10 +522,16 @@ class TestMultiGPUDevice(TestCase):
             p2c.get()
             c2p.put(sync_func(device_module, FIFTY_MIL_CYCLES))
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5402")
     @deviceCountAtLeast(2)
     def test_stream_event_nogil(self, devices):
         device_module = torch.get_device_module(devices[0])
+        # The first _sleep() on a device pays one-time lazy initialization (on
+        # XPU, around a second of online spin-kernel compilation), which the
+        # measurements below would otherwise charge to the first sync_func.
+        for device in devices[:2]:
+            with device_module.device(device):
+                device_module._sleep(1)
+                device_module.synchronize()
         for sync_func in [
             self._stream_synchronize,
             self._event_synchronize,
